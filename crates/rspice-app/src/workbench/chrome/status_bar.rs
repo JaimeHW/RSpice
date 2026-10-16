@@ -7,6 +7,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Problem, paint_problem_mark};
 use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::diagnostic_store::listing::{DiagnosticCounts, listing_in_pass};
 
 use super::super::commands::vocabulary::Command;
 use super::super::layout::LayoutSpec;
@@ -29,7 +30,8 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
             let bar_width = ui.available_width();
             let height = ui.available_height();
-            let check = check_summary(app);
+            let check_counts = listing_in_pass(&app.state, ctx.cumulative_pass_nr()).counts();
+            let check = check_summary(check_counts);
             // The Results workspace reports the view its instrument shows:
             // the visible X interval in the coordinate segment, and that
             // interval's magnification in the zoom chip beside it.
@@ -66,7 +68,8 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 app.state.simulation.execution.has_active_execution(),
             );
             let platform = platform_label();
-            let check_mark = check_problem(app).map_or(StatusMark::None, StatusMark::Problem);
+            let check_mark =
+                check_problem(check_counts).map_or(StatusMark::None, StatusMark::Problem);
             let left_desired = optional_status_width(ui, check.as_deref(), check_mark)
                 + if visibility.coordinates {
                     desired_status_width(ui, &engineering, StatusMark::None)
@@ -324,22 +327,20 @@ fn status_group_allocation(
     }
 }
 
-/// The checks segment, or nothing.
+/// What the checks segment states, from the same list the Problems page
+/// lists and the tab badge counts, or nothing.
 ///
 /// With nothing open, any retained result describes the bootstrap placeholder
 /// rather than the reader's work, and the coordinate segment already says no
 /// project is loaded. Checks that have never run are not a finding either.
-/// What the checks segment states, from the same list the Problems page
-/// lists and the tab badge counts.
 ///
 /// Three surfaces used to derive this independently — the status bar from
 /// `dialogs.drc_results` or the netlist summary depending on which workspace
 /// was open, the badge from the page, the page from four producers — and they
-/// disagreed routinely. There is one list now, so there is one answer.
-fn check_summary(app: &RSpiceApp) -> Option<String> {
-    let listed = crate::workbench::app_state::diagnostic_store::listing::listing(&app.state);
-    let counts = listed.counts();
-    if counts.errors == 0 && counts.advisories == 0 && counts.stale == 0 {
+/// disagreed routinely. There is one list now, so there is one answer, and
+/// the bar reads it once per pass for both the text and the mark.
+fn check_summary(counts: DiagnosticCounts) -> Option<String> {
+    if counts == DiagnosticCounts::default() {
         return None;
     }
     let mut label = format!(
@@ -349,22 +350,27 @@ fn check_summary(app: &RSpiceApp) -> Option<String> {
         counts.advisories,
         if counts.advisories == 1 { "y" } else { "ies" }
     );
+    use std::fmt::Write as _;
     if counts.stale > 0 {
-        use std::fmt::Write as _;
         let _ = write!(label, " · {} stale", counts.stale);
+    }
+    // Findings whose inputs cannot be read are not stale — nothing is known
+    // to have moved — and saying so would send the reader to re-run checks
+    // that cannot run.
+    if counts.unavailable > 0 {
+        let _ = write!(label, " · {} unavailable", counts.unavailable);
     }
     Some(label)
 }
 
 /// The mark in front of the checks segment: a failure while anything errors,
-/// a warning while anything advises or anything is stale, and nothing at
-/// zero and zero, the way a compiler's problem count reads.
-fn check_problem(app: &RSpiceApp) -> Option<Problem> {
-    let counts =
-        crate::workbench::app_state::diagnostic_store::listing::listing(&app.state).counts();
+/// a warning while anything warns, is stale or cannot be evaluated, and
+/// nothing otherwise, the way a compiler's problem count reads. A note or a
+/// hint is counted among the advisories but raises no mark.
+fn check_problem(counts: DiagnosticCounts) -> Option<Problem> {
     if counts.errors > 0 {
         Some(Problem::Failure)
-    } else if counts.advisories > 0 || counts.stale > 0 {
+    } else if counts.warnings > 0 || counts.stale > 0 || counts.unavailable > 0 {
         Some(Problem::Warning)
     } else {
         None
@@ -650,7 +656,11 @@ fn status_padding_x(ui: &egui::Ui) -> f32 {
 fn status_mark_size(mark: StatusMark) -> f32 {
     match mark {
         StatusMark::None => 0.0,
-        StatusMark::Problem(_) => 11.0,
+        // The kit's own, so the bar's refusal is the mark the panel above it
+        // sets. Only the gap differs: `STATUS_MARK_GAP` is tighter than the
+        // kit's, because the bar is one 22 pt strip rather than a row of body
+        // text.
+        StatusMark::Problem(_) => crate::ui::widgets::PROBLEM_MARK_SIDE,
         StatusMark::Live => 6.0,
         StatusMark::Processor => 16.0,
     }
@@ -876,6 +886,11 @@ fn platform_label() -> String {
 mod tests {
     use super::*;
 
+    /// The counts the bar states, read as the page reads them.
+    fn counts(app: &RSpiceApp) -> DiagnosticCounts {
+        crate::workbench::app_state::diagnostic_store::listing::listing(&app.state).counts()
+    }
+
     /// A rule separates two items. The last item on the left used to draw
     /// one anyway, so a rule stood alone in front of the empty middle of the
     /// bar. Every rule now has an item's ink within a gutter on both sides.
@@ -950,14 +965,14 @@ mod tests {
         );
 
         assert_eq!(
-            check_summary(&app).as_deref(),
+            check_summary(counts(&app)).as_deref(),
             Some("Problems · 1 error · 1 advisory")
         );
-        assert_eq!(check_problem(&app), Some(Problem::Failure));
+        assert_eq!(check_problem(counts(&app)), Some(Problem::Failure));
 
         app.state.workbench.activate(Workspace::Design);
         assert_eq!(
-            check_summary(&app).as_deref(),
+            check_summary(counts(&app)).as_deref(),
             Some("Problems · 1 error · 1 advisory"),
             "the count cannot depend on which workspace is open"
         );
@@ -965,7 +980,7 @@ mod tests {
 
     /// The checks segment is a problem count. A closed project, or checks
     /// that have never run, put nothing on the bar; zero and zero is a count
-    /// with no mark; advisories and staleness earn a warning, errors a failure.
+    /// with no mark; warnings and staleness earn a warning, errors a failure.
     #[test]
     fn the_checks_segment_marks_only_a_problem_and_is_absent_until_checks_run() {
         use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
@@ -996,39 +1011,39 @@ mod tests {
 
         let mut app = RSpiceApp::test_instance();
         app.state.project_lifecycle.authority.close_project();
-        assert_eq!(check_summary(&app), None);
-        assert_eq!(check_problem(&app), None);
+        assert_eq!(check_summary(counts(&app)), None);
+        assert_eq!(check_problem(counts(&app)), None);
 
         app.state.project_lifecycle.authority.open_session();
         app.state.workbench.activate(Workspace::Design);
         assert_eq!(
-            check_summary(&app),
+            check_summary(counts(&app)),
             None,
             "checks that never ran say nothing"
         );
-        assert_eq!(check_problem(&app), None);
+        assert_eq!(check_problem(counts(&app)), None);
 
         publish(&mut app, completed(None));
         assert_eq!(
-            check_summary(&app),
+            check_summary(counts(&app)),
             None,
             "zero and zero puts nothing on the bar"
         );
-        assert_eq!(check_problem(&app), None);
+        assert_eq!(check_problem(counts(&app)), None);
 
         publish(
             &mut app,
             completed(Some(violation(DrcViolationType::UnconnectedPin))),
         );
-        assert_eq!(check_problem(&app), Some(Problem::Warning));
+        assert_eq!(check_problem(counts(&app)), Some(Problem::Warning));
 
         publish(
             &mut app,
             completed(Some(violation(DrcViolationType::ShortedOutputs))),
         );
-        assert_eq!(check_problem(&app), Some(Problem::Failure));
+        assert_eq!(check_problem(counts(&app)), Some(Problem::Failure));
         assert_eq!(
-            check_summary(&app).as_deref(),
+            check_summary(counts(&app)).as_deref(),
             Some("Problems · 1 error · 0 advisories")
         );
 
@@ -1042,10 +1057,46 @@ mod tests {
             .policy
             .width_mismatch = crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
         assert_eq!(
-            check_summary(&app).as_deref(),
+            check_summary(counts(&app)).as_deref(),
             Some("Problems · 0 errors · 0 advisories · 1 stale")
         );
-        assert_eq!(check_problem(&app), Some(Problem::Warning));
+        assert_eq!(check_problem(counts(&app)), Some(Problem::Warning));
+    }
+
+    /// Findings whose inputs cannot be read are said to be that, not stale:
+    /// nothing is known to have moved under them.
+    #[test]
+    fn findings_that_cannot_be_evaluated_are_not_called_stale() {
+        let counts = DiagnosticCounts {
+            unavailable: 2,
+            ..DiagnosticCounts::default()
+        };
+        assert_eq!(
+            check_summary(counts).as_deref(),
+            Some("Problems · 0 errors · 0 advisories · 2 unavailable")
+        );
+        assert_eq!(check_problem(counts), Some(Problem::Warning));
+    }
+
+    /// A note or a hint is counted, but it is not a warning and raises no
+    /// warning mark; it used to, because every advisory did.
+    #[test]
+    fn only_a_warning_raises_the_warning_mark() {
+        let notes = DiagnosticCounts {
+            advisories: 2,
+            ..DiagnosticCounts::default()
+        };
+        assert_eq!(
+            check_summary(notes).as_deref(),
+            Some("Problems · 0 errors · 2 advisories")
+        );
+        assert_eq!(check_problem(notes), None);
+
+        let warned = DiagnosticCounts {
+            warnings: 1,
+            ..notes
+        };
+        assert_eq!(check_problem(warned), Some(Problem::Warning));
     }
 
     /// The coordinate and selection segments sit side by side. They answer

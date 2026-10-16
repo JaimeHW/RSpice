@@ -459,25 +459,28 @@ fn state_with_unplaced_amp_symbol_pins(count: usize) -> AppState {
     state
 }
 
-/// Every finding stays in the receipt and the Console gets one line.
+/// Every finding becomes a published record and the Console gets one line.
 ///
 /// The check used to write one anchored log row per finding as well, capped
 /// at fifty. That put each finding on the Problems page twice — once from
-/// the receipt and once from the log — counted it twice in the tab strip,
-/// and left the findings past the cap reachable only through the navigation
-/// commands, while the receipt always carried every one.
+/// the result and once from the log — counted it twice in the tab strip, and
+/// left the findings past the cap reachable only through the navigation
+/// commands, while the result always carried every one.
 #[test]
 fn symbol_pin_checks_keep_every_finding_and_log_one_line() {
     let mut state = state_with_unplaced_amp_symbol_pins(55);
 
     state.run_active_symbol_pin_checks();
 
-    let result = state.dialogs.drc_results.as_ref().expect("result stored");
-    assert_eq!(result.violations().len(), 55);
+    assert_eq!(
+        state.active_symbol_pin_finding_count(),
+        Some(55),
+        "every finding is a record, not a receipt the page has to be told about",
+    );
     let entries: Vec<_> = state.log_buffer.entries().collect();
     assert!(
         entries.iter().all(|entry| entry.source != LogSource::Drc),
-        "a finding is reported by the receipt, not copied into the log",
+        "a finding is a published record, not a line copied into the log",
     );
     let lines: Vec<_> = entries
         .iter()

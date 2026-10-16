@@ -3,13 +3,14 @@
 use super::{interaction::SymbolRequestSource, session::SymbolEditorSession};
 use egui::{Align2, Color32, Rect, Stroke, Ui, vec2};
 use rspice_design::symbol::{PinSummary, SymbolDocument, publication::SymbolSaveCheck};
-use rspice_design_model::{cell_view::CellViewRef, port::PortSpec};
+use rspice_design_model::port::PortSpec;
 use rspice_ui_kit::{
     accessibility::counted,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
     widgets::{
         Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
+        PROBLEM_MARK_SIDE, Problem, paint_problem_mark,
     },
 };
 
@@ -79,7 +80,7 @@ pub fn invalid_symbol_document_state(ui: &mut Ui, error: &str) {
                         ui.add_space(8.0);
                         ui.label(
                             egui::RichText::new(
-                                "The stored symbol metadata was left unchanged. Restore a valid project revision or repair the imported library before editing this view.",
+                                "Restore an earlier revision or repair the library.",
                             )
                             .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                             .color(c.text_dim),
@@ -90,28 +91,12 @@ pub fn invalid_symbol_document_state(ui: &mut Ui, error: &str) {
     });
 }
 
-pub fn canvas_breadcrumb(ctx: &egui::Context, reference: &CellViewRef, stage: Rect) {
-    let t = Tokens::get(ctx);
-    let text = format!(
-        "{} / {} / {}",
-        reference.library, reference.cell, reference.view
-    );
-    egui::Area::new(egui::Id::new("symbol-editor.canvas-breadcrumb"))
-        .order(egui::Order::Middle)
-        .fixed_pos(stage.min + vec2(10.0, 9.0))
-        .constrain_to(stage)
-        .interactable(false)
-        .show(ctx, |ui| {
-            overlay_frame(ui, &t, t.color.border, |ui| {
-                ui.label(
-                    egui::RichText::new(text)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text),
-                );
-            });
-        });
-}
-
+/// The pin contract's standing, where the drawing is: the one statement of a
+/// mismatch in the editor, in view while a pin is being placed.
+///
+/// A symbol whose pins answer its interface shows nothing. There is no note
+/// reading that the contract matches, because a reader who is not told
+/// otherwise is being told that.
 pub fn canvas_check_note(
     ctx: &egui::Context,
     document: &SymbolDocument,
@@ -122,25 +107,25 @@ pub fn canvas_check_note(
         return;
     }
     let t = Tokens::get(ctx);
-    let (message, color) = match document.pin_summary(ports) {
-        PinSummary::Match => ("Pin contract matches the interface".to_owned(), t.color.ok),
+    let (message, problem) = match document.pin_summary(ports) {
+        PinSummary::Match => return,
         PinSummary::Unplaced(count) => (
             format!(
                 "{count} declared pin{} unplaced",
                 if count == 1 { "" } else { "s" }
             ),
-            t.color.err,
+            Problem::Failure,
         ),
         PinSummary::Orphaned(count) => (
             format!(
-                "{count} pin{} not declared by the interface",
+                "{count} pin{} not in the schematic",
                 if count == 1 { "" } else { "s" }
             ),
-            t.color.err,
+            Problem::Failure,
         ),
         PinSummary::NoSchematic => (
             "No schematic interface declares this cell".to_owned(),
-            t.color.warn,
+            Problem::Warning,
         ),
     };
     egui::Area::new(egui::Id::new("symbol-editor.canvas-check-note"))
@@ -150,11 +135,17 @@ pub fn canvas_check_note(
         .constrain_to(stage)
         .interactable(false)
         .show(ctx, |ui| {
-            overlay_frame(ui, &t, color.gamma_multiply(0.55), |ui| {
+            overlay_frame(ui, &t, t.color.border, |ui| {
+                let (mark, _) = ui.allocate_exact_size(
+                    vec2(PROBLEM_MARK_SIDE, PROBLEM_MARK_SIDE),
+                    egui::Sense::hover(),
+                );
+                paint_problem_mark(ui.painter(), mark, problem);
+                ui.add_space(4.0);
                 ui.label(
                     egui::RichText::new(message)
                         .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                        .color(color),
+                        .color(t.color.text),
                 );
             });
         });
@@ -186,7 +177,7 @@ fn symbol_save_dialog_body(
         .striped(true)
         .min_col_width(112.0)
         .show(ui, |ui| {
-            for heading in ["CHECK", "EXPECTED", "OBSERVED", "STATUS"] {
+            for heading in ["Check", "Expected", "Observed", "Status"] {
                 ui.label(
                     egui::RichText::new(heading)
                         .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
@@ -204,15 +195,13 @@ fn symbol_save_dialog_body(
                     egui::RichText::new(&check.observed)
                         .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
                 );
-                ui.label(
-                    egui::RichText::new(if check.passed { "pass" } else { "blocked" }).color(
-                        if check.passed {
-                            t.color.ok
-                        } else {
-                            t.color.err
-                        },
-                    ),
-                );
+                // A check that passed is the row's normal state and says so
+                // in the table's own ink; only the blocking one is coloured.
+                ui.label(if check.passed {
+                    egui::RichText::new("pass").color(t.color.text)
+                } else {
+                    egui::RichText::new("blocked").color(t.color.err)
+                });
                 ui.end_row();
             }
         });
@@ -305,19 +294,18 @@ pub fn read_only_banner(
     requested
 }
 
-pub fn revision_state_strip(ui: &mut Ui, dirty: bool, revision: u64) {
+/// The one thing a strip across the editor is worth saying: that what is on
+/// the canvas is not what the sheets are placing.
+///
+/// A published revision and a revision counter are not states a reader acts
+/// on, and the strip stood permanently to report them. With the symbol saved
+/// there is no strip at all.
+pub fn unpublished_changes_strip(ui: &mut Ui, dirty: bool) {
+    if !dirty {
+        return;
+    }
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let (text, color) = if dirty {
-        (
-            format!("Unpublished edits \u{00b7} last published revision {revision}"),
-            c.warn,
-        )
-    } else if revision == 0 {
-        ("No revision published yet".to_owned(), c.text_dim)
-    } else {
-        (format!("Published revision {revision}"), c.ok)
-    };
     ui.allocate_ui_with_layout(
         vec2(ui.available_width(), 22.0),
         egui::Layout::left_to_right(egui::Align::Center),
@@ -329,10 +317,18 @@ pub fn revision_state_strip(ui: &mut Ui, dirty: bool, revision: u64) {
                 Stroke::new(1.0, c.border),
             );
             ui.add_space(12.0);
+            let (mark, _) = ui.allocate_exact_size(
+                vec2(PROBLEM_MARK_SIDE, PROBLEM_MARK_SIDE),
+                egui::Sense::hover(),
+            );
+            paint_problem_mark(ui.painter(), mark, Problem::Warning);
+            ui.add_space(4.0);
             ui.label(
-                egui::RichText::new(text)
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .color(color),
+                egui::RichText::new(
+                    "Unpublished changes: placed instances still use the last saved symbol.",
+                )
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(c.text_dim),
             );
         },
     );

@@ -12,10 +12,11 @@
 //! `ProjectModelLibrary::pack_pin`: adopt by copy, keep the provenance, offer
 //! to re-adopt when the source moves.
 //!
-//! Realizing a definition — turning it into a card, a `SourceSpec` or a
-//! waveform — is deliberately *not* here. It needs the netlister and the
-//! engine's evaluator, both of which sit above `state`, so it lives in
-//! `simulation::stimulus_realize` and the library stays a value model.
+//! Realizing a definition (turning it into a card, a `SourceSpec` or a
+//! waveform) is deliberately *not* here. The card comes from the netlist
+//! generator in `rspice-simulation`, which depends on this crate, so
+//! realization lives in `rspice-app` (`simulation::stimulus_realize`) and the
+//! library stays a value model.
 
 pub mod definition;
 pub mod draft;

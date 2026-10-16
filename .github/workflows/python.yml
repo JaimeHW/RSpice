@@ -222,7 +222,7 @@ jobs:
           assert abs(result.voltage("in") - 1.0) < 1e-9
           print(f"rspice {rspice.__version__} Python 3.10 abi3 smoke passed")
           PY
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: wheels-${{ matrix.platform.name }}
           path: crates/rspice-python/dist/*.whl
@@ -303,7 +303,7 @@ jobs:
           assert abs(result.voltage("in") - 1.0) < 1e-9
           print(f"rspice {rspice.__version__} cp314t smoke passed with the GIL disabled")
           PY
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: wheels-cp314t-${{ matrix.platform.name }}
           path: crates/rspice-python/dist/*.whl
@@ -356,7 +356,7 @@ jobs:
           assert abs(result.voltage("in") - 1.0) < 1e-12
           print(f"rspice {rspice.__version__} source-distribution smoke passed")
           PY
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: source-distribution
           path: crates/rspice-python/dist/*.tar.gz

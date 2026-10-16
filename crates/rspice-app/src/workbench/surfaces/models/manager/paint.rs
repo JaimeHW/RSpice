@@ -22,15 +22,18 @@
 
 use super::*;
 
-/// Side of a problem mark painted into one of this workspace's cells, and the
-/// advance from its left edge to where the text after it begins.
+/// Side of a problem mark painted into one of this workspace's cells, the
+/// advance from its left edge to where the text after it begins, and the air
+/// between the two.
 ///
-/// The kit keeps both of these to itself, so they are restated here once
-/// rather than in each of the nine painters that set a mark before a word.
-/// They are the kit's own values: a marked cell and an unmarked one beside it
-/// differ by exactly the advance, here as everywhere else.
-pub(super) const MARK_SIDE: f32 = 11.0;
-pub(super) const MARK_ADVANCE: f32 = 17.0;
+/// Named here, once, for the nine painters in this workspace that set a mark
+/// before a word — but read from the kit rather than copied out of it, so a
+/// marked cell and an unmarked one beside it differ by exactly the advance
+/// the rest of the product uses, now and after the kit moves it.
+pub(super) use crate::ui::widgets::{
+    PROBLEM_MARK_ADVANCE as MARK_ADVANCE, PROBLEM_MARK_GAP as MARK_GAP,
+    PROBLEM_MARK_SIDE as MARK_SIDE,
+};
 
 /// The page bar's content height, from the mockup's `.model-section-bar`
 /// (`min-height: 40px`).
@@ -212,9 +215,32 @@ pub(super) fn card_title(ui: &mut Ui, title: &str, meta: Option<&str>) {
     ui.separator();
 }
 
+/// One property of a card: its name, its value, and where the value came
+/// from, on one 22 pt line.
+///
+/// All three columns are painter text, which publishes no accessibility node
+/// of its own, and the row threw its response away — so every property of
+/// every card in this workspace was invisible to a screen reader while
+/// rendering correctly. The row keeps its response now and publishes the
+/// three columns whole: `widget_info` first, for the role and the bounds
+/// without which the node is dropped before any reader sees it, then the
+/// pair. What is announced is the text as given, not the elided text, so a
+/// value shortened to its column is still reachable in full.
 pub(super) fn property(ui: &mut Ui, name: &str, value: &str, origin: &str) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 22.0), Sense::hover());
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 22.0), Sense::hover());
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), name));
+    let announced_value = if origin.is_empty() {
+        value.to_owned()
+    } else {
+        format!("{value} ({origin})")
+    };
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label(name);
+        node.set_value(announced_value.as_str());
+    });
     let name_width = rect.width() * 0.30;
     let value_width = rect.width() * 0.34;
     let origin_width = (rect.width() - name_width - value_width).max(1.0);

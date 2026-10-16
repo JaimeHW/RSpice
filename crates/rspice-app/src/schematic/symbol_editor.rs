@@ -84,7 +84,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .symbol
         .history
         .is_dirty(&state.workspace.content.active_key());
-    surface::revision_state_strip(ui, dirty, editor.revision);
+    surface::unpublished_changes_strip(ui, dirty);
     if document.body.is_empty()
         && !ports.is_empty()
         && let Some(request) =
@@ -148,7 +148,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             state.workspace.content.active_view_type(),
         );
     });
-    surface::canvas_breadcrumb(ui.ctx(), &state.workspace.content.active_view, stage);
+    // No breadcrumb overlay: the document tab and the inspector's eyebrow
+    // both name the view this canvas is drawing.
     surface::canvas_check_note(ui.ctx(), &document, &ports, stage);
     show_save_symbol_dialog(ui.ctx(), state, &document, &mut editor, &ports);
 }

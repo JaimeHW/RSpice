@@ -305,6 +305,44 @@ pub struct GeneratedVerilogAModelDescriptor {
     /// Hosts must exclude these unknowns from electrical shunts and voltage clamps.
     pub internal_state_nodes: &'static [usize],
     pub branch_count: usize,
+    /// Every matrix location and right-hand-side row the model's stamps can
+    /// write, whatever its parameters and bias.
+    pub stamp_pattern: GeneratedVerilogAStampPattern,
+}
+
+/// The matrix locations a generated model's stamp calls name, read from the
+/// calls themselves.
+///
+/// Axes are device-local: nodes `0..total_node_count` in the model's own order,
+/// then branch unknowns from `total_node_count`. A location is listed when
+/// some stamp call can write it, which is a superset of what any one
+/// evaluation writes; a location a call writes only with a zero value at a
+/// given bias is still listed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GeneratedVerilogAStampPattern {
+    /// `(row, column)` locations the conduction stamp can write at DC: those
+    /// of every equation that is not a sum of `ddt()` terms, and the structural
+    /// incidence of every source branch.
+    pub resistive: &'static [(usize, usize)],
+    /// `(row, column)` locations the conduction stamp writes only through a
+    /// time derivative: those of the equations whose contribution is a sum of
+    /// `ddt()` terms. They are zero at DC and carry the integration companion
+    /// in a transient step.
+    pub dynamic: &'static [(usize, usize)],
+    /// `(row, column)` locations the small-signal reactive stamp can write.
+    pub reactive: &'static [(usize, usize)],
+    /// Rows the conduction stamp can write on the right-hand side.
+    pub rhs_rows: &'static [usize],
+}
+
+impl GeneratedVerilogAStampPattern {
+    /// No location at all, for a model whose stamps write nothing.
+    pub const EMPTY: Self = Self {
+        resistive: &[],
+        dynamic: &[],
+        reactive: &[],
+        rhs_rows: &[],
+    };
 }
 
 /// Typed BLAKE3 identity of a generated model's accepted-state layout.

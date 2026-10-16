@@ -10,3 +10,11 @@ ignore = [
     "RUSTSEC-2026-0195",
     "RUSTSEC-2026-0206",
 ]
+
+# cargo audit cannot scope a yanked exception to one release, so while the
+# registry accepts one, yanked releases are gated by cargo-deny alone
+# (`yanked = "deny"` in deny.toml), which runs in the same jobs and ignores
+# only the exact releases recorded there. The checker fails if this stays off
+# after the last yanked-release exception is removed.
+[yanked]
+enabled = false

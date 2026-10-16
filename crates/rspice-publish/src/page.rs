@@ -27,6 +27,24 @@ const BRAND_LOGO_SVG: &str = include_str!("../../../assets/brand/logo.svg");
 pub const PAGE_STYLES: &str = include_str!("assets/page.css");
 /// Progressive page chrome, separate from the figure hydration loader.
 pub(crate) const PAGE_SCRIPT: &str = include_str!("assets/page.js");
+/// The IBM Plex Mono cuts the stylesheet declares for figure lettering, at
+/// the bundle paths it names, with the licence they are distributed under.
+/// A bundle with figures carries all three; one without carries none. Bundle
+/// paths are lowercase because the cloud render worker refuses any other.
+pub(crate) const PAGE_FONTS: [(&str, &[u8]); 3] = [
+    (
+        "assets/fonts/ibm-plex-mono-regular.ttf",
+        include_bytes!("../../../assets/fonts/IBMPlexMono-Regular.ttf"),
+    ),
+    (
+        "assets/fonts/ibm-plex-mono-medium.ttf",
+        include_bytes!("../../../assets/fonts/IBMPlexMono-Medium.ttf"),
+    ),
+    (
+        "assets/fonts/ofl-ibm-plex.txt",
+        include_bytes!("../../../assets/fonts/OFL-IBMPlex.txt"),
+    ),
+];
 
 struct AssetLink {
     path: String,

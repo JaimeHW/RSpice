@@ -136,6 +136,26 @@ mod tests {
         );
     }
 
+    /// The deck writes an instance drawn `amp` as `Xamp`, so the engine scope
+    /// of `/amp/X2` is `XAMP.X2`. A row sealed when the prefix was derived
+    /// from the drawn name still loads, and states the scope the run had.
+    #[test]
+    fn a_hierarchy_map_row_states_the_scope_of_the_written_instance() {
+        let row = HierarchyMapRow::new("/amp/X2", "amp_1", "XAMP.X2", amp_reference())
+            .expect("the written scope is the derived prefix");
+        assert_eq!(row.engine_prefix(), "XAMP.X2");
+
+        let sealed_earlier = HierarchyMapRow::new("/amp/X2", "amp_1", "AMP.X2", amp_reference())
+            .expect("a row sealed with the drawn spelling still loads");
+        assert_eq!(sealed_earlier.engine_prefix(), "XAMP.X2");
+
+        assert!(
+            HierarchyMapRow::new("/amp/X2", "amp_1", "AMP.X9", amp_reference())
+                .unwrap_err()
+                .contains("rather than 'XAMP.X2'")
+        );
+    }
+
     #[test]
     fn a_sealed_hierarchy_map_names_each_occurrence_once() {
         let receipt = plan_receipt(vec![task(

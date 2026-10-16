@@ -35,11 +35,12 @@ const CONSOLE_ROW_MIN_HEIGHT: f32 = 16.0;
 const CONSOLE_TIME_WIDTH: f32 = 58.0;
 const CONSOLE_SOURCE_WIDTH: f32 = 62.0;
 const CONSOLE_COLUMN_GAP: f32 = 9.0;
-/// Side of a row's leading problem mark.
-const CONSOLE_MARK_SIDE: f32 = 11.0;
-/// The gutter every row reserves for that mark, so a marked row's columns line
-/// up with an unmarked row's.
-const CONSOLE_MARK_GUTTER: f32 = CONSOLE_MARK_SIDE + 6.0;
+/// Side of a row's leading problem mark, and the gutter every row reserves for
+/// it so a marked row's columns line up with an unmarked row's. Both read from
+/// the kit, so a console row's mark is the mark every other panel sets.
+use crate::ui::widgets::{
+    PROBLEM_MARK_ADVANCE as CONSOLE_MARK_GUTTER, PROBLEM_MARK_SIDE as CONSOLE_MARK_SIDE,
+};
 const CONSOLE_FONT_SIZE: f32 = tokens::FS_1;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
@@ -81,7 +82,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 
 fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ui.ctx());
-    let problems = active_problem_count(&app.state);
+    let problems = active_problem_count(&app.state, ui.ctx().cumulative_pass_nr());
     let touch_targets = Tokens::get(ui.ctx()).metrics.ctl_h >= 44.0;
     let header_height = if touch_targets {
         CONSOLE_TOUCH_HEADER_HEIGHT

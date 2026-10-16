@@ -609,7 +609,7 @@ const DIAGNOSTIC_PAD_Y: i8 = 8;
 fn diagnostic_row(ui: &mut Ui, diagnostic: &CodeEditorDiagnostic) {
     /// The side of the kit's problem mark, so a row's mark matches the one in
     /// the section header above it.
-    const MARK_SIDE: f32 = 11.0;
+    use crate::ui::widgets::PROBLEM_MARK_SIDE as MARK_SIDE;
 
     let t = Tokens::get(ui.ctx());
     // On the panel inset: the body has set it already, so the row adds none.

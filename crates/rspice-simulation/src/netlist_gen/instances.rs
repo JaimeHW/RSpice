@@ -4,6 +4,9 @@
 //! its device type requires and its parameter overrides appended.
 
 use super::*;
+use rspice_design::schematic::component_references::{
+    InstanceReference, resolve_instance_reference,
+};
 
 /// The card one independent source emits, without a schematic around it.
 ///
@@ -331,59 +334,37 @@ impl<'a> NetlistGenerator<'a> {
                     return None;
                 }
                 let params = rspice_design::parameters::parse_params_string(&component.params);
-                let authored_reference = params
-                    .get("vref")
-                    .map(|reference| reference.trim())
-                    .filter(|reference| !reference.is_empty());
-                let sense_name = authored_reference
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| format!("VSENSE_{}", instance_name));
-                if authored_reference.is_none() {
-                    self.lines.push(format!(
-                        "{} {} {} 0",
-                        sense_name, node_names[2], node_names[3]
-                    ));
-                }
+                let sense_name = match component.sense_source_name() {
+                    Some(sense_name) => {
+                        self.lines.push(format!(
+                            "{} {} {} 0",
+                            sense_name, node_names[2], node_names[3]
+                        ));
+                        sense_name
+                    }
+                    // The controlling element is named the way the deck
+                    // writes it: a source drawn `sense` is the card `Vsense`.
+                    // A reference nothing here answers to is written as
+                    // authored, and the design check refuses it before a run.
+                    None => {
+                        let reference = params.get("vref").map_or("", |reference| reference.trim());
+                        match resolve_instance_reference(&self.schematic.components, reference) {
+                            InstanceReference::Names(target) => target.written_element_name(),
+                            InstanceReference::Ambiguous | InstanceReference::Unresolved => {
+                                reference.to_owned()
+                            }
+                        }
+                    }
+                };
                 let gain = self.format_value(&component.value);
                 let multiplier = params
                     .get("m")
                     .map(|value| value.trim())
                     .filter(|value| !value.is_empty() && *value != "1");
-                let polynomial = params
-                    .get("poly")
-                    .map(|value| value.trim())
-                    .filter(|value| !value.is_empty());
-                let (upper_key, lower_key) = if component.kind == ComponentType::Ccvs {
-                    ("vmax", "vmin")
-                } else {
-                    ("imax", "imin")
-                };
-                let upper = params.get(upper_key).map(String::as_str);
-                let lower = params.get(lower_key).map(String::as_str);
 
-                if polynomial.is_some() || upper.is_some() || lower.is_some() {
+                if let Some(lowering) = component.behavioral_lowering() {
                     let current = format!("i({sense_name})");
-                    let mut expression = if let Some(coefficients) = polynomial {
-                        polynomial_expression(coefficients, &current)
-                    } else {
-                        format!("({gain})*({current})")
-                    };
-                    if let Some(multiplier) = multiplier {
-                        expression = format!("({multiplier})*({expression})");
-                    }
-                    if upper.is_some() || lower.is_some() {
-                        expression = format!(
-                            "limit({expression},{},{})",
-                            lower.unwrap_or("-1e308"),
-                            upper.unwrap_or("1e308")
-                        );
-                    }
-                    let behavioral_name = format!(
-                        "B{}",
-                        instance_name
-                            .strip_prefix(component.kind.spice_prefix())
-                            .unwrap_or(&instance_name)
-                    );
+                    let expression = behavioral_expression(&lowering, &gain, multiplier, &current);
                     let quantity = if component.kind == ComponentType::Ccvs {
                         "V"
                     } else {
@@ -391,7 +372,11 @@ impl<'a> NetlistGenerator<'a> {
                     };
                     Some(format!(
                         "{} {} {} {}={{{}}}",
-                        behavioral_name, node_names[0], node_names[1], quantity, expression
+                        component.written_element_name(),
+                        node_names[0],
+                        node_names[1],
+                        quantity,
+                        expression
                     ))
                 } else {
                     let gain = multiplier
@@ -467,7 +452,7 @@ impl<'a> NetlistGenerator<'a> {
                     ));
                     return None;
                 }
-                let sense_name = format!("VSENSE_{}", instance_name);
+                let sense_name = component.sense_source_name()?;
                 self.lines.push(format!(
                     "{} {} {} 0",
                     sense_name, node_names[2], node_names[3]
@@ -540,8 +525,11 @@ impl<'a> NetlistGenerator<'a> {
             }
 
             // Memristor: YMEMRISTOR <name> n+ n- <model> (Xyce element;
-            // the TEAM LEVEL=2 card is the executable default).
+            // the TEAM LEVEL=2 card is the executable default). The keyword
+            // is the type's own, which is also how the engine names the
+            // element (`YMEMRISTOR!<name>`) to every probe.
             ComponentType::Memristor => {
+                let keyword = component.kind.element_keyword()?;
                 let nodes = self.format_nodes(&node_names, 2);
                 let (explicit_model, _) = Self::extract_model_override(component);
                 let model = self.get_memristor_model(component, explicit_model.as_deref());
@@ -555,7 +543,7 @@ impl<'a> NetlistGenerator<'a> {
                     .map(|value| format!(" IVRELATION={value}"))
                     .unwrap_or_default();
                 Some(format!(
-                    "YMEMRISTOR {instance_name} {nodes} {model}{iv_relation}"
+                    "{keyword} {instance_name} {nodes} {model}{iv_relation}"
                 ))
             }
 
@@ -991,31 +979,25 @@ impl<'a> NetlistGenerator<'a> {
             return None;
         }
 
-        let mut params = rspice_design::parameters::parse_params_string(&component.params);
-        let upper = params
-            .remove("vmax")
-            .filter(|value| !value.trim().is_empty());
-        let lower = params
-            .remove("vmin")
-            .filter(|value| !value.trim().is_empty());
         let gain = self.format_value(&component.value);
-        let remaining =
-            self.format_params(&rspice_design::parameters::format_params_string(&params));
-
-        if upper.is_none() && lower.is_none() {
+        let Some(lowering) = component.behavioral_lowering() else {
+            let mut params = rspice_design::parameters::parse_params_string(&component.params);
+            params.remove("vmax");
+            params.remove("vmin");
+            let remaining =
+                self.format_params(&rspice_design::parameters::format_params_string(&params));
             return Some(format!(
                 "{} {} 0 {} {} {}{}",
                 instance_name, node_names[2], node_names[0], node_names[1], gain, remaining
             ));
-        }
+        };
 
         let control = format!("v({},{})", node_names[0], node_names[1]);
         Some(format!(
-            "{} {} 0 V={{limit(({gain})*({control}),{},{})}}",
-            behavioral_controlled_source_name(component, instance_name),
+            "{} {} 0 V={{{}}}",
+            component.written_element_name(),
             node_names[2],
-            lower.as_deref().unwrap_or("-1e308"),
-            upper.as_deref().unwrap_or("1e308"),
+            behavioral_expression(&lowering, &gain, None, &control),
         ))
     }
 
@@ -1062,36 +1044,10 @@ impl<'a> NetlistGenerator<'a> {
             .get("m")
             .map(|value| value.trim())
             .filter(|value| !value.is_empty() && *value != "1");
-        let polynomial = params
-            .get("poly")
-            .map(|value| value.trim())
-            .filter(|value| !value.is_empty());
-        let (upper_key, lower_key) = if component.kind == ComponentType::Vcvs {
-            ("vmax", "vmin")
-        } else {
-            ("imax", "imin")
-        };
-        let upper = params.get(upper_key).map(String::as_str);
-        let lower = params.get(lower_key).map(String::as_str);
 
-        if polynomial.is_some() || upper.is_some() || lower.is_some() {
+        if let Some(lowering) = component.behavioral_lowering() {
             let control = format!("v({},{})", node_names[2], node_names[3]);
-            let mut expression = if let Some(coefficients) = polynomial {
-                polynomial_expression(coefficients, &control)
-            } else {
-                format!("({gain})*({control})")
-            };
-            if let Some(multiplier) = multiplier {
-                expression = format!("({multiplier})*({expression})");
-            }
-            if upper.is_some() || lower.is_some() {
-                expression = format!(
-                    "limit({expression},{},{})",
-                    lower.unwrap_or("-1e308"),
-                    upper.unwrap_or("1e308")
-                );
-            }
-            let behavioral_name = behavioral_controlled_source_name(component, instance_name);
+            let expression = behavioral_expression(&lowering, &gain, multiplier, &control);
             let quantity = if component.kind == ComponentType::Vcvs {
                 "V"
             } else {
@@ -1099,7 +1055,11 @@ impl<'a> NetlistGenerator<'a> {
             };
             return Some(format!(
                 "{} {} {} {}={{{}}}",
-                behavioral_name, node_names[0], node_names[1], quantity, expression
+                component.written_element_name(),
+                node_names[0],
+                node_names[1],
+                quantity,
+                expression
             ));
         }
 
@@ -1428,13 +1388,31 @@ fn source_boolean_is_false(value: &str) -> bool {
     )
 }
 
-fn behavioral_controlled_source_name(component: &Component, instance_name: &str) -> String {
-    format!(
-        "B{}",
-        instance_name
-            .strip_prefix(component.kind.spice_prefix())
-            .unwrap_or(instance_name)
-    )
+/// The expression a lowered controlled source carries: its polynomial in the
+/// controlling quantity, or its gain times it, scaled by the multiplier and
+/// clipped to its output limits.
+fn behavioral_expression(
+    lowering: &rspice_design::schematic::component::BehavioralLowering,
+    gain: &str,
+    multiplier: Option<&str>,
+    control: &str,
+) -> String {
+    let mut expression = if let Some(coefficients) = lowering.polynomial.as_deref() {
+        polynomial_expression(coefficients, control)
+    } else {
+        format!("({gain})*({control})")
+    };
+    if let Some(multiplier) = multiplier {
+        expression = format!("({multiplier})*({expression})");
+    }
+    if lowering.upper.is_some() || lowering.lower.is_some() {
+        expression = format!(
+            "limit({expression},{},{})",
+            lowering.lower.as_deref().unwrap_or("-1e308"),
+            lowering.upper.as_deref().unwrap_or("1e308")
+        );
+    }
+    expression
 }
 
 fn polynomial_expression(coefficients: &str, variable: &str) -> String {
@@ -2176,6 +2154,30 @@ mod loop_probe_contract_tests {
         assert_eq!(fields[3], "0", "the probe must not bias the loop: {card:?}");
         assert_ne!(fields[1], "0", "a grounded terminal blinds the method");
         assert_ne!(fields[2], "0", "a grounded terminal blinds the method");
+    }
+
+    /// A plan is offered each placed probe under the name the deck writes it
+    /// under. A probe drawn `LOOP2` is the card `VLOOP2`, and a `.STB` naming
+    /// `LOOP2` would name no voltage source.
+    #[test]
+    fn a_probe_drawn_without_its_prefix_is_offered_under_its_card_name() {
+        let mut schematic = schematic_with_a_placed_probe();
+        schematic.document_mut_for_test().components[0].name = "LOOP2".to_owned();
+
+        let generated = generate_netlist(&schematic);
+
+        assert!(generated.errors.is_empty(), "{:?}", generated.errors);
+        let offered =
+            rspice_design::schematic::component_edit::placed_loop_probe_names(schematic.document());
+        assert_eq!(offered, ["VLOOP2"]);
+        assert!(
+            generated
+                .netlist
+                .lines()
+                .any(|line| line.starts_with(&format!("{} ", offered[0]))),
+            "{}",
+            generated.netlist
+        );
     }
 
     /// End to end: the placed probe's card, the directive this studio writes

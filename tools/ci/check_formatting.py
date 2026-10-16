@@ -107,15 +107,79 @@ def offenders(output: str) -> list[str]:
     return found
 
 
+def run_rustfmt(command: list[str]) -> subprocess.CompletedProcess:
+    """Run one rustfmt batch, reading its output as the UTF-8 it is.
+
+    rustfmt writes the source lines of a diff, and this workspace's sources
+    are UTF-8. Decoding with the locale's codec instead, which is cp1252 on a
+    Windows checkout, fails on the first typographic quote or box-drawing
+    character a diff quotes, and the gate would crash rather than name the
+    file.
+    """
+    return subprocess.run(
+        command,
+        cwd=ROOT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        check=False,
+    )
+
+
+def format_members(
+    grouped: dict[tuple[str, str], list[str]],
+    *,
+    write: bool,
+    runner=None,
+) -> tuple[list[str], list[str], int]:
+    """Check or format every batch, and report everything that went wrong.
+
+    Every batch runs whatever an earlier one reported, because a gate that
+    stops at its first failure hides the rest, which is the defect this script
+    replaced. Returns the unformatted files, a line per batch rustfmt could
+    not check, and the number of targets it was given.
+    """
+    runner = runner or run_rustfmt
+    unformatted: list[str] = []
+    failures: list[str] = []
+    targets = 0
+    for (member, edition), paths in grouped.items():
+        targets += len(paths)
+        for run in batches(paths):
+            command = ["rustfmt", "--edition", edition]
+            if not write:
+                command.append("--check")
+            completed = runner([*command, *run])
+            stdout = completed.stdout or ""
+            found = offenders(stdout)
+            for path in found:
+                if path not in unformatted:
+                    unformatted.append(path)
+            problem = (completed.stderr or "").strip()
+            if completed.returncode != 0 and (problem or not found):
+                # A diff is reported on stdout and nothing else; anything on
+                # stderr is a parse error, a missing file or a command line
+                # rustfmt could not take, and a diff in the same run must not
+                # hide it behind advice to run --write. A failure that named
+                # no file at all is not a pass either, and what it did print
+                # is kept, because it is the only account of what went wrong.
+                said = problem or stdout.strip()
+                failures.append(
+                    f"rustfmt could not check {member} (exit status {completed.returncode})"
+                    + (f": {said}" if said else "")
+                )
+    return unformatted, failures, targets
+
+
 def metadata() -> dict:
     """Describe the workspace, keeping cargo's own words when it refuses.
 
-    `--locked` is deliberate: a gate checks the workspace the lockfile pins
-    rather than quietly resolving a new one. It also means a tree whose
-    `Cargo.lock` is out of step with its manifests fails here, which is the
-    ordinary state of a landing tree that merged two branches each adding a
-    dependency. Capturing stderr is what lets the caller say the tree is
-    stale instead of raising a traceback that reads as a broken gate.
+    `--no-deps` resolves nothing, so cargo does not read `Cargo.lock` here and
+    `--locked` cannot trip; it is passed because every cargo call in CI is.
+    What does make this fail is a manifest cargo cannot load. Capturing stderr
+    is what lets the caller print cargo's reason instead of raising a
+    traceback that reads as a broken gate.
     """
     return json.loads(
         subprocess.check_output(
@@ -139,12 +203,8 @@ def main() -> int:
     try:
         grouped = entry_points(metadata())
     except subprocess.CalledProcessError as refusal:
-        print(f"cargo could not describe the workspace:\n{(refusal.stderr or '').strip()}")
-        print(
-            "This gate reads the workspace under --locked, so Cargo.lock must "
-            "match the manifests. Run a cargo command without --locked to "
-            "update it and commit the lockfile with the manifest that moved."
-        )
+        reason = (refusal.stderr or "").strip() or f"exit status {refusal.returncode}"
+        print(f"cargo could not describe the workspace:\n{reason}")
         return 1
     members = {member for member, _ in grouped}
     if len(members) < MINIMUM_MEMBERS:
@@ -154,34 +214,22 @@ def main() -> int:
         )
         return 1
 
-    unformatted: list[str] = []
-    targets = 0
-    for (member, edition), paths in grouped.items():
-        targets += len(paths)
-        for run in batches(paths):
-            command = ["rustfmt", "--edition", edition]
-            if not arguments.write:
-                command.append("--check")
-            completed = subprocess.run(
-                [*command, *run],
-                cwd=ROOT,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            for path in offenders(completed.stdout):
-                if path not in unformatted:
-                    unformatted.append(path)
-            if completed.returncode != 0 and not completed.stdout:
-                # rustfmt failed without reporting a diff: a parse error, a
-                # missing file, or a command line it still could not take.
-                print(f"rustfmt could not check {member}: {completed.stderr.strip()}")
-                return 1
+    unformatted, failures, targets = format_members(grouped, write=arguments.write)
 
-    if unformatted:
-        for path in unformatted:
-            print(f"unformatted: {path}")
+    for path in unformatted:
+        print(f"unformatted: {path}")
+    for failure in failures:
+        print(failure)
+    if unformatted and not failures:
         print(f"{len(unformatted)} file(s) need rustfmt; run with --write to format them")
+    elif unformatted:
+        # --write cannot fix a file that does not parse, so the advice is
+        # given only alongside the failures that say what has to come first.
+        print(
+            f"{len(unformatted)} file(s) need rustfmt, and rustfmt could not check "
+            f"{len(failures)} batch(es); fix those first, then run with --write"
+        )
+    if unformatted or failures:
         return 1
 
     action = "formatted" if arguments.write else "checked"

@@ -905,11 +905,17 @@ fn design_checks_on_save_are_off_by_default_and_never_refuse_the_save() {
         "the outcome is stated where the author is looking"
     );
     assert!(
-        state.log_buffer.entries().any(|entry| checked
+        !state.log_buffer.entries().any(|entry| checked
             .violations()
             .iter()
             .any(|violation| entry.message == violation.message)),
-        "the console states a finding rather than only a count"
+        "a finding is a record on the Problems page, not a second line in the Console"
+    );
+    let subject = state.workspace.content.active_schematic_reference();
+    assert_eq!(
+        state.design_rule_finding_identities(&subject).len(),
+        checked.violations().len(),
+        "every finding the save's checks raised is a published record"
     );
     assert!(
         !state.schematic.session.is_dirty,

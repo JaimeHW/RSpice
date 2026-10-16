@@ -1,6 +1,6 @@
 //! The signed drawing-sheet package contract.
 //!
-//! One implementation serves both ends of the ceremony: `rspice-ui` imports a
+//! One implementation serves both ends of the ceremony: `rspice-app` imports a
 //! package, and the offline `rspice-sheet-publisher` signs one. Because they
 //! share this code rather than agreeing by convention, "the publisher signed
 //! it" and "the importer will accept it" are the same statement.

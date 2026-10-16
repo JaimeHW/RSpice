@@ -34,8 +34,9 @@ use super::project;
 const COMPACT_BREAKPOINT: f32 = 820.0;
 const SPLIT_BREAKPOINT: f32 = 960.0;
 const HEADER_MIN_HEIGHT: f32 = 68.0;
-/// Side of a header chip's problem mark, sized to the chip's own text.
-const HEADER_CHIP_MARK_SIDE: f32 = 11.0;
+/// Side of a header chip's problem mark: the kit's own, so it matches every
+/// other marked line in the product.
+use crate::ui::widgets::PROBLEM_MARK_SIDE as HEADER_CHIP_MARK_SIDE;
 const TAB_HEIGHT: f32 = 34.0;
 const PIN_TABLE_MIN_WIDTH: f32 = 690.0;
 const FORM_TABLE_MIN_WIDTH: f32 = 900.0;

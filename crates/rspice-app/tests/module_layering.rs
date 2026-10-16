@@ -1573,8 +1573,6 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     // budget every save already hangs sidecars off — and this file was standing
     // exactly on its ceiling, so the ceiling moves to the new measurement
     // rather than the field being refused a home.
-    ("workbench/app/dialogs/drawing_sheet_setup/render.rs", 2_845),
-    ("workbench/app/dialogs/hardcopy/render.rs", 3_112),
     ("workbench/docks/navigator.rs", 6_668),
     // 2026-09-06, +100 (6_418 -> 6_518): three viewer sheets joined the
     // workspace. Every line is a single-owner table this file exists to own —
@@ -1736,4 +1734,378 @@ fn every_production_dialog_callsite_supplies_a_description() {
         "production dialogs must publish explicit purpose text:\n{}",
         missing.join("\n")
     );
+}
+
+/// The UI crates this file's accessibility scan covers, relative to the
+/// workspace's `crates/` directory.
+const PAINTED_UI_CRATES: &[&str] = &[
+    "rspice-app/src",
+    "rspice-ui-kit/src",
+    "rspice-results-ui/src",
+    "rspice-schematic-editor/src",
+];
+
+/// Row helpers that paint words and publish nothing a screen reader can
+/// reach, recorded by file and by the function they sit in.
+///
+/// This is a debt list, not a dispensation. Every entry is a row, a cell, a
+/// header or a chip whose text renders correctly and is invisible to
+/// assistive technology, and each one is fixed the same way: give the row a
+/// response, call `widget_info` on it for the role and the bounds, then state
+/// the pair through the AccessKit builder. Delete the entry in the same
+/// commit as the fix — an entry whose site is clean fails this test, so the
+/// list cannot rot into a record of problems that no longer exist.
+///
+/// It is 62 entries because the class is 62 sites wide and fixing them is a
+/// program rather than a change. It was measured, not estimated: the two
+/// known-worst sites were repaired first — Check and save's rows, and
+/// `models/manager/paint.rs::property`, which painted all three columns of
+/// every property of every card in that workspace and published nothing at
+/// all — and this is what was left.
+const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
+    "rspice-app/src/workbench/app/dialogs/design_management/widgets.rs::schematic_preview",
+    "rspice-app/src/workbench/app/dialogs/design_review_comments.rs::review_message",
+    "rspice-app/src/workbench/app/dialogs/drawing_sheet_setup/render.rs::measurement_strip",
+    "rspice-app/src/workbench/app/dialogs/drawing_sheet_support.rs::title_field_summary_facts",
+    "rspice-app/src/workbench/app/dialogs/help.rs::render_shortcuts_help_dialog",
+    "rspice-app/src/workbench/app/dialogs/hierarchy/create.rs::table_row",
+    "rspice-app/src/workbench/app/dialogs/library/cell_ops_dialogs.rs::process_copy_cell_dialog",
+    "rspice-app/src/workbench/app/dialogs/library/new_cell_dialog.rs::process_new_cell_dialog",
+    "rspice-app/src/workbench/app/dialogs/library/new_view_dialog.rs::process_new_view_dialog",
+    "rspice-app/src/workbench/app/dialogs/license.rs::row",
+    "rspice-app/src/workbench/app/dialogs/review_primitives.rs::purpose_line",
+    "rspice-app/src/workbench/app/dialogs/selection/bulk_edit.rs::selection_filter_header",
+    "rspice-app/src/workbench/docks/drawers.rs::mobile_navigation_dialog",
+    "rspice-app/src/workbench/docks/drawers.rs::mobile_navigation_group",
+    "rspice-app/src/workbench/docks/inspector.rs::trace_colour_row",
+    "rspice-app/src/workbench/docks/navigator/design.rs::tabs",
+    "rspice-app/src/workbench/surfaces/design/layout_editor.rs::show_canvas",
+    "rspice-app/src/workbench/surfaces/model_editor.rs::dialog_subheading",
+    "rspice-app/src/workbench/surfaces/model_editor.rs::release_no_candidate_row",
+    "rspice-app/src/workbench/surfaces/model_editor.rs::section_header",
+    "rspice-app/src/workbench/surfaces/model_editor.rs::specialist_header",
+    "rspice-app/src/workbench/surfaces/model_editor.rs::table_empty",
+    "rspice-app/src/workbench/surfaces/model_editor/schema_editors.rs::temperature_plot",
+    "rspice-app/src/workbench/surfaces/model_editor/workflows.rs::workflow_purpose_note",
+    "rspice-app/src/workbench/surfaces/models/manager.rs::catalog_footer_capped",
+    "rspice-app/src/workbench/surfaces/models/manager/bins.rs::map_legend",
+    "rspice-app/src/workbench/surfaces/models/manager/detail.rs::origin_property",
+    "rspice-app/src/workbench/surfaces/models/manager/include.rs::include_closure_graph",
+    "rspice-app/src/workbench/surfaces/models/manager/qualification_page.rs::closure_ledger",
+    "rspice-app/src/workbench/surfaces/models/manager/symbols.rs::detail_table_header",
+    "rspice-app/src/workbench/surfaces/project/landing.rs::compact_recent_header",
+    "rspice-app/src/workbench/surfaces/project/landing.rs::compact_section_header",
+    "rspice-app/src/workbench/surfaces/project/overview.rs::status_rows",
+    "rspice-app/src/workbench/surfaces/simulate.rs::analysis_group_header",
+    "rspice-app/src/workbench/surfaces/simulate.rs::paint_control_row_label",
+    "rspice-app/src/workbench/surfaces/simulate/analysis_form.rs::named_periodic_source_row",
+    "rspice-app/src/workbench/surfaces/simulate/analysis_form.rs::property_row",
+    "rspice-app/src/workbench/surfaces/simulate/analysis_form/envelope.rs::envelope_choice_row",
+    "rspice-app/src/workbench/surfaces/simulate/catalog.rs::analysis_catalog_window",
+    "rspice-app/src/workbench/surfaces/simulate/page_kit.rs::card_head_row",
+    "rspice-app/src/workbench/surfaces/simulate/page_runset.rs::value_chip",
+    "rspice-app/src/workbench/surfaces/simulate/page_solver.rs::ladder_stage",
+    "rspice-app/src/workbench/surfaces/simulate/plan_manager/kit.rs::detail_row",
+    "rspice-app/src/workbench/surfaces/simulate/plan_manager/kit.rs::section_head",
+    "rspice-app/src/workbench/surfaces/simulate/plan_manager/kit.rs::table",
+    "rspice-app/src/workbench/surfaces/simulate/workflows.rs::workflow_section_heading",
+    "rspice-app/src/workbench/surfaces/stimulus/pwl.rs::table_header",
+    "rspice-app/src/workbench/surfaces/verify/tuning.rs::tuning_waveform_preview",
+    "rspice-app/src/workbench/surfaces/veriloga.rs::source_editor",
+    "rspice-app/src/workbench/tools/notification_center.rs::foot",
+    "rspice-results-ui/src/noise_contrib.rs::contributor_header",
+    "rspice-results-ui/src/waves/expression_editor.rs::show",
+    "rspice-schematic-editor/src/property_values.rs::render_value_editor",
+    "rspice-ui-kit/src/panels.rs::card_with_body_margin",
+    "rspice-ui-kit/src/widgets/canvas_entry.rs::derived",
+    "rspice-ui-kit/src/widgets/canvas_entry.rs::paint_status",
+    "rspice-ui-kit/src/widgets/command_form.rs::list_entry",
+    "rspice-ui-kit/src/widgets/command_form.rs::paint_context_line",
+    "rspice-ui-kit/src/widgets/command_form.rs::paint_status",
+    "rspice-ui-kit/src/widgets/command_form.rs::value_row",
+    "rspice-ui-kit/src/widgets/dialog.rs::mark",
+    "rspice-ui-kit/src/widgets/form.rs::kv_row",
+];
+
+/// `source` with every `#[cfg(test)]` item blanked, line for line.
+///
+/// The crate's own `source_guard::without_test_items` does this for scans that
+/// live inside the library. An integration test cannot reach it, so the rule
+/// is restated here: cutting the file at the first `#[cfg(test)]` — which the
+/// dialog-purpose audit above does — leaves everything after an early test
+/// module unscanned, and that is not a small gap. The models workspace's
+/// painter module declares a test module a third of the way down; cutting
+/// there hid `property`, the single worst accessibility defect in the
+/// product, from the very scan written to find it.
+///
+/// Removed lines become empty ones so the line a match sits on is still the
+/// line in the file.
+fn without_test_items(source: &str) -> String {
+    const ATTRIBUTE: &str = "#[cfg(test)]";
+    let lines = source.lines().collect::<Vec<_>>();
+    let mut kept: Vec<&str> = Vec::with_capacity(lines.len());
+    let mut index = 0;
+    while index < lines.len() {
+        let line = lines[index];
+        let Some(rest) = line.trim_start().strip_prefix(ATTRIBUTE) else {
+            kept.push(line);
+            index += 1;
+            continue;
+        };
+        let indent = line.len() - line.trim_start().len();
+        kept.push("");
+        index += 1;
+        let mut item = rest.trim();
+        let mut opened = false;
+        loop {
+            let trimmed = item.trim_end();
+            if !opened && trimmed.matches('{').count() > trimmed.matches('}').count() {
+                opened = true;
+            }
+            let closed = if opened {
+                // The closer of a braced item is the only `}` at the
+                // attribute's own indentation; its contents are indented
+                // further. Reading the end that way rather than by counting
+                // braces keeps a brace inside a string from moving it.
+                trimmed.trim_start().starts_with('}')
+                    && item.len() - item.trim_start().len() == indent
+            } else {
+                // Balanced braces on the first line finish the item here — a
+                // one-line `fn`, or a `use` naming a brace list. So does a
+                // statement, an out-of-line `mod`, or an attributed field.
+                trimmed.contains('{') || trimmed.ends_with(';') || trimmed.ends_with(',')
+            };
+            if closed || index >= lines.len() {
+                break;
+            }
+            item = lines[index];
+            kept.push("");
+            index += 1;
+        }
+    }
+    kept.join("\n")
+}
+
+/// The function a line sits in, by the nearest `fn` declared above it.
+///
+/// A line number would rot on the next edit anywhere above it; a function
+/// name survives one, which is what makes [`UNPUBLISHED_PAINTED_ROWS`] a list
+/// a reader can check against the source.
+fn enclosing_fn(lines: &[&str], index: usize) -> String {
+    for line in lines[..=index].iter().rev() {
+        let mut rest = line.trim_start();
+        if let Some(after) = rest.strip_prefix("pub") {
+            let after = after.strip_prefix('(').map_or(after, |inner| {
+                inner.split_once(')').map_or(inner, |(_, tail)| tail)
+            });
+            if after.starts_with(' ') {
+                rest = after.trim_start();
+            }
+        }
+        for keyword in ["const ", "async ", "unsafe "] {
+            rest = rest.strip_prefix(keyword).unwrap_or(rest).trim_start();
+        }
+        if let Some(name) = rest.strip_prefix("fn ") {
+            let name: String = name
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if !name.is_empty() {
+                return name;
+            }
+        }
+    }
+    "<file>".to_owned()
+}
+
+/// The response identifier an `accesskit_node_builder` call is keyed on.
+fn builder_response(line: &str) -> Option<String> {
+    let tail = line.split_once("accesskit_node_builder(")?.1.trim_start();
+    let tail = tail.strip_prefix('&').unwrap_or(tail);
+    let name: String = tail
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+    if name.is_empty() {
+        return None;
+    }
+    // `let response_id = response.id` is the same response under another name.
+    Some(name.strip_suffix("_id").unwrap_or(&name).to_owned())
+}
+
+/// Does `line` bind `name`, either alone or as the second half of an
+/// `allocate_exact_size` tuple?
+fn binds(line: &str, name: &str) -> bool {
+    let squeezed = line.split_whitespace().collect::<Vec<_>>().join(" ");
+    squeezed.contains(&format!(", {name}) ="))
+        || squeezed.contains(&format!("let {name} ="))
+        || squeezed.contains(&format!("let mut {name} ="))
+}
+
+fn allocates(window: &str) -> bool {
+    [
+        "allocate_exact_size",
+        "allocate_response",
+        "allocate_at_least",
+    ]
+    .iter()
+    .any(|call| window.contains(call))
+}
+
+/// Does `window` paint text through the raw painter?
+fn paints_text(window: &str) -> bool {
+    window.match_indices("painter()").any(|(at, _)| {
+        let reach = window.len().min(at + 200);
+        window[at..reach].contains(".text(")
+    })
+}
+
+/// Everything a surface paints must also reach assistive technology.
+///
+/// Two shapes of the same bug, and the second is the first with its visible
+/// half missing:
+///
+/// 1. **A node created but never given a role or bounds.**
+///    `Context::accesskit_node_builder` *creates* the node, so a helper that
+///    calls only the builder looks like it published something. Only
+///    `Response::widget_info` fills in the role and the geometry, and a node
+///    with neither is `Role::Unknown` at no position: unreachable by any
+///    assistive technology, and dropped outright by
+///    `tools/ci/browser_workbench.py::controls()`, which appends a node only
+///    `if bounds:`. This is how the whole body of the Check and save dialog —
+///    every fact row and the entire change preview — rendered correctly and
+///    was read as empty.
+///
+/// 2. **No node at all.** A helper that allocates its own row, throws the
+///    response away into `_`, and paints the row's words through
+///    `ui.painter()`. There is no builder call to find here, because nothing
+///    was ever created; the only handle on the row is gone by the time the
+///    text is drawn.
+///
+/// Both are recorded by function in [`UNPUBLISHED_PAINTED_ROWS`], and the list
+/// is checked for equality: a new one fails, and a fixed one that is still
+/// listed fails too.
+///
+/// What this test cannot see: whether a published node says anything useful.
+/// Assert *bounds* when pinning a specific surface, never only the text — the
+/// text was always painted, which is exactly why this class went unnoticed.
+#[test]
+fn a_painted_row_reaches_the_accessibility_tree() {
+    let crates_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let mut sources = Vec::new();
+    for crate_src in PAINTED_UI_CRATES {
+        sources.extend(rust_sources(&crates_root.join(crate_src)));
+    }
+
+    let mut scanned = 0_usize;
+    let mut found: BTreeMap<String, String> = BTreeMap::new();
+    for path in sources {
+        let relative = path
+            .strip_prefix(crates_root)
+            .expect("source beneath the crates directory")
+            .to_string_lossy()
+            .replace('\\', "/");
+        if relative.ends_with("/tests.rs") || relative.contains("/tests/") {
+            continue;
+        }
+        scanned += 1;
+        let source = fs::read_to_string(&path).expect("read Rust source");
+        let shipped = without_test_items(&source);
+        let lines = shipped.lines().collect::<Vec<_>>();
+
+        for (index, line) in lines.iter().enumerate() {
+            // --- a node created with no role and no bounds ---
+            if let Some(name) = builder_response(line) {
+                let mut published = false;
+                let mut raw = false;
+                for back in (0..=index).rev() {
+                    if index - back > 120 {
+                        break;
+                    }
+                    if lines[back].contains(".widget_info(") {
+                        published = true;
+                    }
+                    if binds(lines[back], &name) {
+                        let reach = lines.len().min(back + 6);
+                        raw = allocates(&lines[back..reach].join("\n"));
+                        break;
+                    }
+                }
+                // Setting the bounds by hand inside the builder is the one
+                // other way a node gets geometry, so it counts as published.
+                let reach = lines.len().min(index + 30);
+                if lines[index..reach].join("\n").contains("set_bounds") {
+                    published = true;
+                }
+                if raw && !published {
+                    found
+                        .entry(format!("{relative}::{}", enclosing_fn(&lines, index)))
+                        .or_insert_with(|| {
+                            format!("{relative}:{}: builder with no widget_info", index + 1)
+                        });
+                }
+            }
+
+            // --- a row allocated, discarded, and painted anyway ---
+            let squeezed = line.split_whitespace().collect::<Vec<_>>().join(" ");
+            if squeezed.contains(", _) = ui.allocate_exact_size") {
+                let reach = lines.len().min(index + 60);
+                let mut ahead = lines[index + 1..reach].join("\n");
+                // Stay inside this row's own statements.
+                if let Some(cut) = ahead.find("allocate_") {
+                    ahead.truncate(cut);
+                }
+                if paints_text(&ahead)
+                    && !ahead.contains("widget_info")
+                    && !ahead.contains("accesskit_node_builder")
+                {
+                    found
+                        .entry(format!("{relative}::{}", enclosing_fn(&lines, index)))
+                        .or_insert_with(|| {
+                            format!("{relative}:{}: painted row, no node", index + 1)
+                        });
+                }
+            }
+        }
+    }
+
+    assert!(scanned > 100, "the accessibility scan read {scanned} files");
+
+    let listed: std::collections::BTreeSet<&str> =
+        UNPUBLISHED_PAINTED_ROWS.iter().copied().collect();
+    assert_eq!(
+        listed.len(),
+        UNPUBLISHED_PAINTED_ROWS.len(),
+        "UNPUBLISHED_PAINTED_ROWS contains a duplicate entry"
+    );
+
+    let mut failures = String::new();
+    let fresh = found
+        .iter()
+        .filter(|(key, _)| !listed.contains(key.as_str()))
+        .map(|(key, site)| format!("  {key}\n    {site}"))
+        .collect::<Vec<_>>();
+    if !fresh.is_empty() {
+        failures.push_str(&format!(
+            "These helpers paint words no screen reader can reach:\n{}\n\
+             Give the row a response, call `widget_info` on it for the role and the\n\
+             bounds, then state the pair through the AccessKit builder — in that\n\
+             order, because `widget_info` would otherwise overwrite the value with\n\
+             the label.\n",
+            fresh.join("\n")
+        ));
+    }
+    let repaired = UNPUBLISHED_PAINTED_ROWS
+        .iter()
+        .filter(|key| !found.contains_key(**key))
+        .copied()
+        .collect::<Vec<_>>();
+    if !repaired.is_empty() {
+        failures.push_str(&format!(
+            "\nUNPUBLISHED_PAINTED_ROWS entries that are clean, renamed or gone:\n  {}\n\
+             Delete them, so the list stays a record of what is still broken.\n",
+            repaired.join("\n  ")
+        ));
+    }
+    assert!(failures.is_empty(), "{failures}");
 }

@@ -952,6 +952,24 @@ impl GoldenHarness {
         Ok((self.dense_matrix(), self.rhs.clone()))
     }
 
+    /// The conduction stamp at `unknowns` with `ddt` driven at the bare
+    /// companion weight `scale`, as a transient step stamps it: dense
+    /// row-major matrix and right-hand side.
+    pub fn stamp_dynamic(
+        &mut self,
+        unknowns: &[Value],
+        scale: Value,
+    ) -> Result<(Vec<Value>, Vec<Value>), GoldenError> {
+        // Inert first, so every `ddt` slot holds its history; see
+        // [`Self::device_charges`].
+        self.set_ddt_scale(None);
+        let inert = self.stamp_dense(unknowns);
+        self.set_ddt_scale(Some(scale));
+        let active = inert.and_then(|_| self.stamp_dense(unknowns));
+        self.set_ddt_scale(None);
+        active
+    }
+
     fn stamp_dense(&mut self, unknowns: &[Value]) -> Result<(Vec<Value>, Vec<Value>), GoldenError> {
         self.stamp_with(unknowns, GeneratedSimulationParameters::new())
     }

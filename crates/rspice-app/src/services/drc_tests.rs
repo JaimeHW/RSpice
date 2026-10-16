@@ -88,16 +88,19 @@ fn library_with_authored_amp_symbol() -> (LibraryManager, HashMap<String, Schema
     library.add_cell(cell);
     libraries.add_library(library);
 
+    // The master declares what the placed instances bind: the check reads a
+    // pin's direction from the master as it stands.
     let mut master = SchematicState::default();
-    for (idx, name) in ["IN", "OUT"].iter().enumerate() {
+    for (idx, (name, direction)) in [("IN", "in"), ("OUT", "out")].iter().enumerate() {
         let id = master.add_component(ComponentType::Port, Point::new(idx as i32 * 40, 0));
-        master
+        let port = master
             .document_mut_for_test()
             .components
             .iter_mut()
             .find(|component| component.id == id)
-            .expect("port component")
-            .value = (*name).to_owned();
+            .expect("port component");
+        port.value = (*name).to_owned();
+        port.params = format!("dir={direction}");
     }
 
     let mut buffers = HashMap::new();
@@ -202,9 +205,9 @@ fn hierarchy_resolved_unconnected_pin_check_uses_authored_terminal_geometry() {
     );
 }
 
-/// The declared direction a finding is classified by comes off the bound cell
-/// interface, through the real extraction. An input the drawing leaves open is
-/// an error; the output beside it is a warning.
+/// The declared direction a finding is classified by comes off the cell's
+/// interface as its master declares it, through the real extraction. An input
+/// the drawing leaves open is an error; the output beside it is a warning.
 #[test]
 fn an_open_instance_terminal_is_classified_by_its_bound_interface() {
     let (libraries, buffers) = library_with_authored_amp_symbol();

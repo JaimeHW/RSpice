@@ -517,8 +517,13 @@ fn manual_fourier_is_topologically_bound_to_its_exact_transient_task() {
     assert_eq!(tasks[1].dependencies(), &[tasks[0].instance_id()]);
 }
 
-#[test]
-fn campaign_freezes_distinct_plan_members_without_switching_the_live_editor() {
+/// A runnable state holding two plans a campaign can freeze, the first of
+/// them active.
+fn two_plan_campaign_state() -> (
+    AppState,
+    crate::product::SimulationPlanId,
+    crate::product::SimulationPlanId,
+) {
     let mut state = runnable_state();
     let first_plan_id = state.sim_setup.stable_analysis_plan().unwrap().id();
     state
@@ -537,6 +542,12 @@ fn campaign_freezes_distinct_plan_members_without_switching_the_live_editor() {
         .workspace
         .content
         .sync_legacy_specs_projection(second_plan_id);
+    (state, first_plan_id, second_plan_id)
+}
+
+#[test]
+fn campaign_freezes_distinct_plan_members_without_switching_the_live_editor() {
+    let (mut state, first_plan_id, second_plan_id) = two_plan_campaign_state();
     let live_plan_before_dispatch = state.sim_setup.stable_analysis_plan().unwrap().id();
     let mut controller = SimulationController::new();
 
@@ -589,6 +600,65 @@ fn campaign_freezes_distinct_plan_members_without_switching_the_live_editor() {
         .expect("campaign identity survives project round trip");
     assert_eq!(restored_membership.campaign_id(), receipt.campaign_id);
     assert_eq!(restored_membership.member_index(), 1);
+
+    controller.abort();
+}
+
+/// A campaign member that cannot be started is filed as a finding about
+/// that member, where its failures would have been filed had it run, and the
+/// campaign run again supersedes it. It used to reach only the Console, so
+/// a campaign none of whose members ran left the Problems page empty.
+#[test]
+fn a_campaign_member_that_cannot_start_is_filed_until_a_rerun_supersedes_it() {
+    let (mut state, first_plan_id, second_plan_id) = two_plan_campaign_state();
+    let next_run_id = state.simulation.retained.next_run_id;
+    state.simulation.retained.next_run_id = u64::MAX;
+    let mut controller = SimulationController::new();
+
+    controller
+        .prepare_and_start_campaign(
+            &mut state,
+            "Nightly characterization",
+            &[first_plan_id, second_plan_id],
+        )
+        .expect("the campaign freezes; its members are refused one by one");
+
+    assert!(state.simulation.active_run().is_none());
+    let refused = state.diagnostics.published_member_refusals();
+    assert_eq!(refused.len(), 2, "{refused:?}");
+    for (index, (scope, subject, message)) in refused.iter().enumerate() {
+        let member = index + 1;
+        assert_eq!(*scope, format!("simulation-run/member-{member}"));
+        assert!(
+            subject.ends_with(&format!(" · campaign member {member}")),
+            "{subject}"
+        );
+        assert!(
+            message.starts_with("The member could not be started: ")
+                && message.contains("run sequence is exhausted"),
+            "{message}"
+        );
+    }
+    assert!(
+        refused[1].1.starts_with("Second campaign plan"),
+        "the member is named by the plan it was to run: {}",
+        refused[1].1
+    );
+
+    state.simulation.retained.next_run_id = next_run_id;
+    controller
+        .prepare_and_start_campaign(
+            &mut state,
+            "Nightly characterization",
+            &[first_plan_id, second_plan_id],
+        )
+        .expect("the campaign runs again");
+
+    assert!(state.simulation.active_run().is_some());
+    assert!(
+        state.diagnostics.published_member_refusals().is_empty(),
+        "the campaign run again is a new measurement"
+    );
 
     controller.abort();
 }
@@ -1754,24 +1824,51 @@ fn a_generated_run_set_names_its_unresolved_device_models() {
 /// A design whose root is sound and whose instantiated cell is not cannot be
 /// prepared, because the source checks read the whole hierarchy.
 ///
-/// Before they did, an open one level down was invisible to the run gate: the
-/// deck emitted, the design checks passed on the root alone, and the solver
-/// met a floating node nobody had been told about. The deck still emits here —
-/// generation reports no error — so this refusal is the checks' judgement
-/// about the circuit, not the generator's about the deck.
+/// Before they did, a defect one level down was invisible to the run gate:
+/// the deck emitted, the design checks passed on the root alone, and the
+/// solver met a circuit nobody had been told about. The cell here holds two
+/// independent voltage sources across one pair of nodes — a loop of ideal
+/// sources the solver cannot stamp, which is an error wherever it is drawn.
+/// The deck still emits, so the refusal is the checks' judgement about the
+/// circuit and not the generator's about the deck; and it is that one finding,
+/// stated inside the occurrence, so neither a check that stopped walking nor
+/// a refusal for some other reason passes this.
 #[test]
 fn an_error_inside_an_instantiated_cellview_refuses_the_run() {
     use crate::state::{
         CellViewRef, ComponentType, Library, LibraryCellInstance, Point, SchematicState, View,
         ViewType,
     };
+    use rspice_design::drc::{DrcConfig, DrcLocation, DrcViolationType};
 
     let mut state = runnable_state();
 
-    // One resistor, both legs unwired: each of its nodes carries a single
-    // connection, which is an open circuit wherever it is drawn.
     let mut master = SchematicState::default();
-    master.add_component(ComponentType::Resistor, Point::new(30, 0));
+    let sources = [
+        master.add_component(ComponentType::VoltageSource, Point::new(30, 0)),
+        master.add_component(ComponentType::VoltageSource, Point::new(90, 0)),
+    ];
+    let terminal = |master: &SchematicState, id: u64, pin: &str| {
+        master
+            .document()
+            .components
+            .iter()
+            .find(|component| component.id == id)
+            .and_then(|component| {
+                component
+                    .terminal_positions()
+                    .into_iter()
+                    .find_map(|(name, point)| (name == pin).then_some(point))
+            })
+            .expect("a voltage source has both terminals")
+    };
+    for pin in ["+", "-"] {
+        let from = terminal(&master, sources[0], pin);
+        let to = terminal(&master, sources[1], pin);
+        master
+            .add_wire(vec![from, to])
+            .expect("the two terminals are joined");
+    }
 
     if state.library_manager.get_library("user").is_none() {
         state.library_manager.add_library(Library::new("user"));
@@ -1780,29 +1877,82 @@ fn an_error_inside_an_instantiated_cellview_refuses_the_run() {
         .library_manager
         .get_library_mut("user")
         .expect("the project library")
-        .get_or_create_cell("dangling");
+        .get_or_create_cell("loop");
     if cell.get_view("schematic").is_none() {
         cell.add_view(View::new("schematic", ViewType::Schematic));
     }
-    state.workspace.insert_schematic_editor(
-        CellViewRef::new("user", "dangling", "schematic").key(),
-        master,
-    );
+    let reference = CellViewRef::new("user", "loop", "schematic");
+    state
+        .workspace
+        .insert_schematic_editor(reference.key(), master);
 
-    let mut binding = LibraryCellInstance::new("user", "dangling", "schematic");
+    let mut binding = LibraryCellInstance::new("user", "loop", "schematic");
     binding.bind_interface(&[]);
     state
         .schematic
         .add_library_cell_component(Point::new(400, 400), binding);
     state.dialogs.drc_checked_version = state.schematic.topology_version();
 
+    let projection = state
+        .workspace
+        .configuration_execution_projection(
+            &state.library_manager,
+            &state.workspace.content.active_view,
+            &state.schematic,
+        )
+        .expect("the authored hierarchy projects");
+    let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
+        state.library_manager.catalog(),
+        &projection,
+    );
+    let root = projection
+        .root_schematic()
+        .expect("the projection carries the root");
+    let generated = rspice_simulation::netlist_gen::generate_netlist_hierarchical(
+        root,
+        &[],
+        &hierarchy,
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
+    );
+    assert!(
+        generated.errors.is_empty(),
+        "the deck emits: {:?}",
+        generated.errors
+    );
+
+    // What the gate judges: the whole hierarchy, as the gate configures it.
+    let findings = rspice_design::drc::run_check_with_hierarchy(
+        root,
+        &hierarchy,
+        DrcConfig {
+            check_missing_ground: true,
+            ..DrcConfig::default()
+        },
+    );
+    let errors = findings.errors();
+    assert_eq!(errors.len(), 1, "{:?}", findings.violations());
+    assert_eq!(errors[0].violation_type, DrcViolationType::SourceToSource);
+    match &errors[0].location {
+        DrcLocation::InsideInstance { path, view, inner } => {
+            assert_eq!(path.to_string(), "/X1");
+            assert_eq!(view.key(), reference.key());
+            assert!(
+                matches!(inner.as_ref(), DrcLocation::Node { .. }),
+                "{inner:?}"
+            );
+        }
+        other => panic!("the loop is stated inside the occurrence: {other:?}"),
+    }
+
     let error =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-            .expect_err("a cellview with an open node cannot be prepared");
+            .expect_err("a cellview holding a source loop cannot be prepared");
     assert_eq!(error.stage(), PreparationStage::DesignChecks);
     assert!(
-        error.message().contains("error"),
-        "the refusal must say findings stand against the design: {error}"
+        error.message().contains("1 error"),
+        "the refusal counts the one finding against the design: {error}"
     );
 }
 
@@ -1810,11 +1960,11 @@ fn an_error_inside_an_instantiated_cellview_refuses_the_run() {
 /// whose deck declares one master and instantiates two occurrences.
 ///
 /// The cell declares no interface, so the two placements add no node to the
-/// root. Its contents still have to stand on their own: the design checks
-/// walk into every cellview the design instantiates, so a single unwired
-/// resistor left each of its two nodes with one connection — a `FloatingNode`
-/// error at every occurrence, which refuses the run. Two resistors across one
-/// pair of nodes is the smallest closed circuit a port-less cell can hold.
+/// root. Its contents are still checked at every occurrence, because the
+/// design checks walk into every cellview the design instantiates; two
+/// resistors across one pair of nodes is the smallest closed circuit a
+/// port-less cell can hold, so the report on these fixtures is clean rather
+/// than carrying an open leg per occurrence.
 fn author_two_occurrences_of_one_cell(state: &mut AppState) {
     use crate::state::{
         CellViewRef, ComponentType, Library, LibraryCellInstance, Point, SchematicState, View,

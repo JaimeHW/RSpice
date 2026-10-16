@@ -5,9 +5,9 @@ use super::{
     ComponentPropertyServices, section_band,
 };
 use egui::{Align, Layout, Margin, Ui};
-use rspice_app_types::property::PropertyValue;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
+use rspice_ui_kit::widgets::{Problem, problem_line};
 
 pub(super) fn evidence_pane(
     ui: &mut Ui,
@@ -49,28 +49,9 @@ fn evidence_contents(
     action: &mut ComponentPropertyDialogResult,
     pane: egui::Rect,
 ) {
-    if binds_a_model(draft, context) {
-        model_binding_card(ui, draft, context, action, pane);
-    }
     if show_source_preview {
         stimulus_section(ui, draft, context, services, action, pane);
     }
-}
-
-/// Whether this component binds a model at all.
-///
-/// A source, a resistor and a capacitor do not, and a banded card reading
-/// `Model binding · not bound · This component has no model binding` is three
-/// ways of saying that the section should not have been drawn.
-pub(super) fn binds_a_model(
-    draft: &ComponentPropertyDraft,
-    context: &ComponentEditorContext,
-) -> bool {
-    context.model.is_some()
-        || draft
-            .get_value("model")
-            .map(PropertyValue::display_string)
-            .is_some_and(|model| !model.trim().is_empty())
 }
 
 /// The colour a provenance chip takes.
@@ -167,27 +148,26 @@ fn stimulus_body(
         .definition
         .as_deref()
         .zip(stimulus.library_revision);
-    // Which definition this card came from, in the row grammar the model
-    // binding beside it already uses. It was the band's caption until the
-    // band stopped carrying one; it is a fact about this instance either way,
-    // and the only statement of it in the editor.
-    evidence_row(
-        ui,
-        "Definition",
-        &match (held, stimulus.definition.as_deref()) {
-            (Some((definition, revision)), _) => format!("{definition} · r{revision}"),
-            (None, Some(definition)) => definition.to_owned(),
-            (None, None) => "none · this instance's own card".to_owned(),
-        },
-    );
-    if stimulus.definition.is_some() && held.is_none() {
-        ui.label(
-            egui::RichText::new(
-                "The library no longer holds it. This instance keeps the card it copied.",
-            )
-            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-            .color(Tokens::get(ui.ctx()).color.warn),
-        );
+    // Which definition this card came from, when it came from one. A source
+    // drawn on the sheet adopted nothing, which is the ordinary state of a
+    // source and not a row.
+    match (held, stimulus.definition.as_deref()) {
+        (Some((definition, revision)), _) => {
+            evidence_row(
+                ui,
+                "Definition",
+                &format!("{definition} \u{b7} r{revision}"),
+            );
+        }
+        (None, Some(definition)) => {
+            evidence_row(ui, "Definition", definition);
+            problem_line(
+                ui,
+                Problem::Warning,
+                "Definition deleted from the library; this source keeps its copy.",
+            );
+        }
+        (None, None) => {}
     }
     let readopt = held
         .filter(|_| stimulus.state.offers_readoption())
@@ -337,94 +317,11 @@ fn evidence_row(ui: &mut Ui, label: &str, value: &str) {
     });
 }
 
-fn model_binding_card(
-    ui: &mut Ui,
-    draft: &ComponentPropertyDraft,
-    context: &ComponentEditorContext,
-    action: &mut ComponentPropertyDialogResult,
-    pane: egui::Rect,
-) {
-    let draft_model = draft
-        .get_value("model")
-        .map(PropertyValue::display_string)
-        .filter(|model| !model.trim().is_empty());
-    let draft_library = draft
-        .get_value("model_library")
-        .map(PropertyValue::display_string)
-        .filter(|library| !library.trim().is_empty());
-    let pending_model = context.model.as_ref().and_then(|model| {
-        let identity_changed = draft_model
-            .as_deref()
-            .is_some_and(|draft| !draft.eq_ignore_ascii_case(&model.name))
-            || draft_library.as_deref().is_some_and(|library| {
-                model
-                    .library
-                    .as_deref()
-                    .is_none_or(|resolved| !library.eq_ignore_ascii_case(resolved))
-            });
-        identity_changed.then(|| draft_model.as_deref().unwrap_or(&model.name))
-    });
-    section_block(ui, "Model binding", pane, |ui| {
-        if let Some(model) = &context.model {
-            let t = Tokens::get(ui.ctx());
-            if let Some(pending_model) = pending_model {
-                evidence_row(ui, "Model", pending_model);
-                evidence_row(
-                    ui,
-                    "Source",
-                    draft_library.as_deref().unwrap_or("Pending validation"),
-                );
-                evidence_row(ui, "Section", &model.section);
-                ui.label(
-                    egui::RichText::new("Apply to resolve the new model binding.")
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.warn),
-                );
-            } else {
-                evidence_row(ui, "Model", &model.name);
-                evidence_row(ui, "Source", &model.source);
-                evidence_row(ui, "Section", &model.section);
-                ui.label(
-                    egui::RichText::new(&model.status)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_faint),
-                );
-            }
-            if model.can_open || model.can_qualify {
-                let pending = pending_model
-                    .is_some()
-                    .then_some("Apply the new model binding first");
-                let mut verbs = Vec::new();
-                if model.can_open {
-                    verbs.push(Verb {
-                        label: "Open model detail…",
-                        unavailable: pending,
-                        hover: "Show this model's catalog record",
-                        result: ComponentPropertyDialogResult::OpenModel,
-                    });
-                }
-                if model.can_qualify {
-                    verbs.push(Verb {
-                        label: "Qualification…",
-                        unavailable: pending,
-                        hover: "Show the qualification evidence behind this binding",
-                        result: ComponentPropertyDialogResult::OpenQualification,
-                    });
-                }
-                ui.add_space(10.0);
-                verb_grid(ui, &verbs, action);
-            }
-        } else if let Some(model) = draft_model.as_deref() {
-            evidence_row(ui, "Model", model);
-            evidence_row(ui, "Source", "No catalog source resolved");
-            evidence_row(ui, "Section", "default");
-        }
-    });
-}
-
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+    use rspice_app_types::property::PropertyValue;
+
     /// The Stimulus section's verbs, as a screen reader receives them.
     fn stimulus_verbs(
         draft: &ComponentPropertyDraft,

@@ -508,6 +508,7 @@ fn bind_veriloga_solver_unknowns(
     instance: &str,
     device: &mut rspice_veriloga::device::VerilogADevice,
     names: &VerilogAUnknownNames<'_>,
+    artifact: Option<&rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
 ) -> Result<(), String> {
     // Before the internal nodes, so the numbering follows the module's own
     // order, terminals first: the order a generated instance is built in.
@@ -551,13 +552,41 @@ fn bind_veriloga_solver_unknowns(
         .extend(device.non_electrical_node_indices());
     // The instance owns its internal nodes and the nets of the terminals the
     // card left out: no final GMIN floor reaches them.
-    circuit.compact_model_private_nodes.extend(
-        unconnected
+    let private: Vec<_> = unconnected
+        .iter()
+        .chain(&internal_nodes)
+        .copied()
+        .filter(|&node| node > 0)
+        .collect();
+    // How far its stamps reach into them, from the locations its programs
+    // name rather than from any one evaluation. Matrix indices are zero-based.
+    let locations: Vec<_> = device
+        .mapped_jacobian_locations()
+        .into_iter()
+        .flatten()
+        .chain(device.mapped_branch_incidence())
+        .collect();
+    let stamped_rows: std::collections::HashSet<_> =
+        locations.iter().filter_map(|&(row, _)| row).collect();
+    // A row counts at DC when an equation that is not a sum of `ddt()` terms
+    // stamps into it. Without the canonical MIR to say which those are, every
+    // stamped row counts.
+    let dc_rows: Vec<_> =
+        match artifact.and_then(|artifact| device.mapped_dc_equation_rows(artifact)) {
+            Some(rows) => rows
+                .into_iter()
+                .filter(|row| stamped_rows.contains(row))
+                .collect(),
+            None => stamped_rows.iter().copied().collect(),
+        };
+    circuit.record_compact_model_stamp_reach(
+        &private,
+        dc_rows.into_iter().map(|row| row + 1),
+        locations
             .iter()
-            .chain(&internal_nodes)
-            .copied()
-            .filter(|&node| node > 0),
+            .filter_map(|&(_, col)| col.map(|col| col + 1)),
     );
+    circuit.compact_model_private_nodes.extend(private);
     Ok(())
 }
 
@@ -3170,16 +3199,22 @@ fn report_planned_xspice_auto_bridge_supplies(
         let Some(derivation) = bridge.supply.as_ref() else {
             continue;
         };
-        #[cfg(feature = "veriloga")]
-        if bridge
-            .connect_module
-            .as_ref()
-            .is_some_and(connect_modules::PlannedConnectModule::states_supply)
-        {
-            continue;
-        }
         let node_label = xspice_auto_bridge_node_label(Some(&node_names), bridge.node);
-        supplies.report(&node_label, derivation)?;
+        #[cfg(feature = "veriloga")]
+        if let Some(selected) = bridge.connect_module.as_ref() {
+            if let Some(net) = selected.supply_net() {
+                boundary_supply::report_declared_live(&node_label, net);
+                continue;
+            }
+            if selected.states_supply() {
+                continue;
+            }
+        }
+        supplies.report(
+            &node_label,
+            derivation,
+            boundary_supply::live_supply_net(bridge).is_some(),
+        )?;
     }
     Ok(())
 }
@@ -4874,7 +4909,14 @@ fn add_planned_xspice_auto_bridge(
     }
 
     let event_node = bridge.event_node.unwrap_or(bridge.node);
-    let vcc = bridge.vcc;
+    // A converter bound live to a supply net takes its levels and thresholds
+    // as fractions of that net's voltage.
+    let live_supply = boundary_supply::live_supply_node(circuit, bridge)?;
+    let vcc = if live_supply.is_some() {
+        1.0
+    } else {
+        bridge.vcc
+    };
     let half_vcc = vcc / 2.0;
     let (model_name, instance_name, connections, numeric_params, output_branch) = match bridge.kind
     {
@@ -4972,15 +5014,21 @@ fn add_planned_xspice_auto_bridge(
     let (code_model, output_branch): (std::sync::Arc<dyn crate::xspice::CodeModel>, _) =
         match (bridge.event_node, bridge.kind) {
             (Some(_), XspiceAutoBridgeKind::Adc) => (
-                std::sync::Arc::new(crate::xspice::models::MixedAdcBridge),
+                std::sync::Arc::new(crate::xspice::models::MixedAdcBridge {
+                    tracking: live_supply.is_some(),
+                }),
                 None,
             ),
             (Some(_), XspiceAutoBridgeKind::Dac) => (
-                std::sync::Arc::new(crate::xspice::models::MixedDacBridge),
+                std::sync::Arc::new(crate::xspice::models::MixedDacBridge {
+                    tracking: live_supply.is_some(),
+                }),
                 None,
             ),
             _ => (code_model, output_branch),
         };
+    let (code_model, connections) =
+        boundary_supply::with_live_supply(bridge, live_supply, code_model, connections);
 
     let mut instance = crate::xspice::XspiceInstance::new_with_string_vectors(
         instance_name.clone(),
@@ -8739,6 +8787,7 @@ impl Engine {
                                 &element.name,
                                 &mut device,
                                 &names,
+                                prepared.canonical_ir.as_deref(),
                             )
                             .map_err(|error| {
                                 refuse_veriloga_instance(
@@ -12607,13 +12656,25 @@ apull [mix] pull
             .build_circuit(&netlist)
             .expect("circuit builds");
 
-        assert_eq!(
-            single_xspice_param(&circuit, "dac_bridge", "out_high"),
-            5.0,
-            "the 5 V rail reaches the boundary through rpull, so it is the supply"
+        // The 5 V rail reaches the boundary through rpull, so it is the
+        // supply, and an inferred rail binds live: the converter reads vdd
+        // through its supply port and its levels are fractions of it.
+        let dac = single_xspice_instance(&circuit, "__rspice_tracking_dac");
+        let rail = circuit.get_node_by_name("vdd").expect("the rail's node");
+        assert!(
+            matches!(
+                dac.connection("sup"),
+                Some(crate::xspice::PortConnection::Analog(node)) if *node == rail
+            ),
+            "the converter reads the rail's node"
         );
         assert_eq!(
-            single_xspice_param(&circuit, "dac_bridge", "out_low"),
+            single_xspice_param(&circuit, "__rspice_tracking_dac", "out_high"),
+            1.0,
+            "a 1 is the whole supply"
+        );
+        assert_eq!(
+            single_xspice_param(&circuit, "__rspice_tracking_dac", "out_low"),
             0.0,
             "the low level is still ground"
         );

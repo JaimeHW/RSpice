@@ -117,13 +117,11 @@ fn deck_status(ui: &mut Ui, deck: &DesignRuleDeck) {
         .painter()
         .layout_no_wrap(text.clone(), font, t.color.text_dim);
     let height = galley.size().y + 2.0 * ROW_PAD;
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), height), egui::Sense::hover());
-    response.widget_info(|| {
-        let mut info = WidgetInfo::new(WidgetType::Label);
-        info.value = Some(text.clone().into());
-        info
-    });
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), height),
+        egui::Sense::hover(),
+    );
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &text));
     if ui.is_rect_visible(rect) {
         ui.painter().galley(
             egui::pos2(rect.left() + inset, rect.center().y - galley.size().y * 0.5),
@@ -198,10 +196,8 @@ fn table(
 
 fn header_row(ui: &mut Ui, full_width: f32, columns: &[(f32, f32); COLUMNS]) {
     let t = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(full_width, HEADER_HEIGHT),
-        egui::Sense::hover(),
-    );
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(full_width, HEADER_HEIGHT), egui::Sense::hover());
     response.widget_info(|| {
         WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), "Design rule columns")
     });
@@ -234,10 +230,7 @@ fn header_row(ui: &mut Ui, full_width: f32, columns: &[(f32, f32); COLUMNS]) {
         );
         let galley = painter.layout_job(job);
         painter.galley(
-            egui::pos2(
-                rect.left() + left,
-                rect.center().y - galley.size().y * 0.5,
-            ),
+            egui::pos2(rect.left() + left, rect.center().y - galley.size().y * 0.5),
             galley,
             t.color.text_faint,
         );
@@ -252,9 +245,8 @@ fn category_band(ui: &mut Ui, full_width: f32, inset: f32, category: DrcRuleCate
     let t = Tokens::get(ui.ctx());
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(full_width, BAND_HEIGHT), egui::Sense::hover());
-    response.widget_info(|| {
-        WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), category.label())
-    });
+    response
+        .widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), category.label()));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::RowHeader);
         node.set_label(category.label());
@@ -275,10 +267,7 @@ fn category_band(ui: &mut Ui, full_width: f32, inset: f32, category: DrcRuleCate
         t.color.text_dim,
     );
     painter.galley(
-        egui::pos2(
-            rect.left() + inset,
-            rect.center().y - galley.size().y * 0.5,
-        ),
+        egui::pos2(rect.left() + inset, rect.center().y - galley.size().y * 0.5),
         galley,
         t.color.text_dim,
     );
@@ -409,10 +398,7 @@ fn rule_row(
             t.color.text,
         );
         painter.galley(
-            egui::pos2(
-                rect.left() + columns[0].0,
-                name_top + text.name.size().y,
-            ),
+            egui::pos2(rect.left() + columns[0].0, name_top + text.name.size().y),
             text.code.clone(),
             t.color.text_faint,
         );
@@ -448,10 +434,7 @@ fn rule_row(
             rect.left() + columns[2].0,
             rect.center().y - t.metrics.ctl_h * 0.5,
         ),
-        egui::vec2(
-            (columns[2].1 - CELL_PAD).max(1.0),
-            t.metrics.ctl_h,
-        ),
+        egui::vec2((columns[2].1 - CELL_PAD).max(1.0), t.metrics.ctl_h),
     );
     let mut picked = None;
     let mut control = ui.new_child(
@@ -525,7 +508,7 @@ mod tests {
     fn every_rule_the_checker_reports_is_on_the_page() {
         // The page walks the checker's own inventory, so this is a check that
         // the inventory is exhaustive rather than a hand-maintained subset.
-        assert_eq!(DrcViolationType::ALL.len(), 28);
+        assert_eq!(DrcViolationType::ALL.len(), 29);
         for rule in DrcViolationType::ALL {
             assert!(!rule.label().is_empty());
             assert!(!rule.description().is_empty());
@@ -537,7 +520,10 @@ mod tests {
     fn the_default_option_is_marked_and_nothing_else_is() {
         let rule = DrcViolationType::DanglingWire;
         assert_eq!(rule.default_severity(), DrcSeverity::Warning);
-        assert_eq!(option_label(rule, DrcSeverity::Warning), "Warning · default");
+        assert_eq!(
+            option_label(rule, DrcSeverity::Warning),
+            "Warning · default"
+        );
         assert_eq!(option_label(rule, DrcSeverity::Critical), "Critical");
     }
 

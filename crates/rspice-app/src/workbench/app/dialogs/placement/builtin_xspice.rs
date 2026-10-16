@@ -4,15 +4,11 @@ use egui::Context;
 use rspice_schematic_editor::xspice_placement;
 
 use crate::state::{builtin_xspice_library_binding_with_vector_widths, engine_only_xspice_devices};
-use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
-};
+use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::app::{RSpiceApp, schematic_editor_request_source};
 
-const PRIMARY: &str = "Arm placement";
-const DESCRIPTION: &str = "Choose the exact logical width of every vector port. The resulting pin order and executable connection contract are frozen with each placed instance.";
-const DISCARD_TITLE: &str = "Unsaved interface changes";
-const DISCARD_DETAIL: &str = "Choose Discard changes again to close. No schematic object or placement tool has been changed.";
+const PRIMARY: &str = "Place";
+const DESCRIPTION: &str = "Choose how many pins each vector port has.";
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_builtin_xspice_placement_dialog(&mut self, ctx: &Context) {
@@ -21,44 +17,39 @@ impl RSpiceApp {
         }
 
         let validation_error = validate_draft(self).err();
-        let discard_confirm = self.state.dialogs.builtin_xspice_placement.discard_confirm;
         let title = format!(
             "Configure {}",
             self.state.dialogs.builtin_xspice_placement.display_name
         );
-        let mut dialog = Dialog::new(&title, PRIMARY)
-            .description(DESCRIPTION)
-            .size(DialogSize::Transaction)
-            .ghost(if discard_confirm {
-                "Discard changes"
-            } else {
-                "Cancel"
-            })
-            .primary_enabled(validation_error.is_none())
-            .initial_focus(DialogInitialFocus::BodyControl);
-        if discard_confirm {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                DISCARD_TITLE,
-                DISCARD_DETAIL,
-            );
-        }
-
-        let mut response = dialog.show_transaction(ctx, |ui| {
-            let draft = &mut self.state.dialogs.builtin_xspice_placement;
-            let (focus, edited) = xspice_placement::show(
-                ui,
-                &draft.vector_ports,
-                &mut draft.widths,
-                validation_error.as_deref(),
-                draft.validation_error.as_deref(),
-            );
-            if edited {
-                draft.mark_edited();
-            }
-            focus
+        let refusal = validation_error.clone().or_else(|| {
+            self.state
+                .dialogs
+                .builtin_xspice_placement
+                .validation_error
+                .clone()
         });
-        match response.choice {
+
+        let draft = &mut self.state.dialogs.builtin_xspice_placement;
+        let mut edited = false;
+        let choice = CommandForm::new(&title, PRIMARY)
+            .describe(DESCRIPTION)
+            .primary_enabled(validation_error.is_none())
+            .status(match refusal.as_deref() {
+                Some(message) => Err(message),
+                None => Ok(None),
+            })
+            .status_lines(2)
+            .show(ctx, |rows| {
+                let (changed, focus) =
+                    xspice_placement::show(rows, &draft.vector_ports, &mut draft.widths);
+                edited = changed;
+                focus
+            });
+        if edited {
+            // An edit answers the refusal the last attempt recorded.
+            self.state.dialogs.builtin_xspice_placement.validation_error = None;
+        }
+        match choice {
             DialogChoice::Primary => match validate_draft(self) {
                 Ok(binding) => {
                     let label =
@@ -76,10 +67,7 @@ impl RSpiceApp {
                 }
             },
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.builtin_xspice_placement.attempt_close();
-                if self.state.dialogs.builtin_xspice_placement.open {
-                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
-                }
+                self.state.dialogs.builtin_xspice_placement.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }

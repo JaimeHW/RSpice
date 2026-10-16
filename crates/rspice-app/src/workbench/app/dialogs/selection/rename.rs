@@ -1,19 +1,20 @@
-//! Mockup-owned stable-identity rename transaction.
+//! Rename one selected schematic object.
 //!
-//! Edit ▸ Rename selected object captures one live schematic object by
-//! durable ID, edits an isolated name draft, and publishes exactly one guarded
-//! undo transaction. Components, net labels, logical named-net authorities,
-//! and declared buses retain their IDs; bus dependencies are rebased through
-//! the schematic's semantic bus transaction rather than by rewriting display
-//! text.
+//! Edit ▸ Rename captures one live object by durable ID, edits an isolated
+//! name draft, and publishes exactly one guarded undo transaction. Components,
+//! net labels, logical named nets and declared buses keep their IDs; bus
+//! dependencies are rebased through the schematic's bus transaction rather
+//! than by rewriting display text.
+//!
+//! The form asks for the new name and says how far it reaches when that is
+//! more than the object itself. It does not state the internal ID of what it
+//! is renaming, and it does not report what it preserved.
 
-use egui::{Context, Frame, Response, Stroke, TextEdit, Ui, Vec2};
+use egui::{Context, Id};
 
 use crate::diagnostics::ConsoleMessage;
 use crate::state::{BusDeclaration, Component, NetLabel, SchematicState};
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
+use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 
 use crate::workbench::app::{RSpiceApp, RenameSelectionTarget};
 use crate::workbench::app_state::AppState;
@@ -21,11 +22,9 @@ use crate::workbench::app_state::AppState;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod transaction_tests;
 
-const TITLE: &str = "Rename selected object";
-const PRIMARY: &str = "Rename object";
-const BODY: &str = "Change a user-facing name while preserving stable identity and previewing netlist, requirement, and review references.";
+const TITLE: &str = "Rename";
+const PRIMARY: &str = "Rename";
 const FIELD_ID: &str = "rename-selected-object-name";
-const DIALOG_SIZE: DialogSize = DialogSize::Transaction;
 
 #[derive(Debug, Clone)]
 enum RenameCommit {
@@ -156,8 +155,9 @@ impl RSpiceApp {
             },
             RenameValidation::Invalid,
         );
-        let object = object_summary(target);
-        let references = reference_summary(&self.state.schematic, target);
+        let object = object_context(target);
+        let previous = target.current_name().to_owned();
+        let scope = rename_scope(&self.state.schematic, target);
         let validation_message = self
             .state
             .dialogs
@@ -168,22 +168,30 @@ impl RSpiceApp {
             .map(str::to_owned);
 
         let mut edited = false;
-        let choice = Dialog::new(TITLE, PRIMARY)
-            .description(BODY)
-            .size(DIALOG_SIZE)
-            .ghost("Cancel")
+        let choice = CommandForm::new(TITLE, PRIMARY)
+            .context(Some(object.as_str()))
             .primary_enabled(validation.can_commit())
-            .initial_focus(DialogInitialFocus::BodyControl)
-            .show_with_initial_body_focus(ctx, |ui| {
-                let (focus, changed) = rename_body(
-                    ui,
-                    &object,
-                    &references,
+            .show(ctx, |rows| {
+                let field = Id::new(FIELD_ID);
+                let response = rows.text(
+                    "New name",
+                    field,
                     &mut self.state.dialogs.rename_selection.draft,
-                    validation_message.as_deref(),
+                    "A SPICE-safe name",
                 );
-                edited = changed;
-                focus
+                // A prior publication error belongs to an older candidate;
+                // the live validation under this field now owns what is
+                // typed.
+                edited = response.changed();
+                rows.field_line(
+                    Some(field),
+                    match (validation_message.as_deref(), scope.as_deref()) {
+                        (Some(message), _) => FieldLine::Error(message),
+                        (None, Some(scope)) => FieldLine::Derived(scope),
+                        (None, None) => FieldLine::Blank,
+                    },
+                );
+                Some(field)
             });
         if edited {
             self.state.dialogs.rename_selection.validation_error = None;
@@ -207,25 +215,20 @@ impl RSpiceApp {
                 match validation {
                     RenameValidation::Valid(commit) => {
                         match apply_commit(&mut self.state, *commit) {
+                            // One line in the log, because a rename reaches
+                            // saved outputs and configuration paths the
+                            // canvas does not show.
                             Ok(true) => {
-                                let message = format!(
-                                    "{} was renamed as one undoable stable-identity transaction.",
-                                    object
-                                );
-                                self.state
-                                    .push_user_message(ConsoleMessage::info(message.clone()));
-                                self.state.ui.toasts.success(
-                                    ctx,
-                                    "Object renamed",
-                                    "Stable identity and dependent schematic references were preserved.",
-                                );
+                                let renamed =
+                                    self.state.dialogs.rename_selection.draft.trim().to_owned();
+                                self.state.push_user_message(ConsoleMessage::info(format!(
+                                    "Renamed {previous} to {renamed}."
+                                )));
                                 self.state.dialogs.rename_selection.close();
                             }
                             Ok(false) => {
-                                self.state.dialogs.rename_selection.validation_error = Some(
-                                    "The target no longer required a rename. Review its current name and try again."
-                                        .to_owned(),
-                                );
+                                self.state.dialogs.rename_selection.validation_error =
+                                    Some("That is already its name.".to_owned());
                             }
                             Err(error) => {
                                 self.state.dialogs.rename_selection.validation_error = Some(error);
@@ -246,165 +249,38 @@ impl RSpiceApp {
     }
 }
 
-fn rename_body(
-    ui: &mut Ui,
-    object: &str,
-    references: &str,
-    draft: &mut String,
-    validation_message: Option<&str>,
-) -> (Option<egui::Id>, bool) {
-    read_only_value(ui, "Object", object);
-    ui.add_space(10.0);
-    field_label(ui, "New name");
-    let t = Tokens::get(ui.ctx());
-    let response = ui.add_sized(
-        Vec2::new(ui.available_width(), t.metrics.ctl_h),
-        TextEdit::singleline(draft)
-            .id_source(FIELD_ID)
-            .font(egui::TextStyle::Monospace)
-            .hint_text("Enter a SPICE-safe name")
-            .margin(egui::Margin::symmetric(8, 4)),
-    );
-    configure_name_accessibility(ui, &response, validation_message);
-    let changed = response.changed();
-    if changed {
-        // A prior publication error belongs to an older candidate. The live
-        // validation under this field now owns the current draft state.
-        ui.ctx().request_repaint();
-    }
-    if let Some(message) = validation_message {
-        ui.add_space(4.0);
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(message)
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.err),
-            )
-            .wrap(),
-        );
-    }
-    ui.add_space(10.0);
-    read_only_value(ui, "References", references);
-    (Some(response.id), changed)
-}
-
-fn configure_name_accessibility(ui: &Ui, response: &Response, error: Option<&str>) {
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_label("New name");
-        if let Some(error) = error {
-            node.set_invalid(egui::accesskit::Invalid::True);
-            node.set_description(format!("Required SPICE-safe name. {error}"));
-        } else {
-            node.clear_invalid();
-            node.set_description("Required SPICE-safe name");
-        }
-    });
-}
-
-fn field_label(ui: &mut Ui, label: &str) {
-    ui.label(
-        egui::RichText::new(label.to_ascii_uppercase())
-            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-            .color(Tokens::get(ui.ctx()).color.text_faint),
-    );
-    ui.add_space(4.0);
-}
-
-fn read_only_value(ui: &mut Ui, label: &str, value: &str) {
-    field_label(ui, label);
-    let t = Tokens::get(ui.ctx());
-    Frame::new()
-        .fill(t.color.bg_app)
-        .stroke(Stroke::new(1.0, t.color.border))
-        .corner_radius(3.0)
-        .inner_margin(egui::Margin::symmetric(8, 6))
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(value)
-                        .font(theme::mono(tokens::FS_1, FontWeight::Medium))
-                        .color(t.color.text),
-                )
-                .wrap(),
-            );
-        });
-}
-
-fn object_summary(target: &RenameSelectionTarget) -> String {
+/// What the form is renaming, as its one context line: the name it has now
+/// and what kind of thing it is. No internal ID — the reader cannot act on
+/// one, and the object is the same object either way.
+fn object_context(target: &RenameSelectionTarget) -> String {
     match target {
         RenameSelectionTarget::Component(component) => format!(
-            "{} \u{00b7} {} \u{00b7} stable ID COMPONENT-{:03}",
+            "{} \u{00b7} {}",
             component.name,
-            component.kind.display_name(),
-            component.id
+            component.kind.display_name()
         ),
-        RenameSelectionTarget::NetLabel(label) => {
-            format!("net {} \u{00b7} stable ID NET-{:03}", label.name, label.id)
-        }
-        RenameSelectionTarget::NamedNet(net) => format!(
-            "net {} \u{00b7} {} stable naming authorit{}",
-            net.name,
-            net.authority_count(),
-            if net.authority_count() == 1 {
-                "y"
-            } else {
-                "ies"
-            }
-        ),
+        RenameSelectionTarget::NetLabel(label) => format!("{} \u{00b7} net label", label.name),
+        RenameSelectionTarget::NamedNet(net) => format!("{} \u{00b7} net", net.name),
         RenameSelectionTarget::Bus(bus) => format!(
-            "bus {} \u{00b7} stable ID BUS-{:03}",
+            "{} \u{00b7} bus",
             bus.declaration
                 .as_ref()
-                .map_or_else(|| "undeclared".to_owned(), ToString::to_string),
-            bus.id
+                .map_or_else(|| "undeclared".to_owned(), ToString::to_string)
         ),
     }
 }
 
-fn reference_summary(schematic: &SchematicState, target: &RenameSelectionTarget) -> String {
+/// How far the rename reaches, for the two targets that carry other names
+/// with them. A component and a single label rename only themselves, and a
+/// form does not report that it is ordinary.
+fn rename_scope(schematic: &SchematicState, target: &RenameSelectionTarget) -> Option<String> {
     match target {
-        RenameSelectionTarget::Component(component) => {
-            let terminals = schematic
-                .document()
-                .connections
-                .iter()
-                .filter(|connection| connection.component_id == component.id)
-                .count();
-            format!(
-                "{terminals} terminal connection(s) \u{00b7} generated netlist designator updates on commit \u{00b7} 0 stable-ID requirement/review records"
-            )
+        RenameSelectionTarget::Component(_) | RenameSelectionTarget::NetLabel(_) => None,
+        RenameSelectionTarget::NamedNet(net) => {
+            let labels = count(net.labels.len(), "label", "labels");
+            let ports = count(net.ports.len(), "port", "ports");
+            Some(format!("Renames {}.", clause(labels, ports)?))
         }
-        RenameSelectionTarget::NetLabel(label) => {
-            let occurrences = schematic
-                .document()
-                .net_labels
-                .iter()
-                .filter(
-                    |candidate| match schematic.document().document_policy.net_naming {
-                        crate::state::NetNamingPolicy::StrictCaseSensitive => {
-                            candidate.name == label.name
-                        }
-                        crate::state::NetNamingPolicy::SpiceCompatibleRelaxed => {
-                            candidate.name.eq_ignore_ascii_case(&label.name)
-                        }
-                    },
-                )
-                .count();
-            let comparison = match schematic.document().document_policy.net_naming {
-                crate::state::NetNamingPolicy::StrictCaseSensitive => "exact-case",
-                crate::state::NetNamingPolicy::SpiceCompatibleRelaxed => "case-insensitive",
-            };
-            format!(
-                "{occurrences} {comparison} named-net occurrence(s) \u{00b7} stable label ID retained \u{00b7} 0 stable-ID requirement/review records"
-            )
-        }
-        RenameSelectionTarget::NamedNet(net) => format!(
-            "{} label ID(s) + {} interface-port ID(s) \u{00b7} {} conductor segment(s) \u{00b7} one atomic logical-net transaction",
-            net.labels.len(),
-            net.ports.len(),
-            net.wire_ids.len()
-        ),
         RenameSelectionTarget::Bus(bus) => {
             let taps = schematic
                 .document()
@@ -412,10 +288,24 @@ fn reference_summary(schematic: &SchematicState, target: &RenameSelectionTarget)
                 .iter()
                 .filter(|tap| tap.bus_id == bus.id)
                 .count();
-            format!(
-                "{taps} dependent bus-tap selector(s) \u{00b7} selectors rebase atomically \u{00b7} 0 stable-ID requirement/review records"
-            )
+            Some(format!("Renames {} with it.", count(taps, "tap", "taps")?))
         }
+    }
+}
+
+fn count(value: usize, one: &str, many: &str) -> Option<String> {
+    match value {
+        0 => None,
+        1 => Some(format!("1 {one}")),
+        value => Some(format!("{value} {many}")),
+    }
+}
+
+fn clause(left: Option<String>, right: Option<String>) -> Option<String> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(format!("{left} and {right}")),
+        (Some(only), None) | (None, Some(only)) => Some(only),
+        (None, None) => None,
     }
 }
 
@@ -641,15 +531,16 @@ mod tests {
         (app, id)
     }
 
+    /// The form names what it is renaming and how far the rename reaches,
+    /// and states no internal ID for either.
     #[test]
-    fn mockup_contract_is_exact() {
-        assert_eq!(TITLE, "Rename selected object");
-        assert_eq!(PRIMARY, "Rename object");
-        assert_eq!(
-            BODY,
-            "Change a user-facing name while preserving stable identity and previewing netlist, requirement, and review references."
-        );
-        assert_eq!(DIALOG_SIZE, DialogSize::Transaction);
+    fn the_context_line_names_the_object_without_its_internal_id() {
+        let (app, _) = component_app();
+        let target = selected_rename_target(&app.state).expect("one renameable object");
+        let context = object_context(&target);
+        assert_eq!(context, "R1 \u{00b7} Resistor");
+        assert!(!context.contains("COMPONENT-"));
+        assert_eq!(rename_scope(&app.state.schematic, &target), None);
     }
 
     #[test]

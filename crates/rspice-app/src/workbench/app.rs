@@ -232,11 +232,10 @@ pub(crate) use dialogs::selection::array::{
     open_array_selection_dialog,
 };
 pub(crate) use dialogs::selection::move_selection::{
-    armed_move_selection_authority, cancel_armed_move_selection, open_move_selection_dialog,
+    arm_move_selection, armed_move_selection_authority, cancel_armed_move_selection,
 };
 pub(crate) use dialogs::selection::stretch::{
-    armed_stretch_selection_authority, cancel_armed_stretch_selection,
-    open_stretch_selection_dialog,
+    arm_stretch_selection, armed_stretch_selection_authority, cancel_armed_stretch_selection,
 };
 #[cfg(target_arch = "wasm32")]
 pub(crate) use dialogs::symbol_definition::MAX_SYMBOL_DEFINITION_IMPORT_BYTES;
@@ -889,8 +888,6 @@ impl RSpiceApp {
         self.render_design_review_comments_dialog(ctx);
         self.render_design_note_dialog(ctx);
         self.render_documentation_shape_dialog(ctx);
-        self.render_move_selection_dialog(ctx);
-        self.render_stretch_selection_dialog(ctx);
         self.render_array_selection_dialog(ctx);
         self.render_replace_instance_dialog(ctx);
         dialogs::stimulus_link::render_stimulus_link_dialog(ctx, &mut self.state);

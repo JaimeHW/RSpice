@@ -180,6 +180,7 @@ impl InsertionRule {
     pub fn numeric_parameters(&self) -> Result<Vec<(SmolStr, f64)>, ConnectError> {
         self.parameters
             .iter()
+            .filter(|parameter| supply_net_of(parameter).is_none())
             .map(|parameter| {
                 let name = parameter.name.clone().ok_or_else(|| {
                     ConnectError::PositionalConnectParameter {
@@ -197,6 +198,29 @@ impl InsertionRule {
                 Ok((name, value))
             })
             .collect()
+    }
+
+    /// The net a `vsup` override names instead of a level: `#(.vsup(vdd))`.
+    ///
+    /// A bare identifier is the one non-literal the supply parameter takes,
+    /// because a supply is a property of a net and the deck's nets are the
+    /// one scope a connect statement does have. The engine binds the
+    /// boundary to that net's solved voltage; every other parameter, and a
+    /// numeric `vsup`, still folds through [`Self::numeric_parameters`].
+    pub fn supply_net(&self) -> Option<&SmolStr> {
+        self.parameters.iter().find_map(supply_net_of)
+    }
+}
+
+/// The net a `vsup` override names, when it names one.
+fn supply_net_of(parameter: &ParameterOverride) -> Option<&SmolStr> {
+    match (&parameter.name, &parameter.value) {
+        (Some(name), crate::ast::Expression::Identifier(net))
+            if name.eq_ignore_ascii_case("vsup") =>
+        {
+            Some(&net.name)
+        }
+        _ => None,
     }
 }
 

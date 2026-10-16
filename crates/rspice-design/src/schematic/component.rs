@@ -2,8 +2,15 @@
 //!
 //! A placed component on the schematic with position, rotation, and properties.
 
+mod card_names;
 mod variant;
+mod written_name;
+pub use card_names::{
+    CardRole, CouplingCard, CouplingCards, CouplingRefusal, CouplingSource, TransformerCards,
+    WrittenCard, coupling_cards, written_cards,
+};
 pub use variant::PreparedVariantReplacement;
+pub use written_name::{BehavioralLowering, component_for_engine_device};
 
 use super::component_type::ComponentType;
 use super::label_position::LabelPosition;
@@ -1101,37 +1108,33 @@ impl Component {
         }
     }
 
-    /// Exact card identity shared by netlist emission and structural references.
+    /// The drawn name under its device prefix: the reference the card carries.
+    ///
+    /// Names the deck derives from a card — a synthesized sense source, a
+    /// generated model — build on this. The element itself is named by
+    /// [`Component::written_element_name`], which differs from this where the
+    /// deck writes the component as another element.
     pub fn emitted_instance_name(&self) -> String {
-        let base = self.spice_instance_name();
-        let prefix = self
-            .library_cell
-            .as_ref()
-            .filter(|binding| binding.netlist_template.is_some() || binding.is_executable_builtin())
-            .and_then(LibraryCellInstance::effective_reference_prefix)
-            .unwrap_or_else(|| self.kind.spice_prefix());
-        if prefix.is_empty()
-            || base.is_empty()
-            || base
-                .get(..prefix.len())
-                .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
-        {
-            base
-        } else {
-            format!("{prefix}{base}")
-        }
+        rspice_app_types::hierarchy_path::written_instance_name(
+            self.reference_prefix(),
+            &self.spice_instance_name(),
+        )
     }
 
-    /// Validate against the effective emitted device prefix. Model-bound
+    /// The device prefix the card's reference begins with. Model-bound
     /// library cells own their declared primitive prefix rather than the
     /// generic `X` prefix of ordinary hierarchical instances.
-    pub fn validate_reference_designator(&self, value: &str) -> Result<(), String> {
-        let prefix = self
-            .library_cell
+    fn reference_prefix(&self) -> &str {
+        self.library_cell
             .as_ref()
             .filter(|binding| binding.netlist_template.is_some() || binding.is_executable_builtin())
             .and_then(LibraryCellInstance::effective_reference_prefix)
-            .unwrap_or_else(|| self.kind.spice_prefix());
+            .unwrap_or_else(|| self.kind.spice_prefix())
+    }
+
+    /// Validate against the effective emitted device prefix.
+    pub fn validate_reference_designator(&self, value: &str) -> Result<(), String> {
+        let prefix = self.reference_prefix();
         if prefix.is_empty() {
             return Err(
                 "This component type does not own a SPICE reference designator.".to_owned(),

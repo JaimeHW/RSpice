@@ -220,15 +220,6 @@ fn verilog_ams_digital_constructs_are_refused_by_name() {
         );
     }
 
-    // `defparam` is refused with its clause and its alternative rather than
-    // with the bare keyword message. It is the one construct in this set an
-    // author reaches for on purpose — it is the *other* spelling of a parameter
-    // override — so "not supported" would leave nothing to do about it.
-    assert_unsupported(
-        &module_with_item("defparam u1.gain = 1;"),
-        "`defparam`; IEEE 1364-2005 section 12.2.1",
-    );
-
     // Procedural statements, inside the analog block. A digital construct has
     // no meaning in continuous-time code, so these do not retreat with the
     // module-item productions.

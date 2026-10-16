@@ -3,7 +3,7 @@
 //! Preflight retains an immutable report and later queues it without
 //! recomputing. That is only sound if the report can say *which* design and
 //! *which* plan it was taken against, and notice when either has moved. These
-//! two derivations produce that identity.
+//! derivations produce that identity.
 //!
 //! The closure matters as much as the root: a hierarchical design changes when
 //! any schematic it instantiates changes, so the topology revision is a set of
@@ -15,6 +15,12 @@
 //! rather than with the dialog that displays a report. Four modules ask the
 //! question; none of them should have to name the dialog to get an answer.
 
+use std::collections::BTreeMap;
+
+use rspice_design::schematic::document::SchematicDocument;
+use sha2::{Digest, Sha256};
+
+use crate::product::ContentDigest;
 use crate::state::ComponentType;
 use crate::workbench::app_state::AppState;
 
@@ -37,12 +43,51 @@ impl AppState {
     /// per-reference topology versions of everything it instantiates.
     pub(crate) fn configured_topology_revision(&self) -> (String, u64, Vec<(String, u64)>) {
         let root = self.workspace.content.simulation_root_reference();
+        let closure = self.configured_closure(|_, topology_version| topology_version);
+        let root_key = root.key();
+        let revision = closure
+            .get(&root_key.to_ascii_lowercase())
+            .copied()
+            .or_else(|| {
+                self.workspace
+                    .simulation_root_schematic(&self.workspace.content.active_view, &self.schematic)
+                    .map(|source| source.design.topology_version())
+            })
+            .unwrap_or(0);
+        (root_key, revision, closure.into_iter().collect())
+    }
+
+    /// The content of everything the configured design is made of, as a run
+    /// would execute it.
+    ///
+    /// The topology revision deliberately ignores property edits, and a value
+    /// edit is how a run that will not converge is most often repaired. What a
+    /// run reported is about the content it solved, so that is what its
+    /// evidence expires on.
+    pub(crate) fn configured_design_content(&self) -> Result<Vec<(String, ContentDigest)>, String> {
+        self.configured_closure(|document, _| {
+            let encoded = serde_json::to_vec(document)
+                .map_err(|error| format!("could not encode the configured design: {error}"))?;
+            Ok::<_, String>(ContentDigest::from_bytes(Sha256::digest(encoded).into()))
+        })
+        .into_iter()
+        .map(|(reference, digest)| Ok((reference, digest?)))
+        .collect()
+    }
+
+    /// Every cell view the configured root instantiates, each measured by
+    /// `measure` from its document and its topology version.
+    fn configured_closure<T>(
+        &self,
+        measure: impl Fn(&SchematicDocument, u64) -> T,
+    ) -> BTreeMap<String, T> {
+        let root = self.workspace.content.simulation_root_reference();
         let projection = self.workspace.configuration_execution_projection(
             &self.library_manager,
             &self.workspace.content.active_view,
             &self.schematic,
         );
-        let mut closure = std::collections::BTreeMap::new();
+        let mut closure = BTreeMap::new();
         if let Ok(projection) = &projection {
             // Two independent things put a cell view in this closure, and
             // neither implies the other. The design *references* it, which is
@@ -99,38 +144,27 @@ impl AppState {
                     .iter()
                     .find(|(key, _)| key.eq_ignore_ascii_case(&reference))
                 {
-                    closure.insert(reference, schematic.topology_version());
+                    let measured = measure(schematic.document(), schematic.topology_version());
+                    closure.insert(reference, measured);
                 }
             }
         } else {
-            closure.extend(
-                self.workspace
-                    .content
-                    .schematic_buffers
-                    .iter()
-                    .map(|(key, schematic)| {
-                        (key.to_ascii_lowercase(), schematic.topology_version())
-                    }),
-            );
+            closure.extend(self.workspace.content.schematic_buffers.iter().map(
+                |(key, schematic)| {
+                    let measured = measure(schematic.document(), schematic.topology_version());
+                    (key.to_ascii_lowercase(), measured)
+                },
+            ));
+            let active = self.schematic.editor_ref().design;
             closure.insert(
                 self.workspace
                     .content
                     .active_view
                     .key()
                     .to_ascii_lowercase(),
-                self.schematic.topology_version(),
+                measure(active.document(), active.topology_version()),
             );
         }
-        let root_key = root.key();
-        let revision = closure
-            .get(&root_key.to_ascii_lowercase())
-            .copied()
-            .or_else(|| {
-                self.workspace
-                    .simulation_root_schematic(&self.workspace.content.active_view, &self.schematic)
-                    .map(|source| source.design.topology_version())
-            })
-            .unwrap_or(0);
-        (root_key, revision, closure.into_iter().collect())
+        closure
     }
 }

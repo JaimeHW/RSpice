@@ -8,19 +8,20 @@
 use std::borrow::Cow;
 
 use egui::{
-    Align2, Color32, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, epaint::TextShape, pos2, vec2,
+    Align2, Color32, FontId, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, epaint::TextShape,
+    pos2, vec2,
 };
 
 use crate::session::visibility::DrawingSheetLayerVisibility;
 use rspice_design_model::Point;
 use rspice_design_model::design_management::{
-    DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS, DRAWING_SHEET_TITLE_CAPTION_POSITION,
-    DRAWING_SHEET_TITLE_CELL_PADDING_UM, DRAWING_SHEET_TITLE_VALUE_POSITION,
-    DrawingSheetBorderTemplate, DrawingSheetDisplayUnit,
+    DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS, DRAWING_SHEET_TITLE_BLOCK_LETTERING,
+    DRAWING_SHEET_TITLE_CAPTION_POSITION, DRAWING_SHEET_TITLE_CELL_PADDING_UM,
+    DRAWING_SHEET_TITLE_VALUE_POSITION, DrawingSheetBorderTemplate, DrawingSheetDisplayUnit,
     DrawingSheetGeometry as AuthoredDrawingSheetGeometry, DrawingSheetLettering, DrawingSheetRect,
     DrawingSheetTitleBlockRotation, DrawingSheetTitleFieldValueAuthority, DrawingSheetZoneEdges,
     DrawingSheetZoneGrid, DrawingSheetZoneLabels, ResolvedDrawingSheetTitleField,
-    SchematicSheetFormat, drawing_sheet_mono_em_um, drawing_sheet_title_block_lettering,
+    SchematicSheetFormat, drawing_sheet_mono_em_um, drawing_sheet_zone_lettering_um,
 };
 use rspice_ui_kit::theme;
 use rspice_ui_kit::tokens::{Mode, Tokens};
@@ -236,11 +237,6 @@ enum DrawingSheetLodTier {
 #[derive(Debug, Clone, Copy)]
 struct DrawingSheetLod {
     tier: DrawingSheetLodTier,
-    /// The heights this level of detail was resolved against. Every painter
-    /// that letters the sheet already carries the level of detail, so it
-    /// reads them from here rather than taking a second argument that could
-    /// disagree with the one the tier was decided from.
-    lettering: DrawingSheetLettering,
     show_border: bool,
     show_margins: bool,
     show_zone_labels: bool,
@@ -275,26 +271,15 @@ fn authored_lettering(lettering_um: u64) -> f32 {
     drawing_sheet_mono_em_um(lettering_um) as f32 * DRAWING_SHEET_UNITS_PER_MM as f32 / 1_000.0
 }
 
-/// The heights this sheet's title block letters at: the sheet's own ISO 3098
-/// heights, stepped down where a row of the block it carries is too shallow
-/// to seat them. A sheet with no title block keeps the sheet's heights, which
-/// is what its remaining annotation is lettered at.
-fn sheet_lettering(sheet: &ActiveDrawingSheet) -> DrawingSheetLettering {
-    drawing_sheet_title_block_lettering(&sheet.format, &sheet.geometry.physical)
-        .unwrap_or_else(|| sheet.format.authored_size.lettering())
-}
-
-/// Em a zone reference in the border band is lettered at.
-///
-/// A zone reference is bounded by the band that carries it rather than by the
-/// sheet. That band is a fixed 2.5 to 6 mm whatever the paper, so lettering a
-/// reference at the capital height ISO 3098 recommends for the sheet would
-/// drive an A0 label — 7 mm of capitals — straight through a 5 mm frame. The
-/// band therefore keeps the size it has always been painted at, and sizing
-/// the two to each other is the border's problem to solve, not the title
-/// block's.
-fn authored_zone_lettering(lettering_um: u64) -> f32 {
-    lettering_um as f32 * DRAWING_SHEET_UNITS_PER_MM as f32 / 1_000.0
+/// Font a zone reference in the border band is lettered in: the height and
+/// weight the plot letters it at, which depend on the band and not on the
+/// sheet.
+fn zone_label_font(sheet: &ActiveDrawingSheet, zoom: f32) -> FontId {
+    let lettering_um = drawing_sheet_zone_lettering_um(sheet.geometry.physical.border_band_um);
+    theme::mono(
+        drawing_sheet_font_size(zoom, authored_lettering(lettering_um)),
+        theme::FontWeight::Regular,
+    )
 }
 
 /// Smallest em height, in physical pixels, at which title-block lettering is
@@ -319,7 +304,6 @@ impl DrawingSheetLod {
         };
         Self {
             tier,
-            lettering,
             show_border: tier != DrawingSheetLodTier::Thumbnail,
             show_margins: tier != DrawingSheetLodTier::Thumbnail,
             show_zone_labels: matches!(
@@ -421,7 +405,7 @@ pub fn draw_base(
     let tokens = Tokens::get(painter.ctx());
     let palette = DrawingSheetPalette::resolve(&tokens);
     let layers = input.layers;
-    let lettering = sheet_lettering(sheet);
+    let lettering = DRAWING_SHEET_TITLE_BLOCK_LETTERING;
     let lod = DrawingSheetLod::resolve(viewport.zoom, painter.ctx().pixels_per_point(), lettering);
     let paper = sheet.geometry.paper.screen_rect(viewport);
     let printable = sheet.geometry.printable.screen_rect(viewport);
@@ -477,15 +461,10 @@ pub fn draw_base(
         if layers.zones
             && let Some(zones) = sheet.geometry.physical.zones
         {
-            draw_zone_band(
-                painter,
-                printable,
-                drawing_area,
-                zones,
-                lod,
-                viewport.zoom,
-                palette,
-            );
+            let label_font = lod
+                .show_zone_labels
+                .then(|| zone_label_font(sheet, viewport.zoom));
+            draw_zone_band(painter, printable, drawing_area, zones, label_font, palette);
         }
     }
     if layers.title_block
@@ -541,7 +520,7 @@ pub fn draw_overflow_advisories(
     let lod = DrawingSheetLod::resolve(
         viewport.zoom,
         painter.ctx().pixels_per_point(),
-        sheet_lettering(sheet),
+        DRAWING_SHEET_TITLE_BLOCK_LETTERING,
     );
     if !overflow_advisories_visible(lod.tier) {
         return;
@@ -1046,8 +1025,7 @@ fn draw_zone_band(
     printable: Rect,
     drawing_area: Rect,
     zones: DrawingSheetZoneGrid,
-    lod: DrawingSheetLod,
-    zoom: f32,
+    label_font: Option<FontId>,
     palette: DrawingSheetPalette,
 ) {
     let column_width = drawing_area.width() / f32::from(zones.columns);
@@ -1084,13 +1062,9 @@ fn draw_zone_band(
             );
         }
     }
-    if !lod.show_zone_labels || !zone_edge_labels_visible(zones.labels) {
+    let Some(font) = label_font.filter(|_| zone_edge_labels_visible(zones.labels)) else {
         return;
-    }
-    let font = theme::mono(
-        drawing_sheet_font_size(zoom, authored_zone_lettering(lod.lettering.reference_um)),
-        theme::FontWeight::Medium,
-    );
+    };
     let top_y = (printable.top() + drawing_area.top()) * 0.5;
     let bottom_y = (drawing_area.bottom() + printable.bottom()) * 0.5;
     for column in 0..zones.columns {
@@ -1264,7 +1238,7 @@ fn draw_title_block(
     else {
         return;
     };
-    let lettering = sheet_lettering(sheet);
+    let lettering = DRAWING_SHEET_TITLE_BLOCK_LETTERING;
     let capacity = |lettering_um| {
         rspice_design_model::design_management::drawing_sheet_title_cell_capacity(
             &sheet.format,
@@ -1333,7 +1307,9 @@ fn draw_title_block(
                 at(DRAWING_SHEET_TITLE_CAPTION_POSITION),
             )),
             Align2::LEFT_CENTER,
-            truncate_title_text(&field.id.display_label().to_uppercase(), caption_chars),
+            // The field's own wording, in the case the plot and the dialogs
+            // letter it in, so a caption reads the same on screen and on paper.
+            truncate_title_text(field.id.display_label(), caption_chars),
             theme::mono(
                 drawing_sheet_font_size(zoom, authored_lettering(lettering.caption_um)),
                 theme::FontWeight::Regular,
@@ -1364,17 +1340,17 @@ fn draw_title_block(
             )),
             Align2::LEFT_CENTER,
             truncate_canvas_title_value(&field.value, value_chars),
-            // A value carries more stroke than its caption rather than more
-            // height. Drafting practice letters a caption one height step
-            // below the data it names and leaves both in the same ink, which
-            // reads as a hierarchy only because a drawing is lettered wholly
-            // in capitals. RSpice cannot be: a cell or view name is a
-            // case-bearing identifier, and a caption's capitals come out the
-            // same height as a value's lower case. The step has to be bought
-            // in weight, because the cell has no room to buy it in height.
+            // A value stands a step of the series above its caption, which is
+            // what makes it read as the field's content; only the document
+            // identifier is set in the heavier weight. The plot letters both
+            // the same way.
             theme::mono(
                 drawing_sheet_font_size(zoom, authored_lettering(lettering.data_um)),
-                theme::FontWeight::Medium,
+                if field.id.emphasised() {
+                    theme::FontWeight::Medium
+                } else {
+                    theme::FontWeight::Regular
+                },
             ),
             palette.block_ink,
             rotation,

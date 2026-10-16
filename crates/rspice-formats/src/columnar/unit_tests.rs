@@ -4,9 +4,9 @@ use arrow_schema::{DataType, Field, Schema};
 
 fn field(name: &str, unit: Option<&str>) -> Field {
     Field::new(name, DataType::Float64, false).with_metadata(
-        unit.map(|unit| ("unit".into(), unit.into()))
+        unit.map(|unit| ("unit", unit))
             .into_iter()
-            .collect(),
+            .collect::<arrow_schema::Metadata>(),
     )
 }
 
@@ -25,10 +25,7 @@ fn read_formats(
             field("Re(gain)", real_unit),
             field("current", Some("uA")),
         ],
-        HashMap::from([
-            ("rspice.coordinate".into(), "x".into()),
-            ("rspice.analysis".into(), analysis.into()),
-        ]),
+        [("rspice.coordinate", "x"), ("rspice.analysis", analysis)],
     ));
     let batch = RecordBatch::try_new(
         schema.clone(),

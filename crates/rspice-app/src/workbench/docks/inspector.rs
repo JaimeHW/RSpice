@@ -1371,18 +1371,7 @@ fn compact_readout(value: f64, unit: &str) -> String {
 /// number of significant digits, without the zeros that only pad it out:
 /// `900 mV` and `4.1 V`, not `900.0000 mV` and `4.100000 V`.
 fn engineering_readout(value: f64, unit: &str, significant_digits: usize) -> String {
-    let text = rspice_results_ui::waves::fmt_in_unit(value, unit, significant_digits);
-    let (number, rest) = text.split_once(' ').unwrap_or((text.as_str(), ""));
-    let number = if number.contains('.') && !number.contains(['e', 'E']) {
-        number.trim_end_matches('0').trim_end_matches('.')
-    } else {
-        number
-    };
-    if rest.is_empty() {
-        number.to_owned()
-    } else {
-        format!("{number} {rest}")
-    }
+    rspice_results_ui::waves::fmt_in_unit_readout(value, unit, significant_digits)
 }
 
 /// The trace's colour as one more property row: its name in the label column,
@@ -1536,16 +1525,27 @@ fn schematic_cross_probe_unavailability(
         );
     }
     let here = state.workspace.content.occurrence_path(); // only that occurrence answers for a trace
-    if let Ok(probe) = crate::state::ProbeTarget::parse_legacy(net)
-        && probe.scope.fold_key() != here.fold_key()
-    {
-        let deeper = probe.scope.starts_with(&here);
-        let verb = if deeper { "Descend" } else { "Ascend" };
-        return Some(format!("{verb} to {} to cross-probe it.", probe.scope));
-    }
+    // A trace is scoped by written instance names, `xamp` for a cell drawn
+    // `amp`, so its scope is compared with the drawn occurrence by those names
+    // and named to the reader as the occurrence the run drew.
+    let leaf = match crate::state::ProbeTarget::parse_legacy(net) {
+        Ok(probe) if !probe.scope.same_engine_scope(&here) => {
+            let deeper = probe.scope.engine_scope_starts_with(&here);
+            let verb = if deeper { "Descend" } else { "Ascend" };
+            let drawn = receipt
+                .hierarchy_map()
+                .iter()
+                .filter_map(|row| crate::state::InstancePath::parse(row.occurrence()).ok())
+                .collect::<Vec<_>>();
+            let scope = probe.scope.resolve_drawn(&drawn).unwrap_or(&probe.scope);
+            return Some(format!("{verb} to {scope} to cross-probe it."));
+        }
+        Ok(probe) => probe.leaf,
+        Err(_) => net.to_owned(),
+    };
     let mut nets = map.net_to_points.iter();
-    let known = nets.any(|(name, points)| name.eq_ignore_ascii_case(net) && !points.is_empty());
-    (!known).then(|| format!("The open sheet has no conductor named {net}."))
+    let known = nets.any(|(name, points)| name.eq_ignore_ascii_case(&leaf) && !points.is_empty());
+    (!known).then(|| format!("The open sheet has no conductor named {leaf}."))
 }
 
 /// Resolve against the current schematic map before navigation. A stale or
@@ -2316,8 +2316,11 @@ fn diagnostic_tone(
         crate::workbench::documents::netlist_document::DiagnosticSeverity::Hint => {
             tokens.color.text_dim
         }
+        // An informational diagnostic is not a problem, so it is not news:
+        // it reads as the hint beside it does. Warning and error keep their
+        // tones because those are the two the reader must act on.
         crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => {
-            tokens.color.info
+            tokens.color.text_dim
         }
         crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning => {
             tokens.color.warn

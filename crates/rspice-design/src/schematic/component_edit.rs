@@ -191,8 +191,8 @@ fn transform_components_with(
     }
 }
 
-/// The emitted names of every loop probe drawn on this sheet, in the
-/// spelling the deck will carry.
+/// The names the deck writes every loop probe drawn on this sheet under, which
+/// are the voltage sources `.STB` can name: a probe drawn `LOOP1` is `VLOOP1`.
 ///
 /// This reads the drawing, not an elaborated circuit, so it answers for
 /// the sheet the engineer is looking at. A probe placed inside a
@@ -205,7 +205,7 @@ pub fn placed_loop_probe_names(document: &SchematicDocument) -> Vec<String> {
         .components
         .iter()
         .filter(|component| component.kind == ComponentType::LoopProbe)
-        .map(Component::spice_instance_name)
+        .map(Component::written_element_name)
         .filter(|name| !name.is_empty())
         .collect();
     names.sort_by(|left, right| {
@@ -215,6 +215,30 @@ pub fn placed_loop_probe_names(document: &SchematicDocument) -> Vec<String> {
     });
     names.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
     names
+}
+
+/// The placed loop probe, out of [`placed_loop_probe_names`], that a
+/// stability plan's chosen reference names.
+///
+/// A plan saved while the picker offered drawn names holds `LOOP1` for the
+/// probe the deck writes `VLOOP1`. A loop probe is written by the prefix rule
+/// alone, so either spelling names one probe. `None` when no placed probe
+/// answers to the reference.
+pub fn placed_loop_probe<'a>(placed: &'a [String], reference: &str) -> Option<&'a str> {
+    let reference = reference.trim();
+    let written = rspice_app_types::hierarchy_path::written_instance_name(
+        ComponentType::LoopProbe.spice_prefix(),
+        reference,
+    );
+    placed
+        .iter()
+        .find(|name| name.eq_ignore_ascii_case(reference))
+        .or_else(|| {
+            placed
+                .iter()
+                .find(|name| name.eq_ignore_ascii_case(&written))
+        })
+        .map(String::as_str)
 }
 
 fn next_library_reference_name(components: &[Component], prefix: &str) -> String {

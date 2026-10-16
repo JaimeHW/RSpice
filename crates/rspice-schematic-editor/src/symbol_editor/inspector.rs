@@ -5,23 +5,20 @@ use super::session::{SymbolEditorSession, SymbolSelection};
 use egui::Ui;
 use rspice_design::symbol::edit::SymbolCommitIntent;
 use rspice_design::symbol::{
-    MAX_SYMBOL_PIN_NAME_BYTES, MAX_SYMBOL_TEXT_BYTES, PinSummary, SymbolAttributeKind,
-    SymbolDocument, SymbolEditorMetadata, SymbolPin, SymbolPinElectricalKind, SymbolShape,
-    SymbolTextAlign, SymbolTextSize,
+    MAX_SYMBOL_PIN_NAME_BYTES, MAX_SYMBOL_TEXT_BYTES, SymbolAttributeKind, SymbolDocument,
+    SymbolEditorMetadata, SymbolPin, SymbolPinElectricalKind, SymbolShape, SymbolTextAlign,
+    SymbolTextSize,
 };
 use rspice_design_model::{
     Point, cell_view::CellViewRef, port::PortSpec, symbol_pin::SymbolPinSide,
 };
-use rspice_ui_kit::accessibility::plural_suffix;
-use rspice_ui_kit::panels::inspector::muted_inspector_copy;
 use rspice_ui_kit::panels::{
-    PANEL_INSET, Problem, StatusMark, WorkbenchIcon, labeled_icon_button, panel_bleed, panel_inset,
-    property_row, property_row_combo, property_row_input, property_row_status, section_block_gap,
+    PANEL_INSET, Problem, WorkbenchIcon, labeled_icon_button, panel_bleed, panel_inset,
+    property_row, property_row_combo, property_row_input, property_row_problem, section_block_gap,
     section_header,
 };
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
-use rspice_ui_kit::widgets::TreeRow;
 
 /// The field-edit lifetime. Selection here identifies the draft, not a second selection owner.
 #[derive(Debug, Clone, Default)]
@@ -116,9 +113,9 @@ pub fn show(
         ui.add_enabled_ui(capabilities.edit, |ui| {
             let selection = edit.selection.clone();
             let total = selection.len();
-            if total == 0 {
-                empty_selection_section(ui);
-            } else if total > 1 {
+            // Nothing selected draws nothing: the hero and the definition
+            // section are what the panel has to say about the symbol itself.
+            if total > 1 {
                 multi_selection_section(
                     ui,
                     selection.pins.len(),
@@ -133,8 +130,10 @@ pub fn show(
                 changed |= attribute_section(ui, &mut edit, &mut document, &mut metadata, *kind);
             }
         });
-        contract_section(ui, &mut edit, &document, ports);
-        definition_section(ui, &mut edit, &metadata);
+        // The pin list is the navigator's, including the ports no pin was
+        // placed for: one list, in one place, rather than the same numbered
+        // pins with the same marks on two panels at once.
+        definition_section(ui, &mut edit);
     });
     edit.session.selection = edit.selection.clone();
     SymbolInspectorRequest {
@@ -176,10 +175,9 @@ impl InspectorEdit {
 
 fn hero(ui: &mut Ui, reference: &CellViewRef, document: &SymbolDocument, ports: &[PortSpec]) {
     let t = Tokens::get(ui.ctx());
-    let summary = document.pin_summary(ports);
     let inset = panel_inset(ui);
     let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 82.0), egui::Sense::hover());
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 64.0), egui::Sense::hover());
     // The band reaches the panel's edges; its text keeps the panel inset on
     // the right.
     let band = panel_bleed(ui, rect);
@@ -243,35 +241,6 @@ fn hero(ui: &mut Ui, reference: &CellViewRef, document: &SymbolDocument, ports: 
         theme::sans(tokens::FS_0, FontWeight::Regular),
         t.color.text_dim,
     );
-    let (status, tone) = summary_status(&t, summary);
-    painter.text(
-        at(68.0),
-        egui::Align2::LEFT_CENTER,
-        status,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        tone,
-    );
-}
-
-fn summary_status(t: &Tokens, summary: PinSummary) -> (String, egui::Color32) {
-    match summary {
-        PinSummary::Match => ("pin contract matches the interface".to_owned(), t.color.ok),
-        PinSummary::Unplaced(count) => (
-            format!("{count} declared pin{} unplaced", plural_suffix(count)),
-            t.color.err,
-        ),
-        PinSummary::Orphaned(count) => (
-            format!(
-                "{count} pin{} not declared by the interface",
-                plural_suffix(count)
-            ),
-            t.color.err,
-        ),
-        PinSummary::NoSchematic => (
-            "no schematic interface declares this cell".to_owned(),
-            t.color.warn,
-        ),
-    }
 }
 
 // =============================================================================
@@ -362,16 +331,42 @@ const PIN_WIDTH_HINT: &str =
 /// The width row's value for one pin, or `None` when the pin declares no
 /// range.
 ///
-/// One conductor is what every name that is not a range carries, so a row
-/// stating it would be a row on every pin. The width and the declaration are
-/// both read from [`SymbolPin::vector`], which reads the name —
-/// the form cannot show a width the netlister disagrees with.
+/// One bit is what every name that is not a range carries, so a row stating it
+/// would be a row on every pin. The width is read from [`SymbolPin::vector`],
+/// which reads the name — the form cannot show a width the netlister
+/// disagrees with. The range itself is not repeated here: it is the Name field
+/// directly above.
 fn pin_width_row(pin: &SymbolPin) -> Option<String> {
-    let declaration = pin.vector()?;
-    Some(format!(
-        "{} conductors \u{2014} {declaration}",
-        declaration.width()
-    ))
+    Some(format!("{} bits", pin.vector()?.width()))
+}
+
+/// What the integers on this panel's coordinate rows are counted in. The
+/// terminal pitch is ten of them, which is what the canvas grid shows.
+const COORDINATE_UNIT: &str = "grid units";
+
+/// The pin's place in netlist order, and the control that changes it.
+///
+/// One row on the property grid rather than a pair of buttons below it: the
+/// order *is* a property of the pin, the two buttons that used to carry it sat
+/// off the grid in a line of their own, and moving a terminal from last to
+/// first took one press per place it passed.
+///
+/// Returns the index the pin is to take.
+fn netlist_order_row(ui: &mut Ui, order: usize, total: usize) -> Option<usize> {
+    let mut selected = (order + 1).to_string();
+    let options = (1..=total)
+        .map(|position| (position.to_string(), format!("{position} of {total}")))
+        .collect::<Vec<_>>();
+    let changed = property_row_combo(
+        ui,
+        "Netlist order",
+        ("symbol-pin-order", order),
+        &mut selected,
+        &options,
+        total > 1,
+    );
+    let picked = selected.parse::<usize>().ok()?.checked_sub(1)?;
+    (changed && picked != order && picked < total).then_some(picked)
 }
 
 fn pin_section(
@@ -387,18 +382,15 @@ fn pin_section(
         .iter()
         .position(|pin| pin.name.eq_ignore_ascii_case(name))
     else {
-        empty_selection_section(ui);
         return false;
     };
     let before = document.clone();
     let total = document.pins.len();
     let current_name = document.pins[order].name.clone();
 
-    section_header(
-        ui,
-        "Selected pin",
-        Some(&format!("port {} / {total}", order + 1)),
-    );
+    // The meta carries the unit the coordinate row below has no room to
+    // state, in place of a port count the Netlist order row already gives.
+    section_header(ui, "Selected pin", Some(COORDINATE_UNIT));
 
     let mut changed = false;
     if let Some(new_name) =
@@ -490,71 +482,35 @@ fn pin_section(
         changed = true;
     }
 
-    property_row(ui, "Netlist order", &format!("{} of {total}", order + 1));
-    section_block_gap(ui);
-    ui.horizontal(|ui| {
-        if ui
-            .add_enabled(order > 0, egui::Button::new("Move earlier"))
-            .clicked()
-        {
-            edit.record_undo(&before);
-            document.pins.swap(order, order - 1);
-            edit.session.undo_recorded = false;
-            changed = true;
-        }
-        if ui
-            .add_enabled(order + 1 < total, egui::Button::new("Move later"))
-            .clicked()
-        {
-            edit.record_undo(&before);
-            document.pins.swap(order, order + 1);
-            edit.session.undo_recorded = false;
-            changed = true;
-        }
-    });
+    if let Some(moved) = netlist_order_row(ui, order, total) {
+        edit.record_undo(&before);
+        let pin = document.pins.remove(order);
+        document.pins.insert(moved, pin);
+        edit.session.undo_recorded = false;
+        changed = true;
+    }
 
     let active_name = document.pins[order].name.clone();
-    let declared = ports
+    // Both rows state a mismatch and nothing else. A pin the interface
+    // declares, placed on the terminal grid, is the state every pin is in
+    // while nothing is wrong, and a row saying so is a row on every pin.
+    if !ports
         .iter()
-        .any(|port| port.name.eq_ignore_ascii_case(&active_name));
-    property_row_status(
-        ui,
-        "Declared by interface",
-        if declared { "yes" } else { "orphaned" },
-        if declared {
-            Tokens::get(ui.ctx()).color.ok
-        } else {
-            Tokens::get(ui.ctx()).color.err
-        },
-        if declared {
-            StatusMark::Success
-        } else {
-            StatusMark::Warning
-        },
-    );
+        .any(|port| port.name.eq_ignore_ascii_case(&active_name))
+        && !ports.is_empty()
+    {
+        property_row_problem(ui, "Interface", "not in schematic", Some(Problem::Warning));
+    }
     let placed = document.pins[order].position.is_some();
     let on_grid = document.pins[order].terminal_on_grid();
-    property_row_status(
-        ui,
-        "Terminal",
-        if !placed {
-            "unplaced"
-        } else if on_grid {
-            "on grid"
-        } else {
-            "off grid"
-        },
-        if placed && on_grid {
-            Tokens::get(ui.ctx()).color.ok
-        } else {
-            Tokens::get(ui.ctx()).color.err
-        },
-        if placed && on_grid {
-            StatusMark::Success
-        } else {
-            StatusMark::Warning
-        },
-    );
+    if !placed || !on_grid {
+        property_row_problem(
+            ui,
+            "Terminal",
+            if placed { "off grid" } else { "unplaced" },
+            Some(Problem::Warning),
+        );
+    }
     if !placed
         && labeled_icon_button(
             ui,
@@ -588,6 +544,14 @@ fn pin_section(
     changed
 }
 
+/// The four orientations an arrow head takes, in quarter turns.
+const ARROW_ROTATIONS: [i32; 4] = [0, 1, 2, 3];
+
+/// A quarter-turn count in the degrees a designer reads it in.
+fn arrow_rotation_label(quarters: i32) -> String {
+    format!("{}\u{b0}", quarters.rem_euclid(4) * 90)
+}
+
 fn shape_kind(shape: &SymbolShape) -> &'static str {
     match shape {
         SymbolShape::Polyline { closed: true, .. } => "polygon",
@@ -609,22 +573,25 @@ fn shape_section(
     index: usize,
 ) -> bool {
     let Some(shape) = document.body.get(index).cloned() else {
-        empty_selection_section(ui);
         return false;
     };
     let before = document.clone();
-    section_header(ui, "Selected shape", Some(shape_kind(&shape)));
+    section_header(
+        ui,
+        "Selected shape",
+        Some(&format!("{} · {COORDINATE_UNIT}", shape_kind(&shape))),
+    );
 
     let mut changed = false;
     let mut edited = shape;
     match &mut edited {
-        SymbolShape::Polyline { points, closed } => {
-            property_row(ui, "Type", if *closed { "closed" } else { "open" });
-            property_row(ui, "Points", &points.len().to_string());
+        SymbolShape::Polyline { points, closed: _ } => {
             if let Some(first) = points.first_mut() {
                 let mut anchor = *first;
-                let moved = coordinate_row(ui, edit, &before, "Start X", &mut anchor.x)
-                    | coordinate_row(ui, edit, &before, "Start Y", &mut anchor.y);
+                // "Position", not "Start": editing either moves the whole
+                // shape, which is what the delta below applies.
+                let moved = coordinate_row(ui, edit, &before, "Position X", &mut anchor.x)
+                    | coordinate_row(ui, edit, &before, "Position Y", &mut anchor.y);
                 if moved {
                     let delta = Point::new(anchor.x - first.x, anchor.y - first.y);
                     for point in points.iter_mut() {
@@ -657,7 +624,32 @@ fn shape_section(
         } => {
             changed |= coordinate_row(ui, edit, &before, "Tip X", &mut tip.x);
             changed |= coordinate_row(ui, edit, &before, "Tip Y", &mut tip.y);
-            changed |= coordinate_row(ui, edit, &before, "Quarter turns", rotation_quarters);
+            // Degrees, in the four the shape has: a quarter turn is a unit
+            // nothing else on a schematic is measured in.
+            let mut rotation = arrow_rotation_label(*rotation_quarters);
+            if property_row_combo(
+                ui,
+                "Rotation",
+                ("symbol-arrow-rotation", index),
+                &mut rotation,
+                &ARROW_ROTATIONS
+                    .iter()
+                    .map(|degrees| {
+                        (
+                            arrow_rotation_label(*degrees),
+                            arrow_rotation_label(*degrees),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+                true,
+            ) && let Some(quarters) = ARROW_ROTATIONS
+                .iter()
+                .find(|degrees| arrow_rotation_label(**degrees) == rotation)
+            {
+                record_once(edit, &before);
+                *rotation_quarters = *quarters;
+                changed = true;
+            }
         }
         SymbolShape::Text {
             anchor,
@@ -726,28 +718,7 @@ fn shape_section(
     if changed {
         document.body[index] = edited;
     }
-    muted_inspector_copy(
-        ui,
-        "Body geometry is cosmetic; it never changes the port contract.",
-    );
     changed
-}
-
-fn visibility_row(ui: &mut Ui, label: &str, shown: &mut bool) -> bool {
-    let t = Tokens::get(ui.ctx());
-    let before = *shown;
-    ui.horizontal(|ui| {
-        ui.add_sized(
-            [112.0, t.metrics.ctl_h],
-            egui::Label::new(
-                egui::RichText::new(label)
-                    .size(tokens::FS_0)
-                    .color(t.color.text_dim),
-            ),
-        );
-        ui.checkbox(shown, if *shown { "Shown" } else { "Hidden" });
-    });
-    *shown != before
 }
 
 fn attribute_section(
@@ -762,12 +733,15 @@ fn attribute_section(
         .iter()
         .position(|attribute| attribute.kind == kind)
     else {
-        empty_selection_section(ui);
         return false;
     };
     let before = document.clone();
     let mut changed = false;
-    section_header(ui, "Selected attribute", Some(kind.key()));
+    section_header(
+        ui,
+        "Selected attribute",
+        Some(&format!("{} · {COORDINATE_UNIT}", kind.key())),
+    );
 
     let current_value = metadata.attributes[index].default_value.clone();
     if let Some(value) = text_row(
@@ -783,8 +757,11 @@ fn attribute_section(
         changed = true;
     }
 
+    // One control with one label. The row used to be a hand-built pair off
+    // the grid whose tick box re-labelled itself "Shown" / "Hidden", saying
+    // twice what the tick already said.
     let mut shown = metadata.attributes[index].shown;
-    if visibility_row(ui, "Visibility", &mut shown) {
+    if rspice_ui_kit::widgets::switch_row(ui, "Show on instances", &mut shown) {
         record_once(edit, &before);
         metadata.attributes[index].shown = shown;
         changed = true;
@@ -802,144 +779,29 @@ fn attribute_section(
         }
         changed = true;
     }
-    muted_inspector_copy(
-        ui,
-        "Attributes are rendered on every placed instance when visibility is enabled.",
-    );
     changed
 }
 
-fn empty_selection_section(ui: &mut Ui) {
-    section_header(ui, "Selection", Some("none"));
-    muted_inspector_copy(
-        ui,
-        "Select a pin or body shape on the canvas, or in the Symbol editor panel, to edit it here.",
-    );
-}
-
+/// More than one object: the count, and nothing else. Which kinds they are is
+/// in the navigator's lists, and the instruction that used to sit here told a
+/// reader to do what the next click does anyway.
 fn multi_selection_section(ui: &mut Ui, pins: usize, shapes: usize, attributes: usize) {
-    section_header(
-        ui,
-        "Selection",
-        Some(&(pins + shapes + attributes).to_string()),
-    );
-    property_row(ui, "Pins", &pins.to_string());
-    property_row(ui, "Body shapes", &shapes.to_string());
-    property_row(ui, "Attributes", &attributes.to_string());
-    muted_inspector_copy(
-        ui,
-        "Reduce the selection to one object to edit its geometry. Canvas transforms apply to the whole selection.",
-    );
+    let total = pins + shapes + attributes;
+    section_header(ui, "Selection", Some(&format!("{total} selected")));
 }
 
-fn definition_section(ui: &mut Ui, edit: &mut InspectorEdit, metadata: &SymbolEditorMetadata) {
-    section_header(ui, "Symbol definition", Some("CDF"));
-    property_row(ui, "Published revision", &metadata.revision.to_string());
-    property_row(
-        ui,
-        "Revision note",
-        if metadata.revision_note.is_empty() {
-            "not published"
-        } else {
-            &metadata.revision_note
-        },
-    );
+fn definition_section(ui: &mut Ui, edit: &mut InspectorEdit) {
+    section_header(ui, "Symbol definition", None);
     if labeled_icon_button(
         ui,
         WorkbenchIcon::Sliders,
-        "Open CDF / form designer",
+        "Edit parameter form...",
         false,
         ui.available_width(),
     )
     .clicked()
     {
         edit.open_parameter_form = true;
-    }
-}
-
-// =============================================================================
-// Pin contract
-// =============================================================================
-
-/// The ordered comparison the symbol is answerable to: for each declared
-/// port, the pin this symbol places for it.
-fn contract_section(
-    ui: &mut Ui,
-    edit: &mut InspectorEdit,
-    document: &SymbolDocument,
-    ports: &[PortSpec],
-) {
-    let summary = document.pin_summary(ports);
-    section_header(
-        ui,
-        "Pin contract · netlist order",
-        Some(match summary {
-            PinSummary::Match => "matches",
-            PinSummary::NoSchematic => "no interface",
-            _ => "mismatch",
-        }),
-    );
-    if ports.is_empty() {
-        muted_inspector_copy(
-            ui,
-            "No schematic in this project declares an interface for this cell, so there is no contract to satisfy.",
-        );
-        return;
-    }
-
-    let t = Tokens::get(ui.ctx());
-    let mut select: Option<String> = None;
-    for (index, port) in ports.iter().enumerate() {
-        let pin = document
-            .pins
-            .iter()
-            .find(|pin| pin.name.eq_ignore_ascii_case(&port.name));
-        let placed = pin.is_some_and(|pin| pin.position.is_some());
-        let meta = match pin {
-            Some(pin) => match pin.position {
-                Some(point) => format!("{}, {}", point.x, point.y),
-                None => "unplaced".to_owned(),
-            },
-            None => "no pin".to_owned(),
-        };
-        let label = format!("{}. {}", index + 1, port.name);
-        let row = TreeRow::new(&label)
-            .mono()
-            .indent(1)
-            .meta(&meta)
-            .problem((!placed).then_some(Problem::Warning))
-            .selected(edit.selection.pins.contains(&port.name))
-            .show(ui);
-        if row.response.clicked() && pin.is_some() {
-            select = Some(port.name.clone());
-        }
-    }
-    if let Some(name) = select {
-        edit.select_pin(name);
-    }
-
-    // Pins the symbol places that no port declares are the other half of a
-    // mismatch, and are invisible in a port-ordered list.
-    let orphaned: Vec<&SymbolPin> = document
-        .pins
-        .iter()
-        .filter(|pin| {
-            !ports
-                .iter()
-                .any(|port| port.name.eq_ignore_ascii_case(&pin.name))
-        })
-        .collect();
-    if !orphaned.is_empty() {
-        section_header(ui, "Undeclared pins", Some(&orphaned.len().to_string()));
-        for pin in orphaned {
-            property_row_status(
-                ui,
-                &pin.name,
-                "not declared by the interface",
-                t.color.err,
-                StatusMark::Warning,
-            );
-        }
     }
 }
 
@@ -951,13 +813,11 @@ mod tests {
 
     /// The row is `declared_width` in words: the name decides the width, and
     /// the form has no second answer. A pin that declares no range shows no
-    /// row rather than one stating the obvious.
+    /// row rather than one stating the obvious, and the row never repeats the
+    /// range itself, which is the Name field directly above it.
     #[test]
     fn the_pin_width_row_states_what_the_name_declares() {
-        for (name, expected) in [
-            ("DATA[3:0]", "4 conductors \u{2014} DATA[3:0]"),
-            ("ADDR<0:7>", "8 conductors \u{2014} ADDR<0:7>"),
-        ] {
+        for (name, expected) in [("DATA[3:0]", "4 bits"), ("ADDR<0:7>", "8 bits")] {
             let pin = SymbolPin::new(name, PortDirection::InOut, None);
             assert_eq!(pin_width_row(&pin).as_deref(), Some(expected));
             assert_eq!(pin.width(), rspice_design_model::bus::declared_width(name));
@@ -968,5 +828,20 @@ mod tests {
             assert_eq!(pin_width_row(&pin), None, "{scalar}");
             assert_eq!(pin.width(), 1, "{scalar}");
         }
+    }
+
+    /// An arrow's orientation reads in degrees, which is how every other
+    /// rotation in the editor reads. "Quarter turns" was the stored unit
+    /// shown raw, and the four values it takes are the whole range.
+    #[test]
+    fn an_arrows_rotation_reads_in_degrees() {
+        assert_eq!(
+            ARROW_ROTATIONS.map(arrow_rotation_label).to_vec(),
+            ["0\u{b0}", "90\u{b0}", "180\u{b0}", "270\u{b0}"]
+        );
+        // A document written with a turn count outside the range still lands
+        // on one of the four the combo offers.
+        assert_eq!(arrow_rotation_label(5), "90\u{b0}");
+        assert_eq!(arrow_rotation_label(-1), "270\u{b0}");
     }
 }

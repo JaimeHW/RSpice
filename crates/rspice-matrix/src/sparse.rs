@@ -1965,6 +1965,42 @@ impl StaticMatrix {
             .any(|value| value.abs() > 0.0)
     }
 
+    /// Whether `row` holds nothing beyond `diagonal` on its diagonal: every
+    /// other entry has no magnitude above zero, and the diagonal entry, where
+    /// the pattern has one, is exactly `diagonal`. A row outside the matrix
+    /// holds nothing beyond it.
+    pub fn row_is_deficient_beyond_diagonal(&self, row: usize, diagonal: Value) -> bool {
+        let layout = &self.residual_layout;
+        if row >= self.nrows || row + 1 >= layout.row_ptr.len() {
+            return true;
+        }
+        (layout.row_ptr[row]..layout.row_ptr[row + 1]).all(|position| {
+            let value = self.values[layout.csc_idx[position]];
+            if layout.col_idx[position] == row {
+                value == diagonal
+            } else {
+                value.abs() == 0.0
+            }
+        })
+    }
+
+    /// The column twin of [`Self::row_is_deficient_beyond_diagonal`].
+    pub fn column_is_deficient_beyond_diagonal(&self, col: usize, diagonal: Value) -> bool {
+        if col >= self.ncols {
+            return true;
+        }
+        let col_ptr = self.csc.col_ptr();
+        let row_idx = self.csc.row_idx();
+        (col_ptr[col]..col_ptr[col + 1]).all(|index| {
+            let value = self.values[index];
+            if row_idx[index] == col {
+                value == diagonal
+            } else {
+                value.abs() == 0.0
+            }
+        })
+    }
+
     /// Determine whether the principal submatrix selected by `indices` is
     /// singular under this matrix's solver policy.
     ///

@@ -248,7 +248,7 @@ fn a_connect_parameter_that_cannot_be_folded_is_refused() {
     source.push_str(
         "\
 connectrules folded;
-    connect a2d #(.vsup(vdd));
+    connect a2d #(.tdrise(delay));
 endconnectrules
 ",
     );
@@ -259,4 +259,25 @@ endconnectrules
         format!("{error}").contains("numeric literal"),
         "unexpected: {error}"
     );
+}
+
+/// `vsup` is the one parameter a bare identifier may give: it names the deck
+/// net the boundary's supply binds to, and leaves the numbers to fold.
+#[test]
+fn a_supply_named_as_a_net_is_carried_beside_the_numbers() {
+    let mut source = library_modules();
+    source.push_str(
+        "\
+connectrules net_supply;
+    connect a2d #(.vsup(vdd), .tdrise(2e-9));
+endconnectrules
+",
+    );
+    let (table, db) = table(&source);
+    let selected = select_for_boundary(&table, &db, Kind::Adc, "din", "a1", "in")
+        .expect("a net-named supply selects")
+        .expect("the a2d rule applies");
+    assert_eq!(selected.supply_net(), Some("vdd"));
+    assert!(!selected.states_supply(), "a net is not a stated level");
+    assert_eq!(selected.parameter("tdrise"), Some(2e-9));
 }

@@ -954,6 +954,25 @@ fn noise_form_matches_mockup_owned_contract() {
     }
 }
 
+/// The page gathers the drawing's loop probes for exactly the forms that offer
+/// them. It gathered them for STB alone, so the periodic form was handed an
+/// empty list, said no probe was placed beside a drawn one, and could only
+/// name its probe by hand.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn every_form_with_a_probe_picker_is_handed_the_placed_probes() {
+    for kind in AnalysisKind::ALL {
+        let draft = AnalysisDraft::for_kind(kind);
+        let offered = super::offers_placed_loop_probes(&draft);
+        let (_, painted) = render_analysis_form(draft, NoiseDomain::default());
+        let picks = painted.iter().any(|line| line == "entered by hand");
+        assert_eq!(
+            offered, picks,
+            "{kind:?}: the page's gathering and the form's picker disagree"
+        );
+    }
+}
+
 /// Both loop-stability forms designate their probe the same way.
 ///
 /// STB and PSTB break the same loop at the same element, and for a long time

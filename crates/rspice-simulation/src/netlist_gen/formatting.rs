@@ -24,6 +24,10 @@ impl<'a> NetlistGenerator<'a> {
         format!("\"{}\"", escaped)
     }
 
+    /// The reference a component's card carries, and the stem of every name
+    /// the deck derives from that card, such as a synthesized sense source. A
+    /// component the deck writes as another element — a lowered controlled
+    /// source — heads its card with [`Component::written_element_name`].
     pub(super) fn instance_name(&self, component: &Component) -> String {
         component.emitted_instance_name()
     }

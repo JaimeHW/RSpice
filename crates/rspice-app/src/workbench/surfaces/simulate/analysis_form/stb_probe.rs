@@ -46,11 +46,23 @@ fn hint(placed: &[String], reference: StbProbeReference) -> String {
     }
 }
 
-/// A placed loop probe chosen from the drawing, or a name entered by hand.
+/// What the selector shows as chosen: the placed probe the name designates,
+/// which a plan saved under the probe's drawn name (`LOOP1`) spells
+/// differently from the card it is offered as (`VLOOP1`).
 ///
 /// A stale reference is shown as the name it still holds rather than being
 /// quietly folded into the entered form. The engineer has to see which probe
 /// went missing, and the plan refuses under that same name.
+fn chosen(placed: &[String], name: &str, reference: StbProbeReference) -> String {
+    if reference == StbProbeReference::Entered {
+        return ENTERED_CHOICE.to_owned();
+    }
+    rspice_design::schematic::component_edit::placed_loop_probe(placed, name)
+        .unwrap_or(name.trim())
+        .to_owned()
+}
+
+/// A placed loop probe chosen from the drawing, or a name entered by hand.
 fn control(
     ui: &mut Ui,
     label: &str,
@@ -60,11 +72,7 @@ fn control(
 ) {
     let mut options = placed.to_vec();
     options.push(ENTERED_CHOICE.to_owned());
-    let current = if *reference == StbProbeReference::Entered {
-        ENTERED_CHOICE.to_owned()
-    } else {
-        name.trim().to_owned()
-    };
+    let current = chosen(placed, name, *reference);
     let width = ui.available_width();
     let (selector_width, editor_width) = noise_sweep_control_widths(width);
     ui.allocate_ui_with_layout(
@@ -127,6 +135,28 @@ mod tests {
         assert_eq!(
             hint(&["VLOOP1".to_owned()], StbProbeReference::Placed),
             "1 placed"
+        );
+    }
+
+    #[test]
+    fn a_probe_saved_under_its_drawn_name_shows_as_the_card_it_is_offered_as() {
+        let placed = ["VLOOP1".to_owned()];
+        assert_eq!(
+            chosen(&placed, "LOOP1", StbProbeReference::Placed),
+            "VLOOP1"
+        );
+        assert_eq!(
+            chosen(&placed, "VLOOP1", StbProbeReference::Placed),
+            "VLOOP1"
+        );
+        assert_eq!(
+            chosen(&placed, " LOOP9 ", StbProbeReference::Placed),
+            "LOOP9",
+            "a deleted probe keeps the name the plan refuses under"
+        );
+        assert_eq!(
+            chosen(&placed, "LOOP1", StbProbeReference::Entered),
+            ENTERED_CHOICE
         );
     }
 }

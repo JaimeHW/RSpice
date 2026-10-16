@@ -1887,20 +1887,208 @@ fn an_instance_array_range_is_refused_by_name() {
     );
 }
 
-/// `defparam` is refused at its own keyword, as every other unimplemented
-/// discrete-domain construct is.
+/// A child with two parameters and a localparam, for `defparam` targets.
+const PARAMETERIZED: &str = "module leaf(y);\n\
+                             \x20   output y;\n\
+                             \x20   parameter P = 1, Q = 2;\n\
+                             \x20   localparam L = P + 1;\n\
+                             \x20   wire y;\n\
+                             \x20   assign y = P[0];\n\
+                             endmodule\n\
+                             module mid(y);\n\
+                             \x20   output y;\n\
+                             \x20   wire y;\n\
+                             \x20   leaf l(y);\n\
+                             endmodule\n";
+
+/// A comma-separated `defparam` assigns each of its targets: one of the
+/// writer's own instances, and one below an instance of a module
+/// instantiated once.
 #[test]
-fn defparam_is_refused_by_name() {
+fn defparam_assigns_each_of_its_targets() {
+    let compiled = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    })
+    .compile_runtime(
+        &hierarchy(
+            PARAMETERIZED,
+            "    wire y, z;\n     leaf u1(y);\n     mid m(z);\n     defparam u1.P = 3, m.l.Q = 4;",
+        ),
+        Some("top"),
+    )
+    .expect("the hierarchy compiles");
+    // u1.P and u1.Q, in elaboration order. `m.l.Q` keeps its value as an
+    // expression of `mid`'s scope; the HDL host tests run it.
+    assert_eq!(child_parameters(&compiled)[..2], [3.0, 2.0]);
+}
+
+/// The elaborated `P` and `Q` of each `leaf` instance, in elaboration order,
+/// up to the first one kept as an expression. A flattened child's parameter
+/// keeps a runtime slot under an internal name that ends with its own.
+fn child_parameters(compiled: &rspice_veriloga::RuntimeCompileReport) -> Vec<f64> {
+    compiled
+        .canonical_ir
+        .hir
+        .parameters
+        .iter()
+        .filter(|parameter| parameter.name.ends_with("_P") || parameter.name.ends_with("_Q"))
+        .map_while(|parameter| parameter.elaboration_value.or(parameter.default))
+        .collect()
+}
+
+/// The value a compiled design elaborated one parameter to.
+fn elaborated_parameter(compiled: &rspice_veriloga::RuntimeCompileReport, name: &str) -> f64 {
+    let parameters = &compiled.canonical_ir.hir.parameters;
+    parameters
+        .iter()
+        .find(|parameter| parameter.name == name)
+        .and_then(|parameter| parameter.elaboration_value)
+        .unwrap_or_else(|| {
+            panic!(
+                "no elaborated `{name}` among {:?}",
+                parameters
+                    .iter()
+                    .map(|parameter| &parameter.name)
+                    .collect::<Vec<_>>()
+            )
+        })
+}
+
+/// Two `defparam`s on one parameter: the last in source order wins (section
+/// 12.2.1), with a warning naming both.
+#[test]
+fn the_last_of_two_defparams_wins_with_a_warning_naming_both() {
+    let compiled = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    })
+    .compile_runtime(
+        &hierarchy(
+            PARAMETERIZED,
+            "    wire y, z;\n     leaf #(.P(2)) u1(y);\n     mid m(z);\n     \
+             defparam u1.P = 5;\n     defparam u1.P = 6;",
+        ),
+        Some("top"),
+    )
+    .expect("the hierarchy compiles");
+    assert_eq!(child_parameters(&compiled), [6.0, 2.0, 1.0, 2.0]);
+    let warnings: Vec<_> = compiled
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "VA-SEM-DEFPARAM-REPLACED")
+        .collect();
+    assert_eq!(warnings.len(), 1, "{:?}", compiled.diagnostics);
+    let message = &warnings[0].message;
+    assert!(
+        message.contains("`defparam u1.P` in module `top` replaces the earlier `defparam u1.P`")
+            && message.contains("top.u1.P")
+            && message.contains("12.2.1"),
+        "{message}"
+    );
+}
+
+/// What a `defparam` cannot reach is refused by name.
+#[test]
+fn defparam_targets_outside_its_reach_are_refused_by_name() {
+    let refused = |section: &str| {
+        hierarchy_error(&hierarchy(
+            PARAMETERIZED,
+            &format!("    wire y, z, w;\n     leaf u1(y);\n     mid m(z);\n{section}"),
+        ))
+    };
+    for (section, expected) in [
+        ("     defparam u1.L = 3;", "a `localparam` of module `leaf`"),
+        ("     defparam u1.R = 3;", "declares no parameter `R`"),
+        (
+            "     defparam nope.P = 3;",
+            "names `nope`, which is neither",
+        ),
+        (
+            "     defparam m.x.P = 3;",
+            "`x`, which is not an instance of module `mid`",
+        ),
+        ("     defparam m.l.P = w;", "names a declaration"),
+        (
+            "     mid m2(w);\n     defparam m.l.P = 3;",
+            "passes through module `mid`, which is instantiated 2 times",
+        ),
+    ] {
+        let message = refused(section);
+        assert!(message.contains(expected), "{section}: {message}");
+    }
     let message = parse_error(&hierarchy(
-        NAND2,
-        "    wire a, b, y;\n     nand2 g1(y, a, b);\n     defparam g1.w = 1;",
+        PARAMETERIZED,
+        "    wire y;\n     generate if (1) begin : g\n       leaf u(y);\n       \
+         defparam u.P = 3;\n     end endgenerate",
     ));
-    assert!(message.contains("defparam"), "{message}");
-    // The clause, and what to write instead. `defparam` is the one construct in
-    // this set an author reaches for on purpose — it is the other spelling of a
-    // parameter override — so the refusal has to say which spelling is read.
-    assert!(message.contains("12.2.1"), "{message}");
-    assert!(message.contains("`#(...)` override"), "{message}");
+    assert!(
+        message.contains("`defparam`") && message.contains("generate block"),
+        "{message}"
+    );
+    let message = parse_error(&hierarchy(
+        PARAMETERIZED,
+        "    wire y;\n     leaf u1(y);\n     defparam g[0].u.P = 3;",
+    ));
+    assert!(message.contains("an indexed scope"), "{message}");
+    // `top` has an analog block: its own parameters take instance values
+    // at run time, where the `defparam` could not win.
+    for section in [
+        "     parameter T = 1;\n     defparam top.T = 3;",
+        "     parameter T = 1;\n     defparam T = 3;",
+    ] {
+        let message = refused(section);
+        assert!(message.contains("has an analog block"), "{message}");
+    }
+    // A simple name in an instantiated module would reach every instance.
+    let message = hierarchy_error(&hierarchy(
+        "module leaf(y);\n    output y;\n    parameter P = 1;\n    wire y;\n    \
+         assign y = P[0];\n    defparam P = 2;\nendmodule\n",
+        "    wire y;\n     leaf u1(y);",
+    ));
+    assert!(message.contains("which is instantiated"), "{message}");
+}
+
+/// A `defparam` on a digital root's own parameter takes precedence over the
+/// instance value an X card gives it, with a warning (design P2 section 4.2).
+#[test]
+fn a_defparam_on_a_root_parameter_takes_precedence_over_its_instance_value() {
+    let source = "module top(y);\n\
+                  \x20   output y;\n\
+                  \x20   parameter integer T = 1;\n\
+                  \x20   wire y;\n\
+                  \x20   assign y = T[1];\n\
+                  \x20   defparam top.T = 3;\n\
+                  endmodule\n";
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let initial = compiler
+        .compile_runtime(source, Some("top"))
+        .expect("the module compiles");
+    let specialized = compiler
+        .specialize_mixed_runtime(
+            &initial.canonical_ir,
+            &[("T", 2.0)],
+            &rspice_veriloga::NoPipelineControl,
+        )
+        .expect("the instance value is accepted");
+    for report in [&initial, &specialized] {
+        assert_eq!(elaborated_parameter(report, "T"), 3.0);
+    }
+    let warning = specialized
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "VA-SEM-DEFPARAM-REPLACED")
+        .unwrap_or_else(|| panic!("{:?}", specialized.diagnostics));
+    assert!(
+        warning
+            .message
+            .contains("takes precedence over the instance value"),
+        "{}",
+        warning.message
+    );
 }
 
 /// A hierarchy that elaborates is still refused by the bytecode backend, which

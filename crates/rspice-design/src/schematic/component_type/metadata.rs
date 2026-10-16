@@ -28,8 +28,8 @@ impl ComponentType {
             ComponentType::Njfet | ComponentType::Pjfet => "J",
             ComponentType::Nmesfet | ComponentType::Pmesfet => "Z",
             ComponentType::SaturableInductor => "L",
-            // The Xyce element keyword is YMEMRISTOR; the designator uses a
-            // distinct MR prefix and the emitter writes the full form.
+            // The designator uses a distinct MR prefix; the card is headed by
+            // the element keyword (`element_keyword`).
             ComponentType::Memristor => "MR",
             ComponentType::VoltageSource
             | ComponentType::VoltageSourceAc
@@ -95,6 +95,19 @@ impl ComponentType {
             | ComponentType::XspiceSrLatch
             | ComponentType::XspiceAdcBridge
             | ComponentType::XspiceDacBridge => "A",
+        }
+    }
+
+    /// The keyword the deck heads this type's card with, for an element the
+    /// engine reads by keyword rather than by the first letter of its name.
+    ///
+    /// Such a card is `<keyword> <name> …`, and the engine files the element
+    /// under `<keyword>!<name>`: a memristor written `YMEMRISTOR MR1` is the
+    /// element `YMEMRISTOR!MR1`.
+    pub fn element_keyword(&self) -> Option<&'static str> {
+        match self {
+            ComponentType::Memristor => Some("YMEMRISTOR"),
+            _ => None,
         }
     }
 

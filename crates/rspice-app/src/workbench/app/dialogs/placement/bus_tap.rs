@@ -1,9 +1,7 @@
-//! App-owned modal, source validation and arming for bus-tap placement.
+//! App-owned form, source validation and arming for bus-tap placement.
 
 use crate::state::Tool;
-use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
-};
+use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use egui::Context;
@@ -14,11 +12,8 @@ use rspice_schematic_editor::{
 };
 
 const TITLE: &str = "Place bus tap";
-const PRIMARY: &str = "Arm bus-tap tool";
-const BODY: &str = "Create a typed scalar or slice connection from a declared bus with direction and naming validation.";
-const DIALOG_SIZE: DialogSize = DialogSize::Transaction;
-const DISCARD_TITLE: &str = "Unsaved dialog changes";
-const DISCARD_DETAIL: &str = "Choose Discard changes again to close, or continue editing. No project or result data has been changed.";
+const PRIMARY: &str = "Place";
+const DESCRIPTION: &str = "Connect one bit or a range of a bus.";
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_bus_tap_dialog(&mut self, ctx: &Context) {
@@ -30,38 +25,22 @@ impl RSpiceApp {
             Ok(_) => self.state.dialogs.bus_tap.fields.validate(),
             Err(message) => DraftValidation::Invalid(message),
         };
-        let can_commit = validation.can_commit();
+        // The sheet this tap goes on: the one thing about the form that is not
+        // in the form.
+        let view_path = self.state.workspace.content.active_view.display_path();
 
-        let discard_confirm = self.state.dialogs.bus_tap.discard_confirm;
-        let mut dialog = Dialog::new(TITLE, PRIMARY)
-            .description(BODY)
-            .size(DIALOG_SIZE)
-            .ghost(if discard_confirm {
-                "Discard changes"
-            } else {
-                "Cancel"
-            })
-            .primary_enabled(can_commit)
-            .initial_focus(DialogInitialFocus::Control(
-                bus_tap_placement::bus_field_id(),
-            ));
-        if discard_confirm {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                DISCARD_TITLE,
-                DISCARD_DETAIL,
-            );
-        }
-        let mut response = dialog.show_transaction(ctx, |ui| {
-            let (focus, edited) =
-                bus_tap_placement::show(ui, &validation, &mut self.state.dialogs.bus_tap.fields);
-            if edited {
-                self.state.dialogs.bus_tap.mark_edited();
-            }
-            focus
-        });
+        let fields = &mut self.state.dialogs.bus_tap.fields;
+        let choice = CommandForm::new(TITLE, PRIMARY)
+            .context(Some(view_path.as_str()))
+            .describe(DESCRIPTION)
+            .primary_enabled(validation.can_commit())
+            .status(validation.status())
+            .status_lines(2)
+            .show(ctx, |rows| {
+                bus_tap_placement::show(rows, &validation, fields)
+            });
 
-        match response.choice {
+        match choice {
             DialogChoice::Primary => {
                 // The footer follows the body in the same immediate-mode
                 // frame. Re-parse the post-edit draft so Enter can never
@@ -78,10 +57,7 @@ impl RSpiceApp {
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.bus_tap.attempt_close();
-                if self.state.dialogs.bus_tap.open {
-                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
-                }
+                self.state.dialogs.bus_tap.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -90,7 +66,32 @@ impl RSpiceApp {
 
 pub(crate) fn open_bus_tap(state: &mut AppState) {
     let source = crate::workbench::app::schematic_editor_request_source(state);
-    state.dialogs.bus_tap.open(source);
+    let bus = sole_declared_bus(state);
+    state.dialogs.bus_tap.open(source, bus);
+}
+
+/// The bus a tap starts from when the sheet leaves no doubt: the one
+/// declaration it draws.
+///
+/// A sample value written into the field — this form opened holding
+/// `DATA[15:0]` — is a tap on a bus the design may not have, placed by a
+/// reader who pressed Enter. One declared bus is not a sample; it is the only
+/// answer. Anything else starts empty, with the shape of a declaration as the
+/// field's hint.
+fn sole_declared_bus(state: &AppState) -> String {
+    let mut declarations = state
+        .schematic
+        .document()
+        .buses
+        .iter()
+        .filter_map(|bus| bus.declaration.as_ref().map(ToString::to_string))
+        .collect::<Vec<_>>();
+    declarations.sort();
+    declarations.dedup();
+    match declarations.as_slice() {
+        [only] => only.clone(),
+        _ => String::new(),
+    }
 }
 
 fn placement_source(state: &AppState) -> Result<&EditorRequestSource, String> {
@@ -112,7 +113,7 @@ fn placement_source(state: &AppState) -> Result<&EditorRequestSource, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::BusTapOrientation;
+    use crate::state::{Bus, BusDeclaration, BusTapOrientation, Point};
     use crate::workbench::app::dialogs::state::BusTapDialogState;
 
     fn test_source() -> EditorRequestSource {
@@ -153,6 +154,22 @@ mod tests {
         ]
     }
 
+    /// Draw one declared bus on the active sheet.
+    fn declare_bus(state: &mut AppState, declaration: &str) {
+        let id = state.schematic.next_id();
+        let declaration = BusDeclaration::parse(declaration).expect("declaration");
+        state.schematic.document_mut_for_test().buses.push(
+            Bus::segment(id, Point::new(0, 0), Point::new(40, 0), Some(declaration))
+                .expect("bus segment"),
+        );
+    }
+
+    /// Type a complete tap into the open form.
+    fn fill(state: &mut AppState, bus: &str, slice: &str) {
+        state.dialogs.bus_tap.fields.bus = bus.to_owned();
+        state.dialogs.bus_tap.fields.slice = slice.to_owned();
+    }
+
     #[test]
     fn opening_input_reaches_the_bus_field() {
         let ctx = Context::default();
@@ -160,92 +177,84 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         open_bus_tap(&mut app.state);
 
+        // The form asks for the caret once its rows exist, so the frame that
+        // builds them is the frame before the one that can be typed into.
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
+            app.render_bus_tap_dialog(ctx)
+        });
         let _ = ctx.run_ui(dialog_input(replace_text("DATA[31:0]")), |ctx| {
             app.render_bus_tap_dialog(ctx)
         });
 
         assert_eq!(app.state.dialogs.bus_tap.fields.bus, "DATA[31:0]");
-        assert!(app.state.dialogs.bus_tap.dirty);
         assert!(app.state.schematic.session.editor.pending_bus_tap.is_none());
     }
 
+    /// The content bug this form shipped: it opened holding `DATA[15:0]` and
+    /// `DATA[7:0]` as values, so Enter on an untouched form placed a tap on a
+    /// bus the design had never declared.
     #[test]
-    fn edited_cancel_then_enter_discards_and_restores_workspace_focus() {
-        let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+    fn an_untouched_form_taps_nothing_and_prefills_only_the_one_declared_bus() {
         let mut app = RSpiceApp::test_instance();
-        let workspace_id = egui::Id::new("bus-tap-test-workspace");
-        let mut workspace_text = "workspace".to_owned();
-        let mut render = |events, body: &mut dyn FnMut(&Context)| {
-            let _ = ctx.run_ui(dialog_input(events), |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    ui.add(egui::TextEdit::singleline(&mut workspace_text).id(workspace_id));
-                });
-                body(ctx);
-            });
-        };
-        render(Vec::new(), &mut |ctx| app.render_bus_tap_dialog(ctx));
-        ctx.memory_mut(|memory| memory.request_focus(workspace_id));
         open_bus_tap(&mut app.state);
-        render(Vec::new(), &mut |ctx| app.render_bus_tap_dialog(ctx));
+        assert_eq!(app.state.dialogs.bus_tap.fields.bus, "");
+        assert_eq!(app.state.dialogs.bus_tap.fields.slice, "");
+        assert!(!app.state.dialogs.bus_tap.fields.validate().can_commit());
 
-        let mut events = replace_text("DATA[31:0]");
-        events.extend([key_event(egui::Key::Escape), key_event(egui::Key::Enter)]);
-        render(events, &mut |ctx| app.render_bus_tap_dialog(ctx));
-        assert_eq!(app.state.dialogs.bus_tap.fields.bus, "DATA[31:0]");
-        assert!(app.state.dialogs.bus_tap.discard_confirm);
-        assert!(app.state.dialogs.bus_tap.open);
-        for _ in 0..4 {
-            render(Vec::new(), &mut |ctx| app.render_bus_tap_dialog(ctx));
-        }
+        // One declared bus is the only answer, so the field starts there. The
+        // slice is still the reader's, so the form still cannot commit.
+        app.state.dialogs.bus_tap.close();
+        declare_bus(&mut app.state, "DATA[15:0]");
+        open_bus_tap(&mut app.state);
+        assert_eq!(app.state.dialogs.bus_tap.fields.bus, "DATA[15:0]");
+        assert_eq!(app.state.dialogs.bus_tap.fields.slice, "");
+        assert!(!app.state.dialogs.bus_tap.fields.validate().can_commit());
 
-        assert!(!app.state.dialogs.bus_tap.open);
-        assert!(app.state.schematic.session.editor.pending_bus_tap.is_none());
-        assert_eq!(app.state.schematic.session.editor.tool, Tool::Select);
-        assert_eq!(ctx.memory(|memory| memory.focused()), Some(workspace_id));
-        assert_eq!(workspace_text, "workspace");
+        // Two declarations are a choice, and a form does not choose for the
+        // reader.
+        app.state.dialogs.bus_tap.close();
+        declare_bus(&mut app.state, "ADDR[7:0]");
+        open_bus_tap(&mut app.state);
+        assert_eq!(app.state.dialogs.bus_tap.fields.bus, "");
     }
 
     #[test]
-    fn dialog_opens_with_the_mockup_values_and_a_valid_clean_draft() {
+    fn opening_captures_the_source_and_closing_releases_it() {
         let mut draft = BusTapDialogState::default();
         let source = test_source();
-        draft.open(source.clone());
+        draft.open(source.clone(), String::new());
 
         assert!(draft.open);
-        assert_eq!(draft.fields.bus, "DATA[15:0]");
-        assert_eq!(draft.fields.slice, "DATA[7:0]");
-        assert_eq!(draft.fields.orientation, BusTapOrientation::Automatic);
-        assert!(!draft.dirty);
-        assert!(!draft.discard_confirm);
-        assert!(draft.fields.validate().can_commit());
         assert_eq!(draft.source.as_ref(), Some(&source));
+        assert_eq!(draft.fields.orientation, BusTapOrientation::Automatic);
         draft.close();
         assert!(draft.source.is_none());
         let mut next = source;
         next.document_epoch += 1;
-        draft.open(next.clone());
+        draft.open(next.clone(), String::new());
         assert_eq!(draft.source.as_ref(), Some(&next));
     }
 
+    /// Escape leaves at once. The draft owns nothing, so there is nothing to
+    /// confirm the discard of.
     #[test]
-    fn edited_drafts_require_an_explicit_second_discard_action() {
-        let mut draft = BusTapDialogState::default();
-        draft.open(test_source());
-        assert!(draft.attempt_close());
-        assert!(!draft.open);
+    fn escape_closes_the_form_at_once_and_places_nothing() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = RSpiceApp::test_instance();
+        open_bus_tap(&mut app.state);
+        fill(&mut app.state, "DATA[15:0]", "DATA[7:0]");
 
-        draft.open(test_source());
-        draft.mark_edited();
-        assert!(!draft.attempt_close());
-        assert!(draft.open);
-        assert!(draft.discard_confirm);
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
+            app.render_bus_tap_dialog(ctx)
+        });
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
+            app.render_bus_tap_dialog(ctx)
+        });
 
-        draft.mark_edited();
-        assert!(!draft.discard_confirm);
-        assert!(!draft.attempt_close());
-        assert!(draft.attempt_close());
-        assert!(!draft.open);
+        assert!(!app.state.dialogs.bus_tap.open);
+        assert!(app.state.schematic.session.editor.pending_bus_tap.is_none());
+        assert_eq!(app.state.schematic.session.editor.tool, Tool::Select);
     }
 
     #[test]
@@ -254,6 +263,7 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
         open_bus_tap(&mut app.state);
+        fill(&mut app.state, "DATA[15:0]", "DATA[7:0]");
 
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_bus_tap_dialog(ctx)
@@ -311,6 +321,7 @@ mod tests {
                 .bootstrap_for_cell_view(&master.key(), "Sheet 1", [])
                 .unwrap();
             open_bus_tap(&mut app.state);
+            fill(&mut app.state, "DATA[15:0]", "DATA[7:0]");
             let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
                 app.render_bus_tap_dialog(ctx)
             });
@@ -382,28 +393,5 @@ mod tests {
             assert_eq!(app.state.schematic.content_version(), content, "{change}");
             assert_eq!(app.state.schematic.topology_version(), topology, "{change}");
         }
-    }
-
-    #[test]
-    fn rendered_escape_requires_two_actions_for_an_edited_draft() {
-        let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let mut app = RSpiceApp::test_instance();
-        open_bus_tap(&mut app.state);
-        app.state.dialogs.bus_tap.mark_edited();
-
-        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-            app.render_bus_tap_dialog(ctx)
-        });
-        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
-            app.render_bus_tap_dialog(ctx)
-        });
-        assert!(app.state.dialogs.bus_tap.open);
-        assert!(app.state.dialogs.bus_tap.discard_confirm);
-
-        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
-            app.render_bus_tap_dialog(ctx)
-        });
-        assert!(!app.state.dialogs.bus_tap.open);
     }
 }

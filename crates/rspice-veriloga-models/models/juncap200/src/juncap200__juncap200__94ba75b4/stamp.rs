@@ -7086,4 +7086,6 @@ impl Instance {
         );
     }
 
+
+    pub const STAMP_PATTERN: rspice_veriloga_runtime::GeneratedVerilogAStampPattern = rspice_veriloga_runtime::GeneratedVerilogAStampPattern { resistive: &[(0, 0), (0, 1), (1, 0), (1, 1)], dynamic: &[], reactive: &[(0, 0), (0, 1), (1, 0), (1, 1)], rhs_rows: &[0, 1] };
 }

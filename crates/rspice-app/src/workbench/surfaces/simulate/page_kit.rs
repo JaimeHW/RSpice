@@ -56,9 +56,9 @@ pub(super) enum Tone {
 }
 
 /// Side of a problem mark set in front of a status or a cell, and the advance
-/// from the mark's left edge to the text after it: the kit's own row metrics.
-const MARK_SIDE: f32 = 11.0;
-const MARK_ADVANCE: f32 = 17.0;
+/// from the mark's left edge to the text after it: read from the kit's own
+/// row metrics.
+use crate::ui::widgets::{PROBLEM_MARK_ADVANCE as MARK_ADVANCE, PROBLEM_MARK_SIDE as MARK_SIDE};
 
 impl Tone {
     /// The colour the words are painted in.

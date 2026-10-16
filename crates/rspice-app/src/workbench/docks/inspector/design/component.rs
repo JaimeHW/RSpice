@@ -1155,15 +1155,15 @@ pub(super) fn operating_point_rows(
 }
 
 /// The engine's name for `component` at the occurrence being edited: the
-/// card name on the top sheet, the dotted instance path below it. The report
-/// names every device that way, so a bare name below the root would read the
-/// operating point of a different instance of the same master.
+/// element the engine knows on the top sheet, the dotted instance path below
+/// it. The report names every device that way, so a bare name below the root
+/// would read the operating point of a different instance of the same master.
 pub(super) fn device_engine_name(state: &AppState, component: &Component) -> Option<String> {
     state
         .workspace
         .content
         .occurrence_path()
-        .engine_name_for(&component.emitted_instance_name())
+        .engine_name_for(&component.engine_element_name())
         .ok()
 }
 
@@ -1234,6 +1234,12 @@ pub(super) fn component_checks(ui: &mut Ui, app: &RSpiceApp, component: &Compone
 }
 
 pub(super) fn violation_targets_component(violation: &DrcViolation, component: &Component) -> bool {
+    // A finding inside an instantiated cellview names that cellview's
+    // components, and `amp`'s `R1` is not this sheet's `R1` however alike the
+    // two references read.
+    if matches!(violation.location, DrcLocation::InsideInstance { .. }) {
+        return false;
+    }
     // A terminal finding belongs to the component that owns the terminal. The
     // identity has to be read off the location rather than left to the related
     // items, because an instance with no authored reference is named by its id

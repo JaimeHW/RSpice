@@ -6106,6 +6106,77 @@ impl VerilogADevice {
             .collect()
     }
 
+    /// Mapped `(row, col)` locations of the structural coupling each source
+    /// branch stamps: its current into both KCL rows and, unless an indirect
+    /// contribution owns its row, both node voltages into its branch row.
+    pub fn mapped_branch_incidence(&self) -> Vec<(Option<usize>, Option<usize>)> {
+        let mut locations = Vec::new();
+        for (ordinal, source) in self.model.branch_sources.iter().enumerate() {
+            let branch = self.stamp_index_to_node(&StampIndex::Branch(ordinal));
+            for endpoint in [&source.pos, &source.neg] {
+                let node = self.stamp_index_to_node(endpoint);
+                locations.push((node, branch));
+                if !source.indirect {
+                    locations.push((branch, node));
+                }
+            }
+        }
+        locations
+    }
+
+    /// The mapped rows into which an equation of `artifact`'s MIR that is not
+    /// a sum of `ddt()` terms (`MirModel::equation_stores_only_charge`)
+    /// stamps, directly or through its source branch's coupling: the rows a
+    /// DC evaluation can reach.
+    ///
+    /// `None` when the MIR's nodes do not line up with this model's terminals
+    /// and internal nodes, so the answer would be a guess.
+    pub fn mapped_dc_equation_rows(&self, artifact: &CanonicalIrArtifact) -> Option<Vec<usize>> {
+        let mir = &artifact.mir;
+        let externals = mir.nodes.iter().filter(|node| node.is_external).count();
+        if externals != self.model.num_terminals
+            || mir.nodes.len() - externals != self.model.internal_nodes
+            || mir
+                .nodes
+                .iter()
+                .enumerate()
+                .any(|(index, node)| usize::from(node.id) != index)
+        {
+            return None;
+        }
+        let (mut terminal, mut internal) = (0, 0);
+        let index: Vec<StampIndex> = mir
+            .nodes
+            .iter()
+            .map(|node| {
+                if node.is_external {
+                    terminal += 1;
+                    StampIndex::Terminal(terminal - 1)
+                } else {
+                    internal += 1;
+                    StampIndex::Internal(internal - 1)
+                }
+            })
+            .collect();
+        let mut rows = Vec::new();
+        for equation in &mir.equations {
+            if mir.equation_stores_only_charge(equation) {
+                continue;
+            }
+            for node in [equation.branch.pos_node, equation.branch.neg_node]
+                .into_iter()
+                .flatten()
+            {
+                rows.extend(
+                    index
+                        .get(usize::from(node))
+                        .and_then(|index| self.stamp_index_to_node(index)),
+                );
+            }
+        }
+        Some(rows)
+    }
+
     /// Recompute cached matrix/RHS node mappings after topology changes.
     fn rebuild_matrix_indices(&mut self) {
         let mut rhs = vec![Vec::new(); self.model.stamp_programs.len()];

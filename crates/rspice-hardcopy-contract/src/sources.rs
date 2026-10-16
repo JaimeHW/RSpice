@@ -1,14 +1,16 @@
 //! Project-owned hardcopy source-set records and their shared validation.
 //!
 //! A source set is the persisted, digest-authenticated answer to "which exact
-//! document revisions does this print job cover". `ProjectWorkspace` owns these
-//! records directly, so they live here rather than beside the adapters that
-//! resolve live documents: the adapters need the schematic symbol library and
-//! the analysis viewers, and `state` must not reach up through those to
-//! describe its own saved data.
+//! document revisions does this print job cover". `rspice-project`'s
+//! `ProjectWorkspace` owns these records directly, so they live here rather
+//! than beside the adapters that resolve live documents: the adapters are in
+//! `rspice-hardcopy`, which carries the PDF, SVG and raster backends, and the
+//! app-crate dependency check does not allow `rspice-project` to depend on it.
 //!
-//! The document adapters in `workbench::hardcopy_adapters::sources` import these types
-//! and the shared validation helpers back down from here.
+//! The document adapters in `rspice-hardcopy`'s `sources` module import these
+//! types and the shared validation helpers back down from here, and
+//! `rspice-app`'s `workbench::hardcopy_adapters::sources` re-exports those
+//! adapters beside its application-side pieces.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -38,6 +40,10 @@ pub struct HardcopyPublicationIdentity {
     pub revision_label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub publication_date_utc: Option<String>,
+    /// Where the document stands in its release, such as `Draft`, as the
+    /// title block's Document status letters it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_status: Option<String>,
 }
 
 impl HardcopyPublicationIdentity {
@@ -46,12 +52,14 @@ impl HardcopyPublicationIdentity {
         document_path: impl Into<String>,
         revision_label: Option<String>,
         publication_date_utc: Option<String>,
+        document_status: Option<String>,
     ) -> Result<Self, HardcopySourceError> {
         let identity = Self {
             project_name: project_name.into(),
             document_path: document_path.into(),
             revision_label,
             publication_date_utc,
+            document_status,
         };
         identity.validate()?;
         Ok(identity)
@@ -70,6 +78,9 @@ impl HardcopyPublicationIdentity {
         )?;
         if let Some(revision) = &self.revision_label {
             validate_label("publication revision", revision, DISPLAY_NAME_LIMIT)?;
+        }
+        if let Some(status) = &self.document_status {
+            validate_label("publication document status", status, DISPLAY_NAME_LIMIT)?;
         }
         if let Some(date) = &self.publication_date_utc
             && !is_iso_utc_date(date)

@@ -929,4 +929,84 @@ mod tests {
             found.join("\n  ")
         );
     }
+
+    /// The placement forms paint no status in colour, and none of the mockup
+    /// frame they were ported inside comes back.
+    ///
+    /// Each of these six surfaces was a 760 pt two-pane shell: a fixed
+    /// drawing labelled a live preview, a "100 mil grid" constant, three
+    /// cards restating the same three sentences, a green "legal preview" dot
+    /// and a pointer/stylus disclaimer, with one to four real fields beside
+    /// it. The frame is gone; this is what keeps it gone, because the
+    /// vocabulary is what came back last time. The scan reaches into the
+    /// editor crate, which holds the fields half of every one of these forms
+    /// and has no self-scan of its own.
+    #[test]
+    fn the_placement_forms_paint_no_status_in_colour_and_keep_no_mockup_frame() {
+        const FILES: [&str; 11] = [
+            "src/workbench/app/dialogs/placement/builtin_xspice.rs",
+            "src/workbench/app/dialogs/placement/bus_tap.rs",
+            "src/workbench/app/dialogs/placement/design_note.rs",
+            "src/workbench/app/dialogs/placement/documentation_shape.rs",
+            "src/workbench/app/dialogs/placement/net_label.rs",
+            "src/workbench/app/dialogs/placement/pin_port.rs",
+            "../rspice-schematic-editor/src/annotations/note_placement.rs",
+            "../rspice-schematic-editor/src/annotations/shape_placement.rs",
+            "../rspice-schematic-editor/src/bus_tap_placement.rs",
+            "../rspice-schematic-editor/src/net_label_placement.rs",
+            "../rspice-schematic-editor/src/xspice_placement.rs",
+        ];
+        const BANNED_CALLS: [&str; 4] = [
+            "colored_label",
+            "status_dot(",
+            "StatusMark::Success",
+            "StatusMark::Neutral",
+        ];
+        const PALETTE_RECEIVERS: [&str; 4] = ["color", "colors", "c", "palette"];
+        const BANNED_ROLES: [&str; 2] = ["ok", "info"];
+        // The frame's own words. Spelled in halves so this file is not itself
+        // a match: a detector that matches itself is one nobody can keep
+        // green, and these are strings, not identifiers, so a boundary test
+        // would not separate them.
+        let retired: Vec<String> = [
+            ("live schematic ", "preview"),
+            ("100 mil ", "grid"),
+            ("legal ", "preview"),
+            ("stable IDs + one ", "undo record"),
+            ("connectivity \u{00b7} discipline \u{00b7} ", "hierarchy"),
+            ("Pointer, touch, stylus, and ", "keyboard entry"),
+            ("Placement / transform ", "parameters"),
+            ("review ", "boundary"),
+        ]
+        .iter()
+        .map(|(head, tail)| format!("{head}{tail}"))
+        .collect();
+
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut found = Vec::new();
+        for file in FILES {
+            let path = root.join(file);
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+            for (index, line) in without_test_items(&source).lines().enumerate() {
+                let code = line.split("//").next().unwrap_or_default();
+                let banned_call = BANNED_CALLS.iter().any(|call| code.contains(call));
+                let banned_role = PALETTE_RECEIVERS.iter().any(|receiver| {
+                    BANNED_ROLES
+                        .iter()
+                        .any(|role| reads_palette_role(code, receiver, role))
+                });
+                let frame = retired.iter().any(|words| line.contains(words.as_str()));
+                if banned_call || banned_role || frame {
+                    found.push(format!("{file}:{}: {}", index + 1, line.trim()));
+                }
+            }
+        }
+        assert!(
+            found.is_empty(),
+            "a placement form paints status in colour, or has grown the mockup frame back; \
+             these forms are their fields and nothing else:\n  {}",
+            found.join("\n  ")
+        );
+    }
 }

@@ -51,6 +51,10 @@ impl<S: AsRef<SchematicDocument>> SchematicBuffers for HashMap<String, S> {
 /// netlist masters, case-insensitively.
 pub struct HierarchySource<'a> {
     masters: HashMap<String, &'a SchematicDocument>,
+    /// Every indexed cell view as its buffer key spells it, beside the
+    /// document it names: the one way to say which cell view a borrowed
+    /// buffer is.
+    references: Vec<(CellViewRef, &'a SchematicDocument)>,
     libraries: Option<&'a LibraryCatalog>,
     schematic_buffers: Option<&'a dyn SchematicBuffers>,
     execution_plan: Option<ConfigurationExecutionPlan>,
@@ -61,6 +65,7 @@ impl<'a> HierarchySource<'a> {
     /// Index workspace schematic buffers (keys `"library/cell/view"`).
     pub fn from_buffers<S: AsRef<SchematicDocument>>(buffers: &'a HashMap<String, S>) -> Self {
         let mut masters = HashMap::new();
+        let mut references = Vec::with_capacity(buffers.len());
         for (key, schematic) in buffers {
             let mut parts = key.split('/');
             let (Some(library), Some(cell), Some(view)) =
@@ -69,9 +74,11 @@ impl<'a> HierarchySource<'a> {
                 continue;
             };
             masters.insert(Self::view_key(library, cell, view), schematic.as_ref());
+            references.push((CellViewRef::new(library, cell, view), schematic.as_ref()));
         }
         Self {
             masters,
+            references,
             libraries: None,
             schematic_buffers: None,
             execution_plan: None,
@@ -114,6 +121,14 @@ impl<'a> HierarchySource<'a> {
             .with_connectivity(projection.connectivity());
         source.execution_plan = Some(projection.plan().clone());
         source
+    }
+
+    /// Seal a resolved plan onto buffers indexed without a projection, for a
+    /// test that needs a configuration without the workspace behind one.
+    #[cfg(test)]
+    pub(crate) fn with_execution_plan(mut self, plan: ConfigurationExecutionPlan) -> Self {
+        self.execution_plan = Some(plan);
+        self
     }
 
     /// The same binding for a caller holding the shared execution handle.
@@ -246,14 +261,46 @@ impl<'a> HierarchySource<'a> {
             .is_some_and(|plan| plan.configuration_id().is_some())
     }
 
+    /// Which cell view a borrowed document is, when it is one of the very
+    /// buffers this source indexes.
+    ///
+    /// Identity, not content: two cell views may hold equal drawings, and a
+    /// caller that hands over an editor copy rather than the indexed buffer is
+    /// told nothing rather than told a guess.
+    pub fn cellview_of(&self, document: &SchematicDocument) -> Option<CellViewRef> {
+        self.references
+            .iter()
+            .find(|(_, indexed)| std::ptr::eq(*indexed, document))
+            .map(|(reference, _)| reference.clone())
+    }
+
     /// The exact cell view a placed binding names. A master is a Library/Cell/
     /// View, so the view is never dropped from the lookup: two views of one
-    /// cell are two masters.
+    /// cell are two masters. See [`Self::placed_master`] for the one view a
+    /// placement names that is not a master.
     pub fn schematic_master_for_binding(
         &self,
         binding: &LibraryCellInstance,
     ) -> Option<&'a SchematicDocument> {
-        self.master_view(&binding.library, &binding.cell, &binding.view)
+        let master = Self::placed_master(binding);
+        self.master_view(&master.library, &master.cell, &master.view)
+    }
+
+    /// The cell view a placed binding instantiates.
+    ///
+    /// That is the view it names, except a cell's `symbol`: a symbol is how
+    /// an instance is drawn, not what it contains, so a placement made from
+    /// it instantiates the cell's schematic. The hierarchy resolver binds it
+    /// so, and the deck is written from what the resolver binds; a lookup
+    /// that took `symbol` literally would find no master where the deck has
+    /// one.
+    pub fn placed_master(binding: &LibraryCellInstance) -> CellViewRef {
+        let view = if binding.view.eq_ignore_ascii_case("symbol") {
+            rspice_design_model::cell_view::DEFAULT_SCHEMATIC_VIEW
+        } else {
+            binding.view.as_str()
+        };
+        CellViewRef::new(&binding.library, &binding.cell, view)
     }
 
     /// The view type of one cell view, or the schematic every buffer in this

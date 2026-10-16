@@ -782,8 +782,10 @@ pub struct HdlTestbenchReport {
     pub fatals: u32,
 }
 
-/// The modules a source declares, in order.
-fn declared_modules(source: &str) -> Result<Vec<String>, DigitalRunError> {
+/// The modules a source declares, in order, and the ones it instantiates.
+fn declared_modules(
+    source: &str,
+) -> Result<(Vec<String>, std::collections::BTreeSet<String>), DigitalRunError> {
     use rspice_veriloga::lexer::{Lexer, TokenKind};
     let mut sources = rspice_veriloga::SourceMap::new();
     let id = sources.add_source("unit", source);
@@ -793,11 +795,28 @@ fn declared_modules(source: &str) -> Result<Vec<String>, DigitalRunError> {
             .map_err(|error| DigitalRunError::Compile {
                 detail: error.to_string(),
             })?;
-    Ok(tokens
+    let declared: Vec<String> = tokens
         .windows(2)
         .filter(|pair| matches!(pair[0].kind, TokenKind::Module | TokenKind::Macromodule))
         .filter_map(|pair| pair[1].text.clone())
-        .collect())
+        .collect();
+    // An instantiation is a declared module's name followed by an instance
+    // name or a parameter override, anywhere but after `module` itself. The
+    // plan's scope table misses an instance with no digital content of its
+    // own, such as one that only holds further instances.
+    let named: std::collections::BTreeSet<&str> = declared.iter().map(String::as_str).collect();
+    let instantiated = tokens
+        .windows(3)
+        .filter(|triple| {
+            !matches!(triple[0].kind, TokenKind::Module | TokenKind::Macromodule)
+                && triple[1].kind == TokenKind::Identifier
+                && matches!(triple[2].kind, TokenKind::Identifier | TokenKind::Hash)
+        })
+        .filter_map(|triple| triple[1].text.as_deref())
+        .filter(|name| named.contains(name))
+        .map(str::to_owned)
+        .collect();
+    Ok((declared, instantiated))
 }
 
 /// Run a self-checking HDL testbench to its end (design P2 section 2.3).
@@ -852,7 +871,8 @@ pub fn run_digital_testbench(
         ..CompilerOptions::default()
     });
     let mut plans = Vec::new();
-    for module in declared_modules(&unit)? {
+    let (declared, mut instantiated) = declared_modules(&unit)?;
+    for module in declared {
         let artifact = compiler
             .compile_canonical_ir_module(&unit, Some(&module))
             .map_err(|error| DigitalRunError::Compile {
@@ -867,14 +887,15 @@ pub fn run_digital_testbench(
         plans.push((module, artifact.digital));
     }
     // A module some other module instantiates is not a root.
-    let instantiated: std::collections::BTreeSet<String> = plans
-        .iter()
-        .flat_map(|(_, plan)| plan.scopes.iter().skip(1))
-        .filter(|scope| {
-            scope.kind == rspice_veriloga::canonical_ir::digital::DigitalScopeKind::Module
-        })
-        .map(|scope| scope.module.to_string())
-        .collect();
+    instantiated.extend(
+        plans
+            .iter()
+            .flat_map(|(_, plan)| plan.scopes.iter().skip(1))
+            .filter(|scope| {
+                scope.kind == rspice_veriloga::canonical_ir::digital::DigitalScopeKind::Module
+            })
+            .map(|scope| scope.module.to_string()),
+    );
     let roots: Vec<_> = plans
         .into_iter()
         .filter(|(module, plan)| !instantiated.contains(module) && plan.has_executable_content())

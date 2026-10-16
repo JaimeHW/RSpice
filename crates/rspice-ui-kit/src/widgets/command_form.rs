@@ -31,7 +31,7 @@ use crate::tokens::{self, Tokens};
 use super::dialog::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
 use super::form;
 use super::segmented::{SegmentedWidth, segmented};
-use super::select::select;
+use super::select::{SelectOutput, select, select_with_response};
 use super::status_mark::{PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE, Problem, paint_problem_mark};
 
 /// Air between a row's label column and its control.
@@ -55,6 +55,11 @@ const STACKED_LABEL_GAP: f32 = 4.0;
 /// field give the value they show. A read-only value starts there too, so
 /// every value in a form starts at one x.
 const VALUE_INSET: f32 = 8.0;
+/// One further line of a multi-line field, past the first.
+const MULTILINE_LINE_H: f32 = 17.0;
+/// A whole-number field: wide enough for four digits and its drag affordance,
+/// narrow enough to leave the bounds beside it on one line.
+const NUMBER_FIELD_W: f32 = 64.0;
 /// One line of a set of checks or choices, and one entry of a list, under a
 /// fine pointer. These are words beside a mark, not inputs, so they take less
 /// than a field; under a finger every line is a full control tall.
@@ -65,6 +70,8 @@ const MARK_SIDE: f32 = 14.0;
 const MARK_GAP: f32 = 6.0;
 /// Air between two columns of a set of checks or choices.
 const MARK_COLUMN_GAP: f32 = 16.0;
+/// Air between the two axes of a point row.
+const POINT_GAP: f32 = 8.0;
 /// Entries a list shows before it scrolls inside its own row.
 const LIST_VISIBLE_ENTRIES: usize = 5;
 /// Air between a list's last entry and the field that adds the next.
@@ -209,6 +216,96 @@ impl<'u> FormRows<'u> {
         })
     }
 
+    /// One bounded whole number, with what the engine will accept stated
+    /// after it.
+    ///
+    /// The words are the bounds, not a restatement of the control: a port
+    /// that may be left out says so there, where the reader is choosing.
+    pub fn number(
+        &mut self,
+        label: &str,
+        value: &mut usize,
+        range: std::ops::RangeInclusive<usize>,
+        allowed: &str,
+    ) -> Response {
+        self.row(label, |ui, _| {
+            let t = Tokens::get(ui.ctx());
+            let response = ui.add_sized(
+                vec2(NUMBER_FIELD_W, t.metrics.ctl_h),
+                egui::DragValue::new(value).range(range).speed(1.0),
+            );
+            form::name_control(ui, &response, label);
+            ui.label(
+                egui::RichText::new(allowed)
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_dim),
+            );
+            response
+        })
+    }
+
+    /// One multi-line mono text field, `lines` controls tall.
+    ///
+    /// For the one value in this family that is prose rather than a name: a
+    /// design note's text, where a line break is content the model keeps. A
+    /// form holding one of these hands Enter to the body with
+    /// [`CommandForm::primary_on_enter`].
+    pub fn text_multiline(
+        &mut self,
+        label: &str,
+        id: Id,
+        value: &mut String,
+        hint: &str,
+        lines: usize,
+    ) -> Response {
+        let t = Tokens::get(self.ui.ctx());
+        let first_line_h = t.metrics.ctl_h;
+        let height = first_line_h + MULTILINE_LINE_H * lines.saturating_sub(1) as f32;
+        self.block(label, first_line_h, |ui, width| {
+            let response = ui.add_sized(
+                vec2(width, height),
+                egui::TextEdit::multiline(value)
+                    .id(id)
+                    .font(egui::TextStyle::Monospace)
+                    .hint_text(hint)
+                    .margin(egui::Margin::symmetric(8, 4)),
+            );
+            form::name_control(ui, &response, label);
+            response
+        })
+    }
+
+    /// One point: its X and Y side by side in the control column, for a form
+    /// that enters exact geometry. Returns the two fields in that order.
+    pub fn point(
+        &mut self,
+        label: &str,
+        id: Id,
+        x: &mut String,
+        y: &mut String,
+    ) -> (Response, Response) {
+        self.row(label, |ui, width| {
+            let t = Tokens::get(ui.ctx());
+            let field = ((width - POINT_GAP) * 0.5).max(1.0);
+            ui.spacing_mut().item_spacing.x = POINT_GAP;
+            let axis = |ui: &mut Ui, axis: &str, value: &mut String| {
+                let response = ui.add_sized(
+                    vec2(field, t.metrics.ctl_h),
+                    egui::TextEdit::singleline(value)
+                        .id(id.with(axis))
+                        .font(egui::TextStyle::Monospace)
+                        .hint_text(axis)
+                        .margin(egui::Margin::symmetric(8, 4)),
+                );
+                form::name_control(ui, &response, &format!("{label} {axis}"));
+                response
+            };
+            let x = axis(ui, "X", x);
+            let y = axis(ui, "Y", y);
+            (x, y)
+        })
+    }
+
     /// One contiguous group of exclusive options. Returns `true` when the
     /// selection changed this frame.
     pub fn segmented(
@@ -233,6 +330,20 @@ impl<'u> FormRows<'u> {
     ) -> Option<usize> {
         self.row(label, |ui, width| {
             select(ui, id_salt, label, selected, options, width)
+        })
+    }
+
+    /// [`Self::select`] with the control itself, for a form whose only row is
+    /// the dropdown and which therefore has to be able to give it the caret.
+    pub fn select_with_response(
+        &mut self,
+        label: &str,
+        id_salt: &str,
+        selected: &str,
+        options: &[String],
+    ) -> SelectOutput {
+        self.row(label, |ui, width| {
+            select_with_response(ui, id_salt, label, selected, options, width)
         })
     }
 
@@ -865,6 +976,7 @@ pub struct CommandForm<'a> {
     status: Result<Option<&'a str>, &'a str>,
     status_lines: usize,
     status_reserved: bool,
+    primary_on_enter: bool,
 }
 
 impl<'a> CommandForm<'a> {
@@ -882,7 +994,15 @@ impl<'a> CommandForm<'a> {
             status: Ok(None),
             status_lines: 1,
             status_reserved: true,
+            primary_on_enter: true,
         }
+    }
+
+    /// Hand Enter to the body, for a form holding a
+    /// [`FormRows::text_multiline`] row where Enter is a line break.
+    pub fn primary_on_enter(mut self, on: bool) -> Self {
+        self.primary_on_enter = on;
+        self
     }
 
     /// A plain action beside the primary, for a form whose primary does one
@@ -971,14 +1091,14 @@ impl<'a> CommandForm<'a> {
         let context = self.context;
         let fields_enabled = self.fields_enabled;
         let label_col = self.label_col;
-        // Cancel is the only word any form in this family has for leaving, and
-        // Enter is the only key any of them commits on: a form with a
-        // multiline body will add the opt-out when it arrives.
+        // Cancel is the only word any form in this family has for leaving.
+        // Enter commits, except in a form that said its body owns the key.
         let mut dialog = Dialog::new(self.title, self.primary)
             .size(DialogSize::CommandForm)
             .overlay_scrollbar()
             .ghost("Cancel")
             .primary_enabled(self.primary_enabled)
+            .primary_on_enter(self.primary_on_enter)
             .initial_focus(DialogInitialFocus::BodyControl);
         if let Some(secondary) = self.secondary {
             dialog = dialog

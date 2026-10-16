@@ -170,7 +170,7 @@ br937	vlg	passed	L4	pass	PASSED
 br946	vlg	passed	L1	pass	PASSED
 br947	vlg	gold	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
 br948	vlg	passed	L3	pass	PASSED
-br955	vlg	passed	L4	fail	compile error: Parse error: Expected Semicolon, found Hash
+br955	vlg	passed	L4	pass	PASSED
 br960a	vlg	gold	-	excluded:sdf-annotate	
 br960b	vlg	gold	-	excluded:sdf-annotate	
 br960c	vlg	gold	-	excluded:sdf-annotate	
@@ -187,15 +187,15 @@ br982	vlg	ce	L3	pass	language error: Semantic error: Invalid expression: `simple
 br982a	vlg	ce	L3	pass	language error: Semantic error: Invalid expression: `simple_func` takes 1 argument and is given 2
 br982b	vlg	ce	L3	pass	language error: Semantic error: Invalid expression: `simple_task` takes 2 arguments and is given 3
 br988	vlg	passed	L4	refused:begin	Parse error: Unsupported module item: begin
-br990	vlg	passed	L4	fail	compile error: Parse error: Expected Semicolon, found Hash
+br990	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
 br991a	vlg	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
 br999	vlg	passed	L1	pass	PASSED
 br_gh103	vlg	passed	L1	pass	PASSED
 br_gh11	vlg	co	L1	fail	compile error: Parse error: Invalid expression
 br_gh1117	vlg	ce	L1	refused:generate-region	Parse error: Unsupported generate region: IEEE 1364-2005 section 12.4 nests generate constructs directly, without reopening a region
 br_gh1173	vlg	ce	L4	pass	language error: Parse error: Expected port name, found RParen
-br_gh1174a	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Hash
-br_gh1174b	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Hash
+br_gh1174a	vlg	ce	L1	refused:case	Parse error: Unsupported module item: case
+br_gh1174b	vlg	ce	L1	pass	language error: Semantic error: Invalid contribution: cannot contribute to `id_8`, which is a Parameter of the continuous-domain module and is not a discrete-domain assignment ...
 br_gh1175a	vlg	ce	L7	fail	compiled without error; nothing to run: module `ivltests/br_gh1175a.v` declares no digital nets, processes or drivers
 br_gh1175b	vlg	ce	L7	fail	compiled without error; nothing to run: module `ivltests/br_gh1175b.v` declares no digital nets, processes or drivers
 br_gh1175c	vlg	ce	L7	fail	compiled without error; nothing to run: module `ivltests/br_gh1175c.v` declares no digital nets, processes or drivers
@@ -223,7 +223,7 @@ br_gh142	vlg	ce	L1	fail	internal error: Code generation error: canonical IR vali
 br_gh15	vlg	passed	L1	pass	PASSED
 br_gh152	vlg	ce	L1	pass	language error: Parse error: Expected RParen, found Identifier
 br_gh156	vlg	gold	L5	fail	compile error: Parse error: Expected Semicolon, found Identifier
-br_gh157	vlg	ce	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+br_gh157	vlg	ce	L4	pass	language error: Semantic error: Invalid expression: `defparam dut.x` assigns `x`, a `localparam` of module `dut`; IEEE 1364-2005 section 12.2 lets no override reach a local par...
 br_gh162	vlg	passed	L1	racy	passes in reverse order only; no PASSED line (1 output lines)
 br_gh163	vlg	ce	L3	pass	language error: Parse error: Expected Semicolon, found Identifier
 br_gh18	vlg	passed	L1	pass	PASSED
@@ -349,7 +349,7 @@ check_constant_16	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature:
 check_constant_17	vlg	ce	L1	pass	language error: Semantic error: Invalid expression: packed array part-select bounds must be constant signed 64-bit integers
 check_constant_18	vlg	ce	L1	pass	language error: Semantic error: Invalid expression: packed array part-select bounds must be constant signed 64-bit integers
 check_constant_19	vlg	ce	L1	pass	language error: Semantic error: Invalid expression: a part select of `Out` must have constant bounds; IEEE 1364-2005 section 5.2.1 makes both bounds of a part select constant e...
-check_constant_2	vlg	ce	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+check_constant_2	vlg	ce	L4	refused:$rspice_override	Semantic error: Unsupported feature: parameter 'Value1' of instance 'top_module.sub_module': parameter `$rspice_override`: `Value2` is not a discrete-domain sig...
 check_constant_20	vlg	ce	L1	pass	language error: Semantic error: Invalid expression: a part select of `Out` must have constant bounds; IEEE 1364-2005 section 5.2.1 makes both bounds of a part select constant e...
 check_constant_3	vlg	ce	-	excluded:flag-g1995	
 check_constant_4	vlg	ce	L1	fail	compiled without error; ran to quiescence
@@ -416,10 +416,10 @@ decl_assign1	vlg	passed	L3	pass	PASSED
 def_nettype	vlg	passed	L7	fail	compile error: I/O error: Preprocessor error: line 118: unsupported `default_nettype tri0`; supported net defaults are wire, tri and none
 def_nettype_none	vlg	ce	L1	refused:implicit-net-declaration	Parse error: Unsupported implicit net declaration: `b` requires a net declaration under `default_nettype none`
 define1	vlg	passed	L1	pass	PASSED
-defparam	vlg	passed	L4	refused:defparam	testbench gap: no root selection (-s main); Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
-defparam2	vlg	gold	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
-defparam3	vlg	gold	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
-defparam3.5	vlg	passed	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+defparam	vlg	passed	L4	refused:hierarchical-reference	testbench gap: no root selection (-s main); Semantic error: Unsupported feature: hierarchical reference: `testmodA.value0` is not a continuous net, branch, parameter or analog function
+defparam2	vlg	gold	L4	refused:defparam	Parse error: Unsupported defparam target: an indexed scope; a `defparam` reaching into an instance array or a generate block (IEEE 1364-2005 section 12.2.1) is ...
+defparam3	vlg	gold	L4	refused:defparam	Parse error: Unsupported defparam target: an indexed scope; a `defparam` reaching into an instance array or a generate block (IEEE 1364-2005 section 12.2.1) is ...
+defparam3.5	vlg	passed	L4	refused:wire	Semantic error: Unsupported feature: port `out0` of instance `testmodA` is connected to `out0`, which is not a declared discrete-domain signal; this compiler do...
 defparam4	vlg	gold	L4	refused:if	Parse error: Unsupported module item: if
 delay	vlg	gold	L1	pass	matches the gold file
 delay2	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
@@ -697,19 +697,19 @@ param_test4	vlg	passed	L1	pass	PASSED
 param_times	vlg	passed	L1	pass	PASSED
 parameter_1bit	vlg	passed	-	excluded:systemverilog-systf:$bits	
 parameter_in_generate1	vlg	ce	L1	refused:parameter	Parse error: Unsupported generate block: parameter declaration (use localparam); VAMS-2023 6.6 excludes module-interface declarations from a generate block
-parameter_no_default	vlg	ce	L4	pass	language error: Parse error: Expected Semicolon, found Hash
-parameter_omit1	vlg	ce	L4	pass	language error: Parse error: Expected Semicolon, found Hash
-parameter_omit2	vlg	ce	L4	pass	language error: Parse error: Expected Semicolon, found Hash
-parameter_omit3	vlg	ce	L4	pass	language error: Parse error: Expected Semicolon, found Hash
-parameter_omit_invalid1	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Hash
-parameter_omit_invalid2	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Hash
-parameter_omit_invalid3	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Hash
-parameter_override_invalid1	vlg	ce	L4	pass	language error: Parse error: Expected Semicolon, found Hash
-parameter_override_invalid2	vlg	ce	L4	pass	language error: Parse error: Expected Semicolon, found Hash
+parameter_no_default	vlg	ce	L4	pass	language error: Parse error: Expected a value for parameter `A`; IEEE 1364-2005 A.2.4 gives every parameter assignment one, found none
+parameter_omit1	vlg	ce	L4	pass	language error: Parse error: Expected `parameter`, which opens each declaration of a module parameter port list (IEEE 1364-2005 A.1.3), found Identifier
+parameter_omit2	vlg	ce	L4	pass	language error: Parse error: Expected `parameter`, which opens each declaration of a module parameter port list (IEEE 1364-2005 A.1.3), found Integer
+parameter_omit3	vlg	ce	L4	pass	language error: Parse error: Expected a value for parameter `integer`; IEEE 1364-2005 A.2.4 gives every parameter assignment one, found none
+parameter_omit_invalid1	vlg	ce	L1	pass	language error: Parse error: Expected `parameter`, which opens each declaration of a module parameter port list (IEEE 1364-2005 A.1.3), found LBracket
+parameter_omit_invalid2	vlg	ce	L1	pass	language error: Parse error: Expected `parameter`, which opens each declaration of a module parameter port list (IEEE 1364-2005 A.1.3), found Signed
+parameter_omit_invalid3	vlg	ce	L1	pass	language error: Parse error: Expected a value for parameter `signed`; IEEE 1364-2005 A.2.4 gives every parameter assignment one, found none
+parameter_override_invalid1	vlg	ce	L4	pass	language error: Semantic error: Undeclared symbol: 'Z'
+parameter_override_invalid2	vlg	ce	L4	pass	language error: Semantic error: Invalid expression: `defparam i_a.Z`: module `a` declares no parameter `Z`
 parameter_override_invalid3	vlg	ce	L4	pass	language error: Semantic error: Undeclared symbol: 'A'
-parameter_override_invalid4	vlg	ce	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
-parameter_override_invalid5	vlg	ce	L4	pass	language error: Parse error: Expected Semicolon, found Hash
-parameter_override_invalid6	vlg	ce	L4	pass	language error: Parse error: Expected Semicolon, found Hash
+parameter_override_invalid4	vlg	ce	L4	pass	language error: Semantic error: Invalid expression: `defparam i_a.A` assigns `A`, a `localparam` of module `a`; IEEE 1364-2005 section 12.2 lets no override reach a local param...
+parameter_override_invalid5	vlg	ce	L4	pass	language error: Semantic error: Undeclared symbol: 'B'
+parameter_override_invalid6	vlg	ce	L4	pass	language error: Semantic error: Invalid expression: `defparam i_a.B` assigns `B`, a `localparam` of module `a`; IEEE 1364-2005 section 12.2 lets no override reach a local param...
 patch1268	vlg	passed	L1	pass	PASSED
 pca1	vlg	passed	L1	pass	PASSED
 pic	vlg	gold	L5	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `piccpu_inst.d` is not a continuous net, branch, parameter or analog function
@@ -746,8 +746,8 @@ pr1077	vlg	gold	-	excluded:flag-g2
 pr1087	vlg	passed	L4	refused:module-instance	Parse error: Unsupported module instance `INST_COUNTER`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this comp...
 pr1101	vlg	passed	L1	pass	PASSED
 pr1115	vlg	passed	L1	pass	PASSED
-pr1353345	vlg	passed	L4	fail	compile error: Parse error: Expected Semicolon, found Hash
-pr1353345b	vlg	passed	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+pr1353345	vlg	passed	L4	refused:module-instance	Parse error: Unsupported module instance `U`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler elabor...
+pr1353345b	vlg	passed	L4	refused:module-instance	Parse error: Unsupported module instance `U`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler elabor...
 pr136	vlg	passed	L1	pass	PASSED
 pr1367855	vlg	passed	L1	pass	PASSED
 pr1380261	vlg	passed	L1	pass	PASSED
@@ -773,7 +773,7 @@ pr1489570	vlg	passed	L1	pass	PASSED
 pr1491355	vlg	passed	L1	pass	PASSED
 pr1492075	vlg	gold	L1	pass	matches the gold file
 pr1508882	vlg	passed	L1	pass	PASSED
-pr1510724	vlg	passed	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+pr1510724	vlg	passed	L4	pass	PASSED
 pr1515168	vlg	passed	L1	pass	PASSED
 pr1520314	vlg	co	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
 pr1522570	vlg	passed	L1	pass	PASSED
@@ -951,7 +951,7 @@ pr1903157	vlg	co	L1	pass	compiled
 pr1903324	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `tstr.data_in_array` is not a continuous net, branch, parameter or analog function
 pr1903343	vlg	gold	L3	pass	matches the gold file
 pr1903520	vlg	passed	L1	pass	PASSED
-pr1907192	vlg	passed	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+pr1907192	vlg	passed	L4	pass	PASSED
 pr1909940	vlg	ce	L1	fail	compiled without error; ran to tick-ceiling
 pr1909940b	vlg	ce	L1	fail	compiled without error; ran to tick-ceiling
 pr1912843	vlg	passed	L1	pass	PASSED
@@ -966,7 +966,7 @@ pr1925356	vlg	passed	L1	pass	PASSED
 pr1925363a	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: a concatenation requires a positive bounded width and non-negative constant replication counts
 pr1925363b	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: a concatenation requires a positive bounded width and non-negative constant replication counts
 pr1932444	vlg	passed	L1	pass	PASSED
-pr1934744	vlg	passed	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+pr1934744	vlg	passed	L4	refused:module-item	Parse error: Unsupported module item: test_lut
 pr1936363	vlg	gold	L1	pass	matches the gold file
 pr1938138	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'a' already defined
 pr1939165	vlg	passed	L1	pass	PASSED
@@ -1019,7 +1019,7 @@ pr2030767	vlg	passed	L1	pass	PASSED
 pr2036953	vlg	passed	L1	pass	PASSED
 pr2038048	vlg	passed	L1	pass	PASSED
 pr2039632	vlg	ce	L1	refused:generate-if-condition	Parse error: Unsupported generate if condition: an expression this compiler cannot fold to a constant; IEEE 1364-2005 section 12.4 elaborates a generate region ...
-pr2039694	vlg	gold	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+pr2039694	vlg	gold	L4	racy	passes in source order only; differs from the gold file at line 1 (6 lines against 6)
 pr2043324	vlg	passed	L3	pass	PASSED
 pr2043585	vlg	gold	-	excluded:flag-Wsensitivity-entire-array	
 pr2051694	vlg	ce	L1	pass	language error: Semantic error: Undeclared symbol: 'unknown'
@@ -1044,7 +1044,7 @@ pr2138979	vlg	passed	L1	pass	PASSED
 pr2138979b	vlg	gold	L1	pass	matches the gold file
 pr2138979c	vlg	gold	L1	pass	matches the gold file
 pr2138979d	vlg	gold	L1	pass	matches the gold file
-pr2139593	vlg	passed	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+pr2139593	vlg	passed	L4	pass	PASSED
 pr2146620	vlg	gold	L1	pass	matches the gold file
 pr2146620b	vlg	gold	L1	pass	matches the gold file
 pr2146620c	vlg	passed	L1	pass	PASSED
@@ -1145,9 +1145,9 @@ pr2725700b	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module
 pr2725700c	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `bufs`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler ela...
 pr2728032	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: separate rise, fall and turn-off delays (IEEE 1364-2005 section 7.14); write a single delay expression instead
 pr2728547	vlg	passed	L5	pass	PASSED
-pr2728812a	vlg	passed	L1	fail	compile error: Parse error: Expected Semicolon, found Hash
-pr2728812b	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Hash
-pr2728812c	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Hash
+pr2728812a	vlg	passed	L1	pass	PASSED
+pr2728812b	vlg	ce	L1	pass	language error: Semantic error: Circular dependency in digital module hierarchy at instance 'sum.genblk1.s0.genblk1.s0.genblk1.s1': specialization repeats ancestor 'sum.genblk1...
+pr2728812c	vlg	ce	L1	pass	language error: Semantic error: Circular dependency in digital module hierarchy at instance 'sum.s0.s0.s1': specialization repeats ancestor 'sum.s0.s0'
 pr273	vlg	passed	L1	pass	PASSED
 pr2745281	vlg	passed	L1	pass	PASSED
 pr2781595	vlg	passed	L6	refused:supply0	Parse error: Verilog-AMS digital construct not yet supported: `supply0`
@@ -1182,14 +1182,14 @@ pr2842621_std	vlg	passed	L5	pass	PASSED
 pr2848986	vlg	ce	L3	pass	language error: Semantic error: Invalid expression: `evt` is a named event, which has no value to read; wait for it with `@evt` (IEEE 1364-2005 section 9.7.3)
 pr2849783	vlg	passed	L4	pass	PASSED
 pr2865563	vlg	passed	L1	pass	PASSED
-pr2877564	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Hash
+pr2877564	vlg	ce	L1	refused:$rspice_override	Semantic error: Unsupported feature: parameter 'A' of instance 'testbench.bar': parameter `$rspice_override`: `ASDF` is not a discrete-domain signal; reading a ...
 pr2883958	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
 pr2885048	vlg	passed	L3	pass	PASSED
 pr2890322	vlg	passed	L3	pass	PASSED
 pr2901556	vlg	passed	L6	refused:net-declaration	Parse error: Unsupported net declaration: a net delay (IEEE 1364-2005 section 6.1.3)
 pr2909386a	vlg	passed	L1	pass	PASSED
 pr2909386b	vlg	passed	L1	pass	PASSED
-pr2909414	vlg	passed	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+pr2909414	vlg	passed	L4	pass	PASSED
 pr2909555	vlg	passed	L3	pass	PASSED
 pr2913404	vlg	passed	L1	pass	PASSED
 pr2913416	vlg	passed	L1	pass	PASSED
@@ -1214,8 +1214,8 @@ pr2971207	vlg	passed	L5	pass	PASSED
 pr2972866	vlg	gold	-	excluded:systemverilog:+=	
 pr2973532	vlg	passed	L1	pass	PASSED
 pr2974051	vlg	passed	L1	pass	PASSED
-pr2974216	vlg	passed	L1	fail	compile error: Parse error: Expected Semicolon, found Hash
-pr2974216b	vlg	passed	L1	fail	compile error: Parse error: Expected Semicolon, found Hash
+pr2974216	vlg	passed	L1	pass	PASSED
+pr2974216b	vlg	passed	L1	pass	PASSED
 pr2974294	vlg	passed	L1	pass	PASSED
 pr298	vlg	gold	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
 pr2985542	vlg	passed	L1	pass	PASSED
@@ -1285,13 +1285,13 @@ pr3465541	vlg	passed	L6	refused:not	Parse error: Unsupported `not` gate: a drive
 pr3477107	vlg	passed	L5	pass	PASSED
 pr3499807	vlg	gold	L6	refused:supply0	Parse error: Verilog-AMS digital construct not yet supported: `supply0`
 pr3522653	vlg	gold	L1	pass	matches the gold file
-pr3527022	vlg	passed	L1	fail	compile error: Parse error: Expected Semicolon, found Hash
-pr3527694	vlg	gold	L5	fail	compile error: Parse error: Expected Semicolon, found Hash
+pr3527022	vlg	passed	L1	pass	PASSED
+pr3527694	vlg	gold	L5	racy	passes in source order only; differs from the gold file at line 1 (9 lines against 9)
 pr3534422	vlg	passed	L1	pass	PASSED
 pr3539372	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
 pr3549328	vlg	ce	L4	pass	language error: Semantic error: Invalid expression: the width of an indexed part-select of `vector` must be a positive constant expression; IEEE 1364-2005 section 5.2.1
 pr355	vlg	passed	L3	pass	PASSED
-pr3557493	vlg	passed	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+pr3557493	vlg	passed	L4	refused:defparam	Parse error: Unsupported generate block: `defparam`; IEEE 1364-2005 section 12.2.1 confines one inside a generate block to that block's own hierarchy, which thi...
 pr3561350	vlg	passed	L1	pass	PASSED
 pr3563412	vlg	passed	L1	pass	PASSED
 pr3571573	vlg	gold	L1	pass	matches the gold file
@@ -1304,7 +1304,7 @@ pr445	vlg	passed	L1	pass	PASSED
 pr478	vlg	passed	L1	fail	compile error: Parse error: Expected Semicolon, found Directive
 pr487	vlg	gold	L1	pass	matches the gold file
 pr492	vlg	gold	L1	pass	matches the gold file
-pr498b	vlg	ce	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+pr498b	vlg	ce	L4	pass	language error: Semantic error: Invalid expression: `defparam foo`: module `main` declares no parameter `foo`
 pr508	vlg	passed	L3	pass	PASSED
 pr509	vlg	passed	L1	pass	PASSED
 pr509b	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
@@ -1531,7 +1531,7 @@ sel_rval_bit_ob	vlg	gold	-	excluded:flag-Wselect-range
 sel_rval_part_ob	vlg	gold	-	excluded:flag-Wselect-range	
 select	vlg	passed	L1	pass	PASSED
 select2	vlg	passed	L1	pass	PASSED
-select3	vlg	gold	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+select3	vlg	gold	L4	pass	matches the gold file
 select4	vlg	passed	L1	pass	PASSED
 select5	vlg	passed	L4	pass	PASSED
 select6	vlg	passed	L4	pass	PASSED
@@ -1812,7 +1812,7 @@ conditsynth1	synth	passed	L1	pass	PASSED
 conditsynth2	synth	passed	L1	pass	PASSED
 conditsynth3	synth	passed	L1	pass	PASSED
 ff_dual_enable	synth	passed	L3	pass	PASSED
-for_loop_synth	synth	passed	L1	fail	compile error: Parse error: Expected Semicolon, found Hash
+for_loop_synth	synth	passed	L1	racy	passes in reverse order only; no PASSED line (1 output lines)
 for_loop_synth2	synth	passed	-	excluded:systemverilog:+=	
 if_part_no_else	synth	passed	L1	racy	passes in reverse order only; no PASSED line (1 output lines)
 if_part_no_else2	synth	passed	L1	racy	passes in reverse order only; no PASSED line (1 output lines)
@@ -1979,7 +1979,7 @@ module_port_array1	vvp	passed	-	excluded:flag-g2009
 module_port_array_init1	vvp	passed	-	excluded:flag-g2005-sv	
 monitor4	vvp	gold	L1	fail	differs from the gold file at line 11 (16 lines against 17)
 non-polymorphic-abs	vvp	passed	-	excluded:nonstandard-systf:$abs	
-param-width	vvp	gold	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+param-width	vvp	gold	L4	deviation	IEEE 1364-2005 §5.4.1 and §12.2: a parameter with no type or range takes the width of its final value, so `a + b` of 3-bit values is 3 bits and `c + d` after `defparam c = 2'd2; defparam d = 2'd3;` is 2 bits; Icarus's default gold widens without loss, its strict gold (param-width_std) is this output
 param_test3	vvp	gold	L1	fail	compile error: Semantic error: Function 'am' expects at most 0 parameter overrides argument(s), got 3
 parameter_type	vvp	gold	L3	refused:realtime	Parse error: Verilog-AMS digital construct not yet supported: `realtime`
 partsel_invalid_idx1	vvp	ce	L1	pass	language error: Semantic error: Undeclared symbol: 'does_not_exist'

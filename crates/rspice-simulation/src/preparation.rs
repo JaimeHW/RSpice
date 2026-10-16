@@ -172,17 +172,26 @@ impl std::fmt::Display for PreparationError {
 }
 
 /// Run the generated design's source checks before snapshot preparation.
+///
+/// The check reads the whole hierarchy below `root`, which names the root's
+/// own cellview: under a configuration it reads what the deck runs, and an
+/// instance of the root inside itself closes its cycle there. The run is
+/// refused on an Error or a Critical finding and on nothing milder; a warning
+/// travels with the run rather than stopping it.
 pub fn check_generated_design(
     schematic: &impl AsRef<rspice_design::schematic::document::SchematicDocument>,
+    root: &rspice_design_model::cell_view::CellViewRef,
     hierarchy: &rspice_design::hierarchy::HierarchySource<'_>,
 ) -> Result<rspice_design::drc::DrcResult, PreparationError> {
-    let drc = rspice_design::drc::run_check_with_hierarchy(
+    let drc = rspice_design::drc::run_check_of_cellview(
         schematic,
+        root,
         hierarchy,
         rspice_design::drc::DrcConfig {
             check_missing_ground: true,
             ..rspice_design::drc::DrcConfig::default()
         },
+        rspice_design::drc::CheckReach::Hierarchy,
     );
     if !drc.completed {
         return Err(PreparationError::new(

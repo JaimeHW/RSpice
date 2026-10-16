@@ -466,10 +466,12 @@ fn source_line_component(
     reference: &crate::state::CellViewRef,
     line: &str,
 ) -> Option<(String, String)> {
-    let token = line.split_whitespace().next()?;
+    let mut tokens = line.split_whitespace();
+    let token = tokens.next()?;
     if token.starts_with(['.', '*']) {
         return None;
     }
+    let named = tokens.next();
     let schematic = state
         .workspace
         .content
@@ -480,20 +482,67 @@ fn source_line_component(
         .components
         .iter()
         .find_map(|component| {
-            let base = component.spice_instance_name();
-            let prefix = component.kind.spice_prefix();
-            let emitted = if prefix.is_empty()
-                || base.is_empty()
-                || (base.len() >= prefix.len() && base[..prefix.len()].eq_ignore_ascii_case(prefix))
-            {
-                base
-            } else {
-                format!("{prefix}{base}")
+            // A card is headed by the element it writes, which is the
+            // component's written name: a limited `E1` heads its card `B1`.
+            // A keyword-headed card names it after the keyword: a memristor
+            // is written `YMEMRISTOR MR1`.
+            let written = component.written_element_name();
+            let head = match component.kind.element_keyword() {
+                Some(keyword) if token.eq_ignore_ascii_case(keyword) => named?,
+                Some(_) => return None,
+                None => token,
             };
-            token.eq_ignore_ascii_case(&emitted).then(|| {
+            head.eq_ignore_ascii_case(&written).then(|| {
                 let identity =
                     GeneratedSourceMapEntry::component_identity_for(&reference.key(), component.id);
-                (emitted, identity)
+                (written, identity)
             })
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{Component, ComponentType, Point, SchematicState};
+
+    /// The line `YMEMRISTOR MR1 …` is the memristor drawn `MR1`: a
+    /// keyword-headed card names its element after the keyword.
+    #[test]
+    fn a_keyword_headed_card_names_the_component_after_its_keyword() {
+        let mut state = AppState::default();
+        let view = state.workspace.content.active_view.key();
+        let mut schematic = SchematicState::default();
+        schematic.document_mut_for_test().components.extend([
+            Component::new(4, ComponentType::Memristor, Point::origin()).with_name_value("MR1", ""),
+            Component::new(5, ComponentType::Resistor, Point::new(200, 0))
+                .with_name_value("R1", "1k"),
+        ]);
+        let (design, _) = schematic.into_parts();
+        state
+            .workspace
+            .content
+            .schematic_buffers
+            .insert(view.clone(), design);
+
+        let entries = generated_source_map(
+            &state,
+            "* title\nYMEMRISTOR MR1 a 0 mem_MR1\nR1 a 0 1k\nYMEMRISTOR R1 a 0 m\n",
+        )
+        .expect("source map");
+
+        let mapped = |line: usize| {
+            (
+                entries[line].instance_identity().map(str::to_owned),
+                entries[line].component_identity().map(str::to_owned),
+            )
+        };
+        let component = |id| Some(GeneratedSourceMapEntry::component_identity_for(&view, id));
+        assert_eq!(mapped(1), (Some("MR1".to_owned()), component(4)));
+        assert_eq!(mapped(2), (Some("R1".to_owned()), component(5)));
+        assert_eq!(
+            mapped(3),
+            (None, None),
+            "a keyword card names no component of another kind"
+        );
+    }
 }

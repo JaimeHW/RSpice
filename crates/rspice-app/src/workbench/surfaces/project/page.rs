@@ -247,9 +247,8 @@ fn card_title_row(ui: &mut Ui, title: &str, meta: &str, problem: Option<Problem>
 }
 
 /// Side of a problem mark set in front of a card's meta, and the advance from
-/// its left edge to the text after it: the kit's own values.
-const MARK_SIDE: f32 = 11.0;
-const MARK_ADVANCE: f32 = 17.0;
+/// its left edge to the text after it: read from the kit.
+use crate::ui::widgets::{PROBLEM_MARK_ADVANCE as MARK_ADVANCE, PROBLEM_MARK_SIDE as MARK_SIDE};
 
 pub(super) fn paint_elided(
     ui: &Ui,

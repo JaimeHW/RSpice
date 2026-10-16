@@ -52,8 +52,47 @@ pub const fn drawing_sheet_mono_baseline_offset_um(lettering_um: u64) -> u64 {
 
 /// The ISO 3098 lettering height series, smallest first. Lettering only ever
 /// steps between these, never to a height between two of them.
-pub const ISO_3098_HEIGHTS_UM: [u64; 8] =
+pub(in crate::design_management) const ISO_3098_HEIGHTS_UM: [u64; 8] =
     [1_800, 2_500, 3_500, 5_000, 7_000, 10_000, 14_000, 20_000];
+
+/// Height ISO 5457 letters a grid reference at, on every sheet size.
+const ZONE_REFERENCE_UM: u64 = 3_500;
+
+/// The ISO 3098 height a zone reference in a border band of the given width
+/// is lettered at.
+///
+/// ISO 5457 letters grid references 3.5 mm high whatever the paper: they
+/// label a frame of fixed width rather than the drawing inside it, so unlike
+/// the drawing's own lettering they do not grow with the sheet. A band too
+/// narrow for that steps down the series to the largest height whose
+/// capitals clear both of its rules by a stroke width, a tenth of the
+/// height, and no lower than the series goes. Canvas and hardcopy both
+/// letter a reference at this height, centred in the band.
+#[must_use]
+pub fn drawing_sheet_zone_lettering_um(border_band_um: u64) -> u64 {
+    let mut fitted_um = ISO_3098_HEIGHTS_UM[0];
+    for height_um in ISO_3098_HEIGHTS_UM {
+        if height_um > ZONE_REFERENCE_UM {
+            break;
+        }
+        if height_um * 12 / 10 <= border_band_um {
+            fitted_um = height_um;
+        }
+    }
+    fitted_um
+}
+
+/// The heights a title block letters its fields at, on every sheet: 1.8 mm
+/// captions and 2.5 mm values, the row ISO 3098 gives A4.
+///
+/// ISO 7200 uses the same title block for every paper size, and the block is
+/// a fixed form, the same 32 to 50 mm tall whichever sheet carries it. The
+/// heights a sheet recommends rise with the paper because the drawing grows
+/// with it; the block does not, so lettering it at an A0 sheet's heights only
+/// overfills rows no taller than an A4 block's. A caption stands a step of
+/// the series below the value it names.
+pub const DRAWING_SHEET_TITLE_BLOCK_LETTERING: DrawingSheetLettering =
+    DrawingSheetLettering::for_sheet(210_000, 297_000);
 
 /// How far a line's ink reaches below the point it is seated on, in
 /// twentieths of its em.
@@ -67,59 +106,33 @@ pub const ISO_3098_HEIGHTS_UM: [u64; 8] =
 /// rules by the ink that crosses them and not by the box around it.
 const TITLE_LINE_REACH_PER_EM: u64 = 12;
 
-/// The heights a title block can actually letter its rows at.
+/// How far a line's capitals rise above the point it is seated on, in
+/// twentieths of its em.
 ///
-/// The lettering a sheet recommends rises with the paper, but a title block
-/// does not: it is a fixed form, the same 32 to 50 mm tall whichever sheet
-/// carries it, so a row of an A0 block is no taller than a row of an A4 one.
-/// Letter that row at the height A0 recommends and the value's descenders
-/// cross the rule below it — on the canvas, which clips a cell to its rules,
-/// that is the field truncated outright.
-///
-/// Each height therefore steps down the standard's own series until the line
-/// it sets fits between its seat in the row and the rule under it, so a
-/// clamped field is still lettered at an ISO height rather than at some
-/// height derived from the furniture.
-#[must_use]
-pub fn drawing_sheet_title_block_lettering(
-    format: &SchematicSheetFormat,
-    geometry: &DrawingSheetGeometry,
-) -> Option<DrawingSheetLettering> {
-    let block = geometry.title_block?;
-    let rows = format.title_block_rows(geometry.effective_title_block_template)? as u64;
-    let authored_height_um = match format.title_block.rotation {
-        DrawingSheetTitleBlockRotation::Upright => block.height_um,
-        DrawingSheetTitleBlockRotation::Clockwise90
-        | DrawingSheetTitleBlockRotation::CounterClockwise90 => block.width_um,
-    };
-    let row_height_um = authored_height_um / rows.max(1);
-    let mut lettering = format.authored_size.lettering();
-    lettering.caption_um = fit_title_line_um(
-        row_height_um,
-        DRAWING_SHEET_TITLE_CAPTION_POSITION,
-        lettering.caption_um,
-    );
-    lettering.data_um = fit_title_line_um(
-        row_height_um,
-        DRAWING_SHEET_TITLE_VALUE_POSITION,
-        lettering.data_um,
-    );
-    Some(lettering)
-}
+/// The baseline sits 3/8 of an em below the seat and the face's capitals
+/// stand 698 units per 1000-unit em above it, so they top out 0.323 of an em
+/// above the seat, and 7/20 is the next twentieth clear of it.
+const TITLE_LINE_RISE_PER_EM: u64 = 7;
 
-/// Largest height at or below `requested_um` whose ink clears the rule below
-/// its seat in the row.
-fn fit_title_line_um(row_height_um: u64, position: (u64, u64), requested_um: u64) -> u64 {
-    let (numerator, denominator) = position;
-    let below_seat_um = row_height_um.saturating_sub(row_height_um * numerator / denominator);
-    let mut fitted_um = ISO_3098_HEIGHTS_UM[0];
-    for height_um in ISO_3098_HEIGHTS_UM {
-        if height_um > requested_um {
-            break;
-        }
-        if drawing_sheet_mono_em_um(height_um) * TITLE_LINE_REACH_PER_EM / 20 <= below_seat_um {
-            fitted_um = height_um;
-        }
-    }
-    fitted_um
+/// Whether a title row of the given height seats
+/// [`DRAWING_SHEET_TITLE_BLOCK_LETTERING`].
+///
+/// The value's ink must stop above the rule under it, and the caption's
+/// descenders must stop short of the value's capitals by the gap ISO 3098's
+/// own line spacing leaves between a descender and the next line's capitals:
+/// one stroke width, a tenth of the taller line's height. Clearing the rule
+/// at the foot of the cell is not enough, because the value lies between.
+#[must_use]
+pub(in crate::design_management) fn drawing_sheet_title_row_holds_lettering(
+    row_height_um: u64,
+) -> bool {
+    let lettering = DRAWING_SHEET_TITLE_BLOCK_LETTERING;
+    let seat_um = |(numerator, denominator): (u64, u64)| row_height_um * numerator / denominator;
+    let value_seat_um = seat_um(DRAWING_SHEET_TITLE_VALUE_POSITION);
+    let value_em_um = drawing_sheet_mono_em_um(lettering.data_um);
+    let caption_foot_um = seat_um(DRAWING_SHEET_TITLE_CAPTION_POSITION)
+        + drawing_sheet_mono_em_um(lettering.caption_um) * TITLE_LINE_REACH_PER_EM / 20;
+    value_seat_um + value_em_um * TITLE_LINE_REACH_PER_EM / 20 <= row_height_um
+        && caption_foot_um + lettering.data_um / 10 + value_em_um * TITLE_LINE_RISE_PER_EM / 20
+            <= value_seat_um
 }

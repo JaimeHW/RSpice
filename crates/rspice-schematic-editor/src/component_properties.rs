@@ -7,10 +7,7 @@ mod context;
 mod dialog;
 mod evidence;
 mod form;
-pub use context::{
-    ComponentEditorContext, ComponentModelContext, ComponentPropertyDialogResult,
-    StimulusEditorContext,
-};
+pub use context::{ComponentEditorContext, ComponentPropertyDialogResult, StimulusEditorContext};
 pub use dialog::{
     ComponentPropertyDialogView, ComponentPropertyServices, render_component_property_dialog,
 };
@@ -377,9 +374,14 @@ impl ComponentPropertyDraft {
 
         if !all_valid {
             self.global_error = Some(format!(
-                "{} invalid field(s) retained; {} valid field(s) will be applied",
-                self.validation_errors.len(),
-                self.prepared_commit.len()
+                "Applied {} field{}. {}",
+                self.prepared_commit.len(),
+                if self.prepared_commit.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+                still_need_fixing(self.validation_errors.len()),
             ));
         }
         true
@@ -458,7 +460,26 @@ impl ComponentPropertyDraft {
 
     fn refresh_validation_summary(&mut self) {
         self.global_error = (!self.validation_errors.is_empty())
-            .then(|| format!("{} validation error(s)", self.validation_errors.len()));
+            .then(|| fields_need_fixing(self.validation_errors.len()));
+    }
+}
+
+/// The footer line for fields the sheet rejects: what is wrong, counted, in
+/// the words a reader would use. It used to read "2 validation error(s)".
+fn fields_need_fixing(invalid: usize) -> String {
+    if invalid == 1 {
+        "1 field needs fixing".to_owned()
+    } else {
+        format!("{invalid} fields need fixing")
+    }
+}
+
+/// The same count after a partial apply, as the second half of a sentence.
+fn still_need_fixing(invalid: usize) -> String {
+    if invalid == 1 {
+        "1 still needs fixing.".to_owned()
+    } else {
+        format!("{invalid} still need fixing.")
     }
 }
 

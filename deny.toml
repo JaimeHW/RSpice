@@ -10,6 +10,7 @@ ignore = [
     { id = "RUSTSEC-2026-0194", reason = "quick-xml is pulled only through wayland-scanner 0.31, whose latest release still depends on quick-xml 0.39; this is a build-time code generator for trusted Wayland protocol XML, not runtime untrusted XML parsing." },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml is pulled only through wayland-scanner 0.31, whose latest release still depends on quick-xml 0.39; this is a build-time code generator for trusted Wayland protocol XML, not runtime untrusted XML parsing." },
     { id = "RUSTSEC-2026-0206", reason = "rustybuzz is transitive through krilla 0.8.2 simple-text; RSpice PDF exporters shape only repository-embedded IBM Plex fonts, and no maintained krilla release or compatible drop-in exists yet." },
+    { crate = "zip@8.6.0", reason = "zip yanked every 8.x release after fixing extraction advisories in 9.0; rust_xlsxwriter 0.99.1 still requires zip ^8.3, and RSpice never calls ZipArchive::extract or ZipStreamReader::extract." },
 ]
 
 [licenses]

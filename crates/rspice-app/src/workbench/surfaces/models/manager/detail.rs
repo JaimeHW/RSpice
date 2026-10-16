@@ -35,13 +35,12 @@ struct SelectedModelDetail<'a> {
     pinned: bool,
     project_owned: bool,
     source_available: bool,
-    /// Whether this card carries a finding an engineer has to look at, and
-    /// whether its library's retained bytes still hash to their pin. Both are
-    /// stated in the header band rather than only in the catalog row above it:
-    /// a reader who arrived at this pane from anywhere else could not see the
-    /// row's cell.
+    /// Whether this card carries a finding an engineer has to look at. It is
+    /// stated in the header band rather than only in the catalog row above
+    /// it: a reader who arrived at this pane from anywhere else could not see
+    /// the row's cell. Source drift is not a word here — the pane paints the
+    /// drift banner immediately under this band.
     review: bool,
-    drifted: bool,
     /// Whether the definition is one of the simulator's own compiled-in cards.
     engine_owned: bool,
     /// Where the card is written — `OPA189.lib:41` — when the parse retained
@@ -186,7 +185,6 @@ fn project_selection<'a>(
         project_owned: library.source_authority.is_project_owned(),
         source_available: !library.source_contents.is_empty() || model.file_path.is_some(),
         review: model_needs_review(library, model),
-        drifted: !drift::findings_for(app.state, &library.name).is_empty(),
         engine_owned: matches!(library.source_authority, ModelSourceAuthority::BuiltIn),
         source_reference: model.file_path.as_deref().map(|path| {
             // The line is the one the card *starts* on: the parse retains a
@@ -279,10 +277,12 @@ pub(super) fn selected_model_detail(
                 // "qualified", and repeating it from weaker evidence is how two
                 // surfaces come to disagree about one model.
                 // "engine-owned" is gone: the SOURCE cell beside it reads
-                // "RSpice built-in" on exactly the same rows.
+                // "RSpice built-in" on exactly the same rows. So is "drift":
+                // it is shown on exactly the rows whose banner is painted
+                // directly below this band, and a marked word over a marked
+                // sentence saying the same thing is one of them too many.
                 for (word, shown, problem) in [
                     ("review", detail.review, Some(Problem::Warning)),
-                    ("drift", detail.drifted, Some(Problem::Warning)),
                     ("pinned", detail.pinned, None),
                 ] {
                     if !shown {

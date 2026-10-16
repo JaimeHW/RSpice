@@ -78,6 +78,10 @@ pub(super) struct PlannedConnectModule {
     /// the boundary in the vocabulary the deck author wrote, not the engine's.
     pub(super) instance: String,
     pub(super) parameters: Vec<(String, f64)>,
+    /// The deck net a `vsup` override names instead of a level
+    /// (`#(.vsup(vdd))`): the boundary converts against that net's solved
+    /// voltage, live, rather than against a number.
+    pub(super) supply_net: Option<String>,
     pub(super) execution: Option<std::sync::Arc<super::connect_execution::ConnectExecution>>,
 }
 
@@ -102,6 +106,11 @@ impl PlannedConnectModule {
     /// Whether this connect statement answers the supply question itself.
     pub(super) fn states_supply(&self) -> bool {
         self.stated_supply().is_some()
+    }
+
+    /// The net this connect statement binds the boundary's supply to.
+    pub(super) fn supply_net(&self) -> Option<&str> {
+        self.supply_net.as_deref()
     }
 }
 
@@ -195,7 +204,7 @@ pub(super) fn select_for_boundary(
         .into());
     }
 
-    let parameters = table
+    let rule = table
         .select_typed(
             DECK_DISCIPLINE,
             EVENT_DISCIPLINE,
@@ -203,7 +212,9 @@ pub(super) fn select_for_boundary(
             Some(value_kind),
             db,
         )
-        .and_then(|rule| rule.numeric_parameters())
+        .map_err(|error| connect_error(node_label, &error))?;
+    let parameters = rule
+        .numeric_parameters()
         .map_err(|error| connect_error(node_label, &error))?
         .into_iter()
         .map(|(name, value)| (name.to_string(), value))
@@ -213,6 +224,7 @@ pub(super) fn select_for_boundary(
         name: insertion.connect_module.to_string(),
         instance: insertion.instance,
         parameters,
+        supply_net: rule.supply_net().map(ToString::to_string),
         execution: None,
     }))
 }
@@ -326,9 +338,42 @@ pub(super) fn expected_library_module(kind: super::XspiceAutoBridgeKind) -> Opti
 /// Selection must carry an authenticated execution decision from its source.
 pub(super) fn check_execution(
     selected: &PlannedConnectModule,
-    _kind: super::XspiceAutoBridgeKind,
+    kind: super::XspiceAutoBridgeKind,
     node_label: &str,
 ) -> Result<(), SimulationError> {
+    if let Some(net) = selected.supply_net()
+        && !matches!(
+            kind,
+            super::XspiceAutoBridgeKind::Adc | super::XspiceAutoBridgeKind::Dac
+        )
+    {
+        return Err(connect_refusal(format!(
+            "node '{node_label}' selects connect module '{}' with vsup naming net '{net}'; only \
+             the analog-to-discrete and discrete-to-analog converters track a supply net, so \
+             give this {} boundary's vsup a level",
+            selected.name,
+            super::xspice_auto_bridge_kind_label(kind)
+        ))
+        .module(selected.name.as_str())
+        .into());
+    }
+    if let (Some(net), Some(execution)) = (selected.supply_net(), selected.execution.as_deref())
+        && matches!(
+            execution,
+            super::connect_execution::ConnectExecution::Authored(_)
+        )
+    {
+        // An authored module receives its parameters as numbers; a net is a
+        // supply port, which authored connect modules do not have yet.
+        return Err(connect_refusal(format!(
+            "node '{node_label}' selects the authored connect module '{}' with vsup naming net \
+             '{net}'; a supply net binds live only through the built-in connect modules. Give \
+             vsup a level for an authored module",
+            selected.name
+        ))
+        .module(selected.name.as_str())
+        .into());
+    }
     if selected.execution.is_some() {
         return Ok(());
     }

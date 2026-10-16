@@ -18,7 +18,15 @@ use crate::workbench::state::{
 use super::super::AppState;
 use super::{
     DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject,
+    FindingKey, mint_canonical,
 };
+
+/// The document a run's failures are about: the run, not any file.
+const RUN_DOCUMENT: &str = "simulation-run";
+/// The document a dispatch finding is about.
+const DISPATCH_DOCUMENT: &str = "simulation-dispatch";
+/// The rule code every dispatch advisory carries.
+const ADVISORY_CODE: &str = "RUN-ADVISORY";
 
 /// The engine, when it could say which objects a solve gave up on.
 const CONVERGENCE_PRODUCER: &str = "rspice.engine.convergence";
@@ -56,15 +64,33 @@ impl AppState {
         } else {
             RUN_PRODUCER
         };
-        let canonical = CanonicalDiagnosticMetadata::current(
-            producer,
-            code,
-            format!("run/{run_sequence}"),
-            None,
+        // Keyed by the analysis that failed, in the place the run stands in:
+        // a plain run, or one member of a campaign. Not by the run's
+        // sequence, which is recorded as the revision — the next run's
+        // failure of the same analysis is the same condition, still standing.
+        let key = FindingKey::new(producer, code, run_scope(self, run_sequence), analysis);
+        let inputs = DiagnosticInputs::Run { run_sequence };
+        // Every failure in one run stands together. Each analysis that
+        // failed is its own record with its own identity; a later failure in
+        // the same run is added to the batch rather than replacing it. Both
+        // are decided against the design as it was dispatched.
+        let opened = self.diagnostics.batch(&inputs);
+        let dispatched = opened
+            .map(|batch| batch.input_digest)
+            .or_else(|| self.diagnostics.run_baselines.get(&run_sequence).copied());
+        let mut records: Vec<DiagnosticRecord> = opened
+            .map(|batch| batch.records.clone())
+            .unwrap_or_default();
+        let mut keys: Vec<FindingKey> = records.iter().map(|record| record.key.clone()).collect();
+        keys.push(key.clone());
+        let Some(canonical) = mint_canonical(
+            &keys,
             run_sequence,
-            format!("run:{run_sequence}:{analysis}"),
-            message,
-        );
+            &format!("run:{run_sequence}:{analysis}"),
+        )
+        .pop() else {
+            return;
+        };
         let route = attribution.and_then(|attribution| {
             let nets: Vec<String> = attribution.nets().map(str::to_owned).collect();
             let devices: Vec<String> = attribution.devices().map(str::to_owned).collect();
@@ -81,9 +107,98 @@ impl AppState {
             ),
             message,
         )
+        .keyed(key)
         .with_details(attribution.map_or_else(String::new, ConvergenceAttribution::summary))
         .with_route(route);
-        self.publish_or_state_refusal(DiagnosticInputs::Run { run_sequence }, vec![record]);
+        records.push(record);
+        let published = match dispatched {
+            Some(digest) => self.diagnostics.insert(digest, inputs, records),
+            None => self.publish_diagnostics(inputs, records),
+        };
+        self.state_refusal(published);
+    }
+
+    /// One record for a campaign member that never became a run.
+    ///
+    /// Filed as the members that ran file their failures — scoped to the
+    /// member's place in the campaign and named by the plan it was to run —
+    /// so the Problems page lists it beside them, and a later run supersedes
+    /// it as it supersedes theirs. It used to reach only the Console, which
+    /// left a campaign with a refused member reading as clean on the page.
+    ///
+    /// A refusal is an attempt to measure the design all the same, so it
+    /// supersedes what earlier runs and campaigns reported before it is
+    /// filed: a re-run whose member is refused again replaces the last
+    /// refusal rather than colliding with its identity.
+    pub(crate) fn publish_campaign_member_refusal(
+        &mut self,
+        campaign: crate::product::SimulationCampaignId,
+        member_index: u32,
+        member: &str,
+        refusal: crate::simulation::controller::CampaignMemberRefusal,
+        error: &str,
+    ) {
+        use crate::simulation::controller::CampaignMemberRefusal;
+
+        let (code, message) = match refusal {
+            CampaignMemberRefusal::Authorization => (
+                "RUN-MEMBER-UNAUTHORIZED",
+                format!("The member could not be authorized: {error}"),
+            ),
+            CampaignMemberRefusal::Start => (
+                "RUN-MEMBER-NOT-STARTED",
+                format!("The member could not be started: {error}"),
+            ),
+        };
+        let key = FindingKey::new(RUN_PRODUCER, code, member_scope(member_index), member);
+        let revision = self.workspace.content.project.revision().get();
+        let Some(canonical) = mint_canonical(
+            std::slice::from_ref(&key),
+            revision,
+            &format!("campaign:{campaign}:member:{member_index}"),
+        )
+        .pop() else {
+            return;
+        };
+        let record = DiagnosticRecord::new(
+            canonical,
+            DiagnosticLevel::Error,
+            DiagnosticSubject::new(
+                self.workspace.content.project.id(),
+                format!("{member} · campaign member {member_index}"),
+            ),
+            message,
+        )
+        .keyed(key);
+        self.supersede_run_outcomes(None, Some(campaign));
+        self.publish_or_state_refusal(
+            DiagnosticInputs::CampaignMember {
+                campaign,
+                member_index,
+            },
+            vec![record],
+        );
+    }
+
+    /// Take the digest a dispatched run's failures will be decided against.
+    ///
+    /// Taken here because this is the design and setup the run solves. Taken
+    /// when a failure arrives instead, it was whatever the reader had edited
+    /// while the run was solving, and a failure about the design as
+    /// dispatched read as current against an edit made after it. Nothing is
+    /// published: a run that fails nothing has nothing to list, and an empty
+    /// batch would tell the page that checks had run.
+    pub(crate) fn open_run_outcome(&mut self, run_sequence: u64) {
+        match (DiagnosticInputs::Run { run_sequence }).digest(&super::DigestScope::new(self)) {
+            Ok(digest) => {
+                let retained = &self.simulation.retained.runs;
+                self.diagnostics
+                    .run_baselines
+                    .retain(|run, _| retained.iter().any(|kept| kept.id == *run));
+                self.diagnostics.run_baselines.insert(run_sequence, digest);
+            }
+            Err(error) => self.state_refusal(Err(error)),
+        }
     }
 
     /// Everything the dispatch checks found, as records.
@@ -96,12 +211,44 @@ impl AppState {
     pub(in crate::workbench) fn publish_dispatch_diagnostics(&mut self, report: &PreflightReport) {
         let project = self.workspace.content.project.id();
         let revision = report.project_revision;
-        let mut records = Vec::with_capacity(report.blockers.len() + report.advisories.len());
-        for (ordinal, issue) in report.blockers.iter().enumerate() {
-            records.push(blocker_record(project, revision, ordinal, issue));
+        // Keyed by what each finding names as the thing to change, which is
+        // the nearest a dispatch check comes to an object. Two findings that
+        // name the same destination are told apart by the order the pass
+        // reported them in, and by nothing else about the pass.
+        let blocker_keys = report.blockers.iter().map(|issue| {
+            let (producer, family) = remediation_producer(&issue.remediation);
+            FindingKey::new(
+                producer,
+                screaming_code(family, &issue.check),
+                DISPATCH_DOCUMENT,
+                remediation_key(&issue.remediation),
+            )
+        });
+        let advisory_keys = report.advisories.iter().map(|advisory| {
+            let remediation = advisory.remediation.as_ref();
+            FindingKey::new(
+                remediation.map_or(PREFLIGHT_PRODUCER, |remediation| {
+                    remediation_producer(remediation).0
+                }),
+                ADVISORY_CODE,
+                DISPATCH_DOCUMENT,
+                remediation.map_or_else(String::new, remediation_key),
+            )
+        });
+        let keys: Vec<FindingKey> = blocker_keys.chain(advisory_keys).collect();
+        let mut canonicals =
+            mint_canonical(&keys, revision, &format!("dispatch:{revision}")).into_iter();
+        let mut keys = keys.into_iter();
+        let mut records = Vec::with_capacity(keys.len());
+        for issue in &report.blockers {
+            if let (Some(key), Some(canonical)) = (keys.next(), canonicals.next()) {
+                records.push(blocker_record(project, key, canonical, issue));
+            }
         }
-        for (ordinal, advisory) in report.advisories.iter().enumerate() {
-            records.push(advisory_record(project, revision, ordinal, advisory));
+        for advisory in &report.advisories {
+            if let (Some(key), Some(canonical)) = (keys.next(), canonicals.next()) {
+                records.push(advisory_record(project, key, canonical, advisory));
+            }
         }
         self.publish_or_state_refusal(DiagnosticInputs::Dispatch, records);
     }
@@ -117,7 +264,12 @@ impl AppState {
         inputs: DiagnosticInputs,
         records: Vec<DiagnosticRecord>,
     ) {
-        if let Err(error) = self.publish_diagnostics(inputs, records) {
+        let published = self.publish_diagnostics(inputs, records);
+        self.state_refusal(published);
+    }
+
+    fn state_refusal(&mut self, published: Result<(), String>) {
+        if let Err(error) = published {
             self.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
                 "Findings could not be recorded: {error}"
             )));
@@ -125,28 +277,70 @@ impl AppState {
     }
 }
 
+/// Where a run stands, for keying its failures: a plain run, or one member of
+/// the campaign it belongs to.
+///
+/// A campaign's members are dispatched one after another and their outcomes
+/// stand together, so each member is its own place; a plain run's outcome is
+/// superseded by the next run's, so every plain run is the same place.
+fn run_scope(state: &AppState, run_sequence: u64) -> String {
+    state
+        .simulation
+        .retained
+        .run_by_sequence(run_sequence)
+        .and_then(|run| run.campaign_membership())
+        .map_or_else(
+            || RUN_DOCUMENT.to_owned(),
+            |membership| member_scope(membership.member_index()),
+        )
+}
+
+/// The place one campaign member stands in, whether it ran or was refused.
+fn member_scope(member_index: u32) -> String {
+    format!("{RUN_DOCUMENT}/member-{member_index}")
+}
+
+/// A stable key of the destination a dispatch finding names.
+///
+/// A deck line is left out: it is a position in a generated deck, which moves
+/// with every edit upstream of it, and the finding is about the deck. An
+/// analysis is kept: its instance identity survives every edit to it, and two
+/// analyses that fail the same check are two findings, not one told apart by
+/// the order they were reported in.
+fn remediation_key(remediation: &PreflightRemediation) -> String {
+    match remediation {
+        PreflightRemediation::DesignChecks => "design-checks".to_owned(),
+        PreflightRemediation::SimulationPlan { analysis: None } => "simulation-plan".to_owned(),
+        PreflightRemediation::SimulationPlan {
+            analysis: Some(analysis),
+        } => format!("simulation-plan:{analysis}"),
+        PreflightRemediation::ProjectTechnology => "project-technology".to_owned(),
+        PreflightRemediation::Models {
+            page,
+            library,
+            corner,
+        } => format!(
+            "models:{page:?}:{}:{}",
+            library.as_deref().unwrap_or_default(),
+            corner.as_deref().unwrap_or_default()
+        ),
+        PreflightRemediation::NetlistSource { .. } => "netlist-source".to_owned(),
+    }
+}
+
 fn blocker_record(
     project: crate::product::ProjectId,
-    revision: u64,
-    ordinal: usize,
+    key: FindingKey,
+    canonical: CanonicalDiagnosticMetadata,
     issue: &PreflightIssue,
 ) -> DiagnosticRecord {
-    let (producer, family) = remediation_producer(&issue.remediation);
-    let canonical = CanonicalDiagnosticMetadata::current(
-        producer,
-        screaming_code(family, &issue.check),
-        "simulation-dispatch",
-        None,
-        revision,
-        format!("dispatch:{revision}:blocker:{ordinal}"),
-        &issue.observed,
-    );
     DiagnosticRecord::new(
         canonical,
         DiagnosticLevel::Error,
         DiagnosticSubject::new(project, remediation_subject(&issue.remediation)),
         issue.observed.clone(),
     )
+    .keyed(key)
     .with_details(format!("{} · required: {}", issue.check, issue.required))
     // A dispatch check states what it requires of every run, which is the
     // nearest thing it has to rule prose and is not the same sentence as what
@@ -157,23 +351,11 @@ fn blocker_record(
 
 fn advisory_record(
     project: crate::product::ProjectId,
-    revision: u64,
-    ordinal: usize,
+    key: FindingKey,
+    canonical: CanonicalDiagnosticMetadata,
     advisory: &PreflightAdvisory,
 ) -> DiagnosticRecord {
     let remediation = advisory.remediation.as_ref();
-    let producer = remediation.map_or(PREFLIGHT_PRODUCER, |remediation| {
-        remediation_producer(remediation).0
-    });
-    let canonical = CanonicalDiagnosticMetadata::current(
-        producer,
-        "RUN-ADVISORY",
-        "simulation-dispatch",
-        None,
-        revision,
-        format!("dispatch:{revision}:advisory:{ordinal}"),
-        &advisory.message,
-    );
     DiagnosticRecord::new(
         canonical,
         DiagnosticLevel::Warning,
@@ -183,6 +365,7 @@ fn advisory_record(
         ),
         advisory.message.clone(),
     )
+    .keyed(key)
     .with_route(remediation.map(|remediation| DiagnosticRoute::Repair(remediation.clone())))
 }
 
@@ -197,7 +380,7 @@ const fn remediation_producer(remediation: &PreflightRemediation) -> (&'static s
         PreflightRemediation::Models { .. } => (MODEL_BINDING_PRODUCER, "MODEL"),
         PreflightRemediation::ProjectTechnology => (MODEL_BINDING_PRODUCER, "TECH"),
         PreflightRemediation::NetlistSource { .. } => (NETLIST_PRODUCER, "NETLIST"),
-        PreflightRemediation::DesignChecks | PreflightRemediation::SimulationPlan => {
+        PreflightRemediation::DesignChecks | PreflightRemediation::SimulationPlan { .. } => {
             (PREFLIGHT_PRODUCER, "RUN")
         }
     }
@@ -208,7 +391,7 @@ const fn remediation_producer(remediation: &PreflightRemediation) -> (&'static s
 fn remediation_subject(remediation: &PreflightRemediation) -> String {
     match remediation {
         PreflightRemediation::DesignChecks => "Design checks".to_owned(),
-        PreflightRemediation::SimulationPlan => "Simulation plan".to_owned(),
+        PreflightRemediation::SimulationPlan { .. } => "Simulation plan".to_owned(),
         PreflightRemediation::ProjectTechnology => "Project technology".to_owned(),
         PreflightRemediation::Models {
             library: Some(library),
@@ -368,11 +551,29 @@ mod tests {
             7,
         );
         let listed = listing::listing(&state);
-        let row = listed.row(0).expect("the failure is listed");
+        let row = listed.row(1).expect("the second failure is listed");
         assert_eq!(
             row.code, "RUN-FAILED",
             "an attribution for another failure must not be adopted",
         );
         assert!(row.route.is_none());
+    }
+
+    /// Two analyses that fail in one run are two findings. Each failure used
+    /// to be published as the whole batch, so the second replaced the first.
+    #[test]
+    fn every_failure_in_one_run_stands_under_its_own_identity() {
+        let mut state = open_state();
+        state.publish_run_failure("Operating point", "Analysis failed: OP", None, 3);
+        state.publish_run_failure("Transient", "Analysis failed: tran", None, 3);
+
+        let listed = listing::listing(&state);
+        assert_eq!(listed.len(), 2, "both failures stand");
+        let first = listed.row(0).expect("the first failure is listed");
+        let second = listed.row(1).expect("the second failure is listed");
+        assert_eq!(first.subject, "Operating point · run 3");
+        assert_eq!(second.subject, "Transient · run 3");
+        assert_ne!(first.id, second.id);
+        assert_eq!(listed.counts().errors, 2);
     }
 }

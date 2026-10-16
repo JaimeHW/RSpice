@@ -6,6 +6,7 @@ mod annotation_allocation;
 mod drawing_sheet_release;
 mod manual_annotation;
 mod sheet_lifecycle;
+mod title_fields;
 
 fn sheet(name: &str, page: u32) -> SheetDefinition {
     SheetDefinition {
@@ -243,13 +244,13 @@ fn drawing_sheet_title_contract_matches_field_provenance_and_required_visibility
         DrawingSheetTitleFieldId::Date.policy().value_authority,
         DrawingSheetTitleFieldValueAuthority::Automatic
     );
-    assert_eq!(
-        DrawingSheetTitleFieldId::Scale.policy().value_authority,
-        DrawingSheetTitleFieldValueAuthority::Automatic
-    );
-    assert_eq!(
-        format.title_block.fields[&DrawingSheetTitleFieldId::Scale].value,
-        ""
+    // A schematic is not drawn to scale, and ISO 7200 keeps scale out of the
+    // title block, so a sheet carries no Scale field at all.
+    assert!(
+        !format
+            .title_block
+            .fields
+            .contains_key(&DrawingSheetTitleFieldId::Scale)
     );
     assert_eq!(DrawingSheetDisplayUnit::Inches.format_um(25_400), "1");
     assert_eq!(
@@ -315,17 +316,18 @@ fn drawing_sheet_title_resolution_is_one_renderer_independent_authority() {
                 .get_mut(&DrawingSheetTitleFieldId::SheetTitle)
                 .unwrap()
                 .value = "Power tree".to_owned();
-            // A release-process field is hidden until a sheet opts into it.
+            // An optional field is hidden until a sheet opts into it, and a
+            // shown one may be dropped.
             draft
                 .title_block
                 .fields
-                .get_mut(&DrawingSheetTitleFieldId::DrawnBy)
+                .get_mut(&DrawingSheetTitleFieldId::CheckedBy)
                 .unwrap()
                 .visible = true;
             draft
                 .title_block
                 .fields
-                .get_mut(&DrawingSheetTitleFieldId::CheckedBy)
+                .get_mut(&DrawingSheetTitleFieldId::ApprovedBy)
                 .unwrap()
                 .visible = false;
             // Legacy project-owned storage remains a migration fallback only.
@@ -366,13 +368,14 @@ fn drawing_sheet_title_resolution_is_one_renderer_independent_authority() {
         Some("Power tree")
     );
     assert_eq!(value(DrawingSheetTitleFieldId::DrawnBy), Some("—"));
+    assert_eq!(value(DrawingSheetTitleFieldId::CheckedBy), Some("—"));
     assert_eq!(
         value(DrawingSheetTitleFieldId::Organization),
         Some("RSpice Engineering")
     );
-    assert_eq!(value(DrawingSheetTitleFieldId::CheckedBy), None);
+    assert_eq!(value(DrawingSheetTitleFieldId::ApprovedBy), None);
     assert_eq!(
-        value(DrawingSheetTitleFieldId::Format),
+        value(DrawingSheetTitleFieldId::Scale),
         None,
         "a retired field resolves to nothing even when a value is offered"
     );
@@ -451,7 +454,7 @@ fn managed_title_templates_are_versioned_digest_verified_and_layout_authoritativ
             draft.title_block.managed_template = Some(snapshot.clone());
         })
         .unwrap();
-    assert_eq!(custom.title_block_field_order(), reversed.as_slice());
+    assert_eq!(custom.title_block_field_order(), reversed);
     assert_eq!(
         custom.title_block_dimensions_um(DrawingSheetTitleBlockTemplate::OrganizationManaged),
         Some((160_000, 40_000))
@@ -602,7 +605,7 @@ fn managed_title_logo_rejects_ambiguous_unbounded_and_excessive_geometry() {
 }
 
 #[test]
-fn applying_a_format_preserves_target_sheet_fields_but_updates_declared_scale() {
+fn applying_a_format_preserves_target_sheet_fields() {
     let source = SchematicSheetFormat::default()
         .try_update(|draft| {
             draft.title_block.scale = DrawingSheetScale::Ratio {
@@ -631,12 +634,6 @@ fn applying_a_format_preserves_target_sheet_fields_but_updates_declared_scale() 
                 .get_mut(&DrawingSheetTitleFieldId::DrawnBy)
                 .unwrap()
                 .value = "Target owner".to_owned();
-            draft
-                .title_block
-                .fields
-                .get_mut(&DrawingSheetTitleFieldId::Scale)
-                .unwrap()
-                .visible = false;
         })
         .unwrap();
 
@@ -651,17 +648,13 @@ fn applying_a_format_preserves_target_sheet_fields_but_updates_declared_scale() 
         "Target owner"
     );
     assert_eq!(
-        applied.title_block.fields[&DrawingSheetTitleFieldId::Scale].value,
-        ""
-    );
-    assert_eq!(
         applied.title_block.scale,
         DrawingSheetScale::Ratio {
             drawing_units: 2,
             reality_units: 5,
         }
     );
-    assert!(!applied.title_block.fields[&DrawingSheetTitleFieldId::Scale].visible);
+    assert!(applied.validate().is_ok());
 }
 
 #[test]
@@ -701,10 +694,10 @@ fn drawing_sheet_geometry_is_canonical_and_bounded() {
     assert_eq!(
         geometry.title_block,
         Some(DrawingSheetRect {
-            x_um: 152_000,
-            y_um: 163_000,
-            width_um: 130_000,
-            height_um: 32_000,
+            x_um: 102_000,
+            y_um: 150_000,
+            width_um: 180_000,
+            height_um: 45_000,
         })
     );
     assert_eq!(geometry.zones.unwrap().columns, 4);
@@ -1310,13 +1303,17 @@ fn preset_storage_strips_authored_values_and_canonicalizes_custom_identity() {
 
 #[test]
 fn legacy_scale_mirror_and_missing_preset_references_normalize_safely() {
+    // Builds that lettered a Scale cell mirrored the scale into its field
+    // string; the field is retired now, so the stale copy goes with it.
     let mut legacy_format = serde_json::to_value(SchematicSheetFormat::default()).unwrap();
-    legacy_format["title_block"]["fields"]["scale"]["value"] =
-        serde_json::Value::String("stale 99:1".to_owned());
+    legacy_format["title_block"]["fields"]["scale"] =
+        serde_json::json!({ "value": "stale 99:1", "visible": true });
     let restored_format: SchematicSheetFormat = serde_json::from_value(legacy_format).unwrap();
-    assert_eq!(
-        restored_format.title_block.fields[&DrawingSheetTitleFieldId::Scale].value,
-        ""
+    assert!(
+        !restored_format
+            .title_block
+            .fields
+            .contains_key(&DrawingSheetTitleFieldId::Scale)
     );
     assert_eq!(
         restored_format.title_block.scale,
@@ -2576,13 +2573,13 @@ fn a_sheet_authored_before_a_field_retired_still_loads_without_it() {
     let format = SchematicSheetFormat::default();
     let mut wire = serde_json::to_value(&format).unwrap();
     // Reintroduce the withdrawn field exactly as an older build wrote it.
-    wire["title_block"]["fields"]["format"] = serde_json::json!({ "value": "", "visible": true });
+    wire["title_block"]["fields"]["scale"] = serde_json::json!({ "value": "", "visible": true });
     let restored: SchematicSheetFormat = serde_json::from_value(wire).unwrap();
     assert!(
         !restored
             .title_block
             .fields
-            .contains_key(&DrawingSheetTitleFieldId::Format),
+            .contains_key(&DrawingSheetTitleFieldId::Scale),
         "a retired field must be dropped rather than refused or rendered"
     );
     assert_eq!(
@@ -2593,7 +2590,7 @@ fn a_sheet_authored_before_a_field_retired_still_loads_without_it() {
     assert!(
         !resolve_drawing_sheet_title_fields(&restored, &BTreeMap::new())
             .iter()
-            .any(|field| field.id == DrawingSheetTitleFieldId::Format)
+            .any(|field| field.id == DrawingSheetTitleFieldId::Scale)
     );
 
     // A sheet missing a field the product has gained is filled in, so the
@@ -2614,20 +2611,129 @@ fn a_sheet_authored_before_a_field_retired_still_loads_without_it() {
 }
 
 #[test]
-fn a_new_sheet_shows_only_the_fields_an_unreleased_drawing_can_fill() {
+fn an_organization_template_sealed_before_a_field_retired_still_loads() {
+    let managed = SchematicSheetFormat::default()
+        .try_update(|draft| {
+            draft.title_block.template = DrawingSheetTitleBlockTemplate::OrganizationManaged;
+        })
+        .unwrap();
+    // The built-in template exactly as a build that still offered a Scale
+    // cell sealed it: fourteen fields, and a digest over all fourteen.
+    let sealed_order = [
+        "project",
+        "cell-view",
+        "sheet-title",
+        "page",
+        "revision",
+        "format",
+        "scale",
+        "drawn-by",
+        "checked-by",
+        "approved-by",
+        "date",
+        "organization",
+        "document-id",
+        "classification",
+    ];
+    let sealed_digest = "51714aad10ff2f84fb2bb451212d0e39659310c069b00ff49f40afdde92b300d";
+    let mut wire = serde_json::to_value(&managed).unwrap();
+    wire["title_block"]["fields"]["scale"] = serde_json::json!({ "value": "", "visible": true });
+    wire["title_block"]["managed_template"]["field_order"] = serde_json::json!(sealed_order);
+    wire["title_block"]["managed_template"]["content_digest"] = serde_json::json!(sealed_digest);
+
+    let restored: SchematicSheetFormat = serde_json::from_value(wire).unwrap();
+    let snapshot = restored.title_block.managed_template.as_ref().unwrap();
+    assert_eq!(
+        snapshot.content_digest().to_string(),
+        sealed_digest,
+        "the seal is the record of what was released, so loading must not re-seal it"
+    );
+    // The retired field keeps its place in the seal and nowhere else, and a
+    // field the seal predates follows every field it names.
+    let gained = [
+        DrawingSheetTitleFieldId::DocumentType,
+        DrawingSheetTitleFieldId::DocumentStatus,
+    ];
+    let mut expected = DrawingSheetTitleFieldId::ALL
+        .into_iter()
+        .filter(|field| !gained.contains(field))
+        .collect::<Vec<_>>();
+    expected.extend(gained);
+    assert_eq!(restored.title_block_field_order(), expected);
+    assert!(
+        !resolve_drawing_sheet_title_fields(&restored, &BTreeMap::new())
+            .iter()
+            .any(|field| field.id == DrawingSheetTitleFieldId::Scale)
+    );
+    let rewritten = serde_json::to_value(&restored).unwrap();
+    assert_eq!(
+        rewritten["title_block"]["managed_template"]["field_order"],
+        serde_json::json!(sealed_order)
+    );
+    assert_eq!(
+        serde_json::from_value::<SchematicSheetFormat>(rewritten).unwrap(),
+        restored
+    );
+
+    let mut with_retired = DrawingSheetTitleFieldId::ALL.to_vec();
+    with_retired.push(DrawingSheetTitleFieldId::Scale);
+    assert!(
+        DrawingSheetManagedTemplateSnapshot::try_new(
+            "example.release-title-block",
+            "2026.10",
+            180_000,
+            50_000,
+            5,
+            with_retired,
+            Vec::new(),
+        )
+        .is_err(),
+        "a template sealed today must not name a field the product withdrew"
+    );
+    let mut repeated = DrawingSheetTitleFieldId::ALL.to_vec();
+    repeated.push(DrawingSheetTitleFieldId::Page);
+    assert!(
+        DrawingSheetManagedTemplateSnapshot::try_new(
+            "example.release-title-block",
+            "2026.10",
+            180_000,
+            50_000,
+            5,
+            repeated,
+            Vec::new(),
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn a_new_sheet_shows_the_fields_iso_7200_requires_and_waits_on_the_rest() {
     let format = SchematicSheetFormat::default();
     let visible = resolve_drawing_sheet_title_fields(&format, &BTreeMap::new());
-    let hidden = [
+    // ISO 7200 makes the creator and the approval person mandatory, so a
+    // sheet names both before anyone has signed it.
+    for field in [
         DrawingSheetTitleFieldId::DrawnBy,
-        DrawingSheetTitleFieldId::CheckedBy,
         DrawingSheetTitleFieldId::ApprovedBy,
+    ] {
+        assert!(
+            visible
+                .iter()
+                .any(|resolved| resolved.id == field && resolved.value == "—"),
+            "{field:?} is mandatory in ISO 7200 and must start on the sheet"
+        );
+    }
+    // Checked by is not one of the standard's fields, Classification is set
+    // by a release policy, and Paper size restates the sheet in hand.
+    let hidden = [
+        DrawingSheetTitleFieldId::CheckedBy,
         DrawingSheetTitleFieldId::Classification,
+        DrawingSheetTitleFieldId::PaperSize,
     ];
     for field in hidden {
         assert!(
             !visible.iter().any(|resolved| resolved.id == field),
-            "{field:?} is filled by a release process and must not occupy a \
-             cell on a sheet that has never been released"
+            "{field:?} must wait until a sheet asks for it"
         );
         assert!(
             !field.policy().required_visible,
@@ -2639,7 +2745,7 @@ fn a_new_sheet_shows_only_the_fields_an_unreleased_drawing_can_fill() {
         DrawingSheetTitleFieldId::ALL.len() - hidden.len()
     );
 
-    // Fewer fields is the point: the cells that remain are wider, so more of
+    // A field a sheet does not spend is width the others keep, so more of
     // each value survives.
     let geometry = format.geometry().unwrap();
     let lettering = format.authored_size.lettering();
@@ -2655,7 +2761,7 @@ fn a_new_sheet_shows_only_the_fields_an_unreleased_drawing_can_fill() {
     .unwrap();
     assert!(
         shown > crowded,
-        "hiding the release fields must widen the remaining cells: {shown} vs {crowded}"
+        "hiding the optional fields must widen the remaining cells: {shown} vs {crowded}"
     );
 }
 
@@ -2663,39 +2769,29 @@ fn a_new_sheet_shows_only_the_fields_an_unreleased_drawing_can_fill() {
 fn drawing_sheet_lettering_is_iso_3098_and_its_budget_is_a_measurement() {
     // Every height a sheet can letter at, for every size RSpice supports,
     // must be a step on the ISO 3098 series, and a caption must never
-    // outweigh the value it names nor a value its zone reference.
+    // outweigh the value it names.
     const SERIES: [u64; 8] = [1_800, 2_500, 3_500, 5_000, 7_000, 10_000, 14_000, 20_000];
     for standard in DrawingSheetStandard::ALL {
         let (width_um, height_um) = standard.portrait_dimensions_um();
         let lettering = DrawingSheetLettering::for_sheet(width_um, height_um);
-        for height in [
-            lettering.caption_um,
-            lettering.data_um,
-            lettering.reference_um,
-        ] {
+        for height in [lettering.caption_um, lettering.data_um] {
             assert!(
                 SERIES.contains(&height),
                 "{height} um on {standard:?} is not an ISO 3098 lettering height"
             );
         }
         assert!(
-            lettering.caption_um < lettering.data_um && lettering.data_um < lettering.reference_um,
+            lettering.caption_um < lettering.data_um,
             "{standard:?} letters its captions at or above its values"
         );
     }
 
     // The recommended minimum rises with the sheet, and A4 takes the row the
-    // standard gives it: 1.8 mm notes, 2.5 mm titles, 3.5 mm headings.
+    // standard gives it: 1.8 mm notes and 2.5 mm titles.
     let a4 = DrawingSheetLettering::for_sheet(210_000, 297_000);
-    assert_eq!(
-        (a4.caption_um, a4.data_um, a4.reference_um),
-        (1_800, 2_500, 3_500)
-    );
+    assert_eq!((a4.caption_um, a4.data_um), (1_800, 2_500));
     let a0 = DrawingSheetLettering::for_sheet(841_000, 1_189_000);
-    assert_eq!(
-        (a0.caption_um, a0.data_um, a0.reference_um),
-        (3_500, 5_000, 7_000)
-    );
+    assert_eq!((a0.caption_um, a0.data_um), (3_500, 5_000));
     assert_eq!(
         DrawingSheetLettering::for_sheet(297_000, 420_000),
         DrawingSheetLettering::for_sheet(594_000, 841_000),
@@ -2751,61 +2847,154 @@ fn drawing_sheet_lettering_is_iso_3098_and_its_budget_is_a_measurement() {
 }
 
 #[test]
-fn title_block_lettering_steps_down_to_the_row_that_carries_it() {
-    // A title block is a fixed form: the block on an A0 sheet has the same
-    // rows in the same height as the block on an A4 one. The heights a sheet
-    // recommends rise with the paper, so on the largest sheets a value's line
-    // is taller than the space under its seat in the row — and the canvas
-    // clips a cell to its rules, which makes an unclamped height a field
-    // truncated outright rather than a field lettered generously.
-    let mut stepped_down = 0;
-    for standard in DrawingSheetStandard::ALL {
-        let format = SchematicSheetFormat::default()
-            .try_update(|draft| {
-                draft.authored_size = AuthoredDrawingSheetSize::Standard { standard };
-                draft.margins = standard.default_margins();
-            })
-            .expect("every standard sheet size is a valid format");
-        let geometry = format.geometry().expect("a standard sheet has geometry");
-        let Some(lettering) = drawing_sheet_title_block_lettering(&format, &geometry) else {
-            continue;
-        };
-        let recommended = format.authored_size.lettering();
+fn zone_references_letter_at_the_iso_5457_height_their_band_can_hold() {
+    // ISO 5457 letters a grid reference 3.5 mm high on every sheet, because
+    // the band carrying it is the same width on every sheet. A band too
+    // narrow for that steps down the series until the capitals clear both
+    // rules by a tenth of their height.
+    for border in [
+        DrawingSheetBorderTemplate::Standard,
+        DrawingSheetBorderTemplate::Plain,
+        DrawingSheetBorderTemplate::OrganizationManaged,
+    ] {
+        let band_um = border.band_width_um();
+        let height_um = drawing_sheet_zone_lettering_um(band_um);
+        assert!(ISO_3098_HEIGHTS_UM.contains(&height_um));
+        assert!(height_um <= 3_500);
         assert!(
-            lettering.caption_um <= recommended.caption_um
-                && lettering.data_um <= recommended.data_um,
-            "{standard:?} must not letter above what its sheet recommends"
+            height_um + 2 * (height_um / 10) <= band_um,
+            "{border:?} letters {height_um} um references that crowd its {band_um} um band"
         );
-        if lettering.data_um < recommended.data_um {
-            stepped_down += 1;
-        }
-        assert!(
-            ISO_3098_HEIGHTS_UM.contains(&lettering.data_um),
-            "{standard:?} letters values at {} um, which is not on the series",
-            lettering.data_um
-        );
+    }
+    assert_eq!(
+        drawing_sheet_zone_lettering_um(DrawingSheetBorderTemplate::Standard.band_width_um()),
+        3_500
+    );
+    assert_eq!(
+        drawing_sheet_zone_lettering_um(DrawingSheetBorderTemplate::Plain.band_width_um()),
+        1_800
+    );
+    assert_eq!(
+        drawing_sheet_zone_lettering_um(
+            DrawingSheetBorderTemplate::OrganizationManaged.band_width_um()
+        ),
+        3_500,
+        "a wider band does not letter its references any larger"
+    );
+}
 
-        // A line seated on a fraction of the row reaches 0.587 of its em
-        // below that seat — 3/8 to the baseline, then 212/1000 to the foot of
-        // a `g` — and has to stop above the rule under it.
-        let rows = format
-            .title_block_rows(geometry.effective_title_block_template)
-            .expect("a block has rows") as u64;
-        let row_height_um = geometry.title_block.expect("a block has a rect").height_um / rows;
-        for (position, height_um) in [
-            (DRAWING_SHEET_TITLE_CAPTION_POSITION, lettering.caption_um),
-            (DRAWING_SHEET_TITLE_VALUE_POSITION, lettering.data_um),
+#[test]
+fn a_title_block_letters_at_one_height_on_every_sheet() {
+    // ISO 7200 uses the same title block for every paper size, so the block
+    // letters ISO 3098's A4 row whatever sheet carries it: 1.8 mm captions,
+    // a step of the series below 2.5 mm values.
+    let lettering = DRAWING_SHEET_TITLE_BLOCK_LETTERING;
+    assert_eq!((lettering.caption_um, lettering.data_um), (1_800, 2_500));
+    assert_eq!(
+        lettering,
+        DrawingSheetLettering::for_sheet(210_000, 297_000)
+    );
+    for height_um in [lettering.caption_um, lettering.data_um] {
+        assert!(ISO_3098_HEIGHTS_UM.contains(&height_um));
+    }
+
+    // Every built-in block seats that lettering on every sheet. A line seated
+    // on a fraction of the row reaches 0.587 of its em below that seat — 3/8
+    // to the baseline, then 212/1000 to the foot of a `g` — and its capitals
+    // rise 0.323 of its em above it. The value has to stop above the rule
+    // under it, and the caption's descenders a tenth of the value's height
+    // above the value.
+    for standard in DrawingSheetStandard::ALL {
+        for template in [
+            DrawingSheetTitleBlockTemplate::Compact,
+            DrawingSheetTitleBlockTemplate::Standard,
+            DrawingSheetTitleBlockTemplate::Wide,
+            DrawingSheetTitleBlockTemplate::OrganizationManaged,
         ] {
-            let (numerator, denominator) = position;
-            let below_seat_um = row_height_um - row_height_um * numerator / denominator;
+            let format = SchematicSheetFormat::default()
+                .try_update(|draft| {
+                    draft.authored_size = AuthoredDrawingSheetSize::Standard { standard };
+                    draft.margins = standard.default_margins();
+                    draft.title_block.template = template;
+                })
+                .expect("every standard sheet size is a valid format");
+            let geometry = format.geometry().expect("a standard sheet has geometry");
+            let Some(block) = geometry.title_block else {
+                continue;
+            };
+            let rows = format
+                .title_block_rows(geometry.effective_title_block_template)
+                .expect("a block has rows") as u64;
+            let row_height_um = block.height_um / rows;
+            let seat_um =
+                |(numerator, denominator): (u64, u64)| row_height_um * numerator / denominator;
+            let value_seat_um = seat_um(DRAWING_SHEET_TITLE_VALUE_POSITION);
             assert!(
-                drawing_sheet_mono_em_um(height_um) * 587 / 1_000 <= below_seat_um,
-                "{standard:?} letters at {height_um} um, whose ink crosses the rule below it"
+                value_seat_um + drawing_sheet_mono_em_um(lettering.data_um) * 587 / 1_000
+                    <= row_height_um,
+                "{standard:?} {template:?} letters a value whose ink crosses the rule below it"
             );
+            let caption_foot_um = seat_um(DRAWING_SHEET_TITLE_CAPTION_POSITION)
+                + drawing_sheet_mono_em_um(lettering.caption_um) * 587 / 1_000;
+            let value_capitals_um =
+                value_seat_um - drawing_sheet_mono_em_um(lettering.data_um) * 323 / 1_000;
+            assert!(
+                caption_foot_um + lettering.data_um / 10 <= value_capitals_um,
+                "{standard:?} {template:?} seats caption descenders on the value's capitals"
+            );
+            assert!(drawing_sheet_title_row_holds_lettering(row_height_um));
         }
     }
+
+    // An organization template sealed from now on must have rows that do the
+    // same.
     assert!(
-        stepped_down > 0,
-        "the largest sheets recommend more lettering than a title row can seat"
+        DrawingSheetManagedTemplateSnapshot::try_new(
+            "example.shallow-title-block",
+            "1",
+            180_000,
+            30_000,
+            5,
+            DrawingSheetTitleFieldId::ALL.to_vec(),
+            Vec::new(),
+        )
+        .is_err(),
+        "6 mm rows cannot seat 2.5 mm values under 1.8 mm captions"
+    );
+
+    // One sealed before that was asked of it still loads.
+    let managed = SchematicSheetFormat::default()
+        .try_update(|draft| {
+            draft.title_block.template = DrawingSheetTitleBlockTemplate::OrganizationManaged;
+        })
+        .unwrap();
+    let mut wire = serde_json::to_value(&managed).unwrap();
+    let template = &mut wire["title_block"]["managed_template"];
+    template["template_id"] = serde_json::json!("example.shallow-title-block");
+    template["revision"] = serde_json::json!("1");
+    template["height_um"] = serde_json::json!(30_000);
+    template["field_order"] = serde_json::json!([
+        "project",
+        "cell-view",
+        "sheet-title",
+        "page",
+        "revision",
+        "format",
+        "scale",
+        "drawn-by",
+        "checked-by",
+        "approved-by",
+        "date",
+        "organization",
+        "document-id",
+        "classification",
+    ]);
+    template["locked_fields"] = serde_json::json!([]);
+    template["content_digest"] =
+        serde_json::json!("cbf756a281c949ca600bf5c2c3a92186ca7b8970a5e1ef17f8b79c6bc623ce9d");
+    let restored: SchematicSheetFormat = serde_json::from_value(wire).unwrap();
+    assert_eq!(
+        restored.title_block_dimensions_um(DrawingSheetTitleBlockTemplate::OrganizationManaged),
+        Some((180_000, 30_000))
     );
 }

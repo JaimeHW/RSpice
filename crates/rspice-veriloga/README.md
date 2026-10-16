@@ -4,18 +4,17 @@ A Verilog-AMS compiler written in Rust, covering both halves of LRM 2.4: the
 supported analog subset commonly called Verilog-A, and the supported discrete
 subset (IEEE 1364-2005 digital constructs carrying four-state values and
 real-valued nets), with connect modules inserted automatically at discipline
-boundaries.
+boundaries. There is one language and one pipeline: `.va` and `.vams` are the
+same dialect here, with no mode selector between them. A host that executes
+the digital half of a mixed module opts in through
+`CompilerOptions::enable_ams`, which widens what a runtime report carries, not
+what the front end accepts.
 
-Source is compiled through parser, semantic, device-IR, canonical-IR, and
-backend stages, and the crate supplies the runtime that lets the result behave
-as a device inside the rspice-core simulator: evaluating currents and charges,
-producing an analytic Jacobian by automatic differentiation, and contributing
-noise sources. It backs the engine's `veriloga`, `veriloga-native`, and
-`veriloga-wasm-jit` features, the CLI's `rspice compile-va`, the GUI's
-Verilog-A dialog, and the generated-Rust built-in path behind
-`rspice-core`'s `veriloga-builtins`.
+It is separate from `rspice-core` because it is a compiler, not an engine: four
+independent backends consume one canonical artifact, and one of them runs
+offline, ahead of the build, with this crate absent from the shipped link.
 
-## Compilation pipeline and module map
+## What's in here
 
 ```
 source text ─▶ preprocessor ─▶ lexer ─▶ parser ─▶ semantic ─▶ IR (+ autodiff) ─▶ canonical IR
@@ -24,1329 +23,196 @@ source text ─▶ preprocessor ─▶ lexer ─▶ parser ─▶ semantic ─�
 ┌────────────────────────┬─────────────────┬─────────────────────┬────────────────────┘
 ▼                        ▼                 ▼                     ▼
 codegen                  native/           wasm_jit/             rust_backend
-bytecode CompiledModel   feature "native"  feature "wasm-jit"    offline Rust emitter
-run by vm                machine code      one wasm module       compiled into rspice-core
+bytecode CompiledModel   feature "native"  feature "wasm-jit"    feature "rust-codegen"
+run by vm                machine code      one wasm module       offline Rust emitter
 │                        │                 │                     │
 └────────────────────────┴─────────────────┘                     ▼
                          ▼                                       rspice-veriloga-models
             device: VerilogADevice instance                      (this crate is not linked)
 ```
 
-The four backends are not interchangeable at run time. `vm`, `native/`, and
-`wasm_jit/` are all driven through `VerilogADevice` in this process;
-`rust_backend` runs offline, ahead of the build, and its output is compiled
-into `rspice-core` as ordinary Rust with this compiler absent from the link.
-
-Analog real-to-integer assignments round to nearest, with half cases away
-from zero, before automatic differentiation. Scalar and array writes,
-variable initializers, and function arguments and results share this conversion.
-The checked signed-32-bit conversion and bitwise/shift rules live in
-`rspice-veriloga-runtime::integer` and are used by the generated Rust path
-as well as the portable, native, and Wasm evaluators. This does not yet
-provide signed-32-bit wrapping for all ordinary integer arithmetic.
+The backends are not interchangeable at run time. `vm`, `native/` and
+`wasm_jit/` are driven through `VerilogADevice` in this process; `rust_backend`
+runs offline and emits Rust that is checked in as feature-selectable crates
+under `rspice-veriloga-models/` and compiled against the generated-model
+runtime ABI.
 
 | Module | Contents |
 | :--- | :--- |
-| `preprocessor` | `` `include ``/`` `define ``/`` `ifdef `` expansion; supplies built-in `disciplines.vams` and `constants.vams` when not found on disk; records include dependencies |
-| `lexer` | Tokenizer for the full token set, including system-function and preprocessor tokens |
-| `parser` | Recursive-descent parser producing `SourceFile`/`Module` ASTs; handles ANSI and non-ANSI port styles |
-| `ast` | AST types for expressions, statements, declarations, analog operators, event expressions |
-| `semantic` | Symbol table, type inference, discipline validation; rejects unsupported constructs with explicit errors |
-| `ir` / `expr_converter` | Lowering to device-equation IR; the `autodiff` submodule generates derivative ("shadow") assignments by symbolic forward-mode differentiation, so Jacobians are analytic rather than finite-difference |
-| `canonical_ir` | Stable HIR/MIR artifact with validation, diagnostics, content digests, and backend input for generated Rust and native/JIT paths |
-| `codegen` | Emits the bytecode `CompiledModel`: assignment programs, per-stamp value and Jacobian programs, reactive (charge) programs, noise metadata |
-| `rust_backend` | Deterministic Verilog-A-to-Rust backend for generated built-ins: lowers canonical IR to Rust source folders, registry/support modules, manifest data, and cleanup guards used by `rspice-core`'s `veriloga-builtins` feature |
-| `vm` | Bytecode interpreter and per-instance runtime context (state for `ddt`/`idt`, transition/slew filters, delay buffers, event detectors, lookup tables) |
+| `preprocessor` | `` `include ``/`` `define ``/`` `ifdef `` expansion; supplies the built-in `disciplines.vams` and `constants.vams` when not found on disk; records include dependencies |
+| `lexer` / `parser` / `ast` | Tokenizer, recursive-descent parser producing `SourceFile`/`Module` ASTs in both ANSI and non-ANSI port styles, and the AST types |
+| `semantic` | Symbol table, type inference, discipline validation; rejects unsupported constructs with explicit errors rather than dropping them |
+| `ir` / `expr_converter` | Lowering to device-equation IR; the `autodiff` submodule generates derivative assignments by symbolic forward-mode differentiation, so Jacobians are analytic rather than finite-difference |
+| `canonical_ir` | Stable HIR/MIR artifact with validation, diagnostics and content digests: the single input every backend consumes |
+| `codegen` / `vm` | Emits the bytecode `CompiledModel` (assignment programs, per-stamp value and Jacobian programs, reactive programs, noise metadata), and the interpreter and per-instance context that run it |
+| `device` | `VerilogADevice`: the per-instance object the simulator drives |
+| `native/` | RSpice-owned native JIT: full native JIT or typed construction error, no bytecode fallback. x86-64 and desktop AArch64 on macOS, Linux and Windows, with platform-native executable memory and unwind registration |
+| `wasm_jit/` | Browser JIT: emits one WebAssembly module per model through `wasm-encoder` and validates it with `wasmparser`. The owning Web Worker compiles and instantiates it |
+| `rust_backend` | Offline Verilog-A-to-Rust emitter: source folders, registry and support modules, manifest data and the staleness digests behind `rspice-veriloga-gen` |
 | `laplace` / `zfilter` | State-space runtime for the `laplace_*` (s-domain) and `zi_*` (sampled-data) filter operators |
-| `device` | `VerilogADevice`: the per-instance object the simulator drives; see below |
-| `native/` | RSpice-owned native JIT backend (feature `native`): full native JIT or typed construction error, no bytecode fallback. Supports x86-64 and desktop AArch64 on macOS, Linux, and Windows, with platform-native executable-memory and unwind registration |
-| `wasm_jit/` | Browser JIT backend (feature `wasm-jit`): emits a WebAssembly module per model through `wasm-encoder`, validates it with `wasmparser`, and dispatches into it. The owning Web Worker compiles and instantiates the module |
-| `connect` | Connect-module insertion at discipline boundaries, for mixed Verilog-AMS decks |
-| `four_state` | The four-state logic values and their propagation, for the discrete half of Verilog-AMS |
-| `specialist` / `reaching_definition` / `timing_contract` | Structural specialization candidates, the reaching-definition analysis they rest on, and the digital timing contract |
-| `array_index` / `integer_runtime` / `numeric_literal` / `json_float` | Array indexing rules, integer semantics, literal parsing, and the exact float round-trip the artifact digests depend on |
-| `canonical_compat` | Compatibility between canonical-IR artifact versions |
-| `virtual_source` | Sealed, file-system-free source bundles: portable logical paths, include resolution restricted to the bundle plus the built-in headers, and BLAKE3 identities for the source, dependency closure, compiler contract, and runtime contract. The transport boundary for browser workers and retained run snapshots |
-| `runtime_report` | In-memory compilation reports: the simulator ABI a compiled artifact exposes, its user-facing diagnostics with source positions, and which runtime targets have actually qualified for it. Performs no file-system access |
-| `metrics` | Stable phase identifiers, structured timing/work-size reports, measured-result wrappers, and opt-in performance budgets shared by the compiler and offline Rust backend |
-| `disciplines` / `stdlib` / `types` | Discipline database, the built-in `disciplines.vams`/`constants.vams` headers (LRM 2.4 physical constants), the type system, function registry, and parameter-range types |
-| `source` / `error` | Source maps/spans and the `CompileError`/`CompileResult` types |
+| `connect` / `four_state` | Connect-module insertion at discipline boundaries, with its own clause-by-clause table of the LRM 2.4 clause 7 rules and what it refuses by name; and the four-state logic values of the discrete half |
+| `virtual_source` | Sealed, file-system-free source bundles: portable logical paths, includes resolved inside the bundle plus the built-in headers, and BLAKE3 identities for the source, dependency closure, compiler contract and runtime contract. The transport boundary for browser workers and retained run snapshots |
+| `runtime_report` | In-memory compilation reports: the simulator ABI an artifact exposes, user-facing diagnostics with source positions, and which backends have qualified for it. Performs no file-system access |
+| `specialist` / `metrics` | Structural specialization findings a model author sees; stable phase identifiers, timing and work-size reports, and opt-in performance budgets |
+| `disciplines` / `stdlib` / `types` | Discipline database, the built-in headers (LRM 2.4 physical constants), the type system, function registry and parameter-range types |
+| `source` / `error` | Source maps and spans, and the `CompileError`/`CompileResult` types |
+| `analog_tasks` / `analog_occurrences` / `time_scale` | Ordered analog task calls and assignment notifications shared by every lowering; declared module timing and delay rounding |
+| `generated_source` / `json_float` | Data-only generated-source report types, available without `rust-codegen`; the JSON-safe float encoding serialized artifacts use |
 
-## Public API
+## Boundaries
 
-Every entry point hangs off `VerilogACompiler`, and they differ along two
-axes: which artifact you get back, and where the source comes from.
+- The runtime ABI generated models link against is
+  [`rspice-veriloga-runtime`](../rspice-veriloga-runtime); the generated
+  artifacts are [`rspice-veriloga-models`](../rspice-veriloga-models).
+- Model caching, device routing and the netlist directives that load a source
+  file (`.va`, `.veriloga`, `.hdl`, `.vams` and `.verilog` all name the same
+  directive) belong to [`rspice-core`](../rspice-core/README.md), whose suite
+  also holds the engine-level oracle tests, as `veriloga_*.rs`.
 
-```rust
-use rspice_veriloga::{VerilogACompiler, CompilerOptions};
+## Entry points
 
+Every compile starts at `VerilogACompiler::new(CompilerOptions)`. The entry
+points differ along two axes: which artifact comes back, and where the source
+comes from.
+
+- `compile` / `compile_module`: source text to a bytecode `CompiledModel`.
+  Compiling without a module name errors if the source declares more than one
+  module, listing their names.
+- `compile_runtime`: source text to a `RuntimeCompileReport`, with bytecode model
+  and canonical IR from one parse, cross-validated and qualified against the
+  available backends. Nothing is written to disk.
+- `compile_canonical_ir` / `compile_canonical_ir_module`: the canonical
+  artifact alone, for a caller that only drives a JIT or the offline emitter.
+- `compile_file_with_metadata` / `compile_file_runtime_with_metadata`: the
+  same products from a path, returning the include dependencies preprocessing
+  discovered.
+- `compile_virtual_runtime`: the same products from a sealed
+  `VirtualSourceBundle`, never touching the file system.
+- `VerilogADevice::try_new(name, model, nodes)`: the instance the simulator
+  drives directly, with no trait indirection: set parameters and simulation
+  state, then `evaluate()` / `stamp()` / `stamp_reactive()` /
+  `compute_jacobian()` inside the Newton loop, and `noise_sources()` for noise.
+  `try_new_with_canonical_ir` is the form that admits the native JIT. The
+  compiled model is shared, so a thousand instances of one model compile once.
+- `rust_backend::RustTranspiler`: the offline emitter; `rspice-veriloga-gen`
+  is the binary that drives it over a model tree.
+
+```rust,ignore
 let compiler = VerilogACompiler::new(CompilerOptions::default());
-
-// Bytecode CompiledModel
-let model = compiler.compile(source)?;                       // exactly one module
-let measured = compiler.compile_measured(source)?;           // model + phase metrics
-let model = compiler.compile_module(source, Some("nmos"))?;  // pick one of several
-let model = compiler.compile_file(path)?;                    // from disk, with includes
-let model = compiler.compile_file_module(path, Some("nmos"))?;
-let file  = compiler.compile_file_with_metadata(path)?;      // + include dependency list
-let file  = compiler.compile_file_module_with_metadata(path, Some("nmos"))?;
-
-// Canonical HIR/MIR artifact
-let ir = compiler.compile_canonical_ir(source)?;
-let measured_ir = compiler.compile_canonical_ir_measured(source)?;
-let ir = compiler.compile_canonical_ir_module(source, Some("nmos"))?;
-let ir = compiler.compile_file_canonical_ir_with_metadata(path, Some("nmos"))?;
-
-// Both at once, from one parse/analysis pass
-let report = compiler.compile_runtime(source, Some("nmos"))?;
-let both   = compiler.compile_file_runtime_with_metadata(path, Some("nmos"))?;
-
-// Sealed bundle, no file-system access at all
-let built = compiler.compile_virtual_runtime(&bundle, "nmos", limits)?;
-let built = compiler.compile_virtual_runtime_diagnosed(&bundle, "nmos", limits)?;
+let report = compiler.compile_runtime(source, Some("resistor"))?;
+let device = VerilogADevice::try_new("R1", report.model, &[1, 0])?;
 ```
-
-The `*_runtime` family is the one to reach for when a caller needs both
-artifacts: preprocessing, lexing, parsing, and semantic analysis run once
-and the bytecode model and canonical IR are emitted from the same analyzed
-module, then cross-validated. `compile_runtime` and the virtual-bundle
-APIs are sealed: they consult the built-in standard headers but never the
-configured `include_paths` or the disk, so a caller that needs includes
-resolves its own graph into a `VirtualSourceBundle` first.
-`compile_virtual_runtime_diagnosed` differs from `compile_virtual_runtime`
-only in failure: it keeps source-authentic diagnostics mapped back to
-bundle paths instead of collapsing to a bare `CompileError`.
-
-When a source declares connection rules or connect modules, its canonical
-artifact retains the active preprocessed closure with a separate integrity
-identity. The core uses that closure and its discipline definitions for
-connection selection after file loading, cache reuse, or sealed virtual
-registration. Multiple selected modules from one closure share its rules.
-Selected authored connect bodies execute through the shared mixed runtime at
-deck boundaries and typed scalar HDL hierarchy boundaries. Internal insertion
-uses the source closure's rules after parameter/generate specialization and
-preserves merged/split grouping, authored loading, and real-net resolution.
-`PreparedRuntimeSource::connection_configuration(name)` seals an explicit named
-selection. `compile_runtime_with_connections` applies that selection before
-hierarchy elaboration, including a separately prepared library and its helpers.
-The canonical artifact retains both the original device source and the selected
-library/block; parameter specialization replays that exact configuration. Library
-compiler directives retain their own scope, conflicting physical definitions are
-rejected, and external diagnostics name the retained preprocessed library.
-
-The engine discovers the complete deck selection before compiling internal
-boundaries and re-elaborates cached/registered hierarchies when it changes.
-Canonical artifacts retain typed root assignments separately from source text;
-reconfiguration and later partial overrides preserve prior assignments and their
-`$param_given` meaning. `prepare_artifact_runtime_source` reconstructs this input
-without filesystem access, with diagnostics labeled as preprocessed coordinates.
-That preparation is bound to its original root module; default replay preserves
-its captured configuration, while an explicit configuration can replace it.
-`PreparedVirtualSource` exposes the same named selection and configured compilation,
-including optional backend qualifications and cancellation. The combined expanded
-device/library input obeys `max_expanded_bytes`; the device's original dependency
-graph stays separate from the library retained in the canonical artifact. The
-virtual runtime contract includes that selection, and external error diagnostics
-carry the exact retained library text labeled as preprocessed coordinates.
-Selected packed bits and unpacked variable-array elements can cross internal
-unidirectional boundaries. Selectors are closed in the parent parameter scope;
-per-lane identities preserve merged/split grouping and the authored converter's
-loading. ADC writes retain independent driver identities on the selected bits.
-Physical vector ports and internal nodes retain authored bounds and expand into
-scalar solver lanes. Hierarchy connections bind whole vectors, part-selects and
-concatenations in declaration order with exact width checks. Parent packed buses
-can drive whole physical input vectors through per-lane authored converters;
-selected physical lanes can connect to scalar digital formals. Scalar potential
-and flow accesses resolve constant coordinates, including analog `genvar` loops
-and custom nature accesses. Shape and selector dependencies require source
-specialization when their parameters change. Named branch declarations also accept
-whole physical vectors and constant terminal bit/part selections. Explicit branch
-ranges retain their coordinates; an omitted vector branch range starts at zero.
-Corresponding vector lanes connect in declaration order, and a scalar terminal is
-shared by all lanes. `branch (<p>) probe;` aliases and selected `I(<p[k]>)` reads
-measure each local port's flow, including when parent connections tie ports together.
-These probes work in analog expressions and discrete processes, with custom nature
-flow access functions as well as `I`. Port probes cannot drive contributions or
-read potentials. Branch ranges and terminal selectors participate in parameter
-specialization. Artifact schema 138 and core cache record 120 invalidate models
-compiled before these checks.
-Inline discipline names on `wreal`, `wire`, and module-level `reg` declarations
-retain the same semantic identity as separate discipline declarations. ANSI and
-body port declarations accept discipline-before-type syntax, while preserving the
-existing reverse-order compatibility spelling. Real nets require a discrete
-discipline; unknown and conflicting declarations diagnose before connection
-insertion. `logic` and the conventional `ddiscrete` name are built-in discrete
-disciplines; user-defined discrete disciplines participate in converter selection.
-Connected analog and digital ports accept compatible discipline names and reject
-incompatible potential/flow natures or selected `resolveto exclude` pairs. Digital
-checks cover authored scalar, array, selected and concatenated net operands before
-input assignments are prepared. Analog flattening retains each child port's local
-branch discipline while sharing the connected physical node. Schema 142 and core
-cache record 124 invalidate artifacts compiled before these checks.
-Declared digital interconnects without a local discipline now acquire one bottom-up
-from concrete child ports before converter selection. Resolution follows selected
-`resolveto` rules, with each owning module's default used only when there are no
-matching child disciplines. Explicit declarations retain precedence. Scalar, selected,
-array and concatenated connections share this pass, including parameterized generated
-occurrences and authored connect bodies. Ambiguous resolution rules retain the required
-source-order warning in runtime reports and file diagnostics. Schema 143 and cache
-record 125 invalidate artifacts compiled before inherited resolution.
-Structural `wire`/`tri` interconnects now follow continuous-domain child ports under
-basic domain resolution. Packed ranges and unpacked dimensions become physical
-node shapes; converters are inserted only at the resulting domain boundaries.
-Process reads/writes, assignment operands, initializers, numeric analog reads and
-computed connection values retain discrete storage. Lexical locals do not change
-the domain of a same-named module wire. Physical boundaries stop real-net type
-promotion, and entirely physical structural subtrees require no digital runtime.
-Schema 144 and cache record 126 invalidate artifacts compiled before this change.
-Structural module connections and continuous-assignment targets now create implicit
-scalar wire nets in their lexical scope. The same domain/type resolver handles these
-nets, including real-valued interconnect and physical analog loading. `default_nettype`
-wire/tri/none is retained across includes, macro expansion, inactive source and resetall;
-none rejects missing net declarations at their source positions. Reads in arbitrary
-behavioral code do not introduce nets. Analog behavioral access still requires a
-declared nature (VAMS-2023 3.6.3–3.6.5).
-Generate blocks retain separate explicit and implicit net declarations, packed ranges,
-unpacked dimensions and local shadowing. Unnamed blocks use collision-checked genblk
-names, preserved through specialization and source replay. Generated local storage,
-localparams, genvars, branches, analog functions and analog bodies retain concrete
-per-occurrence identities. Nested generate schemes see scoped constants; procedural
-locals and function arguments shadow enclosing names. Generated analog initialization
-and simulation statements retain source ordering and independent state. Ordinary
-parameter and port declarations remain illegal inside a generated block (VAMS-2023
-6.6). HIR 147 / cache record 129 invalidate pre-expansion artifacts. Other unsupported
-module-item forms remain separate requirements.
-Analog blocks concatenate after elaboration: repeated iterations remain in loop
-order, and nested generated constructs stay between their surrounding authored
-statements. Directly nested conditional generates share the enclosing scope level
-and construct number; conflicting block names diagnose even in unselected branches.
-HIR 148 / cache record 130 invalidate artifacts with earlier ordering or scope names.
-References into named generated scopes within a module now bind structured path
-segments, constant scope indices and lexical origins before either domain lowers.
-Forward/sibling references, digital reads/writes, physical probes/contributions and
-analog function calls use the selected declaration; terminal bit/part selectors stay
-separate from scope selectors. Each loop iteration retains its implicit integer
-localparam. Escaped identifiers cannot alias generated paths or internal symbols.
-Authored paths replay after parameter specialization. HIR 149 / cache record 131
-invalidate artifacts predating generated-reference binding.
-Descendant numeric parameter references now discover target occurrences before body
-analysis, with named/ordered overrides, aliases, local constants, packed values and
-parameters inside generated scopes. Sibling parameter reads may supply instance
-overrides; dependency cycles are diagnosed. Both domains consume the same effective
-value. Retained dependencies protect parameter updates from stale folded values and
-source replay rebinds after specialization. HIR 150 / cache record 132 invalidate
-artifacts predating these source bindings.
-Descendant analog function calls retain the target occurrence's parameter values,
-local names, nested calls and built-in math binding. Scalar output/inout copy-out
-uses the existing function execution path. Captured values and scope indices remain
-protected through specialization and source replay. HIR 151 / cache record 133
-invalidate artifacts predating these function bindings.
-Continuous-net, named-branch, explicit unnamed-branch and port-current references
-bind to the target occurrence's existing physical storage. Branch ownership,
-orientation, contributions and derivative signs survive flattening. Within one
-selected HDL root, upward, sibling, self/module-name and `$root.selected_root`
-references retain lexical shadowing and effective instance parameters. Automatically
-inserted connect bodies and their helpers use the upper connection's actual context,
-including supply probes, generated structure and connect-rule overrides.
-Numeric integer/real parameter and localparam arrays retain their declared coordinates
-and readonly storage. Hierarchical reads such as `child.table[index]` close values
-and bounds in the target occurrence while evaluating runtime indices in the caller.
-Imported arrays add no externally overridable parameters. Bounds, dependencies,
-integer assignment conversion and source replay follow the existing typed parameter
-path. Resizing a public parameter array requires an explicit replacement array value.
-External scalar specialization also enforces that rule, including alias overrides;
-private local arrays may derive new shapes from effective public parameters.
-HIR 157 / cache record 139 invalidate artifacts predating these array contracts.
-Foreign digital storage, multiple HDL roots/cross-model hierarchy,
-aggregate expressions that depend on other arrays, hierarchy-dependent
-generate decisions, and scope indices that themselves depend on hierarchical
-constants remain open. References requiring complete post-insertion discovery or
-prior coercion of an implicit net's discipline also need further elaboration work.
-Detailed top-down domain resolution remains open. HIR 145 / cache record 127 invalidate
-artifacts produced before scoped implicit-net construction.
-Explicit continuous-discipline `wire`/`tri` declarations allocate only physical
-nodes. Inline and separate declarations retain their packed and unpacked shapes
-through generated scopes, parameter specialization and replay. Discrete siblings
-and potential/flow reads retain their existing domain bindings. Conflicting shapes
-and digital drivers on continuous nets are diagnosed. HIR 146 / cache record 128
-invalidate artifacts compiled before this storage normalization. Net-discipline
-initializer (nodeset) syntax remains separate unfinished work.
-The existing `output real` variable-port form is an RSpice compatibility extension,
-not the VAMS-2023 real-net port syntax (`wreal`).
-Compatible scalar and complete bus connections to real nets resolve `wire`/`tri`
-interconnect to the real net's type before driver and expression lowering. Resolution
-is per concrete instance and propagates across hierarchy, including authored connect
-bodies; unrelated uses of the same module retain their original type. A wire bus
-resolves as a complete bus before a selected part can carry real values. Structural
-concatenations and bounded input replications propagate the same net-type constraints
-through nested groups and selected real-array cells. Repetition retains the original
-driver contributions. Promotion of individual elements of unpacked wire arrays
-remains open implementation work.
-Unpacked arrays of four-state wire nets retain independent drivers per word.
-Constant element and packed bit/part targets accept continuous assignments;
-procedural writes remain invalid for nets. Statically selected elements connect
-scalar/packed input, output and inout ports through shared wire identities, including
-mixed analog buses. Multidimensional, ascending and negative coordinates use the
-same storage layout as variable arrays. Dynamic reads retain ordinary array lookup
-semantics. Unpacked real-net arrays (`wreal` and the supported resolved RNM types)
-share each selected element's complete signal identity through scalar input, output
-and inout connections. Original drivers retain their resolution policy through
-hierarchy and authored converters, including physical loading and return feedback.
-Canonical real-net aliases can also join separately stored views through the same
-resolver. Linking relocates their identities, validates the combined driver count,
-and retains them in artifact identity. Runtime publication updates the entire group
-before computed event expressions run; external drivers and trial/reset state use
-the same topology. Real buses declared with a range before the net name retain
-local array coordinates and use these aliases for scalar or bus port connections.
-Whole buses, constant lane/part selections, concatenations, and selected bus words
-in multidimensional arrays preserve declaration order across ascending, descending,
-and different formal bounds. Dynamic scalar reads use the ordinary array evaluator.
-Specialization and source replay rebuild the bus shape and its lane connections.
-Conservative net arrays retain multidimensional physical node identities, with an
-optional bus range on each element. Constant scalar probes, branch terminals,
-bus-word and part connections, and ranged grounds resolve to the same scalar
-physical equations. Bounds and selections are rebuilt during specialization and
-source replay. Whole unpacked-array formal ports remain open implementation work.
-Constant four-state wire bit/part selections can connect bidirectional HDL ports
-and scalar authored mixed boundaries. Explicit aliases retain each original driver,
-resolve contention, and release with `Z` through hierarchy and linked designs.
-External event-net identities survive aliases that join multiple circuit nets.
-Whole physical vectors, physical part-selects and physical concatenations can also
-connect to packed digital input, output and inout ports. Packed proxy nets preserve
-port order and use per-lane aliases to share merged converter drivers across child
-ports, including nested instances and variable outputs. Packed words and word
-part-selects from variable arrays can drive physical input vectors; each unpacked
-coordinate is resolved in the parent parameter scope before packed lanes expand.
-Declared bit order and per-element identities retain merged/split loading, while
-real-valued elements keep their scalar connection semantics. Concatenations can
-combine physical lanes with four-state scalar, packed and selected variable-array
-lanes on packed digital ports. Input/output digital lanes use one grouped assignment;
-inout wire lanes retain driver identities through normalized bit aliases. Output
-and inout lanes require writable parent nets, and replications remain input-only
-(VAMS-2023 4.2.13). Discrete input expressions execute through parent-side assignments
-with the formal's width and value type. Constants, arithmetic, concatenations,
-conditional values, dynamic bit/array selections and width/type conversions retain
-the parent's parameter and time scope, without requiring connect rules. Existing
-type/coordinate-compatible net bindings and constant selections retain their direct
-binding path. Equal-width inputs with different signedness or bit numbering use
-assignment conversion to retain the child's declared interpretation.
-Equal-width output/inout nets retain local packed bounds and signedness through
-positional wire aliases when their declarations differ. Body selections and signed
-operations use the local declaration; original drivers still share resolution.
-Mixed input concatenations can interleave physical nets with constants, computed
-digital expressions and dynamic bit/array reads. One parent-side assignment retains
-the digital expression, including replication evaluation and X/Z values; it releases
-physical positions to the selected converters. Physical sites retain per-bit
-merged/split grouping and loading. The shared digital type rules determine operand
-widths, and the mixed connection must match its formal width. Vector-valued/named
-branch forms, unpacked net/port arrays, complete inherited discipline resolution,
-and library/view selection remain open.
-Escaped node names retain distinct lane identities; escaped ground and comma-bearing
-names still require structured branch labels, and the full escaped-identifier
-language surface remains part of language qualification.
-
-`prepare_file_runtime_source` freezes one analyzed file/include closure before
-module selection. It can describe a standalone connection library or compile
-several ordinary modules through `PreparedRuntimeSource::compile_runtime`.
-Captured dependency identities refer to the bytes actually preprocessed, even
-if a file changes afterward. The preparation and compiler options are shared;
-module compilation does not reopen sources. Keep prepared trees scoped to
-elaboration. The limits/control variant bounds source expansion and preserves
-cancellation; returned module metrics include the shared preparation prefix.
-The engine groups `.VERILOGA` selections by source and freezes discovery before
-emitting devices. Retained expanded source across the design obeys the active
-source byte budget. Configured memory/disk cache entries include the selected
-library, rule block, module and root assignments; they do not replace the base
-registration. Warm runtimes carry their connection closure. Cache dependency
-hashes come from captured preprocessing bytes, so a later source edit cannot
-relabel old compiled behavior as current.
-
-Connection tables retain case-sensitive named `connectrules` blocks, including
-empty blocks. `blocks()` lists their declaration spans; `select_block(name)`
-returns only that configuration's ordered insertion and resolution statements.
-The complete table is an inspection view, not an implicit union of alternative
-configurations. Duplicate connect-module or rule-block declarations are errors.
-
-`prepare_virtual_runtime_source` provides the same immutable preparation for a
-sealed bundle. It retains the exact active dependency/include graph, diagnostic
-source map, compiler options and limits. Its module emissions reuse the front
-end and report only newly performed phases to a progress observer; each report
-retains the shared preparation metrics as provenance. The existing virtual
-discovery and compilation APIs now use this path. A control variant supports
-cancellation during preparation and subsequent module emission.
-
-Both file and virtual preparation can produce a `ConnectionLibraryArtifact`,
-including when there are no ordinary modules. This versioned source artifact
-retains the active connection declarations and authored bodies independently of
-a device ABI. Validate its integrity before registration and use
-`connect_specification()` to resolve its physical definitions and named rules
-without filesystem access. The containing project or signed package authenticates
-the artifact identity. The core's `register_project_veriloga_sources_for_session`
-API registers these artifacts atomically with device runtimes in one bounded
-source cache; module artifacts also continue to carry their connection closure.
-Product-specific library import and worker packaging remain integration work.
-
-Runtime reports and file-metadata results carry `PipelineMetrics`.
-`compile_measured` and `compile_canonical_ir_measured` expose the same data
-for source-only artifact calls. `RustTranspiler::transpile_measured` reports
-the offline backend's CFG lowering, differentiation, optimization,
-scheduling, emission, and exact generated byte/line counts. Timings are
-operational evidence and never participate in artifact or cache identities.
-`CompilerOptions::performance_budget` and
-`RustTranspileOptions::performance_budget` can enforce opt-in total or
-per-phase limits; empty budgets are the default.
-The `*_with_control` measured entry points accept a `PipelineControl` for
-cooperative cancellation and progress callbacks. Cancellation is polled at
-phase boundaries and inside the packed-AD and CFG-optimization hot loops, so
-stopping a large compact-model generation does not wait for the entire
-transpile to finish.
-
-Two environment variables also provide diagnostic-only output:
-`RSPICE_DEBUG_PP=1` writes the preprocessed source beside the input file
-as `*.pp.va`, and `RSPICE_VERILOGA_PHASE_TRACE=1` (or the narrower
-`RSPICE_VERILOGA_CANONICAL_IR_PHASE_TRACE=1`) prints per-phase timings to
-stderr.
-
-`CompilerOptions` carries three fields that change generated artifacts, all
-of them preprocessor inputs: `include_paths` (searched by
-`` `include ``, and only by the file-system entry points), `defines`, and
-`undefines` (drops a standard macro so `defines` can replace it). The
-performance budget changes only whether a slow invocation is accepted and
-is excluded from compiler-contract identities.
-
-`enable_ams` lets the runtime compilation APIs return the analog model
-alongside a canonical digital plan. It defaults to false: callers enabling
-it must execute that plan on the event scheduler, since the analog model
-alone cannot execute digital behavior. Canonical-IR compilation can lower
-digital processes independently of this option.
-
-Active `` `timescale `` directives now retain module units and precision through
-includes, HDL hierarchy, specialization and canonical transport. `` `resetall ``
-restores the default 1 ns / 1 ns timing and the supported default discipline and
-transition settings. Procedural wait expressions, including runtime, fractional
-and parenthesized expressions, round at the declaring module's precision before
-checked integer rescaling to the compiled HDL design's finest precision. Integer
-delays use checked integer arithmetic; values above 32 bits are retained without
-clamping. Expressions are sampled once at encounter. X/Z delays become zero
-and retain inactive-region scheduling; negative delays use unsigned 64-bit time
-conversion followed by range checks. Nonfinite and out-of-range delays produce
-runtime errors before scheduling. Delay-input reads participate in `@*`.
-The event host still enforces its exact tick-to-seconds range.
-
-`$simparam("timeUnit")` and `$simparam("timePrecision")` resolve to the owning
-module's declarations in seconds, including parameter defaults, analog hierarchy
-and digital expressions. A simulator-environment override cannot replace these
-declarations. The optional fallback is not executed for these known queries.
-Analog `$realtime` is retained as a compatibility function returning continuous
-simulation time divided by the owning module's time unit; `$abstime` remains
-seconds-valued. This changes the former unscaled alias. VAMS-2023 section 9.10
-deprecates analog `$realtime` in favor of `$abstime`; the retained compatibility
-behavior is not a vendor qualification claim.
-
-Digital `$time`, `$stime`, `$realtime` and `$abstime` read the current process
-activation. `$time` rounds exact design ticks to a 64-bit unsigned count of
-module time units; `$stime` returns the low 32 bits of that count. `$realtime`
-returns the fractional module-unit count. `$abstime` returns physical activation
-time in seconds. An analog-triggered activation and its `#0` consequences retain
-that physical time even when their digital reporting tick is rounded. A later
-positive-delay activation receives its own clock. Custom `DigitalEnvironment`
-implementations must supply `read_clock`; absent or invalid clocks are errors.
-
-`canonical_ir::digital_eval::checkpoint` provides versioned process continuations,
-captured expression-event baselines, waits and pending nonblocking assignments.
-`DigitalCheckpointReader` validates the compiled plan once, authenticates saved
-identities and cursor/value shapes, and rebuilds event programs and analog-read
-capture maps without executing processes. Packed planes are checked strictly;
-real values preserve IEEE bits, including signed zero and NaN payloads. Shared
-decoded-item and packed-bit budgets apply across a reader's restored objects.
-The enclosing circuit reader must bound deserialization and validate/atomically
-install the complete host, scheduler, storage and analog state. These component
-APIs alone do not enable circuit-level persisted mixed-signal restart.
-
-Known digital arithmetic and relational operands wider than 64 bits use exact
-integer arithmetic, with results wrapping at their declared width. X/Z and
-division-by-zero behavior is preserved. Wide shift counts, based literals and
-unsized based values retain their bits, within the existing 65,536-bit literal
-budget. Known based literals that cannot fit exactly in the scalar `f64`
-representation use the exact-bit path too. Analog scalar consumers continue to
-reject unsupported discrete forms explicitly. Full literal/type/conversion work
-in MS06 remains open.
-
-Digitally owned module-level `integer` and `real` variables, and explicit packed
-`reg` variables, can carry constant initializers. Numeric declarations still
-acquire their domain from their procedural writers; initialization does not
-choose ownership, and writes from both domains remain errors. Each initializer
-uses its own instance's parameters and typed assignment conversion. Canonical
-signals retain the initial value, and the
-core installs it before process startup, preserving it through ordinary trial
-rollback and checkpoint restoration. Custom digital stores must initialize from
-`DigitalSignal::initial_value` when present. Packed initializers retain signed
-extension, truncation, ascending ranges and X/Z values. This follows the
-VAMS-2023 pre-simulation contract (8.2), including when a variable has no process
-writer. Digitally owned unpacked variable arrays use the same ownership and
-initial-storage contract, including multidimensional declarations.
-
-Digital processes can read elements of analog-owned `real` and
-`integer` arrays using constant or runtime indices. Reads retain the element
-type, signed integer arithmetic, and declared index bounds. They use the normal
-analog evaluation's published storage and sampling barrier; resumption preserves
-the chosen index and does not replay earlier digital writes. Real indices use
-the shared nearest-integer conversion. Unknown, unrepresentable, and out-of-range
-indices produce an explicit diagnostic, consistent with the current analog array
-runtime. Schema 114 extends the indexed-read contract to multidimensional arrays
-and carries their shapes into HIR, MIR, and digital analog-probe groups. Analog
-reads and writes check every coordinate before flattening the address; constant
-integer coordinates retain their exact values. Module and analog block-local
-nested initializers follow authored axis order. Derivative storage retains full
-source element names. Direct analog numeric and packed reads of discrete matrices
-use the existing value/validity projections, so unknown unselected bits do not
-invalidate a known selection. Multidimensional analog assignment-event subscriptions
-retain complete cell identities, including selected and whole-array subscriptions.
-Implicit event dependencies and continuous digital drivers can read retained
-analog matrix cells. Ownership checks constrain partially constant selections to
-the possible cells; continuously assigned cells cannot provide assignment events.
-Selected write addresses survive self-indexing, trial rejection, and in-memory
-checkpoint restore. These paths have focused desktop transient evidence.
-Analog evaluation records assignment occurrences in execution order, including
-writes to different cells and repeated equal-value writes. Publication keeps that
-order and lets digital controls rearm between occurrences. Candidate replacement
-and rejection discard speculative records; observation does not generate them.
-Canonical schema 115 retains occurrence effects in the executable CFG, keeping
-intermediate counter writes live through differentiation, scalarization and
-native scheduling. The ordered postfix native plan uses the same journal.
-The journal is bounded to 65,536 occurrences per model evaluation and reports
-exhaustion without accepting a truncated stream.
-Cross-instance race behavior, generated/native digital execution, browser/tablet
-execution, and vendor scheduling equivalence require their separate qualification.
-This evidence does not establish complete mixed scheduling or platform parity.
-Schema 68 requires finite integral declaration bounds, preserves integer-valued
-constant indices without floating-point narrowing, and checks extents before
-allocation. Constant real indices use the same checked rounding as runtime
-indices. Single-element arrays at either signed 64-bit endpoint retain their
-exact element names; invalid ranges and non-finite indices produce diagnostics.
-
-Schema 69 introduces the runtime foundation for digitally owned unpacked
-variables: explicitly declared array groups over ordinary scalar signal cells,
-with runtime-indexed reads, blocking writes and nonblocking writes. The selected
-cell and RHS are captured when a deferred update is scheduled. Linking preserves
-instance-local array storage; expression-event dependencies cover the address and
-all possible cells, then reevaluate the selected value. Array shape, cell type,
-name, ownership and non-overlap are validated at the artifact boundary. Unknown
-or out-of-range four-state reads produce X; invalid writes have no effect.
-Invalid real-array reads currently diagnose instead of inventing a sample; their
-language-level invalid-value contract remains to be qualified.
-
-Source lowering connects one-dimensional module-level `reg`, digitally owned
-`integer`, and digitally owned `real` arrays to that contract. Element accesses
-retain packed width, signedness and real type. Literal initializer lists use the
-declaring module's constant scope and authored element order, including descending
-ranges. Numeric projections bind digitally owned elements read by analog code
-to the existing discrete-state inputs. Implicit sensitivities and continuous
-assignments subscribe to every possible element and the index expression's inputs.
-Blocking intra-assignment controls evaluate the target index after resumption;
-nonblocking writes capture it when the update is scheduled (IEEE 1364 9.2.1/9.2.2).
-The schema-70 value/validity contract pairs each numeric discrete input with a
-finite validity state lane. Schema 71 gives indexed reads a shared selector.
-An indexed read carries one selector for its value and validity arrays, preserving
-one evaluation and one stateful-operator site. The VM reads both selected cells;
-canonical and native SSA lowering share the selector before checking availability.
-Unavailable values can remain in unselected elements or untaken analog branches;
-the executed numeric read performs the check. Both lanes participate in mixed
-sampling, cached-stamp identity, trial rejection and checkpoint state. Custom
-hosts must populate the value/validity slot pairs in `hir.discrete_inputs` using
-validity 1 for a known finite value, or validity 0 and a zero placeholder for an
-unavailable value. The placeholder cannot be consumed by a checked read.
-Schema 72 lowers read-only projected arrays to checked indexed reads of the dense,
-immutable evaluation-input snapshot. Value selection has constant cost per read;
-analog-writable arrays retain their reaching local definitions. Eligibility checks
-include initialization and both HIR views. Bounds errors and selected-value
-validity checks remain on the executed branch, and discrete selection contributes
-no continuous derivative. Snapshot storage, input sampling and conservative
-all-cell subscriptions still scale with array length.
-The shared checked operations are lowered by the VM, native, generated-Rust and
-Wasm paths (Wasm helper ABI 20). Full shipping-platform execution remains to be
-qualified. Non-finite real inputs still use the current rejection policy when
-read; language-complete propagation of special real values remains open.
-Schema 73 supports `array[word][bit]` and `array[word][msb:lsb]` in digital
-expressions and procedural assignments. Bit selectors may vary at runtime;
-ordinary part-select bounds are constant and follow the packed declaration's
-direction. Selected results are unsigned and retain X/Z bits. Out-of-range
-read bits become X; writes affect only bits that exist. Nonblocking updates
-capture the element, packed selection and RHS at scheduling, then merge into
-current storage when delivered. Blocking intra-assignment waits resolve both
-selectors after resumption. Linking and event dependencies retain the array,
-word selector and packed selector.
-Schema 74 binds fixed packed bit/part selections to dedicated numeric/validity
-inputs for analog expressions. Selection occurs on four-state storage before
-numeric conversion, so X/Z bits outside the selected range and unselected array
-cells do not invalidate an executed read. The 31-bit continuous-domain grouping
-limit applies to the selection, including selections from wider or signed parents;
-selected values are zero-extended. Runtime unpacked indices retain a single paired
-read and selector evaluation. Projection state uses existing cache, trial rejection
-and checkpoint paths. Storage/sampling scale with the distinct selected ranges and
-array cells, rather than all bits of a wide parent.
-Schema 75 adds runtime packed bit selectors in analog expressions, including
-`array[word][bit]`. Shared 15-bit chunks encode both values and known-bit masks
-in exact positive integers; only the selected bit must be known. Word and bit
-selectors each execute once, retain their own operator history, and are checked
-against their authored bounds before a chunk is addressed. Ascending and
-descending packed declarations, nonzero bounds, inactive guards, cache
-invalidation, trial rejection and checkpoint restore use the same contract.
-The portable real/small-signal evaluators and native/Wasm paths reject invalid
-indices, unknown selected bits and malformed chunk encodings. Native and Wasm
-lowering use existing checked arithmetic operations; the Wasm helper ABI remains
-20. Projected storage is bounded and scales by words and 15-bit chunks.
-Schema 76 resolves digital select-bound constants through the existing typed
-digital expression engine. Supported arithmetic, bitwise/shift, comparison,
-conditional, reduction and concatenation expressions retain their digital widths,
-signedness and known bits; semantic validation and executable lowering agree.
-Based integers do not narrow through floating point before becoming index
-metadata. Local shadows, signal/probe reads and runtime clock queries cannot become
-constant bounds, including inside unselected conditional arms. Analog packed
-selectors accept exact known based literals with encodings up to 64 bits and
-values in the signed-64 range, while keeping analog arithmetic and runtime
-parameter overrides. Wider analog literal encodings remain unsupported;
-this does not complete constant grammar or parameter-dependent shape support.
-Digital integer exponentiation is supported starting with schema 85.
-Schema 77 gives digital packed reads of analog-owned integers their [31:0]
-range and accepts packed reads of indexed analog integer array elements.
-The existing typed probes supply candidate-state values; array reads share one
-binding group and retain the evaluated word selector across a sample barrier.
-Bit selectors may vary at runtime; ordinary part-select bounds are constant,
-bounded, and follow the integer's declared direction. Selected values are
-unsigned, even when the sampled integer is negative. Nonexistent selected bits
-produce X; invalid word indices and malformed integer samples report errors
-before publishing a result. Real storage has no packed view, and storage still
-cannot be written from both domains. Packed parameter bit reads also retain
-their resolved width. This uses existing IR/runtime operations and keeps Wasm
-helper ABI 20; shipping-platform qualification remains open.
-Schema 78 bounds packed part-select widths before expression or assignment
-sizing. Canonical lowering validates constant bounds, direction and integral
-types for parameters as well as storage, so invalid parameter selections return
-source diagnostics instead of overflowing a width calculation or reaching an
-ill-typed executable node. Scalar and array reads share checked packed-selection
-lowering; unrepresentable endpoint offsets preserve the selected width and X
-result. Existing runtime operations and Wasm helper ABI 20 are unchanged.
-Schema 79 also admits constant out-of-range selections of declared digital
-vectors and integers. Missing read bits produce X and writes affect only the
-overlapping bits, using the same runtime operations as packed arrays. Declared
-direction, constant part bounds and the width limit remain enforced. Direct
-and linked instances preserve this behavior through deferred updates.
-Schema 80 adds runtime-selected procedural bit writes to module-level vectors
-and integers. Blocking intra-assignment controls evaluate the target after the
-wait; nonblocking writes capture the bit and RHS when scheduled, then merge the
-bit into current storage when delivered. Constant and runtime bit selectors
-share numeric conversion and invalid-index behavior. In digital contexts,
-packed selections of un-ranged scalar declarations and scalar array elements
-are rejected.
-Authored bounds travel with scalar bit and array writes so hierarchy linking
-preserves ascending and nonzero ranges while normalizing storage. These writes
-reuse the existing update and scheduling paths; Wasm helper ABI 20 is unchanged.
-Schema 81 extends scalar-selection diagnostics to analog expressions while
-preserving whole scalar reads and explicitly declared one-bit vectors. Fixed
-procedural and continuous-driver write targets now validate part widths,
-direction, real-storage restrictions, RHS types and effect types at the artifact
-boundary. Public procedural/deferred update application rejects incompatible
-storage and invalid part targets before mutation, sharing checked width arithmetic
-with artifact validation. Out-of-range endpoints still clip to existing bits.
-Schema 82 adds blocking bit/part assignments to process-local vectors and
-integers. A pure four-state packed update replaces selected bits in the current
-local value without converting untouched X/Z bits through arithmetic. It shares
-index conversion, part-width checks and clipping with stored writes. Locals keep
-their authored ranges, lexical scope, branch/loop merges and values across waits
-and process re-entry. Intra-assignment waits capture the RHS before suspension
-and evaluate the selector after resumption. Concatenation targets update the
-current local for each selected part.
-Schema 83 assigns shared storage to static locals that receive nonblocking
-writes or participate in direct, computed, or implicit event controls. These
-locals use existing typed signal reads, writes, subscriptions and deferred
-updates. Other locals retain SSA storage. Local declaration identity, nested
-lexical shadowing and static lifetime survive process restart, completion and
-instance linking. Deferred bit targets capture their selector at scheduling
-and merge into current storage when delivered. Real locals accept value-change
-events; edge events require integral values. Artifact validation rejects
-invalid local ownership, duplicate declaration identities, module-array aliases
-and real edge subscriptions. Hierarchical local references remain open;
-local arrays are implemented in schema 86. Wasm helper ABI remains 20. Continuous net-assignment selectors must
-be constant under VAMS-2023 A.8.5; runtime selectors are language errors, rather
-than a missing dynamic-driver execution path. Parameter-based constant selectors
-are supported. Runtime bit reads and procedural bit writes remain supported.
-Schema 84 prepares every declaration in a block with its typed default before
-lowering any local initializer. Self references and forward references bind to
-the local declaration, with the same types and lexical shadowing as ordinary
-reads. RSpice's local declaration-initializer extension evaluates initializers
-in source order across interleaved reg, integer and real declarations. Both SSA
-locals and addressable locals retain the resulting values across suspension and
-process re-entry. This ordering is an RSpice contract; VAMS-2023 section A.2.8
-does not specify local declaration initializers. Wasm helper ABI remains 20.
-Schema 85 adds exact four-state integer exponentiation. The base receives the
-result context while the exponent retains its own width and signedness.
-Modular integer arithmetic bounds intermediate storage by the result width,
-including for very wide exponents. Negative powers follow the integral rules;
-unknown/high-impedance operand bits produce an all-unknown result. Real powers
-keep their existing real arithmetic path. Chained powers now associate left to
-right as VAMS-2023 4.2.2 specifies; explicit parentheses preserve grouping.
-The shared digital evaluator also supplies powers in constant select bounds.
-Wasm helper ABI remains 20.
-Schema 86 adds one-dimensional process-local reg, integer and real arrays,
-using ordinary signal cells and existing array read/write and event operations.
-Each cell retains the owning process, lexical declaration and logical element
-index. Ascending/descending bounds, packed selections, X/Z, type conversions,
-deferred target capture and per-element events follow the module-array paths.
-Static storage survives waits and process restart, with independent instances.
-Implicit sensitivity includes every cell of arrays read in its lexical scope.
-Local array bounds use exact constant evaluation, including parameters; a local
-shadow cannot be replaced by a module parameter. Arrays retain the existing
-65,536-element storage limit. Multidimensional shapes remain open.
-RSpice's declaration-initializer extension accepts complete element patterns in
-authored index order, initializes all declarations to typed defaults first,
-and evaluates each pattern before publishing its values. Block declaration
-initializers remain an extension to VAMS-2023 A.2.8. Artifact validation rejects
-orphan cells, inconsistent element identities and aliased local declarations.
-Wasm helper ABI remains 20.
-Integer output ports now accept ANSI declarations, inherited ANSI names and
-both compact and separate non-ANSI declarations. They retain signed [31:0]
-four-state storage and integer identity through hierarchy linking and analog
-reads. Constant declaration initializers use the declaring instance's parameter
-scope; unassigned integer outputs use discrete storage with the ordinary
-unknown default. Integral variable outputs drive wider or narrower parent nets
-and fixed selections through assignment conversion, preserving their own storage.
-Output-variable initializers are also retained for the existing reg and real
-port forms. Input/inout integer variables, conflicting declarations, incompatible
-ranges and nonconstant initializers are rejected. Analog-written integer output
-ports remain an explicit unsupported continuous-to-discrete port-driving case;
-variables written in both domains remain errors. `output time t` is the other
-output-variable form, an unsigned 64-bit variable in both port styles; an input
-or inout `time` port is a language error, as for `integer`. Unpacked port
-arrays and unequal-width collapsed output/inout net connections remain open.
-This uses the existing schema 86 storage and Wasm helper ABI 20.
-Source: [VAMS-2023, 6.5.2, 7.2.2 and A.2.1.2](https://accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf).
-
-Schema 87 specializes scalar numeric parameters on digital child instances.
-Named, ordered and alias bindings close in the parent's effective constant
-scope using the child's assignment type. Specialized analysis rebuilds packed
-and supported unpacked shapes, initializers, dependent defaults and localparams.
-Equal effective override sets share an analyzed template; instance storage and
-process identities remain independent. Final range and exclusion constraints
-are checked against the specialized values.
-Generate templates retain authored structure so child and external root
-specialization can rebuild conditional branches, loops and generated instances.
-Generate expressions and digital ranges now use the same typed constant
-evaluator as digital execution. Packed override values retain width, signedness
-and four-state bits. Genvar assignment conversion and substitution preserve
-signed integer semantics. Generate selectors still require a known integer;
-four-state case selection remains open.
-Array/string overrides, non-finite real overrides, the full typed external
-parameter ABI, parameter-dependent analog array layouts and general mixed HDL
-hierarchy remain open. Broader generate bodies also remain open.
-Wasm helper ABI stays at 20.
-
-Finite recursive digital hierarchies now elaborate through conditional generate.
-Cycle detection compares the module and its closed typed overrides along the
-active ancestor path; repeated templates in sibling instances remain independent.
-Traversal is iterative and preserves source order. Repeating specializations
-report the instance and ancestor; non-repeating expansion is bounded to 256
-instance levels below the root and 65,536 child instances per compiled
-root. Exceeding these limits is a resource diagnostic, not a claim that the
-design is cyclic. Analog and mixed child modules follow the same rule: the
-continuous pass walks the hierarchy with an explicit stack and compares closed
-overrides along the ancestor path, so a finite recursive analog or mixed
-hierarchy elaborates one occurrence per level.
-This uses the existing schema 87 flat plan and Wasm helper ABI 20.
-Source: [VAMS-2023, 6.3 and 6.6](https://accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf).
-
-Configurations and library maps (IEEE 1364-2005 clause 13) bind right after
-parsing, in `semantic/library_binding.rs`, and leave an ordinary module set.
-`.options hdl_libmap="lib.map"` reads a map relative to the deck: `library`
-declarations with `*`, `?` and `...` wildcards and directory paths, `include`
-of further maps, and `config` blocks. A file named by a path that ends in a
-file name wins over a wildcard, which wins over a directory; a file matched by
-no path is in `work`. The map's files join the unit after the deck's, in map
-order, and a module name is declared once per library. An instance no
-configuration governs binds to the first library in the map's declaration
-order that declares its cell; `work` comes last unless the map declares it,
-which is RSpice's choice where the clause is silent. A configuration applies
-its instance clause, then its cell clause, then a liblist an ancestor's clause
-passed down, then `default liblist`, then the map's order; a configuration
-with no `default` clause searches as a design without one would. A `use`
-clause without a library takes the parent cell's. `module=<config>` selects a
-configuration where a module is expected, and `%l` prints the bound
-`library.cell`. Hierarchical configurations (`use lib.cell:config`), several
-design cells in one configuration, empty liblists and a library's `-incdir`
-are refused by name. A map's own `config` blocks are in `work`.
-
-Schema 88 evaluates supported closed scalar parameter and localparam defaults
-with the same typed constant evaluator as digital execution and child overrides.
-Packed expression width and signedness are retained, and an explicit integer
-declaration supplies its 32-bit assignment context before arithmetic. Known
-packed results enter the analog scalar ABI only when exactly representable.
-Unsized signed decimal literals retain at least 32 bits and enough bits for their
-mathematical value and sign in both domains. Analog folding preserves that
-width across intermediate results; digital lowering parses their exact source
-spelling instead of the rounded f64 lexer cache.
-Dependent defaults retain their executable expressions so later overrides
-still take effect. Runtime queries and constant functions outside the shared
-evaluator retain their existing scalar path.
-
-Schema 89 evaluates typed operator trees with explicit work stacks for width
-and sign inference, operator emission, conditionals and supported numeric
-calls. Long packed arithmetic defaults now preserve narrow wrapping and
-declared assignment context; runtime digital expressions use the same walker.
-Comparisons supply their common operand width and sign before arithmetic is
-evaluated, so `(8'd255+8'd1)==16'd256` is true. Conditional evaluation still
-skips inactive arms and preserves analog sample barriers.
-
-Schema 90 short-circuits discrete logical expressions: a false left operand
-of `&&` or a true left operand of `||` skips the right operand, including its
-analog reads and runtime conversion errors. Unknown left truth values still
-evaluate the right operand and use the four-state logical tables. The shared
-lowerer applies this behavior to constants, processes, drivers and computed
-events, preserving captured operands across analog sample barriers.
-Stateful analog operators remain invalid in digital expressions.
-
-Schema 91 gives discrete real unary negation an explicit sign-inversion
-operation. Negating positive zero produces negative zero; negating twice
-restores the original binary64 bits, including NaN payloads. Constants,
-processes and computed event expressions use the same operation. Integral
-negation still happens in its packed domain before any conversion to real.
-Serialized artifacts validate both the operand and result as real values.
-
-Schema 92 extends the explicit expression stacks to concatenations,
-replications, array reads and packed selections. Nested constant replication
-counts and part bounds reuse prepared descendant types. Closed packed defaults
-no longer have the temporary 256-expression-node limit. Concatenation widths
-are checked before expansion against the 65,536-bit vector limit; invalid
-counts and concatenations with no result bits receive diagnostics.
-
-Replication operands execute exactly once, including zero-count operands
-whose result bits are omitted inside a nonempty concatenation. Array word
-indices are captured before analog sampling; packed bit selection follows
-the sample. Replication preserves X/Z bits and does not propagate assignment
-width into its operands. Dependent packed-default semantics, general parameter
-typing and the full typed external parameter ABI remain open. Wasm helper ABI
-remains 20.
-Source: [VAMS-2023, 3.4.1 and 4.2](https://accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf).
-
-Schema 93 preserves closed packed operands at a known real conversion
-boundary inside a dependent parameter or localparam default. For example,
-`parameter real BASE=2.5; parameter real RESULT=BASE+(8'd255+8'd2);`
-produces 3.5 and responds to subsequent BASE overrides. Arithmetic,
-comparisons and mixed real conditional arms share the typed constant
-evaluator before scalar lowering; integer assignment context is retained.
-This does not yet cover packed operations whose operands themselves depend on
-parameters, or realness that requires general implicit parameter/function
-type inference. Those remain part of the parameter typing and ABI work.
-
-Schema 94 adds `specialize_mixed_runtime_typed` with
-`ScalarParameterValue::{Integer, Bits, Real}`. Integral inputs reach the shared
-parameter evaluator without binary64 rounding; declarations apply their own
-assignment conversion. `Bits` preserves width, signedness and X/Z values.
-The existing numeric specialization API remains available. Both APIs resolve
-parameter aliases and reject duplicate assignments through an alias.
-
-Closed scalar parameters that cannot be represented exactly by
-the numeric ABI are retained in `digital.elaboration_parameters` and the public
-runtime ABI summary. They have no numeric runtime slot. Serialization, plan
-identity, source re-specialization and circuit-wide linking preserve their
-exact values and aliases; numeric parameters keep dense independent slots.
-Changing an elaboration value requires source specialization.
-
-Direct analog uses, unresolved numeric parameter dependencies and range
-constraints involving these packed values receive an explicit diagnostic until
-their typed conversion/evaluation is implemented. Schema 166 adds
-`ScalarParameterValue::String`: a `string` parameter is closed at elaboration
-and every comparison of two strings folds to a constant, so it takes a value
-only by source specialization (a SPICE card's quoted value or an instance
-override, keyed `str:`). Other reads of a string parameter keep their
-diagnostics. Array override APIs remain
-open. This is a compiler
-API and exact elaboration increment, not completion of the full typed external
-ABI. Wasm helper ABI remains 20.
-
-Schema 95 closes defaults over earlier immutable exact parameters. Copies,
-bitwise operations, selections and other supported typed constant expressions
-preserve packed width, signedness and X/Z values across dependency chains.
-A packed operand that depends only on those values can also be evaluated at
-a known real conversion boundary. An explicit real declaration converts a
-known wide integer to binary64 at that boundary; its original digital value
-remains exact.
-
-Parameters with numeric runtime slots remain symbolic, including numeric
-parameters produced by an exact constant calculation. Dependent defaults
-therefore still recompute after numeric updates. Changing an exact parent
-re-elaborates its dependent defaults from the retained source. The exact
-constant environment is reset for each module.
-
-Schema 96 retains wide and X/Z scalar `localparam` values as private exact
-elaboration metadata. Copies and derived packed constants preserve their width
-and sign without creating analog variables or numeric parameter slots. Numeric
-localparams still execute in the analog prologue and follow numeric parameter
-updates. Localparams cannot be overridden through either public parameter API.
-
-Digital instance specialization and analog hierarchy flattening retain each
-instance's private constants. Serialization and content identity include those
-constants even in an otherwise analog-only model; `has_executable_content()`
-distinguishes retained metadata from work that needs a digital runtime.
-Unsupported direct analog reads and packed localparam range constraints still
-produce diagnostics.
-
-Schema 97 analyzes interleaved `parameter` and `localparam` declarations in
-source order. Public defaults can read earlier exact or numeric locals while
-preserving integer assignment rounding and real arithmetic boundaries.
-Readonly local expressions are expanded over public numeric slots, so defaults
-and range constraints still respond to instance updates. Local dependencies
-cannot hide a model default's dependence on an instance-only parameter.
-`$param_given` keeps its name argument through expansion and resolves canonical
-names and aliases using the existing external lookup rules before either backend.
-
-Expansion is measured before materialization and limited to 1,048,576 expression
-nodes and 128 local dependency levels. Local analog computations retain their
-prologue variables. Closed numeric local literals can participate in typed
-constant selection without freezing any public numeric parameter.
-Declared string locals stay outside numeric expansion and constant caches;
-public defaults that need their values report the missing typed string evaluator.
-
-Forward default references are rejected, including references through packed
-selects and between local/public declarations: VAMS-2023 section 3.4 requires
-previously defined parameters, and section 3.4.5 applies the parameter rules
-to locals. Earlier notes listing forward exact defaults as missing standard
-functionality were incorrect. See the [VAMS-2023 reference](https://accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf).
-
-Schema 98 infers native scalar parameter types from the shared typed constant
-evaluator after source overrides. Untyped signed 32-bit parameters and locals
-now use integer arithmetic and storage in the analog half, matching the digital
-half; real overrides select real arithmetic on re-elaboration. Inference does
-not replace live numeric dependencies with constants. Numeric updates still
-recompute dependent defaults and local prologues. Wider and unsigned packed
-values are never narrowed to signed 32-bit merely because their value is small.
-General packed analog typing/lowering and typed deck transport remain open.
-
-Schema 99 accepts packed parameter/localparam ranges and optional `signed`
-qualifiers. Assignment applies the declared width and signedness, preserves
-ascending and nonzero bit numbering, and retains exact packed metadata even
-for small known values. RHS signedness controls sign extension. Digital child
-overrides are evaluated in the parent scope and assigned in the effective child
-scope after all overrides, so changing a width and value together is independent
-of the order of named overrides.
-
-Numeric dependencies of those packed values or bounds carry their effective
-elaboration values through the canonical artifact and runtime ABI. Updating a
-compiled device to a different dependency value reports that source
-specialization is required; specialization recomputes the dependent packed
-values and widths. Ordinary numeric defaults remain symbolic and writable.
-The generated Rust parameter-update path emits the same dependency guard.
-Schema 100 specializes scalar analog-child overrides before semantic analysis
-and flattening when the subtree needs effective values for types or structure.
-It shares override assignment with digital children and caches repeated child
-specializations. Widths, dependent values, private packed metadata, local
-assignment boundaries, and generated instance counts now follow the effective
-child source. Original override presence still drives `$param_given`.
-
-A dependency graph retains parent/child provenance through numeric parameters
-and locals. Packed and generate dependencies require source specialization to
-change, including an initially empty generated hierarchy. Unrelated numeric
-inputs retain symbolic defaults and live updates; explicitly typed numeric-only
-trees keep their existing path. Mixed packed/array source specialization, general
-packed analog arithmetic, typed ranges, and full mixed-domain hierarchy remain
-open. Array-valued hierarchy retains its existing shape validation and explicitly
-refuses overrides that also require unavailable packed/array specialization.
-
-General packed operations over mutable numeric parameters, non-scalar
-overrides, and typed range constraints remain open.
-Exact parameters whose overrides change their numeric/elaboration
-classification still require the corresponding general parameter typing work;
-this pass does not freeze numeric slots to hide that gap.
-
-Digitally owned multidimensional `reg`, `integer`, and `real` arrays execute
-from source in module scope and static process locals. Each unpacked coordinate
-is checked independently before flattening; negative/descending bounds, exact
-wide integer indices, nested declaration-order initializers, typed element
-reads/writes, packed selections, delayed assignment targets, event waits, and
-parameterized hierarchy share the existing scalar-cell runtime. The rightmost
-axis varies fastest. Invalid four-state coordinates preserve the existing
-unknown-read/no-write policy, while real-array invalid access retains its
-explicit diagnostic. Local shadowing and source element names survive linking.
-These digital arrays can control analog equations through scalar discrete state
-or direct numeric/packed element reads. Analog-owned multidimensional arrays also
-support continuous reads/writes and sampling by digital processes, as described
-in the schema-114 contract above. Canonical schema 113 introduced digital shapes
-and checked coordinates; schema 114 extends the analog paths. This execution
-coverage uses the portable digital runtime; native/generated digital execution
-and the remaining platform/restart qualification are separate requirements.
-
-Whole-array variable assignments accept nested assignment patterns and copies
-between equivalent element types with equal extents on every unpacked axis.
-Schema 116 captures all right-hand values before writing destinations, preserving
-self permutations, authored array direction, mixed real/integer reads and digital
-four-state widths. Module and static local digital arrays retain complete values
-across blocking/nonblocking delays, repeated event controls, and checkpoint restore.
-Analog copies retain their numerical derivatives and per-cell ownership checks.
-Schema 117 retains source assignment groups in the analog occurrence journal.
-A whole-array assignment publishes its affected cells together before digital
-controls resume; separate assignments and loop iterations retain separate events.
-The grouping survives hierarchy, inactive guards, rejected candidates and
-checkpoint restore. This is implementation coverage, not vendor qualification.
-
-Variable array patterns now support nested replication in module/local
-initializers and analog/digital assignments (schema 118). Every unpacked axis is
-checked before expansion; counts use the declaring scope's integer constants and
-participate in specialization identity. Packed leaf concatenations keep their
-normal expression semantics, including wide X/Z values. Zero-count items follow
-the existing parameter-pattern extension; an entirely empty value cannot fill a
-nonempty array. Assignment-pattern side-effect evaluation counts are not a
-portable vendor contract (IEEE 1800-2017 section 10.9.1).
-
-Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, partial-array values and slices,
-parameter-array value copies, cross-instance scheduling qualification,
-full parameter-dependent shape/override support beyond the scalar digital path, and remaining mixed-host/platform qualification
-are still open.
-
-Delay-controlled nonblocking assignments capture their RHS and converted delay
-at encounter, then continue immediately. Positive delays retain every update
-until its due tick; zero/X/Z delays use the current nonblocking region without
-suspending the process. The host delivers these after active and inactive work,
-including real values and partial-vector writes. Captures survive process
-completion, mixed-trial rejection/retry and accepted in-memory checkpoints.
-Event-controlled nonblocking assignments also capture their RHS and continue.
-Direct signal edges, real signal changes and implicit RHS sensitivity register
-independent one-shot subscriptions at encounter. Only subsequent transitions
-can satisfy a subscription, including later writes in the same activation.
-Eligible captures retain source statement order within the NBA queue. Ordinary
-process event waits use the same registration frontier to exclude earlier
-transitions. Pending subscriptions survive mixed rejection and accepted
-in-memory checkpoint restoration. Custom `DigitalEnvironment` hosts must honor
-`DigitalDeferredUpdate::wait` for both delay and event controls.
-
-Computed event controls such as `@(posedge (enable & clk))`, `@(bus[index])`
-and `@(a+b)` for real signals evaluate the result at registration and after each
-dependent input change. Ordinary waits and nonblocking captures share this
-expression contract. Intermediate changes inside one process activation are
-retained. Dynamic bit reads use the declared range, exact signed/unsigned index
-values (including wide indices), and X for unknown or out-of-range selection.
-Constant event expressions remain asleep because their value cannot change.
-The same signal may appear in multiple edge terms. Custom hosts must observe
-`DigitalWaitRequest::Expressions` at each input write with
-`DigitalExpressionWait::observe`, then deliver one wakeup/update when satisfied.
-Prepared expression programs are shared; checkpointed baselines are independent.
-
-Intra-assignment repeat-event controls such as
-`q <= repeat (3) @(posedge clk) data` capture the count and RHS once. The host
-counts each subsequent matching transition, including distinct transitions at
-one timestamp, before delivering the captured value. Blocking assignments
-suspend their process; nonblocking assignments continue. Direct, computed,
-real and implicit event controls share this behavior. Unknown and signed
-negative counts become zero, bypassing event evaluation; real counts use the
-shared signed 32-bit integer conversion, and positive integral counts retain
-their width. Ordinary repeat loops use the same count normalization. Pending
-counts and expression baselines survive mixed rejection and in-memory restart.
-Custom digital hosts must unwrap `DigitalWaitRequest::Repeated` and consume
-its count once per observed event, releasing the wait only when complete.
-
-MS02 remains open. Min:typ:max selection, continuous driver delays, complete
-delayed-assignment semantics, time/realtime declarations and SystemVerilog
-`timeunit`/`timeprecision` still require implementation and qualification.
-Process-local and analog-owned event dependencies, dynamic write targets and
-indexed part selects still need their corresponding MS02/MS06 implementation;
-explicit computed controls with unsupported storage dependencies are refused.
-Separate circuit hosts still await one circuit-wide time/scheduling authority.
-
-`strict_mode` and `integration_order` are **reserved**. They participate in
-the compiler-contract identity but currently gate no behavior.
-`integration_order` does not pick the
-`ddt`/`idt` integration rule; the engine supplies companion coefficients
-per timestep, so one compiled model serves backward Euler and Gear-2
-alike.
-
-Multi-module foundry files are supported via `compile_module` /
-`compile_file_module_with_metadata`; compiling without a module name
-errors if the source declares more than one module, listing their names.
-
-### Runtime: `VerilogADevice`
-
-The simulator instantiates `VerilogADevice::new(name, Arc<CompiledModel>,
-nodes)` and then drives it directly (no trait indirection): set parameters
-(`set_parameter`, `resolve_parameter_defaults`), set simulation state
-(`set_temperature`, `set_time`, `set_timestep`, `set_analysis_type`,
-`update_voltages`), then `evaluate()` / `stamp()` /
-`stamp_reactive()` / `compute_jacobian()` inside the Newton loop, and
-`noise_sources()` for noise analysis. Transient control flows back through
-`transient_bound_step()` (`$bound_step`) and `discontinuity_pending()`
-(`$discontinuity`). The compiled model is shared: a thousand instances of
-one model compile (and JIT) once. `is_using_native()` reports whether the
-JIT is active for diagnostics.
-
-On canonical runtime plans, `observe_variables` publishes ordinary named
-values when requested. Branch-kind state preserves accepted voltage/current
-source-mode changes without forcing every named value into the Newton pass.
-Models with procedural event-owned variables retain eager readback publication
-so observing a value cannot replay an event body.
-
-Native compilation coalesces requests for the same artifact and allows up to
-two independent compilations at once, bounded by available parallelism.
-Ready cache hits do not wait for unrelated compilation. Retention is limited
-to 1,024 entries and 512 MiB of executable images by default (overridable with
-`RSPICE_VERILOGA_NATIVE_CACHE_MAX_BYTES`); one oversized image is retained to
-prevent repeated compilation. Live devices retain their images after eviction.
-The cancellable constructor, `try_new_with_canonical_ir_and_control`, lets a
-waiting caller leave without interrupting compilation needed by other callers.
-An already-started compilation finishes before its owner reports cancellation.
 
 ## Language support
 
-Finite nested `ddx` readbacks are supported by canonical AD and generated
-Rust. The portable evaluator allocates the derivative orders needed through
-assignments and arrays, including the extra order required by Newton's
-Jacobian. Runtime loops that feed a `ddx` result back into its own operand
-remain unsupported. Native/Wasm assignment and internal-variable readback
-passes still have higher-derivative limits; native readback explicitly rejects
-simultaneous `ddx` self-updates instead of publishing partially updated shadows.
-This is not complete Verilog-AMS support.
+Unsupported input is always a `CompileError` naming the construct and its span.
+The compiler does not silently drop what it cannot lower, and `semantic`
+carries tests pinning that.
 
-Real `%` uses remainder semantics. Away from its discontinuities, Jacobians,
-`ddx` readbacks and noise gains follow `da - trunc(a/b)*db` for `a % b`.
-A constant divisor does not require forming the quotient for differentiation.
-
-The supported subset, as documented in the crate docs (`src/lib.rs`) and
-exercised by the test suite:
-
-- **Analog operators**: `ddt`, `idt`, `idtmod`, `ddx`, `limexp`,
-  `absdelay`, `transition`, `slew`, `laplace_zp/zd/np/nd`,
-  `zi_nd/zp/zd/np`, `last_crossing`, `$limit`, `$table_model`. The
-  `zi_*` sample periods may depend on scalar parameters and are frozen per
-  instance when its parameters are resolved. The integration rule for
-  `ddt`/`idt` is not a compile-time choice; the
-  engine supplies the companion coefficients per timestep, so the same
-  compiled model runs under backward Euler or Gear-2/trapezoidal
-- **Noise**: `white_noise`, `flicker_noise`, `noise_table`,
-  `noise_table_log`, injected into `.noise` with amplitude scaling and
-  mode gating
-- **Indirect contributions**: `V(x): lhs == rhs` as constraint rows on a
-  branch unknown
+- **Analog operators**: `ddt`, `idt`, `idtmod`, `ddx`, `limexp`, `absdelay`,
+  `transition`, `slew`, `laplace_zp/zd/np/nd`, `zi_nd/zp/zd/np`,
+  `last_crossing`, `$limit`, `$table_model`. The `zi_*` sample periods may
+  depend on scalar parameters and freeze per instance when its parameters
+  resolve. The integration rule for `ddt`/`idt` is not a compile-time choice:
+  the engine supplies companion coefficients per timestep, so one compiled
+  model runs under backward Euler or Gear-2/trapezoidal.
+- **Noise**: `white_noise`, `flicker_noise`, `noise_table`, `noise_table_log`,
+  injected into `.noise` with amplitude scaling and mode gating. Distinct
+  processes are uncorrelated; reusing one process through an assigned
+  expression preserves coherent contributions, including cancellation. The
+  trailing name argument is a display label, not a correlation key.
+- **Indirect contributions**: `V(x): lhs == rhs` as constraint rows on a branch
+  unknown, one per source, with analysis-constant control flow and an access
+  function (optionally under `ddt`, `idt` or `idtmod`) on the left side.
 - **System functions**: `$temperature`, `$vt`, `$thermal_vt`, `$abstime`,
   `$realtime`, `$simparam`, `$param_given`, `$port_connected`, `$mfactor`
-  (with automatic multiplicity scaling), `$bound_step`, `$discontinuity`,
-  and the `analysis()` analysis-name query. AC/noise operating points expose
-  `static`; transient operating points expose `tran`, `ic`, and `static`.
-  Phase changes retain analog initialization state. Global-event analysis
-  lists match physical analysis names; unknown query names evaluate false.
-- **Data**: 1-D array variables (compile-time and runtime indexing, with
-  shadowed derivatives), runtime-bounded loops, parameters with dependent
-  defaults/ranges/exclusions, localparams, `aliasparam`, attribute
-  instances (`(* desc, units *)`), string parameters
+  (with automatic multiplicity scaling), `$bound_step`, `$discontinuity`, and
+  the `analysis()` query. AC and noise operating points expose `static`;
+  transient ones expose `tran`, `ic` and `static`. An unknown query name
+  evaluates false.
+- **Data**: 1-D array variables with compile-time and runtime indexing and
+  shadowed derivatives, runtime-bounded loops, parameters with dependent
+  defaults, ranges and exclusions, localparams, `aliasparam`, attribute
+  instances (`(* desc, units *)`), string parameters.
 - **Structure**: internal nodes, named branches, scalar ground nets, user
-  disciplines beyond electrical (thermal, mechanical, …), ANSI and
-  non-ANSI port styles. Ground qualifiers inherit the declared discipline
-  (`thermal g; ground g;`); typed grounds (`ground thermal g;`) are also
-  supported. The undeclared shorthand `ground g;` defaults to electrical.
-  Derived natures retain their ancestry, tolerance, units, and calculus
-  relationships. Invalid attributes and incompatible relationship overrides
-  are diagnosed. Connection metadata retains source-defined natures even
-  without connect rules; both compatibility APIs apply the same nature rules.
-  An analog net bus on a port takes one deck node per member, leading
-  index first, at the root and through a child's connection. Ground
-  declarations on module ports remain unsupported; connect those ports to
-  ground in the containing circuit.
+  disciplines beyond electrical, ANSI and non-ANSI port styles. Ground
+  qualifiers inherit the declared discipline (`thermal g; ground g;`) and typed
+  grounds (`ground thermal g;`) are accepted; the shorthand `ground g;`
+  defaults to electrical. Derived natures retain their ancestry, tolerance,
+  units and calculus relationships. An analog net bus on a port takes one deck
+  node per member, leading index first.
 - **Control flow**, lowered to guarded dataflow: `if`/`else`, `case`,
-  compile-time-bounded `for`/`repeat` loops, event controls
-  (`initial_step`, `final_step`, `cross`, `above`, `timer`)
-- **Functions**: user-defined analog functions (inlined, including
-  `output`/`inout` arguments), and the built-in math set (`abs`, `sqrt`,
-  `exp`, `ln`, `log`, `log10`, trig/hyperbolic and their inverses,
-  `floor`, `ceil`, `pow`, `hypot`, `atan2`, `min`, `max`)
+  compile-time-bounded `for`/`repeat`, and the event controls `initial_step`,
+  `final_step`, `cross`, `above` and `timer`.
+- **Library maps and configurations** (IEEE 1364-2005 clause 13):
+  `.options hdl_libmap="lib.map"` reads a map relative to the deck, with
+  wildcard library paths, nested `include`, and `config` blocks; a deck selects
+  a configuration with `module=<config>` as it selects a module, and `%l`
+  prints the bound `library.cell`. Binding runs right after parsing and leaves
+  an ordinary module set. Hierarchical configurations, several design cells in
+  one configuration, empty liblists and a library's `-incdir` are refused by
+  name.
+- **Functions**: user-defined analog functions, inlined, including
+  `output`/`inout` arguments, and the built-in math set (`abs`, `sqrt`, `exp`,
+  `ln`, `log`, `log10`, trig and hyperbolic functions with their inverses,
+  `floor`, `ceil`, `pow`, `hypot`, `atan2`, `min`, `max`).
 
-**Known limitations**, every one of them a compile error rather than a
-silent miscompile: `noise_table` file input (inline the `{f, p, ...}` pair
-list); array locals in analog functions; and `output`/`inout`
-analog-function arguments used inside conditional expressions or any other
-context that must stay free of side effects.
+Refused by name, each a compile error rather than a silent miscompile:
+`noise_table` file input, which requires the `{f, p, ...}` pair list inline;
+array locals in analog functions; `output`/`inout` analog-function arguments
+used inside a conditional expression or any other context that must stay free
+of side effects; ground declarations on module ports, which are connected to
+ground in the containing circuit instead; a runtime loop that feeds a `ddx`
+result back into its own operand; and analog `$fatal` and `$stop`, whose
+simulation-control semantics are not implemented. `$error` is refused in
+pre-simulation initialization, where it must stop the run. These checks follow
+transitive function calls and branches removed by constant folding.
+`$display`, `$write`, `$strobe`, `$monitor`, `$info`, `$warning` and ordinary
+analog `$error` are accepted and discarded with a warning: they produce no
+runtime output.
 
-Distinct noise processes are uncorrelated. Reusing one process through an
-assigned expression preserves coherent contributions, including cancellation.
-The trailing name argument is a display label, not a correlation key.
-
-Analog `$fatal` and `$stop` are rejected because their simulation-control
-semantics are not implemented. `$error` is also rejected during pre-simulation
-initialization, where it must prevent simulation from proceeding. These checks
-include transitive function calls and branches removed by constant folding.
-
-`$finish` calls retain their argument snapshots and execution order in a
-transactional journal. Runtime, generated, and mixed-signal device hosts can
-consume accepted calls through `CircuitData::visit_accepted_analog_tasks`.
-`Engine::run_with_outcome` reports initialization `$finish` as normal completion
-without a numerical result. Accepted DC operating-point and sweep `$finish`
-retain the final solution and the accepted prefix of a sweep. Early sweep
-termination solves `final_step` before committing model history, and a failed
-final solve remains an error. Rebuilt parameter/temperature sweep points restore
-the accepted state without executing declaration or analog initial programs again.
-The run's completion state is separate from caller
-cancellation and is not reused by later analyses. Mixed digital processes start
-only after the circuit-wide analog initialization barrier. Result-only engine
-APIs cannot represent an initialization finish and return `ModelFinished`.
-Accepted transient/frequency-domain termination, their early `final_step` delivery,
-source-located diagnostic formatting, and frontend outcome handling remain
-incomplete; this does not establish full `$finish` support.
-
-The engine's discrete host also accepts digital-only modules and analog
-procedural blocks without contribution equations. Digital boundary ports still
-use the circuit's A/D and D/A bridges, and analog initialization retains its
-ordering before digital startup. AC rejects unsupported discrete simulation
-even when a module has no ports or matrix unknowns.
-
-`$display`, `$write`, `$strobe`, `$monitor`, `$info`, `$warning`, and ordinary
-analog `$error` are still discarded with a warning. They produce no runtime
-output. Models that rely on these missing task behaviors are not supported.
+Real `%` is a remainder, differentiated as `da - trunc(a/b)*db` away from its
+discontinuities. Analog real-to-integer assignment rounds to nearest, half away
+from zero; that conversion and the integer bitwise and shift rules live in
+`rspice-veriloga-runtime`, so every backend shares them.
 
 ## Feature flags
 
-| Feature | Default | Effect |
-| :--- | :--- | :--- |
-| `rust-codegen` | on | Offline Rust-source emitter and `rspice-veriloga-gen`. Disable default features for runtime-only compilation; serialized generated-source artifact types remain available in `generated_source` |
-| `native` | off | RSpice-owned native JIT for Verilog-A devices; requested native mode is full native JIT or typed construction error, with no bytecode fallback. Pulls in the platform APIs for executable memory (`windows-sys` / `libc`) |
-| `wasm-jit` | off | Browser JIT backend, adding `wasm-encoder` and `wasmparser`. Reached through `rspice-core/veriloga-wasm-jit` |
-| `native-bytecode-contract-tests` | off | Internal. Implies `native` and exposes `compile_native`, which JITs straight from the bytecode model without a canonical IR artifact. Backend contract tests only: production native users must supply canonical IR and must not enable it |
+| Flag | Effect |
+| :--- | :--- |
+| `rust-codegen` | On by default. Offline Rust-source emitter and the `rspice-veriloga-gen` binary. Disable default features for runtime-only compilation; the serialized artifact types in `generated_source` stay available |
+| `native` | RSpice-owned native JIT. Requested native mode is full native JIT or typed construction error, with no bytecode fallback. Pulls in the Windows APIs for executable memory (`windows-sys`) |
+| `wasm-jit` | Browser JIT backend, adding `wasm-encoder` and `wasmparser`. Reached through `rspice-core/veriloga-wasm-jit` |
+| `native-bytecode-contract-tests` | Internal. Implies `native` and exposes `compile_native`, which JITs straight from the bytecode model without a canonical artifact. Backend contract tests only: production native users supply canonical IR and must not enable it |
 
-`rspice-core` disables compiler defaults: simulation does not need Rust-source
-emission. Compiler tooling, the CLI, and the IDE retain it through their direct
-compiler dependency. A runtime-only build still reads the same report format;
-requesting generated Rust reports that the backend is unavailable, and requiring
-it returns a qualification error. Native and Wasm JITs do not need the emitter.
+`rspice-core` disables this crate's defaults, because simulation does not need
+Rust-source emission, and maps the rest as `veriloga` (interpreter),
+`veriloga-native` and `veriloga-wasm-jit`, adding a blake3-keyed on-disk cache
+for compiled models. Its `veriloga-builtins` feature is a different path
+entirely: it selects pre-generated artifacts and does not link this compiler.
 
-`rspice-core` maps these as `veriloga` (interpreter) and `veriloga-native`
-(native JIT) and adds a blake3-keyed on-disk cache for compiled models on
-top. Its `veriloga-builtins` feature is a different path entirely: it
-selects pre-generated artifacts from `rspice-veriloga-models/models/` and does
-not link this compiler at all.
+Backend qualification is report-only by default, so an editor can show every
+target's readiness. Release tooling that must not fall back to the interpreter
+passes `RuntimeQualificationOptions::GENERATED_RUST_REQUIRED`,
+`RuntimeQualificationOptions::NATIVE_REQUIRED` or
+`rejecting_interpreter_fallback()`; an unavailable or refusing backend then
+returns a typed `BackendQualification` error instead of running bytecode.
 
-Signed macOS executables that enable the hardened runtime must be signed with
-[`RSpice.entitlements`](../rspice-ui/macos/RSpice.entitlements). It grants only
-Apple's narrow `MAP_JIT` and JIT write-callback permissions; it does not disable
-executable-memory protection or library validation. CI ad-hoc signs a native
-test executable with this exact file and executes generated ARM64 code through
-the callback-only publication path.
-
-Optional backend qualification is report-only by default so the editor can
-show every target's readiness. Release tooling must use
-`RuntimeQualificationOptions::GENERATED_RUST_REQUIRED`,
-`RuntimeQualificationOptions::NATIVE_REQUIRED`, or
-`rejecting_interpreter_fallback()` when interpreter execution is not permitted.
-A requested backend that is unavailable or rejects the model then returns a
-typed `BackendQualification` compile error; it never silently runs bytecode.
+A signed macOS executable that enables the hardened runtime must be signed
+with [`RSpice.entitlements`](../rspice-app/macos/RSpice.entitlements), which
+grants only Apple's narrow `MAP_JIT` and JIT write-callback permissions.
 
 ## Generating the built-in device models
 
-The crate ships one binary, `rspice-veriloga-gen`. It walks a tree of
-Verilog-A sources, compiles each module to canonical IR, and emits a Rust
-device folder per module into
-`crates/rspice-veriloga-models/models/`, with one Cargo package per model plus
-a feature-selectable catalog, `registry.rs`, and `manifest.txt`. Cargo can
-compile those packages in parallel and reuse an unchanged model artifact
-without rebuilding it through `rspice-core`. That generated Rust, not this
-compiler, is what `rspice-core`'s `veriloga-builtins` feature builds.
-
-The generated backend preserves the compact-model parameter convention in
-the source: unmarked parameters are model-card parameters, while
-`(* type="instance" *)` marks per-device geometry and switches. Canonical
-dependency analysis separates model, instance, temperature, timestep, and
-Newton work. Model-stage outputs are interned by the final model-parameter
-values and `$param_given` bits, so devices bound to the same card reuse one
-Verilog-derived preprocessing result; instance geometry and solver state are
-never shared.
-
-Xyce Q `LEVEL=11` and `LEVEL=12` route to the generated VBIC 1.3 modules.
-After the three or four electrical terminals, respectively, a card may expose
-six optional internal connections in order: `dt`, `cx`, `ci`, `bx`, `bi`, `ei`.
-The three-terminal thermal variant supplies `dt` through its declared fourth
-terminal; other optional connections bind existing generated node slots. Omitted
-connections retain their internal equations and state, and excess terminals are
-rejected. This mapping reuses the shipped model equations and requires no
-additional generated model variant. On every VBIC variant, the card's `AREA`,
-`M`, and `MULT` factors combine into the model multiplicity, including factors
-supplied through parameter expressions.
-
-Generated Rust and executable models support `last_crossing` with omitted,
-parameter, or procedural direction operands. Interpolated crossing times remain
-real-valued, survive rollback and checkpoints, and do not request timestep
-refinement. Noise evaluation returns the static sentinel without changing history.
-
-Generated devices retain `$bound_step` requests across conditional calls,
-runtime loops, and nested analog instances. The transient engine uses the
-smallest active bound, including zero as a request for its supported minimum;
-rollback and checkpoints preserve accepted bounds. Ordinary analog
-`$discontinuity` calls preserve independent transient and Newton hints in the
-portable VM, native backend, and generated Rust. Nonnegative degrees request a
-transient restart on a rising edge; `-1` prevents Newton convergence without
-requesting a time event. Degree expressions must be constant, numeric, and
-finite integers at least `-1`; instance-dependent values are checked during
-evaluation. Custom `$limit` callbacks accept function-identifier selectors;
-structured callback bodies and their convergence hints remain incomplete.
-Runtime state version 10 and transient checkpoint format 41 preserve limiter
-history and reject older payloads that omitted it or used older discontinuity
-semantics. Executable limiter value and derivative programs share the previous
-Newton history throughout one evaluation. Generated Rust and executable VM,
-native, and WebAssembly scalar stamping apply the limiter's affine RHS
-correction while retaining physical contribution values for current probes.
-The correction follows assignments, arrays, loops, `ddx`, and transient
-companions. Executable limiter models currently use the postfix scalar stamp
-driver; publishing the correction lane through CFG and fused stamp drivers
-remains outstanding. Compiled-model caches, canonical artifacts, WebAssembly
-modules, and generated-model checkpoints reject incompatible branch layouts.
-
-Probed flow sources use private current unknowns with simultaneous equations.
-Forward reads, self and mutual feedback, named parallel flow branches, reverse
-probes, and explicit port-flow sums therefore retain their solver derivatives
-in DC, AC, noise, and transient analysis. Source-free flow probes impose zero
-potential; probing both flow and potential on the same source-free branch is
-rejected. Each probed flow branch adds one mathematical unknown; source
-expressions and stateful operators stay at their original execution sites.
-Private equations are excluded from electrical shunts. Hierarchy flattening
-preserves each instance's unnamed branches and explicit port-current boundaries,
-including nested instances and distinct ports bound to the same circuit node
-or ground. Cancelled sources retain evaluation and state through private
-equations. Potential sources retain independent named and instance-local branches;
-repeated contributions to one branch share its current unknown and source direction.
-MIR maps each contribution to that physical unknown, so generated devices need
-no padding rows. Each contribution retains its own evaluation and operator state.
-Mixed potential/flow switch branches retain the last executed source kind.
-Changing kind discards the earlier accumulated value; later writes of the same
-kind add to it. Executed RHS validation and operator state survive replacement.
-One private current unknown supports flow probes in either mode. Mode changes
-request an order-zero discontinuity relative to the last accepted timestep,
-including after rollback or checkpoint restore. Explicit `cross` events remain
-necessary when a model requires threshold-crossing time resolution.
-Direct and indirect contributions cannot share an analog net pair, including
-parallel named branches. Conflicts are rejected after hierarchy and ground
-resolution, before private flow equations are introduced.
-Generated Rust supports indirect constraint rows, including source-current
-feedback, parameter-controlled activation, transient integration, AC derivatives,
-and grouped noise. These rows couple the source current into KCL without adding
-a structural voltage term, preserving small constraint derivatives. They reuse
-the sparse row and operator-state paths used by direct sources.
-Both compiler paths enforce one indirect constraint per source, analysis-constant
-control flow, and an access function (optionally under `ddt`, `idt`, or `idtmod`)
-on the equality's left side. MIR validation also rejects conflicting source rows.
-Zero-valued potential reads such as `V(n,n)` remain accepted for compact-model
-compatibility; authored sources and flow probes require distinct nets.
-
-Automatic differentiation keeps exact sparse lane shapes. Its fixed point uses
-a bounded compact bit matrix for ordinary compact models and falls back to
-sparse storage before hostile lane counts can force an oversized dense
-allocation. One-lane derivative values emit as plain `f64`; widths two and above
-remain packed `Lanes<N>` values, avoiding both scalar source explosion and
-one-element array overhead. Generator progress reports scalar/packed value
-counts, seed count, and maximum width so representation changes are visible on
-the shipped corpus.
-
-When the same cached model/instance predicate guards at least three Newton
-regions, the emitter evaluates a two-variant specialization candidate. It is
-accepted only when neither outcome controls a loop and the complete specialized
-body grows by at most 2%; otherwise the ordinary CFG is emitted unchanged.
-There is no exponential variant set and no frozen numerical condition. Generator
-progress reports model/instance structural-guard counts, their Newton impact,
-the scheduling time, and generated bytes so this policy is observable on the
-real corpus.
+`rspice-veriloga-gen` walks a tree of Verilog-A sources, compiles each module
+to canonical IR, and emits one Cargo package per model into
+`crates/rspice-veriloga-models/models/` alongside the catalog's `registry.rs`,
+`README.md` and `manifest.txt`. The catalog README is generated too: its model
+table comes from the same package list as the catalog's features, and the
+manifest authenticates it like every other file there.
 
 ```bash
-# Full regeneration; must rewrite every device, registry.rs and manifest.txt
+# Full regeneration; rewrites every device, registry.rs, README.md and manifest.txt
 cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- \
     regenerate-builtins [--models PATH] [--out PATH] [--jobs N]
 
@@ -1359,102 +225,59 @@ cargo run -p rspice-veriloga --bin rspice-veriloga-gen -- \
     check-builtins [--models PATH] [--out PATH]
 ```
 
-`--models` defaults to `models/veriloga`. `--jobs` defaults to the
-available parallelism capped at 4, or to
-`RSPICE_VERILOGA_GENERATOR_JOBS` when that is set, and is in any case
-clamped to the number of modules being generated. `--filter` belongs to
-the subset command only: full
-regeneration rejects it, because a partial rewrite would leave the
-registry and manifest describing devices that are no longer there. The
-subset command says so in its output: it deliberately does not rewrite
-`registry.rs` or `manifest.txt`, so its output is for inspection, not for
-committing. The `generator` profile matters: it is release-optimized, and
-compiling the full model corpus under the dev profile is impractically
-slow.
+`--models` defaults to `models/veriloga`. `--jobs` defaults to the available
+parallelism capped at 4, or to `RSPICE_VERILOGA_GENERATOR_JOBS` when that is
+set, and is clamped to the number of modules generated. `--filter` belongs to
+the subset command alone: full regeneration rejects it, because a partial
+rewrite would leave the registry and manifest describing devices that are no
+longer there. The subset command rewrites none of `registry.rs`, `README.md`
+or `manifest.txt`, so its output is for inspection, not for committing. The
+`generator` profile is release-optimized; the full corpus under the dev profile
+is impractically slow.
 
-Staleness is detected by two digests recorded in `manifest.txt`. The
+Staleness rests on two digests recorded in `manifest.txt`. The
 `source_tree_digest` covers the model sources under `--models`; the
-`generator_digest` is computed at generation time over the
-`GENERATOR_SOURCE_DIGEST_INPUTS` list in `src/rust_backend/builtins.rs`,
-every compiler source a generator run compiles, `build.rs` and
-`Cargo.toml`, plus the workspace `Cargo.toml`/`Cargo.lock`, so that
-editing the compiler invalidates its output exactly like editing a model
-does. The in-process runtime backends are the deliberate omission, and the
-comment on that list says why they cannot move a generated byte.
-`check-builtins` compares both digests and fails with the exact
-regeneration command when either has moved.
+`generator_digest` covers the `GENERATOR_SOURCE_DIGEST_INPUTS` list in
+`src/rust_backend/builtins.rs`, every compiler source a generator run compiles,
+`build.rs`, `Cargo.toml` and the workspace `Cargo.toml`/`Cargo.lock`, so
+editing the compiler invalidates its output exactly as editing a model does.
+The in-process runtime backends are the deliberate omission, and the comment on
+that list says why they cannot move a generated byte. `check-builtins` compares
+both and fails with the exact regeneration command when either moved.
 
-Two markers steer discovery inside the model tree: a `.rspice-veriloga-skip`
-file excludes a directory, and a `.rspice-veriloga-profile` file supplies
-the `defines`/`undefines` a source needs to preprocess. Profiles also accept
-`namespace SOURCE::MODULE=HEX_ID`, where `SOURCE` is relative to the profile
-directory and `HEX_ID` is eight hexadecimal digits. These declarations preserve
-published generated paths and duplicate model names across source repairs;
-content hashes still change and invalidate stale artifacts. Each source/module
-may have one namespace declaration across its inherited profiles. The shipped
-corpus pins all published namespaces. Discovery rejects missing sources or
-modules, and generation rejects colliding folders or package names before writing.
+Two markers steer discovery: `.rspice-veriloga-skip` excludes a directory, and
+`.rspice-veriloga-profile` supplies the `defines`/`undefines` a source needs to
+preprocess. A profile also accepts `namespace SOURCE::MODULE=HEX_ID`, with
+`SOURCE` relative to the profile directory and `HEX_ID` eight hexadecimal
+digits, which preserves published generated paths and duplicate model names
+across source repairs, one declaration per source and module. Discovery rejects
+a missing source or module, and generation rejects a colliding folder or
+package name before writing anything.
 
 There is one emitter and no tier to select. A model either lowers through the
-canonical CFG backend or generation fails naming the construct that stopped it;
-there is no fallback to regress onto and no environment variable that changes
-which emitter runs.
+canonical CFG backend or generation fails naming the construct that stopped it.
 
-## Building and testing
+## Testing
 
 ```bash
-cargo build -p rspice-veriloga
-cargo test  -p rspice-veriloga                      # interpreter paths
-cargo test  -p rspice-veriloga --features native    # + native JIT contract
+cargo test -p rspice-veriloga                      # interpreter paths
+cargo test -p rspice-veriloga --features native    # + native JIT contract
 ```
 
-The integration tests under `tests/` group into five bands.
-
-**Compilation and language semantics**: end-to-end compilation
-(`compile_models.rs`), multi-module selection (`module_selection.rs`),
-parameter constraints and `aliasparam` (`parameter_validation.rs`,
-`aliasparam.rs`), array variables (`array_vars.rs`), expression truth and
-equality rules (`expression_semantics.rs`), `analysis()` queries
-(`analysis_queries.rs`), and `syntax_integrity.rs`, which pins that
-unsupported constructs are rejected rather than silently dropped.
-
-**Runtime numerics**: evaluation and Jacobians against hand-derived
-companion-model values (`device_eval.rs`), indirect contributions
-(`indirect_contributions.rs`), `$mfactor` scaling (`mfactor.rs`), solver
-companion coefficients (`integration_methods.rs`), state installation
-(`runtime_configuration.rs`), and `numeric_integrity.rs`, which pins that
-non-finite values are reported rather than zeroed away.
-
-**Stateful operators**: `zi_*` filters (`zi_filters.rs`), events
-(`event_semantics.rs`), timers (`timer_semantics.rs`), `last_crossing`
-(`last_crossing_semantics.rs`), `$bound_step`/`$discontinuity`
-(`timestep_control.rs`), and `stateful_operator_idempotence.rs`, which
-pins that Newton re-evaluation never consumes accepted history.
-
-**Artifacts and backends**: canonical IR validation (`canonical_ir.rs`),
-runtime reports and cross-artifact digest drift
-(`runtime_compile_report.rs`), sealed bundles (`virtual_source.rs`), the
-native no-fallback contract (`native_contract.rs`), and the Rust backend
-(`rust_backend.rs`, plus `generated_output_audit.rs` auditing the
-checked-in generated devices).
-
-**Production-model frontiers**: PSP 103.6 via the IHP SG13G2 open PDK
-(`psp103_frontier.rs`) and the shipped CMC r3_cmc and JUNCAP200 models
-(`cmc_frontier.rs`). `bsim4_frontier.rs` is optional and activates only
-when `RSPICE_BSIM4_VA` points at an externally supplied clean BSIM4.8
-source.
-
-Two whole-corpus gates are `#[ignore]`d, because they are qualification
-evidence rather than a fast check. Run them explicitly when working on the
-compiler frontier or on generated built-ins:
+Most suites under `tests/` require `rust-codegen`, which is on by default; the
+per-suite `required-features` entries in `Cargo.toml` name them. Whole-corpus
+gates are `#[ignore]`d, because they are qualification evidence rather than a
+fast check. Run them explicitly when working on the compiler frontier or on
+generated built-ins:
 
 ```bash
-cargo test -p rspice-veriloga --test shipped_cmc_compile shipped_veriloga_models_compile_end_to_end -- --ignored --nocapture
-cargo test -p rspice-veriloga --test rust_backend_frontier shipped_rust_backend_frontier -- --ignored --nocapture
+cargo test -p rspice-veriloga --test shipped_cmc_compile \
+    shipped_veriloga_models_compile_end_to_end -- --ignored --nocapture
+cargo test -p rspice-veriloga --test canonical_device \
+    the_whole_corpus_reports_what_the_canonical_backend_carries -- --ignored --nocapture
 ```
 
-Engine-level oracle tests that compare compiled models against reference results live in
-[rspice-core's test suite](../rspice-core/README.md#building-and-testing)
-(`veriloga_*.rs`).
+`bsim4_frontier.rs` activates only when `RSPICE_BSIM4_VA` points at an
+externally supplied BSIM4.8 source.
 
 Licensed under the [RSpice Personal Use License](../../LICENSE).

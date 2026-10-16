@@ -39,9 +39,11 @@ const RAIL_WIDTH: f32 = 322.0;
 const COLUMN_GAP: f32 = 18.0;
 const STACK_BREAKPOINT: f32 = 900.0;
 
-/// Side of the publication state's problem mark, sized to its text.
-const PUBLICATION_MARK_SIDE: f32 = 11.0;
-const PUBLICATION_MARK_GAP: f32 = 6.0;
+/// Side of the publication state's problem mark and the air after it: the
+/// kit's own, so it matches every other marked line in the product.
+use crate::ui::widgets::{
+    PROBLEM_MARK_GAP as PUBLICATION_MARK_GAP, PROBLEM_MARK_SIDE as PUBLICATION_MARK_SIDE,
+};
 const PREVIEW_TOOLBAR_HEIGHT: f32 = 34.0;
 const PREVIEW_LINE_HEIGHT: f32 = 17.0;
 const PREVIEW_GUTTER_WIDTH: f32 = 44.0;

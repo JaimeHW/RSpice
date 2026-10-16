@@ -26,11 +26,11 @@ the Model Hub pipeline, not committed to this application repository.
 ## Licensing
 
 Every pack here is tier `own`: authored by the RSpice project and covered by
-the repository LICENSE. The index machinery retains the full license vocabulary
-(`permissive`, `copyleft`, `ambiguous`, `own`) because imported user content
-and future hub packs carry real license diversity, and because
-`redistributable` — the shipping decision — is recorded per pack rather than
-inferred from the tier.
+the repository LICENSE. The index machinery still carries the full license
+vocabulary (`permissive`, `copyleft`, `ambiguous`, `own`), because imported
+user content and Model Hub packs do have license diversity this tree does not
+exercise, and because `redistributable` (the shipping decision) is recorded
+per pack rather than inferred from the tier.
 
 `SHIPPING.toml` is the sole product allowlist. Repository presence does not
 grant shipping authority; release tooling fails closed on any pack it does not
@@ -74,13 +74,3 @@ and the allowlisted pack directories. Browser and mobile builds receive the
 same foundation source through `rspice-core`; they do not carry a separate
 pack tree. The Python source-distribution repair follows compiled
 `include_str!` targets, so it adds only `foundation/lib/foundation.lib`.
-
-## History
-
-Until August 2026 this tree also vendored a large third-party developer corpus
-(foundry PDKs, academic collections, community and manufacturer libraries,
-~260k definitions). It was removed when RSpice committed to an entirely
-RSpice-authored catalog: the corpus was never a product payload, most of it
-carried no redistribution grant, and the authored-library program replaces the
-rest. The vendoring tooling (`sources.toml`, `sync_packs.py`) was retired with
-it; git history retains both.

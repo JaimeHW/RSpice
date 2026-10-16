@@ -1,63 +1,71 @@
 # rspice-design-model
 
-The durable design-management model and the signed drawing-sheet package
-contract built on top of it. Everything here is data and rules over data:
-identities, revisions, semantic digests, sheet geometry, and the canonical
-package a publisher signs. No rendering, no widgets, no engine.
+The durable design-management model, the signed drawing-sheet package contract
+built on it, and the Library/Cell/View, port, bus and symbol-pin vocabulary the
+rest of the design stack shares. It is data and rules over data, with no
+rendering and no engine, and it depends on no other RSpice crate. It stands
+alone because two programs must agree on these bytes exactly: `rspice-app`
+imports a signed drawing-sheet package and the offline
+[`rspice-sheet-publisher`](../../tools/rspice-sheet-publisher) signs one, so
+"the publisher signed it" and "the importer will accept it" are one
+implementation, and the signing tool links none of the desktop application.
 
-The crate exists because two very different programs must agree on these bytes
-exactly. [`rspice-ui`](../rspice-ui) imports a signed drawing-sheet package; the
-offline [`rspice-sheet-publisher`](../rspice-sheet-publisher) ceremony signs
-one. Sharing one implementation is what makes "the publisher signed it" and "the
-importer will accept it" the same statement, and it keeps the publisher's
-trusted computing base down to `serde`, SHA-256, and Ed25519 rather than the
-whole desktop application. `rspice-ui` re-exports these types from the modules
-that used to define them, so application paths are unchanged.
+## What's in here
 
-## Modules
+| Module | Contents |
+| :--- | :--- |
+| `primitives` | Leaf value types: `ContentDigest`, `ConfigurationSetId`, `Point`, `SchematicPageSize`, `SchematicPageOrientation` |
+| `cell_view` | `CellViewRef`, the Library/Cell/View document identity, the name-segment rule, and the default `user` library, `top` cell and `schematic` view names |
+| `port` | `PortSpec` and `PortDirection`, the interface-port identity symbols and port lists read |
+| `bus` | `BusDeclaration`, `BusSlice`, the bounded bus-name parser, `declared_vector` and `declared_width` |
+| `symbol_geometry` | `SymbolShape`, symbol text size, alignment and placement, and `symbol_text_bounds` |
+| `symbol_pin` | `SymbolElectricalType` and `SymbolPinSide`, shared by authored and model-bound symbols |
+| `design_management` | `DesignManagementCatalog`: schematic sheet catalogs and cross-sheet ports, drawing-sheet formats, presets and lettering metrics, assembly variants, reference annotation, and hierarchy audit receipts. Mutations validate a cloned candidate before committing, and each persisted structure carries its own schema version and explicit `MAX_*` bounds |
+| `sheet_authoring` | `custom_format` and `validate_dimensions`: a custom drawing-sheet format derived from a `StartingFrame`, which decides margins, border and title block |
+| `sheet_package` | The signed drawing-sheet package: build, encode, parse, inspect, publish and verify, with authenticity decided through a `PublisherTrust` authority |
 
-- **`primitives`**: leaf value types with no behaviour beyond their own
-  invariants: `ContentDigest`, `ConfigurationSetId`, `Point`,
-  `SchematicPageSize`, `SchematicPageOrientation`.
-- **`design_management`**: the authority over schematic sheets, assembly
-  variants, reference annotation, and hierarchy preflight evidence. Split into
-  `identity`, `drawing_sheet`, `sheets`, `variants`, `annotation`, `hierarchy`,
-  and `catalog`.
-- **`sheet_authoring`**: deriving a custom drawing-sheet format from a
-  `StartingFrame`, because a custom size is not just a width and a height: the
-  drafting convention it starts from decides margins, border, and title block.
-- **`sheet_package`**: the signed package contract.
+## Boundaries
 
-## Draft in, committed state out
+- Schematic documents, connectivity, hierarchy resolution and configuration
+  sets belong to [`rspice-design`](../rspice-design).
+- The revocation-aware publisher trust store the importer passes as
+  `PublisherTrust` is `PdkPublisherTrustStore` in
+  [`rspice-model-library`](../rspice-model-library).
+- The drawing-sheet editing surfaces and package import belong to
+  [`rspice-app`](../rspice-app); printed and exported sheets are rendered by
+  [`rspice-hardcopy`](../rspice-hardcopy).
+- Several crates re-export these types under their own paths (the `product`
+  module of `rspice-app-types` re-exports `ContentDigest`); the definitions
+  are here.
 
-The UI only edits drafts. Every mutation in `design_management` is applied to a
-cloned candidate and committed after complete validation, so malformed or stale
-dialog input cannot partially change a project. Stable identities, revisions,
-semantic digests, and immutable receipts are owned here rather than inferred
-from labels the workbench rendered.
+## Entry points
 
-Each persisted structure carries its own schema version
-(`DESIGN_MANAGEMENT_SCHEMA_VERSION`, `SHEET_CATALOG_SCHEMA_VERSION`,
-`VARIANT_CATALOG_SCHEMA_VERSION`, `ANNOTATION_STATE_SCHEMA_VERSION`) and an
-explicit `MAX_*` bound on every collection and string, so a corrupted or hostile
-project file is rejected rather than allocated against.
+- `CellViewRef::new(library, cell, view)` for a document identity.
+- `DesignManagementCatalog::validate` and `semantic_digest`;
+  `publish_reviewed_candidate` with the expected revision for a reviewed
+  whole-catalog transaction.
+- `BusDeclaration::parse` for a declared bus name.
+- `custom_format(name, width_um, height_um, frame)` for a custom sheet.
+- `sheet_package::parse_package` with a `PublisherTrust` to import a package;
+  `inspect_drawing_sheet_package` to read one without asserting trust.
+- `publish_organization_drawing_sheet_package` and
+  `verify_published_drawing_sheet_package`, the two ends of the offline
+  signing ceremony.
 
 ## What a signature covers
 
-A drawing-sheet package signature covers exactly the projection built by
-`canonical_package_contract`, prefixed with a domain separator. The stored
-digest and the signature bytes themselves sit *outside* that projection and so
-cannot influence what was signed. `PACKAGE_SCHEMA` is `rspice-sheet-formats`,
+A drawing-sheet package signature is Ed25519 over a fixed domain separator
+followed by the projection `canonical_package_contract` builds. That projection
+carries the schema, version, builtin-frame references, source metadata, the
+publisher and signing-key identities, and the presets. The stored
+`source_digest_sha256` and the signature bytes sit outside it and cannot
+influence what was signed. `PACKAGE_SCHEMA` is `rspice-sheet-formats`,
 `PACKAGE_VERSION` is 1, and a package is capped at
 `DRAWING_SHEET_PACKAGE_MAX_BYTES` (4 MiB).
 
-`publish_organization_drawing_sheet_package` and
-`verify_published_drawing_sheet_package` are the two ends of the ceremony;
-`inspect_drawing_sheet_package` reads one without asserting trust.
-
 ## Testing
 
-```text
+```bash
 cargo test -p rspice-design-model
 ```
 

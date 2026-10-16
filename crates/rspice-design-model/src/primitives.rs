@@ -4,8 +4,10 @@
 //! behaviour beyond its own invariants. They live here rather than in the
 //! application crate because the persisted design-management schema and the
 //! signed drawing-sheet package contract both name them, and neither may
-//! depend on the GUI. `rspice-ui` re-exports every type below from the module
-//! that owned it, so application paths are unchanged.
+//! depend on the GUI. `rspice-app-types` re-exports `ContentDigest`,
+//! `rspice-design` re-exports `ConfigurationSetId`, `SchematicPageSize` and
+//! `SchematicPageOrientation`, and `rspice-app` re-exports `Point`, each from
+//! the module that owned it, so application paths are unchanged.
 
 use std::fmt;
 use std::ops::{Add, Sub};

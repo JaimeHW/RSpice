@@ -2,7 +2,7 @@
 
 use super::viewport::Viewport;
 use super::{SchematicSymbolContext, schematic_symbol_context};
-use crate::state::{DrawingSheetScale, DrawingSheetTitleFieldId};
+use crate::state::DrawingSheetTitleFieldId;
 use crate::workbench::app_state::AppState;
 use egui::{Painter, Rect};
 use rspice_schematic_editor::view::drawing_sheet::{self as sheet_view, DrawingSheetCanvas};
@@ -90,24 +90,27 @@ fn default_title_field_value(
             .design_management
             .drawing_sheet_settings()
             .document_control
-            .revision
-            .clone(),
+            .revision_index()
+            .to_owned(),
+        DrawingSheetTitleFieldId::PaperSize => sheet.format.authored_size.paper_size().to_owned(),
         // Retired: never present in a normalized field set, so never resolved.
-        DrawingSheetTitleFieldId::Format => String::new(),
-        DrawingSheetTitleFieldId::Scale => match sheet.format.title_block.scale {
-            DrawingSheetScale::NotToScale => "NTS".to_owned(),
-            DrawingSheetScale::Ratio {
-                drawing_units,
-                reality_units,
-            } => format!("{drawing_units}:{reality_units}"),
-        },
+        DrawingSheetTitleFieldId::Scale => String::new(),
         DrawingSheetTitleFieldId::Date => state
             .workspace
             .content
             .design_management
             .drawing_sheet_settings()
             .document_control
-            .display_date()
+            .revision_date_utc
+            .clone(),
+        DrawingSheetTitleFieldId::DocumentStatus => state
+            .workspace
+            .content
+            .design_management
+            .drawing_sheet_settings()
+            .document_control
+            .status
+            .label()
             .to_owned(),
         DrawingSheetTitleFieldId::Organization
         | DrawingSheetTitleFieldId::DocumentId
@@ -122,7 +125,8 @@ fn default_title_field_value(
             .unwrap_or_default(),
         DrawingSheetTitleFieldId::DrawnBy
         | DrawingSheetTitleFieldId::CheckedBy
-        | DrawingSheetTitleFieldId::ApprovedBy => String::new(),
+        | DrawingSheetTitleFieldId::ApprovedBy
+        | DrawingSheetTitleFieldId::DocumentType => String::new(),
     }
 }
 

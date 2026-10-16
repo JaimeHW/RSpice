@@ -10,7 +10,7 @@ use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::{Button, mono_input};
 
-use super::data::{format_engineering_summary, format_spice_number_lossless};
+use super::data::{format_engineering_quantity, format_spice_number_lossless};
 use super::state::PwlEditorState;
 
 /// Result of PWL editor interaction.
@@ -52,20 +52,15 @@ pub fn render_pwl_editor(
     let compact = ui.available_width() < 330.0;
     // Action strip: the narrow mockup aside stacks its command row so every
     // action remains reachable instead of clipping past the pane edge.
+    // The table's one heading. The form above it no longer writes a second
+    // one: two stacked headings over one table read as two tables.
     let render_kicker = |ui: &mut Ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
-        let mut kicker = egui::text::LayoutJob::default();
-        kicker.append(
-            "WAVEFORM POINTS",
-            0.0,
-            egui::TextFormat {
-                font_id: theme::mono(tokens::FS_0, FontWeight::Regular),
-                color: c.text_faint,
-                extra_letter_spacing: 0.08 * tokens::FS_0,
-                ..Default::default()
-            },
+        ui.label(
+            egui::RichText::new("Waveform points")
+                .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
+                .color(c.text_dim),
         );
-        ui.label(kicker);
     };
     let mut render_actions = |ui: &mut Ui| {
         ui.horizontal(|ui| {
@@ -201,16 +196,14 @@ fn render_raw_source_draft(ui: &mut Ui, state: &mut PwlEditorState) -> PwlEditor
     let mut source = state.raw_source_draft().unwrap_or_default().to_owned();
 
     ui.label(
-        egui::RichText::new("REPAIR PWL SOURCE")
-            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-            .color(c.text_faint),
+        egui::RichText::new("Repair PWL source")
+            .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
+            .color(c.text_dim),
     );
     ui.label(
-        egui::RichText::new(
-            "The imported source cannot be represented as points. Correct the retained source below.",
-        )
-        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-        .color(c.text_dim),
+        egui::RichText::new("This PWL text can't be shown as points. Fix it below.")
+            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+            .color(c.text_dim),
     );
     ui.add_space(4.0);
     let response = ui.add_sized(
@@ -262,14 +255,14 @@ fn render_table_header(ui: &mut Ui, state: &PwlEditorState) {
     painter.text(
         egui::pos2(rect.left() + INDEX_COL + 6.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        "TIME (S)",
+        "Time (s)",
         header.clone(),
         c.text_faint,
     );
     painter.text(
         egui::pos2(rect.left() + INDEX_COL + 6.0 + cell + 6.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        format!("VALUE ({})", state.value_unit.to_uppercase()),
+        format!("Value ({})", state.value_unit),
         header,
         c.text_faint,
     );
@@ -458,28 +451,34 @@ fn normalize_pwl_pair(
     ))
 }
 
+/// What the table spans, in time and in amplitude.
+///
+/// No point count: the rows above are numbered, so the table states it. The
+/// spans are what a glance at a long table does not give.
 fn render_summary(ui: &mut Ui, state: &PwlEditorState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let mut parts = vec![format!("{} points", state.data.len())];
+    let mut parts = Vec::new();
     if let Some((t_min, t_max)) = state.data.time_range() {
         parts.push(format!(
-            "{} -> {} s",
-            format_engineering_summary(t_min),
-            format_engineering_summary(t_max)
+            "{} \u{2192} {}",
+            format_engineering_quantity(t_min, "s"),
+            format_engineering_quantity(t_max, "s")
         ));
     }
     if let Some((v_min, v_max)) = state.data.value_range() {
         parts.push(format!(
-            "{} -> {} {}",
-            format_engineering_summary(v_min),
-            format_engineering_summary(v_max),
-            state.value_unit
+            "{} \u{2192} {}",
+            format_engineering_quantity(v_min, &state.value_unit),
+            format_engineering_quantity(v_max, &state.value_unit)
         ));
+    }
+    if parts.is_empty() {
+        return;
     }
     ui.add_space(6.0);
     ui.label(
-        egui::RichText::new(parts.join(" · "))
+        egui::RichText::new(parts.join(", "))
             .font(theme::mono(tokens::FS_0, FontWeight::Regular))
             .color(c.text_faint),
     );

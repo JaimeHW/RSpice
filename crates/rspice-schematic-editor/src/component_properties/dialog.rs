@@ -1,11 +1,11 @@
 //! Component modal presentation with host-owned services and publication.
 
-use super::evidence::{evidence_pane, provenance_colour};
+use super::evidence::evidence_pane;
 use super::{
     ComponentEditorContext, ComponentPropertyDialogResult, ComponentPropertyDraft,
     PropertyBrowseRequest, render_component_parameters,
 };
-use egui::{Align, Layout, Margin, Sense, Stroke, Ui, vec2};
+use egui::{Align, Layout, Margin, Stroke, Ui};
 use rspice_app_types::property::{PropertySheet, PropertyValue};
 use rspice_app_types::quantity::{QuantityPresentationPolicy, UiNumberLocale};
 use rspice_design::properties::SourceContractFinding;
@@ -39,7 +39,18 @@ pub trait ComponentPropertyServices {
 }
 
 const DIALOG_SIZE: DialogSize = DialogSize::ComponentEditor;
-const DESCRIPTION: &str = "Edit identity, model, parameters, orientation, connectivity, display, constraints, and review metadata.";
+
+/// What a screen reader is told this dialog is for.
+///
+/// It is a parameter form: it edits no orientation, no display option, no
+/// constraint and no review metadata, all of which the description used to
+/// promise.
+fn accessible_description(name: Option<&str>) -> String {
+    match name {
+        Some(name) => format!("Edit {name}'s parameters."),
+        None => "Edit this instance's parameters.".to_owned(),
+    }
+}
 
 /// Render one active component dialog and return a typed host action.
 /// The host closes cancelled dialogs and publishes prepared edits after return.
@@ -72,8 +83,16 @@ pub fn render_component_property_dialog(
         ),
     };
 
+    let described = accessible_description(
+        draft
+            .get_value("name")
+            .map(PropertyValue::display_string)
+            .filter(|name| !name.trim().is_empty())
+            .as_deref()
+            .or(component_name),
+    );
     let mut dialog = Dialog::new("Edit instance properties", "OK")
-        .description(DESCRIPTION)
+        .description(&described)
         .size(DIALOG_SIZE)
         .fixed_height(680.0)
         .without_header()
@@ -101,7 +120,7 @@ pub fn render_component_property_dialog(
         let first_parameter;
         // With nothing to show beside them, the parameters take the whole body
         // rather than leaving a pane that holds a divider and no content.
-        if !has_evidence(draft, context, show_source_preview) {
+        if !has_evidence(context, show_source_preview) {
             clip_to_pane(ui);
             first_parameter = render_component_parameters(
                 ui,
@@ -263,25 +282,30 @@ fn clip_to_pane(ui: &mut Ui) {
 
 /// Whether this component has anything to show beside its parameters.
 ///
-/// A resistor binds no model and adopts no waveform, so its editor is a form
-/// and nothing else: the pane beside it would be empty, which is the editor
-/// claiming to hold something it does not.
+/// Only a source does: its waveform, and the library verbs that act on the
+/// card it carries. Everything else is a parameter form and nothing else, as
+/// Virtuoso's Edit Object Properties and ADS's component dialog are. What the
+/// pane used to hold beside them — the model binding, the operating point and
+/// the terminal table — is the design inspector's, which this modal covers
+/// while it is open.
 ///
 /// `show_source_preview` is part of the question and not a duplicate of the
 /// stimulus context, even though the host derives both from the same kind: the
 /// evidence pane is what calls the preview service, so a source whose
 /// provenance failed to resolve would otherwise lose its waveform rather than
 /// its provenance line.
-fn has_evidence(
-    draft: &ComponentPropertyDraft,
-    context: &ComponentEditorContext,
-    show_source_preview: bool,
-) -> bool {
-    show_source_preview
-        || context.stimulus.is_some()
-        || super::evidence::binds_a_model(draft, context)
+fn has_evidence(context: &ComponentEditorContext, show_source_preview: bool) -> bool {
+    show_source_preview || context.stimulus.is_some()
 }
 
+/// Which instance this form is editing, and what it is.
+///
+/// Two lines and nothing else. The header used to carry a glyph box, the
+/// instance's path, the device family and a provenance chip beside a subtitle
+/// that named the device a third time — `R1  R / Resistor` over
+/// `Resistor · SPICE primitive · lib/amp/schematic/R1`, with `Resistor ·
+/// primitive` flush right. The name is editable, the master is named for an
+/// instance that has one, and what the part is takes one word.
 fn component_identity_header(
     ui: &mut Ui,
     draft: &mut ComponentPropertyDraft,
@@ -296,119 +320,45 @@ fn component_identity_header(
         .inner_margin(Margin::symmetric(16, 10))
         .show(ui, |ui| {
             ui.set_width(width - 32.0);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 12.0;
-                let (glyph, _) = ui.allocate_exact_size(vec2(34.0, 34.0), Sense::hover());
-                ui.painter().rect_filled(glyph, 5.0, c.bg_panel);
-                ui.painter().rect_stroke(
-                    glyph,
-                    5.0,
-                    Stroke::new(1.0, c.border),
-                    egui::StrokeKind::Inside,
-                );
-                ui.painter().text(
-                    glyph.center(),
-                    egui::Align2::CENTER_CENTER,
-                    &context.glyph,
-                    theme::mono(tokens::FS_2, FontWeight::SemiBold),
-                    c.accent,
-                );
-
-                // A source carrying a provenance chip needs room for the chip
-                // *and* the family beside it; everything else keeps the track
-                // the family alone has always had.
-                let status_width = if context.stimulus.is_some() {
-                    (ui.available_width() * 0.44).clamp(200.0, 330.0)
-                } else {
-                    (ui.available_width() * 0.28).clamp(110.0, 190.0)
-                };
-                let identity_width =
-                    (ui.available_width() - status_width - ui.spacing().item_spacing.x).max(180.0);
-                ui.allocate_ui_with_layout(
-                    vec2(identity_width, 34.0),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        // Claim the whole track. `allocate_ui_with_layout`
-                        // advances the cursor by the content it ends up with,
-                        // not by the size it was asked for, so a short instance
-                        // path would otherwise drag the family badge in off the
-                        // right edge instead of leaving it flush.
-                        ui.set_min_width(identity_width);
-                        ui.spacing_mut().item_spacing.y = 2.0;
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 7.0;
-                            ui.label(
-                                egui::RichText::new("Instance")
-                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                    .color(c.text_dim),
-                            );
-                            let mut name = draft
-                                .get_value("name")
-                                .map(PropertyValue::display_string)
-                                .or_else(|| component_name.map(str::to_owned))
-                                .unwrap_or_default();
-                            let response = ui.add(
-                                egui::TextEdit::singleline(&mut name)
-                                    .font(theme::mono(tokens::FS_1, FontWeight::SemiBold))
-                                    .desired_width(88.0),
-                            );
-                            if response.changed() {
-                                draft.set_value("name", PropertyValue::String(name));
-                            }
-                            ui.label(
-                                egui::RichText::new(&context.library_cell)
-                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                    .color(c.text_faint),
-                            );
-                        });
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
-                            ui.label(
-                                egui::RichText::new(&context.subtitle)
-                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                    .color(c.text_dim),
-                            );
-                            ui.label(
-                                egui::RichText::new("·")
-                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                    .color(c.text_faint),
-                            );
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(&context.instance_path)
-                                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                        .color(c.text_dim),
-                                )
-                                .truncate(),
-                            );
-                        });
-                    },
-                );
-                ui.allocate_ui_with_layout(
-                    vec2(status_width, 34.0),
-                    Layout::right_to_left(Align::Center),
-                    |ui| {
-                        ui.set_min_width(status_width);
-                        ui.spacing_mut().item_spacing.x = 8.0;
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(&context.family)
-                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                    .color(c.text_dim),
-                            )
-                            .truncate(),
-                        );
-                        if let Some(stimulus) = &context.stimulus {
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(stimulus.state.label())
-                                        .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                                        .color(provenance_colour(ui, stimulus.state)),
-                                )
-                                .truncate(),
-                            );
-                        }
-                    },
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 7.0;
+                    ui.label(
+                        egui::RichText::new("Instance")
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(c.text_dim),
+                    );
+                    let mut name = draft
+                        .get_value("name")
+                        .map(PropertyValue::display_string)
+                        .or_else(|| component_name.map(str::to_owned))
+                        .unwrap_or_default();
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut name)
+                            .font(theme::mono(tokens::FS_1, FontWeight::SemiBold))
+                            .desired_width(88.0),
+                    );
+                    if response.changed() {
+                        draft.set_value("name", PropertyValue::String(name));
+                    }
+                    // Empty for a primitive, whose "library" is the engine.
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(&context.library_cell)
+                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                .color(c.text_faint),
+                        )
+                        .truncate(),
+                    );
+                });
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(&context.subtitle)
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(c.text_dim),
+                    )
+                    .truncate(),
                 );
             });
         });

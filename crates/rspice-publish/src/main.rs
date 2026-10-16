@@ -26,8 +26,15 @@ const EXIT_OUTPUT_EXISTS: u8 = 3;
 /// before any input is read so the cloud executor classifies it as a
 /// renderer failure, never as a rejected snapshot.
 const EXIT_RUNTIME_MISSING: u8 = 4;
-/// Filesystem or usage failure.
+/// Filesystem or usage failure. Usage errors are routed here rather than to
+/// clap's default `2`, which would read as a rejected snapshot.
 const EXIT_IO: u8 = 1;
+
+/// The status for an invocation the argument parser stopped. `--help` and
+/// `--version` are answered requests; anything else is a usage error.
+fn parse_exit_code(error: &clap::Error) -> u8 {
+    if error.use_stderr() { EXIT_IO } else { 0 }
+}
 
 #[derive(Debug, Parser)]
 #[command(
@@ -150,7 +157,13 @@ fn render(args: &RenderArgs) -> Result<(), (u8, String)> {
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error) => {
+            let _ = error.print();
+            return ExitCode::from(parse_exit_code(&error));
+        }
+    };
     match &cli.command {
         Command::Render(args) => match render(args) {
             Ok(()) => ExitCode::SUCCESS,
@@ -174,6 +187,27 @@ mod tests {
     #[test]
     fn cli_definition_is_consistent() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn a_usage_error_never_reads_as_a_rejected_snapshot() {
+        let usage_errors: [&[&str]; 4] = [
+            &["rspice-publish"],
+            &["rspice-publish", "render"],
+            &["rspice-publish", "render", "--snapshot", "snapshot.json"],
+            &["rspice-publish", "publish"],
+        ];
+        for argv in usage_errors {
+            let error = Cli::try_parse_from(argv).expect_err("the invocation is incomplete");
+            assert_eq!(parse_exit_code(&error), EXIT_IO, "{argv:?}");
+        }
+        for argv in [
+            ["rspice-publish", "--help"],
+            ["rspice-publish", "--version"],
+        ] {
+            let error = Cli::try_parse_from(argv).expect_err("help and version stop parsing");
+            assert_eq!(parse_exit_code(&error), 0, "{argv:?}");
+        }
     }
 
     #[test]

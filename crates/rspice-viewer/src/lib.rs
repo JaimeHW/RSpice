@@ -14,6 +14,7 @@
 //! module ratchets color parity against the page stylesheet in
 //! `rspice-publish`.
 
+pub mod fonts;
 pub mod payload;
 pub mod plot;
 pub mod scene;

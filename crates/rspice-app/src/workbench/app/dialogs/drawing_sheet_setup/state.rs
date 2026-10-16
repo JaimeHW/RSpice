@@ -368,7 +368,10 @@ pub(crate) struct DrawingSheetDraft {
     pub(crate) title_block_rotation: TitleBlockRotationChoice,
     pub(crate) title_block_offset_x: String,
     pub(crate) title_block_offset_y: String,
-    pub(crate) declared_scale: String,
+    /// Carried through unedited. A schematic is not drawn to scale and the
+    /// title block no longer letters one, so nothing offers this for editing;
+    /// a sheet keeps the value it was saved with.
+    pub(crate) scale: DrawingSheetScale,
     pub(crate) managed_title_template: Option<DrawingSheetManagedTemplateSnapshot>,
     pub(crate) title_fields:
         std::collections::BTreeMap<DrawingSheetTitleFieldId, DrawingSheetTitleFieldState>,
@@ -435,7 +438,7 @@ impl DrawingSheetDraft {
             title_block_rotation: title_rotation_from_model(format.title_block.rotation),
             title_block_offset_x: format_signed_um(format.title_block.offset_x_um, display_unit),
             title_block_offset_y: format_signed_um(format.title_block.offset_y_um, display_unit),
-            declared_scale: scale_from_model(format.title_block.scale),
+            scale: format.title_block.scale,
             managed_title_template: format.title_block.managed_template.clone(),
             title_fields: format.title_block.fields.clone(),
             inheritance: format.inheritance,
@@ -693,13 +696,6 @@ impl DrawingSheetDraft {
                 message: "Custom zone rows and columns must each be between 2 and 24.".to_owned(),
             });
         }
-        if parse_scale(&self.declared_scale).is_none() {
-            problems.push(FieldProblem {
-                field: "scale",
-                message: "Declared scale must be NTS or a positive ratio such as 1:1 or 1:2.5."
-                    .to_owned(),
-            });
-        }
         if bleed_um.is_some_and(|bleed| bleed > 25_400) {
             problems.push(FieldProblem {
                 field: "bleed",
@@ -741,13 +737,6 @@ impl DrawingSheetDraft {
                 },
             },
         };
-        let declared_scale = parse_scale(&self.declared_scale).expect("validated scale");
-        let mut title_fields = self.title_fields.clone();
-        title_fields
-            .get_mut(&DrawingSheetTitleFieldId::Scale)
-            .expect("the canonical title-field set contains Scale")
-            .value
-            .clear();
         let page_format = SchematicSheetFormat::try_from_draft(SchematicSheetFormatDraft {
             authored_size,
             orientation: self.orientation,
@@ -778,9 +767,9 @@ impl DrawingSheetDraft {
                 rotation: title_rotation_to_model(self.title_block_rotation),
                 offset_x_um: offset_x_um.expect("validated horizontal title offset"),
                 offset_y_um: offset_y_um.expect("validated vertical title offset"),
-                scale: declared_scale,
+                scale: self.scale,
                 managed_template: self.managed_title_template.clone(),
-                fields: title_fields,
+                fields: self.title_fields.clone(),
             },
             inheritance: self.inheritance,
         })
@@ -1229,68 +1218,6 @@ fn title_rotation_to_model(value: TitleBlockRotationChoice) -> DrawingSheetTitle
     }
 }
 
-fn scale_from_model(value: DrawingSheetScale) -> String {
-    match value {
-        DrawingSheetScale::NotToScale => "NTS".to_owned(),
-        DrawingSheetScale::Ratio {
-            drawing_units,
-            reality_units,
-        } => format!("{drawing_units}:{reality_units}"),
-    }
-}
-
-fn parse_scale(value: &str) -> Option<DrawingSheetScale> {
-    let value = value.trim();
-    if value.eq_ignore_ascii_case("NTS") {
-        return Some(DrawingSheetScale::NotToScale);
-    }
-    let (drawing, reality) = value.split_once(':')?;
-    let (drawing_numerator, drawing_denominator) = parse_positive_decimal(drawing)?;
-    let (reality_numerator, reality_denominator) = parse_positive_decimal(reality)?;
-    let drawing_units = drawing_numerator.checked_mul(reality_denominator)?;
-    let reality_units = reality_numerator.checked_mul(drawing_denominator)?;
-    let divisor = gcd_u64(drawing_units, reality_units);
-    let drawing_units = u32::try_from(drawing_units / divisor).ok()?;
-    let reality_units = u32::try_from(reality_units / divisor).ok()?;
-    Some(DrawingSheetScale::Ratio {
-        drawing_units,
-        reality_units,
-    })
-}
-
-fn parse_positive_decimal(value: &str) -> Option<(u64, u64)> {
-    let normalized = value.trim().replace(',', ".");
-    let normalized = normalized.strip_prefix('+').unwrap_or(&normalized);
-    let (whole, fraction) = normalized
-        .split_once('.')
-        .map_or((normalized, ""), |parts| parts);
-    if whole.is_empty()
-        || !whole.bytes().all(|byte| byte.is_ascii_digit())
-        || !fraction.bytes().all(|byte| byte.is_ascii_digit())
-        || fraction.len() > 6
-    {
-        return None;
-    }
-    let denominator = 10_u64.checked_pow(fraction.len() as u32)?;
-    let whole = whole.parse::<u64>().ok()?;
-    let fraction = if fraction.is_empty() {
-        0
-    } else {
-        fraction.parse::<u64>().ok()?
-    };
-    let numerator = whole.checked_mul(denominator)?.checked_add(fraction)?;
-    (numerator > 0).then_some((numerator, denominator))
-}
-
-fn gcd_u64(mut left: u64, mut right: u64) -> u64 {
-    while right != 0 {
-        let remainder = left % right;
-        left = right;
-        right = remainder;
-    }
-    left.max(1)
-}
-
 fn automatic_zone_divisions(edge_um: u64) -> u8 {
     let edge_mm = edge_um as f64 / 1_000.0;
     let nearest = (edge_mm / 140.0).round() as i32;
@@ -1354,9 +1281,16 @@ mod tests {
                 .get_mut(&DrawingSheetTitleFieldId::SheetTitle)
                 .unwrap()
                 .value = "Sheet 1".to_owned();
+            // A new portrait A4 sheet starts on the compact block, but turning
+            // a sheet keeps the block it asked for: portrait paper paints the
+            // compact one in its place and says so, and turning back restores
+            // it.
+            format.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
         })
         .unwrap();
-        assert_eq!(draft.validate().unwrap().page_format, expected);
+        let turned = draft.validate().unwrap().page_format;
+        assert_eq!(turned, expected);
+        assert!(turned.title_block_substituted());
     }
 
     #[test]
@@ -1431,45 +1365,25 @@ mod tests {
     }
 
     #[test]
-    fn declared_scale_is_the_single_canonical_scale_value() {
-        let mut draft = valid_draft();
-        draft.declared_scale = "2:5".to_owned();
+    fn a_sheet_keeps_the_scale_it_was_saved_with() {
+        let saved = SchematicSheetFormat::default()
+            .try_update(|draft| {
+                draft.title_block.scale = DrawingSheetScale::Ratio {
+                    drawing_units: 2,
+                    reality_units: 5,
+                };
+            })
+            .unwrap();
+
+        let mut draft = DrawingSheetDraft::from_format(&saved);
         draft
             .title_fields
-            .get_mut(&DrawingSheetTitleFieldId::Scale)
+            .get_mut(&DrawingSheetTitleFieldId::SheetTitle)
             .unwrap()
-            .value = "stale".to_owned();
-
+            .value = "Sheet 1".to_owned();
         let format = draft.validate().unwrap().page_format;
 
-        assert_eq!(
-            format.title_block.scale,
-            DrawingSheetScale::Ratio {
-                drawing_units: 2,
-                reality_units: 5,
-            }
-        );
-        assert_eq!(
-            format.title_block.fields[&DrawingSheetTitleFieldId::Scale].value,
-            ""
-        );
-    }
-
-    #[test]
-    fn decimal_declared_scale_is_preserved_as_an_exact_rational_ratio() {
-        let mut draft = valid_draft();
-        draft.declared_scale = "1:2.5".to_owned();
-
-        let format = draft.validate().unwrap().page_format;
-
-        assert_eq!(
-            format.title_block.scale,
-            DrawingSheetScale::Ratio {
-                drawing_units: 2,
-                reality_units: 5,
-            }
-        );
-        assert_eq!(scale_from_model(format.title_block.scale), "2:5");
+        assert_eq!(format.title_block.scale, saved.title_block.scale);
     }
 
     #[test]
@@ -1492,7 +1406,6 @@ mod tests {
         authority.set_border_template(BorderTemplateChoice::Organization);
         authority.set_title_block_template(TitleBlockTemplateChoice::Organization);
         authority.title_block_anchor = TitleBlockAnchorChoice::TopRight;
-        authority.declared_scale = "1:2.5".to_owned();
 
         let mut replacement = valid_draft();
         replacement.set_border_template(BorderTemplateChoice::None);
@@ -1513,7 +1426,6 @@ mod tests {
             replacement.title_block_anchor,
             TitleBlockAnchorChoice::BottomRight
         );
-        assert_eq!(replacement.declared_scale, "1:1");
         assert_eq!(
             replacement.title_fields[&DrawingSheetTitleFieldId::SheetTitle].value,
             "Edited title"
@@ -1661,7 +1573,7 @@ mod tests {
     fn validation_retains_every_field_problem_for_complete_surface_feedback() {
         let mut draft = valid_draft();
         draft.width = "not-a-length".to_owned();
-        draft.declared_scale = "not-a-scale".to_owned();
+        draft.title_block_offset_x = "not-an-offset".to_owned();
         draft
             .title_fields
             .get_mut(&DrawingSheetTitleFieldId::SheetTitle)
@@ -1672,7 +1584,11 @@ mod tests {
         let problems = draft.validate().unwrap_err();
 
         assert!(problems.iter().any(|problem| problem.field == "width"));
-        assert!(problems.iter().any(|problem| problem.field == "scale"));
+        assert!(
+            problems
+                .iter()
+                .any(|problem| problem.field == "title-offset-x")
+        );
         assert!(
             problems
                 .iter()

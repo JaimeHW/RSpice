@@ -20,6 +20,7 @@ pub fn mark_response_disabled(response: &mut egui::Response) {
 }
 
 mod button;
+mod canvas_entry;
 mod chip;
 mod command_form;
 mod dialog;
@@ -29,10 +30,8 @@ pub mod notice;
 #[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
 pub mod painted_runs;
 mod pane;
-mod schematic_command;
 mod segmented;
 mod select;
-mod selection_command;
 mod status_mark;
 mod switch;
 mod table;
@@ -41,6 +40,7 @@ mod tree;
 mod view_switch;
 
 pub use button::{Button, IconButton};
+pub use canvas_entry::{CanvasEntry, CanvasEntryChoice, CanvasEntryRows};
 pub use chip::chip;
 pub(crate) use command_form::middle_elided;
 pub use command_form::{CommandForm, FieldLine, FormRows, ListEdit, ListWords};
@@ -56,14 +56,9 @@ pub use form::{
 pub use pane::{
     PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W, PaneSide, pane_footer, pane_header, two_pane,
 };
-pub use schematic_command::{SchematicCommandPreview, schematic_command_workflow};
 pub use segmented::{SegmentedWidth, segmented};
 pub use select::{SelectOutput, select};
 pub use select::{select_mono_with_response, select_with_disabled, select_with_response};
-pub use selection_command::{
-    NotePreviewStyle, PreviewPoint, SelectionImpact, SelectionPreview, ShapePreviewStroke,
-    selection_command_workflow, workflow_preview_status,
-};
 pub use status_mark::{
     PROBLEM_MARK_ADVANCE, PROBLEM_MARK_GAP, PROBLEM_MARK_SIDE, Problem, StatusMark,
     paint_problem_mark, paint_status_mark, problem_line,

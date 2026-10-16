@@ -57,7 +57,8 @@ pub async fn hydrate_figure(
         .start(
             canvas,
             eframe::WebOptions::default(),
-            Box::new(move |_context| {
+            Box::new(move |context| {
+                crate::fonts::install(&context.egui_ctx);
                 Ok(Box::new(FigureApp {
                     figure,
                     camera: SceneCamera::default(),

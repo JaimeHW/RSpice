@@ -256,16 +256,25 @@ fn build_stb_command(
 ) -> Result<String, String> {
     let mut stb_state = draft.clone();
     stb_state.ensure_initialized();
-    let stb_cfg = stb_state
+    let mut stb_cfg = stb_state
         .to_config()
         .map_err(|e| format!("invalid STB settings: {}", e))?;
+    let placed = rspice_design::schematic::component_edit::placed_loop_probe_names(schematic);
+    // A chosen probe is named in the directive by the card the deck writes,
+    // which a plan saved under the probe's drawn name does not spell.
+    if stb_cfg.probe_reference == rspice_simulation_contract::stb_draft::StbProbeReference::Placed
+        && let Some(written) = rspice_design::schematic::component_edit::placed_loop_probe(
+            &placed,
+            &stb_cfg.probe_source,
+        )
+    {
+        stb_cfg.probe_source = written.to_owned();
+    }
     // A probe chosen from the drawing has to still be on it. Checked here
     // because this is the one path every surface takes to a directive, so
     // the plan refuses by name instead of writing a deck the engine will
     // reject for a reason that no longer mentions the schematic.
-    if let Some(error) = stb_cfg.deleted_probe_error(
-        &rspice_design::schematic::component_edit::placed_loop_probe_names(schematic),
-    ) {
+    if let Some(error) = stb_cfg.deleted_probe_error(&placed) {
         return Err(error);
     }
     Ok(stb_cfg.to_spice())
@@ -387,16 +396,22 @@ fn build_pstb_command(
 ) -> Result<String, String> {
     let mut pstb_state = draft.clone();
     pstb_state.ensure_initialized();
-    let pstb_cfg = pstb_state
+    let mut pstb_cfg = pstb_state
         .to_config()
         .map_err(|e| format!("invalid PSTB settings: {}", e))?;
+    let placed = rspice_design::schematic::component_edit::placed_loop_probe_names(schematic);
+    // Named by the card the deck writes, as the stability directive is.
+    if pstb_cfg.probe_reference == rspice_simulation_contract::stb_draft::StbProbeReference::Placed
+        && let Some(written) =
+            rspice_design::schematic::component_edit::placed_loop_probe(&placed, &pstb_cfg.probe)
+    {
+        pstb_cfg.probe = written.to_owned();
+    }
     // The same check the stability directive makes, at the same seam and
     // for the same reason: this is the one path every surface takes to a
     // directive, so a plan pointing at a probe the drawing no longer holds
     // is refused by name here rather than in the solver.
-    if let Some(error) = pstb_cfg.deleted_probe_error(
-        &rspice_design::schematic::component_edit::placed_loop_probe_names(schematic),
-    ) {
+    if let Some(error) = pstb_cfg.deleted_probe_error(&placed) {
         return Err(error);
     }
     Ok(pstb_cfg.to_spice())
@@ -933,6 +948,37 @@ mod tests {
             build_stb_command(&schematic, &setup.stb).expect("a placed probe reaches the deck");
 
         assert!(directive.contains("probe=VLOOP1"), "{directive}");
+    }
+
+    /// The picker used to offer each probe under its drawn name, so a plan
+    /// saved then holds `LOOP2` for the probe the deck writes `VLOOP2`. It is
+    /// the same probe, so the directive names its card instead of refusing
+    /// the plan as pointing at a deleted one.
+    #[test]
+    fn a_plan_saved_under_a_probes_drawn_name_names_its_card() {
+        use rspice_design::schematic::{component::Component, component_type::ComponentType};
+        use rspice_design_model::primitives::Point;
+        use rspice_simulation_contract::stb_draft::StbProbeReference;
+
+        let mut setup = rspice_simulation_contract::setup_state::SimulationSetup::new();
+        let mut schematic = rspice_design::schematic::document::SchematicDocument::default();
+        schematic.components.push(
+            Component::new(1, ComponentType::LoopProbe, Point::new(0, 0))
+                .with_name_value("LOOP2", ""),
+        );
+        setup.stb.ensure_initialized();
+        setup.stb.probe_source = "LOOP2".to_owned();
+        setup.stb.probe_reference = StbProbeReference::Placed;
+        setup.pstb.ensure_initialized();
+        setup.pstb.probe = "loop2".to_owned();
+        setup.pstb.probe_reference = StbProbeReference::Placed;
+
+        let directive =
+            build_stb_command(&schematic, &setup.stb).expect("the drawn name names the probe");
+        assert!(directive.contains("probe=VLOOP2"), "{directive}");
+        let directive =
+            build_pstb_command(&schematic, &setup.pstb).expect("the drawn name names the probe");
+        assert!(directive.contains("probe=VLOOP2"), "{directive}");
     }
 
     /// PSTB designates the same element, so it is refused the same way.

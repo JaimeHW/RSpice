@@ -1,117 +1,109 @@
 # rspice-automation-runtime
 
-Verification and launch support for RSpice-owned native Python runtimes: the
-native half of the transport that
-[`rspice-automation-protocol`](../rspice-automation-protocol) defines.
+Verification and launch of the RSpice-owned native Python runtime that runs
+Automation scripts: the native side of
+[`rspice-automation-protocol`](../rspice-automation-protocol). There is no
+system-interpreter discovery. A caller supplies an application-local runtime
+directory and a release trust store; every file in the runtime is signed,
+enumerated and content-verified before a worker can start, and the launch uses
+only that verified executable, with no `PATH` lookup, shell, user site,
+startup hook or ambient working directory.
 
-The crate deliberately has **no system-interpreter discovery**. A caller
-supplies an application-local runtime directory and a release trust store;
-every executable input is signed, enumerated, and content verified before a
-Python worker can be launched. `NativeWorker` starts only the verified
-application-local executable: no `PATH` lookup, shell, user site, startup hook,
-or ambient working directory is involved.
+## What's in here
 
-## Verifying a runtime
+- `src/lib.rs`: `RuntimeTrustStore`, `VerifiedRuntime`, `NativeWorker`, the
+  signed manifest types, and `runtime_inventory_digest`.
+- `worker/rspice_worker.py`: the trusted protocol worker the runtime runs.
+  Release assembly copies it into the runtime as `worker/rspice_worker.py`.
+- `src/bin/rspice-managed-runtime-packager.rs`: inventories and signs a
+  staged runtime, then verifies the result with the code the application uses.
+- `src/bin/rspice-managed-runtime-qualifier.rs`: release qualification of one
+  signed runtime: verification, a validate and a run launch, hard
+  cancellation and watchdog termination, reported as one JSON evidence line.
 
-A managed runtime directory carries `runtime-manifest.json` and
-`runtime-manifest.ed25519.json`. Verification walks:
+## Boundaries
 
-1. the signature document, against an Ed25519 key in the caller's
-   `RuntimeTrustStore` (an unlisted key id is `UntrustedSigningKey`, not a
-   warning);
-2. the manifest schema, protocol major/minor against `PROTOCOL_VERSION`, target
-   triple, Python version, and ABI against the requirement;
-3. `runtime_digest_sha256` recomputed by `runtime_inventory_digest` over the
-   enumerated file set, the same implementation release assembly uses, so the
-   packager and the installed verifier cannot drift on framing, ordering, or
-   executable-bit semantics;
-4. every `RuntimeFile` digest on disk.
+- The messages the worker speaks: `rspice-automation-protocol`.
+- Locating the installed runtime (`runtimes/python` beside the executable), the
+  compiled-in trust key, and the browser (Pyodide) worker: `rspice-app`.
+- Staging a CPython build into a runtime directory:
+  `tools/release/stage_managed_python.py`.
 
-The result is a `VerifiedRuntime`. `RuntimeError` names which of those steps
-failed and with what value, so a broken install is diagnosable without a debug
-build. Python environments inside a runtime are content-addressed: a project
-lock names one of `environment_digests_sha256` exactly.
+## Entry points
 
-## Launching and containing a worker
-
-`NativeWorker` owns the child process, frames envelopes through
-`rspice_automation_protocol::native_codec`, and applies containment *before* any
-untrusted source is sent:
-
-- OS-enforced CPU, memory, process-count, and kill-on-close limits (a Windows
-  job object, or the equivalent rlimits inside the POSIX trusted bootstrap);
-- a process-owning watchdog deadline per launch request, which unlike UI-frame
-  polling stays effective if user Python loops forever or the UI stops
-  repainting;
-- bounded stderr capture, so a chatty failure cannot exhaust host memory.
-
-## Managed native Python runtime payload
-
-[`worker/rspice_worker.py`](worker/rspice_worker.py) is the trusted native Automation
-protocol worker owned by this crate. Release assembly places it inside an application-local
-CPython 3.14 runtime at `runtimes/python/worker/rspice_worker.py`.
-RSpice never searches `PATH`, the Windows Python launcher, registry installations, virtual
-environments, or user site-packages for product execution.
-
-The staged directory must contain the complete interpreter, standard library, approved packages,
-license notices, and the worker before it is signed. Inventory and signing use the repository-owned
-Rust tool so release creation and installed verification share the exact digest implementation.
-Run these commands from the repository root with uv 0.12.1:
-
-```text
-uv python install --managed-python --python-preference only-managed 3.14.6
-python tools/release/stage_managed_python.py \
-  --python-executable <uv-managed-cpython-3.14.6-executable> \
-  --output-root <fresh-stage>/runtimes/python \
-  --worker crates/rspice-automation-runtime/worker/rspice_worker.py \
-  --expected-version 3.14.6 \
-  --source-identity <managed-python-source-identity>
+```rust
+let mut trust = RuntimeTrustStore::new();
+trust.add_key_bytes(key_id, public_key)?;
+let runtime = trust.verify(runtime_root, &requirement)?; // VerifiedRuntime
+let mut worker = runtime.launch(scratch_dir)?;          // NativeWorker
+worker.apply_resource_limits(limits)?;                  // before any source
+worker.arm_wall_time_limit(limits.wall_time_ms)?;
+worker.send(&request)?;
+let event = worker.try_event()?;
 ```
 
-The staging tool launches the candidate with `-I -S`, verifies exact CPython 3.14.6 and `cp314`,
-requires the python-build-standalone `BUILD` identity, rejects escaping symlinks, strips installer
-and test payloads that are not part of the product runtime, copies license evidence, emits the
-runtime notice and CycloneDX 1.5 component SBOM, and re-probes the relocated interpreter before
-signing. The release workflow pins both uv and the setup action; it does not accept whatever Python
-happens to be installed on the build host.
+`VerifiedRuntime::supports_environment` says whether a project lock's
+environment digest is one the runtime installs. `RuntimeError` names the check
+that failed and the value it found, so a broken install is diagnosable from a
+release build.
 
-The staged result is then signed:
+## What a signature covers
 
-```text
-cargo run --locked --release -p rspice-automation-runtime \
-  --bin rspice-managed-runtime-packager -- \
-  --runtime-root <fresh-stage>/runtimes/python \
-  --runtime-build rspice-cpython-3.14.6+<release-id> \
-  --target <rust-target-triple> \
-  --architecture <x86_64-or-aarch64> \
-  --python-version 3.14.6 \
-  --python-abi cp314 \
-  --api-version 1.0.0 \
-  --python-executable <portable-relative-python-path> \
-  --worker-bootstrap worker/rspice_worker.py \
-  --environment-digest d445b1443965be4e6b1b191ee023176dbd35430ac3cd00603458384ea03b8518 \
-  --key-id <release-key-id> \
-  --signing-key-file <protected-ed25519-seed-file>
-```
+A runtime directory carries `runtime-manifest.json` (`MANIFEST_FILE`, schema
+`rspice.managed-python-runtime/v2`) and `runtime-manifest.ed25519.json`
+(`SIGNATURE_FILE`: a `key_id` and the Ed25519 signature over the manifest's
+exact bytes). `RuntimeTrustStore::verify` refuses the runtime unless:
 
-The signing seed file contains exactly 64 hexadecimal characters representing a 32-byte Ed25519
-seed. It is a release-authority input and must never be committed, passed on the command line, or
-stored in a job-wide or reusable general CI environment variable. The release workflow may expose
-the secret only to its isolated signing step, writes it to a protected temporary file, unsets the
-step variable before launching the packager, and removes the file on every exit path. The packager
-refuses symlinks, non-regular members,
-pre-existing manifests, duplicate environment identities, nonportable paths, and any payload that
-does not self-verify after signing.
+1. the signing key id is in the trust store and the signature verifies;
+2. the manifest's protocol version is compatible with `PROTOCOL_VERSION`, its
+   target triple and architecture match the `RuntimeRequirement`, its Python
+   and RSpice API versions satisfy it, and its Python is 3.14 with the `cp314`
+   ABI;
+3. every listed file is a regular file inside the root with the declared size
+   and SHA-256;
+4. `runtime_inventory_digest` over the manifest equals its
+   `runtime_digest_sha256`;
+5. the directory holds no file the manifest does not list, and no symlink.
 
-Release builds compile the printed `signing_key_id` and `public_key_hex` into `rspice-ui` through
-`RSPICE_AUTOMATION_RUNTIME_KEY_ID` and `RSPICE_AUTOMATION_RUNTIME_PUBLIC_KEY_HEX`. The private seed
-is not present in the application or archive. Development builds without an explicit trust key
-correctly report native managed Automation as unavailable; they never fall back to a system Python.
+The packager computes the digest with the same `runtime_inventory_digest`, so
+release assembly and the installed verifier cannot disagree on framing,
+ordering or executable-bit semantics. A project lock selects one of the
+manifest's `environment_digests_sha256` exactly.
+
+## Containment
+
+`NativeWorker` owns the child process and frames envelopes through
+`rspice_automation_protocol::native_codec`. Limits are installed before any
+untrusted source is sent. On Windows, `apply_resource_limits` puts the process
+in a job object with CPU, memory, process-count and kill-on-close limits; on
+POSIX the worker applies the equivalent rlimits in its trusted bootstrap. The
+limits are process-lifetime state, so a second call is refused and each launch
+needs a fresh process. `arm_wall_time_limit` starts a watchdog thread that
+kills the process at the deadline even if the script loops forever or the UI
+stops repainting. Captured stderr is bounded.
+
+## Release packaging
+
+`.github/workflows/native-release.yml` is the reference procedure: it stages a
+uv-managed CPython with `tools/release/stage_managed_python.py`, signs it with
+`rspice-managed-runtime-packager`, and runs `rspice-managed-runtime-qualifier`
+against the signed result before the application is built. The packager reads
+the Ed25519 seed, 64 hexadecimal characters, only from the file named by
+`--signing-key-file`, never from the command line or the environment, and
+refuses a staging directory that already holds manifest outputs. It prints the
+`signing_key_id` and `public_key_hex` that the `rspice-app` build compiles in
+through `RSPICE_AUTOMATION_RUNTIME_KEY_ID` and
+`RSPICE_AUTOMATION_RUNTIME_PUBLIC_KEY_HEX`. A build without them reports native
+Automation as unavailable; it never falls back to a system Python.
 
 ## Testing
 
 ```text
 cargo test -p rspice-automation-runtime
+python3 tools/ci/test_automation_runtime_assets.py
 ```
+
+The second command checks the worker script and the release workflow's
+qualification wiring alongside the browser runtime.
 
 Licensed under the [RSpice Personal Use License](../../LICENSE).

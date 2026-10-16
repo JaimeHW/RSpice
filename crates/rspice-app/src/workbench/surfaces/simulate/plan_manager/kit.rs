@@ -739,8 +739,9 @@ const DETAIL_ROW_PAD: f32 = 10.0;
 const DETAIL_ROW_GAP: f32 = 8.0;
 /// Share of a detail row the label takes, matching `property_row`'s.
 const DETAIL_LABEL_FRACTION: f32 = 0.4;
-/// Width the status mark and its gap take before the value.
-const DETAIL_MARK_WIDTH: f32 = 17.0;
+/// Width the status mark and its gap take before the value: the kit's own
+/// advance, so a marked value and an unmarked one line up.
+use crate::ui::widgets::PROBLEM_MARK_ADVANCE as DETAIL_MARK_WIDTH;
 
 /// A label beside its value, on one line, at a height a touch viewport does not
 /// change.

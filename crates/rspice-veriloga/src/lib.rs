@@ -1225,6 +1225,10 @@ impl VerilogACompiler {
         // Library maps and configurations (IEEE 1364-2005 clause 13) leave an
         // ordinary module set, which a configuration's name selects from.
         semantic::library_binding::bind(&mut source_file)?;
+        // `defparam` (section 12.2.1) over the whole unit, before a root's
+        // specialization reads its instances.
+        let mut defparam_warnings = Vec::new();
+        let root_defparams = semantic::defparam::apply(&mut source_file, &mut defparam_warnings)?;
         let mut source_specialization = Vec::new();
         if !parameters.is_empty() {
             let selected = source_file
@@ -1266,6 +1270,13 @@ impl VerilogACompiler {
                         "parameter override `{name}` must be unique, including aliases"
                     )));
                 }
+                if let Some(defparam) = root_defparams.iter().find(|defparam| {
+                    defparam.module == selected.name && defparam.parameter == parameter.name
+                }) {
+                    defparam_warnings
+                        .push(semantic::defparam::instance_value_replaced(defparam, name));
+                    continue;
+                }
                 parameter.default =
                     Some(value.assigned_expression(parameter, selected.time_scale)?);
                 parameter.is_given = true;
@@ -1274,6 +1285,7 @@ impl VerilogACompiler {
             SemanticAnalyzer::validate_root_array_replacements(selected)?;
             parser::expand_specialized_generates(selected)?;
         }
+        semantic::defparam::apply_to_roots(&mut source_file, &root_defparams)?;
         measurements.record(PipelinePhase::Parse, phase_started.elapsed())?;
         measurements.metrics_mut().top_level_item_count =
             metrics::usize_to_u64(source_file.items.len());
@@ -1295,6 +1307,10 @@ impl VerilogACompiler {
             SemanticAnalyzer::new().prepare_source(&source_file)?
         };
         analyzed.source_specialization = source_specialization;
+        if !defparam_warnings.is_empty() {
+            defparam_warnings.append(&mut analyzed.warnings);
+            analyzed.warnings = defparam_warnings;
+        }
         measurements.record(PipelinePhase::Semantic, phase_started.elapsed())?;
         measurements.metrics_mut().module_count = metrics::usize_to_u64(analyzed.modules.len());
         trace_compiler_phase(

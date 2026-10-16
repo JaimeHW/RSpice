@@ -250,9 +250,8 @@ fn chip_text(currency: PreflightCurrency) -> String {
 }
 
 /// Side of the chip's problem mark, and the advance from its left edge to the
-/// words after it: the kit's own row metrics.
-const MARK_SIDE: f32 = 11.0;
-const MARK_ADVANCE: f32 = 17.0;
+/// words after it: read from the kit's own row metrics.
+use crate::ui::widgets::{PROBLEM_MARK_ADVANCE as MARK_ADVANCE, PROBLEM_MARK_SIDE as MARK_SIDE};
 
 /// How much room a standing's mark takes before its words. Only a blocked
 /// report has one: an expired report is not a finding, it is a report that
@@ -451,7 +450,7 @@ mod tests {
             check: "Run set".to_owned(),
             observed: "No analysis is enabled".to_owned(),
             required: "One enabled analysis".to_owned(),
-            remediation: PreflightRemediation::SimulationPlan,
+            remediation: PreflightRemediation::SimulationPlan { analysis: None },
         }
     }
 
@@ -568,6 +567,92 @@ mod tests {
                 !labels.iter().any(|label| label.contains("Preflight")),
                 "an unrun preflight is the ordinary state and is not an announcement on \
                  {page:?}: {labels:?}"
+            );
+        }
+    }
+
+    /// Everything the Analyses route states, by name and by value: a label
+    /// widget's text is its AccessKit value, not its name.
+    fn analyses_text(seed: impl FnOnce(&mut crate::workbench::AppState)) -> Vec<String> {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.simulation_page = SimulationPage::Analyses;
+        seed(&mut app.state);
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 1600.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| super::super::show(ui, &mut app));
+            },
+        );
+        output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update")
+            .nodes
+            .iter()
+            .flat_map(|(_, node)| [node.label(), node.value()])
+            .flatten()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// The dispatch contract states what an authorized, current report
+    /// authorizes — under the plan it authorizes — and nothing for a report
+    /// that authorizes nothing: one that is blocked, one that has expired,
+    /// or none at all.
+    #[test]
+    fn the_dispatch_contract_is_stated_only_for_an_authorized_current_report() {
+        const TARGET: &str = "Desktop background thread";
+
+        let authorized = analyses_text(|state| {
+            state.workbench.preflight.report = Some(current_report(
+                state,
+                Vec::new(),
+                Some(prepared_contract(3)),
+            ));
+        });
+        // The card's rows, by name and value. Its title is painted, not a
+        // widget, so it is not among what the route announces.
+        for expected in ["Analysis identities", "1 stable instance", TARGET] {
+            assert!(
+                authorized.iter().any(|text| text.contains(expected)),
+                "an authorized report states {expected:?}: {authorized:?}"
+            );
+        }
+
+        let blocked = analyses_text(|state| {
+            state.workbench.preflight.report = Some(current_report(
+                state,
+                vec![blocker()],
+                Some(prepared_contract(3)),
+            ));
+        });
+        let expired = analyses_text(|state| {
+            let mut stale = current_report(state, Vec::new(), Some(prepared_contract(3)));
+            stale.project_revision += 1;
+            state.workbench.preflight.report = Some(stale);
+        });
+        let absent = analyses_text(|_| {});
+        for (standing, text) in [
+            ("blocked", blocked),
+            ("expired", expired),
+            ("absent", absent),
+        ] {
+            assert!(
+                !text
+                    .iter()
+                    .any(|text| text.contains("Analysis identities") || text.contains(TARGET)),
+                "a {standing} report authorizes no dispatch and states none: {text:?}"
             );
         }
     }

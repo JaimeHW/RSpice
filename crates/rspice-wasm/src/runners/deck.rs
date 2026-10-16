@@ -977,22 +977,23 @@ fn transient_builders(
 
 /// Which authored analyses this build cannot execute, and why.
 ///
-/// Each reason names the `rspice-core` entry point that is missing. Nothing
-/// here is a policy choice: a family appears only because running it from this
+/// Each reason names the `rspice-core` entry point that runs the family, which
+/// this surface does not call, and the CLI route to use instead. Nothing here
+/// is a policy choice: a family appears only because running it from this
 /// surface would mean deciding its semantics a second time.
 fn unroutable_reason(command: &AnalysisCommand) -> Option<&'static str> {
     match command {
         AnalysisCommand::Qpnoise(_) => Some(
-            "QPNOISE is available through Engine::run_qpnoise_from_qpss; this surface has no QPNOISE execution adapter yet",
+            "QPNOISE runs through Engine::run_qpnoise_from_qpss, which this surface does not call; run the deck with `rspice run`",
         ),
         AnalysisCommand::Qpxf(_) => Some(
-            "QPXF is available through Engine::run_qpxf_from_qpss; this surface has no QPXF execution adapter yet",
+            "QPXF runs through Engine::run_qpxf_from_qpss, which this surface does not call; run the deck with `rspice run`",
         ),
         AnalysisCommand::Qpac(_) => Some(
-            "QPAC is available through Engine::run_qpac_from_qpss; this surface has no QPAC execution adapter yet",
+            "QPAC runs through Engine::run_qpac_from_qpss, which this surface does not call; run the deck with `rspice run`",
         ),
         AnalysisCommand::Qpss(_) => Some(
-            "QPSS is available through Simulation Studio and Engine::run_qpss; this surface has no QPSS execution adapter yet",
+            "QPSS runs in Simulation Studio and through Engine::run_qpss, which this surface does not call; run the deck with `rspice run`",
         ),
         // Every authored analog card this build recognizes now has a core
         // entry point that takes the card and a shared document projection for
@@ -1078,8 +1079,9 @@ fn refuse_transient_states(plan: &DeckPlan, netlist: &Netlist) -> DetailedWasmRe
         return Err(Box::new(WasmError::new(
             format!(
                 "authored {} card{instance} carries {keyword}, which linearizes it around a \
-                 transient state, and the browser API cannot run that yet. Run the deck with \
-                 `rspice run`, or remove {keyword} to linearize at the operating point.",
+                 transient state; the browser API runs small-signal cards only at the \
+                 operating point. Run the deck with `rspice run`, or remove {keyword} to \
+                 linearize at the operating point.",
                 card_spelling(command),
             ),
             "unsupported_small_signal_state",

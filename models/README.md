@@ -1,47 +1,54 @@
 # Device models
 
-Device model libraries bundled with the repository.
+The model libraries and model-format documents bundled with the repository.
 
 ## `spice/`
 
-SPICE model packs, organized by origin and indexed by license. See
-[`spice/README.md`](spice/README.md) for the layout, the licensing tiers and the
-tooling.
+SPICE model packs, with the generated pack and part indexes that runtime
+discovery reads. `spice/foundation/` is the small RSpice-authored library
+compiled into every build, and `spice/SHIPPING.toml` is the sole product
+allowlist. Every pack in the tree is RSpice-authored; the repository carries no
+third-party SPICE model libraries.
 
-`spice/foundation/` is the small RSpice-authored library available on every
-platform. `spice/SHIPPING.toml` is the sole product allowlist, with
-`spice/SHIPPED-PACKS.tsv` and `spice/SHIPPED-CATALOG.tsv` as its generated
-runtime indexes. Every pack in the tree is RSpice-authored; the repository
-carries no third-party SPICE model libraries.
+See [`spice/README.md`](spice/README.md) for the layout, the licensing tiers,
+and the index and audit tooling.
 
 ## `veriloga/`
 
-Shipped Verilog-A sources for the `rspice-veriloga` compiler crate.
-`constants.vams` and `disciplines.vams` provide the standard support
-headers used by compact models.
+Verilog-A sources for the `rspice-veriloga` compiler.
+[`constants.vams`](veriloga/constants.vams) and
+[`disciplines.vams`](veriloga/disciplines.vams) are the standard support
+headers compact models include.
 
-`veriloga/cmc/` contains redistributable Compact Model Coalition model
-packages using their upstream package directory names. Each package keeps
-its upstream source layout and bundled license/notice files. The root
-[`NOTICE`](../NOTICE) summarizes third-party attribution; package-specific
-license files remain authoritative.
+[`veriloga/cmc/`](veriloga/cmc/) holds the redistributable Compact Model
+Coalition packages under their upstream package directory names, each keeping
+its upstream source layout and its bundled license and notice files.
+[`veriloga/cmc/PROVENANCE.md`](veriloga/cmc/PROVENANCE.md) records where each
+one came from. The root [`NOTICE`](../NOTICE) summarizes third-party
+attribution; the package-specific license files remain authoritative. OMI
+packages are not shipped here: they are not ordinary Verilog-A model packages
+and their terms are not covered by this tree's redistribution review.
 
-These CMC sources are not a staging area for hand-written native ports. They
-are the canonical inputs for the Verilog-A to Rust generator path in
-`rspice-veriloga` / `rspice-core`. Generated Rust devices should preserve the
-upstream source package identity and license/notice attribution, and generated
-CMC entries remain feature-gated qualification artifacts until their oracle
-coverage and product gates are explicit.
+These CMC sources are the canonical inputs to the Verilog-A to Rust generator,
+not a staging area for hand-written native ports. The generated artifacts are
+checked in under
+[`crates/rspice-veriloga-models/`](../crates/rspice-veriloga-models/), whose
+`manifest.txt` records the digest of the source tree they were generated from;
+each generated device compiles in behind its own `veriloga-model-*` feature.
+Attribution stays with the sources here and with the root `NOTICE`.
 
-OMI packages are intentionally not shipped in `veriloga/cmc/` because they are
-not normal Verilog-A model packages and their terms require separate review.
+The other directories under `veriloga/` are non-CMC Verilog-A packages.
+Discovery treats every module-bearing `.va` file under `veriloga/` as a
+candidate model source, takes its package identity from the first two
+directories of its path (for example `cmc/PSP104.1.0_vacode`), and scopes
+include directories to that package.
 
-Auto-discovery treats each module-bearing `.va` file under
-`veriloga/<pack>/<package>/` as a candidate model source, derives package
-identity from the first two path components, and scopes include directories to
-the package.
+No root-level BSIM4 Verilog-A source is bundled. Native BSIM4 v4.8 is
+implemented in `rspice-core` for MOS `LEVEL=14/54`.
 
-RSpice does not bundle a root-level BSIM4 Verilog-A source file. Native BSIM4
-v4.8 simulation is implemented in `rspice-core` for MOS `LEVEL=14/54`; a clean,
-properly licensed external BSIM4 Verilog-A file can be supplied by users or
-reintroduced later only with documented upstream provenance.
+## `soa/`
+
+Safe-operating-area curve formats. [`soa/FORMAT.md`](soa/FORMAT.md) specifies
+the current/voltage SOA curve tables an SOA rule accepts: the column and row
+conventions, the pulse and DC row rules, and what the curve check does and does
+not infer about thermal conditions.

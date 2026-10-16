@@ -785,16 +785,18 @@ impl Command {
             Self::CheckAndSave => {
                 active_schematic_editor(app) && !state.schematic_edit_read_only()
             }
-            Self::ClearChecks if active_symbol_editor(app) => state.dialogs.drc_results.is_some(),
+            Self::ClearChecks if active_symbol_editor(app) => {
+                state.active_symbol_pin_finding_count().is_some()
+            }
             Self::ClearChecks => {
                 state.dialogs.drc_results.is_some()
                     || state.active_design_check_status().last_receipt().is_some()
             }
-            Self::NextViolation | Self::PreviousViolation if active_symbol_editor(app) => state
-                .dialogs
-                .drc_results
-                .as_ref()
-                .is_some_and(|result| !result.violations().is_empty()),
+            Self::NextViolation | Self::PreviousViolation if active_symbol_editor(app) => {
+                state
+                    .active_symbol_pin_finding_count()
+                    .is_some_and(|findings| findings > 0)
+            }
             Self::NextViolation | Self::PreviousViolation => state
                 .active_design_check_status()
                 .current_receipt()
@@ -1607,10 +1609,10 @@ impl Command {
                     .open(source, expected_shapes);
             }
             Self::MoveSelection => {
-                crate::workbench::app::open_move_selection_dialog(&mut app.state);
+                crate::workbench::app::arm_move_selection(&mut app.state);
             }
             Self::StretchSelection => {
-                crate::workbench::app::open_stretch_selection_dialog(&mut app.state);
+                crate::workbench::app::arm_stretch_selection(&mut app.state);
             }
             Self::ArraySelection => {
                 crate::workbench::app::open_array_selection_dialog(&mut app.state);
@@ -1816,7 +1818,7 @@ impl Command {
                 } else if app.state.workbench.drawer.is_some() {
                     app.state.workbench.close_drawer();
                 } else if app.state.dialogs.object_properties.open {
-                    app.state.dialogs.object_properties.attempt_close();
+                    app.state.dialogs.object_properties.close();
                 } else if app.state.tabbed_property_dialog.open {
                     app.state.tabbed_property_dialog.attempt_close();
                 } else if app.state.workbench.workspace == Workspace::Results
@@ -1845,7 +1847,9 @@ impl Command {
                 crate::workbench::app::open_check_and_save_dialog(&mut app.state);
             }
             Self::ClearChecks => {
-                if !active_symbol_editor(app) {
+                if active_symbol_editor(app) {
+                    app.state.clear_active_symbol_pin_checks();
+                } else {
                     app.state.clear_active_design_check();
                 }
                 app.state.dialogs.drc_results = None;

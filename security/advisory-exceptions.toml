@@ -48,3 +48,12 @@ review_after = "2026-10-17"
 reason = "rustybuzz became unmaintained and krilla 0.8.2 has no maintained release or compatible shaping-backend migration yet."
 mitigations = "RSpice's two krilla exporters shape only three repository-embedded IBM Plex font files. They expose no user-supplied font loading path, and PDF source text, cells, raster pixels, and output bytes are independently bounded."
 exit_criteria = "Move to a krilla release backed by harfrust, or replace the simple-text path, as soon as a compatible maintained implementation is available."
+
+[[exceptions]]
+crate = "zip@8.6.0"
+dependency = "rspice-formats and rust_xlsxwriter 0.99.1 -> zip 8.6.0"
+owner = "@JaimeHW"
+review_after = "2026-11-16"
+reason = "zip yanked every 8.x release when 9.0 fixed three extraction advisories (GHSA-4v9h-p7m9-rh26, GHSA-vv5m-jxxh-4627, GHSA-4684-h2q9-2vcp), and the newest rust_xlsxwriter, 0.99.1, still requires zip ^8.3, so no unyanked release satisfies the graph."
+mitigations = "All three advisories are in ZipArchive::extract and ZipStreamReader::extract, which write archive members to the filesystem. RSpice calls neither: its readers take members into memory through by_index, by_name and file_names, and rust_xlsxwriter only writes archives."
+exit_criteria = "Move every zip consumer to 9.0.3 or later once rust_xlsxwriter publishes a release on zip 9, then delete this exception and re-enable cargo audit's yanked check."

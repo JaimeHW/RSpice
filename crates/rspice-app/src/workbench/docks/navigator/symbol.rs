@@ -134,7 +134,7 @@ fn pins_section(
         });
     }
     ui.add_space(4.0);
-    if document.pins.is_empty() {
+    if document.pins.is_empty() && ports.is_empty() {
         // The two buttons that fill the list sit directly above this line.
         super::empty_navigator_row(ui, "No pins.");
         return;
@@ -162,9 +162,35 @@ fn pins_section(
             select = Some(pin.name.clone());
         }
     }
+    // The other half of a mismatch: a port the schematic declares that this
+    // symbol places no pin for. It is invisible in a list of the pins that do
+    // exist, and this list is the only one that holds the contract, so the
+    // missing ones are listed here rather than in a second section beside it.
+    // They carry no index: a pin that does not exist has no netlist position.
+    for port in ports_without_pins(document, ports) {
+        TreeRow::new(&port.name)
+            .mono()
+            .indent(1)
+            .meta("no pin")
+            .problem(Some(Problem::Warning))
+            .show(ui);
+    }
     if let Some(name) = select {
         app.state.ui.symbol.editor.select_pin(name);
     }
+}
+
+/// The declared ports this symbol places no pin for, in interface order.
+fn ports_without_pins<'p>(document: &SymbolDocument, ports: &'p [PortSpec]) -> Vec<&'p PortSpec> {
+    ports
+        .iter()
+        .filter(|port| {
+            !document
+                .pins
+                .iter()
+                .any(|pin| pin.name.eq_ignore_ascii_case(&port.name))
+        })
+        .collect()
 }
 
 /// What one pin row says after its name, and whether that is a problem.
@@ -315,6 +341,45 @@ mod tests {
         assert_eq!(
             pin_meta(&off_grid, &[]),
             ("off grid".to_owned(), Some(Problem::Warning))
+        );
+    }
+
+    /// A port the interface declares and the symbol never placed is listed
+    /// here, because this list is the only statement of the pin contract: the
+    /// inspector's second copy of it is gone, and a reader who cannot see the
+    /// missing port cannot see half of a mismatch.
+    #[test]
+    fn the_pin_list_names_a_declared_port_with_no_pin() {
+        let mut document = SymbolDocument {
+            pins: vec![SymbolPin::new(
+                "IN",
+                PortDirection::In,
+                Some(Point::new(-40, 0)),
+            )],
+            ..SymbolDocument::default()
+        };
+        let declared = [
+            PortSpec {
+                name: "in".to_owned(),
+                direction: PortDirection::In,
+            },
+            PortSpec {
+                name: "OUT".to_owned(),
+                direction: PortDirection::Out,
+            },
+        ];
+
+        let missing = ports_without_pins(&document, &declared);
+
+        assert_eq!(missing.len(), 1, "{missing:?}");
+        assert_eq!(missing[0].name, "OUT");
+
+        document
+            .pins
+            .push(SymbolPin::new("out", PortDirection::Out, None));
+        assert!(
+            ports_without_pins(&document, &declared).is_empty(),
+            "a pin that exists but is unplaced is a pin, not a missing port"
         );
     }
 

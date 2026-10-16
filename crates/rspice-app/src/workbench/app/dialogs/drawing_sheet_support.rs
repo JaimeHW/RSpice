@@ -746,7 +746,7 @@ fn title_block_fields_body(
     });
     let field_order = state.format.as_ref().map_or_else(
         || DrawingSheetTitleFieldId::ALL.to_vec(),
-        |format| format.title_block_field_order().to_vec(),
+        SchematicSheetFormat::title_block_field_order,
     );
     let locked_fields = state
         .format
@@ -1069,6 +1069,7 @@ fn title_field_table(
                                             TextEdit::singleline(
                                                 &mut state.draft.entry(id).or_default().value,
                                             )
+                                            .hint_text(id.default_value())
                                             .char_limit(256),
                                         );
                                     }
@@ -1353,8 +1354,7 @@ fn apply_title_block_fields(app: &mut RSpiceApp) -> Result<String, String> {
             .as_ref()
             .expect("managed format was filtered above")
             .title_block_field_order()
-            .iter()
-            .copied()
+            .into_iter()
             .find(|field| {
                 snapshot.locks_field(*field)
                     && managed_title_field_value_changed(&transaction, *field)
@@ -1536,21 +1536,19 @@ fn title_field_automatic_values(
     );
     values.insert(
         DrawingSheetTitleFieldId::Revision,
-        document_control.revision.clone(),
+        document_control.revision_index().to_owned(),
     );
     values.insert(
-        DrawingSheetTitleFieldId::Scale,
-        match format.title_block.scale {
-            crate::state::DrawingSheetScale::NotToScale => "NTS".to_owned(),
-            crate::state::DrawingSheetScale::Ratio {
-                drawing_units,
-                reality_units,
-            } => format!("{drawing_units}:{reality_units}"),
-        },
+        DrawingSheetTitleFieldId::PaperSize,
+        format.authored_size.paper_size().to_owned(),
     );
     values.insert(
         DrawingSheetTitleFieldId::Date,
-        document_control.display_date().to_owned(),
+        document_control.revision_date_utc.clone(),
+    );
+    values.insert(
+        DrawingSheetTitleFieldId::DocumentStatus,
+        document_control.status.label().to_owned(),
     );
     values
 }
@@ -1564,14 +1562,15 @@ fn title_field_owner(id: DrawingSheetTitleFieldId) -> &'static str {
         DrawingSheetTitleFieldId::Project => "project",
         DrawingSheetTitleFieldId::CellView => "design identity",
         DrawingSheetTitleFieldId::SheetTitle
+        | DrawingSheetTitleFieldId::DocumentType
         | DrawingSheetTitleFieldId::DrawnBy
         | DrawingSheetTitleFieldId::CheckedBy
         | DrawingSheetTitleFieldId::ApprovedBy => "sheet",
-        DrawingSheetTitleFieldId::Scale => "drawing sheet",
+        DrawingSheetTitleFieldId::PaperSize => "drawing sheet",
         DrawingSheetTitleFieldId::Page => "document order",
         DrawingSheetTitleFieldId::Revision => "working revision",
-        DrawingSheetTitleFieldId::Format => "retired",
-        DrawingSheetTitleFieldId::Date => "document",
+        DrawingSheetTitleFieldId::Scale => "retired",
+        DrawingSheetTitleFieldId::Date | DrawingSheetTitleFieldId::DocumentStatus => "document",
         DrawingSheetTitleFieldId::Organization | DrawingSheetTitleFieldId::DocumentId => "project",
         DrawingSheetTitleFieldId::Classification => "project policy",
     }

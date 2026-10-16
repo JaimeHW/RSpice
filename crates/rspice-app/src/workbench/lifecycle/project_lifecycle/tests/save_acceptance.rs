@@ -1,6 +1,7 @@
 //! A published snapshot remains authoritative even if newer drafts are invalid.
 
 use super::*;
+use crate::diagnostics::LogSeverity;
 
 #[test]
 fn acknowledged_save_rebases_pending_cancellation_against_exact_saved_content() {

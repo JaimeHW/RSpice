@@ -24,20 +24,36 @@ use super::state::{
     PreflightReport, PreparedPreflightContract, Workspace,
 };
 
-const TECHNOLOGY_NOT_REQUIRED_ADVISORY: &str = "Technology: not attached — not required by this plan (built-in device models, TT reference process)";
-
 /// Run every local preflight check, retain the exact report for the current
 /// project revision, and publish what it found.
 ///
+/// The design rules are checked once, over the configured root, and their
+/// findings are published by the design-rule producer exactly as the Check
+/// command publishes them. The report carries one blocker that stands for
+/// them when any is an error. The open view is not checked: it is not what
+/// the run executes.
+///
 /// A blocked pass leaves the reader on the Problems page with the blockers
 /// listed; a clean one leaves them where they were. Either way the outcome is
-/// stated on the status line, because "I pressed the button and nothing
-/// visible happened" is the failure mode a command with no dialog has to
-/// answer for.
+/// a Console line the notice centre lifts into a notice, which is where the
+/// reader is told of a finished job. It used to be a plan receipt, which no
+/// chrome draws and which the notice centre deliberately never lifts, so a
+/// clean pass with the Console collapsed said nothing anywhere.
 pub(crate) fn run(app: &mut RSpiceApp) {
     app.state.sync_active_schematic_to_workspace();
-    crate::workbench::menu_bar::run_design_rule_check(&mut app.state);
-    let mut report = collect_report(&app.state);
+    let Collected {
+        mut report,
+        design_rules,
+    } = collect(&app.state);
+    if let Some(result) = design_rules
+        && let Err(error) = app
+            .state
+            .publish_configured_root_design_check_result(result)
+    {
+        app.state.push_user_message(ConsoleMessage::warning(format!(
+            "Design-rule findings could not be recorded: {error}"
+        )));
+    }
     if report.blockers.is_empty() {
         match app
             .simulation_controller
@@ -108,14 +124,32 @@ pub(crate) fn run(app: &mut RSpiceApp) {
         )
     };
 
+    // Retained before its findings are published: the findings stand only
+    // while the report they came from does, and that is part of what their
+    // digest is taken over.
+    app.state.workbench.preflight.report = Some(report.clone());
     app.state.publish_dispatch_diagnostics(&report);
-    app.state.workbench.preflight.report = Some(report);
-    app.state.record_plan_receipt(message);
+    // An event, at the severity of the pass rather than of its findings: the
+    // findings are records on the Problems page, and this says the pass ran
+    // and what it decided.
+    app.state.push_user_message(if blocked {
+        ConsoleMessage::warning(message)
+    } else {
+        ConsoleMessage::info(message)
+    });
 
     if blocked {
-        app.state.workbench.console_visible = true;
-        app.state.workbench.console_page = ConsolePage::Problems;
+        show_blockers(&mut app.state);
     }
+}
+
+/// Bring the reader to the blockers a pass just filed: the Problems page,
+/// listing them. A filter left from earlier reading could hide the very
+/// findings that stopped the run, so the filters are cleared.
+fn show_blockers(state: &mut AppState) {
+    state.workbench.console_visible = true;
+    state.workbench.console_page = ConsolePage::Problems;
+    state.problems_view.clear_filters();
 }
 
 /// Run the same governed preflight used by the explicit Preflight command and
@@ -171,9 +205,48 @@ fn queue_retained_run(app: &mut RSpiceApp) -> bool {
     true
 }
 
+/// What one pass found: the report the run is queued against, and the
+/// design-rule result for the configured root, which is published by the
+/// design-rule producer rather than filed in the report.
+struct Collected {
+    report: PreflightReport,
+    design_rules: Option<rspice_design::drc::DrcResult>,
+}
+
+#[cfg(test)]
 fn collect_report(state: &AppState) -> PreflightReport {
+    collect(state).report
+}
+
+/// The one blocker that stands for the configured root's design-rule errors.
+///
+/// One, not one per finding: the findings themselves are published by the
+/// design-rule producer, under the identities the Check command gives them,
+/// and listing them again as blockers is what made the page state each one
+/// twice. This says the run cannot start because of them, and its route
+/// leads to them.
+fn design_rule_blocker(
+    root: &crate::state::CellViewRef,
+    result: &rspice_design::drc::DrcResult,
+) -> Option<PreflightIssue> {
+    let summary = result.summary();
+    let errors = summary.critical + summary.errors;
+    (errors > 0).then(|| PreflightIssue {
+        check: "Schematic validation".to_owned(),
+        observed: format!(
+            "{errors} design-rule error{} in {}",
+            if errors == 1 { "" } else { "s" },
+            root.display_path()
+        ),
+        required: "No error-level design-rule findings in the configured design".to_owned(),
+        remediation: PreflightRemediation::DesignChecks,
+    })
+}
+
+fn collect(state: &AppState) -> Collected {
     let mut blockers = Vec::new();
     let mut advisories = Vec::new();
+    let mut design_rules = None;
     let root_reference = state.workspace.content.simulation_root_reference();
     let inspection = state.workspace.inspect_design_projection(
         &state.library_manager,
@@ -267,35 +340,17 @@ fn collect_report(state: &AppState) -> PreflightReport {
             state.library_manager.catalog(),
             execution_projection,
         );
+        // The profile the Check command uses for the same cell view, so the
+        // findings this publishes are the same evidence, with the same
+        // digest, as a pass run from the Check menu.
         let result = rspice_design::drc::run_check_with_hierarchy(
             root_schematic,
             &hierarchy_source,
-            rspice_design::drc::DrcConfig {
-                check_missing_ground: true,
-                // A rule the project's deck promoted to an error blocks the
-                // run, and one it demoted does not. Preflight reading the
-                // shipped defaults instead would have contradicted the deck at
-                // the one moment it is consulted for.
-                severity_overrides: state.workspace.content.design_rules.severity_overrides(),
-                ..rspice_design::drc::DrcConfig::default()
-            },
+            state.configured_root_design_check_config(),
         );
         if result.completed {
-            for violation in result.errors() {
-                blockers.push(PreflightIssue {
-                    check: "Schematic validation".to_owned(),
-                    observed: format!("{} · {}", violation.message, violation.location.display()),
-                    required: violation.violation_type.suggested_fix().to_owned(),
-                    remediation: PreflightRemediation::DesignChecks,
-                });
-            }
-            for violation in result.warnings() {
-                advisories.push(PreflightAdvisory::from(format!(
-                    "{} · {}",
-                    violation.message,
-                    violation.location.display()
-                )));
-            }
+            blockers.extend(design_rule_blocker(&root_reference, &result));
+            design_rules = Some(result);
         } else {
             blockers.push(PreflightIssue {
                 check: "Schematic validation".to_owned(),
@@ -323,7 +378,7 @@ fn collect_report(state: &AppState) -> PreflightReport {
             check: "Analysis-instance plan".to_owned(),
             observed: error,
             required: "A migrated, structurally valid simulation plan".to_owned(),
-            remediation: PreflightRemediation::SimulationPlan,
+            remediation: PreflightRemediation::SimulationPlan { analysis: None },
         }),
         Ok(plan) => {
             for issue in plan.validation_issues() {
@@ -332,7 +387,9 @@ fn collect_report(state: &AppState) -> PreflightReport {
                     observed: issue.to_string(),
                     required: "Stable enabled identities with resolved, ordered prerequisites"
                         .to_owned(),
-                    remediation: PreflightRemediation::SimulationPlan,
+                    remediation: PreflightRemediation::SimulationPlan {
+                        analysis: issue_analysis(&issue),
+                    },
                 });
             }
             for instance in plan
@@ -348,7 +405,9 @@ fn collect_report(state: &AppState) -> PreflightReport {
                         check: format!("{} configuration", instance.kind().label()),
                         observed: format!("{}: {error}", instance.id()),
                         required: "A complete, numerically valid analysis configuration".to_owned(),
-                        remediation: PreflightRemediation::SimulationPlan,
+                        remediation: PreflightRemediation::SimulationPlan {
+                            analysis: Some(instance.id()),
+                        },
                     });
                 }
             }
@@ -357,14 +416,12 @@ fn collect_report(state: &AppState) -> PreflightReport {
 
     // A project need not have a technology; if it has one it must be valid,
     // and if the plan needs one it must have one. Each demanding entity is
-    // reported as its own row so the operator sees what to change.
+    // reported as its own row so the operator sees what to change. A plan
+    // that needs none, on a project that has none, is not a finding at all:
+    // reporting it made every clean pass without a technology a warning.
     let demand = state.technology_demand();
     match state.workspace.content.project.technology_binding() {
-        None if demand.is_empty() => {
-            advisories.push(PreflightAdvisory::from(
-                TECHNOLOGY_NOT_REQUIRED_ADVISORY.to_owned(),
-            ));
-        }
+        None if demand.is_empty() => {}
         None => blockers.extend(demand.reasons().iter().map(|reason| PreflightIssue {
             check: "Project technology contract".to_owned(),
             observed: reason.observed(),
@@ -466,16 +523,19 @@ fn collect_report(state: &AppState) -> PreflightReport {
 
     let simulation_plan = state.active_plan_revision();
     let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
-    PreflightReport {
-        project_revision: state.workspace.content.project.revision().get(),
-        topology_root,
-        topology_revision,
-        topology_closure,
-        simulation_plan_id: simulation_plan.map(|(id, _)| id),
-        simulation_plan_revision: simulation_plan.map(|(_, revision)| revision),
-        blockers,
-        advisories,
-        prepared: None,
+    Collected {
+        report: PreflightReport {
+            project_revision: state.workspace.content.project.revision().get(),
+            topology_root,
+            topology_revision,
+            topology_closure,
+            simulation_plan_id: simulation_plan.map(|(id, _)| id),
+            simulation_plan_revision: simulation_plan.map(|(_, revision)| revision),
+            blockers,
+            advisories,
+            prepared: None,
+        },
+        design_rules,
     }
 }
 
@@ -560,8 +620,10 @@ fn preparation_remediation(
 ) -> PreflightRemediation {
     use crate::simulation::execution::PreparationStage;
     match stage {
+        // A preparation failure names a stage, not an analysis, so the page
+        // opens without moving the selection.
         PreparationStage::AnalysisPlan | PreparationStage::Authorization => {
-            PreflightRemediation::SimulationPlan
+            PreflightRemediation::SimulationPlan { analysis: None }
         }
         // A model-binding failure is repaired where the bindings live, not by
         // re-running the source checks that reported it.
@@ -574,6 +636,49 @@ fn preparation_remediation(
         PreparationStage::DesignChecks | PreparationStage::SourceChecks => {
             PreflightRemediation::DesignChecks
         }
+    }
+}
+
+/// The analysis a plan finding is about, where it is about one the page can
+/// show.
+///
+/// The same reading of each finding the Analyses page uses to decide which
+/// analysis a finding is shown against. A cycle is shown on each of its
+/// members, so it opens on the first. A finding about the plan as a whole, a
+/// tombstone or a run receipt names no analysis the page lists.
+fn issue_analysis(
+    issue: &crate::simulation::plan::AnalysisPlanIssue,
+) -> Option<crate::product::AnalysisInstanceId> {
+    use crate::simulation::plan::AnalysisPlanIssue;
+    match issue {
+        AnalysisPlanIssue::DuplicateInstanceId { id }
+        | AnalysisPlanIssue::ReusedTombstonedId { id }
+        | AnalysisPlanIssue::KindDraftMismatch { id, .. }
+        | AnalysisPlanIssue::InvalidInstanceRevision { id }
+        | AnalysisPlanIssue::InvalidInstanceName { id }
+        | AnalysisPlanIssue::DuplicateInstanceName { id, .. }
+        | AnalysisPlanIssue::InvalidLifecycle { id, .. } => Some(*id),
+        AnalysisPlanIssue::MissingPrerequisite { dependent, .. }
+        | AnalysisPlanIssue::UnexpectedDependencyRole { dependent, .. }
+        | AnalysisPlanIssue::DuplicateDependencyRole { dependent, .. }
+        | AnalysisPlanIssue::SelfDependency { dependent }
+        | AnalysisPlanIssue::DanglingDependency { dependent, .. }
+        | AnalysisPlanIssue::WrongDependencyKind { dependent, .. }
+        | AnalysisPlanIssue::DisabledDependency { dependent, .. }
+        | AnalysisPlanIssue::DependencyNotEarlier { dependent, .. }
+        | AnalysisPlanIssue::IncompatibleDependencyConfiguration { dependent, .. } => {
+            Some(*dependent)
+        }
+        AnalysisPlanIssue::DependencyCycle { members } => members.first().copied(),
+        AnalysisPlanIssue::NoEnabledInstances
+        | AnalysisPlanIssue::DuplicateTombstoneId { .. }
+        | AnalysisPlanIssue::InvalidTombstoneRevision { .. }
+        | AnalysisPlanIssue::InvalidReceiptSequence { .. }
+        | AnalysisPlanIssue::InvalidReceiptRevision { .. }
+        | AnalysisPlanIssue::DanglingReceiptInstance { .. }
+        | AnalysisPlanIssue::ReceiptKindMismatch { .. }
+        | AnalysisPlanIssue::EmptyReceiptDetail { .. }
+        | AnalysisPlanIssue::InvalidNextReceiptSequence { .. } => None,
     }
 }
 

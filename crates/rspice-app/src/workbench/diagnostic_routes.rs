@@ -6,12 +6,18 @@
 //! be a page that could do anything, and the route is the whole of what a
 //! finding is allowed to ask for.
 //!
-//! Every destination lands on an object. A model-binding finding opens
-//! Corners & sections with its library selected and its corner inspected; a
-//! netlist finding opens the deck with the cursor on the line the parser
-//! named. Opening the workspace and leaving the reader to find the object
-//! again is what these used to do, and it is why a finding's prose used to
-//! end in an instruction to go somewhere.
+//! A destination is as close to the object as the finding can name. A
+//! model-binding finding that names a library opens Corners & sections with
+//! that library selected and its corner inspected; a netlist finding opens the
+//! deck with the cursor on the line the parser named; a plan finding opens
+//! the Analyses page on the analysis it is about; a finding the design
+//! checks are answerable for opens the configured root with the worst of its
+//! findings current. A finding that names no object — a plan that will not
+//! validate, a model page with no library — opens the page where that object
+//! is chosen, which is as far as its own words reach. Opening the workspace
+//! and leaving the reader to find the object again is what these used to do,
+//! and it is why a finding's prose used to end in an instruction to go
+//! somewhere.
 
 use egui::Context;
 
@@ -19,10 +25,17 @@ use crate::diagnostics::ConsoleMessage;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::state::{PreflightRemediation, ProjectPage, VerificationPage, Workspace};
+use crate::workbench::state::{PreflightRemediation, ProjectPage, SimulationPage, Workspace};
 
 /// Apply the route a consumer asked for, if one is outstanding.
+///
+/// Also the store's frame boundary for what nothing else can announce to it:
+/// a run the simulation state retired — cleared with the result history, or
+/// deleted — takes its outcome with it here, and a source editor that
+/// revalidated under the current finding has it followed to its new identity.
 pub(crate) fn apply_pending(ctx: &Context, app: &mut RSpiceApp) {
+    app.state.withdraw_retired_run_diagnostics();
+    app.state.reconcile_current_finding();
     let Some(route) = app.state.diagnostics.take_pending_route() else {
         return;
     };
@@ -92,6 +105,18 @@ fn open_code_document(
             *language
         }
     };
+    // Opening the owner can be refused — an inspector edit that will not
+    // commit keeps the view it is editing — and the selection below is made
+    // in whichever bundle is active, so it is made only once the bundle that
+    // reported the finding is the one in front of the reader.
+    let active = code_workspace::active_source_bundle(&app.state.workspace, language)
+        .map(crate::state::ProjectSourceBundle::id);
+    if active != Some(bundle) {
+        app.state.push_user_message(ConsoleMessage::warning(format!(
+            "{logical_path} was not opened: the editor that owns it could not be brought forward."
+        )));
+        return;
+    }
     if code_workspace::select_source_document(
         &app.state.workspace,
         &mut app.state.ui.code_workspace,
@@ -120,12 +145,42 @@ pub(in crate::workbench) fn apply_remediation(
     remediation: PreflightRemediation,
 ) {
     match remediation {
+        // What the design checks found about the configured design, where it
+        // is drawn: the configured root opens, the Problems page lists its
+        // findings, and the worst of them is the current one. Nothing is
+        // re-run. Following a finding used to run the checks again and open
+        // the PVT & Monte Carlo page, which replaced the evidence the reader
+        // was following and then left them somewhere it was not.
         PreflightRemediation::DesignChecks => {
-            Command::RunChecks.execute(app);
-            Command::VerificationPage(VerificationPage::Yield).execute(app);
+            let root = app.state.workspace.content.simulation_root_reference();
+            app.state.open_workspace_view(root.clone());
+            Command::OpenWorkspace(Workspace::Design).execute(app);
+            if let Some(worst) = app.state.worst_design_rule_finding(&root) {
+                app.state.diagnostics.set_current_finding(Some(worst));
+            }
+            Command::OpenProblems.execute(app);
         }
-        PreflightRemediation::SimulationPlan => {
-            Command::OpenWorkspace(Workspace::Simulate).execute(app);
+        // The analysis the finding is about, selected before the page opens
+        // so its first frame shows it. One the plan no longer holds is said
+        // rather than skipped: the page would otherwise settle on its first
+        // analysis, which the finding is not about. A finding about the plan
+        // as a whole leaves the selection where it was.
+        PreflightRemediation::SimulationPlan { analysis } => {
+            if let Some(analysis) = analysis {
+                let held = app
+                    .state
+                    .sim_setup
+                    .stable_analysis_plan()
+                    .is_ok_and(|plan| plan.instance(analysis).is_some());
+                if held {
+                    app.state.workbench.active_analysis_instance = Some(analysis);
+                } else {
+                    app.state.push_user_message(ConsoleMessage::warning(
+                        "The analysis this finding names is no longer in the simulation plan.",
+                    ));
+                }
+            }
+            Command::SimulationPage(SimulationPage::Analyses).execute(app);
         }
         PreflightRemediation::ProjectTechnology => {
             Command::ProjectPage(ProjectPage::Dependencies).execute(app);

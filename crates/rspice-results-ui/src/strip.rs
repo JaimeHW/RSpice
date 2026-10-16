@@ -12,11 +12,20 @@ use rspice_ui_kit::widgets::{IconButton, Problem, paint_problem_mark};
 pub const HEADER_HEIGHT: f32 = 28.0;
 
 /// The warning mark an incomplete result sets after its kind tag, and the
-/// air between the tag and the mark.
-const KIND_MARK_SIDE: f32 = 11.0;
-const KIND_MARK_GAP: f32 = 6.0;
+/// air between the tag and the mark — the kit's own, so a strip header's mark
+/// is the mark every other panel sets.
+use rspice_ui_kit::widgets::{
+    PROBLEM_MARK_GAP as KIND_MARK_GAP, PROBLEM_MARK_SIDE as KIND_MARK_SIDE,
+};
 
-const HEADER_PADDING_X: f32 = 10.0;
+/// The inset every row of strip chrome keeps from the pane's edges.
+///
+/// Public because the strip is two header rows, not one: the waveform pane's
+/// own header sits directly under this one and trailed at nothing at all, so
+/// its log toggle ran into the pane edge while the row above it stopped 10 px
+/// short. Two rows of chrome in one card right-align to one rule, and the
+/// only way they stay that way is by reading the same number.
+pub const HEADER_PADDING_X: f32 = 10.0;
 const HEADER_ACTION_GAP: f32 = 6.0;
 const HEADER_METADATA_GAP: f32 = 8.0;
 const HEADER_LEGEND_GAP: f32 = 4.0;

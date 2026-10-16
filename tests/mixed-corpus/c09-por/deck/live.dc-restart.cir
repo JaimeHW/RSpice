@@ -1,6 +1,7 @@
 * C9 power-on reset, variant live, dc-restart (upward supply sweep, every point a fresh .op)
-* No .param vcc and no connect rule: the boundary supply is inferred from vdd.
-.hdl "../net/por_ctrl.v"
+* No .param vcc: the connect rules name the vdd net as the supply, bound live.
+.hdl "../net/por_ctrl_live.vams" module=por_ctrl
+.options connectrules=por_live
 .include ../net/por.cir
 .dc vdd 0 3.6 0.01 RESTART=YES
 .end

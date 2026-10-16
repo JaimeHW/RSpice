@@ -649,7 +649,8 @@ fn code_pane(
         t.color.text_dim,
     );
     let toolbar_content_right = toolbar.right() - EDITOR_SCROLLBAR_INSET;
-    let status_mark_x = toolbar_content_right - status_galley.size().x - 17.0;
+    let status_mark_x =
+        toolbar_content_right - status_galley.size().x - crate::ui::widgets::PROBLEM_MARK_ADVANCE;
     if live {
         ui.painter().circle_filled(
             egui::pos2(status_mark_x, toolbar.center().y),
@@ -1693,8 +1694,9 @@ fn execution_preview(app: &RSpiceApp) -> ExecutionPreview {
 
 /// An artifact row's file icon, on the panel inset, and the gap before its
 /// name.
-/// Side of the toolbar status's failure mark, sized to the status text.
-const TOOLBAR_MARK_SIDE: f32 = 11.0;
+/// Side of the toolbar status's failure mark: the kit's own, so it matches
+/// every other marked line in the product.
+use crate::ui::widgets::PROBLEM_MARK_SIDE as TOOLBAR_MARK_SIDE;
 
 const ARTIFACT_ICON_W: f32 = 14.0;
 const ARTIFACT_ICON_GAP: f32 = 6.0;

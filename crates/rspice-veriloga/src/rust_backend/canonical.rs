@@ -2665,9 +2665,109 @@ impl ModelPlan {
         self.emit_initialization(artifact, &mut out)?;
         self.emit_stamp(artifact, control, &mut out)?;
         self.emit_stamp_reactive(&mut out)?;
+        self.emit_stamp_pattern(artifact, options, &mut out);
 
         out.push_str("}\n");
         Ok(out)
+    }
+
+    /// The locations the two stamps above can write, read from the same rows
+    /// and source groups that emitted their calls.
+    ///
+    /// Axes are local: a derivative unknown is already numbered nodes first,
+    /// then branches, which is the device's axis order, and a branch's row is
+    /// `node_count + branch`.
+    fn emit_stamp_pattern(
+        &self,
+        artifact: &CanonicalIrArtifact,
+        options: &RustTranspileOptions,
+        out: &mut String,
+    ) {
+        use std::collections::BTreeSet;
+        let node_count = self.node_count;
+        let mut resistive = BTreeSet::new();
+        let mut dynamic = BTreeSet::new();
+        let mut reactive = BTreeSet::new();
+        let mut rhs_rows = BTreeSet::new();
+        // The rows one equation's entries land in: both KCL rows of a current,
+        // the branch row of a potential or indirect source.
+        let rows = |equation: usize, row: &StampRow| -> Vec<usize> {
+            match row.kind {
+                MirEquationKind::Current => [row.pos, row.neg]
+                    .into_iter()
+                    .flatten()
+                    .map(usize::from)
+                    .collect(),
+                MirEquationKind::Potential | MirEquationKind::Indirect => self.branch_equations
+                    [equation]
+                    .map(|plan| node_count + plan.branch)
+                    .into_iter()
+                    .collect(),
+            }
+        };
+        for (equation, row) in self.conduction.rows.iter().enumerate() {
+            let charge_only = row.kind == MirEquationKind::Current
+                && artifact
+                    .mir
+                    .equations
+                    .get(equation)
+                    .is_some_and(|mir| artifact.mir.equation_stores_only_charge(mir));
+            let target = if charge_only {
+                &mut dynamic
+            } else {
+                &mut resistive
+            };
+            for at in rows(equation, row) {
+                rhs_rows.insert(at);
+                for (unknown, _) in &row.derivatives {
+                    target.insert((at, *unknown));
+                }
+            }
+        }
+        for group in &self.source_branch_groups {
+            let branch = node_count + group.branch;
+            resistive.insert((branch, branch));
+            for node in [group.pos, group.neg].into_iter().flatten() {
+                let node = usize::from(node);
+                resistive.insert((node, branch));
+                if group.kind != MirEquationKind::Indirect {
+                    resistive.insert((branch, node));
+                }
+            }
+        }
+        for (equation, row) in self.reactive.rows.iter().enumerate() {
+            for at in rows(equation, row) {
+                for (unknown, _) in &row.derivatives {
+                    reactive.insert((at, *unknown));
+                }
+            }
+        }
+        for entry in &self.frequency {
+            let row = &self.conduction.rows[entry.equation];
+            for at in rows(entry.equation, row) {
+                reactive.insert((at, entry.unknown));
+            }
+        }
+        dynamic.retain(|location| !resistive.contains(location));
+        let pairs = |set: &BTreeSet<(usize, usize)>| {
+            set.iter()
+                .map(|(row, col)| format!("({row}, {col})"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let rhs = rhs_rows
+            .iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let runtime = &options.runtime_path;
+        let _ = writeln!(
+            out,
+            "\n    pub const STAMP_PATTERN: {runtime}::GeneratedVerilogAStampPattern = {runtime}::GeneratedVerilogAStampPattern {{ resistive: &[{}], dynamic: &[{}], reactive: &[{}], rhs_rows: &[{rhs}] }};",
+            pairs(&resistive),
+            pairs(&dynamic),
+            pairs(&reactive),
+        );
     }
 
     fn emit_stage_slot_table(

@@ -1,4 +1,4 @@
-//! Mockup-owned filtered selection and atomic schematic bulk editing.
+//! Filtered selection and atomic schematic bulk editing.
 //!
 //! Queries may inspect the active hierarchy or complete project, but edits are
 //! deliberately limited to the active schematic owner. A commit preflights
@@ -24,15 +24,15 @@ use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
 use crate::workbench::design_system::{
-    PANEL_SECTION_H, WorkbenchIcon, property_row, property_row_toned, section_header,
+    PANEL_SECTION_H, WorkbenchIcon, property_row, section_header,
 };
 use crate::workbench::{SelectionBulkFilter, SelectionBulkHierarchyScope, SelectionBulkObjectKind};
 
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
-const TITLE: &str = "Selection and bulk property editing";
-const PRIMARY: &str = "Commit bulk edit";
+const TITLE: &str = "Bulk edit";
+const PRIMARY: &str = "Apply";
 
 const BULK_PROPERTIES: [SelectionBulkProperty; 5] = [
     SelectionBulkProperty::ModelSection,
@@ -138,9 +138,7 @@ impl SelectionBulkEditAuthority {
     }
 
     fn stale_reason(&self, state: &AppState) -> Option<String> {
-        let reopen = |reason: &str| {
-            format!("{reason}. Close and reopen Selection and bulk property editing.")
-        };
+        let reopen = |reason: &str| format!("{reason}. Close Bulk edit and open it again.");
         let current = crate::workbench::app::schematic_editor_request_source(state);
         if self.active.source.design_epoch != current.design_epoch {
             return Some(reopen("The design document changed"));
@@ -197,8 +195,7 @@ impl SelectionBulkEditAuthority {
     }
 
     fn validate_commit(&self, state: &AppState) -> Result<(), String> {
-        self.active
-            .validate(state, "Selection and bulk property editing")?;
+        self.active.validate(state, TITLE)?;
         if state.workbench.safe_mode.project_read_only() {
             return Err("Safe mode has opened the project read-only.".to_owned());
         }
@@ -329,9 +326,7 @@ impl RSpiceApp {
             .or(impact.error.as_deref())
             .map(str::to_owned);
         let mut dialog = Dialog::new(TITLE, PRIMARY)
-            .description(
-                "Filter authored schematic objects, review the exact impact, and commit one governed bulk-edit transaction.",
-            )
+            .description("Change one property on every object the filter matches.")
             .size(DialogSize::SimulationWorkflow)
             .initial_height(640.0)
             .flush_body()
@@ -343,13 +338,13 @@ impl RSpiceApp {
         if !write_allowed {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Progress,
-                "Inspection only",
-                "The active schematic or project is read-only. Filters and exact impact review remain available; commit is disabled.",
+                "Read only",
+                "This schematic cannot be edited. The filter still works.",
             );
         } else if let Some(error) = error.as_deref() {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
-                "Bulk edit cannot be committed",
+                "Nothing was changed",
                 error,
             );
         }
@@ -811,29 +806,25 @@ fn selection_filter_panel(
         .show(ui, |ui| {
             selection_filter_fields(ui, dialog, hierarchy_path, action);
         });
+    let [object_w, path_w, value_w, lock_w] = result_columns(ui.available_width());
     Grid::new("selection-bulk-result-header")
         .num_columns(5)
         .striped(false)
         .min_col_width(0.0)
-        .spacing(Vec2::new(6.0, 4.0))
+        .spacing(Vec2::new(RESULT_COLUMN_GAP, 4.0))
         .show(ui, |ui| {
-            ui.allocate_space(Vec2::new(20.0, 16.0));
-            ui.add_sized(
-                [78.0, 16.0],
-                egui::Label::new(RichText::new("Object").strong()),
-            );
-            ui.add_sized(
-                [158.0, 16.0],
-                egui::Label::new(RichText::new("Path").strong()),
-            );
-            ui.add_sized(
-                [82.0, 16.0],
-                egui::Label::new(RichText::new("Value").strong()),
-            );
-            ui.add_sized(
-                [88.0, 16.0],
-                egui::Label::new(RichText::new("Lock").strong()),
-            );
+            ui.allocate_space(Vec2::new(RESULT_CHECK_W, 16.0));
+            for (label, width) in [
+                ("Object", object_w),
+                ("Path", path_w),
+                ("Value", value_w),
+                ("Locked", lock_w),
+            ] {
+                ui.add_sized(
+                    [width, 16.0],
+                    egui::Label::new(RichText::new(label).strong()),
+                );
+            }
             ui.end_row();
         });
     ScrollArea::vertical()
@@ -845,7 +836,7 @@ fn selection_filter_panel(
                 .num_columns(5)
                 .striped(true)
                 .min_col_width(0.0)
-                .spacing(Vec2::new(6.0, 4.0))
+                .spacing(Vec2::new(RESULT_COLUMN_GAP, 4.0))
                 .show(ui, |ui| {
                     for row in &rows[range] {
                         let mut selected = dialog.selected.contains(&row.key);
@@ -870,22 +861,41 @@ fn selection_filter_panel(
                                 dialog.selected.remove(&row.key);
                             }
                         }
-                        ui.add_sized([78.0, 20.0], egui::Label::new(&row.object).truncate())
+                        ui.add_sized([object_w, 20.0], egui::Label::new(&row.object).truncate())
                             .on_hover_text(&row.object);
                         ui.add_sized(
-                            [158.0, 20.0],
+                            [path_w, 20.0],
                             egui::Label::new(RichText::new(&row.path).monospace()).truncate(),
                         )
                         .on_hover_text(&row.path);
-                        ui.add_sized([82.0, 20.0], egui::Label::new(&row.value).truncate())
+                        ui.add_sized([value_w, 20.0], egui::Label::new(&row.value).truncate())
                             .on_hover_text(&row.value);
-                        let lock = row.lock.as_deref().unwrap_or("editable");
-                        ui.add_sized([88.0, 20.0], egui::Label::new(lock).truncate())
+                        // A cell only when something is in the way; an
+                        // editable row says nothing, which is the whole
+                        // column's news.
+                        let lock = row.lock.as_deref().unwrap_or("");
+                        ui.add_sized([lock_w, 20.0], egui::Label::new(lock).truncate())
                             .on_hover_text(lock);
                         ui.end_row();
                     }
                 });
         });
+}
+
+/// A row's select box, and the air between two result columns.
+const RESULT_CHECK_W: f32 = 20.0;
+const RESULT_COLUMN_GAP: f32 = 6.0;
+/// What a vertical scroll bar takes out of the pane the rows are laid in.
+const RESULT_SCROLLBAR_W: f32 = 12.0;
+
+/// Object, Path, Value and Locked across whatever width this pane has.
+///
+/// These were four fixed widths summing to more than half the dialog, so the
+/// Locked column painted over the impact panel beside it at every viewport
+/// the dialog actually opens at. A path is the long one and gets the room.
+fn result_columns(pane: f32) -> [f32; 4] {
+    let text = (pane - RESULT_CHECK_W - RESULT_COLUMN_GAP * 4.0 - RESULT_SCROLLBAR_W).max(140.0);
+    [text * 0.21, text * 0.40, text * 0.18, text * 0.21]
 }
 
 fn bulk_edit_panel(
@@ -939,13 +949,15 @@ fn bulk_edit_panel(
     });
     ui.add_space(8.0);
     property_row(ui, "Objects changed", &impact.changed.to_string());
-    let warning = Tokens::get(ui.ctx()).color.warn;
-    property_row_toned(
-        ui,
-        "Locked / excluded",
-        &impact.locked_or_excluded.to_string(),
-        warning,
-    );
+    // Only a non-zero count is news. A row reading "0" on every clean filter
+    // is a row the reader learns to skip.
+    if impact.locked_or_excluded > 0 {
+        property_row(
+            ui,
+            "Locked or excluded",
+            &impact.locked_or_excluded.to_string(),
+        );
+    }
     property_row(
         ui,
         "Simulation tasks affected",
@@ -956,7 +968,6 @@ fn bulk_edit_panel(
         }
         .as_str(),
     );
-    property_row(ui, "Undo boundary", "one transaction");
 }
 
 fn new_value_control(ui: &mut Ui, dialog: &mut SelectionBulkEditDialogState) -> bool {
@@ -1547,6 +1558,24 @@ mod tests {
         binding.model_section = section.map(str::to_owned);
         component.library_cell = Some(binding);
         component
+    }
+
+    /// The four result columns and the select box fit the pane they are laid
+    /// in. They were fixed widths that summed past it, so the last column
+    /// painted over the impact panel beside it.
+    #[test]
+    fn the_result_columns_fit_inside_their_pane() {
+        for pane in [240.0_f32, 300.0, 360.0, 520.0, 900.0] {
+            let columns = result_columns(pane);
+            let used = RESULT_CHECK_W
+                + RESULT_COLUMN_GAP * 4.0
+                + RESULT_SCROLLBAR_W
+                + columns.iter().sum::<f32>();
+            assert!(
+                used <= pane.max(RESULT_CHECK_W + RESULT_COLUMN_GAP * 4.0 + 140.0),
+                "{pane} pt pane lays out {used} pt of columns"
+            );
+        }
     }
 
     #[test]

@@ -647,6 +647,27 @@ fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
     );
 }
 
+/// The engine scopes a cell drawn `amp` by the name the deck writes it
+/// under, so its trace is `V(xamp.out)`. On that cell's sheet the trace is the
+/// conductor the sheet draws, not a trace read elsewhere.
+#[test]
+fn cross_probe_finds_a_trace_scoped_by_the_written_instance_name() {
+    let mut app = result_app_with_current_out_map(false);
+    let view = app.state.workspace.content.active_view.clone();
+    let view_type = app.state.workspace.content.active_view_type();
+    let parent = crate::state::CellViewRef::new(&view.library, "tb", &view.view);
+    app.state.workspace.open_as_root(parent, view_type);
+    app.state
+        .workspace
+        .descend_into("amp".to_owned(), view, view_type);
+
+    let net = cross_probe_trace_to_design(&mut app, "V(xamp.out)")
+        .expect("the written scope is this occurrence");
+
+    assert!(net.eq_ignore_ascii_case("out"), "{net}");
+    assert_eq!(app.state.workbench.workspace, Workspace::Design);
+}
+
 #[test]
 fn failure_row_reserves_a_non_overlapping_margin_column_at_drawer_width() {
     let row_width = 228.0;
@@ -897,15 +918,22 @@ fn the_result_inspector_routes_through_the_workspace_memos() {
 /// carve-out is gone and the surface that paints it is in the list.
 #[test]
 fn the_design_and_veriloga_inspectors_paint_no_status_color() {
+    // The token path, not one binding's spelling of it. These were
+    // `t.color.ok` and `t.color.info`, which let `tokens.color.info` through
+    // in `inspector.rs` — the file this scan is named after and did not read.
     const BANNED: &[&str] = &[
         "colored_label",
         "status_dot(",
         "StatusMark::Success",
         "StatusMark::Neutral",
-        "t.color.ok",
-        "t.color.info",
+        ".color.ok",
+        ".color.info",
     ];
     let files = [
+        (
+            "inspector.rs",
+            crate::source_guard::without_test_items(include_str!("../inspector.rs")),
+        ),
         (
             "design.rs",
             crate::source_guard::without_test_items(include_str!("design.rs")),

@@ -1,21 +1,27 @@
 //! Netlist Generator - Schematic to SPICE Netlist Conversion
 //!
-//! Commercial-grade netlist generation following Cadence Spectre conventions:
-//! - Node connectivity extraction via wire tracing
-//! - Ground detection (GND nets → node 0)
-//! - SPICE instance line generation for all component types
-//! - Subcircuit and model statement generation
-//! - Analysis command generation from UI configuration
+//! Writes the SPICE deck a schematic and its project hierarchy describe:
+//! - Nets and ground from `rspice_design`'s connectivity extraction, which
+//!   the generator adopts rather than tracing wires itself
+//! - One instance card per placed component, plus coupled-inductor and
+//!   XSPICE cards
+//! - Include directives for library-bound instances, `.SUBCKT` definitions
+//!   for placed project cells, and the model cards the instances reference
+//! - The design-variable parameter lines and analysis lines the caller passes
 //!
 //! # Architecture
 //!
 //! The netlist generator works in phases:
-//! 1. **Node extraction**: Build connectivity graph from wires and terminals
-//! 2. **Node naming**: Assign node numbers/names (with ground = 0)
-//! 3. **Instance generation**: Generate SPICE lines for each component
-//! 4. **Analysis generation**: Generate analysis commands from config
+//! 1. **Connectivity**: Adopt the design's extraction (nets, ports, labels,
+//!    bus members and ground)
+//! 2. **Header**: Title line and directives, then the design variables
+//! 3. **Definitions**: Library includes, then project-cell `.SUBCKT`
+//!    definitions, so each precedes its first use
+//! 4. **Instances and models**: Instance cards, then model cards; Verilog-A
+//!    source directives are hoisted so each source is registered once
+//! 5. **Analysis**: The caller's analysis lines, then `.end`
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
 #[cfg(test)]
 use rspice_design::connectivity::summary::design_nets_with_hierarchy;
@@ -532,7 +538,7 @@ impl<'a> NetlistGenerator<'a> {
     }
 }
 #[cfg(test)]
-struct FixtureSourceFiles;
+pub(crate) struct FixtureSourceFiles;
 
 #[cfg(test)]
 impl NetlistSourceHost for FixtureSourceFiles {
@@ -560,7 +566,9 @@ impl NetlistSourceHost for FixtureSourceFiles {
 }
 
 #[cfg(test)]
-fn test_placement(position: Point) -> rspice_design::schematic::component_edit::ComponentPlacement {
+pub(crate) fn test_placement(
+    position: Point,
+) -> rspice_design::schematic::component_edit::ComponentPlacement {
     rspice_design::schematic::component_edit::ComponentPlacement {
         position,
         rotation: rspice_design::schematic::rotation::Rotation::R0,
@@ -1373,6 +1381,96 @@ mod tests {
         // Exactly name + 2 nodes + control + gain: no trailing tokens, the
         // core rejects any tail after the gain.
         assert_eq!(h_line.split_whitespace().count(), 5, "{netlist}");
+    }
+
+    /// The deck heads every card with the name the design authority gives
+    /// it, and those names are the ones decks have always been written with:
+    /// sense sources, a transformer's windings and coupling, the coupling an
+    /// inductor asks for, and one card per winding set however many drawn
+    /// couplings ask for it.
+    #[test]
+    fn every_card_is_written_under_the_name_the_design_authority_gives_it() {
+        let drawn = |id: u64, kind: ComponentType, name: &str, value: &str, params: &str| {
+            let mut component = Component::new(id, kind, Point::new(400 * id as i32, 0))
+                .with_name_value(name, value);
+            component.params = params.to_owned();
+            component
+        };
+        let components = vec![
+            drawn(1, ComponentType::Ccvs, "H1", "100", "vmax=1"),
+            drawn(2, ComponentType::Cccs, "", "2", ""),
+            drawn(3, ComponentType::ISwitch, "W1", "", ""),
+            drawn(4, ComponentType::Transformer, "T.out", "1m", ""),
+            drawn(
+                5,
+                ComponentType::Inductor,
+                "L1",
+                "1m",
+                "coupled_to=L2 coupling_factor=0.5",
+            ),
+            drawn(6, ComponentType::Inductor, "L2", "1m", ""),
+            drawn(7, ComponentType::Inductor, "A", "1m", ""),
+            drawn(8, ComponentType::Inductor, "B", "1m", ""),
+            drawn(
+                9,
+                ComponentType::CoupledInductor,
+                "K1",
+                "0.9",
+                "inductors=\"A B\"",
+            ),
+            drawn(
+                10,
+                ComponentType::CoupledInductor,
+                "K2",
+                "0.9",
+                "inductors=\"LB LA\"",
+            ),
+        ];
+        let mut state = Schematic::default();
+        state.document_mut_for_test().components = components.clone();
+        let result = generate_netlist(&state);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let mut written = result
+            .netlist
+            .lines()
+            .skip_while(|line| *line != "* Circuit netlist")
+            .skip(1)
+            .take_while(|line| !line.is_empty())
+            .filter(|line| !line.starts_with('+'))
+            .filter_map(|line| line.split_whitespace().next())
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            written,
+            [
+                "VSENSE_H1",
+                "B1",
+                "VSENSE_F2",
+                "F2",
+                "VSENSE_W1",
+                "W1",
+                "L1",
+                "L2",
+                "LA",
+                "LB",
+                "LT_out_PRI",
+                "LT_out_SEC",
+                "KT_out",
+                "KL1_L2",
+                "K1",
+            ],
+            "{}",
+            result.netlist
+        );
+
+        let mut named = rspice_design::schematic::component::written_cards(&components)
+            .into_values()
+            .flatten()
+            .map(|card| card.name)
+            .collect::<Vec<_>>();
+        named.sort();
+        written.sort();
+        assert_eq!(named, written);
     }
 
     /// The random-telegraph tail reaches the engine, positionally, and the

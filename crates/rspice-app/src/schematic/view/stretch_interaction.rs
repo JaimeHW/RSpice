@@ -202,12 +202,8 @@ mod tests {
     }
 
     fn arm_test_stretch(state: &mut AppState) {
-        crate::workbench::app::open_stretch_selection_dialog(state);
-        assert!(state.dialogs.stretch_selection.open);
-        state.dialogs.stretch_selection.arm();
-        state
-            .schematic
-            .arm_tool(crate::state::Tool::StretchSelection);
+        crate::workbench::app::arm_stretch_selection(state);
+        assert!(state.dialogs.stretch_selection.armed);
     }
 
     #[test]

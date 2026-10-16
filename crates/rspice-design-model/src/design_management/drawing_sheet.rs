@@ -124,6 +124,23 @@ impl DrawingSheetStandard {
         }
     }
 
+    /// What a title block's Paper size field calls this sheet. ISO 7200
+    /// writes the A series by its bare designation, `A4`; every other series
+    /// keeps its prefix, since `B4` alone would not say whether it is the ISO
+    /// or the JIS size.
+    #[must_use]
+    pub const fn paper_size(self) -> &'static str {
+        match self {
+            Self::IsoA5 => "A5",
+            Self::IsoA4 => "A4",
+            Self::IsoA3 => "A3",
+            Self::IsoA2 => "A2",
+            Self::IsoA1 => "A1",
+            Self::IsoA0 => "A0",
+            other => other.label(),
+        }
+    }
+
     #[must_use]
     pub const fn series(self) -> DrawingSheetStandardSeries {
         match self {
@@ -264,6 +281,16 @@ impl AuthoredDrawingSheetSize {
     pub fn label(&self) -> &str {
         match self {
             Self::Standard { standard } => standard.label(),
+            Self::Custom { snapshot } => &snapshot.name,
+        }
+    }
+
+    /// What a title block's Paper size field calls this sheet: a standard
+    /// size by its designation, a custom one by the name it was given.
+    #[must_use]
+    pub fn paper_size(&self) -> &str {
+        match self {
+            Self::Standard { standard } => standard.paper_size(),
             Self::Custom { snapshot } => &snapshot.name,
         }
     }
@@ -601,153 +628,6 @@ impl DrawingSheetScale {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DrawingSheetTitleFieldId {
-    Project,
-    CellView,
-    SheetTitle,
-    Page,
-    Revision,
-    /// Retired. The sheet format restated the paper the reader is holding,
-    /// in prose, in a cell narrow enough that it rarely fitted; Page Setup
-    /// owns that fact and the border itself shows it. The variant remains
-    /// only so sheets authored before it was withdrawn still load — it is
-    /// absent from [`Self::ALL`], so nothing offers, resolves, or renders
-    /// it, and deserialization drops it from the field set.
-    Format,
-    Scale,
-    DrawnBy,
-    CheckedBy,
-    ApprovedBy,
-    Date,
-    Organization,
-    DocumentId,
-    Classification,
-}
-
-impl DrawingSheetTitleFieldId {
-    pub const ALL: [Self; 13] = [
-        Self::Project,
-        Self::CellView,
-        Self::SheetTitle,
-        Self::Page,
-        Self::Revision,
-        Self::Scale,
-        Self::DrawnBy,
-        Self::CheckedBy,
-        Self::ApprovedBy,
-        Self::Date,
-        Self::Organization,
-        Self::DocumentId,
-        Self::Classification,
-    ];
-
-    /// Fields withdrawn from the product that older sheets may still carry.
-    ///
-    /// Deserialization drops these from the field set rather than refusing
-    /// the sheet, so retiring a field costs no saved work. They are never
-    /// written back.
-    pub const RETIRED: [Self; 1] = [Self::Format];
-
-    /// Editable title-block values whose authority is the project rather than
-    /// one sheet. Visibility remains sheet-owned, but the value is resolved
-    /// from [`DrawingSheetProjectSettings::title_block_field_values`] on every
-    /// canvas and hardcopy page.
-    pub const PROJECT_OWNED: [Self; 3] =
-        [Self::Organization, Self::DocumentId, Self::Classification];
-
-    #[must_use]
-    pub const fn is_project_owned(self) -> bool {
-        matches!(
-            self,
-            Self::Organization | Self::DocumentId | Self::Classification
-        )
-    }
-
-    /// Canonical human-facing wording shared by canvas, dialogs, preview,
-    /// and hardcopy. Renderers may change case for typography, but not the
-    /// field's wording or engineering meaning.
-    #[must_use]
-    pub const fn display_label(self) -> &'static str {
-        match self {
-            Self::Project => "Project",
-            Self::CellView => "Cell / view",
-            Self::SheetTitle => "Sheet title",
-            Self::Page => "Page",
-            Self::Revision => "Revision",
-            Self::Format => "Format",
-            Self::Scale => "Scale",
-            Self::DrawnBy => "Drawn by",
-            Self::CheckedBy => "Checked by",
-            Self::ApprovedBy => "Approved by",
-            Self::Date => "Date",
-            Self::Organization => "Organization",
-            Self::DocumentId => "Document ID",
-            Self::Classification => "Classification",
-        }
-    }
-
-    #[must_use]
-    pub const fn policy(self) -> DrawingSheetTitleFieldPolicy {
-        match self {
-            Self::CellView | Self::Page | Self::Revision => DrawingSheetTitleFieldPolicy {
-                required_visible: true,
-                value_authority: DrawingSheetTitleFieldValueAuthority::Automatic,
-            },
-            Self::SheetTitle => DrawingSheetTitleFieldPolicy {
-                required_visible: true,
-                value_authority: DrawingSheetTitleFieldValueAuthority::Authored,
-            },
-            // The project name is the leading segment of `Cell / view` in a
-            // single-library workspace, so the sheet must be free to carry
-            // one or the other rather than always both.
-            Self::Project | Self::Date | Self::Scale | Self::Format => {
-                DrawingSheetTitleFieldPolicy {
-                    required_visible: false,
-                    value_authority: DrawingSheetTitleFieldValueAuthority::Automatic,
-                }
-            }
-            Self::DrawnBy
-            | Self::CheckedBy
-            | Self::ApprovedBy
-            | Self::Organization
-            | Self::DocumentId
-            | Self::Classification => DrawingSheetTitleFieldPolicy {
-                required_visible: false,
-                value_authority: DrawingSheetTitleFieldValueAuthority::Authored,
-            },
-        }
-    }
-
-    /// Whether a new sheet shows this field.
-    ///
-    /// The sign-off and classification cells are filled by a release
-    /// process, not by drawing the circuit, so a sheet that has never been
-    /// released would spend them on em dashes. They stay one click away in
-    /// Page Setup, and every field a sheet does show is one the engineer can
-    /// read: fewer columns means wider cells and more characters in each.
-    #[must_use]
-    pub const fn visible_by_default(self) -> bool {
-        !matches!(
-            self,
-            Self::DrawnBy | Self::CheckedBy | Self::ApprovedBy | Self::Classification
-        )
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DrawingSheetTitleFieldPolicy {
-    pub required_visible: bool,
-    pub value_authority: DrawingSheetTitleFieldValueAuthority,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DrawingSheetTitleFieldValueAuthority {
-    Automatic,
-    Authored,
-}
-
 /// One normalized point in a bounded organization logo. Coordinates use a
 /// 0..=10,000 basis so the same exact geometry can be projected to canvas,
 /// preview, SVG/PDF, raster output, and printer pages without embedding an
@@ -1031,6 +911,26 @@ impl DrawingSheetManagedTemplateSnapshot {
             content_digest: ContentDigest::from_bytes([0; 32]),
         };
         snapshot.validate_shape()?;
+        // A stored snapshot may name a retired field, or lack one the product
+        // has gained since it was sealed; a new one is sealed with exactly the
+        // current fields.
+        if snapshot.field_order.len() != DrawingSheetTitleFieldId::ALL.len()
+            || snapshot
+                .field_order
+                .iter()
+                .any(|field| !DrawingSheetTitleFieldId::ALL.contains(field))
+        {
+            return Err(DesignManagementError::NumericRange(
+                "drawing sheet managed template field order",
+            ));
+        }
+        // Every row must seat the block's lettering. A template sealed
+        // before that was asked of it still loads.
+        if !drawing_sheet_title_row_holds_lettering(snapshot.height_um / u64::from(snapshot.rows)) {
+            return Err(DesignManagementError::NumericRange(
+                "drawing sheet managed template rows",
+            ));
+        }
         snapshot.content_digest = snapshot.compute_content_digest()?;
         Ok(snapshot)
     }
@@ -1066,11 +966,12 @@ impl DrawingSheetManagedTemplateSnapshot {
                 "drawing sheet managed template geometry",
             ));
         }
-        let expected = DrawingSheetTitleFieldId::ALL
-            .into_iter()
-            .collect::<BTreeSet<_>>();
-        let actual = self.field_order.iter().copied().collect::<BTreeSet<_>>();
-        if self.field_order.len() != DrawingSheetTitleFieldId::ALL.len() || actual != expected {
+        // The order is sealed by the digest, so one captured before a field
+        // was retired still names it, and one captured before a field was
+        // added lacks it. It must name no field twice; wherever it is read, a
+        // retired field is skipped and a missing one placed after the rest.
+        let distinct = self.field_order.iter().copied().collect::<BTreeSet<_>>();
+        if distinct.len() != self.field_order.len() {
             return Err(DesignManagementError::NumericRange(
                 "drawing sheet managed template field order",
             ));
@@ -1133,9 +1034,21 @@ impl DrawingSheetManagedTemplateSnapshot {
         self.rows as usize
     }
 
-    #[must_use]
-    pub fn field_order(&self) -> &[DrawingSheetTitleFieldId] {
-        &self.field_order
+    /// The template's field order, less any field the product has since
+    /// retired, followed by any field it has gained since the template was
+    /// sealed, in the product's order. The seal is the record of what was
+    /// released, so a field it never named goes after every field it did
+    /// rather than moving them.
+    pub fn field_order(&self) -> impl Iterator<Item = DrawingSheetTitleFieldId> + '_ {
+        let sealed = self
+            .field_order
+            .iter()
+            .copied()
+            .filter(|field| !DrawingSheetTitleFieldId::RETIRED.contains(field));
+        let gained = DrawingSheetTitleFieldId::ALL
+            .into_iter()
+            .filter(|field| !self.field_order.contains(field));
+        sealed.chain(gained)
     }
 
     #[must_use]
@@ -1154,81 +1067,6 @@ impl DrawingSheetManagedTemplateSnapshot {
     }
 }
 
-/// One visible title-field value after ownership and migration fallback rules
-/// have been resolved. This semantic value is renderer-independent.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedDrawingSheetTitleField {
-    pub id: DrawingSheetTitleFieldId,
-    pub value: String,
-    pub authority: DrawingSheetTitleFieldValueAuthority,
-}
-
-/// Resolve the exact visible title fields for canvas and publication.
-/// `authority_values` supplies automatic values plus canonical project-owned
-/// authored values; ordinary authored values remain in the sheet format.
-#[must_use]
-pub fn resolve_drawing_sheet_title_fields(
-    format: &SchematicSheetFormat,
-    authority_values: &BTreeMap<DrawingSheetTitleFieldId, String>,
-) -> Vec<ResolvedDrawingSheetTitleField> {
-    format
-        .title_block_field_order()
-        .iter()
-        .copied()
-        .filter_map(|id| {
-            let authored = format.title_block.fields.get(&id)?;
-            authored.visible.then(|| {
-                let authority = id.policy().value_authority;
-                let governed = authority_values
-                    .get(&id)
-                    .map(String::as_str)
-                    .unwrap_or_default();
-                let value = match authority {
-                    DrawingSheetTitleFieldValueAuthority::Automatic => governed,
-                    DrawingSheetTitleFieldValueAuthority::Authored if id.is_project_owned() => {
-                        if governed.trim().is_empty() {
-                            authored.value.as_str()
-                        } else {
-                            governed
-                        }
-                    }
-                    DrawingSheetTitleFieldValueAuthority::Authored
-                        if authored.value.trim().is_empty() =>
-                    {
-                        governed
-                    }
-                    DrawingSheetTitleFieldValueAuthority::Authored => authored.value.as_str(),
-                };
-                ResolvedDrawingSheetTitleField {
-                    id,
-                    value: if value.trim().is_empty() {
-                        "—".to_owned()
-                    } else {
-                        value.to_owned()
-                    },
-                    authority,
-                }
-            })
-        })
-        .collect()
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DrawingSheetTitleFieldState {
-    pub value: String,
-    pub visible: bool,
-}
-
-impl Default for DrawingSheetTitleFieldState {
-    fn default() -> Self {
-        Self {
-            value: String::new(),
-            visible: true,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DrawingSheetTitleBlock {
@@ -1237,6 +1075,9 @@ pub struct DrawingSheetTitleBlock {
     pub rotation: DrawingSheetTitleBlockRotation,
     pub offset_x_um: i64,
     pub offset_y_um: i64,
+    /// The scale a sheet declared before the title block stopped lettering
+    /// one. Nothing reads or edits it now; it is kept so the sheets and
+    /// presets that carry it load and save unchanged.
     pub scale: DrawingSheetScale,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub managed_template: Option<DrawingSheetManagedTemplateSnapshot>,
@@ -1258,6 +1099,8 @@ impl Default for DrawingSheetTitleBlock {
             })
             .collect::<BTreeMap<_, _>>();
         Self {
+            // What a sheet saved before title blocks were stored has always
+            // been drawn with. A new sheet starts on ISO 7200's block instead.
             template: DrawingSheetTitleBlockTemplate::Compact,
             anchor: DrawingSheetTitleBlockAnchor::BottomRight,
             rotation: DrawingSheetTitleBlockRotation::Upright,
@@ -1553,16 +1396,6 @@ impl<'de> Deserialize<'de> for SchematicSheetFormat {
             title_block: wire.title_block.0.unwrap_or_default(),
             inheritance: wire.inheritance,
         };
-        // Builds predating structured scale authority mirrored the scale into
-        // the generic title-field string. Normalize that redundant legacy
-        // copy before validation; renderers resolve Scale from `scale`.
-        format
-            .title_block
-            .fields
-            .entry(DrawingSheetTitleFieldId::Scale)
-            .or_default()
-            .value
-            .clear();
         format.title_block.normalize_title_field_set();
         format.title_block.normalize_managed_template();
         if legacy_title_block {
@@ -1640,22 +1473,11 @@ impl SchematicSheetFormat {
     }
 
     /// Apply this physical/frame format to an existing sheet without
-    /// overwriting title-field values owned by that target sheet. Page Setup
-    /// owns the declared scale, so its value follows the applied format while
-    /// the target retains the Scale field's visibility choice.
+    /// overwriting title-field values owned by that target sheet.
     #[must_use]
     pub fn with_target_sheet_title_fields(&self, target: &Self) -> Self {
         let mut format = self.clone();
         format.title_block.fields = target.title_block.fields.clone();
-        // Scale's value is resolved exclusively from the structured
-        // `title_block.scale`; only its target-owned visibility is retained.
-        format
-            .title_block
-            .fields
-            .entry(DrawingSheetTitleFieldId::Scale)
-            .or_default()
-            .value
-            .clear();
         clear_project_owned_title_values(&mut format);
         debug_assert!(format.validate().is_ok());
         format
@@ -1708,6 +1530,7 @@ impl SchematicSheetFormat {
             title_block: DrawingSheetTitleBlock::default(),
             inheritance: DrawingSheetInheritance::Explicit,
         };
+        format.start_on_iso_7200_title_block();
         format.fit_default_title_block();
         debug_assert!(format.validate().is_ok());
         format
@@ -1760,6 +1583,7 @@ impl SchematicSheetFormat {
             title_block: DrawingSheetTitleBlock::default(),
             inheritance: DrawingSheetInheritance::Explicit,
         };
+        format.start_on_iso_7200_title_block();
         format.fit_default_title_block();
         format.validate()?;
         Ok(format)
@@ -1877,16 +1701,17 @@ impl SchematicSheetFormat {
     }
 
     #[must_use]
-    pub fn title_block_field_order(&self) -> &[DrawingSheetTitleFieldId] {
+    pub fn title_block_field_order(&self) -> Vec<DrawingSheetTitleFieldId> {
         self.title_block
             .managed_template
             .as_ref()
             .filter(|_| {
                 self.title_block.template == DrawingSheetTitleBlockTemplate::OrganizationManaged
             })
-            .map_or(&DrawingSheetTitleFieldId::ALL, |snapshot| {
-                snapshot.field_order()
-            })
+            .map_or_else(
+                || DrawingSheetTitleFieldId::ALL.to_vec(),
+                |snapshot| snapshot.field_order().collect(),
+            )
     }
 
     /// Captured organization logo for the exact effective title contract.
@@ -2053,6 +1878,18 @@ impl SchematicSheetFormat {
             ));
         }
         Ok(rect)
+    }
+
+    /// Start a new sheet on ISO 7200's 180 mm title block, which holds the
+    /// standard's 25-character title and 16-character document identifier.
+    /// Paper too narrow to carry it keeps the compact block, rather than
+    /// requesting one that Page Setup would then report as substituted.
+    fn start_on_iso_7200_title_block(&mut self) {
+        let fallback = self.title_block.template;
+        self.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
+        if self.title_block_substituted() || self.geometry().is_err() {
+            self.title_block.template = fallback;
+        }
     }
 
     fn fit_default_title_block(&mut self) {
@@ -2318,7 +2155,9 @@ pub const DRAWING_SHEET_TITLE_VALUE_POSITION: (u64, u64) = (7, 10);
 /// recommended minimum rises with the sheet: text that is legible on A4 at
 /// arm's length is not legible on a drawing twice the size read from the
 /// same distance. Every renderer letters a sheet from this one table, so a
-/// field is the same physical height on the canvas and on the plot.
+/// field is the same physical height on the canvas and on the plot. Zone
+/// references are not in it: they belong to the frame, which does not grow
+/// with the sheet (see [`drawing_sheet_zone_lettering_um`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DrawingSheetLettering {
     /// Field captions: the smallest text on the sheet, since a caption only
@@ -2326,9 +2165,6 @@ pub struct DrawingSheetLettering {
     pub caption_um: u64,
     /// Field values and sheet dimensions — the text the reader came for.
     pub data_um: u64,
-    /// Zone references in the border band, which are read while scanning the
-    /// whole sheet rather than while reading one cell.
-    pub reference_um: u64,
 }
 
 impl DrawingSheetLettering {
@@ -2354,19 +2190,16 @@ impl DrawingSheetLettering {
             Self {
                 caption_um: 1_800,
                 data_um: 2_500,
-                reference_um: 3_500,
             }
         } else if area < A1_TO_A0_UM2 {
             Self {
                 caption_um: 2_500,
                 data_um: 3_500,
-                reference_um: 5_000,
             }
         } else {
             Self {
                 caption_um: 3_500,
                 data_um: 5_000,
-                reference_um: 7_000,
             }
         }
     }
@@ -2419,3 +2252,6 @@ pub use lettering::*;
 
 pub(super) mod presets;
 pub use presets::*;
+
+pub(super) mod title_fields;
+pub use title_fields::*;

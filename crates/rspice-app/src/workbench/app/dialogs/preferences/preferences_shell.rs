@@ -1856,6 +1856,7 @@ mod tests {
                 "Shortcuts",
                 "Units and notation",
                 "Schematic editor",
+                "Design rules",
                 "Projects and files",
                 "Results and precision",
             ]

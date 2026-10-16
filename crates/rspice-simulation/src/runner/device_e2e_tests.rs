@@ -315,6 +315,367 @@ fn ccvs_and_cccs_bench_solves_op() {
     solve_op(&bench.netlist());
 }
 
+/// A current-controlled source with no controlling element of its own is
+/// written beside a 0 V sense source, `VSENSE_H1` for `H1`. A source drawn
+/// `SENSE_H1` is written under that name too, so the deck holds two cards of
+/// one name and the engine refuses it. The design check reads the same names
+/// and refuses the run first.
+#[test]
+fn a_source_written_as_a_sense_source_is_refused_before_the_run() {
+    let mut bench = Bench::new();
+    let v = bench.place(ComponentType::VoltageSource, 0, 0, "SENSE_H1", "1", "");
+    let rc = bench.place(ComponentType::Resistor, 200, 0, "RC", "1k", "");
+    let h = bench.place(ComponentType::Ccvs, 400, 0, "H1", "100", "");
+    let rl = bench.place(ComponentType::Resistor, 600, 0, "RL", "1k", "");
+    bench.connect((v, 0), (rc, 0));
+    bench.connect((rc, 1), (h, 2));
+    bench.ground((h, 3));
+    bench.ground((v, 1));
+    bench.connect((h, 0), (rl, 0));
+    bench.ground((h, 1));
+    bench.ground((rl, 1));
+
+    let netlist = bench.netlist();
+    let cards = netlist
+        .lines()
+        .filter(|line| line.split_whitespace().next() == Some("VSENSE_H1"))
+        .count();
+    assert_eq!(cards, 2, "{netlist}");
+    assert!(
+        matches!(
+            rspice_core::netlist::Netlist::parse(&netlist),
+            Err(rspice_core::netlist::ParseError::DuplicateName { .. })
+        ),
+        "{netlist}"
+    );
+
+    let views = std::collections::HashMap::<
+        String,
+        rspice_design::schematic::document::SchematicDocument,
+    >::new();
+    let hierarchy = rspice_design::hierarchy::HierarchySource::from_buffers(&views);
+    let root = rspice_design_model::cell_view::CellViewRef::new("work", "top", "schematic");
+    assert!(
+        crate::preparation::check_generated_design(&bench.state, &root, &hierarchy).is_err(),
+        "the design check passes a deck the engine refuses:\n{netlist}"
+    );
+    let findings = rspice_design::drc::run_check_with_hierarchy(
+        &bench.state,
+        &hierarchy,
+        rspice_design::drc::DrcConfig::default(),
+    );
+    let duplicates = findings
+        .violations()
+        .iter()
+        .filter(|finding| {
+            finding.violation_type == rspice_design::drc::DrcViolationType::DuplicateName
+        })
+        .map(|finding| finding.message.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        duplicates,
+        ["SENSE_H1 and H1's sense source are both written VSENSE_H1"]
+    );
+}
+
+/// A current-controlled source may name its controlling element by the name
+/// drawn on it. The deck writes a source drawn `sense` as `Vsense`, so the
+/// reference has to follow: in the plain card, and in the behavioural form a
+/// limit lowers it to, whose expression reads the current as `i(...)`.
+#[test]
+fn a_controlling_source_named_as_drawn_solves() {
+    let mut bench = Bench::new();
+    let sense = bench.place(ComponentType::VoltageSource, 0, 0, "sense", "1", "");
+    let rc = bench.place(ComponentType::Resistor, 200, 0, "RC", "1k", "");
+    bench.connect((sense, 0), (rc, 0));
+    bench.ground((rc, 1));
+    bench.ground((sense, 1));
+
+    let f = bench.place(ComponentType::Cccs, 400, 300, "F1", "2.5", "vref=sense");
+    let rf = bench.place(ComponentType::Resistor, 600, 300, "RF", "1k", "");
+    bench.connect((f, 0), (rf, 0));
+    bench.ground((f, 1));
+    bench.ground((rf, 1));
+
+    let h = bench.place(
+        ComponentType::Ccvs,
+        400,
+        600,
+        "H1",
+        "100",
+        "vref=sense vmax=10",
+    );
+    let rh = bench.place(ComponentType::Resistor, 600, 600, "RH", "1k", "");
+    bench.connect((h, 0), (rh, 0));
+    bench.ground((h, 1));
+    bench.ground((rh, 1));
+
+    let netlist = bench.netlist();
+    assert!(
+        netlist
+            .lines()
+            .any(|line| line.starts_with("F1 ") && line.contains(" Vsense ")),
+        "{netlist}"
+    );
+    assert!(netlist.contains("i(Vsense)"), "{netlist}");
+    solve_op(&netlist);
+}
+
+/// The final value of each requested quantity after a short transient, found
+/// under the very name it was requested by. A request the deck cannot answer
+/// fails the run or comes back absent, and either fails the caller.
+fn final_values(netlist: &str, requests: &[String]) -> Vec<f64> {
+    let end = netlist
+        .to_ascii_lowercase()
+        .rfind("\n.end")
+        .expect("the deck ends with .end");
+    let deck = format!(
+        "{}\n.save {}{}",
+        &netlist[..end],
+        requests.join(" "),
+        &netlist[end..]
+    );
+    let result = run_spec_request(
+        &EngineBridge::new(),
+        AnalysisSpec::Transient {
+            stop_time: 1e-6,
+            step_time: 1e-7,
+            start_time: 0.0,
+            max_timestep: None,
+            uic: false,
+        },
+        SpecExecutionOptions::default(),
+        &deck,
+        None,
+        &ResolvedExecutionDependencies::default(),
+        &rspice_core::abort_signal::NoAbort,
+    );
+    let Ok(crate::results::SimulationResult::Transient { waveforms, .. }) = result else {
+        panic!("transient solve failed: {result:?}\ndeck:\n{deck}");
+    };
+    requests
+        .iter()
+        .map(|request| {
+            let bare = request
+                .strip_prefix("V(")
+                .and_then(|inner| inner.strip_suffix(')'))
+                .unwrap_or(request);
+            waveforms
+                .values()
+                .find(|waveform| {
+                    waveform.name.eq_ignore_ascii_case(request)
+                        || waveform.name.eq_ignore_ascii_case(bare)
+                })
+                .and_then(|waveform| waveform.y_values.last().copied())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{request} is absent from {:?}\ndeck:\n{deck}",
+                        waveforms.keys().collect::<Vec<_>>()
+                    )
+                })
+        })
+        .collect()
+}
+
+/// A VCVS with an output limit is written as the behavioural source `B1`, and
+/// the engine knows it by that name alone. A current probe on it asks for that
+/// element; asked for as drawn, it names a source the deck does not have.
+#[test]
+fn a_current_probe_on_a_limited_vcvs_reads_the_behavioural_source() {
+    let mut bench = Bench::new();
+    let v = bench.place(ComponentType::VoltageSource, 0, 0, "V1", "1", "");
+    let e = bench.place(ComponentType::Vcvs, 400, 0, "E1", "2", "vmax=10 vmin=-10");
+    let load = bench.place(ComponentType::Resistor, 600, 0, "RL", "1k", "");
+    bench.connect((v, 0), (e, 2));
+    bench.ground((e, 3));
+    bench.ground((v, 1));
+    bench.connect((e, 0), (load, 0));
+    bench.ground((e, 1));
+    bench.ground((load, 1));
+
+    let probed = bench.state.document().components[e].written_element_name();
+    let current = final_values(&bench.netlist(), &[format!("I({probed})")])[0];
+
+    // 2 V across 1 kΩ, delivered out of the source's positive terminal.
+    assert!(
+        (current.abs() - 2e-3).abs() < 1e-9,
+        "I({probed}) = {current}"
+    );
+}
+
+/// A cell instance drawn `amp`, holding a divider whose midpoint is the net
+/// `n1` and whose lower leg is a resistor drawn `load`. The deck writes them
+/// `Xamp` and `Rload`, and the engine scopes the inside of the cell by the
+/// written instance name.
+fn amp_divider() -> (
+    rspice_design::schematic::owned::Schematic,
+    std::collections::HashMap<String, Schematic>,
+) {
+    use rspice_design::schematic::component::LibraryCellInstance;
+    use rspice_design::schematic::net_label::NetLabel;
+
+    let mut amp = Bench::new();
+    let port = amp.place(ComponentType::Port, 0, 0, "", "IN", "");
+    let upper = amp.place(ComponentType::Resistor, 200, 0, "R1", "1k", "");
+    let lower = amp.place(ComponentType::Resistor, 400, 0, "load", "1k", "");
+    amp.connect((port, 0), (upper, 0));
+    amp.connect((upper, 1), (lower, 0));
+    amp.ground((lower, 1));
+    let midpoint = amp.terminal(upper, 1);
+    amp.state
+        .document_mut_for_test()
+        .net_labels
+        .push(NetLabel::new(90, midpoint, "n1"));
+
+    let mut top = Bench::new();
+    let source = top.place(ComponentType::VoltageSource, 0, 0, "V1", "2", "");
+    let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
+    binding.terminal_order = vec!["IN".to_owned()];
+    let instance = top.state.add_library_cell_component(
+        crate::netlist_gen::test_placement(Point::new(400, 0)),
+        binding,
+    );
+    let instance = top
+        .state
+        .document()
+        .components
+        .iter()
+        .position(|component| component.id == instance)
+        .expect("placed instance");
+    top.state.document_mut_for_test().components[instance].name = "amp".to_owned();
+    top.next_id = 100;
+    top.connect((source, 0), (instance, 0));
+    top.ground((source, 1));
+
+    (
+        top.state,
+        std::collections::HashMap::from([("work/amp/schematic".to_owned(), amp.state)]),
+    )
+}
+
+/// End to end through the real netlist and engine: the inside of a cell drawn
+/// without its `X` is read through the app's own addressing of the drawn path.
+#[test]
+fn a_cell_drawn_without_its_prefix_is_read_through_its_drawn_path() {
+    use rspice_app_types::hierarchy_path::{InstancePath, OccurrenceProbeSpelling, ProbeTarget};
+
+    let (top, buffers) = amp_divider();
+    let hierarchy = rspice_design::hierarchy::HierarchySource::from_buffers(&buffers);
+    let generated = crate::netlist_gen::generate_netlist_hierarchical(
+        &top,
+        &[],
+        &hierarchy,
+        &crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+    );
+    assert!(
+        generated.errors.is_empty(),
+        "{:?}\n{}",
+        generated.errors,
+        generated.netlist
+    );
+
+    let node = ProbeTarget::parse("/amp/n1")
+        .expect("drawn probe")
+        .engine_name()
+        .expect("engine node name");
+    let load = &buffers["work/amp/schematic"].document().components[2];
+    let current = OccurrenceProbeSpelling::for_element(
+        &InstancePath::parse("/amp").expect("drawn occurrence"),
+        'I',
+        &load.name,
+        &load.written_element_name(),
+    )
+    .expect("an ASCII occurrence spells");
+    assert_eq!(current.display(), "I(/amp/load)");
+    let values = final_values(
+        &generated.netlist,
+        &[format!("V({node})"), current.engine().to_owned()],
+    );
+
+    assert!((values[0] - 1.0).abs() < 1e-9, "V({node}) = {}", values[0]);
+    assert!(
+        (values[1].abs() - 1e-3).abs() < 1e-12,
+        "{} = {}",
+        current.engine(),
+        values[1]
+    );
+}
+
+/// Every card the deck writes is parsed under the name the authority gives
+/// its component, whatever the drawing called it: a prefix added, a source
+/// lowered to a behavioural card, a reference resolved to what it names.
+#[test]
+fn every_element_is_parsed_under_its_written_name() {
+    let mut bench = Bench::new();
+    let sense = bench.place(ComponentType::VoltageSource, 0, 0, "sense", "1", "");
+    let misnamed = bench.place(ComponentType::Resistor, 200, 0, "C4", "1k", "");
+    let unnamed = bench.place(ComponentType::Resistor, 400, 0, "", "1k", "");
+    bench.connect((sense, 0), (misnamed, 0));
+    bench.connect((misnamed, 1), (unnamed, 0));
+    bench.ground((unnamed, 1));
+    bench.ground((sense, 1));
+    for (row, (kind, name, params)) in [
+        (ComponentType::Vcvs, "E1", "vmax=5"),
+        (ComponentType::Vcvs, "E2", ""),
+        (ComponentType::Vccs, "G3", "poly=\"0,1m\""),
+        (ComponentType::Ccvs, "H4", "vref=sense vmin=-5"),
+        (ComponentType::Cccs, "F5", "vref=sense"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let y = 300 * (row as i32 + 1);
+        let source = bench.place(kind, 400, y, name, "2", params);
+        let load = bench.place(
+            ComponentType::Resistor,
+            600,
+            y,
+            &format!("RL{row}"),
+            "1k",
+            "",
+        );
+        bench.connect((source, 0), (load, 0));
+        bench.ground((source, 1));
+        bench.ground((load, 1));
+        if matches!(kind, ComponentType::Vcvs | ComponentType::Vccs) {
+            bench.connect((sense, 0), (source, 2));
+            bench.ground((source, 3));
+        }
+    }
+    let rails = bench.place(
+        ComponentType::OpAmp,
+        400,
+        2000,
+        "U1",
+        "1e5",
+        "vmax=3 vmin=-3",
+    );
+    let rail_load = bench.place(ComponentType::Resistor, 600, 2000, "RU", "1k", "");
+    bench.connect((sense, 0), (rails, 0));
+    bench.ground((rails, 1));
+    bench.connect((rails, 2), (rail_load, 0));
+    bench.ground((rail_load, 1));
+
+    let netlist = bench.netlist();
+    let parsed = rspice_core::netlist::Netlist::parse(&netlist).expect("the deck parses");
+    for component in bench.state.document().components.iter() {
+        if component.kind == ComponentType::Ground {
+            continue;
+        }
+        let written = component.written_element_name();
+        assert!(
+            parsed
+                .elements
+                .iter()
+                .any(|element| element.name.eq_ignore_ascii_case(&written)),
+            "{} drawn {:?} is not the element {written}:\n{netlist}",
+            component.kind.display_name(),
+            component.name
+        );
+    }
+    solve_op(&netlist);
+}
+
 #[test]
 fn lossy_ltra_line_bench_solves_op() {
     let mut bench = Bench::new();
@@ -395,6 +756,36 @@ fn memristor_bench_solves_tran() {
     bench.ground((mr, 1));
     bench.ground((v, 1));
     solve_tran_with_uic(&bench.netlist(), 1e-7, 1e-9, false);
+}
+
+/// The engine files a memristor under its card's keyword, so a current probe
+/// built from the component asks for `I(YMEMRISTOR!MR1)`. The drawn `MR1`
+/// would name a MOSFET the deck does not hold.
+#[test]
+fn a_current_probe_on_a_memristor_reads_the_element_the_engine_files() {
+    let mut bench = Bench::new();
+    let v = bench.place(ComponentType::VoltageSource, 0, 0, "V1", "0.2", "");
+    let mr = bench.place(ComponentType::Memristor, 200, 0, "MR1", "", "");
+    bench.connect((v, 0), (mr, 0));
+    bench.ground((mr, 1));
+    bench.ground((v, 1));
+
+    let probed = bench.state.document().components[mr].engine_element_name();
+    assert_eq!(probed, "YMEMRISTOR!MR1");
+    let values = final_values(
+        &bench.netlist(),
+        &[format!("I({probed})"), "I(V1)".to_owned()],
+    );
+
+    // The source's branch current is the memristor's, entering at its
+    // positive terminal.
+    assert!(values[0].abs() > 1e-9, "I({probed}) = {}", values[0]);
+    assert!(
+        (values[0] + values[1]).abs() <= 1e-9 * values[0].abs(),
+        "I({probed}) = {}, I(V1) = {}",
+        values[0],
+        values[1]
+    );
 }
 
 #[test]

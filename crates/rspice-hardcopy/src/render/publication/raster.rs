@@ -297,3 +297,32 @@ pub(super) fn render_tiff(
     }
     Ok(bytes)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_published_weight_resolves_to_a_face_of_that_weight() {
+        // The rasteriser asks for a family and a weight and takes the nearest
+        // face it has, so a cut filed under the wrong weight, or missing,
+        // draws the line at another weight without failing anything.
+        let database = publication_fontdb();
+        for (family, weight, _) in PUBLICATION_FACES {
+            let weight = usvg::fontdb::Weight(weight.parse().expect("a CSS weight is numeric"));
+            let id = database
+                .query(&usvg::fontdb::Query {
+                    families: &[usvg::fontdb::Family::Name(family)],
+                    weight,
+                    ..usvg::fontdb::Query::default()
+                })
+                .expect("every published family resolves");
+            let face = database.face(id).expect("a resolved face exists");
+            assert_eq!(
+                face.weight, weight,
+                "{family} at {weight:?} resolves to {}",
+                face.post_script_name
+            );
+        }
+    }
+}

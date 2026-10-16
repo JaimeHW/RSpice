@@ -313,6 +313,24 @@ impl CircuitData {
             && self.compact_model_private_nodes.contains(&(index + 1))
     }
 
+    /// Record how far one compact-model instance's stamps reach into its own
+    /// nodes `private`: `dc_rows` are the nodes whose row one of its equations
+    /// can write a Jacobian entry into at DC, `read` those whose voltage one of
+    /// its stamp locations reads. Nodes outside `private` are ignored.
+    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+    pub(crate) fn record_compact_model_stamp_reach(
+        &mut self,
+        private: &[NodeId],
+        dc_rows: impl IntoIterator<Item = NodeId>,
+        read: impl IntoIterator<Item = NodeId>,
+    ) {
+        let owned = |node: &NodeId| *node > 0 && private.contains(node);
+        self.compact_model_dc_driven_nodes
+            .extend(dc_rows.into_iter().filter(owned));
+        self.compact_model_read_nodes
+            .extend(read.into_iter().filter(owned));
+    }
+
     /// Whether `.OPTIONS RSHUNT` installed a physical shunt on electrical nodes.
     pub fn has_global_shunt(&self) -> bool {
         self.global_shunt_conductance > 0.0

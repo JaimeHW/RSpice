@@ -79,6 +79,16 @@ impl CodeModel for MetadataOverlayModel {
         self.inner.analog_input_thresholds(ctx)
     }
 
+    fn analog_threshold_input(
+        &self,
+        ctx: &CmContext,
+        port: &str,
+        element: usize,
+        input: crate::Value,
+    ) -> crate::Value {
+        self.inner.analog_threshold_input(ctx, port, element, input)
+    }
+
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         self.inner.init(ctx)
     }

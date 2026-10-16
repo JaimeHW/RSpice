@@ -20,8 +20,7 @@
 //! - [`circuit`] — [`CircuitData`] struct-of-arrays storage, stamping,
 //!   magnetic coupling, introspection
 //! - [`device`] — device models: passives, diodes, BJTs, the MOSFET/FET
-//!   family, sources, transmission lines, memristors, Verilog-A and FFI
-//!   extension points
+//!   family, sources, transmission lines, memristors, and Verilog-A devices
 //! - [`solver`] — sparse LU (KLU-class and faer backends), Newton-Raphson,
 //!   convergence checking, damping, arc-length continuation
 //! - [`engine`] — the orchestrator: one driver per analysis family, matrix
@@ -59,10 +58,12 @@
 //!
 //! ## Feature flags
 //!
-//! `parallel`, `simd`, and `faer-parallel` are on by default. Verilog-A
-//! support (`veriloga`, `veriloga-native`, the generated `veriloga-model-*`
-//! built-ins), `wasm`, and `ffi` are opt-in. See the crate README for the
-//! full table.
+//! `parallel`, `simd`, and `faer-parallel` are on by default. `wasm` and the
+//! Verilog-A features are opt-in: `veriloga`, `veriloga-native`,
+//! `veriloga-wasm-jit`, and the generated built-ins (`veriloga-builtins-base`,
+//! one `veriloga-model-*` flag per model, `veriloga-builtins-noise`, and the
+//! `veriloga-builtins-models` and `veriloga-builtins` umbrellas). The crate
+//! README's feature-flag table says what each one does.
 //!
 //! ## Testing
 //!

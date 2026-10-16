@@ -277,14 +277,24 @@ mod tests {
                 }
                 // Each input representation still gets its own physical
                 // conversion. Neither registration order overwrites the other.
-                for model in ["adc_bridge", "v_to_real"] {
+                // With ground `0`, `v1` is a rail on `mix` itself, so the A/D
+                // converter's inferred supply binds live and it is the
+                // tracking twin; with `ref` no rail is inferred and it is the
+                // stock bridge.
+                let adc = if ground == "0" {
+                    "__rspice_tracking_adc"
+                } else {
+                    "adc_bridge"
+                };
+                for model in [adc, "v_to_real"] {
                     assert_eq!(
                         circuit
                             .xspice_instances
                             .iter()
                             .filter(|instance| instance.model_name() == model)
                             .count(),
-                        1
+                        1,
+                        "{model} with ground {ground}"
                     );
                 }
                 assert_views_agree(&circuit);

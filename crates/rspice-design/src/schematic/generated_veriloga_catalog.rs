@@ -574,6 +574,8 @@ mod descriptor_v2_tests {
             internal_node_names: &["state"],
             internal_state_nodes: &[],
             branch_count: 0,
+            stamp_pattern:
+                rspice_core::device::veriloga_builtins::GeneratedVerilogAStampPattern::EMPTY,
         };
         const CHANGED: GeneratedVerilogAModelDescriptor = GeneratedVerilogAModelDescriptor {
             terminals: &TERMINALS_B,

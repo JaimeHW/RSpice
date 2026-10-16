@@ -505,12 +505,8 @@ mod tests {
     fn plain_context() -> ComponentPropertyContext {
         ComponentPropertyContext {
             editor: rspice_schematic_editor::component_properties::ComponentEditorContext {
-                glyph: "R".to_owned(),
                 subtitle: "Resistor".to_owned(),
-                instance_path: "/top/R4".to_owned(),
-                library_cell: "analogLib/res".to_owned(),
-                family: "Linear".to_owned(),
-                model: None,
+                library_cell: String::new(),
                 stimulus: None,
             },
             retained_table: None,
@@ -527,12 +523,8 @@ mod tests {
 
         ComponentPropertyContext {
             editor: rspice_schematic_editor::component_properties::ComponentEditorContext {
-                glyph: "V".to_owned(),
                 subtitle: "Independent voltage source".to_owned(),
-                instance_path: "/top/V4".to_owned(),
-                library_cell: "analogLib/vpulse".to_owned(),
-                family: "PULSE".to_owned(),
-                model: None,
+                library_cell: String::new(),
                 stimulus: Some(StimulusEditorContext {
                     state: ProvenanceState::Behind {
                         adopted: 1,
@@ -547,27 +539,17 @@ mod tests {
         }
     }
 
-    /// A component that binds a model and adopts no waveform.
+    /// A device with a model to type into its form, instanced from a master.
+    ///
+    /// Where that model comes from is the design inspector's, not this
+    /// dialog's: the editor is a parameter form, and the card that used to
+    /// restate the binding beside it is gone.
     #[cfg(not(target_arch = "wasm32"))]
     fn bound_model_context() -> ComponentPropertyContext {
-        use rspice_schematic_editor::component_properties::ComponentModelContext;
-
         ComponentPropertyContext {
             editor: rspice_schematic_editor::component_properties::ComponentEditorContext {
-                glyph: "M".to_owned(),
-                subtitle: "N-channel MOSFET".to_owned(),
-                instance_path: "/top/M4".to_owned(),
-                library_cell: "analogLib/nmos4".to_owned(),
-                family: "BSIM4".to_owned(),
-                model: Some(ComponentModelContext {
-                    name: "nch_svt".to_owned(),
-                    library: Some("tsmc018".to_owned()),
-                    source: "tsmc018/models/nch.lib".to_owned(),
-                    section: "tt".to_owned(),
-                    status: "resolved from the configured corner".to_owned(),
-                    can_open: true,
-                    can_qualify: true,
-                }),
+                subtitle: "nmos4 (symbol)".to_owned(),
+                library_cell: "analogLib/nmos4/symbol".to_owned(),
                 stimulus: None,
             },
             retained_table: None,
@@ -588,12 +570,18 @@ mod tests {
         std::fs::create_dir_all(&directory).expect("raster output directory");
         let stderr = std::io::stderr();
         let mut report = stderr.lock();
-        let scenes: [EditorScene; 3] = [
+        let scenes: [EditorScene; 4] = [
             ("resistor", ComponentType::Resistor, plain_context),
             ("mosfet", ComponentType::Nmos, bound_model_context),
             (
                 "source-pulse",
                 ComponentType::VoltageSourcePulse,
+                adopted_source_context,
+            ),
+            // The point table and its summary, which no other scene draws.
+            (
+                "source-pwl",
+                ComponentType::VoltageSourcePwl,
                 adopted_source_context,
             ),
         ];

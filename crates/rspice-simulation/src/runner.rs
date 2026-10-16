@@ -1,10 +1,15 @@
 //! Simulation Runner - Async Simulation Execution
 //!
-//! Provides the bridge between UI and rspice-core simulation engine with:
-//! - Async simulation execution on background thread
+//! Provides the bridge between a frontend and the rspice-core simulation
+//! engine with:
+//! - Execution of one prepared task at a time, on a background thread
+//!   natively or in the module worker in the browser
 //! - Thread-safe progress updates
 //! - Abort capability
-//! - Result caching
+//! - Lossless, ordered delivery of accepted transient samples, and the run's
+//!   engine log
+//! - The latest Monte Carlo journal and transient checkpoint, kept even when
+//!   a run is cancelled
 
 use std::path::PathBuf;
 use std::sync::{
