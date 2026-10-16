@@ -534,6 +534,7 @@ impl SimulationController {
         // The new run supersedes the outcomes earlier runs reported, and the
         // pruning above may have retired a run whose failure still stood.
         state.supersede_run_diagnostics(run_id);
+        state.open_run_outcome(run_id);
         self.current_run_id = Some(run_id);
         state.simulation.execution.active_execution = Some(execution_identity);
         state.simulation.execution.abort_request = None;
@@ -965,12 +966,18 @@ impl SimulationController {
             Err(e) => {
                 log::error!("Failed to start simulation: {}", e);
                 let error_message = format!("Failed to start simulation: {e}");
-                state.push_sim_message(ConsoleMessage::error(format!(
-                    "Failed to start simulation: {}",
-                    e
-                )));
                 // Mark run as failed but continue with remaining analyses
                 let target_run_id = self.target_run_id(state);
+                // An analysis the engine would not start is a failure of the
+                // run like any other, and stands with them; it reached only
+                // the Console before.
+                Self::report_failed_analysis(
+                    state,
+                    &analysis_name,
+                    &error_message,
+                    &None,
+                    target_run_id,
+                );
                 let failed_analysis = self.current_provenance.take().map(|provenance| {
                     AnalysisResult::failed(
                         1,
@@ -1411,12 +1418,19 @@ impl SimulationController {
         attribution: &Option<crate::state::ConvergenceAttribution>,
         run_sequence: Option<u64>,
     ) {
-        let anchor = attribution.as_ref().and_then(|attribution| {
-            let nets: Vec<String> = attribution.nets().map(str::to_owned).collect();
-            let devices: Vec<String> = attribution.devices().map(str::to_owned).collect();
-            (!nets.is_empty() || !devices.is_empty())
-                .then_some(crate::diagnostics::LogAnchor::Simulation { nets, devices })
-        });
+        // The record checks the attribution against this failure before it
+        // adopts it, and the Console row must name the same objects: an
+        // attribution recorded for a solve a convergence aid later rescued
+        // describes that solve, not this failure.
+        let anchor = attribution
+            .as_ref()
+            .filter(|attribution| attribution.describes(message))
+            .and_then(|attribution| {
+                let nets: Vec<String> = attribution.nets().map(str::to_owned).collect();
+                let devices: Vec<String> = attribution.devices().map(str::to_owned).collect();
+                (!nets.is_empty() || !devices.is_empty())
+                    .then_some(crate::diagnostics::LogAnchor::Simulation { nets, devices })
+            });
         state.log_buffer.log_anchored(
             crate::diagnostics::LogSeverity::Error,
             crate::diagnostics::LogSource::Simulation,

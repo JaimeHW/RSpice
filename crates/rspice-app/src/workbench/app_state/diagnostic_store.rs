@@ -169,10 +169,11 @@ impl DiagnosticSubject {
 
 /// Where a finding is repaired.
 ///
-/// Every variant addresses an object, not a workspace: that is what makes
-/// following a finding land on the thing it is about rather than on whichever
-/// document happened to be open. A finding with no route is still a finding —
-/// the page renders it inert rather than offering a jump it cannot honour.
+/// Each variant addresses the most specific thing its producer can name — an
+/// object in a drawing, a record, a line of a source, or the destination a
+/// dispatch finding named for itself — rather than whichever document
+/// happened to be open. A finding with no route is still a finding: the page
+/// renders it inert rather than offering a jump it cannot honour.
 #[derive(Debug, Clone, PartialEq)]
 pub(in crate::workbench) enum DiagnosticRoute {
     /// A place in the drawing, or the objects a failed run named.
@@ -343,8 +344,9 @@ impl DiagnosticRecord {
     /// A waived finding is a decision someone recorded, not a condition that
     /// went away, so it stays in the store and stays on the page — it just
     /// stops counting against the design. The decision itself rides on the
-    /// canonical record's suppression, which is the field the rule deck
-    /// writes, so there is exactly one place a waiver can be stated.
+    /// canonical record's suppression, so there is exactly one place a waiver
+    /// can be stated. Nothing records a waiver yet; this is the field one is
+    /// recorded in when something does.
     pub(in crate::workbench) const fn waived(&self) -> bool {
         self.canonical.suppression.is_some()
     }
@@ -403,8 +405,8 @@ pub(in crate::workbench) enum DiagnosticInputs {
     /// The configured topology closure, the active simulation plan, and the
     /// preflight report the findings came from.
     Dispatch,
-    /// One retained run, and the drawing its cross-probe names resolve
-    /// against.
+    /// One retained run, and the configured design and solver setup it was
+    /// dispatched against.
     Run { run_sequence: u64 },
 }
 
@@ -435,19 +437,30 @@ impl DiagnosticInputs {
                     .to_owned()
             }
             Self::Run { run_sequence } => {
-                format!("run {run_sequence} and the drawing its names resolve against")
+                format!("the design and solver setup run {run_sequence} was dispatched against")
             }
         }
     }
 
+    /// Where the store files this batch.
+    ///
+    /// A cell view by the canonical key its receipt is filed under, so two
+    /// spellings of one view are one batch rather than two listing the same
+    /// findings. A run by its sequence padded to a fixed width, so the store's
+    /// order is the order the runs were made in and run 10 follows run 9.
     fn key(&self) -> String {
         let owner = self.owner().key_prefix();
         match self {
             Self::DesignCheck { subject } | Self::SymbolPins { subject } => {
-                format!("{owner}\u{1f}{}", subject.key())
+                let subject = crate::state::canonical_cell_view_owner_key(
+                    &subject.library,
+                    &subject.cell,
+                    &subject.view,
+                );
+                format!("{owner}\u{1f}{subject}")
             }
             Self::Dispatch => owner.to_owned(),
-            Self::Run { run_sequence } => format!("{owner}\u{1f}{run_sequence}"),
+            Self::Run { run_sequence } => format!("{owner}\u{1f}{run_sequence:020}"),
         }
     }
 
@@ -496,18 +509,23 @@ impl DiagnosticInputs {
                     .any(|run| run.id == *run_sequence);
                 // A failure names conductors and devices; an edited design is
                 // no longer the one those names were read off. The design is
-                // the configured one, as the dispatch checks digest it — not
-                // whichever view the reader happens to have open, which
-                // staled a failure on opening another view and un-staled it
-                // on coming back.
-                let (root, revision, closure) = state.configured_topology_revision();
+                // the configured one — not whichever view the reader happens
+                // to have open, which staled a failure on opening another view
+                // and un-staled it on coming back — and it is its content: a
+                // value edit is the commonest repair for a run that would not
+                // converge, and the topology counter ignores it. The solver
+                // setup is the run's other input, and the other repair.
                 digest_of(&(
                     state.workspace.content.project.id(),
                     run_sequence,
                     retained,
-                    root,
-                    revision,
-                    closure,
+                    state.workspace.content.simulation_root_reference().key(),
+                    state.configured_design_content()?,
+                    state.active_plan_revision(),
+                    state.sim_setup.options.to_spice_options(),
+                    format!("{:?}", state.sim_setup.reference_pvt.process),
+                    state.sim_setup.reference_pvt.temperature_celsius.to_bits(),
+                    state.model_library_manager.design_inspection_catalog_key(),
                 ))
             }
         }
@@ -596,6 +614,10 @@ pub(crate) struct DiagnosticStore {
     /// and a run outcome superseded by the next run's outcome for the same
     /// analysis.
     current_key: Option<FindingKey>,
+    /// The digest each retained run's outcome is decided against, taken when
+    /// the run was dispatched. A batch is opened only once the run fails
+    /// something, so a run that fails nothing costs the list nothing.
+    run_baselines: BTreeMap<u64, ContentDigest>,
     /// Moves on every publication and withdrawal, so a memo taken over the
     /// store's batches can tell it is describing a different store.
     generation: u64,
@@ -628,6 +650,14 @@ impl DiagnosticStore {
         &self,
     ) -> impl Iterator<Item = &DiagnosticBatch> + Clone + '_ {
         self.batches.values()
+    }
+
+    /// The batch published for `inputs`, found the way the store files it.
+    pub(in crate::workbench) fn batch(
+        &self,
+        inputs: &DiagnosticInputs,
+    ) -> Option<&DiagnosticBatch> {
+        self.batches.get(&inputs.key())
     }
 
     const fn generation(&self) -> u64 {
@@ -685,7 +715,9 @@ impl DiagnosticStore {
             return;
         }
         self.current = finding;
-        self.current_key = finding.and_then(|id| self.record(id)).map(|record| record.key.clone());
+        self.current_key = finding
+            .and_then(|id| self.record(id))
+            .map(|record| record.key.clone());
     }
 
     /// The record a held identity names, where this store holds it.
@@ -733,6 +765,7 @@ impl DiagnosticStore {
         self.pending_route = None;
         self.current = None;
         self.current_key = None;
+        self.run_baselines.clear();
         self.generation = self.generation.wrapping_add(1);
     }
 
@@ -1142,6 +1175,112 @@ mod tests {
         assert!(
             state.diagnostic_batch_standing(&batch).is_current(),
             "the open view is not the design the run executed"
+        );
+    }
+
+    fn run_batch(state: &AppState, run_sequence: u64) -> DiagnosticBatch {
+        state
+            .diagnostics
+            .batch(&DiagnosticInputs::Run { run_sequence })
+            .expect("the run's outcome is published")
+            .clone()
+    }
+
+    /// A value edit is the commonest repair for a run that would not converge,
+    /// and the topology counter ignores it.
+    #[test]
+    fn a_value_edit_stales_a_run_failure() {
+        let mut state = AppState::default();
+        state.simulation.retained.runs = vec![crate::state::SimulationRun::new(6)].into();
+        state.schematic.add_component(
+            crate::state::ComponentType::Resistor,
+            crate::state::Point::new(0, 0),
+        );
+        state.publish_run_failure("Transient", "Analysis failed: tran", None, 6);
+        assert!(
+            state
+                .diagnostic_batch_standing(&run_batch(&state, 6))
+                .is_current()
+        );
+
+        state.schematic.document_mut_for_test().components[0].value = "10k".to_owned();
+
+        assert_eq!(
+            state.diagnostic_batch_standing(&run_batch(&state, 6)),
+            BatchStanding::Stale,
+        );
+    }
+
+    /// A failure is about the design the run was dispatched with. An edit
+    /// made while it solved is not what it solved, and must not become the
+    /// baseline the failure is decided against.
+    #[test]
+    fn a_failure_is_decided_against_the_design_that_was_dispatched() {
+        let mut state = AppState::default();
+        state.simulation.retained.runs = vec![crate::state::SimulationRun::new(7)].into();
+        state.schematic.add_component(
+            crate::state::ComponentType::Resistor,
+            crate::state::Point::new(0, 0),
+        );
+        state.open_run_outcome(7);
+        assert!(
+            state
+                .diagnostics
+                .batch(&DiagnosticInputs::Run { run_sequence: 7 })
+                .is_none(),
+            "a run that has failed nothing has nothing to list"
+        );
+
+        state.schematic.document_mut_for_test().components[0].value = "10k".to_owned();
+        state.publish_run_failure("Transient", "Analysis failed: tran", None, 7);
+        state.publish_run_failure("Operating point", "Analysis failed: op", None, 7);
+
+        let batch = run_batch(&state, 7);
+        assert_eq!(batch.records.len(), 2);
+        assert_eq!(
+            state.diagnostic_batch_standing(&batch),
+            BatchStanding::Stale,
+            "the design was edited after the run was dispatched"
+        );
+    }
+
+    /// The store lists runs in the order they were made.
+    #[test]
+    fn run_ten_is_filed_after_run_nine() {
+        let mut state = AppState::default();
+        state.simulation.retained.runs = vec![
+            crate::state::SimulationRun::new(9),
+            crate::state::SimulationRun::new(10),
+        ]
+        .into();
+        state.publish_run_failure("Transient", "Analysis failed: tran", None, 10);
+        state.publish_run_failure("Transient", "Analysis failed: tran", None, 9);
+        assert_eq!(run_batches(&state), [9, 10]);
+    }
+
+    /// Receipts are filed under a cell view's canonical key; the batches they
+    /// describe must be too, or one view checked under two spellings lists
+    /// every finding twice.
+    #[test]
+    fn two_spellings_of_one_cell_view_are_one_batch() {
+        let mut state = AppState::default();
+        let subject = state.workspace.content.active_schematic_reference();
+        let respelled = crate::state::CellViewRef::new(
+            subject.library.to_uppercase(),
+            subject.cell.to_uppercase(),
+            &subject.view,
+        );
+        for subject in [subject, respelled.clone()] {
+            state
+                .publish_diagnostics(DiagnosticInputs::DesignCheck { subject }, Vec::new())
+                .expect("the design-check digest is available");
+        }
+        assert_eq!(state.diagnostics.batches().count(), 1);
+        assert!(
+            state
+                .diagnostics
+                .batch(&DiagnosticInputs::DesignCheck { subject: respelled })
+                .is_some()
         );
     }
 

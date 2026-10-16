@@ -72,18 +72,23 @@ impl AppState {
         let inputs = DiagnosticInputs::Run { run_sequence };
         // Every failure in one run stands together. Each analysis that
         // failed is its own record with its own identity; a later failure in
-        // the same run is added to the batch rather than replacing it.
-        let mut records: Vec<DiagnosticRecord> = self
-            .diagnostics
-            .batches()
-            .find(|batch| batch.inputs == inputs)
+        // the same run is added to the batch rather than replacing it. Both
+        // are decided against the design as it was dispatched.
+        let opened = self.diagnostics.batch(&inputs);
+        let dispatched = opened
+            .map(|batch| batch.input_digest)
+            .or_else(|| self.diagnostics.run_baselines.get(&run_sequence).copied());
+        let mut records: Vec<DiagnosticRecord> = opened
             .map(|batch| batch.records.clone())
             .unwrap_or_default();
         let mut keys: Vec<FindingKey> = records.iter().map(|record| record.key.clone()).collect();
         keys.push(key.clone());
-        let Some(canonical) =
-            mint_canonical(&keys, run_sequence, &format!("run:{run_sequence}:{analysis}")).pop()
-        else {
+        let Some(canonical) = mint_canonical(
+            &keys,
+            run_sequence,
+            &format!("run:{run_sequence}:{analysis}"),
+        )
+        .pop() else {
             return;
         };
         let route = attribution.and_then(|attribution| {
@@ -106,7 +111,32 @@ impl AppState {
         .with_details(attribution.map_or_else(String::new, ConvergenceAttribution::summary))
         .with_route(route);
         records.push(record);
-        self.publish_or_state_refusal(inputs, records);
+        let published = match dispatched {
+            Some(digest) => self.diagnostics.insert(digest, inputs, records),
+            None => self.publish_diagnostics(inputs, records),
+        };
+        self.state_refusal(published);
+    }
+
+    /// Take the digest a dispatched run's failures will be decided against.
+    ///
+    /// Taken here because this is the design and setup the run solves. Taken
+    /// when a failure arrives instead, it was whatever the reader had edited
+    /// while the run was solving, and a failure about the design as
+    /// dispatched read as current against an edit made after it. Nothing is
+    /// published: a run that fails nothing has nothing to list, and an empty
+    /// batch would tell the page that checks had run.
+    pub(crate) fn open_run_outcome(&mut self, run_sequence: u64) {
+        match (DiagnosticInputs::Run { run_sequence }).digest(self) {
+            Ok(digest) => {
+                let retained = &self.simulation.retained.runs;
+                self.diagnostics
+                    .run_baselines
+                    .retain(|run, _| retained.iter().any(|kept| kept.id == *run));
+                self.diagnostics.run_baselines.insert(run_sequence, digest);
+            }
+            Err(error) => self.state_refusal(Err(error)),
+        }
     }
 
     /// Everything the dispatch checks found, as records.
@@ -172,7 +202,12 @@ impl AppState {
         inputs: DiagnosticInputs,
         records: Vec<DiagnosticRecord>,
     ) {
-        if let Err(error) = self.publish_diagnostics(inputs, records) {
+        let published = self.publish_diagnostics(inputs, records);
+        self.state_refusal(published);
+    }
+
+    fn state_refusal(&mut self, published: Result<(), String>) {
+        if let Err(error) = published {
             self.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
                 "Findings could not be recorded: {error}"
             )));
