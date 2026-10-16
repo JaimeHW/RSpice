@@ -641,6 +641,10 @@ pub struct AnalysisInputs<'a, R, A> {
     pub sim_setup: &'a SimulationSetup,
     pub schematic: &'a rspice_design::schematic::document::SchematicDocument,
     pub selected_components: &'a std::collections::HashSet<u64>,
+    /// The occurrence `schematic` is edited at, where the selection was made;
+    /// `None` at the design root. A device selected below the root is the
+    /// engine's element scoped by that occurrence, `xamp.rc4`.
+    pub selection_occurrence: Option<&'a rspice_design::occurrence::DocumentOccurrence>,
     pub runs: &'a [R],
     pub active_run: Option<&'a rspice_results::run::SimulationRun<A>>,
     pub project_revision: rspice_app_types::product::ObjectRevision,
@@ -673,8 +677,14 @@ where
             .to_string();
     }
     let mut config = op.to_config()?;
-    // The report names each device as the engine does, by the element the
-    // deck writes; a selected symbol that writes no card names no device.
+    // The report names each device as the engine does: the element the
+    // engine knows, scoped by the occurrence it was selected in. A selected
+    // symbol that writes no card names no device, and neither does one whose
+    // occurrence the engine cannot be asked about.
+    let occurrence = state.selection_occurrence.map_or_else(
+        rspice_app_types::hierarchy_path::InstancePath::root,
+        rspice_design::occurrence::DocumentOccurrence::instance_path,
+    );
     config.selected_devices = state
         .schematic
         .components
@@ -683,7 +693,14 @@ where
             state.selected_components.contains(&component.id)
                 && !component.kind.spice_prefix().is_empty()
         })
-        .map(|component| component.written_element_name())
+        .filter_map(|component| {
+            let element = component.engine_element_name();
+            if occurrence.is_root() {
+                Some(element)
+            } else {
+                occurrence.engine_name_for(&element).ok()
+            }
+        })
         .collect();
     config.selected_devices.sort();
     config.selected_devices.dedup();

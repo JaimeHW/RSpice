@@ -13,6 +13,7 @@ fn spec_for_draft(draft: &AnalysisDraft) -> Result<AnalysisSpec, String> {
         sim_setup: &Default::default(),
         schematic: &Default::default(),
         selected_components: &Default::default(),
+        selection_occurrence: None,
         runs: &[],
         active_run: None,
         project_revision: rspice_app_types::product::ObjectRevision::INITIAL,
@@ -299,15 +300,19 @@ fn transient_noise_seed_inheritance_and_zero_scale_reach_the_solver() {
 }
 
 /// The report names each device as the engine does, so a device selected on
-/// the drawing is requested under the name the deck writes it under: a
-/// resistor drawn `C4` is `RC4`, an unnamed resistor is `R<id>`, and a VCVS
-/// with an output limit is the behavioural source `B1`.
+/// the drawing is requested under the name the engine knows it by: a resistor
+/// drawn `C4` is `RC4`, an unnamed resistor is `R<id>`, a VCVS with an output
+/// limit is the behavioural source `B1`, and a memristor is filed under its
+/// keyword. Selected on the sheet of `/amp`, each is scoped by the instance
+/// the deck writes, `xamp`.
 #[test]
-fn op_selected_devices_are_requested_by_their_written_names() {
+fn op_selected_devices_are_requested_by_their_engine_names() {
+    use rspice_design::occurrence::DocumentOccurrence;
     use rspice_design::schematic::component::Component;
     use rspice_design::schematic::component_type::ComponentType;
     use rspice_design::schematic::document::SchematicDocument;
     use rspice_design_model::Point;
+    use rspice_design_model::cell_view::CellViewRef;
 
     let mut limited =
         Component::new(2, ComponentType::Vcvs, Point::new(200, 0)).with_name_value("E1", "2");
@@ -318,28 +323,42 @@ fn op_selected_devices_are_requested_by_their_written_names() {
                 .with_name_value("C4", "1k"),
             limited,
             Component::new(3, ComponentType::Resistor, Point::new(400, 0)),
+            Component::new(4, ComponentType::Memristor, Point::new(600, 0))
+                .with_name_value("MR1", ""),
         ],
         ..SchematicDocument::default()
     };
-    let selected = std::collections::HashSet::from([1, 2, 3]);
-    let inputs: AnalysisInputs<'_, SimulationRun, AnalysisResult> = AnalysisInputs {
-        sim_setup: &Default::default(),
-        schematic: &schematic,
-        selected_components: &selected,
-        runs: &[],
-        active_run: None,
-        project_revision: rspice_app_types::product::ObjectRevision::INITIAL,
-        plan_payloads: &[],
+    let selected = std::collections::HashSet::from([1, 2, 3, 4]);
+    let mut amp = DocumentOccurrence::rooted(CellViewRef::new("work", "top", "schematic"));
+    amp.descend(
+        "amp".to_owned(),
+        CellViewRef::new("work", "amp", "schematic"),
+    );
+    let requested = |selection_occurrence: Option<&DocumentOccurrence>| {
+        let inputs: AnalysisInputs<'_, SimulationRun, AnalysisResult> = AnalysisInputs {
+            sim_setup: &Default::default(),
+            schematic: &schematic,
+            selected_components: &selected,
+            selection_occurrence,
+            runs: &[],
+            active_run: None,
+            project_revision: rspice_app_types::product::ObjectRevision::INITIAL,
+            plan_payloads: &[],
+        };
+        let spec = crate::analysis_preparation::build_op_spec(&inputs, &Default::default())
+            .expect("selected devices name canonical netlist elements");
+        let AnalysisSpec::DcOp {
+            selected_devices, ..
+        } = spec
+        else {
+            panic!("an OP draft builds an OP spec: {spec:?}");
+        };
+        selected_devices
     };
 
-    let spec = crate::analysis_preparation::build_op_spec(&inputs, &Default::default())
-        .expect("selected devices name canonical netlist elements");
-
-    let AnalysisSpec::DcOp {
-        selected_devices, ..
-    } = spec
-    else {
-        panic!("an OP draft builds an OP spec: {spec:?}");
-    };
-    assert_eq!(selected_devices, ["B1", "R3", "RC4"]);
+    assert_eq!(requested(None), ["B1", "R3", "RC4", "YMEMRISTOR!MR1"]);
+    assert_eq!(
+        requested(Some(&amp)),
+        ["xamp.b1", "xamp.r3", "xamp.rc4", "xamp.ymemristor!mr1"]
+    );
 }
