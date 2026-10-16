@@ -869,11 +869,42 @@ pub(crate) fn preferred_quick_fix_available(state: &AppState) -> bool {
 }
 
 pub(crate) fn apply_preferred_quick_fix(state: &mut AppState) -> Result<String, String> {
+    let fix = preferred_quick_fix(state)
+        .ok_or_else(|| "No preferred quick fix is available at the caret.".to_owned())?;
+    apply_quick_fix(state, &fix)
+}
+
+/// Apply the fix one named finding offered.
+///
+/// The Problems grid holds findings rather than a caret, so it names the
+/// finding it is standing on and the editor resolves the fix. Taking the
+/// caret's fix instead would apply whatever fix happened to be on the line the
+/// netlist editor was last left on, which is not the finding the reader
+/// selected.
+pub(crate) fn apply_quick_fix_for_finding(
+    state: &mut AppState,
+    finding: uuid::Uuid,
+) -> Result<String, String> {
+    let fix = state
+        .ui
+        .netlist
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.canonical.diagnostic_id == finding && diagnostic.is_current())
+        .and_then(|diagnostic| diagnostic.fix.clone())
+        .ok_or_else(|| {
+            "That finding no longer offers a fix; validate the document again.".to_owned()
+        })?;
+    apply_quick_fix(state, &fix)
+}
+
+fn apply_quick_fix(
+    state: &mut AppState,
+    fix: &super::diagnostics::DiagnosticFix,
+) -> Result<String, String> {
     if !super::active_netlist_source_is_editable(state) {
         return Err("Quick fixes cannot edit this read-only source.".to_owned());
     }
-    let fix = preferred_quick_fix(state)
-        .ok_or_else(|| "No preferred quick fix is available at the caret.".to_owned())?;
     let source = state.simulation.source.netlist_content.clone();
     if fix.span.start > fix.span.end
         || fix.span.end > source.len()
