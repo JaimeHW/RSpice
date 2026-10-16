@@ -469,7 +469,10 @@ pub(in crate::workbench) fn listing(state: &AppState) -> DiagnosticListing<'_> {
     if !state.project_lifecycle.is_open() {
         return closed_listing();
     }
-    let segments = segments(state, |batch| state.diagnostic_batch_standing(batch));
+    // One scope for the whole list, so the configured hierarchy two owners'
+    // digests read is walked once rather than once per batch.
+    let scope = super::DigestScope::new(state);
+    let segments = segments(state, |batch| super::batch_standing(batch, &scope));
     let (counts, empty_reason) = tally(&segments);
     DiagnosticListing {
         segments,

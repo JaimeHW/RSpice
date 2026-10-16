@@ -490,7 +490,8 @@ impl DiagnosticInputs {
     /// `Err` is not "stale": it is "cannot be evaluated", which the reader is
     /// told in the producer's own words rather than having findings silently
     /// dropped or silently kept.
-    fn digest(&self, state: &AppState) -> Result<ContentDigest, String> {
+    fn digest(&self, scope: &DigestScope<'_>) -> Result<ContentDigest, String> {
+        let state = scope.state;
         match self {
             Self::DesignCheck { subject } => {
                 super::design_checks::live_input_digest(state, subject)
@@ -504,7 +505,7 @@ impl DiagnosticInputs {
                 state.symbol_pin_check_inputs(subject)?,
             )),
             Self::Dispatch => {
-                let (root, revision, closure) = state.configured_topology_revision();
+                let (root, revision, closure) = scope.configured_topology();
                 digest_of(&(
                     state.workspace.content.project.id(),
                     state.workspace.content.project.revision().get(),
@@ -534,7 +535,7 @@ impl DiagnosticInputs {
                 // whichever view the reader happens to have open, which
                 // staled a failure on opening another view and un-staled it
                 // on coming back.
-                let (root, revision, closure) = state.configured_topology_revision();
+                let (root, revision, closure) = scope.configured_topology();
                 digest_of(&(
                     state.workspace.content.project.id(),
                     run_sequence,
@@ -545,6 +546,31 @@ impl DiagnosticInputs {
                 ))
             }
         }
+    }
+}
+
+/// The live state digests are taken against, for one reading of the store.
+///
+/// The configured topology is an input of two owners' digests and the
+/// costliest one either reads — it walks the configured hierarchy — so it is
+/// read once per scope and shared, never across scopes: a scope lives for
+/// one reading and sees one state.
+struct DigestScope<'a> {
+    state: &'a AppState,
+    topology: std::cell::OnceCell<(String, u64, Vec<(String, u64)>)>,
+}
+
+impl<'a> DigestScope<'a> {
+    fn new(state: &'a AppState) -> Self {
+        Self {
+            state,
+            topology: std::cell::OnceCell::new(),
+        }
+    }
+
+    fn configured_topology(&self) -> &(String, u64, Vec<(String, u64)>) {
+        self.topology
+            .get_or_init(|| self.state.configured_topology_revision())
     }
 }
 
@@ -875,7 +901,7 @@ impl AppState {
         inputs: DiagnosticInputs,
         records: Vec<DiagnosticRecord>,
     ) -> Result<(), String> {
-        let digest = inputs.digest(self)?;
+        let digest = inputs.digest(&DigestScope::new(self))?;
         self.diagnostics.insert(digest, inputs, records)
     }
 
@@ -964,11 +990,16 @@ impl AppState {
         &self,
         batch: &DiagnosticBatch,
     ) -> BatchStanding {
-        match batch.inputs.digest(self) {
-            Ok(digest) if digest == batch.input_digest => BatchStanding::Current,
-            Ok(_) => BatchStanding::Stale,
-            Err(reason) => BatchStanding::Unavailable(reason),
-        }
+        batch_standing(batch, &DigestScope::new(self))
+    }
+}
+
+/// Where one published batch stands, digested within one scope.
+fn batch_standing(batch: &DiagnosticBatch, scope: &DigestScope<'_>) -> BatchStanding {
+    match batch.inputs.digest(scope) {
+        Ok(digest) if digest == batch.input_digest => BatchStanding::Current,
+        Ok(_) => BatchStanding::Stale,
+        Err(reason) => BatchStanding::Unavailable(reason),
     }
 }
 
