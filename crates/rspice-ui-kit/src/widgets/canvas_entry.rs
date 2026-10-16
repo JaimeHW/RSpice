@@ -274,8 +274,8 @@ impl<'a> CanvasEntry<'a> {
         {
             return CanvasEntryChoice::Cancelled;
         }
-        let entered = !dropdown_open
-            && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
+        let entered =
+            !dropdown_open && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
         if entered && self.commit_enabled {
             return CanvasEntryChoice::Commit;
         }
@@ -370,8 +370,11 @@ fn paint_status(ui: &mut Ui, status: Result<Option<&str>, &str>) {
             problem,
         );
     }
-    ui.painter()
-        .galley(egui::pos2(rect.left() + text_left, rect.top()), galley, color);
+    ui.painter().galley(
+        egui::pos2(rect.left() + text_left, rect.top()),
+        galley,
+        color,
+    );
     let message = message.to_owned();
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Label);
@@ -439,14 +442,7 @@ mod tests {
         let anchor = egui::pos2(300.0, 200.0);
         let mut name = String::from("vout");
         for _ in 0..2 {
-            entry(
-                &ctx,
-                anchor,
-                &mut name,
-                Ok(None),
-                true,
-                Vec::new(),
-            );
+            entry(&ctx, anchor, &mut name, Ok(None), true, Vec::new());
         }
         let (choice, _) = entry(
             &ctx,
@@ -549,10 +545,7 @@ mod tests {
                             });
                         card = ctx
                             .memory(|memory| {
-                                memory.area_rect(Id::new((
-                                    "rspice.canvas-entry",
-                                    "test.height",
-                                )))
+                                memory.area_rect(Id::new(("rspice.canvas-entry", "test.height")))
                             })
                             .unwrap_or(egui::Rect::NOTHING);
                     },
