@@ -156,6 +156,11 @@ const PREVIEW_TAIL_CONTROLS: [&str; 2] = ["Fit page", "COLOR"];
 /// inside a 12 pt viewport gutter, edge to edge at or below the 820 pt
 /// manager breakpoint. Anything the studio lays out beyond this rectangle
 /// is off the dialog.
+///
+/// At narrow this is the viewport, which is the bound the studio may not
+/// cross — not the surface, which is its content's height centred inside
+/// that. The caller asks the centring question there instead; see the guard
+/// in `the_studio_fits_every_viewport_and_section_without_scrolling`.
 #[cfg(not(target_arch = "wasm32"))]
 fn studio_surface(viewport: Vec2) -> Rect {
     let screen = Rect::from_min_size(egui::Pos2::ZERO, viewport);
@@ -314,20 +319,47 @@ fn the_studio_fits_every_viewport_and_section_without_scrolling() {
                 // Without this the probe would be measuring against a
                 // rectangle larger than the dialog, and would pass on
                 // anything.
+                //
+                // That holds only where the probe knows the surface's height.
+                // At narrow, edge to edge is a statement about the side
+                // gutters alone: the surface spends none of the width on one
+                // and takes its height from its content, centred in the
+                // viewport. There is no fixed rectangle to reach there, so
+                // the same question is asked of what the dialog drew — the
+                // span stayed inside the viewport, and sits centred in it.
                 let reach = controls
                     .iter()
                     .fold((f32::MAX, f32::MIN), |acc, (_, rect)| {
                         (acc.0.min(rect.top()), acc.1.max(rect.bottom()))
                     });
-                assert!(
-                    reach.0 - surface.top() <= 16.0 && surface.bottom() - reach.1 <= 16.0,
-                    "{case}: the surface this probe measures against is not the one the \
-                         dialog drew — its controls span {:.0}..{:.0} inside {:.0}..{:.0}",
-                    reach.0,
-                    reach.1,
-                    surface.top(),
-                    surface.bottom()
-                );
+                let top_gap = reach.0 - surface.top();
+                let bottom_gap = surface.bottom() - reach.1;
+                if width <= 820.0 {
+                    assert!(
+                        top_gap >= 0.0 && bottom_gap >= 0.0,
+                        "{case}: the studio drew outside the viewport — its controls \
+                             span {:.0}..{:.0} inside {:.0}..{:.0}",
+                        reach.0,
+                        reach.1,
+                        surface.top(),
+                        surface.bottom()
+                    );
+                    assert!(
+                        (top_gap - bottom_gap).abs() <= 24.0,
+                        "{case}: the content-height surface is not centred in the \
+                             viewport — {top_gap:.0} above its controls, {bottom_gap:.0} below"
+                    );
+                } else {
+                    assert!(
+                        top_gap <= 16.0 && bottom_gap <= 16.0,
+                        "{case}: the surface this probe measures against is not the one the \
+                             dialog drew — its controls span {:.0}..{:.0} inside {:.0}..{:.0}",
+                        reach.0,
+                        reach.1,
+                        surface.top(),
+                        surface.bottom()
+                    );
+                }
                 if previewing {
                     for missing in PREVIEW_TAIL_CONTROLS
                         .into_iter()
