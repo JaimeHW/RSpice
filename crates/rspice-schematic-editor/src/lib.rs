@@ -15,6 +15,8 @@ pub mod pwl_editor;
 pub mod selection_forms;
 pub mod session;
 pub mod source_labels;
+#[cfg(test)]
+mod source_guard;
 pub mod symbol_editor;
 pub mod symbols;
 pub mod vector_preview;
