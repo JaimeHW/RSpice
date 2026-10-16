@@ -16,6 +16,14 @@ use rspice_publication_contract::{
 
 use crate::escape_html;
 
+/// The family a figure's monospace text names first: IBM Plex Mono, which
+/// the page ships in both cuts the contract letters in (see
+/// [`crate::page::PAGE_FONTS`]). A sheet's character budgets and baselines are
+/// measurements of that face, and the name is the product's own rather than
+/// the vendor's, so the page lays out from the face it carries instead of
+/// whichever face of the vendor's name a reader has installed.
+pub(crate) const PUBLISHED_MONO_FAMILY: &str = "RSpice Plex Mono";
+
 /// Full turn in the contract's millidegree unit.
 const FULL_TURN_MILLIDEG: i64 = 360_000;
 /// The page palette defines this many trace series colors; higher indices
@@ -230,15 +238,14 @@ fn text_markup(text: &TextPrimitive) -> String {
     let mut presentation = Presentation::default();
     presentation.text_paint(text.paint);
     let presentation = presentation.markup();
+    let mono = format!(
+        " font-family=\"'{PUBLISHED_MONO_FAMILY}', Consolas, 'Cascadia Code', 'DejaVu Sans Mono', monospace\""
+    );
     let font = match text.font {
-        TextFont::Sans => "",
-        TextFont::SansSemibold => " font-weight=\"600\"",
-        TextFont::Monospace => {
-            " font-family=\"Consolas, 'Cascadia Code', 'DejaVu Sans Mono', monospace\""
-        }
-        TextFont::MonospaceMedium => {
-            " font-family=\"Consolas, 'Cascadia Code', 'DejaVu Sans Mono', monospace\" font-weight=\"500\""
-        }
+        TextFont::Sans => String::new(),
+        TextFont::SansSemibold => " font-weight=\"600\"".to_owned(),
+        TextFont::Monospace => mono,
+        TextFont::MonospaceMedium => format!("{mono} font-weight=\"500\""),
     };
     let rotation = if text.rotation_millideg == 0 {
         String::new()
@@ -310,4 +317,36 @@ pub fn scene_svg(scene: &Scene, accessible_title: &str) -> String {
     }
     svg.push_str("</svg>");
     svg
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn markup(font: TextFont) -> String {
+        text_markup(&TextPrimitive {
+            origin: Point { x_um: 0, y_um: 0 },
+            text: "PSAFE-SCH-001".to_owned(),
+            height_um: 3_581,
+            font,
+            anchor: TextAnchor::Start,
+            rotation_millideg: 0,
+            paint: Paint::Role(PaintRole::Foreground),
+        })
+    }
+
+    #[test]
+    fn monospace_lettering_names_the_shipped_face_at_each_weight() {
+        let family = format!(" font-family=\"'{PUBLISHED_MONO_FAMILY}', ");
+        let regular = markup(TextFont::Monospace);
+        let medium = markup(TextFont::MonospaceMedium);
+        for line in [&regular, &medium] {
+            assert!(
+                line.contains(&family),
+                "monospace text must name the face the page ships first: {line}"
+            );
+        }
+        assert!(!regular.contains("font-weight"));
+        assert!(medium.contains(" font-weight=\"500\""));
+    }
 }

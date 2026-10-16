@@ -1,3 +1,21 @@
+/* The face a figure's monospace lettering is laid out against, shipped with
+   the page in both cuts the figures use, so a reader who has not installed
+   it sees the characters and weights the author did. */
+@font-face {
+  font-family: "RSpice Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/IBMPlexMono-Regular.ttf") format("truetype");
+}
+@font-face {
+  font-family: "RSpice Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("fonts/IBMPlexMono-Medium.ttf") format("truetype");
+}
+
 :root {
   color-scheme: light;
   --page-bg: #e8ecee;
