@@ -10,7 +10,7 @@ use sha2::{Digest as _, Sha256};
 /// device terminals, canonical device IR or JIT executable.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct PreparedVerilogAConnectionLibrary {
+pub struct PreparedVerilogAConnectionLibrary {
     source_key: String,
     source_digest: ContentDigest,
     netlist_alias: String,
@@ -19,7 +19,7 @@ pub(crate) struct PreparedVerilogAConnectionLibrary {
 }
 
 impl PreparedVerilogAConnectionLibrary {
-    pub(super) fn try_new(
+    pub fn try_new(
         source_key: String,
         source_digest: ContentDigest,
         netlist_alias: String,

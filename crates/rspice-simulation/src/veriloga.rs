@@ -4,7 +4,7 @@ use crate::compilation::unified_runtime_compiler_options;
 use sha2::{Digest as _, Sha256};
 
 mod connections;
-use connections::PreparedVerilogAConnectionLibrary;
+pub use connections::PreparedVerilogAConnectionLibrary;
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -343,7 +343,9 @@ impl PreparedVerilogARuntimeSet {
         Self::try_with_connections(runtimes, Vec::new())
     }
 
-    fn try_with_connections(
+    /// Device runtimes and connection libraries, the second for a source that
+    /// declares connect rules and no device module.
+    pub fn try_with_connections(
         mut runtimes: Vec<PreparedVerilogARuntime>,
         mut connections: Vec<PreparedVerilogAConnectionLibrary>,
     ) -> Result<Self, String> {

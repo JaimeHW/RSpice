@@ -42,7 +42,9 @@ use rspice_simulation::execution::{
 use rspice_simulation::manual_deck::ManualDeckError;
 use rspice_simulation::preparation::QueuedAnalysis;
 use rspice_simulation::results::SimulationResult;
-use rspice_simulation::veriloga::{PreparedVerilogARuntime, PreparedVerilogARuntimeSet};
+use rspice_simulation::veriloga::{
+    PreparedVerilogAConnectionLibrary, PreparedVerilogARuntime, PreparedVerilogARuntimeSet,
+};
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 
 use super::Route;
@@ -300,6 +302,7 @@ fn seal_hdl(
     );
     let mut lines: Vec<String> = circuit.lines().map(str::to_owned).collect();
     let mut runtimes = Vec::new();
+    let mut connections = Vec::new();
     for directive in directives {
         let path = directory.join(&directive.path);
         let file_name = path
@@ -326,25 +329,55 @@ fn seal_hdl(
         )
         .map_err(|error| compile_refusal(&file_name, &path, error.to_string()))?;
         let limits = rspice_simulation::project_veriloga::project_virtual_compile_limits();
-        let discovered = compiler
-            .discover_virtual_modules(&bundle, limits)
+        let prepared = compiler
+            .prepare_virtual_runtime_source(&bundle, limits)
             .map_err(|failure| compile_refusal(&file_name, &path, failure.to_string()))?;
+        let module_names: Vec<String> = prepared.module_names().map(str::to_owned).collect();
+        let digest = rspice_app_types::product::ContentDigest::from_bytes(
+            <sha2::Sha256 as sha2::Digest>::digest(source.as_bytes()).into(),
+        );
+        // A source of connect rules and connect modules alone contributes
+        // rules, not instances, as the engine reads it; one with neither
+        // modules nor rules is refused.
+        if module_names.is_empty() && directive.module.is_none() {
+            let artifact = prepared.connection_artifact().ok_or_else(|| {
+                compile_refusal(
+                    &file_name,
+                    &path,
+                    format!("{file_name} declares neither modules nor connection rules"),
+                )
+            })?;
+            let alias = directive
+                .alias
+                .clone()
+                .unwrap_or_else(|| connection_alias(&file_name));
+            let source_key = sealed_source_key(design_slug, "connections", &file_name);
+            connections.push(
+                PreparedVerilogAConnectionLibrary::try_new(
+                    source_key.clone(),
+                    digest,
+                    alias.clone(),
+                    artifact,
+                )
+                .map_err(|error| compile_refusal(&file_name, &path, error))?,
+            );
+            lines[directive.line] = format!(".veriloga \"{source_key}\" {alias}");
+            continue;
+        }
         let module = match (&directive.module, &directive.alias) {
             (Some(module), _) => module.clone(),
             (None, Some(alias))
-                if discovered
-                    .module_names
+                if module_names
                     .iter()
                     .any(|name| name.eq_ignore_ascii_case(alias)) =>
             {
-                discovered
-                    .module_names
+                module_names
                     .iter()
                     .find(|name| name.eq_ignore_ascii_case(alias))
                     .cloned()
                     .unwrap_or_default()
             }
-            _ => match discovered.module_names.as_slice() {
+            _ => match module_names.as_slice() {
                 [only] => only.clone(),
                 many => {
                     return Err(compile_refusal(
@@ -365,9 +398,6 @@ fn seal_hdl(
             .map_err(|error| compile_refusal(&module, &path, error.to_string()))?;
         let alias = directive.alias.clone().unwrap_or_else(|| module.clone());
         let source_key = sealed_source_key(design_slug, &module, &file_name);
-        let digest = rspice_app_types::product::ContentDigest::from_bytes(
-            <sha2::Sha256 as sha2::Digest>::digest(source.as_bytes()).into(),
-        );
         let runtime = PreparedVerilogARuntime::try_from_virtual_compilation(
             source_key.clone(),
             digest,
@@ -378,8 +408,32 @@ fn seal_hdl(
         runtimes.push(runtime);
         lines[directive.line] = format!(".veriloga \"{source_key}\" {alias}");
     }
-    let set = PreparedVerilogARuntimeSet::try_new(runtimes).map_err(harness_error)?;
+    let set = PreparedVerilogARuntimeSet::try_with_connections(runtimes, connections)
+        .map_err(harness_error)?;
     Ok((lines.join("\n") + "\n", set))
+}
+
+/// The import alias of a connection library its directive names no alias for:
+/// the file's stem as a SPICE name.
+fn connection_alias(file_name: &str) -> String {
+    let stem = Path::new(file_name)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or(file_name);
+    let mut alias: String = stem
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if !alias.starts_with(|first: char| first.is_ascii_alphabetic()) {
+        alias.insert(0, '_');
+    }
+    alias
 }
 
 /// The virtual key a sealed runtime is installed under. The engine keys an
@@ -1599,6 +1653,72 @@ mod tests {
                     .contains(".veriloga \"__rspice_project__/mixed-corpus/cxx/dut/pair.v\" dut\n"),
             "{rewritten}"
         );
+    }
+
+    /// A file of connect rules and connect modules alone is a connection
+    /// library: it seals, and `.options connectrules=` selects a rule from it
+    /// on the headless path as the engine selects one. A file with neither
+    /// modules nor rules is still refused.
+    #[test]
+    fn a_connect_only_source_contributes_its_rules_on_the_headless_path() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("deck")).unwrap();
+        std::fs::write(
+            dir.path().join("drv.vams"),
+            "module drv(p, q);\n  inout p;\n  electrical p;\n  output q;\n  reg q;\n  initial q = 1;\n  analog I(p) <+ 0;\nendmodule\n",
+        )
+        .unwrap();
+        let mut rules = rspice_veriloga::connect::library::BUILTIN_CONNECT_MODULES
+            .iter()
+            .map(|(_, source)| *source)
+            .collect::<String>();
+        rules.push_str(
+            "\nconnectrules Low; connect d2a #(.vsup(1.0)); endconnectrules\n\
+             connectrules High; connect d2a #(.vsup(5.0)); endconnectrules\n",
+        );
+        std::fs::write(dir.path().join("rules.vams"), rules).unwrap();
+        std::fs::write(dir.path().join("empty.vams"), "// no modules, no rules\n").unwrap();
+        let design = Design {
+            dir: dir.path().to_path_buf(),
+            slug: "cxx".into(),
+            file: toml::from_str(
+                "schema = \"rspice-mixed-design/1\"\nid = \"C99\"\ntitle = \"t\"\nexit_phases = [\"P1\"]\ndialect = \"d\"\n\
+                 [[variant]]\nname = \"mx\"\nfamilies = [\"spice\"]\ntoday = \"runs\"\n\
+                 [[analysis]]\nid = \"tran\"\nvariants = [\"mx\"]\noracles = [\"O6\"]\ntimeout_s = 60\nphase = \"P1\"\n",
+            )
+            .unwrap(),
+            tolerance: toml::from_str("schema = \"rspice-mixed-tolerance/1\"\ntime_precision = 1e-12\n")
+                .unwrap(),
+        };
+        let request = CaseRequest {
+            design: &design,
+            variant: "mx",
+            analysis: "tran",
+            o5: false,
+            budget: Duration::from_secs(60),
+        };
+        let origin = dir.path().join("deck").join("mx.tran.cir");
+        let deck = |rule: &str| {
+            format!(
+                "connect-only rules\n.hdl \"../drv.vams\"\n.hdl \"../rules.vams\"\nV1 p 0 1\nX1 p q drv\nR1 q 0 1meg\n\
+                 .options connectrules={rule} connectrules_source=rules\n.tran 0.2n 2n\n.end\n"
+            )
+        };
+        for (rule, supply) in [("Low", 1.0), ("High", 5.0)] {
+            let result = headless_case(&request, &origin, &deck(rule));
+            assert_eq!(result.outcome, "completed", "{rule}: {:?}", result.error);
+            let q = result.results[0].real.get("v(q)").unwrap_or_else(|| {
+                panic!("{rule}: no v(q) in {:?}", result.results[0].real.keys())
+            });
+            let last = *q.last().unwrap();
+            assert!(
+                (last - supply).abs() < 1e-3 * supply,
+                "{rule}: the rule's d2a drives q to {supply} V, saw {last}"
+            );
+        }
+        let empty = seal_hdl("t\n.hdl \"../empty.vams\"\n.end\n", &origin, "cxx")
+            .expect_err("a source with neither modules nor rules is refused");
+        assert_eq!(empty.token.as_deref(), Some("compile_refusal"), "{empty:?}");
     }
 
     #[test]
