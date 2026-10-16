@@ -1,6 +1,9 @@
 //! Validate stretch canvas requests before the app-owned atomic commit.
 
-use super::{SchematicSymbolContext, requests::editor_request_source, viewport::Viewport};
+use super::{
+    SchematicSymbolContext, requests::editor_request_source,
+    sheet_visibility::with_active_wire_topology, viewport::Viewport,
+};
 use crate::diagnostics::ConsoleMessage;
 use crate::state::{Point, Tool};
 use crate::workbench::{
@@ -127,13 +130,18 @@ fn commit_armed_stretch_selection(state: &mut AppState, symbol_context: &Schemat
     }
 
     state.schematic.begin_operation("stretch selection");
-    match state.schematic.stretch_target_resolved(
-        delta,
-        target,
-        policy,
-        |component| symbol_context.terminal_points(component),
-        |component| symbol_context.component_bounds_tuple(component),
-    ) {
+    // Another sheet's wire or junction can share the stretched segment's
+    // coordinates; it neither anchors the stretch nor moves with it.
+    let stretched = with_active_wire_topology(state, |schematic| {
+        schematic.stretch_target_resolved(
+            delta,
+            target,
+            policy,
+            |component| symbol_context.terminal_points(component),
+            |component| symbol_context.component_bounds_tuple(component),
+        )
+    });
+    match stretched {
         Ok(true) => {
             let recorded = state.schematic.end_operation();
             state.sync_active_schematic_to_workspace();
@@ -177,7 +185,10 @@ mod tests {
     use crate::state::{Junction, Wire};
 
     fn selected_stretch_wire() -> AppState {
-        let mut state = AppState::default();
+        selected_stretch_wire_in(AppState::default())
+    }
+
+    fn selected_stretch_wire_in(mut state: AppState) -> AppState {
         state
             .schematic
             .document_mut_for_test()
@@ -336,6 +347,36 @@ mod tests {
             crate::state::Tool::Select
         );
         assert!(!state.schematic.can_undo());
+    }
+
+    /// A junction on Sheet 2 sits on the stretched segment's coordinates. It
+    /// is another sheet's wiring: it neither anchors the stretch nor moves.
+    #[test]
+    fn another_sheets_junction_neither_anchors_nor_follows_a_stretch() {
+        let mut state = selected_stretch_wire_in(
+            crate::schematic::view::sheet_visibility::two_sheet_state(&[7], &[21]),
+        );
+        let hidden = Junction::new(21, Point::new(10, 20));
+        state
+            .schematic
+            .document_mut_for_test()
+            .junctions
+            .push(hidden);
+        arm_test_stretch(&mut state);
+        state.dialogs.stretch_selection.canvas.gesture.preview_delta = Point::new(0, 10);
+        let symbols = schematic_symbol_context(&state);
+
+        commit_armed_stretch_selection(&mut state, &symbols);
+
+        assert_eq!(
+            state.schematic.document().wires[0].points[1],
+            Point::new(0, 30)
+        );
+        assert_eq!(state.schematic.document().junctions, vec![hidden]);
+        assert_eq!(
+            state.schematic.undo_description(),
+            Some("stretch selection")
+        );
     }
 
     #[test]

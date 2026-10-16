@@ -312,6 +312,15 @@ pub(crate) fn with_active_wire_topology<R>(
     )
 }
 
+/// Finish the route being drawn on the active sheet. Conductors on the cell
+/// view's other sheets share its coordinates; they are kept out of reach so
+/// the route can neither split nor dot them.
+pub(crate) fn finish_wire_on_active_sheet(state: &mut AppState) -> Option<u64> {
+    state
+        .schematic
+        .finish_wire(|id| !object_is_on_active_sheet_in_workspace(&state.workspace, id))
+}
+
 /// Protect hidden conductors around an operation that owns its own undo
 /// transaction. Keeping hidden objects present while that transaction captures
 /// snapshots preserves complete undo/redo state; restoring their authored
@@ -384,53 +393,56 @@ pub(super) fn active_sheet_has_objects(state: &AppState) -> bool {
             .any(|object| object_is_on_active_sheet(state, object.id))
 }
 
+/// A cell view with two sheets: `active_ids` stay on the active Sheet 1 and
+/// `hidden_ids` belong to Sheet 2. Shared by the canvas modules' tests.
+#[cfg(test)]
+pub(super) fn two_sheet_state(active_ids: &[u64], hidden_ids: &[u64]) -> AppState {
+    use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+
+    let mut state = AppState::default();
+    let key = state.workspace.content.active_schematic_reference().key();
+    let all_ids = active_ids
+        .iter()
+        .chain(hidden_ids)
+        .copied()
+        .collect::<Vec<_>>();
+    let first = state
+        .workspace
+        .content
+        .design_management
+        .bootstrap_for_cell_view(&key, "Sheet 1", all_ids)
+        .expect("first sheet");
+    let catalog = state
+        .workspace
+        .content
+        .design_management
+        .sheet_catalog_mut(&key)
+        .expect("sheet catalog");
+    let second = catalog
+        .create_sheet(
+            SheetDefinition {
+                name: "Sheet 2".to_owned(),
+                template: SheetTemplate::AnalogSchematic,
+                port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                explicit_page_number: Some(2),
+            },
+            Some(first),
+        )
+        .expect("second sheet");
+    if !hidden_ids.is_empty() {
+        catalog
+            .assign_objects(catalog.revision(), second, hidden_ids.iter().copied())
+            .expect("hidden assignments");
+    }
+    catalog.set_active(first).expect("active sheet");
+    state
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{
-        Component, ComponentType, Point, SheetDefinition, SheetPortPolicy, SheetTemplate,
-    };
+    use crate::state::{Component, ComponentType, Point};
     use crate::state::{Junction, Wire};
-
-    fn two_sheet_state(active_ids: &[u64], hidden_ids: &[u64]) -> AppState {
-        let mut state = AppState::default();
-        let key = state.workspace.content.active_schematic_reference().key();
-        let all_ids = active_ids
-            .iter()
-            .chain(hidden_ids)
-            .copied()
-            .collect::<Vec<_>>();
-        let first = state
-            .workspace
-            .content
-            .design_management
-            .bootstrap_for_cell_view(&key, "Sheet 1", all_ids)
-            .expect("first sheet");
-        let catalog = state
-            .workspace
-            .content
-            .design_management
-            .sheet_catalog_mut(&key)
-            .expect("sheet catalog");
-        let second = catalog
-            .create_sheet(
-                SheetDefinition {
-                    name: "Sheet 2".to_owned(),
-                    template: SheetTemplate::AnalogSchematic,
-                    port_policy: SheetPortPolicy::TypedOffSheetPorts,
-                    explicit_page_number: Some(2),
-                },
-                Some(first),
-            )
-            .expect("second sheet");
-        if !hidden_ids.is_empty() {
-            catalog
-                .assign_objects(catalog.revision(), second, hidden_ids.iter().copied())
-                .expect("hidden assignments");
-        }
-        catalog.set_active(first).expect("active sheet");
-        state
-    }
 
     /// The scope is a reading position over the one membership authority: it
     /// narrows what a dock lists and decides nothing else, so `AllSheets` must
@@ -575,6 +587,30 @@ mod tests {
                 .find(|junction| junction.id == 11)
                 .is_some_and(|junction| junction.pos == destination)
         );
+    }
+
+    /// Sheet 2's wire runs through the point where a route drawn on Sheet 1
+    /// ends. The two sheets share coordinates, not conductors: the hidden wire
+    /// keeps its id and points, gets no dot, and undo needs nothing from it.
+    #[test]
+    fn a_route_drawn_on_one_sheet_leaves_another_sheets_wire_whole() {
+        let mut state = two_sheet_state(&[], &[20]);
+        let hidden = Wire::segment(20, Point::new(0, 100), Point::new(200, 100));
+        state.schematic.document_mut_for_test().wires = vec![hidden.clone()];
+        state.schematic.init_undo_history();
+
+        state.schematic.start_wire(Point::new(100, 0));
+        state.schematic.extend_wire(Point::new(100, 100));
+        let drawn = finish_wire_on_active_sheet(&mut state).expect("the route is drawn");
+
+        let wires = &state.schematic.document().wires;
+        assert_eq!(wires.iter().find(|wire| wire.id == 20), Some(&hidden));
+        assert_eq!(wires.len(), 2, "the hidden wire was not split");
+        assert!(object_is_on_active_sheet(&state, drawn));
+        assert!(state.schematic.document().junctions.is_empty());
+
+        assert!(state.schematic.undo());
+        assert_eq!(state.schematic.document().wires, vec![hidden]);
     }
 
     #[test]

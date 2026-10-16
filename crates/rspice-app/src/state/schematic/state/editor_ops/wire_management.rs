@@ -95,7 +95,11 @@ impl SchematicState {
     ///   is automatically split at that point (creating a proper vertex)
     /// - This ensures correct rubber-banding: all wires at a T-junction share
     ///   a common endpoint vertex, so moving any wire keeps the junction intact
-    pub fn finish_wire(&mut self) -> Option<u64> {
+    ///
+    /// `hidden` names the conductors of the cell view's other sheets. They
+    /// share this document's coordinates, so a route drawn here would
+    /// otherwise split their wires and re-home the halves onto this sheet.
+    pub fn finish_wire(&mut self, hidden: impl Fn(u64) -> bool) -> Option<u64> {
         if !self.session.editor.wire_drawing.active {
             return None;
         }
@@ -115,6 +119,9 @@ impl SchematicState {
 
         let mut last_wire_id = None;
         self.with_undo("draw wire", |schematic| {
+            // The undo record opened with every sheet present; the other
+            // sheets step out only while the route is laid down.
+            let other_sheets = schematic.design.take_hidden_wire_topology(&hidden);
             // Split the path into individual 2-point wire segments. The
             // complete route and every topology repair it causes are one
             // atomic user operation.
@@ -140,6 +147,7 @@ impl SchematicState {
 
             // Add junction markers where 3+ wire endpoints meet.
             schematic.update_wire_junctions();
+            other_sheets.restore(&mut schematic.design);
         });
 
         last_wire_id
@@ -179,7 +187,7 @@ mod tests {
         schematic.extend_wire(Point::new(20, 20));
 
         assert!(!schematic.has_pending_operation());
-        assert!(schematic.finish_wire().is_some());
+        assert!(schematic.finish_wire(|_| false).is_some());
         assert_eq!(schematic.history().undo_count(), 1);
         assert_eq!(schematic.undo_description(), Some("draw wire"));
         assert_eq!(schematic.design.document().wires.len(), 3);
@@ -214,7 +222,7 @@ mod tests {
         assert!(schematic.design.document().wires.is_empty());
 
         schematic.start_wire(Point::new(5, 5));
-        assert_eq!(schematic.finish_wire(), None);
+        assert_eq!(schematic.finish_wire(|_| false), None);
         assert!(!schematic.has_pending_operation());
         assert!(!schematic.can_undo());
         assert!(schematic.session.is_dirty);
@@ -231,7 +239,7 @@ mod tests {
         schematic.extend_wire(Point::new(10, 0));
 
         assert!(!schematic.session.editor.wire_drawing.active);
-        assert_eq!(schematic.finish_wire(), None);
+        assert_eq!(schematic.finish_wire(|_| false), None);
         assert!(!schematic.can_undo());
         assert!(schematic.design.document().wires.is_empty());
         assert!(!schematic.session.is_dirty);
