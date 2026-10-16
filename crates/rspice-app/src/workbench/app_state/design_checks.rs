@@ -19,7 +19,7 @@ use rspice_design::drc::{DrcConfig, DrcLocation, DrcResult};
 use super::AppState;
 use super::diagnostic_store::{
     DiagnosticInputs, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject, FindingKey,
-    design_rule_code, mint_canonical,
+    mint_canonical,
 };
 
 /// Producer identity every schematic and electrical rule finding carries.
@@ -368,7 +368,7 @@ fn design_rule_records(
         .map(|violation| {
             FindingKey::new(
                 Arc::clone(&producer),
-                design_rule_code(violation.violation_type),
+                violation.violation_type.rule_code(),
                 Arc::clone(&document),
                 location_key(&violation.location),
             )
@@ -797,7 +797,7 @@ mod tests {
         // A record that already holds the identity this pass will mint.
         let key = FindingKey::new(
             DESIGN_RULE_PRODUCER,
-            design_rule_code(rspice_design::drc::DrcViolationType::UnconnectedPin),
+            rspice_design::drc::DrcViolationType::UnconnectedPin.rule_code(),
             subject.key(),
             location_key(&location),
         );

@@ -1143,66 +1143,9 @@ fn batch_standing(batch: &DiagnosticBatch, scope: &DigestScope<'_>) -> BatchStan
     }
 }
 
-/// The stable rule code for a schematic check finding.
-///
-/// `FloatingNode` becomes `DRC-FLOATING-NODE`. Derived from the variant rather
-/// than authored beside it so a new rule cannot ship without a code, and
-/// shaped so the rule deck can address it as one word.
-pub(in crate::workbench) fn design_rule_code(
-    violation_type: rspice_design::drc::DrcViolationType,
-) -> String {
-    format!("DRC-{}", screaming_variant(violation_type))
-}
-
-/// The stable rule code for a symbol pin finding.
-///
-/// `SymbolUnplacedPin` becomes `SYMBOL-UNPLACED-PIN`. Derived from the variant
-/// exactly as [`design_rule_code`] is, and without its `DRC-` family: a
-/// symbol's pin contract is not one of a schematic's electrical rules, and a
-/// reader filtering the page by code is entitled to that distinction.
-pub(in crate::workbench) fn symbol_pin_rule_code(
-    violation_type: rspice_design::drc::DrcViolationType,
-) -> String {
-    screaming_variant(violation_type)
-}
-
-/// `FloatingNode` becomes `FLOATING-NODE`.
-///
-/// One derivation for every family, so two codes for one rule cannot drift
-/// apart on the word the rule is named by.
-fn screaming_variant(violation_type: rspice_design::drc::DrcViolationType) -> String {
-    let variant = format!("{violation_type:?}");
-    let mut code = String::with_capacity(variant.len() + 8);
-    for (index, character) in variant.char_indices() {
-        if character.is_ascii_uppercase() && index > 0 {
-            code.push('-');
-        }
-        code.push(character.to_ascii_uppercase());
-    }
-    code
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_rule_code_is_derived_from_its_variant() {
-        use rspice_design::drc::DrcViolationType;
-        assert_eq!(
-            design_rule_code(DrcViolationType::FloatingNode),
-            "DRC-FLOATING-NODE"
-        );
-        assert_eq!(
-            design_rule_code(DrcViolationType::ShortedOutputs),
-            "DRC-SHORTED-OUTPUTS"
-        );
-        assert_eq!(
-            symbol_pin_rule_code(DrcViolationType::SymbolUnplacedPin),
-            "SYMBOL-UNPLACED-PIN",
-            "a symbol's pin contract is not one of a schematic's rules",
-        );
-    }
 
     /// A symbol view whose pins the checks can read: `work/amp/symbol`, with
     /// one pin, beside a schematic that declares the matching port.

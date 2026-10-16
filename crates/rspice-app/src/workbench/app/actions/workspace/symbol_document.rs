@@ -26,7 +26,7 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::design_checks::location_key;
 use crate::workbench::app_state::diagnostic_store::{
     DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject,
-    FindingKey, mint_canonical, symbol_pin_rule_code,
+    FindingKey, mint_canonical,
 };
 use crate::workbench::{SymbolCommitIntent, SymbolDocumentSnapshot};
 use rspice_design::symbol::publication::{
@@ -818,7 +818,7 @@ fn symbol_pin_records(
         .map(|violation| {
             FindingKey::new(
                 SYMBOL_PIN_PRODUCER,
-                symbol_pin_rule_code(violation.violation_type),
+                violation.violation_type.rule_code(),
                 document_id.as_str(),
                 location_key(&violation.location),
             )
