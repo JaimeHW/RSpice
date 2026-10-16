@@ -48,16 +48,18 @@ impl CircuitData {
                     false,
                 )
             })
-            .chain((0..inductors.names.len()).filter(|&index| shorted(index)).map(
-                |index| {
-                    (
-                        inductors.names[index].as_str(),
-                        inductors.node_pos[index],
-                        inductors.node_neg[index],
-                        true,
-                    )
-                },
-            ))
+            .chain(
+                (0..inductors.names.len())
+                    .filter(|&index| shorted(index))
+                    .map(|index| {
+                        (
+                            inductors.names[index].as_str(),
+                            inductors.node_pos[index],
+                            inductors.node_neg[index],
+                            true,
+                        )
+                    }),
+            )
             .collect();
         let node_count = edges
             .iter()

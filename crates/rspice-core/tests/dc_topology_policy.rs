@@ -754,7 +754,11 @@ fn xyce_winding_ic_participates_in_nonlinear_dc_bias() {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn a_loop_through_dc_shorted_windings_is_refused_by_every_dc_solve() {
     let cases: [(&str, &[&str], bool); 4] = [
-        ("V across L\nV1 a 0 1\nL1 a 0 1u\n.end\n", &["V1", "L1"], true),
+        (
+            "V across L\nV1 a 0 1\nL1 a 0 1u\n.end\n",
+            &["V1", "L1"],
+            true,
+        ),
         (
             "V L V\nV1 a 0 1\nL1 a b 1u\nV2 b 0 1\n.end\n",
             &["V1", "V2", "L1"],
@@ -765,7 +769,11 @@ fn a_loop_through_dc_shorted_windings_is_refused_by_every_dc_solve() {
             &["V1", "V2", "L1"],
             true,
         ),
-        ("V across V\nV1 a 0 1\nV2 a 0 1\n.end\n", &["V1", "V2"], false),
+        (
+            "V across V\nV1 a 0 1\nV2 a 0 1\n.end\n",
+            &["V1", "V2"],
+            false,
+        ),
     ];
     for (deck, members, through_inductor) in cases {
         let netlist = parse(deck);
@@ -773,6 +781,9 @@ fn a_loop_through_dc_shorted_windings_is_refused_by_every_dc_solve() {
         engine
             .run_dc_op(&netlist)
             .expect_err("a loop of fixed branch voltages has no unique DC solution");
+        engine
+            .run_dc_sweep(&netlist, "V1", 0.0, 1.0, 0.5)
+            .expect_err("no point of a DC sweep has a unique solution either");
         let loops = engine
             .build_circuit(&netlist)
             .expect("the loop is refused by the solve, not by construction")

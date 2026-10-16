@@ -52,8 +52,8 @@ use model_resolution::*;
 pub use model_resolution::{
     ModelBinAxisRange, ModelBinCardGeometry, ModelBinCardInspection, ModelBinCoverageGap,
     ModelBinInspection, ModelBinInstanceInspection, ModelBinSelectionKind,
-    ResolvedResistorParameters,
-    XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION, validate_native_xyce_ltra_model_contract,
+    ResolvedResistorParameters, XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION,
+    validate_native_xyce_ltra_model_contract,
 };
 mod behavioral;
 mod boundary_supply;
@@ -11150,7 +11150,10 @@ mod tests {
             .build_circuit(&netlist)
             .expect_err("an uncovered instance blocks construction")
             .to_string();
-        assert!(message.contains("MOSFET 'M1' geometry is uncovered"), "{message}");
+        assert!(
+            message.contains("MOSFET 'M1' geometry is uncovered"),
+            "{message}"
+        );
 
         let gaps = engine
             .model_bin_coverage_gaps(&netlist)
