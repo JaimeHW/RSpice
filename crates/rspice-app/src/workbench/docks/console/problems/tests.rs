@@ -1037,7 +1037,7 @@ fn a_copied_row_keeps_tabs_and_line_breaks_inside_their_cell() {
     let row = listed.row(0).expect("listed");
     assert_eq!(
         copy_of(&row),
-        "Error\tT-1\tNode 'n1'\trspice.test\t\t\"two\tcolumns\nand \"\"two\"\" lines\"",
+        "Error\tT-1\tNode 'n1'\trspice.test\t\t\"two\tcolumns\nand \"\"two\"\" lines\"\t",
     );
 }
 

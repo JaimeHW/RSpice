@@ -69,7 +69,14 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             .layout(Layout::top_down(Align::Min)),
         |ui| match page {
             ConsolePage::Console => console(ui, &mut app.state),
-            ConsolePage::Problems => problems(ui, &mut app.state),
+            ConsolePage::Problems => {
+                // A waiver changes what refuses a run, as the rule deck does,
+                // so a run prepared or checked before it is not authorized
+                // after it.
+                if problems(ui, &mut app.state) {
+                    app.invalidate_simulation_preflight();
+                }
+            }
             ConsolePage::Measurements => measurements(ui, app),
             ConsolePage::TaskLog => task_log(ui, app),
         },

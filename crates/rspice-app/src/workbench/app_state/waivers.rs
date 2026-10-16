@@ -44,16 +44,12 @@ pub(in crate::workbench) struct WaiverTarget {
 pub(in crate::workbench) enum WaiverAction {
     /// The finding is not waived and its rule may be: record one.
     Waive(WaiverTarget),
-    /// A waiver is stored at the target: remove it.
+    /// A waiver covers the finding: remove it, so the finding counts again.
     Remove(WaiverTarget),
-}
-
-impl WaiverAction {
-    pub(in crate::workbench) const fn target(&self) -> &WaiverTarget {
-        match self {
-            Self::Waive(target) | Self::Remove(target) => target,
-        }
-    }
+    /// A stored waiver does nothing — its finding is gone, or its rule may
+    /// not be waived or is not one this build has: delete it from the
+    /// document that stores it.
+    Delete(WaiverTarget),
 }
 
 impl WaiverTarget {
@@ -232,9 +228,11 @@ pub(in crate::workbench) fn stored_waiver_records(
                 finding.message,
             )
             .keyed(key)
-            .with_waiver_action(finding.waiver.map(|waiver| {
-                WaiverAction::Remove(WaiverTarget::of_stored(subject, waiver))
-            }))
+            .with_waiver_action(
+                finding
+                    .waiver
+                    .map(|waiver| WaiverAction::Delete(WaiverTarget::of_stored(subject, waiver))),
+            )
         })
         .collect()
 }
@@ -293,7 +291,10 @@ impl AppState {
 
     /// The waivers stored with the schematic `cell_view`, where the
     /// workspace holds it.
-    pub(in crate::workbench) fn schematic_waivers(&self, cell_view: &CellViewRef) -> Option<&DrcWaivers> {
+    pub(in crate::workbench) fn schematic_waivers(
+        &self,
+        cell_view: &CellViewRef,
+    ) -> Option<&DrcWaivers> {
         let key = cell_view.key();
         self.schematic_documents()
             .into_iter()
@@ -315,9 +316,12 @@ impl AppState {
         documents
             .iter()
             .filter(|(cell_view, _)| !cell_view.key().eq_ignore_ascii_case(&subject_key))
-            .fold(CheckWaivers::for_subject(own), |waivers, (cell_view, document)| {
-                waivers.instantiating(cell_view, &document.waivers)
-            })
+            .fold(
+                CheckWaivers::for_subject(own),
+                |waivers, (cell_view, document)| {
+                    waivers.instantiating(cell_view, &document.waivers)
+                },
+            )
     }
 
     /// Waive the finding at `target` for `reason`, as an edit of the document
@@ -354,12 +358,21 @@ impl AppState {
         )
     }
 
-    fn edit_waivers(&mut self, cell_view: &CellViewRef, edit: StoredWaiverEdit) -> Result<(), String> {
+    fn edit_waivers(
+        &mut self,
+        cell_view: &CellViewRef,
+        edit: StoredWaiverEdit,
+    ) -> Result<(), String> {
         if self.workbench.safe_mode.project_read_only() {
             return Err("The project is read-only.".to_owned());
         }
         let key = cell_view.key();
-        let active = self.workspace.content.active_view.key().eq_ignore_ascii_case(&key);
+        let active = self
+            .workspace
+            .content
+            .active_view
+            .key()
+            .eq_ignore_ascii_case(&key);
         match self.workspace.content.active_view_type() {
             ViewType::Schematic | ViewType::Testbench if active => {
                 edit.apply_to_schematic(&mut self.schematic)?;
@@ -426,7 +439,10 @@ impl StoredWaiverEdit {
         }
     }
 
-    fn apply_to_schematic(self, schematic: &mut crate::state::SchematicState) -> Result<(), String> {
+    fn apply_to_schematic(
+        self,
+        schematic: &mut crate::state::SchematicState,
+    ) -> Result<(), String> {
         match self {
             Self::Waive(waiver) => schematic.waive(waiver),
             Self::Remove { rule, object } => schematic.remove_waiver(&rule, &object).map(drop),

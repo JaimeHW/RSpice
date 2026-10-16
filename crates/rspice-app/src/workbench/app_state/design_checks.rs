@@ -14,14 +14,14 @@ use crate::product::{ContentDigest, ProjectId};
 use crate::state::{
     CanonicalCellViewOwnerKey, CellViewRef, ViewType, canonical_cell_view_owner_key,
 };
-use rspice_design::drc::{DrcConfig, DrcLocation, DrcResult};
+use rspice_design::drc::{DrcConfig, DrcResult};
 
 use super::AppState;
-use super::waivers;
 use super::diagnostic_store::{
     DiagnosticInputs, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject, FindingKey,
     mint_canonical,
 };
+use super::waivers;
 
 /// Producer identity every schematic and electrical rule finding carries.
 const DESIGN_RULE_PRODUCER: &str = "rspice.design.rules";
@@ -174,13 +174,19 @@ impl AppState {
         &mut self,
         subject: CellViewRef,
         config: DrcConfig,
-        result: DrcResult,
+        mut result: DrcResult,
     ) -> Result<(), String> {
         if !result.completed {
             return Err(
                 "an incomplete design-check result cannot become current evidence".to_owned(),
             );
         }
+        // The waivers as the documents store them now, whoever produced the
+        // pass: a check states them itself, and a pass handed in from
+        // elsewhere, or re-stated after a waiver changed, is held to the same
+        // ones. Applying them again to a pass that already states them
+        // changes nothing.
+        config.waivers.apply(&mut result);
         let is_active_subject =
             owner_key(&subject) == owner_key(&self.workspace.content.active_schematic_reference());
         let input_digest = design_check_input_digest(self, &subject, &config)?;
@@ -330,11 +336,12 @@ impl AppState {
             let DesignCheckStatus::Current(receipt) = self.design_check_status(&subject) else {
                 continue;
             };
-            let mut result = receipt.result.clone();
+            let result = receipt.result.clone();
             let config = self.design_check_config(&subject);
-            config.waivers.apply(&mut result);
             if let Err(error) = self.publish_design_check_result(subject, config, result) {
-                debug_assert!(false, "a current pass was refused on re-statement: {error}");
+                self.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+                    "Findings could not be stated again against the waivers: {error}"
+                )));
             }
         }
     }
@@ -650,6 +657,7 @@ fn design_check_input_digest(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rspice_design::drc::DrcLocation;
 
     fn completed_result() -> DrcResult {
         let mut result = DrcResult::new();

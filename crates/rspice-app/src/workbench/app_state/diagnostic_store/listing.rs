@@ -1022,7 +1022,7 @@ mod tests {
             .expect("the waiver is the decision someone recorded")
             .clone();
         assert_eq!(waiver.rule, "T-ERROR");
-        assert_eq!(waiver.scope, "cell");
+        assert_eq!(waiver.reason, "accepted at review");
     }
 
     /// A stale finding keeps its row and loses its jump.
