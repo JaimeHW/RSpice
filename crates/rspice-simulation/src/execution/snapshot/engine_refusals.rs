@@ -30,8 +30,9 @@ pub enum EngineRefusalKind {
     /// DC-shorted inductors.
     BranchVoltageLoop(DcBranchVoltageLoop),
     /// A MOS instance no bin card of its family covers at this deck's
-    /// geometry and temperature.
-    UncoveredModelBin(ModelBinCoverageGap),
+    /// geometry and temperature. Boxed: the gap carries the nearest card's
+    /// whole geometry, several times the size of every other refusal.
+    UncoveredModelBin(Box<ModelBinCoverageGap>),
     /// Any other refusal the build raised — a mixed-discipline connection the
     /// connect rules cannot bridge, among others — in the engine's words.
     Build {
@@ -280,7 +281,7 @@ impl PreparedRunSnapshot {
                 });
                 let mut refused: Vec<EngineRefusalKind> = gaps
                     .into_iter()
-                    .map(EngineRefusalKind::UncoveredModelBin)
+                    .map(|gap| EngineRefusalKind::UncoveredModelBin(Box::new(gap)))
                     .collect();
                 if !stopped_on_a_gap {
                     refused.push(EngineRefusalKind::Build {
