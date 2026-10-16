@@ -52,7 +52,7 @@ pub const fn drawing_sheet_mono_baseline_offset_um(lettering_um: u64) -> u64 {
 
 /// The ISO 3098 lettering height series, smallest first. Lettering only ever
 /// steps between these, never to a height between two of them.
-pub const ISO_3098_HEIGHTS_UM: [u64; 8] =
+pub(in crate::design_management) const ISO_3098_HEIGHTS_UM: [u64; 8] =
     [1_800, 2_500, 3_500, 5_000, 7_000, 10_000, 14_000, 20_000];
 
 /// Height ISO 5457 letters a grid reference at, on every sheet size.

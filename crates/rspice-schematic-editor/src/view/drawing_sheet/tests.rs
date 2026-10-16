@@ -287,7 +287,7 @@ fn title_block_fields_are_withheld_until_their_lettering_is_legible() {
     let illegible = DrawingSheetLod::resolve(0.3, 1.0, test_lettering());
     assert!(
         !illegible.show_title_block_fields,
-        "the same capitals at a fifth of that set a 4-pixel em, which is \
+        "the same capitals at three tenths of that zoom set a 4-pixel em, which is \
          unreadable and must be withheld rather than inflated"
     );
     assert!(
