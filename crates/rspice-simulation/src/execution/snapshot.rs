@@ -47,6 +47,8 @@ use rspice_app_types::canonical::CanonicalWriter;
 pub(crate) mod bound_cards;
 mod declared_points;
 mod derived_identity;
+mod engine_refusals;
+pub use engine_refusals::{EngineRefusal, EngineRefusalKind, RefusedTask};
 mod hierarchy_map;
 mod monte_carlo;
 mod transient_checkpoint;

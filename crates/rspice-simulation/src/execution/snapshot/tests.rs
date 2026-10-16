@@ -4,6 +4,7 @@
 //! so the cases here concentrate on refusal: a digest that does not match its
 //! task, and a PVT change that must produce a new identity.
 
+mod engine_refusals;
 mod identity;
 mod monte_carlo;
 mod transient_checkpoint;
