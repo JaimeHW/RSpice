@@ -1678,7 +1678,7 @@ impl Command {
                 crate::workbench::app::open_configuration_sets_dialog(&mut app.state);
             }
             Self::RuleSetup => {
-                crate::workbench::app::dialogs::rule_setup::open_rule_setup(&mut app.state);
+                crate::workbench::app::open_rule_setup(&mut app.state);
             }
             Self::ReviewComments => {
                 crate::workbench::app::open_design_review_comments(&mut app.state);

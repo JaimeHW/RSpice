@@ -376,6 +376,8 @@ pub(in crate::workbench) enum DiagnosticOwner {
     Dispatch,
     /// One failed run, attributed to the objects the engine named.
     Run,
+    /// What the project's stored rule deck could not apply as written.
+    RuleDeck,
 }
 
 impl DiagnosticOwner {
@@ -386,11 +388,12 @@ impl DiagnosticOwner {
     /// the assertion below holds this list to one owner per place. The tests
     /// that must drive every owner walk this list rather than naming the
     /// owners they happen to know about.
-    pub(in crate::workbench) const ALL: [Self; 4] = [
+    pub(in crate::workbench) const ALL: [Self; 5] = [
         Self::DesignRules,
         Self::SymbolPins,
         Self::Dispatch,
         Self::Run,
+        Self::RuleDeck,
     ];
 
     /// This owner's place in [`Self::ALL`].
@@ -400,6 +403,7 @@ impl DiagnosticOwner {
             Self::SymbolPins => 1,
             Self::Dispatch => 2,
             Self::Run => 3,
+            Self::RuleDeck => 4,
         }
     }
 
@@ -409,6 +413,7 @@ impl DiagnosticOwner {
             Self::SymbolPins => "symbol-pins",
             Self::Dispatch => "dispatch",
             Self::Run => "run",
+            Self::RuleDeck => "rule-deck",
         }
     }
 }
@@ -450,6 +455,9 @@ pub(in crate::workbench) enum DiagnosticInputs {
         campaign: crate::product::SimulationCampaignId,
         member_index: u32,
     },
+    /// The project's stored rule deck: what it holds that this build did not
+    /// apply as written.
+    RuleDeck,
 }
 
 impl DiagnosticInputs {
@@ -459,6 +467,7 @@ impl DiagnosticInputs {
             Self::SymbolPins { .. } => DiagnosticOwner::SymbolPins,
             Self::Dispatch => DiagnosticOwner::Dispatch,
             Self::Run { .. } | Self::CampaignMember { .. } => DiagnosticOwner::Run,
+            Self::RuleDeck => DiagnosticOwner::RuleDeck,
         }
     }
 
@@ -490,6 +499,9 @@ impl DiagnosticInputs {
                 "the design or solver setup campaign member {member_index} was to run against has \
                  changed since this was reported"
             ),
+            Self::RuleDeck => {
+                "the project's rule deck has changed since this was reported".to_owned()
+            }
         }
     }
 
@@ -510,7 +522,7 @@ impl DiagnosticInputs {
                 );
                 format!("{owner}\u{1f}{subject}")
             }
-            Self::Dispatch => owner.to_owned(),
+            Self::Dispatch | Self::RuleDeck => owner.to_owned(),
             Self::Run { run_sequence } => format!("{owner}\u{1f}{run_sequence:020}"),
             // After every run, and in the order the campaign dispatched them.
             Self::CampaignMember {
@@ -572,6 +584,7 @@ impl DiagnosticInputs {
                 campaign,
                 member_index,
             } => dispatched_setup_digest(scope, &(campaign, member_index)),
+            Self::RuleDeck => super::rule_deck::live_input_digest(state),
         }
     }
 }
@@ -647,7 +660,7 @@ impl<'a> DigestScope<'a> {
     }
 }
 
-fn digest_of(material: &impl serde::Serialize) -> Result<ContentDigest, String> {
+pub(super) fn digest_of(material: &impl serde::Serialize) -> Result<ContentDigest, String> {
     let encoded = serde_json::to_vec(material)
         .map_err(|error| format!("could not encode diagnostic inputs: {error}"))?;
     let mut digest = Sha256::new();
@@ -1075,7 +1088,8 @@ impl AppState {
                 } => campaign != Some(member_campaign),
                 DiagnosticInputs::DesignCheck { .. }
                 | DiagnosticInputs::SymbolPins { .. }
-                | DiagnosticInputs::Dispatch => false,
+                | DiagnosticInputs::Dispatch
+                | DiagnosticInputs::RuleDeck => false,
             })
             .map(|batch| batch.inputs.clone())
             .collect();
@@ -1107,7 +1121,8 @@ impl AppState {
                 DiagnosticInputs::DesignCheck { .. }
                 | DiagnosticInputs::SymbolPins { .. }
                 | DiagnosticInputs::Dispatch
-                | DiagnosticInputs::CampaignMember { .. } => false,
+                | DiagnosticInputs::CampaignMember { .. }
+                | DiagnosticInputs::RuleDeck => false,
             })
             .map(|batch| batch.inputs.clone())
             .collect();
@@ -1206,6 +1221,7 @@ mod tests {
                         vec![crate::state::SimulationRun::new(3)].into();
                     DiagnosticInputs::Run { run_sequence: 3 }
                 }
+                DiagnosticOwner::RuleDeck => DiagnosticInputs::RuleDeck,
             };
             state
                 .publish_diagnostics(inputs.clone(), Vec::new())
@@ -1255,6 +1271,12 @@ mod tests {
                         crate::state::ComponentType::Resistor,
                         crate::state::Point::new(0, 0),
                     );
+                }
+                DiagnosticOwner::RuleDeck => {
+                    // A deck holding something this build does not apply.
+                    state.workspace.content.design_rules =
+                        serde_json::from_str(r#"{"schema_version":2}"#)
+                            .expect("a stored deck always reads");
                 }
             }
 
@@ -1308,7 +1330,8 @@ mod tests {
                 DiagnosticInputs::DesignCheck { .. }
                 | DiagnosticInputs::SymbolPins { .. }
                 | DiagnosticInputs::Dispatch
-                | DiagnosticInputs::CampaignMember { .. } => None,
+                | DiagnosticInputs::CampaignMember { .. }
+                | DiagnosticInputs::RuleDeck => None,
             })
             .collect()
     }

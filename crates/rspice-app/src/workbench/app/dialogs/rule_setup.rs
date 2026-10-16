@@ -8,13 +8,16 @@
 //! severity below the rule's floor is shown and refused, with the reason.
 
 use egui::{Context, Grid, RichText, ScrollArea, Ui};
-use rspice_design::drc::{DeckIssue, DesignRuleDeck, DrcRuleCategory, DrcSeverity, DrcViolationType};
+use rspice_design::drc::{
+    DeckIssue, DesignRuleDeck, DrcRuleCategory, DrcSeverity, DrcViolationType,
+};
 
 use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, DialogTransactionTone, select_with_disabled};
-use crate::workbench::app::RSpiceApp;
+use crate::ui::widgets::{
+    Dialog, DialogChoice, DialogSize, DialogTransactionTone, select_with_disabled,
+};
 use crate::workbench::app_state::AppState;
 
 const TITLE: &str = "Design rule setup";
@@ -58,61 +61,61 @@ fn unread_issue(deck: &DesignRuleDeck) -> Option<DeckIssue> {
     })
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_rule_setup_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.rule_setup.open {
-            return;
-        }
-        let read_only = self.state.workbench.safe_mode.project_read_only();
-        let unread = unread_issue(&self.state.dialogs.rule_setup.draft);
-        let editable = !read_only && unread.is_none();
-        let changed = self.state.dialogs.rule_setup.draft != self.state.workspace.content.design_rules;
-        let mut dialog = Dialog::new(TITLE, PRIMARY)
-            .description(DESCRIPTION)
-            .size(DialogSize::Manager)
-            .ghost("Close")
-            .primary_enabled(editable && changed);
-        if let Some(issue) = &unread {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                "The stored deck is not applied",
-                issue.to_string(),
-            );
-        } else if read_only {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Progress,
-                "Inspection only",
-                "The project is read-only.",
-            );
-        } else if let Some(refusal) = self.state.dialogs.rule_setup.refusal.clone() {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                "Severity refused",
-                refusal,
-            );
-        }
-        let session = &mut self.state.dialogs.rule_setup;
-        let choice = dialog.show(ctx, |ui| rule_table(ui, session, editable));
-        match choice {
-            DialogChoice::Primary => self.apply_rule_setup(),
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.rule_setup = RuleSetupDialogState::default();
-            }
-            DialogChoice::None | DialogChoice::Secondary => {}
-        }
+/// Draw the dialog while it is open. Returns whether the draft was applied,
+/// so the caller drops any run prepared under the old deck.
+pub(in crate::workbench) fn render_rule_setup_dialog(ctx: &Context, state: &mut AppState) -> bool {
+    if !state.dialogs.rule_setup.open {
+        return false;
     }
+    let read_only = state.workbench.safe_mode.project_read_only();
+    let unread = unread_issue(&state.dialogs.rule_setup.draft);
+    let editable = !read_only && unread.is_none();
+    let changed = state.dialogs.rule_setup.draft != state.workspace.content.design_rules;
+    let mut dialog = Dialog::new(TITLE, PRIMARY)
+        .description(DESCRIPTION)
+        .size(DialogSize::Manager)
+        .ghost("Close")
+        .primary_enabled(editable && changed);
+    if let Some(issue) = &unread {
+        dialog = dialog.transaction_state(
+            DialogTransactionTone::Error,
+            "The stored deck is not applied",
+            issue.to_string(),
+        );
+    } else if read_only {
+        dialog = dialog.transaction_state(
+            DialogTransactionTone::Progress,
+            "Inspection only",
+            "The project is read-only.",
+        );
+    } else if let Some(refusal) = state.dialogs.rule_setup.refusal.clone() {
+        dialog =
+            dialog.transaction_state(DialogTransactionTone::Error, "Severity refused", refusal);
+    }
+    let session = &mut state.dialogs.rule_setup;
+    match dialog.show(ctx, |ui| rule_table(ui, session, editable)) {
+        DialogChoice::Primary => {
+            apply_rule_setup(state);
+            true
+        }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            state.dialogs.rule_setup = RuleSetupDialogState::default();
+            false
+        }
+        DialogChoice::None | DialogChoice::Secondary => false,
+    }
+}
 
-    /// Make the draft the project's deck. The reports produced under the old
-    /// one go stale through their digests, and preflight authority is dropped,
-    /// because what blocks a run has changed.
-    fn apply_rule_setup(&mut self) {
-        let draft = self.state.dialogs.rule_setup.draft.clone();
-        self.state.workspace.content.design_rules = draft;
-        self.state.workspace.content.project_metadata_dirty = true;
-        self.invalidate_simulation_preflight();
-        self.state.publish_rule_deck_issues();
-        self.state.dialogs.rule_setup = RuleSetupDialogState::default();
-    }
+/// Make the draft the project's deck. The reports produced under the old one
+/// go stale through their digests, and preflight authority is dropped,
+/// because what blocks a run has changed.
+fn apply_rule_setup(state: &mut AppState) {
+    let draft = state.dialogs.rule_setup.draft.clone();
+    state.workspace.content.design_rules = draft;
+    state.workspace.content.project_metadata_dirty = true;
+    state.workbench.preflight.invalidate();
+    state.publish_rule_deck_issues();
+    state.dialogs.rule_setup = RuleSetupDialogState::default();
 }
 
 fn rule_table(ui: &mut Ui, session: &mut RuleSetupDialogState, editable: bool) {
@@ -121,11 +124,11 @@ fn rule_table(ui: &mut Ui, session: &mut RuleSetupDialogState, editable: bool) {
         .id_salt("rule-setup-table")
         .show(ui, |ui| {
             Grid::new("rule-setup-grid")
-                .num_columns(5)
+                .num_columns(6)
                 .striped(true)
                 .spacing([12.0, 2.0])
                 .show(ui, |ui| {
-                    for label in ["Rule", "Code", "Default", "Project", "Waivable"] {
+                    for label in ["Rule", "Code", "Default", "Project", "Waivable", "Floor"] {
                         ui.label(
                             RichText::new(label)
                                 .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
@@ -150,7 +153,12 @@ fn rule_table(ui: &mut Ui, session: &mut RuleSetupDialogState, editable: bool) {
         });
 }
 
-fn rule_row(ui: &mut Ui, session: &mut RuleSetupDialogState, rule: DrcViolationType, editable: bool) {
+fn rule_row(
+    ui: &mut Ui,
+    session: &mut RuleSetupDialogState,
+    rule: DrcViolationType,
+    editable: bool,
+) {
     let entry = rule.rule();
     ui.label(entry.title).on_hover_text(entry.explanation);
     ui.monospace(entry.code);
@@ -158,19 +166,16 @@ fn rule_row(ui: &mut Ui, session: &mut RuleSetupDialogState, rule: DrcViolationT
 
     let effective = session.draft.effective_severity(rule);
     let decided = session.draft.severity(rule).is_some();
-    let mut options = vec![format!("Default ({})", entry.default_severity.display_name())];
-    options.extend(DrcSeverity::ALL.iter().map(|severity| severity.display_name().to_owned()));
-    let reason = if entry.floor >= DrcSeverity::Error {
-        REFUSES_THE_RUN
-    } else {
-        INVENTED_VALUE
-    };
-    let disabled = DrcSeverity::ALL
-        .iter()
-        .enumerate()
-        .filter(|(_, severity)| **severity < entry.floor && **severity != entry.default_severity)
-        .map(|(index, _)| (index + 1, reason))
-        .collect::<Vec<_>>();
+    let mut options = vec![format!(
+        "Default ({})",
+        entry.default_severity.display_name()
+    )];
+    options.extend(
+        DrcSeverity::ALL
+            .iter()
+            .map(|severity| severity.display_name().to_owned()),
+    );
+    let disabled = refused_options(rule);
     let selected = if decided {
         effective.display_name().to_owned()
     } else {
@@ -189,18 +194,54 @@ fn rule_row(ui: &mut Ui, session: &mut RuleSetupDialogState, rule: DrcViolationT
         if let Some(index) = picked {
             let result = match index {
                 0 => session.draft.clear(rule),
-                index => session.draft.set_severity(rule, DrcSeverity::ALL[index - 1]),
+                index => session
+                    .draft
+                    .set_severity(rule, DrcSeverity::ALL[index - 1]),
             };
             session.refusal = result.err().map(|refusal| refusal.to_string());
         }
     });
     ui.label(if entry.waivable { "Yes" } else { "No" });
+    ui.label(floor_cell(rule));
     ui.end_row();
+}
+
+/// The lowest the rule may be set, and, where a finding on an instance the
+/// deck cannot write is held higher whatever is set, that floor beside it.
+fn floor_cell(rule: DrcViolationType) -> String {
+    let floor = rule.rule().floor;
+    if floor.unwritten_instance > floor.deck {
+        format!(
+            "{} \u{00b7} {} if unwritten",
+            floor.deck.display_name(),
+            floor.unwritten_instance.display_name()
+        )
+    } else {
+        floor.deck.display_name().to_owned()
+    }
+}
+
+/// The project-severity options a rule refuses, by their place in the select
+/// (the default is option 0), each with the reason it is refused.
+fn refused_options(rule: DrcViolationType) -> Vec<(usize, &'static str)> {
+    let floor = rule.rule().floor.deck;
+    let reason = if floor >= DrcSeverity::Error {
+        REFUSES_THE_RUN
+    } else {
+        INVENTED_VALUE
+    };
+    DrcSeverity::ALL
+        .iter()
+        .enumerate()
+        .filter(|(_, severity)| **severity < floor)
+        .map(|(index, _)| (index + 1, reason))
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app::RSpiceApp;
 
     #[test]
     fn the_dialog_opens_on_the_projects_deck_and_applies_its_draft() {
@@ -225,7 +266,7 @@ mod tests {
             .set_severity(DrcViolationType::FloatingNode, DrcSeverity::Info)
             .expect("a floating node may be demoted");
         app.state.workspace.content.project_metadata_dirty = false;
-        app.apply_rule_setup();
+        apply_rule_setup(&mut app.state);
         assert!(!app.state.dialogs.rule_setup.open);
         assert!(app.state.workspace.content.project_metadata_dirty);
         assert_eq!(
@@ -236,6 +277,30 @@ mod tests {
                 .severity(DrcViolationType::FloatingNode),
             Some(DrcSeverity::Info)
         );
+    }
+
+    /// A severity below a rule's floor is offered, so the reader sees the
+    /// whole range, but cannot be picked, and says why.
+    #[test]
+    fn a_severity_below_the_floor_is_refused_with_the_reason() {
+        assert_eq!(
+            refused_options(DrcViolationType::DuplicateName),
+            vec![(1, REFUSES_THE_RUN), (2, REFUSES_THE_RUN)]
+        );
+        assert_eq!(
+            refused_options(DrcViolationType::MissingParameter),
+            vec![(1, INVENTED_VALUE)]
+        );
+        assert!(refused_options(DrcViolationType::DanglingWire).is_empty());
+        // An empty reference may be set to anything; the instance the deck
+        // cannot write is held at an error by the checker, and the floor
+        // column says so.
+        assert!(refused_options(DrcViolationType::EmptyName).is_empty());
+        assert_eq!(
+            floor_cell(DrcViolationType::EmptyName),
+            "Info \u{00b7} Error if unwritten"
+        );
+        assert_eq!(floor_cell(DrcViolationType::DuplicateName), "Error");
     }
 
     #[test]

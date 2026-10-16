@@ -325,6 +325,7 @@ fn remediation_key(remediation: &PreflightRemediation) -> String {
             corner.as_deref().unwrap_or_default()
         ),
         PreflightRemediation::NetlistSource { .. } => "netlist-source".to_owned(),
+        PreflightRemediation::RuleSetup => "rule-setup".to_owned(),
     }
 }
 
@@ -380,9 +381,9 @@ const fn remediation_producer(remediation: &PreflightRemediation) -> (&'static s
         PreflightRemediation::Models { .. } => (MODEL_BINDING_PRODUCER, "MODEL"),
         PreflightRemediation::ProjectTechnology => (MODEL_BINDING_PRODUCER, "TECH"),
         PreflightRemediation::NetlistSource { .. } => (NETLIST_PRODUCER, "NETLIST"),
-        PreflightRemediation::DesignChecks | PreflightRemediation::SimulationPlan { .. } => {
-            (PREFLIGHT_PRODUCER, "RUN")
-        }
+        PreflightRemediation::DesignChecks
+        | PreflightRemediation::SimulationPlan { .. }
+        | PreflightRemediation::RuleSetup => (PREFLIGHT_PRODUCER, "RUN"),
     }
 }
 
@@ -411,6 +412,7 @@ fn remediation_subject(remediation: &PreflightRemediation) -> String {
             format!("Generated netlist · line {line}")
         }
         PreflightRemediation::NetlistSource { line: None } => "Generated netlist".to_owned(),
+        PreflightRemediation::RuleSetup => "Rule deck".to_owned(),
     }
 }
 

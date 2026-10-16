@@ -93,6 +93,9 @@ fn rule_deck_records(state: &AppState) -> Vec<DiagnosticRecord> {
                 DeckIssue::UnknownRule { code } | DeckIssue::UnreadableSeverity { code, .. } => {
                     format!("Rule deck \u{00b7} {code}")
                 }
+                DeckIssue::BelowFloor { rule, .. } => {
+                    format!("Rule deck \u{00b7} {}", rule.rule_code())
+                }
                 DeckIssue::UnsupportedSchema { .. } | DeckIssue::Unreadable { .. } => {
                     "Rule deck".to_owned()
                 }
@@ -104,7 +107,9 @@ fn rule_deck_records(state: &AppState) -> Vec<DiagnosticRecord> {
                 format!("{file}: {issue}."),
             )
             .keyed(key)
-            .with_route(Some(DiagnosticRoute::Repair(PreflightRemediation::RuleSetup)))
+            .with_route(Some(DiagnosticRoute::Repair(
+                PreflightRemediation::RuleSetup,
+            )))
         })
         .collect()
 }
@@ -117,6 +122,9 @@ fn issue_identity(issue: &DeckIssue) -> (&'static str, String) {
         DeckIssue::UnreadableSeverity { code, .. } => {
             ("RULE-DECK-UNREADABLE-SEVERITY", code.clone())
         }
+        DeckIssue::BelowFloor { rule, .. } => {
+            ("RULE-DECK-BELOW-FLOOR", rule.rule_code().to_owned())
+        }
         DeckIssue::UnsupportedSchema { .. } => ("RULE-DECK-UNSUPPORTED-SCHEMA", String::new()),
         DeckIssue::Unreadable { .. } => ("RULE-DECK-UNREADABLE", String::new()),
     }
@@ -127,10 +135,12 @@ fn issue_identity(issue: &DeckIssue) -> (&'static str, String) {
 /// A deck that is not applied, or a decided rule checked at its default,
 /// means the design is checked under a policy the team did not write: a rule
 /// they promoted to a blocker no longer blocks. A row naming a rule this build
-/// does not have changes nothing this build checks.
+/// does not have changes nothing this build checks, and a row clamped to its
+/// rule's floor is checked more strictly than written, which hides nothing:
+/// every finding it affects says what it is reported at.
 const fn issue_level(issue: &DeckIssue) -> DiagnosticLevel {
     match issue {
-        DeckIssue::UnknownRule { .. } => DiagnosticLevel::Info,
+        DeckIssue::UnknownRule { .. } | DeckIssue::BelowFloor { .. } => DiagnosticLevel::Info,
         DeckIssue::UnreadableSeverity { .. }
         | DeckIssue::UnsupportedSchema { .. }
         | DeckIssue::Unreadable { .. } => DiagnosticLevel::Warning,
@@ -152,9 +162,10 @@ mod tests {
     #[test]
     fn a_deck_this_build_reads_in_full_publishes_nothing() {
         let mut state = AppState::default();
-        state.workspace.content.design_rules =
-            serde_json::from_str(r#"{"schema_version":1,"severities":{"DRC-DANGLING-WIRE":"Error"}}"#)
-                .expect("a stored deck always reads");
+        state.workspace.content.design_rules = serde_json::from_str(
+            r#"{"schema_version":1,"severities":{"DRC-DANGLING-WIRE":"Error"}}"#,
+        )
+        .expect("a stored deck always reads");
         state.publish_rule_deck_issues();
         assert!(deck_records(&state).is_empty());
     }
@@ -174,12 +185,55 @@ mod tests {
         assert_eq!(records.len(), 1);
         let record = &records[0];
         assert_eq!(&*record.canonical.code, "RULE-DECK-UNKNOWN-RULE");
-        assert!(record.message.starts_with("amp.rspice: "), "{}", record.message);
-        assert!(record.message.contains("DRC-FUTURE-RULE"), "{}", record.message);
+        assert!(
+            record.message.starts_with("amp.rspice: "),
+            "{}",
+            record.message
+        );
+        assert!(
+            record.message.contains("DRC-FUTURE-RULE"),
+            "{}",
+            record.message
+        );
         assert_eq!(record.level, DiagnosticLevel::Info);
         assert_eq!(
             record.route,
             Some(DiagnosticRoute::Repair(PreflightRemediation::RuleSetup))
+        );
+    }
+
+    /// A stored row below its rule's floor is applied at the floor and
+    /// reported, naming the rule's code and the project file.
+    #[test]
+    fn a_row_below_the_floor_is_reported_as_clamped() {
+        let mut state = AppState::default();
+        state.workspace.content.project.path = Some("designs/amp.rspice".into());
+        state.workspace.content.design_rules = serde_json::from_str(
+            r#"{"schema_version":1,"severities":{"DRC-DUPLICATE-NAME":"Info"}}"#,
+        )
+        .expect("a stored deck always reads");
+        state.publish_rule_deck_issues();
+        let records = deck_records(&state);
+        assert_eq!(records.len(), 1, "{records:?}");
+        assert_eq!(&*records[0].canonical.code, "RULE-DECK-BELOW-FLOOR");
+        assert_eq!(records[0].level, DiagnosticLevel::Info);
+        assert!(
+            records[0].message.starts_with("amp.rspice: "),
+            "{}",
+            records[0].message
+        );
+        assert!(
+            records[0].message.contains("DRC-DUPLICATE-NAME"),
+            "{}",
+            records[0].message
+        );
+        assert_eq!(
+            state
+                .workspace
+                .content
+                .design_rules
+                .severity(rspice_design::drc::DrcViolationType::DuplicateName),
+            Some(rspice_design::drc::DrcSeverity::Error)
         );
     }
 
