@@ -324,6 +324,44 @@ impl AppState {
             )
     }
 
+    /// Every waiver the documents open for editing store: each schematic's,
+    /// and the symbol's in front of the reader. Taken before an undo or redo
+    /// and compared after it, it says whether the step recorded or took
+    /// away a waiver.
+    pub(in crate::workbench) fn stored_waivers(&self) -> StoredWaivers {
+        StoredWaivers {
+            schematics: self
+                .schematic_documents()
+                .into_iter()
+                .map(|(cell_view, document)| (cell_view.key(), document.waivers.clone()))
+                .collect(),
+            symbol: (self.workspace.content.active_view_type() == ViewType::Symbol)
+                .then(|| self.load_active_symbol_document().ok())
+                .flatten()
+                .map(|document| document.waivers),
+        }
+    }
+
+    /// State the findings again where a history step changed the waivers
+    /// stored as they were in `before`. Returns whether a schematic's
+    /// changed: those are the waivers the run gate applies.
+    ///
+    /// An undo restores the document whole, a waiver with it, and nothing
+    /// about that tells the published findings: without this a finding whose
+    /// waiver was undone would still be listed waived, and still not count.
+    pub(in crate::workbench) fn restate_waived_findings(&mut self, before: &StoredWaivers) -> bool {
+        let after = self.stored_waivers();
+        if after.symbol != before.symbol {
+            // The pin checks read the symbol document, waivers and all.
+            self.run_active_symbol_pin_checks();
+        }
+        let schematics = after.schematics != before.schematics;
+        if schematics {
+            self.refresh_waived_findings();
+        }
+        schematics
+    }
+
     /// Waive the finding at `target` for `reason`, as an edit of the document
     /// that stores it, and state every published finding again.
     pub(in crate::workbench) fn waive_finding(
@@ -420,6 +458,14 @@ impl AppState {
         self.record_symbol_edit(&before);
         Ok(())
     }
+}
+
+/// The waivers the documents open for editing store, as
+/// [`AppState::stored_waivers`] takes them.
+#[derive(Debug, PartialEq, Eq)]
+pub(in crate::workbench) struct StoredWaivers {
+    schematics: Vec<(String, DrcWaivers)>,
+    symbol: Option<DrcWaivers>,
 }
 
 /// One change to the waivers a document stores.
