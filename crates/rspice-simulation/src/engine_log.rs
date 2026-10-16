@@ -79,6 +79,11 @@ impl EngineLogQueue {
         self.suppressed_warnings
     }
 
+    /// Lines past the bound this run counted and did not keep.
+    pub fn withheld(&self) -> usize {
+        self.withheld
+    }
+
     /// Keep one line, or count it.
     ///
     /// Reached two ways: a native run's sink pushes what it captured, and the

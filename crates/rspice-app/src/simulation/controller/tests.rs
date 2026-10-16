@@ -1288,5 +1288,6 @@ fn browser_worker_transfer_protocol_matches_rust_transport() {
 
 mod autonomous_periodic;
 mod periodic_port_noise;
+mod run_log;
 
 mod pvt_family;

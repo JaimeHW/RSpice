@@ -22,7 +22,7 @@ use crate::error::SimulationError;
 use crate::execution_options::SpecExecutionOptions;
 pub(crate) use rspice_simulation_contract::worker_protocol::AnalysisExecutionEnvironment;
 
-use crate::engine_log::{EngineLogLine, EngineLogQueue, RunLogSink};
+use crate::engine_log::{EngineLogLine, EngineLogQueue, EngineLogSeal, RunLogSink};
 
 use super::execution::ResolvedTaskDispatch;
 use super::status::{SimulationProgress, SimulationStatus};
@@ -234,6 +234,16 @@ impl SimulationRunner {
     /// cannot grow this without limit.
     pub fn drain_engine_log(&self) -> Vec<EngineLogLine> {
         crate::engine_log::lock_queue(&self.engine_log).drain()
+    }
+
+    /// What the current task's engine log withheld and suppressed, for the
+    /// run's own log to account for before the next task clears the queue.
+    pub fn engine_log_tally(&self) -> EngineLogSeal {
+        let queue = crate::engine_log::lock_queue(&self.engine_log);
+        EngineLogSeal {
+            withheld: queue.withheld(),
+            suppressed_warnings: queue.suppressed_warnings(),
+        }
     }
 
     /// Latest complete journal, available independently of terminal success.

@@ -1334,6 +1334,19 @@ impl SimulationController {
         }
     }
 
+    /// Carry a finished task's withheld and suppressed counts into the run's
+    /// log, once per task, before the next dispatch clears them.
+    fn absorb_engine_log_tally(&mut self, state: &mut AppState) {
+        let tally = self.runner.engine_log_tally();
+        if let Some(run) = self
+            .current_run_id
+            .and_then(|run_sequence| state.simulation.retained.run_by_sequence_mut(run_sequence))
+        {
+            run.log
+                .absorb_engine_seal(tally.withheld, tally.suppressed_warnings);
+        }
+    }
+
     fn publish_live_transient_samples(&mut self, state: &mut AppState) {
         let deltas = self.runner.drain_transient_samples();
         if deltas.is_empty() {
@@ -1802,10 +1815,14 @@ impl SimulationController {
         // Check for completion
         if let Some(result) = self.runner.poll_result() {
             // Polling may observe completion after the frame's first stream
-            // drain. Adopt its final journal before taking provenance or
-            // dispatching the next task (which clears the runner queue).
+            // drain. Adopt its final journal and its last engine lines before
+            // taking provenance or dispatching the next task (which clears the
+            // runner queue): the task's sink has dropped by now, so the row
+            // closing a bounded log is in the queue too.
             self.publish_monte_carlo_checkpoint(state);
             self.publish_transient_checkpoint(state);
+            self.publish_engine_log(state);
+            self.absorb_engine_log_tally(state);
             let result = match self.current_transient_checkpoint_error.take() {
                 Some(error) => Err(SimulationError::InvalidConfig(error)),
                 None => result,
