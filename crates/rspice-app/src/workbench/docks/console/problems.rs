@@ -52,7 +52,7 @@ use super::{AppState, CONSOLE_FONT_SIZE, CONSOLE_ROW_MIN_HEIGHT, muted};
 use crate::diagnostics::LogAnchor;
 use crate::ui::theme::{self, FontWeight};
 use crate::workbench::app_state::diagnostic_store::listing::{
-    DiagnosticListing, DiagnosticRow, EmptyReason, RowStanding, listing,
+    DiagnosticListing, DiagnosticRow, EmptyReason, RowStanding, listing_in_pass,
 };
 use crate::workbench::app_state::diagnostic_store::{DiagnosticLevel, DiagnosticRoute};
 use crate::workbench::app_state::problems_view::ProblemsView;
@@ -95,9 +95,10 @@ impl ProblemCount {
 }
 
 /// The counts behind the tab strip's badge. Derived from exactly the rows the
-/// page lists, so the badge can never disagree with the body under it.
-pub(in crate::workbench) fn active_problem_count(state: &AppState) -> ProblemCount {
-    let counts = listing(state).counts();
+/// page lists, read once for the pass the page reads them in, so the badge can
+/// never disagree with the body under it.
+pub(in crate::workbench) fn active_problem_count(state: &AppState, pass: u64) -> ProblemCount {
+    let counts = listing_in_pass(state, pass).counts();
     ProblemCount {
         errors: counts.errors,
         advisories: counts.advisories,
@@ -175,7 +176,7 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) {
     };
     let mut intent = PageIntent::default();
     {
-        let listed = listing(state);
+        let listed = listing_in_pass(state, ui.ctx().cumulative_pass_nr());
         let total = listed.len();
         if total == 0 {
             // Nothing to list is not a table with no rows: it is one claim,

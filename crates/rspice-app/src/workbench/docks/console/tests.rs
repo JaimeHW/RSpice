@@ -392,13 +392,13 @@ fn the_problem_badge_counts_records_and_not_log_entries() {
         .unwrap(),
     );
 
-    assert_eq!(active_problem_count(&app.state).total(), 1);
+    assert_eq!(active_problem_count(&app.state, 0).total(), 1);
 
     // The same count wherever the reader is standing.
     app.state
         .workbench
         .activate(crate::workbench::state::Workspace::Results);
-    assert_eq!(active_problem_count(&app.state).total(), 1);
+    assert_eq!(active_problem_count(&app.state, 1).total(), 1);
 }
 
 #[test]

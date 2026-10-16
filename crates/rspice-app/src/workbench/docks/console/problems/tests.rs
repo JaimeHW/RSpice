@@ -13,6 +13,7 @@ use egui::accesskit::Role;
 use super::super::{CONSOLE_COLUMN_GAP, CONSOLE_MARK_GUTTER};
 use super::*;
 use crate::state::{ComponentType, Point};
+use crate::workbench::app_state::diagnostic_store::listing::listing;
 use crate::workbench::app_state::diagnostic_store::{
     DiagnosticInputs, DiagnosticRecord, DiagnosticSubject,
 };
@@ -271,6 +272,11 @@ impl Harness {
 
     fn frame(&self, state: &mut AppState, input: egui::RawInput) -> Render {
         let output = self.ctx.run_ui(input, |ui| {
+        if self.ctx.cumulative_pass_nr() == 0 {
+            // This context counts passes from zero; a memo another harness
+            // took of the same session must not answer for them.
+            state.diagnostics.forget_pass();
+        }
             egui::CentralPanel::default().show(ui, |ui| {
                 self.page.set(Some(ui.id()));
                 problems(ui, state);
@@ -2192,7 +2198,7 @@ fn a_logged_failure_is_not_a_problem() {
         None,
     );
 
-    assert_eq!(active_problem_count(&state), ProblemCount::default());
+    assert_eq!(active_problem_count(&state, 0), ProblemCount::default());
     let render = render(&mut state, sized(egui::RawInput::default()));
     assert!(
         !render.has("the engine printed a failure"),

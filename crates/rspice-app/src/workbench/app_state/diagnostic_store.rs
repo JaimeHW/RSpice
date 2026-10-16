@@ -799,6 +799,18 @@ impl DiagnosticStore {
             .cloned()
     }
 
+    /// Drop the pass memo. A test that draws the same session in a second
+    /// egui context counts passes from zero again, and would otherwise read
+    /// the first context's memo for a pass of the same number.
+    #[cfg(test)]
+    pub(in crate::workbench) fn forget_pass(&self) {
+        *self
+            .pass_memo
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
+
     fn remember_pass(&self, memo: listing::PassMemo) {
         *self
             .pass_memo

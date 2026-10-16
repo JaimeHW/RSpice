@@ -81,7 +81,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 
 fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ui.ctx());
-    let problems = active_problem_count(&app.state);
+    let problems = active_problem_count(&app.state, ui.ctx().cumulative_pass_nr());
     let touch_targets = Tokens::get(ui.ctx()).metrics.ctl_h >= 44.0;
     let header_height = if touch_targets {
         CONSOLE_TOUCH_HEADER_HEIGHT
