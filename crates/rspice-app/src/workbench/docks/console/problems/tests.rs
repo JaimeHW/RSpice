@@ -144,13 +144,13 @@ fn reported(state: &AppState) -> Vec<uuid::Uuid> {
 /// One node of the access tree, in the terms these tests read.
 ///
 /// egui puts a label widget's text in the node's *value* and a control's in
-/// its name, and reports a selection as a toggle rather than as a selection,
-/// so a test that read only `label()` would see nothing for half the rows.
+/// its name, so a test that read only `label()` would miss every label.
 struct Announced {
     role: Role,
     label: Option<String>,
     value: Option<String>,
     toggled: Option<egui::accesskit::Toggled>,
+    selected: Option<bool>,
     expanded: Option<bool>,
 }
 
@@ -160,7 +160,7 @@ impl Announced {
     }
 
     fn selected(&self) -> bool {
-        matches!(self.toggled, Some(egui::accesskit::Toggled::True))
+        self.selected == Some(true)
     }
 }
 
@@ -352,6 +352,7 @@ fn collect(output: egui::FullOutput) -> Render {
                 label: node.label().map(str::to_owned),
                 value: node.value().map(str::to_owned),
                 toggled: node.toggled(),
+                selected: node.is_selected(),
                 expanded: node.is_expanded(),
             })
             .collect();
@@ -1001,14 +1002,13 @@ fn the_canvas_tour_and_the_grid_stand_on_one_finding() {
         .expect("the finding the tour stands on is a published record");
 
     let render = render(&mut state, sized(egui::RawInput::default()));
-    // The rows, told apart from the detail region's own lines by the selection
-    // state only a row carries, and from the strip's toggles by the message
-    // only a row prints.
+    // The rows, told apart from the detail region's own lines by the role only
+    // a row carries.
     let rows: Vec<&Announced> = render
         .nodes
         .iter()
         .filter(|node| {
-            node.toggled.is_some()
+            node.role == Role::ListBoxOption
                 && node.says().is_some_and(|says| {
                     says.contains("R1 has no resistance") || says.contains("Wire ends open")
                 })
@@ -1550,11 +1550,12 @@ fn a_clicked_row_stays_in_view_when_the_detail_region_opens() {
     assert_eq!(harness.focused(), Some(grid::body_id()));
 }
 
-/// A row with nowhere to go is still a row: it can be read and selected, and
-/// it does not announce itself as something that can be pressed.
+/// Every row is an option of the list the table is, whether or not it leads
+/// anywhere, and says whether it is the current one as a list does: selected,
+/// rather than a toggle pressed or not.
 #[test]
-fn a_finding_with_nowhere_to_go_announces_as_text() {
-    let mut state = open_state();
+fn every_row_announces_as_an_option_of_the_list() {
+    let mut state = state_with_design_findings();
     let nowhere = record(
         &state,
         "TEST-NOWHERE",
@@ -1562,29 +1563,33 @@ fn a_finding_with_nowhere_to_go_announces_as_text() {
         "a finding with nowhere to go",
     );
     publish(&mut state, vec![nowhere]);
+    let listed = listing(&state);
+    let followed = (0..listed.len())
+        .filter_map(|index| listed.row(index))
+        .find(|row| row.message == "R1 has no resistance")
+        .map(|row| row.id);
+    state.diagnostics.set_current_finding(followed);
 
     let render = render(&mut state, sized(egui::RawInput::default()));
-    let row = render
-        .nodes
-        .iter()
-        .find(|node| {
-            node.says()
-                .is_some_and(|says| says.contains("a finding with nowhere to go"))
-        })
-        .expect("the finding is reachable");
-    assert_eq!(
-        row.role,
-        Role::Label,
-        "a finding with no route must not announce as a control",
-    );
-    assert!(
-        !row.selected(),
-        "it still says whether it is the current row",
-    );
-    assert!(
-        row.toggled.is_some(),
-        "and it says so rather than leaving the state unstated",
-    );
+    for (message, selected) in [
+        ("R1 has no resistance", true),
+        ("a finding with nowhere to go", false),
+    ] {
+        let row = render
+            .nodes
+            .iter()
+            .find(|node| {
+                node.role == Role::ListBoxOption
+                    && node.says().is_some_and(|says| says.contains(message))
+            })
+            .unwrap_or_else(|| panic!("{message:?} is an option of the list"));
+        assert_eq!(
+            row.selected,
+            Some(selected),
+            "{message:?} says whether it is the current row",
+        );
+        assert_eq!(row.toggled, None, "{message:?} is not a toggle");
+    }
 }
 
 /// Explain states the rule's own words, and is drawn only where the rule has

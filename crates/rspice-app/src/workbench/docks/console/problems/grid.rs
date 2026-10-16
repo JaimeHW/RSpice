@@ -374,9 +374,9 @@ pub(super) fn body(
 
 /// Paint one finding and return its response.
 ///
-/// Painted rather than built from widgets, so the row declares itself: a row
-/// that can be followed announces as a button, a row that cannot is still text
-/// a screen reader reads, and both say whether they are the current row.
+/// Painted rather than built from widgets, so the row declares itself: it is
+/// an option of the list the table is, and says whether it is the current one
+/// as a list says it — selected — rather than as a toggle pressed or not.
 pub(super) fn row(
     ui: &mut Ui,
     columns: &Columns,
@@ -393,7 +393,7 @@ pub(super) fn row(
     // Every row senses a click because every row can become the current row,
     // and none takes focus: the table is one keyboard stop, held by `body`.
     // What a row that cannot be followed does not do is *look* like a jump: it
-    // announces as text rather than as a button and leaves the pointer alone.
+    // leaves the pointer alone.
     let response = ui.interact(rect, id, Sense::CLICK);
     let announced = match cells.mark {
         RowMark::Problem(problem) => Some(problem),
@@ -410,20 +410,19 @@ pub(super) fn row(
             cells.message,
         ],
     );
-    let selected = cells.selected;
-    let target = cells.target;
+    // Declared as a selectable label so the row's words are its name, then
+    // given the role and state a list option has; egui's own projection of a
+    // selection is a toggle.
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(
-            if target {
-                egui::WidgetType::Button
-            } else {
-                egui::WidgetType::Label
-            },
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::SelectableLabel,
             ui.is_enabled(),
             label.clone(),
-        );
-        info.selected = Some(selected);
-        info
+        )
+    });
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.set_role(egui::accesskit::Role::ListBoxOption);
+        node.set_selected(cells.selected);
     });
     if cells.selected {
         ui.painter()
