@@ -28,8 +28,11 @@
 //! exactly the same one.
 //!
 //! The table is one stop in the keyboard's Tab order, not one per row. Inside
-//! it the arrows, Home, End and the page keys move the current finding, Enter
-//! follows it and Escape lets it go; Tab leaves. Following a finding — by
+//! it the arrows, Home, End and the page keys move over the findings and the
+//! group headers between them, as in a tree: Left goes from a finding to its
+//! header and closes an open one, Right opens a closed header and goes into an
+//! open one, and Enter or Space opens or closes the header stood on. Enter
+//! follows a finding and Escape lets it go; Tab leaves. Following a finding — by
 //! Enter or by a click — lets go of the keyboard, and a finding followed to
 //! the drawing gives it to the canvas, so the canvas's own keys act on what
 //! the finding named without a second click to reach it.
@@ -132,16 +135,18 @@ impl Selection {
     }
 }
 
-/// What the body was when it was last drawn: the finding it stood on, the
-/// height it was given and where it was scrolled to.
+/// What the body was when it was last drawn: the finding or group header it
+/// stood on, the height it was given and where it was scrolled to.
 ///
-/// The body brings the current row into view when that row moved under it —
-/// by a key, by a click or by the canvas tour — and when it lost height to the
+/// The body brings the current line into view when it moved under it — by a
+/// key, by a click or by the canvas tour — and when it lost height to the
 /// detail region a new selection opened. It leaves the reader's own scrolling
 /// alone otherwise.
 #[derive(Debug, Clone, Copy, Default)]
 struct BodyMemory {
     finding: Option<uuid::Uuid>,
+    /// The header stood on, by its identity.
+    group: Option<egui::Id>,
     height: f32,
     offset: f32,
 }
@@ -193,6 +198,18 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) {
         }
 
         selection.listed = current;
+        // A header is stood on only while no finding is current, so a finding
+        // made current anywhere — the canvas tour included — takes the
+        // keyboard off it; and a header no longer printed is stood on by
+        // nobody.
+        if selection.finding.is_some()
+            || view
+                .current_group
+                .as_deref()
+                .is_some_and(|label| arrangement.group_named(label).is_none())
+        {
+            view.current_group = None;
+        }
         let body = BodyMemory::load(ui.ctx());
         keyboard(
             ui,
@@ -313,12 +330,13 @@ struct Table<'a, 'listing> {
     height: f32,
 }
 
-/// How a pressed row left the keyboard.
+/// How a pressed line left the keyboard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Press {
-    /// It was followed into another surface, which takes the keyboard.
+    /// A finding was followed into another surface.
     Followed,
-    /// It had nowhere to go, so the reader stays in the table.
+    /// A finding with nowhere to go, or a group header: the reader stays in
+    /// the table.
     Stayed,
 }
 
@@ -338,18 +356,21 @@ fn table(
     // whatever the enclosing dock spaces its rows by — the same arithmetic
     // `show_rows` does, read from the same place rather than assumed.
     let pitch = CONSOLE_ROW_MIN_HEIGHT + ui.spacing().item_spacing.y;
-    let moved = body.finding != selection.finding;
+    let cursor = cursor_group(table.arrangement, selection, view);
+    let header = view.current_group.as_deref().map(grid::group_id);
+    let moved = body.finding != selection.finding || body.group != header;
     let shrank = table.height + 0.5 < body.height;
     if (moved || shrank)
-        && let Some(line) = selection
-            .listed
-            .and_then(|index| table.arrangement.line_of(index))
+        && let Some(line) = cursor_line(table.arrangement, selection, cursor)
         && let Some(offset) = reveal_offset(line, body.offset, table.height, pitch)
     {
         area = area.vertical_scroll_offset(offset);
     }
     let mut press = None;
-    let mut current_row = None;
+    // The line the keyboard stood on as the frame was drawn, and a line the
+    // pointer pressed during it, which is where the keyboard stands after.
+    let mut cursor_row = None;
+    let mut pressed_row = None;
     let output = area.show_rows(
         ui,
         CONSOLE_ROW_MIN_HEIGHT,
@@ -358,10 +379,21 @@ fn table(
             for line in range {
                 match table.arrangement.line(line) {
                     Some(Line::Group(group)) => {
-                        if let Some(group) = table.arrangement.group(group)
-                            && grid::group_header(ui, table.columns, group)
-                        {
-                            view.collapse(&group.label, !group.collapsed);
+                        let Some(info) = table.arrangement.group(group) else {
+                            continue;
+                        };
+                        let response =
+                            grid::group_header(ui, table.columns, info, cursor == Some(group));
+                        if response.clicked() {
+                            // A header click opens or closes it and stands the
+                            // keyboard on it, in the table.
+                            view.collapse(&info.label, !info.collapsed);
+                            selection.clear();
+                            view.current_group = Some(info.label.clone());
+                            press = Some(Press::Stayed);
+                            pressed_row = Some((response.id, response.rect));
+                        } else if cursor == Some(group) {
+                            cursor_row = Some((response.id, response.rect));
                         }
                     }
                     Some(Line::Row(index)) => {
@@ -370,9 +402,12 @@ fn table(
                         else {
                             continue;
                         };
-                        press = pressed.or(press);
-                        if selection.listed == Some(index) {
-                            current_row = Some((id, rect));
+                        if pressed.is_some() {
+                            press = pressed;
+                            pressed_row = Some((id, rect));
+                            view.current_group = None;
+                        } else if cursor.is_none() && selection.listed == Some(index) {
+                            cursor_row = Some((id, rect));
                         }
                     }
                     None => {}
@@ -382,7 +417,7 @@ fn table(
     );
 
     // The table's one keyboard stop, laid over the rows it moves through.
-    let response = grid::body(ui, output.inner_rect, current_row);
+    let response = grid::body(ui, output.inner_rect, pressed_row.or(cursor_row));
     match press {
         Some(Press::Followed) => response.surrender_focus(),
         Some(Press::Stayed) if !response.has_focus() => response.request_focus(),
@@ -393,10 +428,72 @@ fn table(
     report_escape_owner(&response);
     BodyMemory {
         finding: selection.finding,
+        group: view.current_group.as_deref().map(grid::group_id),
         height: table.height,
         offset: output.state.offset.y,
     }
     .store(ui.ctx());
+}
+
+/// The group header the keyboard stands on, by group index: the header stood
+/// on, or the header of a closed group the current finding is in.
+fn cursor_group(
+    arrangement: &Arrangement,
+    selection: &Selection,
+    view: &ProblemsView,
+) -> Option<usize> {
+    match (selection.finding, selection.listed) {
+        (None, _) => arrangement.group_named(view.current_group.as_deref()?),
+        // Only a closed group can hide the finding, so the walk that finds a
+        // finding's group is made only while one is closed.
+        (Some(_), Some(index)) if arrangement.hides_collapsed_rows() => {
+            arrangement.group_of(index).filter(|group| {
+                arrangement
+                    .group(*group)
+                    .is_some_and(|group| group.collapsed)
+            })
+        }
+        (Some(_), _) => None,
+    }
+}
+
+/// The printed line the keyboard stands on: `group`'s header, where it stands
+/// on one, or else the current finding's row.
+fn cursor_line(
+    arrangement: &Arrangement,
+    selection: &Selection,
+    group: Option<usize>,
+) -> Option<usize> {
+    match group {
+        Some(group) => arrangement.header_line(group),
+        None => selection
+            .listed
+            .and_then(|index| arrangement.line_of(index)),
+    }
+}
+
+/// Stand the keyboard on printed line `line`. A finding's line makes it the
+/// current finding; a header's makes it the header stood on, with no finding
+/// current.
+fn stand_on(
+    line: usize,
+    listed: &DiagnosticListing<'_>,
+    arrangement: &Arrangement,
+    view: &mut ProblemsView,
+    selection: &mut Selection,
+) {
+    match arrangement.line(line) {
+        Some(Line::Row(index)) => {
+            selection.listed = Some(index);
+            selection.finding = listed.facet(index).map(|facet| facet.id);
+            view.current_group = None;
+        }
+        Some(Line::Group(group)) => {
+            selection.clear();
+            view.current_group = arrangement.group(group).map(|group| group.label.clone());
+        }
+        None => {}
+    }
 }
 
 /// One finding's row, with the click that selects it and the click that
@@ -482,7 +579,8 @@ struct Keys {
     escape: bool,
 }
 
-/// Move the current row, close or open its group, follow it, or let it go.
+/// Move over the findings and group headers, open or close the header stood
+/// on, follow a finding, or let go.
 ///
 /// The keys are taken only while the table holds focus, so the page never
 /// swallows a key from the surface a reader is actually in. They are consumed
@@ -510,9 +608,10 @@ fn keyboard(
         // frame, before any page runs, unless the widget's lock filter claims
         // it — and a filter is in force only from the second frame a widget
         // holds focus. The Escape that let go on that first frame was still
-        // the reader's, and still clears the row.
+        // the reader's, and still lets go of the line stood on.
         if let_go && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape)) {
             selection.clear();
+            view.current_group = None;
         }
         return;
     }
@@ -538,47 +637,84 @@ fn keyboard(
         // move is cancelled.
         ui.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
     }
-    if (keys.left || keys.right)
-        && let Some(group) = selection
-            .listed
-            .and_then(|index| arrangement.group_of(index))
-    {
-        // Left closes the current finding's group and Right opens it again,
-        // as a tree does. The finding stays current while its group is
-        // closed; the next arrow starts again from the top or the bottom.
-        view.collapse(&group.label, keys.left);
-    }
     if keys.escape {
-        // A table with no current row would hold keys nothing acts on.
+        // A table with nothing stood on would hold keys nothing acts on.
         ui.memory_mut(|memory| memory.surrender_focus(id));
         selection.clear();
+        view.current_group = None;
         return;
     }
+    let group = cursor_group(arrangement, selection, view);
+    // Space opens and closes the header stood on. On a finding it is not the
+    // table's key, and is left alone.
+    let space =
+        group.is_some() && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Space));
+    let step = isize::from(keys.down) - isize::from(keys.up);
+    let moves = keys.home || keys.end || keys.page_down || keys.page_up || step != 0;
+    if !(moves || keys.left || keys.right || keys.enter || space) {
+        return;
+    }
+    let at = cursor_line(arrangement, selection, group);
+    let header = group.and_then(|group| arrangement.group(group));
     let pitch = CONSOLE_ROW_MIN_HEIGHT + ui.spacing().item_spacing.y;
-    // A page is the rows the body showed whole, less one, so the row a page
+    // A page is the lines the body showed whole, less one, so the line a page
     // key leaves from is still on screen after it.
     let per_page = ((body.height / pitch).floor() as usize)
         .saturating_sub(1)
         .max(1);
-    let step = isize::from(keys.down) - isize::from(keys.up);
     let next = if keys.home {
-        arrangement.first()
+        arrangement.step_line(None, 1)
     } else if keys.end {
-        arrangement.last()
+        arrangement.step_line(None, -1)
     } else if keys.page_down {
-        arrangement.page(selection.listed, per_page, true)
+        arrangement.page_line(at, per_page, true)
     } else if keys.page_up {
-        arrangement.page(selection.listed, per_page, false)
+        arrangement.page_line(at, per_page, false)
     } else if step != 0 {
-        arrangement.step(selection.listed, step)
+        arrangement.step_line(at, step)
+    } else if keys.left {
+        // As in a tree: Left closes an open header, and goes from a finding
+        // to its group's header.
+        match header {
+            Some(header) => {
+                view.collapse(&header.label, true);
+                None
+            }
+            None => selection
+                .listed
+                .and_then(|index| arrangement.group_of(index))
+                .and_then(|group| arrangement.header_line(group)),
+        }
+    } else if keys.right {
+        // Right opens a closed header, and goes into an open one.
+        match (header, at) {
+            (Some(header), _) if header.collapsed => {
+                view.collapse(&header.label, false);
+                None
+            }
+            (Some(_), Some(line)) => {
+                Some(line + 1).filter(|line| matches!(arrangement.line(*line), Some(Line::Row(_))))
+            }
+            _ => None,
+        }
     } else {
         None
     };
     if let Some(next) = next {
-        selection.listed = Some(next);
-        selection.finding = listed.facet(next).map(|facet| facet.id);
+        stand_on(next, listed, arrangement, view, selection);
     }
-    if keys.enter
+    if !(keys.enter || space) {
+        return;
+    }
+    // Enter and Space act where the keyboard stands once it has moved.
+    let group = if next.is_some() {
+        cursor_group(arrangement, selection, view)
+    } else {
+        group
+    };
+    if let Some(header) = group.and_then(|group| arrangement.group(group)) {
+        view.collapse(&header.label, !header.collapsed);
+    } else if keys.enter
         && let Some(row) = selection.listed.and_then(|index| listed.row(index))
         && let Some(route) = row.route
         && route_refusal(state, &route).is_none()

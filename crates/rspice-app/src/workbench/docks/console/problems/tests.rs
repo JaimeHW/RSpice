@@ -152,6 +152,7 @@ struct Announced {
     toggled: Option<egui::accesskit::Toggled>,
     selected: Option<bool>,
     expanded: Option<bool>,
+    bounds: Option<egui::Rect>,
 }
 
 impl Announced {
@@ -175,6 +176,8 @@ struct Render {
     /// Straight strokes, with their colour: the strokes of a problem mark
     /// among them.
     segments: Vec<([egui::Pos2; 2], egui::Color32)>,
+    /// Outlined rectangles, with their stroke: the focus ring among them.
+    outlines: Vec<(egui::Rect, egui::Stroke)>,
     nodes: Vec<Announced>,
 }
 
@@ -317,6 +320,9 @@ fn collect(output: egui::FullOutput) -> Render {
             )),
             egui::epaint::Shape::Rect(rect) => {
                 render.fills.push((rect.rect, rect.fill));
+                if rect.stroke.width > 0.0 {
+                    render.outlines.push((rect.rect, rect.stroke));
+                }
             }
             egui::epaint::Shape::Path(path) if path.points.len() == 3 => {
                 render.triangles.push(path.points.clone());
@@ -338,6 +344,7 @@ fn collect(output: egui::FullOutput) -> Render {
         fills: Vec::new(),
         triangles: Vec::new(),
         segments: Vec::new(),
+        outlines: Vec::new(),
         nodes: Vec::new(),
     };
     for clipped in &output.shapes {
@@ -354,6 +361,12 @@ fn collect(output: egui::FullOutput) -> Render {
                 toggled: node.toggled(),
                 selected: node.is_selected(),
                 expanded: node.is_expanded(),
+                bounds: node.bounds().map(|bounds| {
+                    egui::Rect::from_min_max(
+                        egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                        egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                    )
+                }),
             })
             .collect();
     }
@@ -714,7 +727,7 @@ fn findings_with_equal_keys_keep_their_reported_order_either_way() {
         let listed = listing(&state);
         let arrangement = Arrangement::build(&listed, &view);
         arrangement
-            .rows()
+            .listed_rows()
             .filter_map(|index| listed.row(index).map(|row| row.message.to_owned()))
             .collect::<Vec<_>>()
     };
@@ -948,8 +961,11 @@ fn copying_what_is_listed_includes_collapsed_groups() {
     let listed = listing(&state);
     let arrangement = Arrangement::build(&listed, &state.problems_view);
     assert_eq!(arrangement.listed, 3);
+    let printed = (0..arrangement.lines())
+        .filter(|line| matches!(arrangement.line(*line), Some(Line::Row(_))))
+        .count();
     assert!(
-        arrangement.rows().count() < arrangement.listed,
+        printed < arrangement.listed,
         "precondition: the collapsed group's findings are not printed",
     );
     let copied = copy_of_listed(&listed, &arrangement);
@@ -1381,6 +1397,202 @@ fn home_end_and_the_page_keys_move_through_the_list() {
     );
 }
 
+/// The groups `state` lists under its own reading position, by label, in the
+/// order they are printed.
+fn group_labels(state: &AppState) -> Vec<String> {
+    let listed = listing(state);
+    let arrangement = Arrangement::build(&listed, &state.problems_view);
+    (0..arrangement.lines())
+        .filter_map(|line| match arrangement.line(line) {
+            Some(Line::Group(group)) => arrangement.group(group).map(|group| group.label.clone()),
+            Some(Line::Row(_)) | None => None,
+        })
+        .collect()
+}
+
+/// A group closed with the mouse opens again from the keyboard alone, as a
+/// tree does: the header is a line the arrows stand on, Right opens it and
+/// goes into it, Left comes back out to it and closes it, and Enter and Space
+/// open and close it.
+#[test]
+fn a_group_closed_with_the_mouse_opens_again_from_the_keyboard() {
+    let mut state = state_with_design_findings();
+    netlist_finding_with_a_fix(&mut state);
+    state.problems_view.grouping = ProblemGrouping::Producer;
+    let label = "rspice.design.rules";
+    let first_of_group = {
+        let listed = listing(&state);
+        (0..listed.len())
+            .filter_map(|index| listed.row(index))
+            .find(|row| row.message == "R1 has no resistance")
+            .map(|row| row.id)
+            .expect("the resistor's finding is listed")
+    };
+    let harness = Harness::new();
+    harness.settle(&mut state);
+    let render = harness.frame(&mut state, sized(egui::RawInput::default()));
+    let header = render
+        .nodes
+        .iter()
+        .find(|node| {
+            node.expanded.is_some() && node.says().is_some_and(|says| says.starts_with(label))
+        })
+        .and_then(|node| node.bounds)
+        .expect("the group's header is drawn");
+
+    let _ = harness.frame(&mut state, clicked(header.center()));
+    assert!(
+        state.problems_view.is_collapsed(label),
+        "the click closed it"
+    );
+    assert_eq!(
+        harness.focused(),
+        Some(grid::body_id()),
+        "and left the keyboard in the table",
+    );
+    assert_eq!(state.problems_view.current_group.as_deref(), Some(label));
+    assert_eq!(state.diagnostics.current_finding(), None);
+
+    harness.settle(&mut state);
+    let _ = harness.frame(&mut state, keyed(egui::Key::ArrowRight));
+    assert!(!state.problems_view.is_collapsed(label), "Right opens it");
+    harness.settle(&mut state);
+    let _ = harness.frame(&mut state, keyed(egui::Key::ArrowRight));
+    assert_eq!(
+        state.diagnostics.current_finding(),
+        Some(first_of_group),
+        "Right on an open header goes to its first finding",
+    );
+    assert_eq!(state.problems_view.current_group, None);
+
+    let _ = harness.frame(&mut state, keyed(egui::Key::ArrowLeft));
+    assert_eq!(
+        state.problems_view.current_group.as_deref(),
+        Some(label),
+        "Left on a finding goes to its header",
+    );
+    assert_eq!(state.diagnostics.current_finding(), None);
+    assert!(!state.problems_view.is_collapsed(label));
+    let _ = harness.frame(&mut state, keyed(egui::Key::ArrowLeft));
+    assert!(
+        state.problems_view.is_collapsed(label),
+        "Left on an open header closes it",
+    );
+
+    harness.settle(&mut state);
+    let _ = harness.frame(&mut state, keyed(egui::Key::Enter));
+    assert!(!state.problems_view.is_collapsed(label), "Enter opens it");
+    harness.settle(&mut state);
+    let _ = harness.frame(&mut state, keyed(egui::Key::Space));
+    assert!(state.problems_view.is_collapsed(label), "Space closes it");
+    assert_eq!(harness.focused(), Some(grid::body_id()));
+}
+
+/// With every group closed the lines are the headers alone, and the arrows,
+/// Home and End still move over them.
+#[test]
+fn with_every_group_closed_the_arrows_still_move() {
+    let mut state = state_with_design_findings();
+    netlist_finding_with_a_fix(&mut state);
+    state.problems_view.grouping = ProblemGrouping::Producer;
+    let labels = group_labels(&state);
+    assert_eq!(labels.len(), 2, "precondition: two groups: {labels:?}");
+    for label in &labels {
+        state.problems_view.collapse(label, true);
+    }
+    let standing = |state: &AppState| state.problems_view.current_group.clone();
+
+    let harness = Harness::new();
+    harness.settle(&mut state);
+    harness.focus_table();
+    let _ = harness.frame(&mut state, keyed(egui::Key::ArrowDown));
+    assert_eq!(standing(&state).as_ref(), Some(&labels[0]));
+    let _ = harness.frame(&mut state, keyed(egui::Key::ArrowDown));
+    assert_eq!(standing(&state).as_ref(), Some(&labels[1]));
+    let _ = harness.frame(&mut state, keyed(egui::Key::ArrowDown));
+    assert_eq!(
+        standing(&state).as_ref(),
+        Some(&labels[0]),
+        "the arrows wrap as they do over findings",
+    );
+    let _ = harness.frame(&mut state, keyed(egui::Key::End));
+    assert_eq!(standing(&state).as_ref(), Some(&labels[1]));
+    let _ = harness.frame(&mut state, keyed(egui::Key::Home));
+    assert_eq!(standing(&state).as_ref(), Some(&labels[0]));
+    assert_eq!(state.diagnostics.current_finding(), None);
+    assert_eq!(harness.focused(), Some(grid::body_id()));
+}
+
+/// ArrowUp on the frame the table gains focus moves within the table. egui
+/// reads that arrow as a move to the widget above before any page runs, and
+/// above the table are the column headings.
+#[test]
+fn arrow_up_on_the_first_focused_frame_stays_in_the_table() {
+    let mut state = state_with_findings(4);
+    let order = reported(&state);
+    let harness = Harness::new();
+    harness.settle(&mut state);
+    harness.focus_table();
+    let _ = harness.frame(&mut state, keyed(egui::Key::ArrowUp));
+    assert_eq!(
+        harness.focused(),
+        Some(grid::body_id()),
+        "the arrow did not carry the keyboard to a heading",
+    );
+    assert_eq!(
+        state.diagnostics.current_finding(),
+        order.last().copied(),
+        "Up from nothing stands on the last line",
+    );
+}
+
+/// Tab into the table frames the line it stands on with the focus ring; a
+/// pointer press that gives the table focus frames nothing.
+#[test]
+fn the_focus_ring_shows_after_tab_and_not_after_a_press() {
+    let mut state = state_with_findings(5);
+    let order = reported(&state);
+    state.diagnostics.set_current_finding(Some(order[2]));
+    let accent = crate::ui::tokens::Tokens::default().color.accent;
+    let ring = |render: &Render| {
+        render
+            .outlines
+            .iter()
+            .find(|(_, stroke)| *stroke == egui::Stroke::new(2.0, accent))
+            .map(|(rect, _)| *rect)
+    };
+
+    let harness = Harness::new();
+    harness.settle(&mut state);
+    let last_heading = egui::Id::new(("workbench.problems.header", ProblemColumn::Message.label()));
+    harness
+        .ctx
+        .memory_mut(|memory| memory.request_focus(last_heading));
+    harness.settle(&mut state);
+    let _ = harness.frame(&mut state, keyed(egui::Key::Tab));
+    let tabbed = harness.frame(&mut state, sized(egui::RawInput::default()));
+    assert_eq!(harness.focused(), Some(grid::body_id()));
+    let framed = ring(&tabbed).expect("Tab shows the focus ring");
+    let row = row_of(tabbed.cell("finding 02").expect("the current row is drawn"));
+    assert!(
+        framed.contains(row.center()) && framed.height() < 2.0 * CONSOLE_ROW_MIN_HEIGHT,
+        "the ring frames the current row: {framed:?} around {row:?}",
+    );
+
+    harness
+        .ctx
+        .memory_mut(|memory| memory.surrender_focus(grid::body_id()));
+    harness.settle(&mut state);
+    let _ = harness.frame(&mut state, click_on(&tabbed, "finding 01"));
+    let pressed = harness.frame(&mut state, sized(egui::RawInput::default()));
+    assert_eq!(
+        harness.focused(),
+        Some(grid::body_id()),
+        "precondition: the press gave the table the keyboard",
+    );
+    assert_eq!(ring(&pressed), None, "a press shows no ring");
+}
+
 /// With the table unfocused the page takes no keys: a reader typing in the
 /// canvas does not move the findings list.
 #[test]
@@ -1548,6 +1760,64 @@ fn a_clicked_row_stays_in_view_when_the_detail_region_opens() {
         "{lowest} stays in view"
     );
     assert_eq!(harness.focused(), Some(grid::body_id()));
+}
+
+/// A note under the rows that wraps is given the height it wraps to: the body
+/// gives up exactly that much for it. Given one line, the note would push the
+/// detail region under it off the bottom of the dock.
+#[test]
+fn a_wrapped_note_takes_its_wrapped_height_from_the_body() {
+    // More rule findings than the body shows, so the body is as tall as it
+    // was given rather than as tall as its rows.
+    let mut state = open_state();
+    let mut result = DrcResult::new();
+    for index in 0..40 {
+        result.add_violation(DrcViolation::new(
+            index,
+            DrcViolationType::DanglingWire,
+            format!("wire {index:02} ends open"),
+            DrcLocation::Point {
+                x: 10.0 * index as f64,
+                y: 0.0,
+            },
+        ));
+    }
+    result.completed = true;
+    state
+        .publish_active_design_check_result(result)
+        .expect("the fixture publishes a current receipt");
+    state
+        .diagnostics
+        .set_current_finding(reported(&state).first().copied());
+    let narrow = || egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(360.0, HEIGHT),
+        )),
+        ..Default::default()
+    };
+    let harness = Harness::new();
+    let _ = harness.frame(&mut state, narrow());
+    let _ = harness.frame(&mut state, narrow());
+    let without_note = harness.table().height();
+
+    state.workspace.content.connectivity.policy.width_mismatch =
+        crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+    let _ = harness.frame(&mut state, narrow());
+    let render = harness.frame(&mut state, narrow());
+    let note = render
+        .cell("Faint findings were reported")
+        .expect("the stale note is drawn");
+    assert!(
+        note.height() > 1.5 * CONSOLE_ROW_MIN_HEIGHT,
+        "precondition: the note wraps at this width: {note:?}",
+    );
+    let given_up = without_note - harness.table().height();
+    assert!(
+        (given_up - note.height()).abs() < 0.5,
+        "the body gave up {given_up} for a note {} tall",
+        note.height(),
+    );
 }
 
 /// Every row is an option of the list the table is, whether or not it leads
@@ -1957,4 +2227,87 @@ fn the_arrangement_is_rebuilt_only_when_what_it_was_built_from_changes() {
         "a republished list rebuilds it",
     );
     assert_eq!(republished.listed, 6);
+}
+
+/// A row that changes in place — same identity, same number of rows — still
+/// rebuilds the arrangement when what changed is something the arrangement
+/// reads: the waiver, the severity and the standing always, and the message
+/// and subject where the reading position reads them. A count of rows would
+/// see none of these.
+#[test]
+fn the_arrangement_is_rebuilt_when_a_row_changes_in_place() {
+    let ctx = egui::Context::default();
+    let arranged = |state: &AppState| {
+        let listed = listing(state);
+        arrange::arrange(&ctx, &listed, &state.problems_view, None).0
+    };
+    let republish = |state: &mut AppState, change: &dyn Fn(&mut DiagnosticRecord)| {
+        let mut records: Vec<DiagnosticRecord> = state
+            .diagnostics
+            .batches()
+            .flat_map(|batch| batch.records.iter().cloned())
+            .collect();
+        change(&mut records[0]);
+        let identities = reported(state);
+        publish(state, records);
+        assert_eq!(
+            reported(state),
+            identities,
+            "precondition: the same rows, under the same identities",
+        );
+    };
+
+    let mut state = state_with_findings(5);
+    let built = arranged(&state);
+    republish(&mut state, &|_| {});
+    assert!(
+        Arc::ptr_eq(&built, &arranged(&state)),
+        "the same rows republished reuse the arrangement",
+    );
+
+    republish(&mut state, &|record| {
+        record.canonical.suppression = Some(rspice_app_types::diagnostics::DiagnosticSuppression {
+            rule: "T-00".to_owned(),
+            scope: "cell".to_owned(),
+            justification_required: false,
+        });
+    });
+    let waived = arranged(&state);
+    assert!(!Arc::ptr_eq(&built, &waived), "a new waiver rebuilds it");
+
+    republish(&mut state, &|record| record.level = DiagnosticLevel::Error);
+    let raised = arranged(&state);
+    assert!(!Arc::ptr_eq(&waived, &raised), "a new severity rebuilds it");
+
+    state.problems_view.text = "finding".to_owned();
+    let filtered = arranged(&state);
+    republish(&mut state, &|record| {
+        record.message = "finding 00, restated".to_owned();
+    });
+    assert!(
+        !Arc::ptr_eq(&filtered, &arranged(&state)),
+        "under a text filter, a new message rebuilds it",
+    );
+
+    state.problems_view.text.clear();
+    state.problems_view.sort = Some(ProblemColumn::Subject);
+    let by_subject = arranged(&state);
+    republish(&mut state, &|record| {
+        record.subject.object = "Node 'n9'".to_owned();
+    });
+    assert!(
+        !Arc::ptr_eq(&by_subject, &arranged(&state)),
+        "ordered by subject, a new subject rebuilds it",
+    );
+
+    let mut design = state_with_design_findings();
+    let current = arranged(&design);
+    let rows = listing(&design).len();
+    design.workspace.content.connectivity.policy.width_mismatch =
+        crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+    assert_eq!(listing(&design).len(), rows, "precondition: no row left");
+    assert!(
+        !Arc::ptr_eq(&current, &arranged(&design)),
+        "a batch gone stale rebuilds it",
+    );
 }

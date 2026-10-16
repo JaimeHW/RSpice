@@ -326,37 +326,34 @@ impl Arrangement {
         self.groups.get(index)
     }
 
-    /// The group a listed finding is in, when the rows are grouped.
-    pub(super) fn group_of(&self, listing_index: usize) -> Option<&Group> {
+    /// Which group a listed finding is in, by index, when the rows are
+    /// grouped.
+    pub(super) fn group_of(&self, listing_index: usize) -> Option<usize> {
         if !self.view.grouping.is_grouped() {
             return None;
         }
         let position = self.order.iter().position(|row| *row == listing_index)?;
-        let group = self
-            .group_starts
+        self.group_starts
             .partition_point(|start| *start <= position)
-            .checked_sub(1)?;
-        self.groups.get(group)
+            .checked_sub(1)
+    }
+
+    /// The group whose value is `label`, by index.
+    pub(super) fn group_named(&self, label: &str) -> Option<usize> {
+        self.groups.iter().position(|group| group.label == label)
+    }
+
+    /// The printed line a group's header is on.
+    pub(super) fn header_line(&self, group: usize) -> Option<usize> {
+        self.lines
+            .iter()
+            .position(|line| *line == Line::Group(group))
     }
 
     /// Whether any group is collapsed, so that what is listed is more than
     /// what is printed.
     pub(super) fn hides_collapsed_rows(&self) -> bool {
         self.groups.iter().any(|group| group.collapsed)
-    }
-
-    /// The listing indices this arrangement prints, in print order. A
-    /// collapsed group's findings are not printed.
-    pub(super) fn rows(&self) -> impl Iterator<Item = usize> + '_ {
-        let reported = self.as_reported.unwrap_or(0);
-        let grouped = self.view.grouping.is_grouped();
-        let flat: &[usize] = if grouped { &[] } else { &self.order };
-        (0..reported)
-            .chain(flat.iter().copied())
-            .chain(self.lines.iter().filter_map(|line| match line {
-                Line::Row(index) => Some(*index),
-                Line::Group(_) => None,
-            }))
     }
 
     /// Every finding the filters admit, in print order, collapsed groups
@@ -377,86 +374,43 @@ impl Arrangement {
         }
     }
 
-    /// The finding `step` places after `from` in print order, or the first one
-    /// when nothing is current. Group headers are stepped over and a collapsed
-    /// group's rows are not printed, so neither can be landed on.
-    pub(super) fn step(&self, from: Option<usize>, step: isize) -> Option<usize> {
-        if let Some(total) = self.as_reported {
-            // Drawn as reported, a finding's print position is its own index,
-            // so stepping is arithmetic rather than a walk of a list that may
-            // hold a million rows.
-            if total == 0 {
-                return None;
-            }
-            return Some(match from {
-                Some(index) if index < total => (index as isize + step)
-                    .rem_euclid(total as isize)
-                    .unsigned_abs(),
-                _ if step >= 0 => 0,
-                _ => total - 1,
-            });
-        }
-        let printed = self.rows().count();
-        if printed == 0 {
-            return None;
-        }
-        let standing = from.and_then(|index| self.rows().position(|row| row == index));
-        let next = match standing {
-            Some(position) => (position as isize + step)
-                .rem_euclid(printed as isize)
-                .unsigned_abs(),
-            None if step >= 0 => 0,
-            None => printed - 1,
-        };
-        self.rows().nth(next)
-    }
-
-    /// The first printed finding.
-    pub(super) fn first(&self) -> Option<usize> {
-        self.rows().next()
-    }
-
-    /// The last printed finding.
-    pub(super) fn last(&self) -> Option<usize> {
-        match self.as_reported {
-            Some(total) => total.checked_sub(1),
-            None => self.rows().last(),
-        }
-    }
-
-    /// The finding `lines` printed lines on from `from`, in the direction of
-    /// travel, stopping at the first or last finding rather than wrapping: a
-    /// page key that wrapped would carry the reader from the bottom of the
-    /// list to its top. A group header is never landed on; the move goes on
-    /// to the next finding past it, or back to the last one before it at the
-    /// end of the list.
-    pub(super) fn page(&self, from: Option<usize>, lines: usize, forward: bool) -> Option<usize> {
+    /// The printed line `step` lines on from line `from`, wrapping at either
+    /// end, or the first or last line when the keyboard stands nowhere.
+    ///
+    /// Group headers are lines like any other: a collapsed group is reached,
+    /// and opened again, from its header. Every move is arithmetic on line
+    /// numbers, so a list drawn as reported is never walked.
+    pub(super) fn step_line(&self, from: Option<usize>, step: isize) -> Option<usize> {
         let count = self.lines();
-        let Some(at) = from.and_then(|index| self.line_of(index)) else {
-            return if forward { self.first() } else { self.last() };
-        };
         if count == 0 {
             return None;
         }
-        let target = if forward {
-            at.saturating_add(lines).min(count - 1)
-        } else {
-            at.saturating_sub(lines)
-        };
-        let finding_on = |line: usize| match self.line(line) {
-            Some(Line::Row(index)) => Some(index),
-            Some(Line::Group(_)) | None => None,
-        };
-        if forward {
-            (target..count)
-                .find_map(finding_on)
-                .or_else(|| (0..=target).rev().find_map(finding_on))
-        } else {
-            (0..=target)
-                .rev()
-                .find_map(finding_on)
-                .or_else(|| (target..count).find_map(finding_on))
-        }
+        Some(match from {
+            Some(line) if line < count => (line as isize + step)
+                .rem_euclid(count as isize)
+                .unsigned_abs(),
+            _ if step >= 0 => 0,
+            _ => count - 1,
+        })
+    }
+
+    /// The printed line `lines` lines on from line `from` in the direction of
+    /// travel, stopping at the first or last line rather than wrapping: a page
+    /// key that wrapped would carry the reader from the bottom of the list to
+    /// its top.
+    pub(super) fn page_line(
+        &self,
+        from: Option<usize>,
+        lines: usize,
+        forward: bool,
+    ) -> Option<usize> {
+        let last = self.lines().checked_sub(1)?;
+        Some(match from {
+            Some(line) if forward => line.saturating_add(lines).min(last),
+            Some(line) => line.saturating_sub(lines).min(last),
+            None if forward => 0,
+            None => last,
+        })
     }
 }
 

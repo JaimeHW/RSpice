@@ -131,6 +131,13 @@ pub(crate) struct ProblemsView {
     pub(in crate::workbench) grouping: ProblemGrouping,
     /// The groups the reader has collapsed, by the value they group on.
     pub(in crate::workbench) collapsed: BTreeSet<String>,
+    /// The group header the keyboard stands on, by the value it groups on.
+    ///
+    /// Only while no finding is current: the current finding is the store's,
+    /// shared with the canvas tour, and a header is not a finding. Standing on
+    /// a header is how a collapsed group is reached and opened again from the
+    /// keyboard.
+    pub(in crate::workbench) current_group: Option<String>,
     /// Whether the detail region states the rule's own words.
     pub(in crate::workbench) explain: bool,
 }
@@ -153,6 +160,7 @@ impl Default for ProblemsView {
             waived: true,
             grouping: ProblemGrouping::None,
             collapsed: BTreeSet::new(),
+            current_group: None,
             explain: false,
         }
     }
@@ -176,9 +184,10 @@ impl ProblemsView {
     /// Clear every filter, so every finding is listed — what the strip's
     /// "List everything" does, and what a surface that sends the reader here
     /// to read particular findings does first, so a filter left from earlier
-    /// cannot hide them. The order, the grouping and which groups are
-    /// collapsed are how the list is read rather than what it holds, and a
-    /// collapsed group still counts its findings in its header, so they stay.
+    /// cannot hide them. The order, the grouping, which groups are collapsed
+    /// and the header the keyboard stands on are how the list is read rather
+    /// than what it holds, and a collapsed group still counts its findings in
+    /// its header, so they stay.
     ///
     /// Destructured, so a filter added to the position has to be cleared here
     /// or said not to be one.
@@ -192,6 +201,7 @@ impl ProblemsView {
             waived,
             grouping: _,
             collapsed: _,
+            current_group: _,
             explain: _,
         } = self;
         *severities = SeverityFilter::default();
@@ -229,7 +239,8 @@ impl ProblemsView {
     }
 
     /// Whether two positions list the same rows, in the same order and the
-    /// same groups. Everything but the detail region's own state.
+    /// same groups. Everything but where the keyboard stands and the detail
+    /// region's own state.
     ///
     /// Destructured rather than compared field by field, so a field added
     /// here has to be placed on one side of that line or the other.
@@ -243,6 +254,7 @@ impl ProblemsView {
             waived,
             grouping,
             collapsed,
+            current_group: _,
             explain: _,
         } = self;
         *sort == other.sort

@@ -321,9 +321,10 @@ pub(super) fn body_id() -> egui::Id {
 /// the arrows reached it arrived a frame late, and a quick second arrow moved
 /// egui's own focus past a row.
 ///
-/// `current` is the current row's identity and rectangle, where it is drawn:
-/// it is announced as the focused list's active row, and it carries the focus
-/// ring that Tab shows.
+/// `current` is the identity and rectangle of the line the keyboard stands on
+/// — a finding's row or a group's header — where it is drawn: it is announced
+/// as the focused list's active item, and it carries the focus ring that Tab
+/// shows.
 pub(super) fn body(
     ui: &mut Ui,
     rect: egui::Rect,
@@ -360,7 +361,8 @@ pub(super) fn body(
         }
     });
     // Focus a pointer press gave must not frame anything; focus Tab gave
-    // frames the row the keys will move, or the body while none is current.
+    // frames the line the keys will move from, or the body while there is
+    // none.
     // A row the body's edge cuts is framed where it shows.
     if theme::focus_is_visible(ui.ctx(), &response) {
         let framed = current
@@ -425,13 +427,7 @@ pub(super) fn row(
         node.set_selected(cells.selected);
     });
     if cells.selected {
-        ui.painter()
-            .rect_filled(rect, 0.0, tokens.color.accent.linear_multiply(0.14));
-        ui.painter().vline(
-            rect.left(),
-            rect.y_range(),
-            Stroke::new(2.0, tokens.color.accent),
-        );
+        paint_current(ui, rect);
     } else if response.hovered() {
         ui.painter().rect_filled(rect, 0.0, tokens.color.bg_hover);
     }
@@ -493,19 +489,40 @@ pub(super) fn row(
     response
 }
 
+/// The mark of the line the keyboard stands on: the selection fill and the
+/// accent edge, the same on a finding's row as on a group's header.
+fn paint_current(ui: &Ui, rect: egui::Rect) {
+    let tokens = Tokens::get(ui.ctx());
+    ui.painter()
+        .rect_filled(rect, 0.0, tokens.color.accent.linear_multiply(0.14));
+    ui.painter().vline(
+        rect.left(),
+        rect.y_range(),
+        Stroke::new(2.0, tokens.color.accent),
+    );
+}
+
+/// The identity a group's header is addressed by, so it survives the rows
+/// under it changing.
+pub(super) fn group_id(label: &str) -> egui::Id {
+    egui::Id::new(("workbench.problems.group", label))
+}
+
 /// A group's own header: what it groups on, what it holds, and whether it is
-/// open. Returns true when the reader asked to collapse or expand it.
+/// open. `current` is whether the keyboard stands on it.
 ///
-/// Like a row it is not a keyboard stop of its own; from the keyboard, Left
-/// and Right close and open the current finding's group.
-pub(super) fn group_header(ui: &mut Ui, columns: &Columns, group: &Group) -> bool {
+/// Like a row it is not a keyboard stop of its own: it is a line the table's
+/// arrows stand on, and Left, Right, Enter and Space close and open it from
+/// there.
+pub(super) fn group_header(
+    ui: &mut Ui,
+    columns: &Columns,
+    group: &Group,
+    current: bool,
+) -> egui::Response {
     let tokens = Tokens::get(ui.ctx());
     let (_, rect) = ui.allocate_space(Vec2::new(ui.available_width(), CONSOLE_ROW_MIN_HEIGHT));
-    let response = ui.interact(
-        rect,
-        egui::Id::new(("workbench.problems.group", group.label.as_str())),
-        Sense::CLICK,
-    );
+    let response = ui.interact(rect, group_id(&group.label), Sense::CLICK);
     let summary = group.counts.summary();
     let announcement = format!("{} · {summary}", group.label);
     response.widget_info(|| {
@@ -523,8 +540,12 @@ pub(super) fn group_header(ui: &mut Ui, columns: &Columns, group: &Group) -> boo
         node.set_expanded(!group.collapsed);
     });
     ui.painter().rect_filled(rect, 0.0, tokens.color.bg_panel_2);
-    if response.hovered() {
+    if current {
+        paint_current(ui, rect);
+    } else if response.hovered() {
         ui.painter().rect_filled(rect, 0.0, tokens.color.bg_hover);
+    }
+    if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     paint_chevron(
@@ -554,7 +575,7 @@ pub(super) fn group_header(ui: &mut Ui, columns: &Columns, group: &Group) -> boo
         theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular),
         tokens.color.text_dim,
     );
-    response.clicked()
+    response
 }
 
 /// A group's open/closed mark, drawn: the bundled face has no chevron glyph.
