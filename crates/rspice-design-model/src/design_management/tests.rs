@@ -2849,47 +2849,67 @@ fn title_block_lettering_steps_down_to_the_row_that_carries_it() {
     // truncated outright rather than a field lettered generously.
     let mut stepped_down = 0;
     for standard in DrawingSheetStandard::ALL {
-        let format = SchematicSheetFormat::default()
-            .try_update(|draft| {
-                draft.authored_size = AuthoredDrawingSheetSize::Standard { standard };
-                draft.margins = standard.default_margins();
-            })
-            .expect("every standard sheet size is a valid format");
-        let geometry = format.geometry().expect("a standard sheet has geometry");
-        let Some(lettering) = drawing_sheet_title_block_lettering(&format, &geometry) else {
-            continue;
-        };
-        let recommended = format.authored_size.lettering();
-        assert!(
-            lettering.caption_um <= recommended.caption_um
-                && lettering.data_um <= recommended.data_um,
-            "{standard:?} must not letter above what its sheet recommends"
-        );
-        if lettering.data_um < recommended.data_um {
-            stepped_down += 1;
-        }
-        assert!(
-            ISO_3098_HEIGHTS_UM.contains(&lettering.data_um),
-            "{standard:?} letters values at {} um, which is not on the series",
-            lettering.data_um
-        );
-
-        // A line seated on a fraction of the row reaches 0.587 of its em
-        // below that seat — 3/8 to the baseline, then 212/1000 to the foot of
-        // a `g` — and has to stop above the rule under it.
-        let rows = format
-            .title_block_rows(geometry.effective_title_block_template)
-            .expect("a block has rows") as u64;
-        let row_height_um = geometry.title_block.expect("a block has a rect").height_um / rows;
-        for (position, height_um) in [
-            (DRAWING_SHEET_TITLE_CAPTION_POSITION, lettering.caption_um),
-            (DRAWING_SHEET_TITLE_VALUE_POSITION, lettering.data_um),
+        for template in [
+            DrawingSheetTitleBlockTemplate::Compact,
+            DrawingSheetTitleBlockTemplate::Standard,
+            DrawingSheetTitleBlockTemplate::Wide,
+            DrawingSheetTitleBlockTemplate::OrganizationManaged,
         ] {
-            let (numerator, denominator) = position;
-            let below_seat_um = row_height_um - row_height_um * numerator / denominator;
+            let format = SchematicSheetFormat::default()
+                .try_update(|draft| {
+                    draft.authored_size = AuthoredDrawingSheetSize::Standard { standard };
+                    draft.margins = standard.default_margins();
+                    draft.title_block.template = template;
+                })
+                .expect("every standard sheet size is a valid format");
+            let geometry = format.geometry().expect("a standard sheet has geometry");
+            let Some(lettering) = drawing_sheet_title_block_lettering(&format, &geometry) else {
+                continue;
+            };
+            let recommended = format.authored_size.lettering();
             assert!(
-                drawing_sheet_mono_em_um(height_um) * 587 / 1_000 <= below_seat_um,
-                "{standard:?} letters at {height_um} um, whose ink crosses the rule below it"
+                lettering.caption_um <= recommended.caption_um
+                    && lettering.data_um <= recommended.data_um,
+                "{standard:?} {template:?} must not letter above what its sheet recommends"
+            );
+            if lettering.data_um < recommended.data_um {
+                stepped_down += 1;
+            }
+            for height_um in [lettering.caption_um, lettering.data_um] {
+                assert!(
+                    ISO_3098_HEIGHTS_UM.contains(&height_um),
+                    "{standard:?} {template:?} letters at {height_um} um, off the series"
+                );
+            }
+            assert!(
+                lettering.caption_um < lettering.data_um,
+                "{standard:?} {template:?} letters a caption level with or above its value"
+            );
+
+            // A line seated on a fraction of the row reaches 0.587 of its em
+            // below that seat — 3/8 to the baseline, then 212/1000 to the foot
+            // of a `g` — and its capitals rise 0.323 of its em above it. The
+            // value has to stop above the rule under it, and the caption's
+            // descenders a tenth of the value's height above the value.
+            let rows = format
+                .title_block_rows(geometry.effective_title_block_template)
+                .expect("a block has rows") as u64;
+            let row_height_um = geometry.title_block.expect("a block has a rect").height_um / rows;
+            let seat_um =
+                |(numerator, denominator): (u64, u64)| row_height_um * numerator / denominator;
+            let value_seat_um = seat_um(DRAWING_SHEET_TITLE_VALUE_POSITION);
+            assert!(
+                value_seat_um + drawing_sheet_mono_em_um(lettering.data_um) * 587 / 1_000
+                    <= row_height_um,
+                "{standard:?} {template:?} letters a value whose ink crosses the rule below it"
+            );
+            let caption_foot_um = seat_um(DRAWING_SHEET_TITLE_CAPTION_POSITION)
+                + drawing_sheet_mono_em_um(lettering.caption_um) * 587 / 1_000;
+            let value_capitals_um =
+                value_seat_um - drawing_sheet_mono_em_um(lettering.data_um) * 323 / 1_000;
+            assert!(
+                caption_foot_um + lettering.data_um / 10 <= value_capitals_um,
+                "{standard:?} {template:?} seats caption descenders on the value's capitals"
             );
         }
     }
@@ -2897,4 +2917,31 @@ fn title_block_lettering_steps_down_to_the_row_that_carries_it() {
         stepped_down > 0,
         "the largest sheets recommend more lettering than a title row can seat"
     );
+
+    // An organization may seal rows too shallow for any step between the
+    // two: both then stand on the lowest height, and the caption still never
+    // outgrows the value.
+    let shallow = DrawingSheetManagedTemplateSnapshot::try_new(
+        "example.shallow-title-block",
+        "1",
+        180_000,
+        30_000,
+        5,
+        DrawingSheetTitleFieldId::ALL.to_vec(),
+        Vec::new(),
+    )
+    .unwrap();
+    let format = SchematicSheetFormat::default()
+        .try_update(|draft| {
+            draft.authored_size = AuthoredDrawingSheetSize::Standard {
+                standard: DrawingSheetStandard::IsoA0,
+            };
+            draft.margins = DrawingSheetStandard::IsoA0.default_margins();
+            draft.title_block.template = DrawingSheetTitleBlockTemplate::OrganizationManaged;
+            draft.title_block.managed_template = Some(shallow);
+        })
+        .unwrap();
+    let lettering = drawing_sheet_title_block_lettering(&format, &format.geometry().unwrap())
+        .expect("a managed block has lettering");
+    assert_eq!((lettering.caption_um, lettering.data_um), (1_800, 1_800));
 }

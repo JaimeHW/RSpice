@@ -67,6 +67,14 @@ pub const ISO_3098_HEIGHTS_UM: [u64; 8] =
 /// rules by the ink that crosses them and not by the box around it.
 const TITLE_LINE_REACH_PER_EM: u64 = 12;
 
+/// How far a line's capitals rise above the point it is seated on, in
+/// twentieths of its em.
+///
+/// The baseline sits 3/8 of an em below the seat and the face's capitals
+/// stand 698 units per 1000-unit em above it, so they top out 0.323 of an em
+/// above the seat, and 7/20 is the next twentieth clear of it.
+const TITLE_LINE_RISE_PER_EM: u64 = 7;
+
 /// The heights a title block can actually letter its rows at.
 ///
 /// The lettering a sheet recommends rises with the paper, but a title block
@@ -76,10 +84,12 @@ const TITLE_LINE_REACH_PER_EM: u64 = 12;
 /// cross the rule below it — on the canvas, which clips a cell to its rules,
 /// that is the field truncated outright.
 ///
-/// Each height therefore steps down the standard's own series until the line
-/// it sets fits between its seat in the row and the rule under it, so a
-/// clamped field is still lettered at an ISO height rather than at some
-/// height derived from the furniture.
+/// The value therefore steps down the standard's own series until its line
+/// fits between its seat in the row and the rule under it, and the caption
+/// steps down until it sits below that value: a step of the series lower,
+/// with its descenders clear of the value's capitals. A clamped field is
+/// still lettered at ISO heights rather than at heights derived from the
+/// furniture, and its caption never draws level with the value it names.
 #[must_use]
 pub fn drawing_sheet_title_block_lettering(
     format: &SchematicSheetFormat,
@@ -94,17 +104,42 @@ pub fn drawing_sheet_title_block_lettering(
     };
     let row_height_um = authored_height_um / rows.max(1);
     let mut lettering = format.authored_size.lettering();
-    lettering.caption_um = fit_title_line_um(
-        row_height_um,
-        DRAWING_SHEET_TITLE_CAPTION_POSITION,
-        lettering.caption_um,
-    );
     lettering.data_um = fit_title_line_um(
         row_height_um,
         DRAWING_SHEET_TITLE_VALUE_POSITION,
         lettering.data_um,
     );
+    lettering.caption_um =
+        fit_title_caption_um(row_height_um, lettering.caption_um, lettering.data_um);
     Some(lettering)
+}
+
+/// Largest height at or below `requested_um` that letters a caption beneath
+/// the value it names.
+///
+/// The caption takes a lower step of the series than the value — unless the
+/// value already stands on the lowest, which has none below it — and its
+/// descenders must stop short of the value's capitals by the gap ISO 3098's
+/// own line spacing leaves between a descender and the next line's capitals:
+/// one stroke width, a tenth of the taller line's height. Clearing the rule at
+/// the foot of the cell is not enough, because the value lies between.
+fn fit_title_caption_um(row_height_um: u64, requested_um: u64, value_um: u64) -> u64 {
+    let seat_um = |(numerator, denominator): (u64, u64)| row_height_um * numerator / denominator;
+    let value_capitals_um = seat_um(DRAWING_SHEET_TITLE_VALUE_POSITION)
+        .saturating_sub(drawing_sheet_mono_em_um(value_um) * TITLE_LINE_RISE_PER_EM / 20);
+    let caption_seat_um = seat_um(DRAWING_SHEET_TITLE_CAPTION_POSITION);
+    let mut fitted_um = ISO_3098_HEIGHTS_UM[0];
+    for height_um in ISO_3098_HEIGHTS_UM {
+        if height_um > requested_um || height_um >= value_um {
+            break;
+        }
+        let ink_foot_um =
+            caption_seat_um + drawing_sheet_mono_em_um(height_um) * TITLE_LINE_REACH_PER_EM / 20;
+        if ink_foot_um + value_um / 10 <= value_capitals_um {
+            fitted_um = height_um;
+        }
+    }
+    fitted_um
 }
 
 /// Largest height at or below `requested_um` whose ink clears the rule below
