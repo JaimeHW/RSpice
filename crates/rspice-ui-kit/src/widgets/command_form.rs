@@ -65,6 +65,8 @@ const MARK_SIDE: f32 = 14.0;
 const MARK_GAP: f32 = 6.0;
 /// Air between two columns of a set of checks or choices.
 const MARK_COLUMN_GAP: f32 = 16.0;
+/// Air between the two axes of a point row.
+const POINT_GAP: f32 = 8.0;
 /// Entries a list shows before it scrolls inside its own row.
 const LIST_VISIBLE_ENTRIES: usize = 5;
 /// Air between a list's last entry and the field that adds the next.
@@ -206,6 +208,66 @@ impl<'u> FormRows<'u> {
             form::name_control(ui, &response, label);
             select_all_on_keyboard_focus(ui, &response, value);
             response
+        })
+    }
+
+    /// One multi-line mono text field, `lines` controls tall.
+    ///
+    /// For the one value in this family that is prose rather than a name: a
+    /// design note's text, where a line break is content the model keeps. A
+    /// form holding one of these hands Enter to the body with
+    /// [`CommandForm::primary_on_enter`].
+    pub fn text_multiline(
+        &mut self,
+        label: &str,
+        id: Id,
+        value: &mut String,
+        hint: &str,
+        lines: usize,
+    ) -> Response {
+        let height = Tokens::get(self.ui.ctx()).metrics.ctl_h * lines.max(2) as f32;
+        self.block(label, height, |ui, width| {
+            let response = ui.add_sized(
+                vec2(width, height),
+                egui::TextEdit::multiline(value)
+                    .id(id)
+                    .font(egui::TextStyle::Monospace)
+                    .hint_text(hint)
+                    .margin(egui::Margin::symmetric(8, 4)),
+            );
+            form::name_control(ui, &response, label);
+            response
+        })
+    }
+
+    /// One point: its X and Y side by side in the control column, for a form
+    /// that enters exact geometry. Returns the two fields in that order.
+    pub fn point(
+        &mut self,
+        label: &str,
+        id: Id,
+        x: &mut String,
+        y: &mut String,
+    ) -> (Response, Response) {
+        self.row(label, |ui, width| {
+            let t = Tokens::get(ui.ctx());
+            let field = ((width - POINT_GAP) * 0.5).max(1.0);
+            ui.spacing_mut().item_spacing.x = POINT_GAP;
+            let axis = |ui: &mut Ui, axis: &str, value: &mut String| {
+                let response = ui.add_sized(
+                    vec2(field, t.metrics.ctl_h),
+                    egui::TextEdit::singleline(value)
+                        .id(id.with(axis))
+                        .font(egui::TextStyle::Monospace)
+                        .hint_text(axis)
+                        .margin(egui::Margin::symmetric(8, 4)),
+                );
+                form::name_control(ui, &response, &format!("{label} {axis}"));
+                response
+            };
+            let x = axis(ui, "X", x);
+            let y = axis(ui, "Y", y);
+            (x, y)
         })
     }
 
@@ -865,6 +927,7 @@ pub struct CommandForm<'a> {
     status: Result<Option<&'a str>, &'a str>,
     status_lines: usize,
     status_reserved: bool,
+    primary_on_enter: bool,
 }
 
 impl<'a> CommandForm<'a> {
@@ -882,7 +945,15 @@ impl<'a> CommandForm<'a> {
             status: Ok(None),
             status_lines: 1,
             status_reserved: true,
+            primary_on_enter: true,
         }
+    }
+
+    /// Hand Enter to the body, for a form holding a
+    /// [`FormRows::text_multiline`] row where Enter is a line break.
+    pub fn primary_on_enter(mut self, on: bool) -> Self {
+        self.primary_on_enter = on;
+        self
     }
 
     /// A plain action beside the primary, for a form whose primary does one
@@ -971,14 +1042,14 @@ impl<'a> CommandForm<'a> {
         let context = self.context;
         let fields_enabled = self.fields_enabled;
         let label_col = self.label_col;
-        // Cancel is the only word any form in this family has for leaving, and
-        // Enter is the only key any of them commits on: a form with a
-        // multiline body will add the opt-out when it arrives.
+        // Cancel is the only word any form in this family has for leaving.
+        // Enter commits, except in a form that said its body owns the key.
         let mut dialog = Dialog::new(self.title, self.primary)
             .size(DialogSize::CommandForm)
             .overlay_scrollbar()
             .ghost("Cancel")
             .primary_enabled(self.primary_enabled)
+            .primary_on_enter(self.primary_on_enter)
             .initial_focus(DialogInitialFocus::BodyControl);
         if let Some(secondary) = self.secondary {
             dialog = dialog
