@@ -1,35 +1,58 @@
 # rspice-matrix
 
-`rspice-matrix` is RSpice's dependency-neutral sparse matrix package. It owns
-the frozen CSC topology, O(1) stamping handles, real KLU-class factorization,
-equilibrated faer fallback, complex sparse LU, residual evaluation, and dense
-reference fallback used by the simulator.
+Sparse matrix storage and factorization for RSpice: a frozen CSC topology with
+O(1) stamping handles, a KLU-class real LU, faer-backed complex and fallback
+LU, and the dense eigensolve the periodic analyses share. It is a crate of its
+own, depending on no other RSpice crate, because the generated Verilog-A
+models stamp into these same matrices through `rspice-veriloga-runtime`: were
+the types inside `rspice-core`, every generated model would have to be a
+source module of the engine rather than an artifact compiled once. The
+KLU-class kernel is written in Rust and does not link or wrap the SuiteSparse
+KLU C library.
 
-## Solver pipeline
+## What's in here
 
-For a real square system, the default policy performs:
+- **`sparse`** — `StaticMatrix` (real, frozen pattern), `ComplexMatrix` (the
+  same structure with complex values, for the AC-family analyses),
+  `TripletMatrix` for accumulating stamps, the `CscIndex`/`CscPatternToken`
+  stamp handles, componentwise backward-error certification, explicit dense
+  and extended-precision fallback solves, and `SparseLuSolver`, which keeps the
+  pattern and analysis of the last matrix it solved until the pattern changes.
+- **`klu`** — `KluSolver`: maximum structural matching, block-triangular form
+  and AMD fill reduction inside each irreducible block, computed once per
+  pattern; Gilbert-Peierls LU with diagonal-preference threshold pivoting
+  confined to each block; allocation-free values-only refactorization on the
+  stored pivots; and triangular solves, transposed and batched included.
+- **`dense_eigen`** — `qualified_dense_eigenspectrum`: a complete dense
+  eigenspectrum with a per-eigenpair residual check. It lives here so faer's
+  generic eigen code compiles in a package the workspace optimizes in its
+  development and test profiles.
+- **Crate root** — `SolverOptions` and its policy enums
+  (`RealSolverBackend`, `NumericFactorizationPolicy`, the circuit-LU
+  orientation, scaling and robustness selectors), and `SolverError`.
 
-1. one-time CSC validation and structural ownership;
-2. maximum structural matching and block-triangular decomposition (BTF);
-3. AMD fill reduction inside every irreducible diagonal block;
-4. Gilbert-Peierls LU with threshold pivoting constrained to each BTF block;
-5. allocation-free values-only refactorization on later Newton iterations;
-6. triangular solves using cached diagonal reciprocals;
-7. componentwise backward-error validation and iterative refinement; and
-8. equilibrated faer LU fallback if KLU cannot produce an accepted result.
+## Boundaries
 
-Complex systems use equilibrated faer sparse LU with the same backward-error
-acceptance and iterative-refinement policy. A complex factorization is reused
-while matrix values remain unchanged, which is important for noise analyses
-with many right-hand sides.
+- The Newton loop, damping and convergence aids that drive these solves belong
+  to `rspice-core`, whose `solver` module re-exports the matrix and solver
+  types.
+- Generated Verilog-A stamps reach these matrices through the stampers in
+  `rspice-veriloga-runtime`.
 
-The implementation is KLU-class and written in Rust; it does not link or wrap
-the SuiteSparse KLU C library.
+## Entry points
 
-## Recommended API
-
-Build topology once, retain direct stamp tokens, and reuse both the matrix and
-the caller-owned output vector:
+- `StaticMatrix::from_triplets_with_options` — freeze a topology under an
+  explicit `SolverOptions`. `StaticMatrix::from_triplets` reads
+  `SolverOptions::from_env()` instead (`RSPICE_SOLVER`, `RSPICE_PIVREL`,
+  `RSPICE_PIVTOL`); embedding code should pass options so process
+  environment cannot change numeric policy.
+- `StaticMatrix::get_index` and `stamp_direct` — resolve a stamp location once,
+  then accumulate into it with no search.
+- `StaticMatrix::solve_into` — solve into a caller-owned vector, reusing it and
+  the internal workspaces after warm-up.
+- `ComplexMatrix::from_real_structure` — the complex twin of a real topology.
+- `StaticMatrixSolverCheckpoint` — the retained factor state a transient
+  checkpoint carries, so a resumed run continues on the same factors.
 
 ```rust
 use rspice_matrix::{RealSolverBackend, SolverOptions, StaticMatrix};
@@ -62,66 +85,40 @@ matrix.solve_into(&[1.0, 2.0], &mut solution)?;
 # Ok::<(), rspice_matrix::SolverError>(())
 ```
 
-`CscIndex` is bound to its originating topology. Its numeric offset remains
-public for source compatibility, while stamping validates the hidden pattern
-identity so a token from another topology cannot silently corrupt the matrix.
+`SolverOptions::default()` is deterministic and selects
+`RealSolverBackend::Auto`: the KLU-class kernel, except for patterns whose
+measured fill favors faer's supernodal LU. Under the default robustness
+policy, any circuit-LU solve that cannot certify its result falls back to
+equilibrated faer. A complex factorization is reused until the matrix's values
+are next written, so a noise analysis solving many right-hand sides factors
+once.
 
-`SolverOptions::default()` is deterministic and selects KLU. The compatibility
-constructor `StaticMatrix::from_triplets` reads `RSPICE_SOLVER=faer`; commercial
-embedding code should use `from_triplets_with_options` so process environment
-cannot change numeric policy.
+A successful sparse solve satisfies a scale-invariant componentwise
+backward-error bound; a finite but inaccurate candidate is refined or
+rejected, never returned. Finiteness is checked again at every solve
+boundary, including after unchecked hot-path stamping, and a `CscIndex` from
+another topology is refused rather than written.
 
-## Numeric contract
+## Feature flags
 
-- Dimensions, CSC pointers, row ordering, duplicate coordinates, and stamp
-  tokens are checked at construction or checked-mutation boundaries. Numeric
-  finiteness is checked by checked mutators and again at every solve boundary,
-  including after unchecked hot-path stamping.
-- A successful sparse solve satisfies a scale-invariant componentwise
-  backward-error bound proportional to machine epsilon and row sparsity.
-- Finite-but-inaccurate candidates are refined or rejected; they are never
-  exposed as successful solutions.
-- KLU analysis is fail-closed. A rejected new pattern invalidates the prior
-  pattern association.
-- `solve_into` reuses output and internal workspaces after warmup. `solve` is a
-  convenience ownership API and necessarily allocates its returned vector.
-- The package contains one narrowly scoped `unsafe` faer LU-reference
-  construction. Its symbolic/numeric provenance and mutation invalidation
-  invariant are documented at the call site.
+| Flag | Effect |
+| :--- | :--- |
+| `faer-parallel` | faer's Rayon-parallel factorization. WebAssembly consumers leave it off: Rayon is unavailable on the baseline `wasm32-unknown-unknown` target |
 
-## Qualification
-
-Run the package's correctness and adversarial contracts with:
+## Testing
 
 ```text
 cargo test -p rspice-matrix --all-features
-cargo clippy -p rspice-matrix --all-targets --all-features -- -D warnings
 cargo doc -p rspice-matrix --no-deps
+cargo run --release -p rspice-bench -- klu
 ```
 
-The KLU kernel gate validates every timed solution outside the timed region and
-ratchets refactor latency, solve latency, and circuit-pattern fill:
-
-```text
-cargo run --release -p rspice-bench -- klu \
-  --max-refactor-ns-per-lu-nnz 4.0 \
-  --max-solve-ns-per-lu-nnz 2.5 \
-  --max-fill-ratio 1.60
-```
-
-CI runs this gate and uploads the machine-readable qualification report. The
-benchmark includes irreducible ladder/ring matrices, a reducible BTF chain, and
-an ungated random-expander reference.
-
-## Current scope
-
-- scalar type: `f64`;
-- storage: square or rectangular CSC, with sparse solves requiring square
-  systems;
-- KLU path: real, single right-hand side, non-transposed solves;
-- complex path: faer sparse LU;
-- parallel faer execution: optional native-only `faer-parallel` feature; wasm
-  consumers leave it disabled because Rayon is not available on the baseline
-  `wasm32-unknown-unknown` target.
+This file is the crate's rustdoc: `cargo test` runs the example above as a
+doctest, and `cargo doc` fails on a broken intra-doc link in it. The `klu`
+benchmark times analyze, factor, refactor and solve on circuit-shaped
+patterns, checks each case's backward error outside the timed region, and
+gates only on budgets passed to it: fill, absolute time per LU nonzero, or
+refactor and solve cost relative to a full factorization. CI runs the fill and
+relative gates and uploads the JSON report.
 
 Licensed under the [RSpice Personal Use License](../../LICENSE).
