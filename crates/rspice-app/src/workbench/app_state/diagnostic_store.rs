@@ -555,7 +555,7 @@ impl DiagnosticInputs {
                     run_sequence,
                     retained,
                     state.workspace.content.simulation_root_reference().key(),
-                    state.configured_design_content()?,
+                    scope.configured_content()?,
                     state.active_plan_revision(),
                     state.sim_setup.options.to_spice_options(),
                     format!("{:?}", state.sim_setup.reference_pvt.process),
@@ -567,15 +567,25 @@ impl DiagnosticInputs {
     }
 }
 
+/// The configured root, its revision, and the topology version of every cell
+/// view it instantiates.
+type ConfiguredTopology = (String, u64, Vec<(String, u64)>);
+
+/// The content digest of every cell view the configured design is made of,
+/// or why it cannot be read.
+type ConfiguredContent = Result<Vec<(String, ContentDigest)>, String>;
+
 /// The live state digests are taken against, for one reading of the store.
 ///
-/// The configured topology is an input of two owners' digests and the
-/// costliest one either reads — it walks the configured hierarchy — so it is
-/// read once per scope and shared, never across scopes: a scope lives for
-/// one reading and sees one state.
+/// Each reading of the configured design walks the configured hierarchy, and
+/// every run batch reads the design's content — a campaign stands one batch
+/// per member — so each reading is taken once per scope and shared, never
+/// across scopes: a scope lives for one reading of the store and sees one
+/// state.
 struct DigestScope<'a> {
     state: &'a AppState,
-    topology: std::cell::OnceCell<(String, u64, Vec<(String, u64)>)>,
+    topology: std::cell::OnceCell<ConfiguredTopology>,
+    content: std::cell::OnceCell<ConfiguredContent>,
 }
 
 impl<'a> DigestScope<'a> {
@@ -583,12 +593,20 @@ impl<'a> DigestScope<'a> {
         Self {
             state,
             topology: std::cell::OnceCell::new(),
+            content: std::cell::OnceCell::new(),
         }
     }
 
-    fn configured_topology(&self) -> &(String, u64, Vec<(String, u64)>) {
+    fn configured_topology(&self) -> &ConfiguredTopology {
         self.topology
             .get_or_init(|| self.state.configured_topology_revision())
+    }
+
+    fn configured_content(&self) -> Result<&[(String, ContentDigest)], String> {
+        self.content
+            .get_or_init(|| self.state.configured_design_content())
+            .as_deref()
+            .map_err(Clone::clone)
     }
 }
 
