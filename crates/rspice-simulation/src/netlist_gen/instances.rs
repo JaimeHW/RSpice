@@ -4,6 +4,7 @@
 //! its device type requires and its parameter overrides appended.
 
 use super::*;
+use rspice_design::parameters::source_value_is_zero_or_blank;
 use rspice_design::schematic::component_references::{
     InstanceReference, resolve_instance_reference,
 };
@@ -1148,60 +1149,41 @@ impl<'a> NetlistGenerator<'a> {
             ""
         };
 
+        // The parasitics are written under the names the design authority
+        // gives them, which is what the duplicate check judges.
+        let parasitics = component.source_parasitics().unwrap_or_default();
         let mut positive_node = node_names[0].as_str();
         let internal_node;
-        if is_voltage
-            && let Some(series_resistance) = params
-                .get("rs")
-                .map(String::as_str)
-                .filter(|value| !source_value_is_zero_or_blank(value))
-        {
+        if let Some(series) = &parasitics.series_resistance {
             internal_node = format!("__rspice_source_{}_internal", component.id);
-            let resistance_name = format!("R__RSPICE_SOURCE_{}_RS", component.id);
             self.lines.push(format!(
                 "{} {} {} {}{}",
-                resistance_name,
-                node_names[0],
-                internal_node,
-                series_resistance.trim(),
-                noise_suffix
+                series.name, node_names[0], internal_node, series.value, noise_suffix
             ));
             positive_node = &internal_node;
         }
 
-        if let Some(parallel_resistance) = params
+        if params
             .get("rp")
-            .map(String::as_str)
-            .filter(|value| !value.trim().is_empty())
+            .is_some_and(|value| !value.trim().is_empty() && source_value_is_zero_or_blank(value))
         {
-            if source_value_is_zero_or_blank(parallel_resistance) {
-                self.errors.push(format!(
-                    "{} '{}' parallel resistance must be positive or blank",
-                    component.kind.display_name(),
-                    component.name
-                ));
-                return None;
-            }
+            self.errors.push(format!(
+                "{} '{}' parallel resistance must be positive or blank",
+                component.kind.display_name(),
+                component.name
+            ));
+            return None;
+        }
+        if let Some(parallel) = &parasitics.parallel_resistance {
             self.lines.push(format!(
-                "R__RSPICE_SOURCE_{}_RP {} {} {}{}",
-                component.id,
-                node_names[0],
-                node_names[1],
-                parallel_resistance.trim(),
-                noise_suffix
+                "{} {} {} {}{}",
+                parallel.name, node_names[0], node_names[1], parallel.value, noise_suffix
             ));
         }
-        if let Some(parallel_capacitance) = params
-            .get("cpar")
-            .map(String::as_str)
-            .filter(|value| !source_value_is_zero_or_blank(value))
-        {
+        if let Some(parallel) = &parasitics.parallel_capacitance {
             self.lines.push(format!(
-                "C__RSPICE_SOURCE_{}_CPAR {} {} {}",
-                component.id,
-                node_names[0],
-                node_names[1],
-                parallel_capacitance.trim()
+                "{} {} {} {}",
+                parallel.name, node_names[0], node_names[1], parallel.value
             ));
         }
 
@@ -1372,13 +1354,6 @@ fn source_analysis_parameter_is_active(name: &str, value: &str) -> bool {
     } else {
         !source_value_is_zero_or_blank(value)
     }
-}
-
-fn source_value_is_zero_or_blank(value: &str) -> bool {
-    matches!(
-        value.trim().to_ascii_lowercase().as_str(),
-        "" | "0" | "+0" | "-0" | "0.0" | "0v" | "0a" | "0f" | "0ohm" | "0Ω"
-    )
 }
 
 fn source_boolean_is_false(value: &str) -> bool {

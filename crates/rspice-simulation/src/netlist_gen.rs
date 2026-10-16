@@ -1386,8 +1386,8 @@ mod tests {
     /// The deck heads every card with the name the design authority gives
     /// it, and those names are the ones decks have always been written with:
     /// sense sources, a transformer's windings and coupling, the coupling an
-    /// inductor asks for, and one card per winding set however many drawn
-    /// couplings ask for it.
+    /// inductor asks for, one card per winding set however many drawn
+    /// couplings ask for it, and the parasitics written beside a source.
     #[test]
     fn every_card_is_written_under_the_name_the_design_authority_gives_it() {
         let drawn = |id: u64, kind: ComponentType, name: &str, value: &str, params: &str| {
@@ -1425,6 +1425,21 @@ mod tests {
                 "0.9",
                 "inductors=\"LB LA\"",
             ),
+            drawn(
+                11,
+                ComponentType::VoltageSourcePulse,
+                "V1",
+                "0",
+                "v2=5 pw=1u per=2u rs=5 rp=1k cpar=1p",
+            ),
+            drawn(
+                12,
+                ComponentType::CurrentSource,
+                "I1",
+                "1m",
+                "rp=10k cpar=0",
+            ),
+            drawn(13, ComponentType::VoltageSource, "V2", "1", "rs=0 cpar=2p"),
         ];
         let mut state = Schematic::default();
         state.document_mut_for_test().components = components.clone();
@@ -1453,6 +1468,14 @@ mod tests {
                 "L2",
                 "LA",
                 "LB",
+                "R__RSPICE_SOURCE_11_RS",
+                "R__RSPICE_SOURCE_11_RP",
+                "C__RSPICE_SOURCE_11_CPAR",
+                "V1",
+                "R__RSPICE_SOURCE_12_RP",
+                "I1",
+                "C__RSPICE_SOURCE_13_CPAR",
+                "V2",
                 "LT_out_PRI",
                 "LT_out_SEC",
                 "KT_out",

@@ -1057,6 +1057,9 @@ fn card_label(component: &ComponentInfo, card: &WrittenCard) -> String {
         CardRole::PrimaryWinding => "primary winding",
         CardRole::SecondaryWinding => "secondary winding",
         CardRole::Coupling => "coupling",
+        CardRole::SeriesResistance => "series resistance",
+        CardRole::ParallelResistance => "parallel resistance",
+        CardRole::ParallelCapacitance => "parallel capacitance",
     };
     format!("{identity}'s {part}")
 }
