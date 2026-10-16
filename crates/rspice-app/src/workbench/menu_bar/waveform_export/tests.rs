@@ -170,6 +170,14 @@ fn last_log_message(state: &AppState) -> String {
         .clone()
 }
 
+/// A refused export answers on the status bar.
+fn refusal(state: &AppState) -> String {
+    state
+        .prompt_text()
+        .expect("the refusal answers on the status bar")
+        .to_owned()
+}
+
 fn state_with_typed_result(analysis: AnalysisResult) -> AppState {
     let viewer = match analysis.analysis_type {
         AnalysisType::DcOp => crate::workbench::ResultViewer::Op,
@@ -443,7 +451,7 @@ fn unavailable_fft_export_never_falls_through_to_the_source_transient() {
 
     assert!(io.text_files.borrow().is_empty());
     assert!(io.datasets.borrow().is_empty());
-    assert!(last_log_message(&state).contains("derived analysis is incomplete"));
+    assert!(refusal(&state).contains("derived analysis is incomplete"));
 }
 
 #[test]
@@ -484,7 +492,7 @@ fn fft_export_rejects_complete_but_unbound_or_stale_cache_evidence() {
 
         assert!(io.text_files.borrow().is_empty());
         assert!(io.datasets.borrow().is_empty());
-        assert!(last_log_message(&state).contains("does not belong to the displayed result"));
+        assert!(refusal(&state).contains("does not belong to the displayed result"));
     }
 }
 
@@ -1184,7 +1192,7 @@ fn csv_export_fails_closed_when_the_active_analysis_has_no_samples() {
 
     assert!(io.dialog_titles.borrow().is_empty());
     assert!(io.datasets.borrow().is_empty());
-    assert_eq!(last_log_message(&state), NO_SAMPLES_MESSAGE);
+    assert_eq!(refusal(&state), NO_SAMPLES_MESSAGE);
 }
 
 #[test]
@@ -1208,12 +1216,7 @@ fn csv_export_rejects_single_analysis_divergent_x_axes() {
     action_export_csv_with_io(&mut state, &io);
 
     assert!(io.datasets.borrow().is_empty());
-    assert!(
-        state
-            .log_buffer
-            .entries()
-            .any(|entry| entry.message.contains("different x-axis samples"))
-    );
+    assert!(refusal(&state).contains("different x-axis samples"));
 }
 
 #[test]
@@ -1510,10 +1513,7 @@ fn flat_export_refuses_mismatched_sample_lengths_without_opening_a_picker() {
     action_export_csv_with_io(&mut state, &io);
     assert!(io.dialog_titles.borrow().is_empty());
     let message = last_log_message(&state);
-    assert!(
-        message.contains("retained-evidence verification failed"),
-        "{message}"
-    );
+    assert!(message.contains("did not verify"), "{message}");
     assert!(message.contains("coordinates"), "{message}");
 }
 
@@ -1540,7 +1540,7 @@ fn incompatible_touchstone_result_is_rejected_before_save_picker() {
 
     assert!(io.dialog_titles.borrow().is_empty());
     assert!(io.text_files.borrow().is_empty());
-    assert!(last_log_message(&state).contains("not compatible"));
+    assert!(refusal(&state).contains("not compatible"));
 }
 
 #[test]
@@ -1711,7 +1711,7 @@ fn assert_stacked_binary_export_is_not_silently_truncated(preferences: &[usize])
             "preference {preference}: a partial export opened a picker"
         );
         assert!(io.byte_files.borrow().is_empty());
-        let message = last_log_message(&state);
+        let message = refusal(&state);
         assert!(
             message.contains("one") && message.contains("CSV/TSV"),
             "{message}"
@@ -1793,7 +1793,7 @@ fn an_export_with_every_trace_hidden_names_the_hidden_traces() {
 
     assert!(io.dialog_titles.borrow().is_empty());
     assert!(io.datasets.borrow().is_empty());
-    assert_eq!(last_log_message(&state), ALL_TRACES_HIDDEN_MESSAGE);
+    assert_eq!(refusal(&state), ALL_TRACES_HIDDEN_MESSAGE);
 }
 
 /// The operating-point export refuses, rather than handing back whatever the
@@ -1825,7 +1825,7 @@ fn an_operating_point_export_that_cannot_be_produced_states_why() {
     action_export_csv_with_io(&mut state, &io);
     assert!(io.dialog_titles.borrow().is_empty());
     assert!(io.text_files.borrow().is_empty());
-    let message = last_log_message(&state);
+    let message = refusal(&state);
     assert!(
         message.contains("no analysis in 'Run 7") && message.contains("completed successfully"),
         "{message}"
@@ -1846,7 +1846,7 @@ fn an_operating_point_export_that_cannot_be_produced_states_why() {
     action_export_csv_with_io(&mut state, &io);
     assert!(io.dialog_titles.borrow().is_empty());
     assert!(io.text_files.borrow().is_empty());
-    let message = last_log_message(&state);
+    let message = refusal(&state);
     assert!(
         message.contains("operating point cannot be exported"),
         "{message}"

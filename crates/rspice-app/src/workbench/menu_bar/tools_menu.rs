@@ -1,7 +1,7 @@
 //! Design-check actions (Check menu). Rendering lives in
 //! `crate::workbench::chrome::title_bar`.
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app_state::AppState;
 
 /// Run the design-rule / electrical-rule checks on the active schematic.
@@ -16,18 +16,24 @@ pub(crate) fn run_design_rule_check(state: &mut AppState) {
     let result = match state.run_active_design_checks() {
         Ok(result) => result,
         Err(error) => {
-            state.push_user_message(ConsoleMessage::error(format!(
-                "Design checks could not create current evidence: {error}"
-            )));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Design checks could not run: {error}"),
+            );
             return;
         }
     };
     let summary = result.summary();
     let errors = summary.critical + summary.errors;
     let advisories = summary.warnings + summary.info;
-    state.push_user_message(ConsoleMessage::info(format!(
-        "Schematic checks · {errors} error{} · {advisories} advisor{}",
-        if errors == 1 { "" } else { "s" },
-        if advisories == 1 { "y" } else { "ies" },
-    )));
+    state.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        format!(
+            "Check: {errors} error{}, {advisories} advisor{}. See Problems.",
+            if errors == 1 { "" } else { "s" },
+            if advisories == 1 { "y" } else { "ies" },
+        ),
+    );
 }

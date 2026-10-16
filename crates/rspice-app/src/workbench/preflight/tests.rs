@@ -1404,7 +1404,7 @@ fn the_design_rule_blocker_opens_the_findings_without_re_running_them() {
             .log_buffer
             .entries()
             .skip(entries_before)
-            .any(|entry| entry.message.starts_with("Schematic checks")),
+            .any(|entry| entry.message.starts_with("Check: ")),
         "following a finding does not run the checks"
     );
 }

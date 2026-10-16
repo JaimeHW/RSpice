@@ -2,6 +2,7 @@
 //!
 //! Wires the File ▸ Export items to the export workflows.
 
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
@@ -51,17 +52,20 @@ pub(super) fn action_export_svg_with_io(
                 .and_then(|destination| io.write_text_file_observed(&destination, &svg_content));
             match export {
                 Ok(()) => {
-                    state.push_user_message(crate::diagnostics::ConsoleMessage::info(
+                    state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
                         crate::workbench::workflows::export_workflow::export_completion_message(
                             "SVG", &path, None, io,
                         ),
-                    ));
+                    );
                 }
                 Err(e) => {
-                    state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                        "SVG export failed: {}",
-                        e
-                    )));
+                    state.record(
+                        LogSeverity::Error,
+                        LogSource::Studio,
+                        format!("SVG export failed: {e}"),
+                    );
                 }
             }
         }
@@ -69,10 +73,11 @@ pub(super) fn action_export_svg_with_io(
             // User cancelled - no message needed
         }
         Err(e) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "SVG export failed: {}",
-                e
-            )));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("SVG export failed: {e}"),
+            );
         }
     }
 }
@@ -85,18 +90,14 @@ pub(crate) fn action_export_netlist_with_io(
     let netlist_content =
         if state.workbench.workspace == crate::workbench::state::Workspace::Netlist {
             if state.ui.netlist.generated_source.is_empty() {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                    "No retained generated artifact is available to export.",
-                ));
+                state.prompt("There is no generated netlist to export.");
                 return;
             }
             if state.ui.netlist.generation_error.is_some()
                 || state.ui.netlist.generated_input_digest
                     != state.ui.netlist.current_generation_input_digest
             {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                    "Generated export is blocked because the retained artifact is stale.",
-                ));
+                state.prompt("The generated netlist is out of date; regenerate it to export.");
                 return;
             }
             match format {
@@ -109,9 +110,7 @@ pub(crate) fn action_export_netlist_with_io(
             }
         } else {
             if state.schematic.document().components.is_empty() {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                    "No circuit to export. Add components first.",
-                ));
+                state.prompt("No circuit to export. Add components first.");
                 return;
             }
             match build_menu_netlist(state, format) {
@@ -121,8 +120,8 @@ pub(crate) fn action_export_netlist_with_io(
                 }
                 Err(reasons) => {
                     state.record(
-                        crate::diagnostics::LogSeverity::Error,
-                        crate::diagnostics::LogSource::Studio,
+                        LogSeverity::Error,
+                        LogSource::Studio,
                         netlist_failure_text("Netlist export", &reasons),
                     );
                     return;
@@ -162,20 +161,23 @@ pub(crate) fn action_export_netlist_with_io(
             });
             match export {
                 Ok(()) => {
-                    state.push_user_message(crate::diagnostics::ConsoleMessage::info(
+                    state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
                         crate::workbench::workflows::export_workflow::export_completion_message(
                             filter_name,
                             &path,
                             None,
                             io,
                         ),
-                    ));
+                    );
                 }
                 Err(e) => {
-                    state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                        "Netlist export failed: {}",
-                        e
-                    )));
+                    state.record(
+                        LogSeverity::Error,
+                        LogSource::Studio,
+                        format!("Netlist export failed: {e}"),
+                    );
                 }
             }
         }
@@ -183,10 +185,11 @@ pub(crate) fn action_export_netlist_with_io(
             // User cancelled - no message needed
         }
         Err(e) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "Netlist export failed: {}",
-                e
-            )));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Netlist export failed: {e}"),
+            );
         }
     }
 }
@@ -199,15 +202,11 @@ pub(crate) fn action_export_generated_netlist_with_options(
     io: &(impl ExportWorkflowIo + ?Sized),
 ) -> bool {
     let Some(document) = state.ui.netlist.generated_document.as_ref() else {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-            "No retained generated artifact is available to export.",
-        ));
+        state.prompt("There is no generated netlist to export.");
         return false;
     };
     let Some(artifact) = document.generated_artifact().cloned() else {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-            "The selected document has no generated artifact to export.",
-        ));
+        state.prompt("The selected document is not a generated netlist.");
         return false;
     };
     if state.ui.netlist.generation_error.is_some()
@@ -215,27 +214,22 @@ pub(crate) fn action_export_generated_netlist_with_options(
             != state.ui.netlist.current_generation_input_digest
         || state.ui.netlist.generated_input_digest != Some(artifact.provenance().input().digest())
     {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-            "Generated export is blocked because the retained artifact is stale or inconsistent with its authenticated inputs.",
-        ));
+        state.prompt("The generated netlist is out of date; regenerate it to export.");
         return false;
     }
     if include_source_map && !bundle_dependencies {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-            "Source-map export requires a self-contained bundle.",
-        ));
+        state.prompt("A source map is exported only with a self-contained bundle.");
         return false;
     }
     if include_source_map && format != crate::io::NetlistFormat::Spice {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-            "Generated source maps identify exact SPICE lines and cannot be attached to a translated dialect.",
-        ));
+        state.prompt("A source map maps SPICE lines; it cannot be attached to another dialect.");
         return false;
     }
     if !bundle_dependencies && !artifact.dependencies().is_empty() {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-            "Generated decks with project or external source dependencies must be exported as a self-contained bundle.",
-        ));
+        state.prompt(
+            "This netlist includes project or external files; export it as a self-contained \
+             bundle.",
+        );
         return false;
     }
     if !bundle_dependencies {
@@ -248,9 +242,11 @@ pub(crate) fn action_export_generated_netlist_with_options(
         }) {
             Ok(bundle) => bundle,
             Err(error) => {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                    "Generated bundle export failed: {error}"
-                )));
+                state.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    format!("Netlist bundle export failed: {error}"),
+                );
                 return false;
             }
         };
@@ -267,9 +263,11 @@ pub(crate) fn action_export_generated_netlist_with_options(
     let Some(mut path) = (match picked {
         Ok(path) => path,
         Err(error) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "Generated bundle export failed: {error}"
-            )));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Netlist bundle export failed: {error}"),
+            );
             return false;
         }
     }) else {
@@ -281,20 +279,24 @@ pub(crate) fn action_export_generated_netlist_with_options(
     });
     match result {
         Ok(()) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::info(
+            state.record(
+                LogSeverity::Info,
+                LogSource::Studio,
                 crate::workbench::workflows::export_workflow::export_completion_message(
-                    "Generated netlist bundle",
+                    "netlist bundle",
                     &path,
                     None,
                     io,
                 ),
-            ));
+            );
             true
         }
         Err(error) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "Generated bundle export failed: {error}"
-            )));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Netlist bundle export failed: {error}"),
+            );
             false
         }
     }
@@ -327,9 +329,11 @@ fn publish_generated_source(
     }) {
         Ok(path) => path,
         Err(error) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "Generated netlist export failed: {error}"
-            )));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Netlist export failed: {error}"),
+            );
             return false;
         }
     }) else {
@@ -341,20 +345,24 @@ fn publish_generated_source(
         .and_then(|destination| io.write_text_file_observed(&destination, &source));
     match result {
         Ok(()) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::info(
+            state.record(
+                LogSeverity::Info,
+                LogSource::Studio,
                 crate::workbench::workflows::export_workflow::export_completion_message(
                     filter_name,
                     &path,
                     None,
                     io,
                 ),
-            ));
+            );
             true
         }
         Err(error) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "Generated netlist export failed: {error}"
-            )));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Netlist export failed: {error}"),
+            );
             false
         }
     }
@@ -373,9 +381,7 @@ fn generated_export_source(source: &str, format: crate::io::NetlistFormat) -> St
 
 pub(crate) fn action_view_netlist(state: &mut AppState) {
     if state.schematic.document().components.is_empty() {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-            "No circuit to generate netlist. Add components first.",
-        ));
+        state.prompt("No circuit to netlist. Add components first.");
         return;
     }
 
@@ -386,26 +392,22 @@ pub(crate) fn action_view_netlist(state: &mut AppState) {
         }
         Err(reasons) => {
             state.record(
-                crate::diagnostics::LogSeverity::Error,
-                crate::diagnostics::LogSource::Studio,
+                LogSeverity::Error,
+                LogSource::Studio,
                 netlist_failure_text("Netlist generation", &reasons),
             );
             return;
         }
     };
 
-    state.simulation.source.netlist_content = netlist_content.clone();
-
-    let preview_lines: Vec<&str> = netlist_content.lines().take(10).collect();
-    let preview = preview_lines.join("\n");
+    // The Netlist workspace this command opens shows the deck itself.
     let total_lines = netlist_content.lines().count();
-
-    state.push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
-        "Generated netlist ({} lines):\n{}{}",
-        total_lines,
-        preview,
-        if total_lines > 10 { "\n..." } else { "" }
-    )));
+    state.simulation.source.netlist_content = netlist_content;
+    state.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        format!("Generated the netlist ({total_lines} lines)."),
+    );
 }
 
 /// A deck the generator wrote, and the warnings it raised beside it.
@@ -564,9 +566,11 @@ pub(super) fn action_export_publication_snapshot_with_io(
     let content = match built {
         Ok(content) => content,
         Err(error) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "Publication snapshot export failed: {error}"
-            )));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Publication snapshot export failed: {error}"),
+            );
             return;
         }
     };
@@ -590,19 +594,23 @@ pub(super) fn action_export_publication_snapshot_with_io(
                 .and_then(|destination| io.write_text_file_observed(&destination, &content));
             match export {
                 Ok(()) => {
-                    state.push_user_message(crate::diagnostics::ConsoleMessage::info(
+                    state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
                         crate::workbench::workflows::export_workflow::export_completion_message(
-                            "Publication snapshot",
+                            "publication snapshot",
                             &path,
                             None,
                             io,
                         ),
-                    ));
+                    );
                 }
                 Err(error) => {
-                    state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                        "Publication snapshot export failed: {error}"
-                    )));
+                    state.record(
+                        LogSeverity::Error,
+                        LogSource::Studio,
+                        format!("Publication snapshot export failed: {error}"),
+                    );
                 }
             }
         }
@@ -610,9 +618,11 @@ pub(super) fn action_export_publication_snapshot_with_io(
             // User cancelled - no message needed
         }
         Err(error) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "Publication snapshot export failed: {error}"
-            )));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Publication snapshot export failed: {error}"),
+            );
         }
     }
 }

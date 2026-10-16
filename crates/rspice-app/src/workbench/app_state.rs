@@ -1043,6 +1043,15 @@ impl AppState {
         });
     }
 
+    /// The prompt on the status bar, if one is showing.
+    #[cfg(test)]
+    pub(crate) fn prompt_text(&self) -> Option<&str> {
+        self.workbench
+            .prompt
+            .as_ref()
+            .map(|prompt| prompt.text.as_str())
+    }
+
     /// Record an event in the Console and return its log id.
     ///
     /// Error: something the user asked for, or a background job, failed.

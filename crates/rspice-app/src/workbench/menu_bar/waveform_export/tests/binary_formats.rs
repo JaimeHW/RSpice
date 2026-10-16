@@ -182,7 +182,7 @@ fn binary_waveform_exports_enforce_reimport_budget_before_destination_selection(
             "preference {preference}"
         );
         assert!(io.byte_files.borrow().is_empty());
-        let message = last_log_message(&state);
+        let message = refusal(&state);
         assert!(
             message.contains("retains 8410000 numeric values") && message.contains("8388608"),
             "{message}"
@@ -467,18 +467,10 @@ fn a_domain_the_hdf5_layout_has_no_section_for_refuses_and_writes_nothing() {
     assert!(io.byte_files.borrow().is_empty());
     assert!(io.text_files.borrow().is_empty());
     // The refusal names the three sections HDF5 carries.
+    let message = refusal(&state);
     assert!(
-        state.log_buffer.entries().any(|entry| {
-            entry
-                .message
-                .contains("a transient, a DC sweep or an AC sweep")
-        }),
-        "{:?}",
-        state
-            .log_buffer
-            .entries()
-            .map(|entry| entry.message.clone())
-            .collect::<Vec<_>>()
+        message.contains("a transient, a DC sweep or an AC sweep"),
+        "{message}"
     );
 }
 
@@ -563,18 +555,8 @@ fn a_transient_without_event_evidence_refuses_the_dump_and_writes_nothing() {
     assert!(io.byte_files.borrow().is_empty());
     assert!(io.text_files.borrow().is_empty());
     // The refusal names what a dump carries.
-    assert!(
-        state
-            .log_buffer
-            .entries()
-            .any(|entry| entry.message.contains("event timelines")),
-        "{:?}",
-        state
-            .log_buffer
-            .entries()
-            .map(|entry| entry.message.clone())
-            .collect::<Vec<_>>()
-    );
+    let message = refusal(&state);
+    assert!(message.contains("event timelines"), "{message}");
 }
 
 #[test]
@@ -638,16 +620,9 @@ fn a_domain_the_matlab_layout_has_no_coordinate_for_refuses_and_writes_nothing()
     assert!(io.byte_files.borrow().is_empty());
     assert!(io.text_files.borrow().is_empty());
     // The refusal names the three coordinates a MAT file can be read back by.
+    let message = refusal(&state);
     assert!(
-        state.log_buffer.entries().any(|entry| {
-            entry.message.contains("a transient on 'time'")
-                && entry.message.contains("an AC sweep on 'frequency'")
-        }),
-        "{:?}",
-        state
-            .log_buffer
-            .entries()
-            .map(|entry| entry.message.clone())
-            .collect::<Vec<_>>()
+        message.contains("a transient on 'time'") && message.contains("an AC sweep on 'frequency'"),
+        "{message}"
     );
 }

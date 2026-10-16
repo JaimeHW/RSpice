@@ -7,6 +7,7 @@ mod numpy;
 mod typed_csv;
 mod vcd;
 
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::EngineeringExportFormat;
 use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
@@ -150,9 +151,7 @@ pub(crate) fn action_export_result_selection_with_io(
     keys: &[rspice_results_ui::selection::ResultBrowserSelectionKey],
 ) {
     if keys.is_empty() {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-            "No Data Browser quantities are selected for exact export.".to_owned(),
-        ));
+        state.prompt("Select quantities in the Data Browser to export.");
         return;
     }
     let contents =
@@ -162,7 +161,7 @@ pub(crate) fn action_export_result_selection_with_io(
         ) {
             Ok(contents) => contents,
             Err(message) => {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(message));
+                state.prompt(message);
                 return;
             }
         };
@@ -205,19 +204,24 @@ pub(crate) fn action_export_result_selection_with_io(
     match export {
         Ok(()) => {
             note_result_export_success(state, "Exact-result text");
-            state.push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
-                "Exported {} exact retained result item(s).",
-                keys.len()
-            )));
+            let count = keys.len();
+            state.record(
+                LogSeverity::Info,
+                LogSource::Studio,
+                if count == 1 {
+                    "Exported 1 result quantity.".to_owned()
+                } else {
+                    format!("Exported {count} result quantities.")
+                },
+            );
         }
         Err(error) => {
-            note_result_export_failure(
-                state,
-                format!("Exact retained-evidence export failed: {error}"),
+            note_result_export_failure(state, format!("Result text export failed: {error}"));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Result text export failed: {error}"),
             );
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "Could not export exact retained evidence: {error}"
-            )));
         }
     }
 }
@@ -229,7 +233,7 @@ pub(crate) fn action_export_csv_with_io(
     let displayed = match crate::workbench::documents::result_document::view_context::resolve_displayed_result_view(state) {
         Ok(displayed) => displayed,
         Err(message) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(message));
+            state.prompt(message);
             return;
         }
     };
@@ -241,9 +245,11 @@ pub(crate) fn action_export_csv_with_io(
             .iter()
             .find_map(|analysis| analysis.validate_retained_evidence().err())
     }) {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-            "Result export was quarantined because retained-evidence verification failed: {error}"
-        )));
+        state.record(
+            LogSeverity::Error,
+            LogSource::Studio,
+            format!("Result export failed: the stored result did not verify: {error}"),
+        );
         return;
     }
     let export_format = state
@@ -264,7 +270,7 @@ pub(crate) fn action_export_csv_with_io(
         EngineeringExportFormat::MatlabV5File => ResultExportFormat::MatlabV5,
     };
     if let Err(error) = result_export_format_availability_by_id(contract_format.canonical_id()) {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+        state.prompt(error);
         return;
     }
     // These encoders currently publish one retained analysis. Enforce that
@@ -282,10 +288,10 @@ pub(crate) fn action_export_csv_with_io(
         | EngineeringExportFormat::MatlabV5File => true,
     };
     if single_analysis_export && displayed.analysis_indices.len() > 1 {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-            "This export supports one analysis, and this view shows several. Maximize one displayed strip to export it, or choose CSV/TSV to export the displayed stack."
-                .to_owned(),
-        ));
+        state.prompt(
+            "This export supports one analysis, and this view shows several. Maximize one \
+             displayed strip to export it, or choose CSV/TSV to export the displayed stack.",
+        );
         return;
     }
     if let Some(kind) = match export_format {
@@ -302,10 +308,10 @@ pub(crate) fn action_export_csv_with_io(
         // sheet that the reader is currently looking at.
         let owns_non_waveform_view = prepare_displayed_table(state, &displayed).is_some();
         if owns_non_waveform_view {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                "Native RSpice bundles export one retained shared-axis waveform analysis. Select a waveform sheet, or choose CSV/TSV for this derived or tabular view."
-                    .to_owned(),
-            ));
+            state.prompt(
+                "RSpice bundles export one waveform analysis with a shared x-axis. Select a \
+                 waveform sheet, or choose CSV/TSV for this derived or tabular view.",
+            );
             return;
         }
         export_native_result_bundle(state, io, &displayed, kind);
@@ -373,9 +379,7 @@ pub(crate) fn action_export_csv_with_io(
             // The view owns this export and cannot produce it. Falling through
             // to the waveform router below is how an operating-point export
             // came back holding a transient's event history.
-            Err(reason) => {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(reason));
-            }
+            Err(reason) => state.prompt(reason),
         }
         return;
     }
@@ -390,7 +394,7 @@ pub(crate) fn action_export_csv_with_io(
     ) {
         Ok(prepared) => prepared,
         Err(message) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(message));
+            state.prompt(message);
             return;
         }
     };
@@ -450,9 +454,7 @@ fn export_prepared_table(
     match format {
         TabularExportFormat::Csv => export_typed_result_csv(state, io, prepared),
         TabularExportFormat::Tsv => export_typed_result_tsv(state, io, prepared),
-        TabularExportFormat::TouchstoneWhereCompatible => state.push_user_message(
-            crate::diagnostics::ConsoleMessage::warning(touchstone_refusal.to_owned()),
-        ),
+        TabularExportFormat::TouchstoneWhereCompatible => state.prompt(touchstone_refusal),
     }
 }
 
@@ -720,9 +722,11 @@ fn export_typed_result_tsv(
     let contents = match csv_to_tsv(&prepared.contents) {
         Ok(contents) => contents,
         Err(error) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "TSV export failed before destination selection: {error}"
-            )));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("TSV export failed: {error}"),
+            );
             return;
         }
     };
@@ -782,20 +786,24 @@ fn publish_result_text(
     match export {
         Ok(()) => {
             note_result_export_success(state, label);
-            state.push_user_message(crate::diagnostics::ConsoleMessage::info(
+            state.record(
+                LogSeverity::Info,
+                LogSource::Studio,
                 crate::workbench::workflows::export_workflow::export_completion_message(
                     label,
                     &path,
                     Some(detail.to_owned()),
                     io,
                 ),
-            ));
+            );
         }
         Err((note, error)) => {
             note_result_export_failure(state, note);
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "{label} export failed: {error}"
-            )));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("{label} export failed: {error}"),
+            );
         }
     }
 }
@@ -812,9 +820,7 @@ fn export_native_result_bundle(
     let analysis = match displayed.primary_analysis(state) {
         Some(analysis) => analysis,
         None => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                NO_ACTIVE_ANALYSIS_MESSAGE.to_owned(),
-            ));
+            state.prompt(NO_ACTIVE_ANALYSIS_MESSAGE);
             return;
         }
     };
@@ -823,36 +829,36 @@ fn export_native_result_bundle(
         crate::state::AnalysisType::Ac => rspice_formats::WaveformDomain::Ac,
         crate::state::AnalysisType::DcSweep => rspice_formats::WaveformDomain::DcSweep,
         other => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                "{} export currently preserves transient, AC, and DC-sweep waveform domains; the active {} analysis cannot be represented by the version-1 native waveform schema.",
+            state.prompt(format!(
+                "{} export carries transient, AC and DC sweep results; it cannot carry the \
+                 active {} analysis.",
                 kind.display_name(),
                 other.short_label(),
-            )));
+            ));
             return;
         }
     };
     let waveforms = exported_waveforms(state, displayed.dataset_id, analysis);
     if waveforms.is_empty() {
-        let message = if analysis.waveforms.is_empty() {
+        state.prompt(if analysis.waveforms.is_empty() {
             NO_SAMPLES_MESSAGE
         } else {
             ALL_TRACES_HIDDEN_MESSAGE
-        };
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-            message.to_owned(),
-        ));
+        });
         return;
     }
     let native_dataset = match project_native_bundle(analysis, &waveforms, native_analysis) {
         Ok(dataset) => dataset,
         Err(WaveformProjectionError::NoSamples) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                NO_SAMPLES_MESSAGE.to_owned(),
-            ));
+            state.prompt(NO_SAMPLES_MESSAGE);
             return;
         }
         Err(error) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(error.to_string()));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("{} export failed: {error}", kind.display_name()),
+            );
             return;
         }
     };
@@ -867,10 +873,11 @@ fn export_native_result_bundle(
                 state,
                 format!("{} encoding failed: {error}", kind.display_name()),
             );
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "{} export failed before destination selection: {error}",
-                kind.display_name()
-            )));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("{} export failed: {error}", kind.display_name()),
+            );
             return;
         }
     };
@@ -907,28 +914,28 @@ fn export_native_result_bundle(
     match export {
         Ok(()) => {
             note_result_export_success(state, kind.display_name());
-            let detail = format!(
-                "{} signals, {} points, SHA-256-bound dataset",
-                exported_signal_count, exported_point_count
-            );
-            state.push_user_message(crate::diagnostics::ConsoleMessage::info(
+            let detail = format!("{exported_signal_count} signals, {exported_point_count} points");
+            state.record(
+                LogSeverity::Info,
+                LogSource::Studio,
                 crate::workbench::workflows::export_workflow::export_completion_message(
                     kind.display_name(),
                     &published_path,
                     Some(detail),
                     io,
                 ),
-            ));
+            );
         }
         Err(error) => {
             note_result_export_failure(
                 state,
                 format!("{} export failed: {error}", kind.display_name()),
             );
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "{} export failed: {error}",
-                kind.display_name()
-            )));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("{} export failed: {error}", kind.display_name()),
+            );
         }
     }
 }
@@ -958,21 +965,24 @@ fn export_csv(
                         dataset.signal_count(),
                         dataset.point_count()
                     );
-                    state.push_user_message(crate::diagnostics::ConsoleMessage::info(
+                    state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
                         crate::workbench::workflows::export_workflow::export_completion_message(
                             "CSV",
                             &path,
                             Some(detail),
                             io,
                         ),
-                    ));
+                    );
                 }
                 Err(e) => {
                     note_result_export_failure(state, format!("CSV export failed: {e}"));
-                    state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                        "CSV export failed: {}",
-                        e
-                    )));
+                    state.record(
+                        LogSeverity::Error,
+                        LogSource::Studio,
+                        format!("CSV export failed: {e}"),
+                    );
                 }
             }
         }
@@ -981,10 +991,11 @@ fn export_csv(
         }
         Err(e) => {
             note_result_export_failure(state, format!("CSV destination failed: {e}"));
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "CSV export failed: {}",
-                e
-            )));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("CSV export failed: {e}"),
+            );
         }
     }
 }
@@ -998,9 +1009,11 @@ fn export_tsv(
         match crate::io::WaveformWriter::new(crate::io::WaveformFormat::Tsv).write_text(dataset) {
             Ok(contents) => contents,
             Err(error) => {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                    "TSV export failed before destination selection: {error}"
-                )));
+                state.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    format!("TSV export failed: {error}"),
+                );
                 return;
             }
         };
@@ -1023,29 +1036,35 @@ fn export_tsv(
                         dataset.signal_count(),
                         dataset.point_count()
                     );
-                    state.push_user_message(crate::diagnostics::ConsoleMessage::info(
+                    state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
                         crate::workbench::workflows::export_workflow::export_completion_message(
                             "TSV",
                             &path,
                             Some(detail),
                             io,
                         ),
-                    ));
+                    );
                 }
                 Err(error) => {
                     note_result_export_failure(state, format!("TSV export failed: {error}"));
-                    state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                        "TSV export failed: {error}"
-                    )));
+                    state.record(
+                        LogSeverity::Error,
+                        LogSource::Studio,
+                        format!("TSV export failed: {error}"),
+                    );
                 }
             }
         }
         Ok(None) => {}
         Err(error) => {
             note_result_export_failure(state, format!("TSV destination failed: {error}"));
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "TSV export failed: {error}"
-            )));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("TSV export failed: {error}"),
+            );
         }
     }
 }
@@ -1066,9 +1085,9 @@ fn export_touchstone(
     {
         Ok(contents) => contents,
         Err(error) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+            state.prompt(format!(
                 "Touchstone export is not compatible with the active result: {error}"
-            )));
+            ));
             return;
         }
     };
@@ -1096,29 +1115,35 @@ fn export_touchstone(
                         dataset.signal_count(),
                         dataset.point_count()
                     );
-                    state.push_user_message(crate::diagnostics::ConsoleMessage::info(
+                    state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
                         crate::workbench::workflows::export_workflow::export_completion_message(
                             "Touchstone",
                             &path,
                             Some(detail),
                             io,
                         ),
-                    ));
+                    );
                 }
                 Err(error) => {
                     note_result_export_failure(state, format!("Touchstone export failed: {error}"));
-                    state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                        "Touchstone export failed: {error}"
-                    )));
+                    state.record(
+                        LogSeverity::Error,
+                        LogSource::Studio,
+                        format!("Touchstone export failed: {error}"),
+                    );
                 }
             }
         }
         Ok(None) => {}
         Err(error) => {
             note_result_export_failure(state, format!("Touchstone destination failed: {error}"));
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "Touchstone export failed: {error}"
-            )));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Touchstone export failed: {error}"),
+            );
         }
     }
 }
