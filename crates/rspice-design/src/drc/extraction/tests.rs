@@ -775,6 +775,33 @@ fn a_configured_walk_descends_where_the_deck_does() {
         "nothing below the stop view is checked: {:?}",
         result.violations()
     );
+
+    // Run without a stop view, the Verilog-A view is still written from its
+    // own source, so nothing below it is checked either. A drawing filed under
+    // that view's key takes away the other reason the walk could stop — no
+    // schematic to read — so here it is the binding's own text alone.
+    let plan = design.plan(&["veriloga", "schematic"], &[]);
+    let occurrence = plan
+        .binding(&InstancePath::parse("/X1").expect("an instance path"))
+        .expect("the plan binds the occurrence");
+    assert!(!occurrence.stop_boundary());
+    assert_eq!(occurrence.resolved_reference().view, "veriloga");
+    let mut shadowed = design.views.clone();
+    shadowed.insert(
+        "work/amp/veriloga".to_owned(),
+        design.views["work/amp/schematic"].clone(),
+    );
+    let unstopped = HierarchySource::from_buffers(&shadowed).with_execution_plan(plan);
+    let result = run_check_with_hierarchy(
+        &shadowed["work/top/schematic"],
+        &unstopped,
+        connectivity_only(),
+    );
+    assert!(
+        result.violations().is_empty(),
+        "nothing below a view written from its own source is checked: {:?}",
+        result.violations()
+    );
 }
 
 /// The configured walk keys a cellview by what its subtree resolves to. A

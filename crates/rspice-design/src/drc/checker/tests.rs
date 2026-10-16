@@ -667,13 +667,17 @@ fn a_node_that_continues_outside_the_cellview_is_not_floating() {
             unused_port.violations()
         );
     }
-    // The port and one leg: two terminals here, and the parent's net beyond.
+    // The port and one leg: two terminals here, and the parent's net beyond
+    // makes three, which is what a rule asking for three connections needs.
     let used_port = check(
         &[
             interface_port(1, "IN", true),
             resistor(2, "R1", vec![pin("1", "IN"), pin("2", "0")]),
         ],
-        config.clone(),
+        DrcConfig {
+            min_connections: 3,
+            ..config.clone()
+        },
     );
     assert!(
         of_type(&used_port, DrcViolationType::FloatingNode).is_empty(),

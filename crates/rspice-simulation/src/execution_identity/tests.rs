@@ -1463,6 +1463,195 @@ fn drc_identity_tags_are_never_renumbered() {
         assert_eq!(drc_location_tag(location), *pinned, "{location:?}");
     }
 }
+
+/// What one finding's identity hashes, spelled out byte by byte for a finding
+/// at each location kind. The test above keeps the tag numbers; this keeps the
+/// layout around them — the order of the fields, the marker before each, and
+/// how each value is written — so a reordered field or a changed width fails
+/// here rather than silently re-keying every cached receipt.
+#[test]
+fn drc_identity_bytes_are_pinned_for_every_location_kind() {
+    use rspice_design_model::Point;
+    use sha2::{Digest as _, Sha256};
+
+    // The canonical encoding's markers, written out independently of
+    // `CanonicalWriter`.
+    const DOMAIN: u8 = 0xd0;
+    const STRING: u8 = 0x07;
+    fn text(bytes: &mut Vec<u8>, marker: u8, value: &str) {
+        bytes.push(marker);
+        bytes.extend((value.len() as u64).to_be_bytes());
+        bytes.extend(value.as_bytes());
+    }
+    fn tag(bytes: &mut Vec<u8>, value: u8) {
+        bytes.extend([0x02, value]);
+    }
+    fn id(bytes: &mut Vec<u8>, value: u64) {
+        bytes.push(0x03);
+        bytes.extend(value.to_be_bytes());
+    }
+    fn int(bytes: &mut Vec<u8>, value: i32) {
+        bytes.push(0x04);
+        bytes.extend(value.to_be_bytes());
+    }
+    fn real(bytes: &mut Vec<u8>, value: f64) {
+        bytes.push(0x06);
+        bytes.extend(value.to_bits().to_be_bytes());
+    }
+    fn sequence(bytes: &mut Vec<u8>, len: u64) {
+        bytes.push(0x0a);
+        bytes.extend(len.to_be_bytes());
+    }
+    fn location(bytes: &mut Vec<u8>, kind: u8) {
+        text(bytes, DOMAIN, "drc-location");
+        tag(bytes, kind);
+    }
+    fn terminal(bytes: &mut Vec<u8>) {
+        location(bytes, 9);
+        id(bytes, 7);
+        text(bytes, STRING, "R1");
+        text(bytes, STRING, "2");
+        int(bytes, -3);
+        int(bytes, 40);
+    }
+
+    let at_terminal = DrcLocation::Terminal {
+        component_id: 7,
+        component_name: "R1".to_owned(),
+        pin_name: "2".to_owned(),
+        point: Point::new(-3, 40),
+    };
+    type Spelling = Box<dyn Fn(&mut Vec<u8>)>;
+    let cases: Vec<(DrcLocation, Spelling)> = vec![
+        (
+            DrcLocation::Point { x: 1.5, y: -2.0 },
+            Box::new(|bytes: &mut Vec<u8>| {
+                location(bytes, 0);
+                real(bytes, 1.5);
+                real(bytes, -2.0);
+            }),
+        ),
+        (
+            DrcLocation::Component {
+                id: 7,
+                name: "R1".to_owned(),
+            },
+            Box::new(|bytes: &mut Vec<u8>| {
+                location(bytes, 1);
+                id(bytes, 7);
+                text(bytes, STRING, "R1");
+            }),
+        ),
+        (
+            DrcLocation::Wire { id: 9 },
+            Box::new(|bytes: &mut Vec<u8>| {
+                location(bytes, 2);
+                id(bytes, 9);
+            }),
+        ),
+        (
+            DrcLocation::NetLabel {
+                name: "out".to_owned(),
+            },
+            Box::new(|bytes: &mut Vec<u8>| {
+                location(bytes, 3);
+                text(bytes, STRING, "out");
+            }),
+        ),
+        (
+            DrcLocation::Node {
+                net_name: "vdd!".to_owned(),
+            },
+            Box::new(|bytes: &mut Vec<u8>| {
+                location(bytes, 4);
+                text(bytes, STRING, "vdd!");
+            }),
+        ),
+        (
+            DrcLocation::Global,
+            Box::new(|bytes: &mut Vec<u8>| location(bytes, 5)),
+        ),
+        (
+            DrcLocation::SymbolPin {
+                reference: rspice_design_model::cell_view::CellViewRef::new(
+                    "work", "amp", "symbol",
+                ),
+                pin_name: "A".to_owned(),
+                point: Some(Point::new(5, -6)),
+            },
+            Box::new(|bytes: &mut Vec<u8>| {
+                location(bytes, 6);
+                text(bytes, STRING, "work");
+                text(bytes, STRING, "amp");
+                text(bytes, STRING, "symbol");
+                text(bytes, STRING, "A");
+                bytes.extend([0x0b, 1]);
+                int(bytes, 5);
+                int(bytes, -6);
+            }),
+        ),
+        (
+            DrcLocation::Bus { id: 11 },
+            Box::new(|bytes: &mut Vec<u8>| {
+                location(bytes, 7);
+                id(bytes, 11);
+            }),
+        ),
+        (
+            DrcLocation::BusTap { id: 12 },
+            Box::new(|bytes: &mut Vec<u8>| {
+                location(bytes, 8);
+                id(bytes, 12);
+            }),
+        ),
+        (at_terminal.clone(), Box::new(terminal)),
+        (
+            DrcLocation::InsideInstance {
+                path: rspice_app_types::hierarchy_path::InstancePath::parse("/X1/XA")
+                    .expect("instance path"),
+                view: rspice_design_model::cell_view::CellViewRef::new("work", "amp", "schematic"),
+                inner: Box::new(at_terminal),
+            },
+            Box::new(|bytes: &mut Vec<u8>| {
+                location(bytes, 10);
+                sequence(bytes, 2);
+                text(bytes, STRING, "X1");
+                text(bytes, STRING, "XA");
+                text(bytes, STRING, "work");
+                text(bytes, STRING, "amp");
+                text(bytes, STRING, "schematic");
+                terminal(bytes);
+            }),
+        ),
+    ];
+
+    for (at, spelled) in cases {
+        let mut violation = DrcViolation::new(3, DrcViolationType::FloatingNode, "Node 'a'", at)
+            .with_related(vec!["R2".to_owned(), "R1".to_owned()]);
+        violation.severity = DrcSeverity::Warning;
+
+        let mut bytes = b"RSPICE-CANONICAL".to_vec();
+        bytes.extend(1_u16.to_be_bytes());
+        text(&mut bytes, DOMAIN, "rspice.drc-violation/v1");
+        id(&mut bytes, 3);
+        tag(&mut bytes, 0);
+        tag(&mut bytes, 1);
+        text(&mut bytes, STRING, "Node 'a'");
+        spelled(&mut bytes);
+        // The related items, sorted.
+        sequence(&mut bytes, 2);
+        text(&mut bytes, STRING, "R1");
+        text(&mut bytes, STRING, "R2");
+
+        assert_eq!(
+            drc_violation_digest(&violation),
+            ContentDigest::from_bytes(Sha256::digest(&bytes).into()),
+            "{:?}",
+            violation.location
+        );
+    }
+}
+
 #[test]
 fn periodic_port_noise_options_have_distinct_execution_identities() {
     use rspice_core::analysis::s_param::PeriodicPortNoiseReference;
