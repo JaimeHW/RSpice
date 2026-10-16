@@ -2122,85 +2122,48 @@ fn empty_diagnostic_row(ui: &mut Ui, message: &str) {
     rspice_ui_kit::panels::inspector::toned_inspector_copy(ui, message, faint);
 }
 
+/// Where the generated deck came from, and what is wrong with it.
+///
+/// The input revision, the input digest and the netlist digest were three
+/// counters and hashes a designer cannot act on; the generator's healthy
+/// states reported success. What is left is the cellview that produced the
+/// deck, and a marked line when the deck is not the one the schematic implies.
 fn generated_provenance(ui: &mut Ui, state: &AppState) {
-    section_header(ui, "Generated provenance", None);
-    let netlist = &state.ui.netlist;
-    let canonical = netlist.generated_document.as_ref();
-    let source = canonical
+    let source = state
+        .ui
+        .netlist
+        .generated_document
+        .as_ref()
         .and_then(|document| document.generated_artifact())
         .and_then(|artifact| artifact.source_map().first())
-        .map(|entry| entry.view_identity().to_owned())
-        .unwrap_or_else(|| "Unavailable".to_owned());
-    property_row(ui, "Source cell/view", &source);
-    property_row(ui, "Input revision", &generated_input_revision(state));
-    property_row(
-        ui,
-        "Input digest",
-        &canonical
-            .and_then(|document| document.generated_artifact())
-            .map(|artifact| short_digest(artifact.provenance().input().digest()))
-            .unwrap_or_else(|| "Unavailable".to_owned()),
-    );
-    property_row(ui, "Generator state", generated_state(state));
-    property_row(
-        ui,
-        "Netlist digest",
-        &canonical
-            .and_then(|document| document.generated_artifact())
-            .map(|artifact| short_digest(artifact.content_digest()))
-            .unwrap_or_else(|| "Unavailable".to_owned()),
-    );
+        .map(|entry| entry.view_identity().to_owned());
+    if let Some(source) = source {
+        property_row(ui, "Generated from", &source);
+    }
+    if let Some((label, problem)) = generated_state(state) {
+        property_row_problem(ui, "State", label, Some(problem));
+    }
 }
 
+/// Which file the owned deck lives in, and what is wrong with it.
+///
+/// The project revision, the document revision, the generated base and the
+/// two digests were five counters and hashes with nothing a designer can do
+/// about them; the document state reported success in catalog words. What is
+/// left is the file and a marked line when the deck needs attention.
 fn owned_source_provenance(ui: &mut Ui, state: &AppState) {
-    let project = &state.workspace.content;
-    section_header(ui, "Owned source provenance", None);
-    let source = &state.simulation.source.netlist_content;
-    let source_digest = crate::state::content_digest(source);
-    property_row(
-        ui,
-        "Source origin",
-        &project.netlist_source_path.as_ref().map_or_else(
-            || "Project-owned source".to_owned(),
-            |path| path.display().to_string(),
-        ),
-    );
-    property_row(
-        ui,
-        "Project revision",
-        &project.project.revision().get().to_string(),
-    );
-    if let Some(document) = state.ui.netlist.owned_document.as_ref() {
-        property_row(
-            ui,
-            "Document revision",
-            &document.revision().get().to_string(),
-        );
-        property_row(
-            ui,
-            "Generated base",
-            &document
-                .generated_artifact()
-                .map(|artifact| short_digest(artifact.content_digest()))
-                .unwrap_or_else(|| "None · authored netlist-first".to_owned()),
-        );
+    if let Some(path) = state.workspace.content.netlist_source_path.as_ref() {
+        property_row(ui, "File", &path.display().to_string());
     }
-    property_row(
-        ui,
-        "Document state",
-        owned_source_state(state, source_digest),
-    );
-    property_row(ui, "Netlist digest", &short_digest(source_digest));
-    property_row(
-        ui,
-        "Saved digest",
-        &state
-            .ui
-            .netlist
-            .externally_saved_content_digest
-            .map(short_digest)
-            .unwrap_or_else(|| "Not published".to_owned()),
-    );
+    let digest = crate::state::content_digest(&state.simulation.source.netlist_content);
+    if let Some(label) = owned_source_state(state, digest) {
+        let problem = if state.ui.netlist.external_change.is_some() {
+            Problem::Failure
+        } else {
+            Problem::Warning
+        };
+        property_row_problem(ui, "State", label, Some(problem));
+    }
 }
 
 fn dependency_provenance(ui: &mut Ui, state: &AppState) {
@@ -2219,27 +2182,33 @@ fn dependency_provenance(ui: &mut Ui, state: &AppState) {
         &messages.text(crate::workbench::MessageId::NetlistDisplayName),
         dependency.locator().display_name(),
     );
-    property_row(
-        ui,
-        &messages.text(crate::workbench::MessageId::NetlistLogicalIdentity),
-        dependency.locator().logical_identity(),
-    );
-    property_row(
-        ui,
-        &messages.text(crate::workbench::MessageId::NetlistRequestedAs),
-        dependency.requested_locator(),
-    );
-    property_row(
+    // Only worth a row when the deck asked for something other than what it
+    // got: that difference is the thing a designer chases. When they agree the
+    // row restates the display name directly above it.
+    if dependency.requested_locator() != dependency.locator().display_name() {
+        property_row(
+            ui,
+            &messages.text(crate::workbench::MessageId::NetlistRequestedAs),
+            dependency.requested_locator(),
+        );
+    }
+    // Where the bytes come from, and the one failure worth a mark here: an
+    // include the deck names that nothing resolved to.
+    property_row_problem(
         ui,
         &messages.text(crate::workbench::MessageId::NetlistOrigin),
-        dependency
-            .locator()
-            .native_origin()
-            .map(str::to_owned)
-            .unwrap_or_else(|| {
-                messages.text(crate::workbench::MessageId::NetlistRetainedAuthenticatedSource)
-            })
-            .as_str(),
+        &if dependency.resolution().content_digest().is_none() {
+            messages.text(crate::workbench::MessageId::NetlistUnresolved)
+        } else {
+            dependency
+                .locator()
+                .native_origin()
+                .map(str::to_owned)
+                .unwrap_or_else(|| {
+                    messages.text(crate::workbench::MessageId::NetlistRetainedAuthenticatedSource)
+                })
+        },
+        (dependency.resolution().content_digest().is_none()).then_some(Problem::Failure),
     );
     let relationship = messages.text(if dependency.direct_include_index().is_some() {
         crate::workbench::MessageId::NetlistDirectInclude
@@ -2287,69 +2256,32 @@ fn dependency_provenance(ui: &mut Ui, state: &AppState) {
             |_| messages.text(crate::workbench::MessageId::NetlistProjectOwnedEditable),
         ),
     );
-    if let Some(owned) = owned {
-        property_row(
-            ui,
-            &messages.text(crate::workbench::MessageId::NetlistDocumentId),
-            &owned.document_id.to_string(),
-        );
-        property_row(
-            ui,
-            &messages.text(crate::workbench::MessageId::NetlistDocumentRevision),
-            &owned.revision.to_string(),
-        );
-    }
-    property_row(
-        ui,
-        &messages.text(crate::workbench::MessageId::NetlistContentDigest),
-        &dependency
-            .resolution()
-            .content_digest()
-            .map(short_digest)
-            .unwrap_or_else(|| messages.text(crate::workbench::MessageId::NetlistUnresolved)),
-    );
 }
 
-fn generated_state(state: &AppState) -> &'static str {
+/// What is wrong with the generated deck, or nothing when it matches the
+/// schematic. A deck that is current — validated or not — says nothing.
+fn generated_state(state: &AppState) -> Option<(&'static str, Problem)> {
     let netlist = &state.ui.netlist;
     if netlist.generated_source.is_empty() {
-        "not generated"
+        Some(("Not generated yet", Problem::Warning))
     } else if netlist.generation_error.is_some() {
-        "blocked · prior artifact retained"
+        Some((
+            "Could not generate; showing the last deck",
+            Problem::Failure,
+        ))
     } else if netlist.generated_input_digest != netlist.current_generation_input_digest {
-        "stale · refresh pending"
+        Some(("Older than the schematic", Problem::Warning))
     } else {
-        let digest = crate::state::content_digest(&netlist.generated_source);
-        if netlist.validation.as_ref().is_some_and(|receipt| {
-            receipt.visible_content_digest == digest
-                && receipt.project_revision == state.workspace.content.project.revision().get()
-        }) {
-            "generated · validated"
-        } else {
-            "generated · current"
-        }
+        None
     }
 }
 
-fn generated_input_revision(state: &AppState) -> String {
-    state
-        .ui
-        .netlist
-        .generated_document
-        .as_ref()
-        .and_then(|document| document.generated_artifact())
-        .map(|artifact| artifact.provenance().input().revision().get().to_string())
-        .unwrap_or_else(|| "Unavailable".to_owned())
-}
-
-fn owned_source_state(state: &AppState, digest: crate::product::ContentDigest) -> &'static str {
+fn owned_source_state(
+    state: &AppState,
+    digest: crate::product::ContentDigest,
+) -> Option<&'static str> {
     crate::workbench::documents::netlist_document::owned_netlist_publication_state(state, digest)
         .label()
-}
-
-fn short_digest(digest: crate::product::ContentDigest) -> String {
-    let digest = digest.to_string();
-    format!("{}…{}", &digest[..8], &digest[digest.len() - 4..])
 }
 
 fn diagnostic_location(

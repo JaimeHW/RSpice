@@ -373,8 +373,9 @@ fn preview_toolbar_text(ui: &Ui, toolbar: Rect, facts: &DeckFacts, t: &Tokens) {
     let state_font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let state_left = facts
         .publication
-        .map_or(toolbar.right() - 11.0, |publication| {
+        .and_then(|publication| {
             let (label, problem) = publication_presentation(publication);
+            let label = label?;
             let mut left = ui
                 .painter()
                 .text(
@@ -397,8 +398,9 @@ fn preview_toolbar_text(ui: &Ui, toolbar: Rect, facts: &DeckFacts, t: &Tokens) {
                 );
                 left -= PUBLICATION_MARK_SIDE;
             }
-            left
-        });
+            Some(left)
+        })
+        .unwrap_or(toolbar.right() - 11.0);
     let name_font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let name_left = title_rect.right() + 9.0;
     let name_width = (state_left - 9.0 - name_left).max(0.0);
@@ -528,7 +530,7 @@ fn card_tone(t: &Tokens, line: usize, card: &str) -> Color32 {
 /// outside this project is the one the reader has to act on.
 const fn publication_presentation(
     publication: OwnedNetlistPublicationState,
-) -> (&'static str, Option<Problem>) {
+) -> (Option<&'static str>, Option<Problem>) {
     (
         publication.label(),
         if publication.external_change_pending {

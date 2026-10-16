@@ -63,26 +63,22 @@ pub(crate) struct OwnedNetlistPublicationState {
 }
 
 impl OwnedNetlistPublicationState {
+    /// What to say about the deck, or nothing when there is nothing to say.
+    ///
+    /// The seven fields above keep every distinction the toolbar, the
+    /// inspector and the execution gate need. This is only the one line a
+    /// reader sees, so it follows the panel rule: a state renders when it is
+    /// not the normal one. A validated deck, a deck saved and validated, and a
+    /// deck edited since its last save are all ordinary — the last is already
+    /// marked by the document tab — so they say nothing at all.
     #[must_use]
-    pub const fn label(self) -> &'static str {
+    pub const fn label(self) -> Option<&'static str> {
         if self.external_change_pending {
-            "external change · review required"
-        } else if !self.published_before && self.validated {
-            "validated · not externally synchronized"
-        } else if !self.published_before {
-            "owned · validation required"
-        } else if self.source_modified && self.validated {
-            "modified · validated"
-        } else if self.source_modified {
-            "modified · validation required"
-        } else if self.saved && self.validated && self.project_modified {
-            "externally synchronized · validated · project modified"
-        } else if self.saved && self.validated {
-            "externally synchronized · validated"
-        } else if self.saved {
-            "externally synchronized · validation required"
+            Some("Changed on disk since you opened it")
+        } else if self.validated {
+            None
         } else {
-            "owned · validation required"
+            Some("Not checked yet")
         }
     }
 }
