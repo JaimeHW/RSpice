@@ -211,22 +211,20 @@ class WorkspaceDescriptionTests(unittest.TestCase):
         ):
             return check_formatting.main(), printed.getvalue()
 
-    def test_a_stale_lockfile_names_cargos_refusal_and_its_cause(self) -> None:
-        """A landing tree that merged two branches is the common case here.
+    def test_a_refusal_is_stated_in_cargos_own_words(self) -> None:
+        """The gate used to raise `CalledProcessError` out of `main`.
 
-        The gate used to raise `CalledProcessError` out of `main`, which reads
-        as the gate itself being broken. The tree is what is stale, and only
-        cargo knows which lockfile it is.
+        That reads as the gate itself being broken. Only cargo knows what it
+        could not load, so its words are what the reader gets, with no guess
+        at the cause added to them.
         """
         refusal = subprocess.CalledProcessError(101, ("cargo", "metadata"))
         refusal.stderr = (
-            "error: the lock file /w/Cargo.lock needs to be updated but "
-            "--locked was passed to prevent this\n"
+            "error: failed to parse manifest at `/w/crates/x/Cargo.toml`\n"
         )
         code, printed = self.run_main(refusal)
         self.assertEqual(code, 1)
-        self.assertIn("needs to be updated", printed)
-        self.assertIn("Cargo.lock must match the manifests", printed)
+        self.assertIn("failed to parse manifest", printed)
         self.assertNotIn("Traceback", printed)
 
     def test_a_refusal_with_nothing_on_stderr_still_exits_rather_than_raising(
@@ -238,6 +236,66 @@ class WorkspaceDescriptionTests(unittest.TestCase):
         )
         self.assertEqual(code, 1)
         self.assertIn("could not describe the workspace", printed)
+        self.assertIn("exit status 101", printed)
+
+
+class RustfmtOutcomeTests(unittest.TestCase):
+    """What one rustfmt run's exit status and output make of the gate."""
+
+    def run_main(self, completed: subprocess.CompletedProcess) -> tuple[int, str]:
+        workspace = {
+            "packages": [
+                package(f"member-{index:02}", ("2024", f"/w/member-{index:02}/src/lib.rs"))
+                for index in range(MINIMUM_MEMBERS)
+            ]
+        }
+        printed = io.StringIO()
+        with (
+            mock.patch.object(check_formatting, "metadata", return_value=workspace),
+            mock.patch.object(check_formatting.subprocess, "run", return_value=completed),
+            mock.patch.object(sys, "argv", ["check_formatting.py"]),
+            contextlib.redirect_stdout(printed),
+        ):
+            return check_formatting.main(), printed.getvalue()
+
+    @staticmethod
+    def outcome(returncode: int, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess:
+        return subprocess.CompletedProcess(("rustfmt",), returncode, stdout, stderr)
+
+    def test_a_clean_run_passes(self) -> None:
+        code, printed = self.run_main(self.outcome(0))
+        self.assertEqual(code, 0)
+        self.assertIn(f"checked {MINIMUM_MEMBERS} target(s)", printed)
+
+    def test_a_diff_names_the_file_and_fails(self) -> None:
+        code, printed = self.run_main(
+            self.outcome(1, stdout="Diff in /w/member-00/src/lib.rs:1:\n-a\n+b\n")
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("unformatted: /w/member-00/src/lib.rs", printed)
+
+    def test_a_parse_error_beside_a_diff_is_still_reported(self) -> None:
+        """rustfmt prints both and exits 1 when one run holds both files.
+
+        Measured with rustfmt 1.8: the diff goes to stdout, the parse error to
+        stderr. Reading only stdout told the reader to run --write, which does
+        not fix a file that does not parse.
+        """
+        code, printed = self.run_main(
+            self.outcome(
+                1,
+                stdout="Diff in /w/member-00/src/lib.rs:1:\n-a\n+b\n",
+                stderr="error: this file contains an unclosed delimiter\n",
+            )
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("unclosed delimiter", printed)
+
+    def test_a_failure_that_names_no_file_is_not_a_pass(self) -> None:
+        code, printed = self.run_main(self.outcome(1, stdout="something unexpected\n"))
+        self.assertEqual(code, 1)
+        self.assertIn("could not check", printed)
+        self.assertIn("exit status 1", printed)
 
 
 if __name__ == "__main__":

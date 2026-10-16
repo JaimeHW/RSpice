@@ -110,12 +110,11 @@ def offenders(output: str) -> list[str]:
 def metadata() -> dict:
     """Describe the workspace, keeping cargo's own words when it refuses.
 
-    `--locked` is deliberate: a gate checks the workspace the lockfile pins
-    rather than quietly resolving a new one. It also means a tree whose
-    `Cargo.lock` is out of step with its manifests fails here, which is the
-    ordinary state of a landing tree that merged two branches each adding a
-    dependency. Capturing stderr is what lets the caller say the tree is
-    stale instead of raising a traceback that reads as a broken gate.
+    `--no-deps` resolves nothing, so cargo does not read `Cargo.lock` here and
+    `--locked` cannot trip; it is passed because every cargo call in CI is.
+    What does make this fail is a manifest cargo cannot load. Capturing stderr
+    is what lets the caller print cargo's reason instead of raising a
+    traceback that reads as a broken gate.
     """
     return json.loads(
         subprocess.check_output(
@@ -139,12 +138,8 @@ def main() -> int:
     try:
         grouped = entry_points(metadata())
     except subprocess.CalledProcessError as refusal:
-        print(f"cargo could not describe the workspace:\n{(refusal.stderr or '').strip()}")
-        print(
-            "This gate reads the workspace under --locked, so Cargo.lock must "
-            "match the manifests. Run a cargo command without --locked to "
-            "update it and commit the lockfile with the manifest that moved."
-        )
+        reason = (refusal.stderr or "").strip() or f"exit status {refusal.returncode}"
+        print(f"cargo could not describe the workspace:\n{reason}")
         return 1
     members = {member for member, _ in grouped}
     if len(members) < MINIMUM_MEMBERS:
@@ -169,13 +164,21 @@ def main() -> int:
                 capture_output=True,
                 check=False,
             )
-            for path in offenders(completed.stdout):
+            found = offenders(completed.stdout)
+            for path in found:
                 if path not in unformatted:
                     unformatted.append(path)
-            if completed.returncode != 0 and not completed.stdout:
-                # rustfmt failed without reporting a diff: a parse error, a
-                # missing file, or a command line it still could not take.
-                print(f"rustfmt could not check {member}: {completed.stderr.strip()}")
+            problem = completed.stderr.strip()
+            if completed.returncode != 0 and (problem or not found):
+                # A diff is reported on stdout and nothing else; anything on
+                # stderr is a parse error, a missing file or a command line
+                # rustfmt could not take, and a diff in the same run must not
+                # hide it behind advice to run --write. A failure that named
+                # no file at all is not a pass either.
+                print(
+                    f"rustfmt could not check {member}: "
+                    f"{problem or f'exit status {completed.returncode}'}"
+                )
                 return 1
 
     if unformatted:
