@@ -57,6 +57,30 @@ pub(in crate::workbench) enum DiagnosticLevel {
 }
 
 impl DiagnosticLevel {
+    /// Every rung, worst first — the order a reader scans a severity filter
+    /// in, and the order a worst-first tour visits findings in.
+    pub(in crate::workbench) const ALL: [Self; 5] = [
+        Self::Critical,
+        Self::Error,
+        Self::Warning,
+        Self::Info,
+        Self::Hint,
+    ];
+
+    /// This rung's position in [`Self::ALL`].
+    ///
+    /// One mapping, because anything that keeps a count or a flag per severity
+    /// indexes by it, and two copies of the order would be two orders.
+    pub(in crate::workbench) const fn rung(self) -> usize {
+        match self {
+            Self::Critical => 0,
+            Self::Error => 1,
+            Self::Warning => 2,
+            Self::Info => 3,
+            Self::Hint => 4,
+        }
+    }
+
     pub(in crate::workbench) const fn display_name(self) -> &'static str {
         match self {
             Self::Hint => "Hint",
@@ -116,6 +140,11 @@ impl From<rspice_design::drc::DrcSeverity> for DiagnosticLevel {
 /// `Corner tt` — because the producer is the only thing that knows how the
 /// object is addressed in its own domain. What this type adds is the context
 /// that makes those words unambiguous across a project.
+///
+/// The two are kept apart rather than spelled into one line, because the grid
+/// prints them in two columns: the object is what the finding is about, and
+/// the cell view is where that object is. Spelling them together was what made
+/// every row of one view repeat its path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workbench) struct DiagnosticSubject {
     pub(in crate::workbench) project: ProjectId,
@@ -135,24 +164,6 @@ impl DiagnosticSubject {
     pub(in crate::workbench) fn in_cell_view(mut self, cell_view: CellViewRef) -> Self {
         self.cell_view = Some(cell_view);
         self
-    }
-
-    /// The subject in one line, for a column that has room for one.
-    ///
-    /// The cell view is dropped when the object already names it, so a symbol
-    /// pin finding does not read `lib/cell/symbol · lib/cell/symbol pin A`.
-    pub(in crate::workbench) fn display(&self) -> String {
-        match self.cell_view.as_ref() {
-            Some(reference) => {
-                let path = reference.display_path();
-                if self.object.starts_with(path.as_str()) {
-                    self.object.clone()
-                } else {
-                    format!("{path} · {}", self.object)
-                }
-            }
-            None => self.object.clone(),
-        }
     }
 }
 
@@ -196,6 +207,15 @@ pub(in crate::workbench) struct DiagnosticRecord {
     /// What else the reader needs, shown on hover. Empty when the message is
     /// the whole finding.
     pub(in crate::workbench) details: String,
+    /// What the rule itself requires, in the words the rule is written in.
+    ///
+    /// Not the message and not the fix: the message says what this instance
+    /// is, the details say what to do about it, and this says what the rule
+    /// demands of every design. Empty where the producer has no rule prose —
+    /// a run that failed to converge is not an instance of a rule — and a
+    /// surface that offers to explain a finding must offer nothing where this
+    /// is empty rather than restate the message under a different heading.
+    pub(in crate::workbench) rule: String,
     pub(in crate::workbench) route: Option<DiagnosticRoute>,
 }
 
@@ -212,12 +232,19 @@ impl DiagnosticRecord {
             subject,
             message: message.into(),
             details: String::new(),
+            rule: String::new(),
             route: None,
         }
     }
 
     pub(in crate::workbench) fn with_details(mut self, details: impl Into<String>) -> Self {
         self.details = details.into();
+        self
+    }
+
+    /// State the rule this finding is an instance of, in the rule's own words.
+    pub(in crate::workbench) fn with_rule(mut self, rule: impl Into<String>) -> Self {
+        self.rule = rule.into();
         self
     }
 
@@ -288,6 +315,21 @@ impl DiagnosticInputs {
             Self::DesignCheck { .. } => DiagnosticOwner::DesignRules,
             Self::Dispatch => DiagnosticOwner::Dispatch,
             Self::Run { .. } => DiagnosticOwner::Run,
+        }
+    }
+
+    /// What this batch was derived from, in words a reader can check against
+    /// the design. For a stale batch this is exactly what moved under it.
+    pub(in crate::workbench) fn description(&self) -> String {
+        match self {
+            Self::DesignCheck { subject } => format!(
+                "the schematic working set behind {}",
+                subject.display_path()
+            ),
+            Self::Dispatch => "the configured design and the active simulation plan".to_owned(),
+            Self::Run { run_sequence } => {
+                format!("run {run_sequence} and the drawing its names resolve against")
+            }
         }
     }
 
@@ -397,6 +439,22 @@ pub(crate) struct DiagnosticStore {
     /// commands, which is the application root's business. Recording the
     /// request keeps the page from reaching up for the dispatcher.
     pending_route: Option<DiagnosticRoute>,
+    /// The one finding every surface treats as current, by canonical identity.
+    ///
+    /// The Problems grid's current row and the canvas finding tour are the
+    /// same selection. They used to be two: the page had no selection at all
+    /// and the tour kept an index into a list it sorted for itself, so
+    /// "finding 3 of 7" named a different condition from the row a reader was
+    /// looking at, and nothing could carry a selection from one surface to the
+    /// other.
+    ///
+    /// An identity rather than an index, because every ordering here is a
+    /// presentation choice: the grid sorts, filters and groups, the tour walks
+    /// worst-severity-first, and an index means something different in each.
+    /// It also needs no invalidation — a finding that leaves the store stops
+    /// being current because nothing resolves it any more, which is what the
+    /// index could not do when a batch was republished under it.
+    current: Option<uuid::Uuid>,
 }
 
 impl DiagnosticStore {
@@ -414,10 +472,32 @@ impl DiagnosticStore {
         self.pending_route.take()
     }
 
+    /// The finding the grid and the canvas tour are both standing on.
+    ///
+    /// Reachable from the whole crate because the canvas is: the finding tour
+    /// lives with the drawing it moves, outside the shell, and the point of
+    /// one selection is that both ends of it can read it.
+    pub(crate) const fn current_finding(&self) -> Option<uuid::Uuid> {
+        self.current
+    }
+
+    /// Stand on a finding, by the identity its producer minted for it.
+    ///
+    /// Accepting an identity the store does not hold is deliberate: the
+    /// netlist and code editors own their own collections and the store never
+    /// sees those records, so a selection in one of them would be refused by
+    /// any check made here. What makes a selection meaningful is that
+    /// something resolves it, which every reader of it does by looking the
+    /// identity up in the list it is drawing.
+    pub(crate) fn set_current_finding(&mut self, finding: Option<uuid::Uuid>) {
+        self.current = finding;
+    }
+
     pub(in crate::workbench) fn clear(&mut self) {
         self.batches.clear();
         self.owners.clear();
         self.pending_route = None;
+        self.current = None;
     }
 
     /// Replace a batch, and with it every identity the old one held.
@@ -557,26 +637,6 @@ mod tests {
         assert_eq!(
             design_rule_code(DrcViolationType::ShortedOutputs),
             "DRC-SHORTED-OUTPUTS"
-        );
-    }
-
-    #[test]
-    fn a_subject_does_not_repeat_the_cell_view_its_object_already_names() {
-        let mut state = AppState::default();
-        state.workspace.content.active_view = CellViewRef::new("lib", "cell", "symbol");
-        let reference = state.workspace.content.active_view.clone();
-        let project = state.workspace.content.project.id();
-        let bare = DiagnosticSubject::new(project, "Component M1")
-            .in_cell_view(reference.clone())
-            .display();
-        assert!(bare.ends_with("· Component M1"), "{bare}");
-        let already_named =
-            DiagnosticSubject::new(project, format!("{} pin A", reference.display_path()))
-                .in_cell_view(reference)
-                .display();
-        assert!(
-            !already_named.contains('·'),
-            "{already_named} must not name its cell view twice",
         );
     }
 

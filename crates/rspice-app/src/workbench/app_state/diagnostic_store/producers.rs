@@ -148,6 +148,10 @@ fn blocker_record(
         issue.observed.clone(),
     )
     .with_details(format!("{} · required: {}", issue.check, issue.required))
+    // A dispatch check states what it requires of every run, which is the
+    // nearest thing it has to rule prose and is not the same sentence as what
+    // it observed about this one.
+    .with_rule(issue.required.clone())
     .with_route(Some(DiagnosticRoute::Repair(issue.remediation.clone())))
 }
 

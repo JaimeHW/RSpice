@@ -1850,7 +1850,6 @@ impl Command {
                 }
                 app.state.dialogs.drc_results = None;
                 app.state.dialogs.drc_checked_version = 0;
-                app.state.dialogs.drc_cycle = None;
             }
             Self::NextViolation => {
                 crate::schematic::view::violations::cycle_violation(&mut app.state, 1);

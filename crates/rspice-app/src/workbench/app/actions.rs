@@ -1173,12 +1173,19 @@ mod shortcut_ownership_tests {
             .workbench
             .activate(crate::workbench::state::Workspace::Verify);
 
+        // The tour's position is the shared current finding, named by the
+        // canonical identity its published record carries, so the Problems
+        // grid's current row is the finding the canvas just jumped to.
+        let subject = app.state.workspace.content.active_schematic_reference();
+        let identities = app.state.design_rule_finding_identities(&subject);
+        assert_eq!(identities.len(), 2, "both findings were published");
+
         app.execute_shortcut_command(ShortcutCommand::NextViolation);
         assert_eq!(
             app.state.workbench.workspace,
             crate::workbench::state::Workspace::Design
         );
-        assert_eq!(app.state.dialogs.drc_cycle, Some(0));
+        assert_eq!(app.state.diagnostics.current_finding(), Some(identities[0]));
 
         let snapshot = ShortcutInputSnapshot::from_events_for_test(
             &[egui::Event::Key {
@@ -1210,7 +1217,7 @@ mod shortcut_ownership_tests {
         assert_eq!(resolution.command, Some(ShortcutCommand::NextViolation));
 
         app.execute_shortcut_command(resolution.command.unwrap());
-        assert_eq!(app.state.dialogs.drc_cycle, Some(1));
+        assert_eq!(app.state.diagnostics.current_finding(), Some(identities[1]));
         assert_eq!(
             app.state.workbench.workspace,
             crate::workbench::state::Workspace::Design

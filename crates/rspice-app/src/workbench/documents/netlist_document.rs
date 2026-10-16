@@ -1853,7 +1853,6 @@ pub(crate) fn install_active_top_deck(
         state.clear_all_design_checks();
         state.dialogs.drc_results = None;
         state.dialogs.drc_checked_version = 0;
-        state.dialogs.drc_cycle = None;
     }
 }
 

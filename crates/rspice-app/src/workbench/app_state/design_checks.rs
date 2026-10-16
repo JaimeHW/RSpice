@@ -179,6 +179,36 @@ impl AppState {
         Ok(())
     }
 
+    /// What the published rule findings for `subject` are called, in the order
+    /// the checks reported them.
+    ///
+    /// The order is [`DrcResult::violations`]' own, because the records are
+    /// derived from it one for one — which is what lets a surface holding the
+    /// result name the finding at an ordinal without recomputing an identity.
+    /// Recomputing one would be a second copy of the identity rule, and it
+    /// would name a finding the store does not hold as soon as anything moved
+    /// the project revision the batch was published at.
+    ///
+    /// Empty where the checks published no records: the symbol pin checks keep
+    /// their findings in the canvas projection alone, so a surface walking
+    /// them has nothing to name them by.
+    pub(crate) fn design_rule_finding_identities(&self, subject: &CellViewRef) -> Vec<uuid::Uuid> {
+        let published = DiagnosticInputs::DesignCheck {
+            subject: subject.clone(),
+        };
+        self.diagnostics
+            .batches()
+            .find(|batch| batch.inputs == published)
+            .map(|batch| {
+                batch
+                    .records
+                    .iter()
+                    .map(|record| record.canonical.diagnostic_id)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub(crate) fn design_check_status(&self, subject: &CellViewRef) -> DesignCheckStatus<'_> {
         let last = self.design_checks.receipt(subject);
         let Some(receipt) = last else {
@@ -248,7 +278,6 @@ impl AppState {
         ) {
             self.dialogs.drc_checked_version = 0;
             self.dialogs.drc_results = None;
-            self.dialogs.drc_cycle = None;
             return;
         }
         let current = match self.active_design_check_status() {
@@ -261,7 +290,6 @@ impl AppState {
             .as_ref()
             .map_or(0, |_| self.schematic.topology_version());
         self.dialogs.drc_results = current;
-        self.dialogs.drc_cycle = None;
     }
 }
 
@@ -285,21 +313,7 @@ fn design_rule_records(
         .violations()
         .iter()
         .map(|violation| {
-            // The pass plus the finding's ordinal. Two findings of one rule
-            // can carry the same sentence about different objects — "Pin A is
-            // not connected" on two instances — and the ordinal is what keeps
-            // their canonical identities apart. It is stable for an unchanged
-            // design because the checks walk the design in a fixed order.
-            let validation_id = format!("design-check:{document_id}:{}", violation.id);
-            let canonical = CanonicalDiagnosticMetadata::current(
-                DESIGN_RULE_PRODUCER,
-                design_rule_code(violation.violation_type),
-                document_id.clone(),
-                None,
-                revision,
-                validation_id,
-                &violation.message,
-            );
+            let canonical = design_rule_canonical(revision, &document_id, violation);
             let route = drawn
                 .then(|| {
                     crate::schematic::view::violations::location_anchor(state, &violation.location)
@@ -314,9 +328,38 @@ fn design_rule_records(
                 violation.message.clone(),
             )
             .with_details(violation.violation_type.suggested_fix())
+            .with_rule(violation.violation_type.description())
             .with_route(route)
         })
         .collect()
+}
+
+/// The canonical identity and metadata of one rule finding.
+///
+/// One function, because an identity minted twice by two pieces of arithmetic
+/// is two identities: the records this publishes and the canvas tour that
+/// selects them have to agree about what a finding is called, and the tour
+/// holds violations rather than records.
+fn design_rule_canonical(
+    revision: u64,
+    document_id: &str,
+    violation: &rspice_design::drc::DrcViolation,
+) -> CanonicalDiagnosticMetadata {
+    // The pass plus the finding's ordinal. Two findings of one rule can carry
+    // the same sentence about different objects — "Pin A is not connected" on
+    // two instances — and the ordinal is what keeps their canonical identities
+    // apart. It is stable for an unchanged design because the checks walk the
+    // design in a fixed order.
+    let validation_id = format!("design-check:{document_id}:{}", violation.id);
+    CanonicalDiagnosticMetadata::current(
+        DESIGN_RULE_PRODUCER,
+        design_rule_code(violation.violation_type),
+        document_id.to_owned(),
+        None,
+        revision,
+        validation_id,
+        &violation.message,
+    )
 }
 
 fn owner_key(subject: &CellViewRef) -> CanonicalCellViewOwnerKey {

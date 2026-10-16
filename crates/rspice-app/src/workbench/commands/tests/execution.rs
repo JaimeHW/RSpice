@@ -109,14 +109,26 @@ fn repeated_violation_navigation_keeps_advancing_after_jump_to_design() {
             DrcLocation::Point { x, y: 0.0 },
         ));
     }
-    app.state.dialogs.drc_checked_version = app.state.schematic.topology_version();
-    app.state.dialogs.drc_results = Some(result);
+    result.completed = true;
+    // Published through the canonical owner, which is what gives each finding
+    // the identity the tour and the Problems grid share.
+    app.state
+        .publish_active_design_check_result(result)
+        .expect("the fixture publishes a current receipt");
+    app.state.refresh_active_design_check_projection();
     app.state.workbench.activate(Workspace::Verify);
 
-    for expected_cycle in [0, 1] {
+    let subject = app.state.workspace.content.active_schematic_reference();
+    let identities = app.state.design_rule_finding_identities(&subject);
+    assert_eq!(identities.len(), 2, "both findings were published");
+    for expected in identities {
         Command::NextViolation.execute(&mut app);
         assert_eq!(app.state.workbench.workspace, Workspace::Design);
-        assert_eq!(app.state.dialogs.drc_cycle, Some(expected_cycle));
+        assert_eq!(
+            app.state.diagnostics.current_finding(),
+            Some(expected),
+            "advancing the tour moves the one current finding",
+        );
         assert!(app.state.schematic.session.editor.center_request.is_some());
     }
 }

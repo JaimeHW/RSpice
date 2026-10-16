@@ -589,7 +589,6 @@ impl AppState {
                 if result.violations().is_empty() {
                     self.dialogs.drc_results = Some(result);
                     self.dialogs.drc_checked_version = self.schematic.topology_version();
-                    self.dialogs.drc_cycle = None;
                     self.push_user_message(ConsoleMessage::info("Symbol pins match schematic"));
                     return;
                 }
@@ -606,7 +605,6 @@ impl AppState {
                 )));
                 self.dialogs.drc_results = Some(result);
                 self.dialogs.drc_checked_version = self.schematic.topology_version();
-                self.dialogs.drc_cycle = None;
             }
             Err(error) => self.push_user_message(ConsoleMessage::warning(error)),
         }

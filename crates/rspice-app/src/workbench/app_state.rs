@@ -20,6 +20,7 @@ pub(in crate::workbench) mod design_history;
 pub(crate) mod diagnostic_store;
 mod full_screen;
 pub(in crate::workbench) mod interaction_state;
+pub(in crate::workbench) mod problems_view;
 pub(in crate::workbench) mod run_identity;
 pub(crate) mod run_preflight;
 pub(in crate::workbench) mod session;
@@ -200,6 +201,10 @@ pub struct AppState {
     /// The conditions that stand against the design, from every producer, in
     /// the one shape the Problems page, the tab badge and the status bar read.
     pub(crate) diagnostics: DiagnosticStore,
+    /// Where the reader is standing in those conditions: the Problems grid's
+    /// order, filters and groups. A reading position over the evidence, never
+    /// evidence itself, and never persisted.
+    pub(crate) problems_view: problems_view::ProblemsView,
     /// Dialog visibility. Boxed: this is the largest sub-state, and an inline
     /// copy would ride along in every stack frame that moves an [`AppState`].
     pub(crate) dialogs: Box<DialogState>,

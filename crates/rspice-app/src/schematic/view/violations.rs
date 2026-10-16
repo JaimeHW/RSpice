@@ -19,6 +19,12 @@ use rspice_schematic_editor::view::violations as markers;
 /// ordered worst severity first. Selects the offending object where one
 /// exists and centers the canvas on the anchor; node/global findings have
 /// no spot and stay in the console and pill.
+///
+/// The finding it lands on becomes *the* current finding — the same selection
+/// the Problems grid draws its current row from, held by canonical identity in
+/// the diagnostic store. It used to be an index into the list this function
+/// sorts for itself, which no other surface could read and which a
+/// republished batch silently repointed.
 pub(crate) fn cycle_violation(state: &mut AppState, step: isize) {
     let Some(result) = &state.dialogs.drc_results else {
         state.push_user_message(ConsoleMessage::info(
@@ -33,14 +39,24 @@ pub(crate) fn cycle_violation(state: &mut AppState, step: isize) {
         return;
     }
 
+    // What the published findings are called, in the order the result holds
+    // them. Read rather than derived here: the store is where a finding's
+    // identity is minted, and a second derivation of it is a second identity.
+    let subject = state.workspace.content.active_schematic_reference();
+    let identities = state.design_rule_finding_identities(&subject);
     // Owned snapshot of the anchored findings so the borrows drop before
     // the selection/viewport mutations below.
-    let mut anchored: Vec<(DrcSeverity, crate::diagnostics::LogAnchor, String)> = result
+    let mut anchored: Vec<AnchoredFinding> = result
         .violations()
         .iter()
-        .filter_map(|violation| {
-            finding_anchor(state, violation)
-                .map(|anchor| (violation.severity, anchor, violation.message.clone()))
+        .enumerate()
+        .filter_map(|(ordinal, violation)| {
+            finding_anchor(state, violation).map(|anchor| AnchoredFinding {
+                severity: violation.severity,
+                identity: identities.get(ordinal).copied(),
+                anchor,
+                message: violation.message.clone(),
+            })
         })
         .collect();
     if anchored.is_empty() {
@@ -50,26 +66,48 @@ pub(crate) fn cycle_violation(state: &mut AppState, step: isize) {
         return;
     }
     // Worst first; stable within a severity.
-    anchored.sort_by(|a, b| b.0.cmp(&a.0));
+    anchored.sort_by(|a, b| b.severity.cmp(&a.severity));
 
     let len = anchored.len() as isize;
-    let index = match state.dialogs.drc_cycle {
+    // Where the tour stands is wherever the current finding sits in it. A
+    // selection made on the grid — or on a finding this tour cannot visit,
+    // such as a netlist error — therefore does not strand the tour: it starts
+    // from the worst finding, which is where it starts from a cold session.
+    let standing = state.diagnostics.current_finding().and_then(|current| {
+        anchored
+            .iter()
+            .position(|found| found.identity == Some(current))
+    });
+    let index = match standing {
         // First jump lands on the worst finding, not the second one.
         None if step >= 0 => 0,
         None => (len - 1) as usize,
         Some(current) => ((current as isize + step).rem_euclid(len)) as usize,
     };
-    state.dialogs.drc_cycle = Some(index);
 
-    let (severity, anchor, message) = anchored.swap_remove(index);
-    state.jump_to_log_anchor(anchor);
+    let found = anchored.swap_remove(index);
+    // A finding with no published record — the symbol pin checks keep theirs
+    // in the canvas projection alone — leaves nothing current rather than
+    // leaving the previous finding standing, which the tour has just left.
+    state.diagnostics.set_current_finding(found.identity);
+    state.jump_to_log_anchor(found.anchor);
     state.push_user_message(ConsoleMessage::info(format!(
         "Finding {}/{} — {} · {}",
         index + 1,
         len,
-        severity.display_name(),
-        message,
+        found.severity.display_name(),
+        found.message,
     )));
+}
+
+/// One finding the tour can visit: what it is called, how bad it is, where it
+/// is, and what it says.
+struct AnchoredFinding {
+    severity: DrcSeverity,
+    /// What the store calls it, where the checks published a record for it.
+    identity: Option<uuid::Uuid>,
+    anchor: crate::diagnostics::LogAnchor,
+    message: String,
 }
 
 /// What a cycled finding selects on arrival.

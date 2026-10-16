@@ -66,7 +66,6 @@ impl AppState {
         self.workbench.specification_editor_route_pending = false;
         self.dialogs.drc_results = None;
         self.dialogs.drc_checked_version = 0;
-        self.dialogs.drc_cycle = None;
         self.clear_all_design_checks();
         // Console, Problems, and debugger evidence are project-scoped under
         // the source-workspace contract. Clear them in the same transaction
@@ -725,7 +724,7 @@ mod tests {
         state.clear_design_execution_context();
 
         assert!(state.dialogs.drc_results.is_none());
-        assert!(state.dialogs.drc_cycle.is_none());
+        assert!(state.diagnostics.current_finding().is_none());
         assert!(state.current_blocking_drc_result().is_none());
         assert_eq!(
             state.log_buffer.entries_by_source(LogSource::Drc).count(),

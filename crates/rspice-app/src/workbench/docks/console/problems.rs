@@ -15,37 +15,37 @@
 //! tool that confuses them is lying. A finding that knows where it is, is a
 //! target: clicking it goes there.
 //!
-//! Columns are sized to their content, measured in the font they are printed
-//! in. They used to be fixed at 58 px and 62 px — eight characters — which
-//! was enough for the Console's `DRC` source tag and nowhere near enough for
-//! `Component M1` or `opamp.sp · line 42 · column 7`.
+//! The page is one dense table with a toolbar over it and one detail region
+//! under it. Columns are sized to their content, measured in the font they are
+//! printed in; they used to be fixed at 58 px and 62 px — eight characters —
+//! which was enough for the Console's `DRC` source tag and nowhere near enough
+//! for `Component M1`. One row is one line: the message is elided in the table
+//! and stated in full in the detail region, which is also what lets the body
+//! scroll by a row height that is actually a row's height.
+//!
+//! The current row is not the page's own: it is the one current finding, held
+//! by canonical identity in the store, and the canvas finding tour stands on
+//! exactly the same one.
 
-use egui::{Sense, Ui, Vec2};
+mod arrange;
+mod detail;
+mod grid;
+mod strip;
+#[cfg(test)]
+mod tests;
 
-use super::{
-    AppState, CONSOLE_COLUMN_GAP, CONSOLE_FONT_SIZE, CONSOLE_MARK_GUTTER, CONSOLE_ROW_MIN_HEIGHT,
-    announced_row, muted, paint_row_mark,
-};
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::Tokens;
-use crate::ui::widgets::Problem;
+use egui::{Key, Modifiers, Ui, Vec2};
+
+use super::{AppState, CONSOLE_ROW_MIN_HEIGHT, muted};
 use crate::workbench::app_state::diagnostic_store::listing::{
     DiagnosticListing, DiagnosticRow, EmptyReason, listing,
 };
 use crate::workbench::app_state::diagnostic_store::{DiagnosticLevel, DiagnosticRoute};
+use crate::workbench::app_state::problems_view::ProblemsView;
 
-/// The longest severity cell the page can print. The severity column is
-/// measured against this, so no severity word is ever cut.
-const WIDEST_SEVERITY_CELL: &str = "Waived Critical";
-
-/// The narrowest location column worth printing: enough for a short file name
-/// with a line and column, which is the shape a reader scans for.
-const NARROWEST_LOCATION_CELL: &str = "opamp.sp · line 42 · c";
-
-/// The share of a row the location column may take before the message is
-/// starved. A location is how you find the problem; the message is what the
-/// problem is, and the message is the longer text of the two.
-const LOCATION_COLUMN_MAX_SHARE: f32 = 0.34;
+use crate::ui::widgets::Problem;
+use arrange::{Arrangement, Line};
+use grid::Columns;
 
 /// The counts the tab strip shows and the status bar states, under one rule:
 /// an error is a condition that stops the design working, an advisory is
@@ -87,54 +87,361 @@ pub(in crate::workbench) fn active_problem_count(state: &AppState) -> ProblemCou
     }
 }
 
+/// What one frame of the page asks the session to change.
+///
+/// The page holds the list it is drawing, which borrows the session; the
+/// session cannot be moved while that borrow stands. Collecting the frame's
+/// intent and applying it afterwards is what keeps a page from being a place
+/// where anything can happen.
+#[derive(Default)]
+struct PageIntent {
+    route: Option<DiagnosticRoute>,
+    /// A finding whose producer-offered edits the reader asked to apply.
+    fix: Option<uuid::Uuid>,
+    clipboard: Option<String>,
+}
+
+/// The current row, as this frame is reading and editing it.
+///
+/// `finding` is the one piece of state the canvas tour shares; the other two
+/// are this frame's projection of it onto the rows the page is printing.
+struct Selection {
+    /// Which listed row it is, when the filters are listing it at all.
+    listed: Option<usize>,
+    finding: Option<uuid::Uuid>,
+    /// A printed line the body has to bring into view, because a key rather
+    /// than the reader's own scrolling moved the selection to it.
+    reveal: Option<usize>,
+}
+
 pub(super) fn problems(ui: &mut Ui, state: &mut AppState) {
-    let metrics = ColumnMetrics::measure(ui);
-    let mut requested: Option<DiagnosticRoute> = None;
-    let listed = listing(state);
-    let rows = listed.len();
-    if rows == 0 {
-        muted(ui, &empty_state(listed.empty_reason()));
+    let mut view = state.problems_view.clone();
+    let mut selection = Selection {
+        listed: None,
+        finding: state.diagnostics.current_finding(),
+        reveal: None,
+    };
+    let mut intent = PageIntent::default();
+    {
+        let listed = listing(state);
+        let total = listed.len();
+        if total == 0 {
+            // Nothing to list is not a table with no rows: it is one claim,
+            // and a toolbar over it would offer to filter nothing.
+            muted(ui, &empty_state(listed.empty_reason()));
+            return;
+        }
+        let arrangement = Arrangement::build(&listed, &view, selection.finding);
+        let columns = Columns::measure(
+            ui,
+            arrangement.tally.widest_code,
+            arrangement.tally.widest_producer,
+        );
+        strip::filter_strip(ui, &mut view, &arrangement.tally);
+        if view.is_filtered() && strip::filtered_out(ui, arrangement.listed, total) {
+            view = ProblemsView {
+                sort: view.sort,
+                descending: view.descending,
+                grouping: view.grouping,
+                collapsed: view.collapsed.clone(),
+                explain: view.explain,
+                ..ProblemsView::default()
+            };
+        }
+        if let Some(column) = grid::header(ui, &columns, &view) {
+            view.order_by(column);
+        }
+
+        selection.listed = arrangement.current;
+        keyboard(
+            ui,
+            &listed,
+            &arrangement,
+            state,
+            &mut selection,
+            &mut intent,
+        );
+        let note = note(&listed);
+        let detail_height = selection
+            .listed
+            .map_or(0.0, |_| detail::height(ui.available_height()));
+        let note_height = if note.is_some() {
+            CONSOLE_ROW_MIN_HEIGHT
+        } else {
+            0.0
+        };
+        let table_height =
+            (ui.available_height() - detail_height - note_height).max(CONSOLE_ROW_MIN_HEIGHT);
+        // What the table's height was reserved against. A click inside the
+        // table can select a row the height was not reserved for, and drawing
+        // the region anyway would paint it over the rows it displaces: the
+        // frame that changes the selection asks for another one instead.
+        let reserved_for = selection.listed;
+        table(
+            ui,
+            Table {
+                listed: &listed,
+                arrangement: &arrangement,
+                columns: &columns,
+                height: table_height,
+                reveal: selection.reveal,
+            },
+            &mut view,
+            &mut selection,
+            &mut intent,
+            state,
+        );
+        if let Some(note) = note {
+            muted(ui, note);
+        }
+        if selection.listed != reserved_for {
+            ui.ctx().request_repaint();
+        } else if let Some(row) = selection.listed.and_then(|index| listed.row(index)) {
+            let refusal = row
+                .route
+                .as_ref()
+                .and_then(|route| route_refusal(state, route));
+            let actions = ui
+                .allocate_ui_with_layout(
+                    Vec2::new(ui.available_width(), detail_height),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        detail::detail(
+                            ui,
+                            &row,
+                            view.explain,
+                            arrangement.listed,
+                            refusal.as_deref(),
+                        )
+                    },
+                )
+                .inner;
+            if actions.explain {
+                view.explain = !view.explain;
+            }
+            if actions.follow && refusal.is_none() {
+                intent.route = row.route.clone();
+            }
+            if let Some(route) = actions.related {
+                intent.route = Some(route);
+            }
+            if actions.quick_fix {
+                intent.fix = Some(row.id);
+            }
+            if actions.copy_row {
+                intent.clipboard = Some(copy_of(&row));
+            }
+            if actions.copy_listed {
+                intent.clipboard = Some(copy_of_listed(&listed, &arrangement));
+            }
+        }
+    }
+
+    state.problems_view = view;
+    state.diagnostics.set_current_finding(selection.finding);
+    if let Some(route) = intent.route {
+        state.diagnostics.request_route(route);
+    }
+    if let Some(text) = intent.clipboard {
+        ui.ctx().copy_text(text);
+    }
+    if let Some(finding) = intent.fix {
+        match crate::workbench::documents::netlist_document::language::apply_quick_fix_for_finding(
+            state, finding,
+        ) {
+            Ok(applied) => {
+                state.push_user_message(crate::diagnostics::ConsoleMessage::info(applied));
+            }
+            Err(refused) => {
+                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(refused));
+            }
+        }
+    }
+}
+
+/// Everything the table needs to draw itself, so the row loop takes one
+/// argument per concern rather than nine positional ones.
+struct Table<'a, 'listing> {
+    listed: &'a DiagnosticListing<'listing>,
+    arrangement: &'a Arrangement<'listing>,
+    columns: &'a Columns,
+    height: f32,
+    /// A line the keyboard moved to, which the body scrolls into view.
+    reveal: Option<usize>,
+}
+
+/// Where the body last scrolled to, so a keyboard move scrolls the least it
+/// can rather than re-centring the list under the reader on every press.
+fn drawn_range_id() -> egui::Id {
+    egui::Id::new("workbench.problems.drawn")
+}
+
+fn table(
+    ui: &mut Ui,
+    table: Table<'_, '_>,
+    view: &mut ProblemsView,
+    selection: &mut Selection,
+    intent: &mut PageIntent,
+    state: &AppState,
+) {
+    let lines = table.arrangement.lines();
+    let previous: Option<std::ops::Range<usize>> = ui.data(|data| data.get_temp(drawn_range_id()));
+    let mut area = egui::ScrollArea::vertical()
+        .id_salt("workbench.problems")
+        .max_height(table.height);
+    // The pitch the body lays rows out at, which is the row height plus
+    // whatever the enclosing dock spaces its rows by — the same arithmetic
+    // `show_rows` does, read from the same place rather than assumed.
+    let pitch = CONSOLE_ROW_MIN_HEIGHT + ui.spacing().item_spacing.y;
+    if let Some(offset) = reveal_offset(table.reveal, previous.as_ref(), table.height, pitch) {
+        area = area.vertical_scroll_offset(offset);
+    }
+    let drawn = area
+        .show_rows(ui, CONSOLE_ROW_MIN_HEIGHT, lines, |ui, range| {
+            for line in range.clone() {
+                match table.arrangement.line(line) {
+                    Some(Line::Group(group)) => {
+                        if let Some(group) = table.arrangement.group(group)
+                            && grid::group_header(ui, table.columns, group)
+                        {
+                            view.collapse(&group.label, !group.collapsed);
+                        }
+                    }
+                    Some(Line::Row(index)) => {
+                        finding_row(ui, &table, index, selection, intent, state);
+                    }
+                    None => {}
+                }
+            }
+            range
+        })
+        .inner;
+    ui.data_mut(|data| data.insert_temp(drawn_range_id(), drawn));
+}
+
+/// One finding's row, with the click that selects it and the click that
+/// follows it.
+fn finding_row(
+    ui: &mut Ui,
+    table: &Table<'_, '_>,
+    index: usize,
+    selection: &mut Selection,
+    intent: &mut PageIntent,
+    state: &AppState,
+) {
+    let Some(row) = table.listed.row(index) else {
+        return;
+    };
+    // Asked before the row is drawn: a finding whose object the drawing no
+    // longer carries must not look like a jump.
+    let route = row
+        .route
+        .clone()
+        .filter(|route| route_refusal(state, route).is_none());
+    let response = grid::row(
+        ui,
+        table.columns,
+        &grid::RowCells {
+            problem: row.current().then(|| level_mark(row.level)).flatten(),
+            severity: &severity_cell(&row),
+            code: row.code,
+            subject: &row.subject,
+            producer: row.producer,
+            location: &row.location,
+            message: row.message,
+            current: row.current(),
+            target: route.is_some(),
+            selected: selection.finding == Some(row.id),
+        },
+        grid::row_id(row.id),
+    );
+    if response.clicked() {
+        selection.finding = Some(row.id);
+        selection.listed = Some(index);
+        response.request_focus();
+        intent.route = route;
+    } else if response.gained_focus() {
+        // Tab lands on a row; the row it lands on is the one being read.
+        selection.finding = Some(row.id);
+        selection.listed = Some(index);
+    }
+    response.on_hover_text(hover(&row));
+}
+
+/// How far the body has to scroll to bring `reveal` into view, or `None` when
+/// it is already in it.
+fn reveal_offset(
+    reveal: Option<usize>,
+    previous: Option<&std::ops::Range<usize>>,
+    height: f32,
+    pitch: f32,
+) -> Option<f32> {
+    let line = reveal?;
+    let previous = previous?;
+    if line < previous.start {
+        return Some(line as f32 * pitch);
+    }
+    if line + 1 >= previous.end {
+        return Some(((line + 1) as f32 * pitch - height).max(0.0));
+    }
+    None
+}
+
+/// Move the current row, follow it, or clear it.
+///
+/// The keys are taken only while the current row holds focus, so the page
+/// never swallows an arrow key from the surface a reader is actually in. They
+/// are consumed rather than read, so a row that handles Enter does not also
+/// hand it to whatever is listening behind the dock.
+fn keyboard(
+    ui: &Ui,
+    listed: &DiagnosticListing<'_>,
+    arrangement: &Arrangement<'_>,
+    state: &AppState,
+    selection: &mut Selection,
+    intent: &mut PageIntent,
+) {
+    let standing = selection.finding.map(grid::row_id);
+    let focused = standing.is_some_and(|id| ui.memory(|memory| memory.focused() == Some(id)));
+    if !focused {
         return;
     }
-    let note = note(&listed);
-
-    egui::ScrollArea::vertical()
-        .id_salt("workbench.problems")
-        .show_rows(ui, CONSOLE_ROW_MIN_HEIGHT, rows, |ui, range| {
-            for index in range {
-                let Some(row) = listed.row(index) else {
-                    continue;
-                };
-                // Asked before the row is sensed: a finding whose object the
-                // drawing no longer carries must not look like a jump.
-                let route = row
-                    .route
-                    .clone()
-                    .filter(|route| route_refusal(state, route).is_none());
-                let response = problem_row(
-                    ui,
-                    &metrics,
-                    ProblemRow {
-                        problem: row.current.then(|| level_mark(row.level)).flatten(),
-                        severity: &severity_cell(&row),
-                        location: &row.subject,
-                        message: row.message,
-                        current: row.current,
-                        target: route.is_some(),
-                    },
-                );
-                if response.clicked() {
-                    requested = route;
-                }
-                response.on_hover_text(hover(&row));
-            }
-        });
-    if let Some(note) = note {
-        muted(ui, note);
+    let (down, up, enter, escape) = ui.input_mut(|input| {
+        (
+            input.consume_key(Modifiers::NONE, Key::ArrowDown),
+            input.consume_key(Modifiers::NONE, Key::ArrowUp),
+            input.consume_key(Modifiers::NONE, Key::Enter),
+            input.consume_key(Modifiers::NONE, Key::Escape),
+        )
+    });
+    if escape {
+        // The row keeps the arrows while it is focused, so a row that is no
+        // longer current has to give the focus back as well: a focused row
+        // with nothing selected would hold keys that nothing acts on.
+        if let Some(id) = standing {
+            ui.memory_mut(|memory| memory.surrender_focus(id));
+        }
+        selection.listed = None;
+        selection.finding = None;
+        return;
     }
-
-    if let Some(route) = requested {
-        state.diagnostics.request_route(route);
+    let step = isize::from(down) - isize::from(up);
+    if step != 0
+        && let Some(next) = arrangement.step(selection.listed, step)
+    {
+        selection.listed = Some(next);
+        selection.finding = listed.facet(next).map(|facet| facet.id);
+        selection.reveal = arrangement.line_of(next);
+        if let Some(id) = selection.finding {
+            ui.memory_mut(|memory| memory.request_focus(grid::row_id(id)));
+        }
+    }
+    if enter
+        && let Some(row) = selection.listed.and_then(|index| listed.row(index))
+        && let Some(route) = row.route
+        && route_refusal(state, &route).is_none()
+    {
+        intent.route = Some(route);
     }
 }
 
@@ -180,10 +487,10 @@ fn empty_state(reason: &EmptyReason) -> String {
 
 /// One severity word, with its state said in front of it when the finding is
 /// not about the design as it stands, and with a waiver said where one is
-/// recorded — a waived finding is a decision, and the page says whose.
+/// recorded — a waived finding is a decision, and the page says so.
 fn severity_cell(row: &DiagnosticRow<'_>) -> String {
     let severity = row.level.display_name();
-    match (row.current, row.waived) {
+    match (row.current(), row.waived()) {
         (true, false) => severity.to_owned(),
         (true, true) => format!("Waived {severity}"),
         (false, _) => format!("Stale {severity}"),
@@ -205,379 +512,43 @@ fn hover(row: &DiagnosticRow<'_>) -> String {
     text
 }
 
+/// One row as text, tab-separated in the column order the grid prints — the
+/// shape that pastes into a sheet or a report as a row rather than as a
+/// sentence somebody has to take apart again.
+fn copy_of(row: &DiagnosticRow<'_>) -> String {
+    [
+        severity_cell(row),
+        row.code.to_owned(),
+        row.subject.clone(),
+        row.producer.to_owned(),
+        row.location.clone(),
+        row.message.to_owned(),
+    ]
+    .join("\t")
+}
+
+/// Every listed row, with the heading the columns carry.
+fn copy_of_listed(listed: &DiagnosticListing<'_>, arrangement: &Arrangement<'_>) -> String {
+    use crate::workbench::app_state::problems_view::ProblemColumn;
+
+    let mut text = ProblemColumn::ALL
+        .iter()
+        .map(|column| column.label())
+        .collect::<Vec<_>>()
+        .join("\t");
+    for index in arrangement.rows() {
+        if let Some(row) = listed.row(index) {
+            text.push('\n');
+            text.push_str(&copy_of(&row));
+        }
+    }
+    text
+}
+
 const fn level_mark(level: DiagnosticLevel) -> Option<Problem> {
     match level {
         DiagnosticLevel::Critical | DiagnosticLevel::Error => Some(Problem::Failure),
         DiagnosticLevel::Warning => Some(Problem::Warning),
         DiagnosticLevel::Info | DiagnosticLevel::Hint => None,
-    }
-}
-
-/// Column widths for one pass of the page, measured in the font the cells are
-/// painted in rather than assumed.
-struct ColumnMetrics {
-    severity: f32,
-    location: f32,
-    /// Width of one monospace character, which is what makes eliding a cell
-    /// exact instead of iterative: in a monospace face the number of
-    /// characters that fit is a division.
-    advance: f32,
-    ellipsis: f32,
-}
-
-impl ColumnMetrics {
-    fn measure(ui: &Ui) -> Self {
-        let severity = text_width(ui, WIDEST_SEVERITY_CELL, FontWeight::Regular);
-        let advance = text_width(ui, "M", FontWeight::Regular).max(1.0);
-        let ellipsis = text_width(ui, "…", FontWeight::Regular);
-        let narrowest = text_width(ui, NARROWEST_LOCATION_CELL, FontWeight::Medium);
-        let available = ui.available_width();
-        let share = (available * LOCATION_COLUMN_MAX_SHARE).max(0.0);
-        Self {
-            severity,
-            location: share.max(narrowest),
-            advance,
-            ellipsis,
-        }
-    }
-
-    fn message_offset(&self) -> f32 {
-        CONSOLE_MARK_GUTTER
-            + self.severity
-            + CONSOLE_COLUMN_GAP
-            + self.location
-            + CONSOLE_COLUMN_GAP
-    }
-}
-
-fn text_width(ui: &Ui, text: &str, weight: FontWeight) -> f32 {
-    ui.fonts_mut(|fonts| {
-        fonts
-            .layout_no_wrap(
-                text.to_owned(),
-                theme::mono(CONSOLE_FONT_SIZE, weight),
-                egui::Color32::WHITE,
-            )
-            .size()
-            .x
-    })
-}
-
-struct ProblemRow<'a> {
-    problem: Option<Problem>,
-    severity: &'a str,
-    location: &'a str,
-    message: &'a str,
-    current: bool,
-    target: bool,
-}
-
-/// One finding: the mark gutter, the severity, where it is, and what it is.
-///
-/// Painted rather than built from widgets, so the row declares itself: a row
-/// that can be followed is a keyboard target that announces as a button, and
-/// a stale row is still text a screen reader should read.
-fn problem_row(ui: &mut Ui, metrics: &ColumnMetrics, row: ProblemRow<'_>) -> egui::Response {
-    let tokens = Tokens::get(ui.ctx());
-    let (dim, body) = if row.current {
-        (tokens.color.text_dim, tokens.color.text)
-    } else {
-        (tokens.color.text_faint, tokens.color.text_faint)
-    };
-    let message_offset = metrics.message_offset();
-    let message_width = (ui.available_width() - message_offset).max(1.0);
-    let message_galley = ui.painter().layout(
-        row.message.to_owned(),
-        theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular),
-        body,
-        message_width,
-    );
-    let height = message_galley.size().y.max(CONSOLE_ROW_MIN_HEIGHT);
-    let sense = if row.target {
-        // accessibility-pointer-shim: this only picks the sense. The row it
-        // configures announces as a button and paints the focus ring for the
-        // sense it is handed.
-        Sense::click()
-    } else {
-        Sense::hover()
-    };
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), sense);
-    let label = announced_row(row.problem, &[row.severity, row.location, row.message]);
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            if row.target {
-                egui::WidgetType::Button
-            } else {
-                egui::WidgetType::Label
-            },
-            ui.is_enabled(),
-            label.clone(),
-        )
-    });
-    if row.target && response.hovered() {
-        ui.painter().rect_filled(rect, 0.0, tokens.color.bg_hover);
-    }
-    paint_row_mark(ui, rect.left(), rect.top(), row.problem);
-    let center_y = rect.top() + CONSOLE_ROW_MIN_HEIGHT * 0.5;
-    let severity_x = rect.left() + CONSOLE_MARK_GUTTER;
-    let location_x = severity_x + metrics.severity + CONSOLE_COLUMN_GAP;
-    ui.painter().text(
-        egui::pos2(severity_x, center_y),
-        egui::Align2::LEFT_CENTER,
-        row.severity,
-        theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular),
-        dim,
-    );
-    // A location is read from its tail: the file and the line matter, the
-    // directories above them do not, so what gets dropped is the head.
-    ui.painter().text(
-        egui::pos2(location_x, center_y),
-        egui::Align2::LEFT_CENTER,
-        elide_head(row.location, metrics),
-        theme::mono(CONSOLE_FONT_SIZE, FontWeight::Medium),
-        dim,
-    );
-    ui.painter().galley(
-        egui::pos2(rect.left() + message_offset, rect.top()),
-        message_galley,
-        body,
-    );
-    if row.target {
-        theme::paint_focus_ring(ui, &response, rect);
-        return response.on_hover_cursor(egui::CursorIcon::PointingHand);
-    }
-    response
-}
-
-/// Fit `text` into the location column, dropping characters from the front
-/// and marking the cut with an ellipsis. Exact rather than iterative because
-/// the face is monospace.
-fn elide_head(text: &str, metrics: &ColumnMetrics) -> String {
-    let characters = text.chars().count();
-    let width = characters as f32 * metrics.advance;
-    if width <= metrics.location {
-        return text.to_owned();
-    }
-    let room = (metrics.location - metrics.ellipsis).max(0.0);
-    let fits = (room / metrics.advance).floor().max(0.0) as usize;
-    if fits == 0 {
-        return "…".to_owned();
-    }
-    let skip = characters.saturating_sub(fits);
-    let tail = text.chars().skip(skip).collect::<String>();
-    format!("…{tail}")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The severity column is sized to the longest word it can print. Before
-    /// this it was a fixed 58 px, which cut "Stale Warning" to eight
-    /// characters, and the location column was 62 px, which could not hold
-    /// any location this page produces.
-    #[test]
-    fn every_severity_cell_fits_the_widest_measured_cell() {
-        let mut widest = String::new();
-        for level in [
-            DiagnosticLevel::Critical,
-            DiagnosticLevel::Error,
-            DiagnosticLevel::Warning,
-            DiagnosticLevel::Info,
-            DiagnosticLevel::Hint,
-        ] {
-            for (current, waived) in [(true, false), (true, true), (false, false)] {
-                let cell = severity_cell(&DiagnosticRow {
-                    code: "T-1",
-                    level,
-                    current,
-                    waived,
-                    subject: String::new(),
-                    message: "",
-                    details: "",
-                    route: None,
-                });
-                assert!(
-                    cell.chars().count() <= WIDEST_SEVERITY_CELL.chars().count(),
-                    "{cell} is wider than the cell the column is measured against",
-                );
-                if cell.chars().count() > widest.chars().count() {
-                    widest = cell;
-                }
-            }
-        }
-        assert_eq!(
-            widest.chars().count(),
-            WIDEST_SEVERITY_CELL.chars().count(),
-            "the measured cell must be the longest one the page can print",
-        );
-    }
-
-    #[test]
-    fn a_location_that_fits_is_printed_whole() {
-        let metrics = ColumnMetrics {
-            severity: 0.0,
-            location: 100.0,
-            advance: 7.0,
-            ellipsis: 7.0,
-        };
-        assert_eq!(elide_head("Component M1", &metrics), "Component M1");
-    }
-
-    /// The tail carries the file and the line, so the head is what goes.
-    #[test]
-    fn a_long_location_keeps_its_tail() {
-        let metrics = ColumnMetrics {
-            severity: 0.0,
-            location: 70.0,
-            advance: 7.0,
-            ellipsis: 7.0,
-        };
-        let elided = elide_head("models/analog/opamp.sp · line 42", &metrics);
-        assert!(elided.starts_with('…'), "{elided} must mark the cut");
-        assert!(elided.ends_with("line 42"), "{elided} must keep its tail");
-        assert!(
-            elided.chars().count() <= 10,
-            "{elided} must fit the column it was measured against",
-        );
-    }
-
-    /// Every cell the page paints, with the x it was painted at.
-    fn painted_cells(state: &mut AppState, width: f32) -> Vec<(String, f32)> {
-        fn scan(shape: &egui::epaint::Shape, found: &mut Vec<(String, f32)>) {
-            match shape {
-                egui::epaint::Shape::Text(text) => {
-                    found.push((text.galley.job.text.clone(), text.pos.x));
-                }
-                egui::epaint::Shape::Vec(shapes) => {
-                    for shape in shapes {
-                        scan(shape, found);
-                    }
-                }
-                _ => {}
-            }
-        }
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(width, 400.0),
-            )),
-            ..Default::default()
-        };
-        let output = ctx.run_ui(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| problems(ui, state));
-        });
-        let mut found = Vec::new();
-        for clipped in &output.shapes {
-            scan(&clipped.shape, &mut found);
-        }
-        found
-    }
-
-    /// The columns the page actually paints, measured rather than eyeballed.
-    ///
-    /// Severity, location and message each start where the one before it ends
-    /// plus the gap, the location keeps its tail when it is too long for its
-    /// column, and no cell is painted on top of another. The old row clipped
-    /// severity at a fixed 58 px and location at 62 px — eight characters —
-    /// so a location was unreadable and a long severity word lost its end.
-    #[test]
-    fn the_painted_columns_start_where_the_measurements_say() {
-        use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
-
-        let mut state = AppState::default();
-        state.project_lifecycle.authority.open_session();
-        let mut result = DrcResult::new();
-        result.add_violation(DrcViolation::new(
-            1,
-            DrcViolationType::FloatingNode,
-            "Node 'bias_reference_ladder_tap' has only 1 connection(s)",
-            DrcLocation::Node {
-                net_name: "bias_reference_ladder_tap".to_owned(),
-            },
-        ));
-        result.completed = true;
-        state
-            .publish_active_design_check_result(result)
-            .expect("the fixture publishes a current receipt");
-
-        let width = 900.0;
-        let cells = painted_cells(&mut state, width);
-        let severity = cells
-            .iter()
-            .find(|(text, _)| text == "Error")
-            .expect("the severity cell is painted");
-        let location = cells
-            .iter()
-            .find(|(text, _)| text.contains("bias_reference") || text.starts_with('…'))
-            .expect("the location cell is painted");
-        let message = cells
-            .iter()
-            .find(|(text, _)| text.contains("only 1 connection"))
-            .expect("the message cell is painted");
-
-        assert!(
-            location.1 > severity.1,
-            "location at {} must start after severity at {}",
-            location.1,
-            severity.1,
-        );
-        assert!(
-            message.1 > location.1,
-            "message at {} must start after location at {}",
-            message.1,
-            location.1,
-        );
-        // The gap between two column starts is the earlier column's width
-        // plus one gap, so a cell can never be painted over its neighbour.
-        assert!(
-            message.1 - location.1 >= CONSOLE_COLUMN_GAP,
-            "columns must not overlap: {} then {}",
-            location.1,
-            message.1,
-        );
-        assert!(
-            location.0.contains("bias_reference_ladder_tap") || location.0.ends_with("ladder_tap'"),
-            "the location must keep the part that says where to go, got {:?}",
-            location.0,
-        );
-    }
-
-    /// The page is not a severity filter over the session log.
-    ///
-    /// Before the canonical store it read the log buffer, so every refusal,
-    /// engine warning and system notice that had ever been printed stood here
-    /// as a permanent problem — about 715 refusal sites' worth.
-    #[test]
-    fn a_logged_failure_is_not_a_problem() {
-        let mut state = AppState::default();
-        state.project_lifecycle.authority.open_session();
-        state.log_buffer.log(
-            crate::diagnostics::LogSeverity::Error,
-            crate::diagnostics::LogSource::Engine,
-            "the engine printed a failure",
-            None,
-        );
-
-        assert_eq!(active_problem_count(&state), ProblemCount::default());
-        let cells = painted_cells(&mut state, 900.0);
-        assert!(
-            cells
-                .iter()
-                .all(|(text, _)| !text.contains("the engine printed a failure")),
-            "the page lists records, not log entries: {cells:?}",
-        );
-    }
-
-    #[test]
-    fn counts_name_their_severities_separately() {
-        let count = ProblemCount {
-            errors: 1,
-            advisories: 12,
-        };
-        assert_eq!(count.total(), 13);
-        assert_eq!(count.announcement(), "1 error, 12 advisories");
     }
 }

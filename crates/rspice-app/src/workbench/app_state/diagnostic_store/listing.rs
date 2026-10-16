@@ -14,29 +14,102 @@
 
 use std::sync::Arc;
 
+use rspice_app_types::diagnostics::{
+    CanonicalQuickFix, DiagnosticCurrentness, DiagnosticRelatedLocation, DiagnosticSuppression,
+};
+
 use super::{BatchStanding, DiagnosticBatch, DiagnosticLevel, DiagnosticRoute};
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::code_workspace::CodeDiagnosticCollection;
 use crate::workbench::documents::netlist_document::NetlistDiagnosticCollection;
 
+/// Where one finding stands against the design in front of the reader.
+///
+/// The faint rows on the page used to say only "not current", which left the
+/// reader to guess whether the finding had been superseded, whether the
+/// drawing had moved under it, or whether the checks had failed to run at
+/// all. Each is a different thing to do next, so each says which.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workbench) enum RowStanding {
+    Current,
+    /// The inputs this finding was derived from have moved. The words say
+    /// which, in the terms the producer measured them in.
+    Stale(String),
+    /// The inputs cannot be read at all, in the producer's own words.
+    Unavailable(String),
+}
+
+impl RowStanding {
+    pub(in crate::workbench) const fn is_current(&self) -> bool {
+        matches!(self, Self::Current)
+    }
+}
+
 /// One row, assembled when it is drawn.
 pub(in crate::workbench) struct DiagnosticRow<'a> {
+    /// The canonical identity its producer minted for it: what a selection,
+    /// a quick fix and the canvas tour all name it by.
+    pub(in crate::workbench) id: uuid::Uuid,
     /// The rule this finding is an instance of, which is how a reader names
     /// it when they go looking for why it fired.
     pub(in crate::workbench) code: &'a str,
+    /// Who reported it, by the producer identity the record carries. Stated
+    /// in full: a truncated identity is one a reader cannot check.
+    pub(in crate::workbench) producer: &'a str,
     pub(in crate::workbench) level: DiagnosticLevel,
-    /// Whether this finding describes the design as it stands.
-    pub(in crate::workbench) current: bool,
-    /// Whether a recorded waiver covers it. A waived finding is still listed;
-    /// it just stops counting against the design.
-    pub(in crate::workbench) waived: bool,
-    /// What the finding is about, in one line.
+    /// Whether this finding describes the design as it stands, and what moved
+    /// where it does not.
+    pub(in crate::workbench) standing: RowStanding,
+    /// What the finding is about: the object a rule named, or the document a
+    /// parser or compiler was reading.
     pub(in crate::workbench) subject: String,
+    /// Where that thing is — the cell view it is drawn in, or the position in
+    /// the document the producer was reading. Empty where a finding is about
+    /// the project rather than about a place in it.
+    pub(in crate::workbench) location: String,
     pub(in crate::workbench) message: &'a str,
     /// What else the reader needs, for the row's hover.
     pub(in crate::workbench) details: &'a str,
+    /// What the rule requires, in its own words. Empty where the producer has
+    /// no rule prose to state.
+    pub(in crate::workbench) rule: &'a str,
+    /// The other places this finding names.
+    pub(in crate::workbench) related: &'a [DiagnosticRelatedLocation],
+    /// The edits the producer offered, where it offered any.
+    pub(in crate::workbench) quick_fixes: &'a [CanonicalQuickFix],
+    /// The waiver that covers it, with the scope and justification the rule
+    /// deck recorded. A waived finding is still listed; it just stops
+    /// counting against the design.
+    pub(in crate::workbench) suppression: Option<&'a DiagnosticSuppression>,
     /// Where it is repaired, when it names somewhere.
     pub(in crate::workbench) route: Option<DiagnosticRoute>,
+}
+
+impl DiagnosticRow<'_> {
+    pub(in crate::workbench) const fn current(&self) -> bool {
+        self.standing.is_current()
+    }
+
+    pub(in crate::workbench) const fn waived(&self) -> bool {
+        self.suppression.is_some()
+    }
+}
+
+/// Everything about a row that can be read without building it.
+///
+/// Filtering, counting and ordering a release-scale list must not allocate a
+/// string per row per frame, and these are the fields that decide all three.
+/// A text filter is the one thing that cannot be answered from here, because
+/// matching the subject means spelling it — so that, and only that, builds
+/// rows.
+#[derive(Debug, Clone, Copy)]
+pub(in crate::workbench) struct RowFacet<'a> {
+    pub(in crate::workbench) id: uuid::Uuid,
+    pub(in crate::workbench) code: &'a str,
+    pub(in crate::workbench) producer: &'a str,
+    pub(in crate::workbench) level: DiagnosticLevel,
+    pub(in crate::workbench) current: bool,
+    pub(in crate::workbench) waived: bool,
 }
 
 /// Why the list has nothing in it, which is never one answer.
@@ -132,15 +205,48 @@ impl<'a> DiagnosticListing<'a> {
     }
 
     pub(in crate::workbench) fn row(&self, index: usize) -> Option<DiagnosticRow<'a>> {
+        let (segment, index) = self.locate(index)?;
+        segment_row(segment, index)
+    }
+
+    /// What a row is, without spelling it out. See [`RowFacet`].
+    pub(in crate::workbench) fn facet(&self, index: usize) -> Option<RowFacet<'a>> {
+        let (segment, index) = self.locate(index)?;
+        segment_facet(segment, index)
+    }
+
+    fn locate(&self, index: usize) -> Option<(&Segment<'a>, usize)> {
         let mut remaining = index;
         for segment in &self.segments {
             let length = segment.len();
             if remaining < length {
-                return segment_row(segment, remaining);
+                return Some((segment, remaining));
             }
             remaining -= length;
         }
         None
+    }
+}
+
+/// Where a finding from a source editor's own collection stands.
+///
+/// The editors decide currency per record rather than per batch, so the
+/// reason is the record's own currentness rather than a digest comparison.
+fn source_standing(currentness: DiagnosticCurrentness) -> RowStanding {
+    match currentness {
+        DiagnosticCurrentness::Current => RowStanding::Current,
+        DiagnosticCurrentness::StaleSource => {
+            RowStanding::Stale("the source has been edited since this was reported".to_owned())
+        }
+        DiagnosticCurrentness::StaleEnvironment => {
+            RowStanding::Stale("the environment this was compiled in has changed since".to_owned())
+        }
+        DiagnosticCurrentness::StalePermissions => RowStanding::Stale(
+            "the source is no longer readable under these permissions".to_owned(),
+        ),
+        DiagnosticCurrentness::SupersededValidation => {
+            RowStanding::Stale("a later validation of this source has superseded it".to_owned())
+        }
     }
 }
 
@@ -150,13 +256,28 @@ fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<DiagnosticRow<
             let record = batch.records.get(index)?;
             let current = standing.is_current();
             Some(DiagnosticRow {
+                id: record.canonical.diagnostic_id,
                 code: record.canonical.code.as_ref(),
+                producer: record.canonical.source.as_ref(),
                 level: record.level,
-                current,
-                waived: record.waived(),
-                subject: record.subject.display(),
+                standing: match standing {
+                    BatchStanding::Current => RowStanding::Current,
+                    BatchStanding::Stale => RowStanding::Stale(batch.inputs.description()),
+                    BatchStanding::Unavailable(reason) => RowStanding::Unavailable(reason.clone()),
+                },
+                subject: stored_subject(record),
+                location: record
+                    .subject
+                    .cell_view
+                    .as_ref()
+                    .map(|reference| reference.display_path())
+                    .unwrap_or_default(),
                 message: record.message.as_str(),
                 details: record.details.as_str(),
+                rule: record.rule.as_str(),
+                related: record.canonical.related_locations.as_slice(),
+                quick_fixes: record.canonical.quick_fixes.as_slice(),
+                suppression: record.canonical.suppression.as_ref(),
                 // A route captured when the finding was made addresses an
                 // object that may have gone since. Offering it from a stale
                 // batch would be offering a jump the finding cannot honour.
@@ -167,13 +288,19 @@ fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<DiagnosticRow<
             let diagnostic = collection.get(index)?;
             let current = diagnostic.is_current();
             Some(DiagnosticRow {
+                id: diagnostic.canonical.diagnostic_id,
                 code: diagnostic.canonical.code.as_ref(),
+                producer: diagnostic.canonical.source.as_ref(),
                 level: diagnostic.severity.into(),
-                current,
-                waived: diagnostic.canonical.suppression.is_some(),
+                standing: source_standing(diagnostic.canonical.currentness),
                 subject: netlist_subject(diagnostic),
+                location: netlist_location(diagnostic),
                 message: diagnostic.message.as_str(),
                 details: diagnostic.details.as_str(),
+                rule: "",
+                related: diagnostic.canonical.related_locations.as_slice(),
+                quick_fixes: diagnostic.canonical.quick_fixes.as_slice(),
+                suppression: diagnostic.canonical.suppression.as_ref(),
                 route: current.then_some(DiagnosticRoute::NetlistDiagnostic(
                     diagnostic.canonical.diagnostic_id,
                 )),
@@ -181,15 +308,27 @@ fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<DiagnosticRow<
         }
         Segment::Code { bundle, collection } => {
             let diagnostic = collection.as_slice().get(index)?;
-            let current = diagnostic.canonical.is_current();
             Some(DiagnosticRow {
+                id: diagnostic.canonical.diagnostic_id,
                 code: diagnostic.canonical.code.as_ref(),
+                producer: diagnostic.canonical.source.as_ref(),
                 level: diagnostic.severity.into(),
-                current,
-                waived: diagnostic.canonical.suppression.is_some(),
-                subject: code_subject(diagnostic),
+                standing: source_standing(diagnostic.canonical.currentness),
+                subject: diagnostic
+                    .source_path
+                    .as_deref()
+                    .unwrap_or("workspace source")
+                    .to_owned(),
+                location: diagnostic
+                    .line
+                    .map(|line| format!("line {}", line + 1))
+                    .unwrap_or_default(),
                 message: diagnostic.message.as_ref(),
                 details: diagnostic.detail.as_ref(),
+                rule: "",
+                related: diagnostic.canonical.related_locations.as_slice(),
+                quick_fixes: diagnostic.canonical.quick_fixes.as_slice(),
+                suppression: diagnostic.canonical.suppression.as_ref(),
                 route: bundle
                     .zip(diagnostic.source_path.as_ref())
                     .map(|(bundle, path)| DiagnosticRoute::CodeDocument {
@@ -202,33 +341,80 @@ fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<DiagnosticRow<
     }
 }
 
-/// Where a netlist finding is, in the words the deck uses.
-fn netlist_subject(
-    diagnostic: &crate::workbench::documents::netlist_document::Diagnostic,
-) -> String {
-    let line = diagnostic.line.or(diagnostic.source_line);
-    let location = match (line, diagnostic.column) {
-        (Some(line), Some(column)) => format!("line {} · column {}", line + 1, column + 1),
-        (Some(line), None) => format!("line {}", line + 1),
-        (None, _) => "document scope".to_owned(),
-    };
-    match diagnostic.source_path.as_deref() {
-        Some(path) => format!("{} · {location}", path.display()),
-        None => location,
+fn segment_facet<'a>(segment: &Segment<'a>, index: usize) -> Option<RowFacet<'a>> {
+    match segment {
+        Segment::Stored { batch, standing } => {
+            let record = batch.records.get(index)?;
+            Some(RowFacet {
+                id: record.canonical.diagnostic_id,
+                code: record.canonical.code.as_ref(),
+                producer: record.canonical.source.as_ref(),
+                level: record.level,
+                current: standing.is_current(),
+                waived: record.waived(),
+            })
+        }
+        Segment::Netlist(collection) => {
+            let diagnostic = collection.get(index)?;
+            Some(RowFacet {
+                id: diagnostic.canonical.diagnostic_id,
+                code: diagnostic.canonical.code.as_ref(),
+                producer: diagnostic.canonical.source.as_ref(),
+                level: diagnostic.severity.into(),
+                current: diagnostic.is_current(),
+                waived: diagnostic.canonical.suppression.is_some(),
+            })
+        }
+        Segment::Code { collection, .. } => {
+            let diagnostic = collection.as_slice().get(index)?;
+            Some(RowFacet {
+                id: diagnostic.canonical.diagnostic_id,
+                code: diagnostic.canonical.code.as_ref(),
+                producer: diagnostic.canonical.source.as_ref(),
+                level: diagnostic.severity.into(),
+                current: diagnostic.canonical.is_current(),
+                waived: diagnostic.canonical.suppression.is_some(),
+            })
+        }
     }
 }
 
-/// Where a source finding is. The logical path is the identity the compile
-/// receipt used, so a finding in an included header says so rather than
-/// pointing at a line of whatever file is open.
-fn code_subject(diagnostic: &rspice_app_types::diagnostics::SourceDiagnostic) -> String {
-    let path = diagnostic
-        .source_path
-        .as_deref()
-        .unwrap_or("workspace source");
-    match diagnostic.line {
-        Some(line) => format!("{path} · line {}", line + 1),
-        None => path.to_owned(),
+/// What a rule finding is about: the object the producer named, without the
+/// cell view that the row's own location column states.
+fn stored_subject(record: &super::DiagnosticRecord) -> String {
+    let object = record.subject.object.as_str();
+    let Some(reference) = record.subject.cell_view.as_ref() else {
+        return object.to_owned();
+    };
+    let path = reference.display_path();
+    match object.strip_prefix(path.as_str()) {
+        Some(remainder) if !remainder.trim().is_empty() => remainder.trim_start().to_owned(),
+        Some(_) | None => object.to_owned(),
+    }
+}
+
+/// What a netlist finding is about: the document the parser was reading. The
+/// position inside it is the row's location.
+fn netlist_subject(
+    diagnostic: &crate::workbench::documents::netlist_document::Diagnostic,
+) -> String {
+    diagnostic.source_path.as_deref().map_or_else(
+        || "netlist editor".to_owned(),
+        |path| path.display().to_string(),
+    )
+}
+
+/// Where in that document it is. An included source keeps its own line rather
+/// than masquerading as a line of whatever file is open, which is why the
+/// physical source line is read when the buffer has none.
+fn netlist_location(
+    diagnostic: &crate::workbench::documents::netlist_document::Diagnostic,
+) -> String {
+    let line = diagnostic.line.or(diagnostic.source_line);
+    match (line, diagnostic.column) {
+        (Some(line), Some(column)) => format!("line {} · column {}", line + 1, column + 1),
+        (Some(line), None) => format!("line {}", line + 1),
+        (None, _) => String::new(),
     }
 }
 
@@ -446,7 +632,15 @@ mod tests {
         let listing = listing(&state);
         assert_eq!(listing.len(), 1, "a waiver is a decision, not a deletion");
         assert_eq!(listing.counts(), DiagnosticCounts::default());
-        assert!(listing.row(0).expect("the row is listed").waived);
+        assert!(listing.row(0).expect("the row is listed").waived());
+        let waiver = listing
+            .row(0)
+            .expect("the row is listed")
+            .suppression
+            .expect("the waiver is the decision someone recorded")
+            .clone();
+        assert_eq!(waiver.rule, "T-ERROR");
+        assert_eq!(waiver.scope, "cell");
     }
 
     /// A stale finding keeps its row and loses its jump.
@@ -461,8 +655,9 @@ mod tests {
                 wire: None,
             }),
         ));
+        let subject = state.workspace.content.active_schematic_reference();
         let inputs = DiagnosticInputs::DesignCheck {
-            subject: state.workspace.content.active_schematic_reference(),
+            subject: subject.clone(),
         };
         state
             .publish_diagnostics(inputs, vec![anchored])
@@ -476,7 +671,72 @@ mod tests {
         assert_eq!(listing.len(), 1);
         assert_eq!(listing.counts().stale, 1);
         let row = listing.row(0).expect("a stale finding keeps its row");
-        assert!(!row.current);
+        assert!(!row.current());
         assert!(row.route.is_none());
+        assert_eq!(
+            row.standing,
+            RowStanding::Stale(format!(
+                "the schematic working set behind {}",
+                subject.display_path()
+            )),
+            "a stale row says what moved under it, not merely that it is stale",
+        );
+    }
+
+    /// A rule finding's subject is the object; the cell view it is drawn in is
+    /// the location. Before the grid had both columns the subject carried the
+    /// cell view as well, so every row of one view repeated its path.
+    #[test]
+    fn a_rule_finding_separates_its_object_from_the_view_it_is_drawn_in() {
+        let mut state = open_state();
+        let reference = state.workspace.content.active_schematic_reference();
+        let mut record = record(&state, "T-ERROR", DiagnosticLevel::Error);
+        record.subject = DiagnosticSubject::new(
+            state.workspace.content.project.id(),
+            format!("{} pin A", reference.display_path()),
+        )
+        .in_cell_view(reference.clone());
+        state
+            .publish_diagnostics(
+                DiagnosticInputs::DesignCheck {
+                    subject: reference.clone(),
+                },
+                vec![record],
+            )
+            .expect("the design-check digest is available");
+
+        let listing = listing(&state);
+        let row = listing.row(0).expect("the finding is listed");
+        assert_eq!(row.subject, "pin A");
+        assert_eq!(row.location, reference.display_path());
+    }
+
+    /// Counting and filtering read facets, which spell nothing out. A facet
+    /// that disagreed with its row would filter one list and draw another.
+    #[test]
+    fn a_facet_says_what_its_row_says() {
+        let mut state = open_state();
+        state
+            .publish_diagnostics(
+                DiagnosticInputs::Dispatch,
+                vec![
+                    record(&state, "T-ERROR", DiagnosticLevel::Error),
+                    record(&state, "T-INFO", DiagnosticLevel::Info),
+                ],
+            )
+            .expect("the dispatch digest is available");
+
+        let listing = listing(&state);
+        for index in 0..listing.len() {
+            let row = listing.row(index).expect("the row is listed");
+            let facet = listing.facet(index).expect("so is its facet");
+            assert_eq!(facet.id, row.id);
+            assert_eq!(facet.code, row.code);
+            assert_eq!(facet.producer, row.producer);
+            assert_eq!(facet.level, row.level);
+            assert_eq!(facet.current, row.current());
+            assert_eq!(facet.waived, row.waived());
+        }
+        assert!(listing.facet(listing.len()).is_none());
     }
 }

@@ -100,7 +100,7 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
                 record.message
             );
             assert!(
-                !record.subject.display().is_empty(),
+                !record.subject.object.is_empty(),
                 "{owner:?} published a finding that says nothing about what it is about: {}",
                 record.message
             );
@@ -133,14 +133,27 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
 
 /// The page reads records. It must not read the session log back in, which is
 /// what made it a severity filter over everything that had ever happened.
+///
+/// Every file the page is made of, not only its entry: the table, the filter
+/// strip, the arrangement and the detail region are all the page, and a split
+/// that moved the body out from under this guard would have retired it without
+/// anyone deciding to.
 #[test]
 fn the_problems_page_never_names_the_log_buffer() {
-    let source = crate::source_guard::production_half(include_str!("problems.rs"));
-    for forbidden in ["log_buffer", "LogEntry", "LogSeverity", "LogSource"] {
-        assert!(
-            !source.contains(forbidden),
-            "the Problems page names `{forbidden}`; a condition is not an event"
-        );
+    for (file, source) in [
+        ("problems.rs", include_str!("problems.rs")),
+        ("problems/arrange.rs", include_str!("problems/arrange.rs")),
+        ("problems/detail.rs", include_str!("problems/detail.rs")),
+        ("problems/grid.rs", include_str!("problems/grid.rs")),
+        ("problems/strip.rs", include_str!("problems/strip.rs")),
+    ] {
+        let production = crate::source_guard::production_source(source);
+        for forbidden in ["log_buffer", "LogEntry", "LogSeverity", "LogSource"] {
+            assert!(
+                !production.contains(forbidden),
+                "{file} names `{forbidden}`; a condition is not an event"
+            );
+        }
     }
 }
 
