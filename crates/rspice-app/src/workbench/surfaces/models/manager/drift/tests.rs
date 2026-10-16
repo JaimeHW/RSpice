@@ -11,6 +11,40 @@ fn digest(bytes: &[u8]) -> ContentDigest {
     ContentDigest::from_bytes(Sha256::digest(bytes).into())
 }
 
+/// Every label the drift banner publishes for one library.
+fn banner_labels(state: &mut AppState, library: &str) -> Vec<String> {
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut pending = Vec::new();
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1000.0, 600.0),
+            )),
+            ..egui::RawInput::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let mut app = ManagerRenderContext {
+                    state,
+                    pending_actions: &mut pending,
+                };
+                detail_banner(ui, &mut app, library);
+            });
+        },
+    );
+    output
+        .platform_output
+        .accesskit_update
+        .expect("the banner publishes an access tree")
+        .nodes
+        .iter()
+        .filter_map(|(_, node)| node.label().map(str::to_owned))
+        .collect()
+}
+
 /// A retained library whose pin names `pinned` and whose bytes are `held`.
 fn retained(name: &str, pinned: &[u8], held: &[u8]) -> ModelLibrary {
     let mut library = ModelLibrary::new(name);
@@ -332,11 +366,60 @@ fn the_drifted_library_reaches_the_reader_as_a_banner_with_both_digests() {
         "and what it means for a run: {labels:?}"
     );
     assert!(
+        !labels.contains(&REPIN_EFFECT),
+        "what re-pinning does belongs over the control that does it: {labels:?}"
+    );
+    // One source, and the sentence says so in the grammar of one.
+    assert!(
+        labels
+            .iter()
+            .any(|label| label.contains("1 pinned source no longer matches")),
+        "the headline does not agree with its own count: {labels:?}"
+    );
+    assert!(
         nodes
             .iter()
             .any(|(_, node)| node.role() == egui::accesskit::Role::Button
                 && node.label() == Some("Resolve drift…")),
         "and offers the flow that lists every finding"
+    );
+}
+
+/// A banner over several findings names one of them, so it says how many it
+/// is not naming.
+///
+/// Three drifted sources under a line reading "models.lib · pinned … → now …"
+/// read as one finding beside a count nobody could place.
+#[test]
+fn a_banner_over_several_findings_says_how_many_it_does_not_name() {
+    let mut library = retained("foundry", b".model a nmos\n", b".model a pmos\n");
+    for name in ["corners.lib", "rf.lib"] {
+        let path = PathBuf::from(format!("/retained/foundry/{name}"));
+        library.source_closure.push(ModelSourcePin {
+            path: path.clone(),
+            digest: digest(b".lib ff\n"),
+        });
+        library.source_contents.push(ModelSourceContent {
+            path,
+            bytes: b".lib ss\n".to_vec(),
+        });
+    }
+    let mut state = AppState::default();
+    state.model_library_manager.clear();
+    state.model_library_manager.add_library(library);
+    scan(&mut state);
+    assert_eq!(findings_for(&state, "foundry").len(), 3);
+
+    let labels = banner_labels(&mut state, "foundry");
+    assert!(
+        labels
+            .iter()
+            .any(|label| label.contains("3 pinned sources no longer match")),
+        "the headline does not agree with its own count: {labels:?}"
+    );
+    assert!(
+        labels.iter().any(|label| label.contains("and 2 more")),
+        "the banner names one source and hides the other two: {labels:?}"
     );
 }
 
