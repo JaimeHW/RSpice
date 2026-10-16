@@ -1,1645 +1,252 @@
 # rspice-core
 
-The SPICE circuit simulation engine: netlist parsing, device models, sparse
-matrix assembly, Newton-Raphson solving, and the analysis algorithms. Every
-other crate in the workspace (the CLI, the GUI, the Python bindings, the WASM
-bindings, the benchmark rig) is a frontend over this one. It has no I/O
-conventions of its own beyond reading netlist text and `.include` files;
-output formatting, exit codes, and configuration live in the frontends.
+The simulation engine: netlist parsing, device models, circuit assembly,
+Newton-Raphson solving, and the analysis algorithms. The CLI, the desktop and
+browser application, the Python and WebAssembly bindings, and the cloud engine
+adapter all solve a deck through this one crate. It decides analysis identity,
+result shape and failure classification; how a result is printed, which exit
+status a failure maps to, and how a command line configures a run belong to
+the frontends.
 
 ## Architecture
 
 A netlist flows through the engine in stages:
 
-```
+```text
 netlist text
-    │  netlist/    nom-based lexer + parser → Netlist AST
-    │              (elements, models, subcircuits, analysis cards,
-    │               parameters, .MEAS statements)
+    │  netlist/         nom-based lexer + parser → Netlist AST
+    │                   (elements, models, subcircuits, analysis cards,
+    │                    parameters, .MEAS statements)
     ▼
-  Netlist
-    │  engine/builder + circuit/   subcircuit flattening, parameter
-    │              resolution, device construction
+ Netlist
+    │  engine/builder   subcircuit flattening, parameter resolution,
+    │                   model routing, device construction
     ▼
- CircuitData   struct-of-arrays storage: one array per device kind
-    │  solver/    one symbolic analysis freezes the sparsity pattern;
-    │             a position map gives O(1) stamp lookups thereafter
+ CircuitData            circuit/: struct-of-arrays storage, one typed array
+    │                   per device kind
+    │  engine/matrix    the MNA sparsity pattern, reserved once and frozen,
+    │                   with O(1) stamp handles thereafter
     ▼
- StaticMatrix  sparse CSC matrix + reusable LU workspace
-    │  engine/    Newton-Raphson loop with convergence aids,
-    │             transient integration, frequency sweeps
+ StaticMatrix           sparse CSC matrix + reusable LU (rspice-matrix)
+    │  engine/          Newton-Raphson with convergence aids, transient
+    │                   integration, frequency sweeps
     ▼
  SimulationResult / analysis-specific result types
 ```
 
-The crate-level entry point is `Engine` (re-exported from `engine/`), with
-`Netlist::parse` as the front door:
-
-```rust
-use rspice_core::{Engine, Netlist};
-
-// The first line of a SPICE deck is the title, never an element.
-let netlist = Netlist::parse("divider\nV1 1 0 10\nR1 1 0 1k\n.end")?;
-let engine = Engine::default();
-let result = engine.run_dc_op(&netlist)?;
-assert_eq!(result.voltage(1), 10.0);
-```
-
-`SimulationConfig`, `ConvergenceConfig`, `ConvergencePreset`, and
-`DampingStrategy` configure the engine; `AbortSignal`/`AtomicAbort` allow a
-frontend to cancel a long transient or sweep cooperatively (this is what
-backs Ctrl-C in the CLI and `KeyboardInterrupt` in the Python bindings).
-
-With the `veriloga` feature, a deck can select a named Verilog-AMS connection
-configuration from its active `.VERILOGA` sources:
-
-```spice
-.veriloga "models.vams" DRIVER module=driver
-.veriloga "connections.vams" Connections
-.options connectrules=LowVoltage connectrules_source=Connections
-```
-
-`LowVoltage` is a case-sensitive `connectrules` identifier. One configuration
-is selected for the whole deck. Without an explicit selection, a single block
-is implicit; multiple blocks require a choice. An unknown or multiply declared
-selected name reports the source closures and declaration offsets. File,
-cached, and registered virtual models use the same selection path. Changing
-the option reselects deck-boundary connections while allowing unchanged device
-code to remain cached. The option also participates in the netlist's configuration fingerprint.
-The optional `connectrules_source` qualifier names an explicit `.VERILOGA`
-import alias, compared case-insensitively as a SPICE name. It restricts the
-selection to that source, resolving duplicate rule names in different libraries.
-Unknown aliases or an alias identifying multiple sources are errors. A qualified
-source with no rule block is also an error. The qualifier uses the source already
-resolved for the import and survives remapping to a sealed virtual source key.
-An explicitly selected empty block supplies no insertion rules; a mixed boundary
-requiring one is an error. Selected authored bodies execute at deck boundaries
-and typed scalar HDL hierarchy boundaries, including merged/split loading and
-resolved real-net drivers. The engine discovers the deck's selected library and
-rule block before compiling internal boundaries. A changed selection re-elaborates
-retained hierarchy source, including registered sealed runtimes, preserving their
-root parameter assignments. Configured variants occupy distinct bounded cache
-entries and leave the base registration intact; authored deck converters use the
-same selected rules inside their own helper hierarchy. Vector/array insertion,
-complete hierarchical discipline resolution, library/view configuration, and
-product workflows for standalone virtual libraries remain implementation work.
-
-The public `register_project_veriloga_sources_for_session` API accepts a single
-transaction of `ProjectVerilogASourceRegistration::Runtime` and `::Connections`
-entries. A connection entry carries the compiler's `ConnectionLibraryArtifact`
-under an exact sealed source key, with no dummy device module. Import that key
-with `.VERILOGA` and select its rules normally. Both entry kinds share one bounded
-cache and the same key/alias collision checks; failed validation or aggregate
-budgets preserve the installed set. The `_with_limits` variant also bounds
-expanded connection source. Existing runtime-only registration APIs use the
-same transaction path. A connection-library key cannot be selected as a device
-or replaced by a conflicting device registration.
-
-## Module map
+## What's in here
 
 | Module | Contents |
 | :--- | :--- |
-| `netlist/` | Lexer, parser (with submodules for element parsing, command parsing, conditionals, scoping, source specs, transmission lines, Laplace synthesis), AST, subcircuit flattener, hierarchical path handling, `.include` resolution, parameter scoping and expressions, multi-run cards, SPEF and XSPICE card parsing |
-| `circuit/` | `CircuitData` struct-of-arrays storage (one typed array per device kind in `storage/`), construction, linear stamping, nonlinear device hooks, magnetic coupling, introspection, external-model attachment |
-| `device/` | Device model implementations; see [Device models](#device-models) |
-| `solver/` | Newton-Raphson (`newton.rs`), convergence checking, damping strategies, and arc-length continuation. Sparse LU itself lives in [`rspice-matrix`](../rspice-matrix) and is re-exported here |
-| `engine/` | The orchestrator: DC, AC, transient (`transient/`), harmonic balance (`hb/`), PSS (`pss.rs`, `pss_noise.rs`), stability (`stb.rs`), transfer functions, matrix assembly and stamping, source value evaluation, behavioral-expression hooks, circuit builder, configuration and config resolution, convergence-aid drivers |
-| `analysis/` | Analysis algorithms and result types (see [Analyses](#analyses)) plus `.MEAS` evaluation (`measure.rs`, `measure_signals.rs`, `measurements/`), post-processing, and signal-integrity helpers |
-| `expr/` | Expression engine for behavioral sources and parameters: parser, AST, bytecode compiler, and a small VM so expressions evaluate cheaply inside the Newton loop |
-| `io/` | Result export and ingestion: rawfile export, streaming waveforms, LTspice RAW reading |
-| `execution/` | The canonical analysis plan and the shared `rspice-analysis-result` document every frontend publishes |
-| `library/` | `.lib` and model-library parsing, a library manager, and filesystem discovery of shipped Verilog-A and SPICE model packs |
-| `xspice/` | XSPICE code-model subsystem: `CodeModel` trait, `CodeModelRegistry`, instance and context types, event and digital value types, bundled analog/digital/bridge models, plus an `ifspec.ifs` parser and conformance helpers that diff the registry against an ngspice checkout |
-| `numerics/` | Integration companion models, differentiation, and shared numerical kernels |
-| `config`, `resource` | `SimulationConfig` and the resource-budget policy every frontend applies |
-| `diagnostics`, `identity`, `naming`, `op_label` | Typed diagnostics, canonical analysis and coordinate identity, signal naming, operating-point labelling |
-| `constants` | Physical and simulation constants |
-| `abort_signal` | `AbortSignal` trait with `AtomicAbort`/`NoAbort` implementations for cancelling long runs |
-| `simd/` | SIMD math, reduction, and integration kernels (only with the `simd` feature) |
-| `time_compat` | Wall-clock shim: real `std::time::Instant` natively, a no-op stub on `wasm32` (bare WASM has no clock) |
+| `netlist/` | Lexer and parser (element, command, conditional, scoping, source-spec, transmission-line and Laplace-synthesis submodules), the `Netlist` AST, subcircuit flattener, hierarchical paths, `.include`/`.lib` resolution, parameter scoping and the complex-valued `.PARAM` evaluator, `.ALTER`/`.DATA` multi-run expansion, SPEF parasitics, XSPICE cards, and the fail-closed Spectre model-library adapter |
+| `circuit/` | `CircuitData` struct-of-arrays storage (one typed array per device kind under `storage/`), construction, linear stamping, nonlinear device hooks, magnetic coupling, mixed-signal and XSPICE event scheduling, attachment of XSPICE, Verilog-A and generated devices, transient device noise, and read-only introspection including the `.OP` device report |
+| `device/` | Device models: passives (`passive/`, including coupled inductors and Jiles-Atherton cores), diode and BJT (`semiconductor/`), the MOS and FET family (`mosfet/`: Berkeley MOS, BSIM1 to BSIM4, BSIM-SOI, EKV, VDMOS, JFET, MESFET/HFET), independent, controlled and behavioral sources, transmission lines, memristors, switches, thermal elements, and the adapters for runtime (`veriloga`) and generated (`veriloga_builtins`) Verilog-A devices |
+| `solver/` | The Newton-Raphson loop, damping strategies, source-stepping and pseudo-transient controllers, arc-length continuation, and `SimulationResult`. Sparse LU is [`rspice-matrix`](../rspice-matrix), re-exported here |
+| `engine/` | The orchestrator: `Engine`, one driver per analysis family, the builder that elaborates a `Netlist` and routes model cards, MNA reservation and stamping, independent-source evaluation, convergence aids, configuration resolution, the analysis-capability table, Verilog-A source loading and caching, and `ControlCircuit`, the host for ngspice control scripts |
+| `analysis/` | Analysis algorithms and result types, `.MEAS` evaluation (`measure`, `measure_signals`, `measurements`), Fourier and post-processing, temperature handling, process corners, and signal-integrity helpers |
+| `execution/` | Target-neutral deck planning (`DeckPlan`, run axes and coordinates), the typed result document every frontend publishes, signal schemas and projections, event and bus export, the resumable control-flow machine, and bounded, cancellable output sinks |
+| `expr/` | Bytecode expression engine for behavioral sources: parser, AST, compiler and VM, with symbolic derivatives and time-enclosure bounds |
+| `io/` | Waveform files: SPICE RAW read and write (whole-result and streaming), VCD read and write, HDF5 publication, Xyce `.prn` output, and JSON decoding that refuses numeric information loss |
+| `library/` | `.lib` parsing with corner selection, the registry of libraries compiled into the binary, foundation-card fallbacks for unbound devices, and discovery of shipped SPICE and Verilog-A model packs |
+| `xspice/` | XSPICE code models: `CodeModel`, `CodeModelRegistry`, instance and context types, the discrete-event scheduler, bundled analog, digital and bridge models, the native IEEE 1364-2005 digital Verilog host (`verilog`), and an `ifspec.ifs` parser with conformance helpers that diff the registry against an ngspice checkout |
+| `numerics/` | Integration methods and companion coefficients, Krylov and eigenspectrum kernels, exact rank arithmetic for constraint elimination, and RustFFT resource qualification |
+| `config`, `resource` | `SimulationConfig`, `ConvergenceConfig` and their selectors; `ResourceLimits` and the limit errors that govern untrusted and batch workloads |
+| `diagnostics`, `identity`, `op_label` | Structured warnings and convergence-quality metrics; stable analysis-instance and run-coordinate identities; the closed vocabulary of operating-point report labels |
+| `abort_signal`, `constants`, `time_compat` | Cooperative cancellation (`AbortSignal`, `AtomicAbort`, `NoAbort`); physical and simulation constants; a wall-clock shim that is a no-op on `wasm32` |
+| `simd` | `wide`-based vector, reduction and integration kernels (with the `simd` feature) |
 
-Conformance harnesses are deliberately *not* here. They live in
-[`rspice-conformance`](../../tools/rspice-conformance), which can see only this crate's
-public API, so every assertion travels the path a user's deck takes.
+## Device routing
 
-## Device models
+The builder decides which implementation a card reaches. The generated column
+applies when that model's `veriloga-model-*` feature is compiled in; the
+generated module is then the only device created for the card.
 
-Verified against `src/device/`:
+| Element | Native | Generated Verilog-A route |
+| :--- | :--- | :--- |
+| `M` | `LEVEL=1/2/3/6` Berkeley MOS; `4/5` BSIM1/BSIM2; `8/49` BSIM3 3.3.0 (Xyce's 3.2.2 equations for `LEVEL=49` under the Xyce dialect, which refuses `LEVEL=8`); `9` MOS9, or Xyce's BSIM3 3.2.2 under the Xyce dialect and, under best-available, for a card with a decisive BSIM3 signature; `14/54` BSIM4 v4.8; `10/55/56/57` BSIM-SOI (`55` FD, `56` DD, `57` PD); `18` and `VDMOS` cards; `260` EKV 2.6; `301` a native EKV3 slice for the VA-Models/Xyce 150 nm cards | `LEVEL=70/104/107/108/110/111/260/1000/2002/10240/70470`, and model types such as `BSIMBULK`, `BSIMCMG`, `BSIMIMG`, `PSP104`, `HISIMHV`, `HISIMSOI`, `L_UTSOI`, `MVSG`, `ASMHEMT`, `ANGELOV` and `EKV3` |
+| `Q` | Gummel-Poon (no `LEVEL`, `0/1/2`); VBIC (`4/9/11/12/13`) | Types `HICUML0`, `HICUML2`, `MEXTRAM505`, the `BJT505*`/`BJTD505*` variants and the `VBIC*` spellings; `LEVEL=11/12` under the Xyce dialect |
+| `D` | `LEVEL=0/1/2/3` | Types `DIODE_CMC` and `JUNCAP200`; `LEVEL=200/2002` |
+| `R` | Plain and model-card resistors | Types `R2_CMC`, `R2_ET_CMC` and `R3_CMC`; `LEVEL=1002/1003` |
+| `J` | JFET level 1; Parker-Skellern JFET2 (`LEVEL=2`) | — |
+| `Z` | MESFET `0/1`, MESA `2/3/4`, HFET1 `5`, HFET2 `6` | — |
+| `X` | The deck's subcircuits, then authored Verilog-A modules | Then a generated model by its model name |
 
-**Passives** (`passive/`): resistor, capacitor, inductor, coupled
-inductors (`K`), saturable inductor, and a Jiles-Atherton magnetic
-hysteresis model.
+What fails closed, and how:
 
-The programmatic `MultiWindingTransformer` API owns immutable winding and
-coupling arrays so its cached flux matrix cannot become stale. `new` now
-returns `Result`, validates the complete matrix shape and finite symmetric
-coupling data, and rejects nonpositive self-inductances. Read access uses
-`nodes()`, `inductances()`, `coupling_matrix()`, `branches()`, and
-`num_windings()`. `set_branches` and `set_initial_current` also return
-`Result`; invalid assignments preserve the previous binding and history.
-
-Linear-inductor geometry is dialect-specific. Under the ngspice and
-`BestAvailable` policies a model card may synthesize inductance from `NT` with
-`LENGTH` and `DIA` or `CSECT` (optionally `MU`) using ngspice's Lundin/Nagaoka
-correction, qualified in `tests/inductor_geometry.rs` against the analytical
-impedance. Under the Xyce policy the Xyce Reference Guide 7.10 (section 2.3.5)
-defines a linear inductor as a required instance `L` scaled by a dimensionless
-model `L`, the temperature polynomial, and multiplicity, with no geometry
-parameters at all; RSpice therefore requires the instance value and rejects
-`NT`, `LENGTH`, `DIA`, `CSECT`, and `MU` on a Xyce model card even when an
-instance `L` is present, rather than silently ignoring an authored geometry.
-Nonlinear `CORE` mutual-inductor geometry is a separate contract.
-
-`CORE LEVEL=1/2` model coefficients `TC1` and `TC2` scale every winding's
-effective turns by `1 + TC1*(T-TNOM) + TC2*(T-TNOM)^2`. Both the material
-field and the full self/mutual inductance matrix use those effective turns.
-Model `TNOM` takes precedence over the global nominal temperature (default
-27 C); authored temperatures are Celsius and the engine configuration uses
-Kelvin. Expressions for these thermal parameters use the analysis temperature.
-Each build starts from the authored turns, so repeated temperature runs do
-not accumulate scaling. Coefficients must be finite and the resulting turns
-factor must remain positive; invalid domains identify the CORE model.
-
-For `CORE LEVEL=2`, AC, noise and pole-zero analysis use the material
-susceptibility at the DC winding bias, including all windings' ampere-turns
-and the authored gap. The small-signal winding matrix is
-`mu0 * AREA / PATH * Ni * Nj * (1 + (1 - GAP/PATH) * P)`.
-The nonlinear K-card scalar follows Xyce 7.10's unity coupling behavior;
-ordinary linear K elements retain their authored coupling coefficient.
-
-RSpice converges the provisional DC material update before linearization.
-In a fresh core this solves `M = Happ * P(Happ, M)` with the DC voltage
-direction equal to zero. Xyce 7.10 advances that provisional update once per
-device evaluation, so its biased AC results can vary with the number of DC
-iterations, including iterations caused by an electrically unrelated circuit.
-RSpice intentionally uses the converged constitutive initialization rather
-than reproducing that evaluation-count dependence. Undefined or unconverged
-material tangents and nonfinite coefficients report the owning core as an
-error. Small-signal evaluation does not advance accepted magnetic history or
-change the transient update and reset contract. This LEVEL=2 qualification
-does not establish LEVEL=1 small-signal or periodic-analysis support.
-
-**Semiconductors** (`semiconductor/`): junction diode; BJT (legacy
-Gummel-Poon with no `LEVEL` or `LEVEL=1/2`, native VBIC at
-`LEVEL=4/9/11/12/13`). Other BJT levels are rejected with a typed error
-naming the supported set; advanced CMC bipolar models are reached through
-generated Rust from Verilog-A rather than a hand-written path.
-
-### Compact model routing and boundaries
-
-Advanced CMC compact models (HICUM/L0 and L2, MEXTRAM 505 and its
-self-heating and diffusion-charge-split variants, PSP, BSIM-CMG, HiSIM, ASM
-HEMT and the rest) are delivered by the Verilog-A model program as generated
-Rust modules under `../rspice-veriloga-models/models/`, each behind its own
-`veriloga-model-*` feature. This crate owns three things for them and nothing
-else: routing a `.MODEL` card to the right module, the result identity the
-routed instance produces, and how the analysis-capability descriptors answer
-for it. It never carries a hand-written approximation of their equations.
-
-A card naming one of those families therefore has exactly two outcomes. If the
-module is compiled in, the card routes to it and no native device is created
-alongside it. If it is not, the build is refused with a typed error naming the
-compact-model family, the generated module the routing layer would have
-selected, and the feature that supplies it. There is never a fall-back to the
-native Gummel-Poon or VBIC equations, which are a different model, and never a
-name-only route that fails later inside the solver. Level selectors for those
-families (`Q LEVEL=8/23/230/234/504/505`) stay rejected in every build: a level
-names a *dialect's* device rather than a module, and routing one to a
-particular generated artifact would be a guess.
-
-For the analyses, a routed generated instance participates in DC, AC,
-transient and noise, and is refused by capability for the periodic analyses:
-it declares no exact periodic MNA descriptor and no captured period-map
-integration state, so harmonic balance, PAC, periodic noise and PSS
-continuation reject it by name (see `engine/periodic_capability.rs`).
-
-**MOSFETs and FET-family models** (`mosfet/`):
-
-- Classic Berkeley MOS1/MOS2/MOS3/MOS6 at `LEVEL=1/2/3/6` (`classic.rs` and
-  `classic/`, with the shared parameter bundle in `mos_models.rs`)
-- Legacy BSIM1/BSIM2 at `LEVEL=4/5` (`legacy_bsim.rs`)
-- MOS9 at `LEVEL=9`, which is also where Xyce-style BSIM3 cards land: a
-  decisive BSIM3 parameter signature routes to BSIM3v3, and an
-  ngspice-shaped card stays MOS9
-- BSIM3v3 at `LEVEL=8/49` (`bsim3v3.rs`, `bsim3v3/`: params/temp/eval split)
-- BSIM4 v4.8 at `LEVEL=14/54` (`bsim4v8.rs`, `bsim4v8/`)
-- EKV 2.6 at `LEVEL=260` (`ekv.rs`), plus a narrow native EKV3 `LEVEL=301`
-  slice (`ekv3.rs`) covering the VA-Models/Xyce 150 nm NMOS/PMOS cards;
-  other EKV3 cards fail closed in the builder. The complete EKV3 302.00 model
-  is the generated `ekv3_rf` device (`veriloga-model-ekv3-rf`), reached by
-  module name on an `X` line rather than by a `LEVEL` selector
-- VDMOS power MOSFET at `LEVEL=18` (`vdmos/`: device, recovery, thermal
-  submodules)
-- B3SOI silicon-on-insulator at `LEVEL=10/55/56/57`, in DD/FD/PD variants
-  (`b3soi/dd`, `b3soi/fd`, `b3soi/pd`)
-- JFET level 1 and native Parker-Skellern JFET2 (`jfet/`, `jfet.rs`;
-  `NJF`/`PJF LEVEL=2`) with ngspice-compatible `P`, `Q`, `XI`, `Z`,
-  `VST`, `MVST`, `MXI`, `LFGAM`, `LFG1`, `LFG2`, `HFGAM`, `HFG1`,
-  `HFG2`, `HFETA`, `HFE1`, `HFE2`, `TAUG`, `TAUD`, `DELTA`, `ACGAM`,
-  `XC`, `CDS`, `IBD`, `VBD`, and `VER` model parameters plus the common
-  JFET aliases such as `VT0`/`VTO` and `VBI`/`PB`. `SimulationConfig`
-  defaults to best-available Parker-Skellern behavior, while
-  `SpiceDialect::Xyce` selects the internal Xyce modified-Shockley JFET2
-  compatibility path for Xyce regression coverage.
-
-`bsim4v8/` is the native BSIM4 v4.8 path for MOS `LEVEL=14/54`, ported from
-ngspice-46's `src/spicelib/devices/bsim4/`; those upstream BSIM4 files carry
-UC Berkeley BSIM4 / ECL-2.0 terms tracked in the root `NOTICE`. It is wired through the builder,
-matrix reservation, nonlinear Newton stamping, AC small-signal stamping, and
-transient charge integration; `tests/bsim4_native.rs` pins the engine wiring
-against OP, DC sweep, transient, and `LEVEL=54` decks. Implemented: internal
-and external bias-dependent S/D resistance (`rdsMod=0/1`), distributed body
-and gate-resistance networks (`rbodyMod=0/1/2`, `rgateMod=0/1/2/3`),
-transient and AC charge-deficit NQS, `mtrlMod=1` material constants for both
-compatibility modes, `capMod=0/1/2` with integer `cvchargeMod=0/1/2/3`,
-`mobMod=0..6` (including the high-k/Synopsys variants), `tempMod=0/1/2/3`,
-`geoMod=0..10` implicit diffusion geometry, `rgeoMod=1..8` implicit S/D
-resistance geometry for omitted `NRD`/`NRS`, `wpemod=1` well-proximity for
-`SC` and explicit `SCA`/`SCB`/`SCC` inputs, `igcMod`/`igbMod` gate tunneling
-currents, the stress layout correction for active `SA`/`SB` layouts
-including the multi-finger `SD` path, and `dioMod=0/1/2` junction diode
-selectors.
-
-Selector values outside those ranges are typed errors rather than silent
-changes of physics. See `src/device/mosfet/bsim4v8/mod.rs` for the exact
-ported/not-ported inventory.
-
-**Sources and behavioral**: independent sources (`sources.rs`), the four
-controlled sources E/F/G/H (`controlled.rs`), behavioral B-sources whose
-expressions compile through `expr/` (`behavioral.rs`), and PWL-from-file
-sources (`pwl_file.rs`).
-
-**Transmission lines**: lossless and lossy lines (`transmission_line.rs` plus
-`transmission_line/` with delay, distributed, line, response, and TXL
-submodules; the LTRA path is checked by `tests/ltra_ac_oracle.rs`), and coupled
-multi-conductor lines (`coupled_transmission_line.rs`, `cpl_native.rs`).
-
-*LTRA shunt conductance.* A scalar LTRA card is classified exactly from its
-per-unit-length `R`/`L`/`G`/`C`, because those are physical densities and no
-absolute epsilon can decide whether an authored `G` is negligible over an
-arbitrary length. Four classes execute: RLC and lossless LC lines (`G = 0`),
-RC diffusion lines, the memoryless finite-length RG line (`R > 0`, `G > 0`,
-`L = C = 0`), and the `LEN = 0` RC/RG ideal-through special case. An RG line
-has no reactance, so its ABCD parameters are real constants and one
-frequency-independent two-port describes it in DC, AC, transient and the
-periodic analyses; it is admitted wherever a linear resistor is, and it
-contributes no noise source of its own, matching both reference simulators.
-**RLGC with `G != 0` is rejected.** That is a deliberate boundary, not a gap:
-neither ngspice-46 nor Xyce 7.10 implements a lossy line with both shunt
-conductance and reactance, so there is no reference semantics to match, and
-inventing one would produce numbers no oracle can qualify.
-
-**Memristors**: native Xyce `YMEMRISTOR` families: the TEAM model at
-`LEVEL=2` (`memristor_team.rs`) and the threshold-adaptive PEM model at
-`LEVEL=4` (`memristor_pem.rs`), both solving an internal state variable
-alongside the terminal equations.
-
-**MESFETs and HFETs** (`mosfet/jfet/`): the legacy MESFET at `LEVEL=0/1`, MESA
-at `LEVEL=2/3/4`, HFET1 at `LEVEL=5`, and HFET2 at `LEVEL=6`.
-
-**Other**: switches (`switch.rs`) and thermal network elements (`thermal.rs`).
-GaN HEMT qualification is feature-gated work through generated Rust from
-Verilog-A (ASM-HEMT and MVSG CMC).
-
-**Extension points**: external Verilog-A devices via the `rspice-veriloga`
-compiler (`veriloga.rs`, behind the `veriloga` feature, with blake3-keyed
-on-disk caching of compiled models) and build-time generated Verilog-A built-ins
-(`veriloga_builtins.rs`, materialized as reusable packages under
-[`../rspice-veriloga-models/models/`](../rspice-veriloga-models) and
-instantiated by model name when the feature is enabled).
-
-Disk model includes accept `.va filename [MODELNAME] [module=MODULE]` (or
-`.veriloga`). `MODULE` selects a Verilog module by its exact, case-sensitive name;
-`MODELNAME` is an independent SPICE model alias. For example, two devices from
-one source can be loaded with `.va devices.va fast module=FastDevice` and
-`.va devices.va slow module=SlowDevice`, then instantiated as `X1 p n fast` and
-`X2 p n slow`. Without `module=`, a disk source must declare exactly one device
-module, which can be instantiated by its declared name even when that name
-differs from the source filename. Connect-only libraries can be included without
-a device selection.
-Explicit aliases take precedence over module names, which take precedence over
-file stems. Conflicting bindings at the same priority are rejected when used;
-identical compiled models may share a name. An authored include takes precedence
-over a generated built-in with the same name.
+- A `Q` card whose type names HICUM or MEXTRAM, built without that module, is
+  refused by an error naming the family, the generated module and the feature
+  that supplies it. `Q LEVEL=8/23/230/234/504/505`, other simulators' selectors
+  for HICUM, HBT_X and MEXTRAM, are refused in every build: a level names a
+  dialect's device, not a module.
+- An `M` level that belongs to a compact model with no native port (BSIM-CMG,
+  PSP, HiSIM, B4SOI, BSIM6, MVS and others) is refused, naming that family,
+  unless a compiled-in generated module serves it; any other unlisted level is
+  refused with the supported list. Neither falls back to the simplified MOS
+  equations.
+- `M LEVEL=260` is the one deliberate overlap: the generated `ekv_va` when it
+  is compiled in, the native EKV 2.6 otherwise.
 
 ## Analyses
 
-Core analyses, driven from `engine/`:
-
-Checked frequency-grid APIs retain the original `TryReserveError` in
-`FrequencyGridError::Allocation { requested, source }`. `Error::source()`
-exposes that cause, including through STB and PXF wrappers. Conversion into
-`SimulationError` preserves the `allocation_failed` resource classification;
-configured point limits and cancellation remain distinct. Malformed sweep
-diagnostics retain their analysis or input context.
-
-STB loop-gain extraction recovers the small return difference from the probe's
-voltage constraint and the injection node's other KCL terms. It avoids subtracting
-rounded responses from unity and does not replace a small denominator with an
-infinity sentinel. Scaled arithmetic preserves intermediate exponents and
-cancellation; an exactly singular or unrepresentable return ratio is an error.
-Both probe orientations and loaded breaks use the same calculation and the
-original two batched solves. Sparse row traversal shares the matrix pattern.
-STB progress covers circuit construction, bias, the frequency sweep and margin
-projection. It reaches completion once, after the result is constructed, and
-observes cancellation requested by that final callback before returning it.
-
-STB selects the signed phase margin closest to zero over all resolved unity-gain
-crossings, and the signed gain margin closest to zero over all negative-real-axis
-crossings. Each margin and its frequency come from the same interpolated segment.
-Phase margins are folded into (-180, 180] degrees; Bode samples retain unwrapped
-phase. A unity plateau counts as one connected crossing, while the reported
-margin considers its endpoints and any critical point inside it. These are
-sweep measurements; margins alone do not establish closed-loop stability.
-
-`StabilityMargins::gain_margin` and `phase_margin` are optional `CrossoverMargin`
-pairs, each holding a signed `value` and a positive `frequency` in Hz.
-`None` means no crossover was resolved in the sampled band. Single-point sweeps
-retain their sample and can report an exactly sampled crossover. The
-`unity_gain_bandwidth()` method derives its optional frequency from the phase
-margin; `margin_assessment()` summarizes measured margins. The former
-`is_stable()` and `conditionally_stable` APIs have been removed because neither
-positive margins nor multiple crossings alone establish circuit stability.
-Result schema 15 requires matching margin and frequency availability and
-reports multiple crossings as `multiple_unity_gain_crossovers`. Versions 1–14
-decode missing-crossover infinity placeholders as `NoCrossover` while preserving
-historical finite margin values.
-
-`BodePoint` retains finite complex samples even when a derived ordinate is
-undefined: at zero gain, linear magnitude is `Some(0.0)` and dB magnitude and
-phase are `None`. An overflowing linear norm is also `None`, while its scaled
-dB magnitude remains available. Phase unwrap restarts after an undefined sample.
-`magnitude_curve()` and `phase_curve()` preserve this optional-ordinate contract.
-`StbResult::validate_with_abort` checks retained Bode, Nyquist and margin values
-against the raw samples, with resource limits and cancellation.
-
-STB measures its DC return ratio independently at zero frequency, using the
-same linearized circuit and reusable two-experiment workspace. The requested
-positive-frequency grid is unchanged. A measured zero remains zero; an undefined
-DC solve retains a diagnostic and does not discard valid AC results. Rust exposes
-`StabilityMargins::dc_loop_gain` as an optional complex value and `dc_gain_db()`
-as an optional magnitude. A standalone positive-frequency projection cannot
-supply a DC measurement. Result schema 14 validates the DC magnitude against its
-return ratio; versions 1–13 preserve their mislabeled DC numbers as sweep-start
-gain. Python preserves the new DC evidence in pickles and leaves legacy DC
-measurements unavailable.
-
-STB result and workspace reservations also retain their allocator cause in
-`StbAnalysisError::Allocation { object, requested, source }` or
-`SimulationError::Allocation { object, source }`. Callers can inspect the
-failed buffer's identity and the error chain without parsing diagnostic text.
-
-SDK migration: `FrequencyGridError` and `StbAnalysisError` implement `Clone`
-and are no longer `Copy`. Borrow or explicitly clone errors when reusing them;
-match allocation variants with `..` when their cause is not needed. These
-checked APIs report allocation refusal, while the legacy infallible
-`ac_sweep_frequencies` wrapper still returns an empty vector on failure.
-
-Parameter sweeps use `Engine::plan_step_commands`, `StepPlan`, and
-`StepPlanLimits`; axis specifications live in `netlist::StepSweep`.
-The unused `analysis::parametric` API has been removed. SDK callers should
-migrate to the engine planner, which validates dimensions and total run counts
-before executing the same sweep path used by the frontends.
-
-Temperature options accept expressions using parameters available at the option
-card, or scalar parameters declared later in the same or an enclosing lexical
-scope. For example, `.options temp={ambient}` can precede `.param ambient=85`,
-including when a child option closes before that parent declaration.
-Already-bound values and functions keep their option-card meaning. Forward
-expressions resolve after their own scope and the required declaration owners
-close, in authored order within each scope. Local-only options keep their scope
-closure sampling phase; delayed child groups retry in scope-close order when
-an ancestor closes. An unresolved parent graph uses that parent's completed
-definitions, independently of child overrides.
-An unsuccessful forward-reference probe consumes no retained random draws.
-Later option assignments still win, and superseded assignments are validated.
-The parser reconciles the selected temperature with earlier eager expressions
-through bounded replay of the same immutable source and statistical seed.
-Inactive branches and text after `.END` cannot author temperature options.
-`TEMP`, `TEMPER`, and `VT` agree with the selected physical temperature;
-`TNOM` defaults to 27 C without adding a stored parameter binding. A physical
-table/study `TEMP` coordinate takes precedence over options and a single `.TEMP`
-directive. Temperature selections that keep changing on replay are rejected.
-
-Retained ordinary/global parameter chains resolve on demand for temperature
-options, including subcircuit scopes. Numeric evaluation preserves complex
-values, function-argument shadowing and lazy branches. Shared dependencies
-materialize once, so repeated references do not resample statistical parameters.
-Deferred child options, parent options and later analysis cards share those
-owner samples. A failed or cancelled scope probe publishes no options or cache.
-Static parameter validation uses the numeric expression language, including
-complex functions such as `IMG`.
-
-Both expression dialects retain ordinary forward `.PARAM` declarations,
-including bare and signed aliases. Failed probes preserve the random stream;
-selected definitions retain their source location, and duplicate selection and
-diagnostic policies still apply. Ordinary static declarations and global numeric
-projections finalize before deferred source specifications and model expressions
-read them, so sources, models, and their parameters share one sample.
-Ngspice ordinary parameters remain static; Xyce runtime expressions remain
-symbolic where required.
-
-Global expression bodies remain available for runtime binding and derived
-contexts. Deterministic projections follow resolved dependencies, while captured
-static statistical values are reused. Sample detection includes user-function
-bodies and two-argument `LIMIT`; three-argument clipping remains deterministic.
-Ordinary bindings still shadow globals without replacing their namespace.
-Available-parameter materialization uses the same complex numeric resolver, so
-model expressions such as `IMG(global_value)` retain their imaginary input.
-
-Real model fields reject a nonzero imaginary component in the final result;
-there is no tolerance that silently discards a small component. This applies to
-eager and forward expressions, scoped model cards, temperature-dependent fields,
-real vectors, and thermal material updates. Complex intermediate calculations
-remain supported; use `RE()`, `IMG()`, or `MAG()` to select a real result.
-XSPICE complex pairs retain both components, and each component must itself be
-real. XSPICE instance overrides and scoped physical scalar fields use the same
-validation. Eager XSPICE instance expressions observe parser cancellation;
-forward-reference probes do not advance the live statistical stream.
-Repeated XSPICE instance assignments use the last value, including changes in
-value type or expression deferral. Scalar fields resolve sibling dependencies
-at the root and inside subcircuits without consuming samples on failed retries.
-Native XSPICE capacitor/inductor parameter resolution uses the same dependency
-rules, including retained expressions, cycle detection, and typed cancellation.
-Pending instance overrides cannot be replaced by enclosing globals or model
-defaults in sibling expressions; a self-reference may still use its enclosing
-or model value. Root expressions that read sibling fields wait for the complete
-instance context. Retained `.GLOBAL_PARAM` dependencies resolve against completed
-instance bindings at the top level and inside subcircuits. Transitive reads
-preserve complex values and pending-sibling masking; independent root expressions keep their source-order
-statistical sampling. Explicit nonnumeric instance fields block numeric fallback
-to enclosing parameters, including transitive dependencies and user functions.
-Unused conditional branches and each field's enclosing self-reference remain valid.
-Complex instance components resolve forward parameter and function references.
-Numeric vector entries and complex components accept comma-separated function
-arguments and whitespace inside groups.
-Instance vectors and complex values use resolved scalar overrides; numeric
-evaluation begins only after a complete complex-literal grammar is recognized.
-Quoted vector literals reject trailing tokens instead of discarding them.
-Quoted numeric entries use the deck's expression dialect, functions and seeded
-stream; scoped entries resolve and sample separately for each instance.
-Deferred string aliases are classified in their final lexical scope, including
-forward-defined real, integer, string and complex vectors. Numeric entries then
-use the same cancellable instance binding as inline vectors. Scoped scalar and
-vector expressions can read model defaults, with enclosing parameters retaining
-precedence and run temperature options applied consistently.
-Bare-word vectors wait for complete lexical, instance, and model scalar bindings
-before numeric or string classification, including quoted vectors and aliases.
-Explicit string and vector fields take precedence over enclosing numeric names
-when classifying bare words; this does not turn explicitly braced numeric reads
-of those fields into strings. Independent root vectors retain their sampling order.
-Literal words remain string entries in both top-level and subcircuit instances;
-quote individual entries to preserve text that also names a numeric binding or
-resembles a recognized expression function call.
-Quote individual string-vector entries that resemble `<real imag>` pairs to
-preserve them as literal text.
-
-Model fields do not replace enclosing `.PARAM` or `.GLOBAL_PARAM` bindings while
-resolving expressions, including forward references and runtime expressions.
-Model fields supply otherwise unbound names within their own card. Temperature
-quantities retain the separate instance and model override rules below.
-Forward model probes preserve the seeded stream, including calls to functions
-defined later in the deck. Each model evaluation shares resolved
-values and suspended expressions resume after a dependency becomes available.
-`TNOM` and its dependencies resolve once before the remaining model values, so
-nominal-temperature overrides do not cause a second statistical evaluation.
-
-Resistor construction shares one model evaluation across electrical, thermal,
-and flicker-noise consumers, including branch-form and generated auto-bridge
-resistors. Each physical instance retains its own samples. Thermal material
-updates use the same dependency resolver, preserve enclosing parameter bindings,
-and retain the nominal temperature already resolved during construction. Initial
-thermal material values reuse the construction result instead of sampling again.
-Transient material evaluation observes run cancellation before any prepared
-thermal values become accepted state.
-
-Native diode, BJT, MOS, JFET, and MESFET scalar model expressions resolve at
-construction using the instance's `TEMP`/`DTEMP` and the model's `TNOM`.
-Bare, signed, and parenthesized temperature references follow the same rules as
-braced expressions, including dependencies inside user functions. Subcircuit
-models capture local parameters and functions while retaining temperature names
-for the actual device instance. Resolved values must be finite and real; missing
-bindings fail with a model and parameter diagnostic. Existing numeric `LEVEL`
-selector rules still apply. Temperature-dependent model vectors also remain deferred. Cancellable builds
-check the caller's abort signal inside scalar and vector model evaluation,
-including XSPICE model resolution and generated bridge construction.
-
-Independent-source specifications containing function calls are probed using an
-isolated random stream before live evaluation. Failed forward-binding attempts
-and deferral classification consume no live draws, including when a sampled
-field precedes a missing field. Deferred root-source errors retain their physical
-card location. Grouped runtime-dependent sources retain behavioral evaluation.
-
-Analysis cards stage their result, diagnostics, output requests, Monte Carlo
-source identity and transient-noise selection before changing parser state.
-The whole card must validate before publication, including trailing fields
-after `.AC DATA=...`. Function-bearing cards use the same
-isolated sampling probe as independent sources; failed card probes retain no
-live draws, and successful fields evaluate once on the live stream. Optional
-numeric readers leave failed expressions for validation instead of silently
-omitting authored fields.
-
-A deferred analysis that fails at the provisional temperature retains its error
-while the parser discovers any later `.TEMP` selection. If options or that
-directive select a different temperature, a fresh pass must validate the whole
-deck before publication. The original error remains fatal at a stable setting;
-cancellation and resource errors return immediately. Successful passes retain
-their three-attempt consistency limit. Failed discovery has its own
-three-attempt limit because an invalid operand can skip later random draws;
-either limit stops replay, for at most five total attempts. Publication still
-requires a complete pass at the same selected temperature. Physical study
-overrides and statistical order are preserved.
-
-Typed `AnalysisCardError` values retain the physical card origin in `origin`.
-Both their `source_location()` method and `ParseError::source_location()` expose
-the included or root path and source-local line, including deferred cards and
-continuations. The typed card and issue remain available for programmatic handling.
-In-memory errors keep line-only locations. SDK callers constructing these errors
-should use `AnalysisCardError::new`; existing struct literals need the added
-`origin` field (`None` when no physical owner is known).
-
-Top-level analysis cards that cannot bind immediately retry their original
-grammar after root declarations, source specifications and model expressions
-have completed. Already available scalar/complex values, strings, user functions
-and temperature builtins retain their authored bindings; missing bindings use
-the completed root scope. Ready cards retain their eager values and random draws.
-Pending cards draw in authored order in the completion phase. A shared resolved
-statistical parameter is reused rather than sampled by each consumer.
-
-An ordered parser plan merges primary analyses, `.LIN`/`.FFT` auxiliaries,
-Fourier/FFT outputs, Monte Carlo source identities and diagnostics back into
-their original positions. LIN uniqueness and transient-noise consistency are
-checked in authored order, including when an earlier card was pending. Root
-cards do not inherit child-local bindings.
-
-Deferred subcircuit analysis operands resolve only demanded dependencies in
-their declaring scopes, including later parent/root declarations and unresolved
-header defaults. Siblings remain isolated. Known inherited values retain their
-snapshot when a parent is later redefined. Suspended numeric operands preserve
-lazy branches and random-draw order across grammar retries; shared dependencies
-sample once in their owner. Original subcircuit bodies remain available for
-per-instance overrides and evaluation. Only scopes needed by pending cards are
-retained beyond `.ENDS`.
-
-Eager parameter domain errors and root declaration/source/model completion
-errors also participate in temperature reconciliation. Failed declarations
-retain their expressions without numeric placeholders, and every later assignment
-on the same card is still parsed. A later redefinition cannot erase the original
-error. Pending `.TEMP` dependencies can resolve through their declaration owners
-when ordinary parameter finalization is incomplete. No failed pass publishes a
-netlist, and cancellation and resource failures remain terminal.
-
-Eager option fields use the same failed-pass error contract. Scalar fields,
-package transitions, time-point vectors and output/restart schedules retain
-their grammar boundaries while later fields select TEMP/TNOM. A fresh pass must
-validate every field; later assignments cannot erase an earlier error. Option
-overlays applied to an already materialized circuit keep their atomic error
-contract. Schedule look-ahead classifies tokens without evaluating operands,
-so only actual value reads consume statistical draws.
-
-A failed deferred temperature-option group also probes its later operands.
-Successful isolated values are retry candidates, not published options or
-parameter bindings; probes consume no live random draws. Groups still wait for
-unfinished declaration owners, and assignment order controls candidate
-precedence across scopes. Ordinary failures at `.ENDS` retain their physical
-card error while later independent source cards can select temperatures. Every
-assignment must validate in a fresh pass before the circuit is returned.
-
-Failed `.IF`/`.ELSEIF` expressions leave their chain unresolved for the
-current pass. No branch of that chain emits cards or evaluates later decisions,
-but nesting and branch structure remain checked. Independent later temperature
-declarations can trigger a fresh pass; every active decision must then evaluate
-successfully. Inactive `.DATA` blocks neither evaluate rows nor publish tables,
-and their continuations remain attached to their original logical card.
-
-Subcircuit headers retain default-expression failures after exhausting forward
-progress among their defaults. Unresolved defaults stay symbolic, with no
-numeric fallback. Later temperature declarations can trigger a fresh pass;
-selected defaults must then validate even when unused or overridden by an
-instance. Formal ownership, per-instance expressions, duplicate-selection
-policy and isolated default sampling remain intact. A dependent undefined name
-does not hide another default's concrete domain error.
-
-`.IC` and `.NODESET` use one parser that stages a complete card in the existing
-startup-entry representation. Failed cards publish neither partial execution
-values nor provenance records. These cards and inline `.INITCOND` retain their
-ordinary failures while later declarations select temperatures; a fresh pass
-must validate every active card. Scoped expressions, startup identities,
-duplicate rules, statistical phases and typed device-condition errors remain
-intact. Terminal resource failures and cancellation still stop immediately.
-
-Root `.IC`, `.NODESET` and `.INITCOND` operands now accept forward parameter
-references. Startup and analysis cards share captured authored bindings and the
-lexical dependency resolver. Pending startup cards bind after declaration,
-source and model completion, before pending analyses, and publish in authored
-order. Already-known values and functions retain their source-order meaning.
-Scoped voltage expressions still evaluate with each instance's parameters,
-including values supplied only by an X-line. Device startup values retain their
-authored lexical scope, and duplicate `.INITCOND` cards retain typed errors.
-
-Long startup cards use cursor checkpoints instead of copying all tokens for
-every target/value. Constraint validation skips path searches when an endpoint
-has not entered the graph. `tests/startup_card_allocations.rs` enforces parser
-allocation budgets for IC/NODESET cards.
-
-General dependency planning remains incomplete. Other earlier card failures and
-eager parameter error classes can still prevent temperature discovery. Further
-physical-override combinations, statistical/runtime binding, general graph and
-binding complexity, and broader resource behavior still require qualification.
-
-Control scalar evaluation preserves both real and imaginary components through
-`let`, `$name`/`$&name` substitution and print samples. Conditions are true when
-either component is nonzero, including subnormal values. Repeat counts, circuit
-alterations, thread counts, plot limits and numeric control options require real
-values; use `real()`, `imag()` or `mag()` to request a projection explicitly.
-Nonfinite components are rejected before scalar assignment or publication.
-SDK hosts implementing `ControlScalarEvaluator::evaluate_scalar` must now return
-`ComplexValue`; real hosts can construct it with `ComplexValue::from(value)`.
-
-Analysis-card numeric operands require finite real values in both direct and
-control execution. Required fields, optional fields and deferred parameter
-bindings all apply the same check. Complex parameter arithmetic is still valid
-when its result is real, or when an explicit `real()`, `imag()` or `mag()`
-projection is used. Probe and table names are unaffected. Monte Carlo integer
-fields retain exact 64-bit literal values; numeric expressions are evaluated
-before their integer domain is checked.
-AC, noise, SP, distortion and AC sensitivity point counts require positive
-integers within the target platform's `usize` range. Literal counts preserve
-their full precision; fractional and oversized values are rejected before a
-cast can truncate or saturate them. Periodic count fields likewise exclude the
-first integer beyond the platform range.
-
-`ControlCircuit` executes `ac DATA=<table>` and `noise ... DATA=<table>` through
-the shared compact table runners. `ControlAnalysisResult::AcTable` and
-`NoiseTable` retain authored columns, canonical targets, accepted row coordinates,
-requested row count and model-finish metadata. Presentation exposes column names
-and preserves complex samples and noise units. Cross-dataset arithmetic requires
-matching canonical targets and every coordinate, independent of column order.
-Repeated or decreasing frequencies remain in their authored order.
-
-Physical `TEMP` columns override the caller's resolved run temperature. Otherwise
-resolved callers retain their policies; unresolved callers resolve each row's
-authored options and executed control overrides. Only options explicitly changed
-by control commands survive as overrides during source replay. Circuit equations
-and noise densities use the same temperature; the noise fallback applies to
-unresolved rows without a temperature option. Version 11 result documents retain
-table bindings, aligned coordinate axes, requested rows and model-finish evidence.
-The bounded `from_ac_table_with_limits_and_abort` and
-`from_noise_table_with_limits_and_abort` document constructors validate borrowed
-coordinates and admit projected numeric storage before copying it. They preserve
-cancellation during projection and count completion metadata and aligned noise
-contributions. Finish metadata rejects unknown fields at every analysis stage.
-The CLI and WASM direct/control adapters use these documents and compact table
-runners; browser metadata exposes the bindings and bounded windows carry every
-coordinate. CLI flat exports retain coordinates as `data(column)` columns; typed
-JSON additionally retains binding and completion metadata. Noise band totals
-require at least two strictly increasing frequencies with all other coordinates
-constant.
-Textual multi-run expansion preserves tables needed by frequency/control consumers,
-including shared tables and ALTER variants. Regression coverage is in
-`tests/control_frequency_data.rs`.
-
-`ControlCircuit` also executes explicit `tf` and declarative `.TF` through the
-ordinary transfer-function solver. `ControlAnalysisResult::TransferFunction`
-retains the gain, physical gain unit, impedances and source/probe identities.
-Named `tf1`, `tf2`, ... datasets expose `transfer_function`/`transfer_gain`,
-`input_impedance` and `output_impedance`, including the ngspice impedance labels.
-Finite expressions use the existing one-point vector presentation contract.
-Exact infinite impedances requested by `print` are retained as typed
-`ControlPresentation::scalars`, with `ControlScalar::position` preserving order
-among scalar entries and vector traces. They are never converted into finite
-plot samples. Hosts must publish these scalar determinations as well as `kind`.
-Failed or cancelled analyses publish no dataset and consume no ordinal; the
-three retained transfer values count against the cumulative result allowance.
-Control scalar assignments and conditions can read these parameter-style names,
-including `let gain = tf1.transfer_function`. Reads use the same lazy expression
-evaluation and user-function scoping as ordinary parameters. An active read of
-an infinite impedance returns an expression error, rather than a finite overflow
-sentinel; an unselected `if` branch does not read it.
-
-Explicit `pz` commands and declarative `.PZ` cards executed by `run` use the
-shared PZ card runner. `ControlAnalysisResult::PoleZero` retains root evidence,
-physical port names and gains; SDK hosts matching this enum must handle the new
-variant. Immutable `pz1`, `pz2`, ... datasets support `pole(index)`, `zero(index)`,
-`dc_gain` and `hf_gain`/`high_frequency_gain`, with optional dataset qualification
-such as `pz1.pole(2)`. Root indices are one-based real integers. Roots retain
-both complex components in rad/s; gains retain their physical units. Missing
-roots and gains with no finite value produce errors when evaluated. Scalar
-assignments and conditions retain lazy branches, user-function scopes and
-random-draw order. `print`, complex-plane `plot` expressions using `real()` and
-`imag()`, and `settype` use the same retained roots. CLI and WASM publication
-preserve the ordinary PZ result document. Cancelled or failed analyses publish
-no new dataset or ordinal, and retained roots consume the session's cumulative
-result allowance.
-
-Explicit `sens` commands and declarative `.SENS` cards executed by `run` use the
-shared, bounded DC/AC sensitivity runner. `ControlAnalysisResult::Sensitivity`
-retains the complete typed result, including unavailable derived quantities.
-Immutable `sens1`, `sens2`, ... datasets expose the raw absolute derivatives by
-their SPICE vector names, such as `R1`, `R1_TC1`, or `PARAM:p`. `output` and
-`output_value` select the nominal voltage or current with its physical unit;
-derivative units remain unspecified when the parameter's unit is unknown.
-`print`, `plot`, and `settype` accept these vectors and dataset-qualified names
-such as `sens1.R1`. Quote names containing expression punctuation, for example
-`"PARAM:p"` or `"sens1.model:IS"`; the colon in an unquoted expression remains the
-ternary separator. Scalar expressions accept DC and single-frequency AC values,
-preserving both complex components; reading a multi-frequency vector as a scalar
-is an error. CLI and WASM publish the ordinary sensitivity document. Failed or
-cancelled runs preserve existing datasets and ordinals, and each retained result
-consumes the control session's cumulative result allowance.
-
-Explicit `dcmatch OUT=V(out)` commands and declarative `.DCMATCH` cards executed
-by `run` retain immutable `dcmatch1`, `dcmatch2`, ... datasets. Scalar expressions
-and `print` expose `nominal_value`, `sigma_total`, `sigma_mismatch`,
-`sigma_process`, and `quoted_sigma`, including when report filtering retains no
-contributors. Ranked vectors `sigma_parameter`, `sensitivity`, `contribution`,
-and `share` use `contributor_index`; the typed report preserves each row's
-instance, parameter and scope. Combining contributor vectors requires matching
-row identities. Output quantities carry volts or amperes; mixed parameter and
-sensitivity units remain unspecified. CLI and WASM publish the same DC mismatch
-document as direct execution. Cancellation and quota failures preserve prior
-datasets and ordinals.
-
-The unused `JunctionTempScaling` and `MosfetTempScaling` placeholders and
-the unused `CapacitorTempCoeffs::vc1/vc2` fields have also been removed.
-Semiconductor temperature behavior belongs to each device model;
-`TemperatureContext` and the passive temperature coefficients remain available.
-
-The callback `MonteCarloRunner::run` now returns `Result`; callers must
-handle configuration, entropy, and resource errors. `run_with_abort` adds
-cooperative cancellation. Unseeded runs use host entropy on native and WASM
-targets and retain the seed and sampling-policy version in the shared result
-document. Callback sampling now uses the engine's distribution arithmetic,
-including the magnitude of negative nominal parameters; its policy is version 2.
-
-`MonteCarloConfig::confidence_pct` controls a two-sided confidence interval
-for each output mean. `confidence_method` selects Student-t (exact for
-independent normal observations) or a deterministic percentile bootstrap with
-an explicit seed and resampling count. Failed trials make the interval
-conditional on successful trials. The shared result document includes the
-method, level, assumptions, and each interval's availability; fewer than two
-samples have no estimated interval. Bootstrap work and storage use the existing
-analysis-point and result-value limits.
-
-| Analysis | Module |
-| :--- | :--- |
-| DC operating point and DC sweep | `analysis/dc.rs`, `engine/dc.rs` |
-| AC small-signal sweep | `analysis/ac.rs`, `engine/ac.rs` |
-| Transient | `engine/transient/`; shared results in `analysis/transient.rs` |
-| Temperature handling | `analysis/temperature.rs` |
-| Laplace-defined sources/filters | `netlist/parser/laplace_synthesis.rs` |
-
-Transient integration methods: backward Euler, trapezoidal, Gear-2, and the
-hybrid trap/Gear default (selected via `SimulationConfig`; the CLI exposes
-them as `--integration-method euler|trap|gear|trapgear`). Timestep control
-is LTE-based with breakpoint handling; a transient checkpoint/resume path
-exists (`engine/transient/`, exercised by `tests/transient_checkpoint.rs`
-and the CLI's `--checkpoint`/`--resume`).
-`RELTOL` and frontend relative-tolerance overrides preserve the independent
-absolute voltage/current tolerances, including the legacy absolute voltage
-fallback when `VNTOL` has not been specified.
-
-Checkpoint format 35 retains the step and stop defaults that determine
-independent-source waveforms. Extending a run or changing its step ceiling
-preserves those source parameters. Older checkpoints remain readable; resume
-requires fully specified source timing when the original defaults are absent.
-Resume also requires the current resolved simulation identity (v132); states
-captured under previous source evaluation or behavioral event timing semantics
-must be regenerated.
-
-The event kernel exposes a separate versioned `SchedulerCheckpoint` image.
-It preserves exact event times, region/sequence ordering, target identities,
-digital strengths, real payload bits and slot accounting; restore rebuilds
-cancellation and driver indexes after validation. Invalid images, incompatible
-limits/targets and decoded resource-budget violations leave the receiver unchanged.
-Capture rejects failed or partially executed slots. The enclosing file reader
-must bound input bytes before deserialization. Checkpoint format 57 carries the
-shared HDL execution, mixed analog/bridge participants, and qualified XSPICE
-context/dispatch/event state. Restore validates every component before installing
-it and publishes the resume seam only after the saved state is authoritative.
-The gate and bridge families declare portable context state; other code models
-need an explicit capability contract. Live host resources and legacy mixed
-images without complete execution state remain refused.
-
-`Engine::run_tran_checkpoint_stream_with_abort` publishes scheduled snapshots
-at accepted boundaries during a fresh or resumed run. The engine releases each
-snapshot after the callback, so retaining the latest encoded image does not
-accumulate every checkpoint. Callback failures and cancellation stop delivery;
-snapshots already delivered can resume the run. This uses the same nominal-time
-coalescing and resource checks as the retained schedule API and adds no solver
-breakpoints. `TransientCheckpointStart::Restart` admits the existing authored
-restart contract (including stop-horizon extension) while `Resume` requires the
-same netlist identity.
-
-The simulation runner accepts `SpecExecutionOptions::tran_checkpoint`, transfers
-its authenticated resume payload outside worker JSON, and retains the latest
-published packed image in a separate transient queue. Receiving run budgets
-apply to bytes and decoded state; cancelled runs preserve previously delivered
-images. Native request/transport tests cover mixed HDL-to-SPICE continuation and
-horizon extension. Browser transport is wired separately and requires browser
-runtime qualification. Project results retain accepted images and imported
-checkpoint libraries. The transient editor provides bounded capture schedules,
-per-point resume selection, binary import/export, and accepted-time inspection.
-`Engine::validate_transient_checkpoint_request` checks the resolved source and
-numerical policy without executing a transient; runtime restore still validates
-every saved state contract. `NOISEFMAX` stream state and unversioned live host
-resources remain unsupported for checkpoint continuation.
-
-The internal HDL signal-store checkpoint retains typed signal values, each
-driver's contribution (including never-driven state), analog samples, activation
-clock, expression subscriptions, external bit strengths and real contributions.
-Capture requires drained writes, publications and waveform notifications. Restore
-authenticates linked topology, analog dependencies and trace bindings, rebuilds
-subscription indexes, and checks saved net values against driver resolution before
-returning a replacement store.
-
-The internal HDL host checkpoint combines that store with process continuations,
-pending assignments and the exact scheduler image. Restore checks source wait
-sites, event-count ownership, one wakeup per queued process and delayed-assignment
-bucket, and one owner per expression subscription. It preserves external participant
-registration order and constructs the whole host before replacing live state.
-Failed settlements and unfinished same-time execution cannot be captured. The
-enclosing mixed image couples these components to the accepted analog devices,
-bridges, and XSPICE runtime before installation in the transient engine.
-
-The shared coordinator checkpoint adds instance/port mappings, accepted physical
-time, exact observer probe samples and complete `absdelta` history, including
-turning points and suppressed events. It authenticates topology and time policy,
-checks observer controls against their saved history, and rejects digital events
-left behind accepted time or activation clocks ahead of it. Capture and restore
-refuse open trials. Restored coordinators retain the receiving resource ceilings;
-per-instance analog and bridge images must join the final circuit transaction.
-
-Enrolled mixed participants have a separate accepted-transient image for analog
-VM/operator history, solver inputs and both integration rules, ADC samples and
-decisions, transition times, probe samples and ADC/DAC switching histories.
-Restore validates source/parameter shape and boundary wiring, rebuilds local
-digital views from the restored coordinator, and checks bridge histories against
-those values. Decoding constructs a replacement module without modifying the
-receiver. These internal components still need bounded outer-file decoding,
-complete XSPICE model-context persistence and one atomic circuit installation.
-
-The internal XSPICE event image retains the exact queue, per-driver contributions,
-resolved observations and event times. Restore authenticates producers against
-elaborated output ports, validates local resolution, shared HDL observations and
-each original shared contribution, and requires drained waveform notifications.
-The circuit builds this contract from actual output ports and its restored HDL
-owner. An untouched output can omit an XSPICE bank entry only while its HDL
-contribution retains the enrollment default (high-Z or positive zero). Replacement
-queue/value banks publish no events; full circuit installation remains pending.
-
-Resource-free XSPICE contexts also have an internal transient image for state
-arrays, inertial delays, sample histories, port observations and output history,
-analog transitions, integration coefficients, parameter-cache revisions and
-retained matrix/RHS contributions. It authenticates receiving parameters, wiring
-and port shapes, preserves exact real payload bits, and constructs a replacement.
-Capture requires drained output events and breakpoint requests; live host resources
-and open resource transactions are refused. This does not enable model resume by
-itself: instance input signatures and observations, explicit model capability
-and the outer atomic restore still need integration.
-
-XSPICE event-driver banks resolve in stable instance/port/vector-element order.
-This keeps real-valued cancellation and digital inout observations reproducible
-when a circuit is rebuilt, without sorting drivers on each publication. Checkpoints
-from the previous randomized driver order require a fresh run.
-
-PWL interpolation and repeat timing preserve finite nonzero knot intervals
-and positive `TSCALE` values without an absolute machine-epsilon cutoff.
-An exact repeat boundary retains the authored endpoint; the next representable
-instant evaluates the next cycle. The source-event enumeration API preserves
-distinct authored times instead of applying an integrator landing tolerance.
-
-Integration order is deliberately bounded to 1 and 2. Xyce's documented
-`TIMEINT` contract defines its variable-order trapezoidal and Gear methods over
-orders 1 and 2 only (Users' Guide 7.10, section 7.3.4), so `.OPTIONS TIMEINT
-MINORD`/`MAXORD` accept only those values; any other request, including
-inverted bounds, is a typed parse or configuration error, never a silent clamp.
-The parser (`netlist/parser/commands.rs`), `SimulationConfig` validation
-(`config.rs`), and the transient checkpoint identity enforce the same bound,
-and `tests/transient_integration_order.rs` qualifies second-order behaviour
-against an ngspice BSIM3 timing oracle. Higher-order Gear/BDF would need the
-full history, device-state, checkpoint, stability, and manufactured-solution
-qualification program, not a wider option range.
-
-Advanced analyses, all flat under `analysis/`:
-
-| Analysis | Module |
-| :--- | :--- |
-| Fourier / THD (`.FOUR`) | `fourier.rs` |
-| Volterra distortion (`.DISTO`) | `distortion.rs`, `engine/distortion.rs` |
-| Noise | `noise.rs`, `engine/noise.rs` |
-| Pole-zero | `pole_zero.rs`, `pole_zero/` |
-| Sensitivity (DC and AC) | `sensitivity.rs` |
-| Transfer function (`.TF`) | `transfer.rs`, `transfer/` |
-| DC mismatch variance (`.DCMATCH`) | `dcmatch.rs`, `engine/dcmatch.rs` |
-| Parametric sweep (`.STEP`) | `netlist/ast.rs`, `engine/step.rs` |
-| Monte Carlo | `monte_carlo.rs` |
-| Process corners | `corner.rs` |
-| Periodic steady state (shooting) | `pss/`, `engine/pss.rs` |
-| Harmonic balance | `harmonic_balance/`, `engine/hb/` |
-| Periodic noise (pnoise) | `engine/hb/pnoise.rs`, `engine/pss_noise.rs`; spectral results in `pnoise/` |
-| Periodic AC (PAC) | `pac/` |
-| Periodic transfer function (PXF) | `pxf.rs` |
-| Stability (STB) loop-gain | `stb.rs`, `engine/stb.rs` |
-| Periodic stability (PSTB) | `pstb.rs` |
-| S-parameters | `s_param.rs`, `s_param/` |
-| `.MEAS` evaluation | `measure.rs`, `measure_signals.rs`, `measurements/` |
-
-`.DISTO` retains sinusoidal peak phasors. Harmonic mode returns `2f1` and
-`3f1`; two-tone mode fixes F2 at `ratio * F1_start` and returns `f1+f2`,
-`f1-f2`, `2f1-f2`, `2f1`, `2f2`, and `2f2-f1`. Use
-`DistortionProduct::for_mode` to enumerate the returned products. Exhaustive
-SDK matches must handle `SecondHarmonicF2` and `ThirdOrderDifferenceF2`.
-A negative signed product is conjugated onto its positive physical frequency;
-a zero-frequency product is a real DC contribution. Products that share a
-frequency retain their separate tone/order identities. Sum those contributions
-explicitly when forming a composite spectrum. Control expressions such as
-`disto("2f2-f1",i(V1))` and typed documents retain the same product identities.
-
-Transfer-function results retain `gain_unit`: voltage/current gain is in ohms,
-current/voltage gain is in siemens, and equal-quantity gains are dimensionless.
-The engine determines these units from the elaborated input source and output
-probe, including hierarchical sources. Typed documents preserve that unit.
-SDK migration: `TransferFunctionResult::new` now takes
-the explicit `SignalUnit` immediately after `gain`; struct literals must supply
-`gain_unit`. Do not infer a source's quantity from its hierarchical name.
-
-`PoleZeroAnalyzer::pole_spectrum()` and `pole_spectrum_with_abort()` extract
-the complete natural-mode spectrum without choosing transfer ports or calculating
-gains. `PoleSpectrum` retains poles in rad/s and their numerical evidence; its
-stability classification shares the pole-zero result's qualification rules.
-This includes modes invisible at a selected output and systems whose transfer
-gain overflows. `with_resource_limits()` bounds descriptor order and workspace.
-
-Computed pole-zero results populate `hf_gain` with the finite high-frequency
-limit, including zero and static gains. Exact descriptor equations combine
-the selected input and output before classifying improper transfers; `None`
-means a nonzero positive power of frequency remains. A finite limit that
-overflows binary64 or loses a nonzero value to underflow returns
-`PoleZeroAnalysisError::UnrepresentableGain`. It is not replaced with zero or
-classified as unbounded. Exact preparation retains cancellation and configured
-workspace limits. This contract applies to newly computed results; manually
-constructed or historical results can still have an unavailable gain.
-
-PZ poles and zeros use angular frequency (`SignalUnit::RadianPerSecond`,
-`rad/s`); their numeric values are not Hz. Both gains retain `gain_unit` as
-ohms for current excitation and dimensionless for voltage excitation. SDK
-callers constructing `PoleZeroResult` now pass that unit to `new` and include
-it in struct literals. Document version 12 carries `rootUnit` and `gainUnit`;
-versions 1–11 retain absent unit metadata without guessing from port labels.
-
-How each analysis is reached (netlist card, CLI flag, or engine API only)
-varies. The [CLI README](../rspice-cli/README.md) documents the netlist-card
-and flag surface; anything not listed there is engine-API only.
-
-A sensitivity study differentiates one output — a node voltage, a differential
-voltage or a branch current, at the operating point or at each frequency of an
-AC sweep — with respect to the variables one filter list names. The variable
-universe is the union of two namespaces: the **device variables** of the
-flattened circuit (instance parameters, element and source values, model scalar
-and vector parameters) and the **design parameters** of the authored root scope
-(`.PARAM`/`.GLOBAL_PARAM`). A filter item addresses the design parameters if
-and only if it begins with the literal `PARAM:`, whose remainder globs
-parameter names; a filter without that prefix never selects one, not even `*`.
-An empty filter list means every device and model variable and no design
-parameter, which is ngspice's `.sens`. A design-parameter derivative is
-**total**: the deck is replayed with the parameter moved, so every parameter
-defined from it moves with it — `PARAM:a` includes `b={…a…}` while `PARAM:b`
-holds `a` fixed. Design rows are named `PARAM:<NAME>` and tagged as parameter
-sensitivities; they are computed, never recombined from device rows, because a
-parameter inside a behavioural expression, a source argument or `.options`
-reaches the circuit through no differentiated field at all.
-
-Engine results retain physical circuit names in their output probes, including
-numeric and hierarchical node names. Either voltage terminal may be ground;
-`V(0,out)` reverses `V(out)`, while `V(0)` and `V(out,out)` have zero output and
-zero absolute derivatives. Normalization remains unavailable at zero output.
-
-Method of record. A design parameter on a qualified linear circuit is **exact**:
-the parser's forward-mode derivative of every expression the parameter reaches
-is contracted with one transpose solve per frequency, so the error is the LU
-roundoff. Eligible primitive resistance, capacitance and inductance value fields
-use the same physical derivative kernel. This retains small nonzero derivatives
-that finite output perturbations cannot resolve. The primitive path requires a
-qualified linear deck with resolved, positive passive values and no passive
-models or instance scaling; enforced capacitor initial-condition constraints,
-terminal-current meters and topology reduction also require the refinement
-path. Other device fields and unqualified design
-parameters use refined finite differences with the acceptance rule below.
-One study has one nominal output and one run budget, whichever path each row took.
-
-The low-level DC adjoint API differentiates effective linear resistances
-(including branch-form resistors) and independent source amplitudes. Its
-resistance and nonzero-output normalization arithmetic preserves finite extreme
-scales without absolute resistance/conductance/output cutoffs. The standalone
-`SensitivityAnalyzer` returns `None` for malformed matrices, vectors or element
-indices, unsupported derivatives, and nonfinite or inaccurate adjoint solves;
-cancellation remains a distinct error. The dense path verifies its original
-transpose residual. Authored device/model-parameter studies use the separate
-complete-sensitivity engine APIs.
-
-Complete XSPICE studies use the code model's declared parameter types for both
-model cards and instance overrides, including deferred scalar/vector values.
-Only real scalars and real-vector entries are differentiated; integer, Boolean,
-string and complex channels are excluded. Model aliases resolve through the
-same builtin catalog used by circuit construction. Declared types take precedence
-over parameter-name heuristics, so a real parameter is not excluded because its
-name resembles a selector. Native families without descriptors retain their
-existing selector exclusions.
-
-Scalar and complete DC/AC sensitivity share one refinement driver. It compares
-quadratic derivatives at successively halved, representable coordinates and
-checks agreement between one-sided estimates when both sides can be evaluated.
-Richardson extrapolation uses the actual rounded coordinate products. Trials
-must agree to a relative threshold of 1e-4 plus a scale-dependent arithmetic
-roundoff allowance; there is no absolute voltage or current floor. A study that
-cannot resolve a consistent derivative within twelve refinements is diagnosed
-with its parameter identity, rather than returning the first stencil's value.
-Before refinement, observed changes that are too small relative to the probe's
-arithmetic noise trigger up to twelve step doublings. A response first observed
-as nonzero must remain resolved; equal samples at larger steps cannot erase that
-evidence. The final stencil also checks response resolution, so smaller steps
-cannot use a growing roundoff allowance to excuse lost probe digits. Initial
-steps, including explicit deltas, may grow during this calibration.
-An expanded stencil must also reproduce the original nearby samples within
-arithmetic noise; it cannot discard evidence of a different local response or
-reinterpret nearby failed trials as physical domain boundaries.
-These checks provide numerical consistency evidence, not a proof of model
-regularity or an independent bound on operating-point solver error. A response
-that never changes at the sampled coordinates can still conceal variation below
-the evaluator's precision; owning-parameter scales and error evidence remain
-necessary for broader accuracy qualification.
-
-At physical or finite-range boundaries the driver compares successive one-sided
-quadratic stencils. Only explicit `ParameterDomain` errors or exhausted finite
-coordinates establish a boundary. Unclassified circuit, netlist and solver
-failures can trigger smaller trials but cannot justify a one-sided derivative.
-Capacitor/inductor values, authored Level-1 MOS bounds and XSPICE hard numeric
-bounds retain this distinction. Soft bounds remain evaluable so clamping is
-subject to the directional checks.
-Other model constraints need typed domain diagnostics to admit boundary studies.
-Domain/solver failures remain candidates for a smaller step;
-cancellation, resource limits and other typed fatal errors stop immediately.
-Every attempted trial consumes the shared batch-run budget, including failures.
-An ordinary central study uses a nominal solve plus four perturbations; further
-refinement consumes additional runs. The default relative step reserves enough
-ULPs for refinement at subnormal values and remains finite at f64::MAX. Explicit
-steps still require distinct finite coordinates and consistency qualification.
-
-AC studies differentiate the complex output before projecting magnitude, phase
-or normalized sensitivities. The single-parameter API replays the requested
-nominal override, even when it differs from the authored value, and diagnoses
-undefined or out-of-range magnitude derivatives with parameter/frequency context.
-Scaled arithmetic retains finite derivatives through overflowing spans and
-cancelling weighted sums. Probe extraction and refinement poll cancellation.
-Public sensitivity runners report monotonic study progress. Nested compilation
-and solves cannot report whole-study completion; the final notification follows
-successful output projection and is immediately followed by a cancellation check.
-
-Derived sensitivities use `SensitivityValue<T>`: an available number or an
-explicit reason. Relative sensitivity and phase are undefined at zero output;
-the magnitude derivative is nondifferentiable there when the complex derivative
-is nonzero. A zero complex derivative retains a zero magnitude derivative.
-Unrepresentable derived values report `OutOfRange` while preserving the absolute
-derivative. Invalid inputs remain errors at the result-document boundary.
-Sensitivity results retain voltage/current units independently of display names.
-Version 13 documents require the nominal output in volts or amperes. Decoding
-version 5–12 sensitivity documents preserves their values and marks their former
-placeholder output units unspecified. Sensitivity documents before version 5
-require a rerun because their zero values do not establish availability.
-Other supported legacy result families remain readable. Python exposes missing
-DC normalization as `None`, and unavailable AC samples as NumPy NaNs paired with
-`*_unavailability` reason arrays; rankings include only available normalization.
-
-### Periodic large-signal cards
-
-`.PSS`, `.PAC`, `.PNOISE` and `.ENVELOPE` are parsed into typed, fully
-validated cards in `netlist`. The analysis layer converts a card into the
-configuration its entry point takes (`PssConfig::from(&PssCard)`,
-`PacConfig::from(&PacCard)`). A parsed deck sits below the analyses and never
-names them. Every card is case-insensitive and continues across `+` lines. A
-field another simulator accepts here that RSpice cannot honour is refused with
-a source-located error rather than parsed and dropped.
-
-**`.PSS`**, shooting periodic steady state. Two disjoint forms; a token
-followed by `=` is always a keyword, a token that is not is always
-positional, so the two never overlap.
-
-```
+Analysis drivers live in `engine/`, and algorithms and result types in
+`analysis/`. The families are operating point and DC sweep, AC, transient
+(with checkpoint and resume), noise and transient noise, distortion,
+pole-zero, sensitivity, transfer function, DC mismatch, S-parameters,
+loop-gain stability, Monte Carlo, process corners and `.STEP` sweeps, and the
+periodic family built on PSS shooting and harmonic balance: PAC, periodic
+noise, PXF, PSTB, periodic S-parameters, envelope continuation, and
+quasi-periodic QPSS/QPAC/QPNOISE/QPXF. `.MEAS`, `.FOUR` and `.FFT`
+post-process results. The root README's
+[analysis table](../../README.md#analyses) says how each is invoked.
+
+Whether an analysis may run on a circuit is one table, `engine::capability_cell`
+(exported whole as `engine::capability_matrix`), indexed by analysis and by
+instance family: native SPICE, XSPICE analog and event models, runtime and
+generated Verilog-A, mixed Verilog-AMS, and real-number nets. Every analysis
+consults it before solver work, and a refused cell names the analysis, the
+instance, its module and the reason. Generated compact models, for example,
+are refused by every periodic analysis.
+
+### Periodic analysis cards
+
+`.PSS`, `.PAC`, `.PXF`, `.PNOISE`, `.PSTB` and `.ENVELOPE` are validated whole
+at parse time (`netlist/parser/periodic_cards.rs`). Keywords are
+case-insensitive and bind once, cards continue across `+` lines, and a field
+another simulator accepts that RSpice cannot honour is refused with a
+source-located error rather than parsed and dropped.
+
+```text
 .PSS <gfreq> <tstab> <oscnode> <psspoints> <harms> <sciter> [KEY=VALUE ...]
 .PSS KEY=VALUE ...
+.PAC    DEC|LIN|OCT <np> <fstart> <fstop> KEY=VALUE ...
+.PXF    DEC|LIN|OCT <np> <fstart> <fstop> KEY=VALUE ...
+.PNOISE DEC|LIN|OCT <np> <fstart> <fstop> KEY=VALUE ...
+.PSTB PROBE=<instance> [KEY=VALUE ...]
+.ENVELOPE TSTOP=<t> [MAXSTEP=<t>] [FREEZE=(<source>[,<source>...])]
 ```
 
-The positional field order is ngspice's `.pss` card. It names an oscillator
-node, so it selects autonomous period detection. ngspice's trailing
-`steadycoeff` and `uic` fields are refused: the shooting solver converges on
-a relative periodicity norm rather than an ngspice per-node steady
-coefficient, and always starts its stabilization run from the operating
-point. Author `TOL=`/`ABSTOL=` and `TSTAB=`/`TSTABPERIODS=` instead. In the
-positional form the keywords `FUND`, `PERIODGUESS`, `TSTAB`, `OSCNODE`,
-`POINTS`, `HARMS`, `MAXITER` and `AUTONOMOUS` are refused as conflicts,
-because the positional fields already bind them.
+| Card | Keywords |
+| :--- | :--- |
+| `.PSS` | `FUND`, `PERIODGUESS`, `AUTONOMOUS`, `OSCNODE`, `HARMS`, `TSTAB`, `TSTABPERIODS`, `MAXITER`, `TOL`, `ABSTOL`, `DAMPING`, `MAXPERIODCHANGE`, `POINTS`, `METHOD`, `VERBOSE` |
+| `.PAC` | `INPUT` and `OUT` (required), `MAXSIDEBAND`, `SIDEBANDMIN`, `SIDEBANDMAX`, `RELTOL`, `ABSTOL`, `PACMAG`, `INCLUDEDC`, `FROM` |
+| `.PXF` | `INPUT` and `OUT` (required), `INPUTSIDEBAND`, `OUTSIDEBAND`, `MAXSIDEBAND`, `RELTOL`, `ABSTOL`, `FROM` |
+| `.PNOISE` | `OUT` (required), `INPUT`, `MAXSIDEBAND`, `INPUTSIDEBAND`, `OUTSIDEBAND`, `NOISEREF`, `INTEGRATEDNOISE`, `NOISESUMMARY`, `FROM`; sampling controls `SAMPLING`, `SAMPLEPHASE`, `REFOUT`, `PERIODS`, `THRESHOLD`, `DIRECTION`, `OCCURRENCE`, `PHASETOL`, `MINSLEW`, and the `REF`-prefixed forms of the last five |
+| `.PSTB` | `PROBE` (required), `MAXHARM`, `NMULTS`, `STABILITYTHRESHOLD`, `DETECTSUBHARMONICS`, `EIGENTOL` |
+| `.ENVELOPE` | `TSTOP` (required), `MAXSTEP`, `FREEZE` |
 
-| Keyword | Positional | Meaning | Default |
-| :--- | :--- | :--- | :--- |
-| `FUND` | `gfreq` | Fundamental frequency (Hz) | required when driven |
-| `HARMS` | `harms` | Harmonics retained in the result | 9 |
-| `POINTS` | `psspoints` | Samples per period (≥ 16, ≥ 2·`HARMS`) | 256 |
-| `TSTAB` | `tstab` | Stabilization time (s) | 0 |
-| `TSTABPERIODS` | keyword only | Stabilization periods when `TSTAB` is 0 | 10 driven, 20 autonomous |
-| `MAXITER` | `sciter` | Maximum shooting Newton corrections per integration grid | 100 |
-| `TOL` | keyword only | Relative periodicity tolerance | 1e-6 |
-| `ABSTOL` | keyword only | Absolute tolerance | 1e-12 |
-| `DAMPING` | keyword only | Newton damping in [0.1, 1.0] | 1.0 |
-| `MAXPERIODCHANGE` | keyword only | Relative period change bound | 0.1 |
-| `AUTONOMOUS` | implied | Detect the period instead of taking `FUND` | FALSE |
-| `PERIODGUESS` | from `gfreq` | Autonomous period seed (s) | 1e-9 |
-| `OSCNODE` | `oscnode` | Node the period is detected on | none |
-| `METHOD` | keyword only | `TRAP`, `GEAR`, `EULER` or `TRAPGEAR` | engine default |
-| `VERBOSE` | keyword only | Log convergence progress | FALSE |
+The positional `.PSS` form is ngspice's oscillator card. Its fields bind
+`FUND`, `PERIODGUESS`, `AUTONOMOUS`, `OSCNODE`, `TSTAB`, `POINTS`, `HARMS` and
+`MAXITER`, and ngspice's trailing `steadycoeff` and `uic` are refused.
+`FROM=PSS|HB` names the carrier a dependent card linearizes; `.PSTB` reads a
+shooting `.PSS` and takes none.
 
-`FUND` and `PERIODGUESS` set the same quantity and may not both appear;
-`OSCNODE` implies `AUTONOMOUS=TRUE` and conflicts with `AUTONOMOUS=FALSE`.
+## Boundaries
 
-PSS evaluates independent sources under the selected SPICE dialect. Omitted
-source timing uses one configured carrier period as the stop default and
-`period / POINTS` as the step default. These defaults remain fixed during
-stabilization, shooting and PSS-to-transient continuation; an unrelated `.TRAN`
-card does not redefine the PSS drive. Autonomous runs use the configured
-period guess for these defaults. Xyce SIN requires an authored frequency and
-preserves zero as zero; ngspice SIN resolves zero to the inverse stop default.
+- Sparse matrix storage and LU: [`rspice-matrix`](../rspice-matrix).
+- Compiling Verilog-AMS: [`rspice-veriloga`](../rspice-veriloga/README.md);
+  the generated models it emits are
+  [`rspice-veriloga-models`](../rspice-veriloga-models/README.md), built
+  against [`rspice-veriloga-runtime`](../rspice-veriloga-runtime).
+- Writing result files and checkpoints to disk atomically:
+  [`rspice-output`](../rspice-output).
+- Command-line flags, exit codes and output formats:
+  [`rspice-cli`](../rspice-cli/README.md).
+- Reference-simulator conformance suites:
+  [`rspice-conformance`](../../tools/rspice-conformance), which sees only this
+  crate's public API, so every assertion takes the path a user's deck takes.
 
-Driven PSS certifies the authored periods of every independent and behavioral
-source, including RF-port tones. Matching sampled endpoints is insufficient:
-a half-integer sinusoid can return to zero with the wrong outgoing slope.
-Nonrepeating startup prefixes need an explicit frozen-source selection or a
-periodic source specification. Sources that prescribe winding currents also
-require a continuous waveform with finite outgoing slopes.
+## Entry points
 
-`POINTS` sets the minimum base integration grid. The solver first increases
-it beyond the Nyquist limit of recognized source clocks and finite behavioral
-trigonometric polynomials, including products and integer powers. Resolved
-independent PULSE/PAT edges and physical PWL/file corners are inserted directly
-into an immutable, nonuniform integration mesh shared by all shooting and
-derivative evaluations. Behavioral PULSE and piecewise-linear table corners use
-the same mesh, including affine clocks, signed modulo, and resolved temperature
-parameters. Smooth tables and other coordinates with a known time rate retain
-their base-grid interval bounds; arbitrary circuit-dependent expressions do not
-supply that bound. Known extrema and inverse levels of nonlinear sine/cosine
-compositions expose features that could vanish on both initial grids. For
-continuous sums, products, regular quotients, powers, SQR, exponential and sine/cosine compositions,
-value and normalized-time derivative enclosures of the compiled expression
-isolate levels. Nonlinear phase inversion uses those same bounds. Tangential roots are
-retained as small feature clusters at expression rounding precision. Uncertain
-quotient domains are subdivided until their denominator bounds exclude zero;
-unresolved domains report a precision or work-limit error. The VM's exact
-zero-denominator rule is preserved for known zero denominators. The
-collector limits the number of evaluated instructions as well as its events.
-Constants use the shared compiler and VM in the resolved environment.
-Quotient bounds use direct division and scaled derivatives to avoid reciprocal
-overflow. Power bounds preserve the evaluator's operator and named-function
-dialect rules, including varying exponents and Xyce's real projection.
-Logarithmic bounds cover `ln`, `log10`, and dialect-dependent `log`, preserving
-the evaluator's input floor and locating its derivative corner. Exact clamped
-plateaus hide internal source geometry; active logarithmic coordinates retain
-their roots and receive the same local interpolation qualification.
-Square-root and absolute-value bounds preserve the evaluator's zero clamp and
-continuous cusps. Square-root rounding error is bounded across zero without
-requiring a finite derivative there.
-Multi-argument `min` and `max` bounds retain the possible active slopes, discard
-proven inactive branches and preserve continuous corners. Candidate branch
-crossings share a bounded isolation budget; excessive pair enumeration fails
-before copying operand trees. Duplicate operands do not create crossings.
-Time-only compilation reuses an already evaluated stateless sibling from the
-VM stack, preserving arithmetic order and each independent integral occurrence.
-Shooting solves capacitor corrections from voltage differences and retains
-the physical current before adding a small correction to the absolute voltage.
-Physical KCL checks use those currents, avoiding cancellation of large Norton
-companions on very short event intervals. The fixed source mesh is preserved.
-Continuity is tracked separately from derivative bounds; signed zero powers
-retain their branch transitions and do not certify a smooth constant map.
-Internal source features are discarded only when the complete expression is
-proven finite and constant over a nonzero neighborhood. This removes inactive
-geometry on exact exponential-underflow plateaus without merging close clocks
-or discarding another source's events or authored table and pulse corners.
-Comparison and step boundaries are located through the actual behavioral
-evaluator between adjacent representable timestamps, including finite equality plateaus after
-time zero and comparisons between two time coordinates. Transient continuation
-uses the same source feature collector. Refinement preserves source times
-exactly. Before shooting, supported time-only sources outside a finite Fourier
-band receive local interpolation bounds from the shared value/derivative
-interpreter, including propagated VM rounding error. These bounds use the
-resolved voltage/current tolerances to concentrate points around narrow
-features. Bounds cover hyperbolic functions, their inverses and arctangent,
-including real domains and Xyce saturation rules. Exact interval endpoints
-preserve valid domain boundaries, and scaled derivative arithmetic avoids
-avoidable intermediate overflow and underflow.
-Circular bounds cover `asin`, `acos`, `tan` and `atan2`, preserving VM clamps,
-tangent poles and signed-zero angular seams. Angular derivatives use scaled
-coordinates to avoid radius overflow or underflow. A proved VM evaluation order
-can establish an exact plateau from equal endpoint values; sampled endpoint
-equality alone cannot discard an interval or its internal events.
-Value bounds retain defined infinite ranges through bounded outer functions,
-including arctangent and hyperbolic tangent across tangent poles. Indeterminate
-operations such as zero times infinity, opposite infinities added together, or
-an infinite trigonometric argument remain unresolved before any outer clamp
-can certify the source. Unbounded derivative intervals remain separate from
-that value-domain decision.
-Centered mean-value bounds preserve cancellation in compound source
-coordinates before subsequent operations amplify range uncertainty. This
-numerical mesh supplements physical source events. A smooth
-source that cannot meet these bounds at representable time precision returns
-a precision error; finite ideal jumps retain their adjacent event clocks. Shooting
-then solves successively finer grids, comparing the complete voltage and branch
-current waveforms at shared phases, using the engine voltage/current tolerances.
-Only a grid that agrees with its refined grid is retained. Adjacent representable
-source times remain distinct. Where bisection is impossible, a separately solved
-orbit with an alternate integration method must also agree; otherwise the run
-reports a time-precision error. Backward Euler crosses these boundaries and
-restarts the outgoing integration stencil so unresolvable derivative history
-cannot contaminate later steps. The returned sample
-count reflects the complete mesh; harmonic capacity is limited by its largest
-time interval. Dependent spectral analyses integrate the retained samples without
-resampling away local source features. Authored source timing
-defaults still use the original `POINTS`. `MAXITER` applies to each grid solve,
-while the result reports total Newton corrections across all grids. Point and
-memory limits also apply to refinement, and cancellation remains available.
-Retained PSS operating points from earlier producer versions must be regenerated
-with the current engine before dependent numerical reuse.
-The retained orbit includes canonical MNA branch-current waveforms on the same
-time grid as node voltages. Both identities and samples are authenticated and
-projected into dependent analyses; omitted branch currents are never inferred
-to be zero. Current traces also survive result documents and worker, artifact,
-and Python pickle transport. Exact zero-ohm branches constrain charge voltages
-without adding spurious shooting coordinates. AC resistance and the threshold
-used to select the branch representation do not impose this constraint. Cascaded
-and differential VCVS relations also constrain charge coordinates. Their exact
-binary64 coefficient rank is reduced once during setup, and initialization
-projects device charge derivatives into the independent voltage rates to retain
-physical displacement currents. Constant RLC networks with E/F/G/H controls use
-an exact MNA descriptor to close hidden charge and flux constraints, including
-loading of algebraic control nodes. Prescribed capacitor voltages and winding
-currents use analytic forcing derivatives in their transient companions.
-Qualified time-only behavioral voltage and current sources supply higher
-derivatives through a bounded Taylor evaluator that preserves the selected
-dialect's constant-expression semantics. Periodicity and derivative regularity
-are checked across the complete orbit; poles and unresolved derivative jumps
-are diagnosed. Expressions outside this descriptor's supported operator set
-retain their existing path. Memoryless monotone C1 diode islands can also close
-algebraic control voltages: exact port dependencies exclude state or nonlinear
-current-derivative feedback, and an exact passivity check on each feedback
-component certifies a unique algebraic solution. Trial currents and their first
-time derivatives use the canonical full device law and its implicit Jacobian.
-Solved port voltages and their analytic rates enter the exact projection
-directly, preserving small voltages beneath large resistor drops. Overflowing
-Jacobian products use a jointly scaled row and right-hand side. A descriptor
-with no independent dynamic state supplies the complete candidate at each time;
-the same physical residual checks used after Newton certify it before acceptance.
-Residuals scale to the actual control voltages, so large controlled-source gains
-cannot hide small input errors behind an absolute voltage floor. Diode junction,
-sidewall, recombination and tunneling currents preserve the exponential law near
-zero bias without subtractive cancellation or avoidable intermediate range loss.
-Breakdown/recombination joins, injection knees, higher constitutive derivatives,
-solution-dependent behavioral sources and general nonlinear charge/flux
-manifolds still require further closure support. Behavioral displacement
-currents on the existing path require a qualified analytic outgoing derivative;
-unsupported derivatives are reported instead of using Newton's pointwise slope.
-This convergence check supplements the shooting residual, which measures closure
-of a discrete period map. It is not a proof of resolution for all nonlinear
-expressions and devices; independent waveform and
-spectrum qualification remains necessary for the circuit being simulated.
-
-Autonomous shooting repeats the quiet source window from zero to the trial
-period. Startup kicks must lie outside that entire window, including its
-outgoing endpoint; they still excite the circuit during stabilization. A
-changing source inside the window requires driven PSS. Transient continuation
-starts at time zero and reactivates later authored source events, including
-startup kicks and explicitly frozen modulation sources.
-
-**`.PAC`**, periodic small-signal AC around a periodic operating point.
-The leading sweep is the input-frequency sweep.
-
-```
-.PAC DEC|LIN|OCT <np> <fstart> <fstop> INPUT=<source> OUT=V(node[,ref]) [KEY=VALUE ...]
-```
-
-| Keyword | Meaning | Default |
-| :--- | :--- | :--- |
-| `INPUT` | Small-signal source swept across the sweep | required |
-| `OUT` | Output probe, `V(node)` or `V(node,ref)` | required |
-| `MAXSIDEBAND` | Symmetric sideband range `-n..=n` | none |
-| `SIDEBANDMIN` / `SIDEBANDMAX` | Explicit asymmetric range | -5 / +5 |
-| `RELTOL` | Relative tolerance | 1e-3 |
-| `ABSTOL` | Absolute tolerance (A) | 1e-12 |
-| `FROM` | `PSS` or `HB`: which upstream to linearize around | nearest preceding |
-
-`MAXSIDEBAND` and `SIDEBANDMIN`/`SIDEBANDMAX` are two spellings of one range
-and may not be combined.
-
-**`.PNOISE`**, periodic (cyclostationary) noise. The leading sweep is the
-offset-frequency sweep.
-
-```
-.PNOISE DEC|LIN|OCT <np> <fstart> <fstop> OUT=V(node[,ref]) [KEY=VALUE ...]
-```
-
-| Keyword | Meaning | Default |
-| :--- | :--- | :--- |
-| `OUT` | Output probe, `V(node)` or `V(node,ref)` | required |
-| `INPUT` | Source for input-referred noise | none |
-| `MAXSIDEBAND` | Folded sideband bound `-n..=n` | 6 |
-| `FROM` | `PSS` or `HB` | nearest preceding |
-
-Rust callers use `Engine::run_pnoise` for driven conversion noise and
-`Engine::run_pnoise_oscillator` for autonomous phase noise. The
-`run_pnoise_from_pss_with_abort`, `run_pnoise_from_hb_with_abort`, and
-`run_pnoise_oscillator_from_pss_with_abort` variants consume an existing
-authenticated orbit. `PnoiseCard` is the typed authored request; PSS/PSTB
-expose the shared `FloquetSpectrumEvidence` stability contract.
-
-The unused prototype `analysis::pnoise::{PnoiseSolver, PnoiseState,
-FloquetAnalyzer}` and its configuration, mode and transfer helper types have
-been removed. Its waveform/Jacobian inputs had no public initialization path,
-and its phase response estimated charge from voltage and period. Use the
-engine entry points above; the spectral result types used by result documents
-remain available in `analysis::pnoise`.
-
-**`.ENVELOPE`**, harmonic-balance envelope continuation. It attaches to the
-nearest preceding `.HB` and exposes only what the continuation executes.
-
-```
-.ENVELOPE TSTOP=<seconds> [MAXSTEP=<seconds>] [FREEZE=(<source>[,<source>...])]
-```
-
-`MAXSTEP` defaults to `TSTOP/50`, as the direct continuation entry point
-does. `FREEZE` names the independent sources held at their exact time-zero
-values during the carrier solve; a single source may be written without
-parentheses, and a repeated source is refused.
-
-`.PAC`, `.PNOISE` and `.ENVELOPE` each consume the periodic operating point
-of an upstream analysis. Planning binds each of them to the concrete
-upstream instance (`pss-001`, `hb-002`, …) and refuses a card whose upstream
-the deck does not author before it.
+- `Netlist::parse` — deck text to a validated AST. The first line of a deck is
+  its title, never an element.
+- `Engine::new(SimulationConfig)` or `Engine::default()`, then its `run_*`
+  methods. Each analysis family has variants that take an `&dyn AbortSignal`
+  (`_with_abort`, `_and_abort`); frontends call those, which is what backs
+  Ctrl-C in the CLI and `KeyboardInterrupt` in Python.
+- `SimulationConfig`, `ConvergenceConfig`, `ConvergencePreset` and
+  `SpiceDialect` — tolerances, convergence aids, and the dialect
+  (best-available, ngspice or Xyce) whose semantics apply.
+- `ResourceLimits` — the budget applied to untrusted input.
+- `execution::DeckPlan::from_netlist` — the analyses, run axes and coordinates
+  a deck authors, in the order every frontend executes them.
+- `SimulationError::descriptor()` — a stable code, category and retry flag, so
+  a frontend classifies a failure without parsing its message.
 
 ## Solvers and convergence
 
-- **Sparse LU**: the real-valued path defaults to
-  [`rspice-matrix`](../rspice-matrix)'s KLU-class backend, whose stored pivots
-  make refactorization on the frozen sparsity pattern cheap;
-  `RSPICE_SOLVER=faer` opts back into the faer solver. faer also provides the
-  complex solves for AC-family analyses, with parallel factorization when the
-  `faer-parallel` feature is on.
-- **Newton-Raphson** with voltage/residual/charge tolerance checks
-  (`solver/newton.rs`, `solver/convergence.rs`).
-- **Convergence aids**, attempted when plain Newton fails: GMIN stepping,
-  source stepping, pseudo-transient continuation
-  (`engine/convergence/`), and arc-length continuation
-  (`solver/arc_length.rs`). `ConvergencePreset` bundles them as
-  `fast`/`default`/`robust`.
-- **Damping strategies** (`solver/damping.rs`): voltage limiting, line
-  search, and combinations, selectable via `DampingStrategy`.
+- **Sparse LU.** Real systems use `rspice-matrix`'s KLU-class kernel, whose
+  stored pivots make refactorization on the frozen pattern cheap; faer handles
+  complex AC-family solves and is the certified fallback.
+  `.OPTIONS SOLVER=AUTO|KLU|FAER` or `RSPICE_SOLVER` selects the real backend.
+  Left unstated, measured fill decides, and the Xyce dialect reproduces Xyce's
+  own KLU factorization policy.
+- **Newton-Raphson** (`solver/newton.rs`), with tolerance, iteration-budget and
+  residual checks in `engine/convergence/`.
+- **Convergence aids**, tried in order of cost when plain Newton fails: GMIN
+  stepping, source stepping, pseudo-transient and arc-length continuation,
+  bundled by `ConvergencePreset` as `fast`, `default` and `robust`. An aid
+  returns only the unmodified circuit's solution, certified by the residual
+  test a direct solve faces, never a deformed stage.
+- **Damping** (`solver/damping.rs`): line search, junction voltage limiting,
+  Bank-Rose, and the combined default, selected by `DampingStrategy`.
+- **Transient integration**: backward Euler, trapezoidal, Gear-2, and the
+  trapezoidal/Gear-2 hybrid default (`IntegrationMethod`), with LTE-based
+  timestep control and breakpoint handling. Integration order is 1 or 2, and
+  Xyce's `TIMEINT MINORD`/`MAXORD` accept only those values.
+
+## Persisted formats
+
+- **Result document.** `execution::AnalysisResultDocument`, identified by
+  `ANALYSIS_RESULT_DOCUMENT_SCHEMA` and `ANALYSIS_RESULT_DOCUMENT_VERSION`, is
+  the one typed result every frontend publishes. The CLI, Python, WebAssembly
+  and engine-adapter surfaces format it and define none of their own.
+- **Transient checkpoints.** `engine::TransientCheckpoint` is versioned,
+  line-oriented text whose floats round-trip bit-exactly;
+  `TransientCheckpointEncoding::Packed` wraps a zlib-compressed copy in a
+  versioned binary envelope with a BLAKE3 integrity seal. Resume refuses a
+  checkpoint whose deck or resolved-configuration identity differs from the
+  run's.
+- **Monte Carlo journals.** `engine::MonteCarloCheckpoint`: completed trials,
+  failures included, as versioned binary with exact value bits and a checksum.
+- **Operating-point labels.** `op_label::OpLabel` is the closed label set of a
+  device operating-point report. Saved reports are read back into it, so no
+  label a reader cannot resolve is ever written.
 
 ## Feature flags
 
-| Feature | Default | Effect |
-| :--- | :--- | :--- |
-| `faer-parallel` | yes | Adds faer's rayon feature for parallel sparse factorization |
-| `parallel` | yes | rayon and portable-atomic for the parallel sweep, transient, and noise paths in `engine/` and `circuit/` |
-| `simd` | yes | `wide`-based SIMD kernels in `simd/`, consumed by the Newton loop |
-| `veriloga` | no | Verilog-A device support via `rspice-veriloga`, plus `dirs` for the compiled-model cache |
-| `veriloga-native` | no | RSpice-owned native JIT for Verilog-A devices; requested native mode is full JIT or typed construction error |
-| `veriloga-wasm-jit` | no | Browser JIT. The owning Web Worker compiles and instantiates the module; the core keeps the authenticated artifacts and the synchronous solver integration |
-| `veriloga-builtins-base` | no | The runtime integration every generated model shares, without selecting any model |
-| `veriloga-model-*` | no | Compiles one checked-in generated Verilog-A model and the shared runtime. Prefer these granular features in production to minimize compile time, peak rustc memory, and binary size |
-| `veriloga-builtins-noise` | no | Adds generated noise schedules to whichever `veriloga-model-*` features are selected |
-| `veriloga-builtins-models` | no | Enables every checked-in generated Verilog-A model without the optional noise schedules |
-| `veriloga-builtins` | no | Backwards-compatible umbrella that enables every generated model plus noise. Each model is a reusable artifact under `../rspice-veriloga-models/models/`; refresh with `cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- regenerate-builtins` and validate with `check-builtins` |
-| `wasm` | no | wasm-bindgen, so the crate builds on `wasm32-unknown-unknown`; used by `rspice-wasm` and the UI's wasm target, which also set `default-features = false` to drop rayon and SIMD |
-
-The defaults mean the CLI, Python bindings, and the standard test run all
-exercise the parallel + SIMD paths.
+| Flag | Effect |
+| :--- | :--- |
+| `parallel` | On by default. Rayon and `portable-atomic` for the parallel paths in `engine/`, `circuit/` and `device/` |
+| `simd` | On by default. `wide`: the `simd` module's kernels and a vectorized Newton update test |
+| `faer-parallel` | On by default. faer's Rayon-parallel factorization, forwarded to `rspice-matrix` and `rspice-veriloga-runtime` |
+| `wasm` | Adds `wasm-bindgen`. The browser builds enable it with `default-features = false`, which also drops Rayon and `wide` |
+| `veriloga` | Runtime Verilog-AMS devices through `rspice-veriloga`'s bytecode interpreter: a deck's `.va`, `.veriloga`, `.vams`, `.hdl` or `.verilog` source compiles at elaboration. Native targets cache compiled models on disk under the platform cache directory, or `RSPICE_VERILOGA_CACHE_DIR` |
+| `veriloga-native` | Implies `veriloga`. RSpice's native JIT: a requested native device is fully JIT-compiled or refused with a typed construction error, never run on bytecode |
+| `veriloga-wasm-jit` | Implies `veriloga`. Browser JIT: the owning Web Worker compiles and instantiates the module, while this crate keeps the authenticated artifacts and the synchronous solver integration |
+| `veriloga-builtins-base` | The engine integration every generated model shares, selecting no model |
+| `veriloga-model-*` | One flag per generated model, as listed in `Cargo.toml`: compiles that checked-in model and the shared integration. Prefer these in production builds for compile time, peak `rustc` memory and binary size. The models are regenerated as [`rspice-veriloga`](../rspice-veriloga/README.md#generating-the-built-in-device-models) describes |
+| `veriloga-builtins-noise` | Adds the generated noise schedules to whichever models are selected |
+| `veriloga-builtins-models` | Every generated model, without the noise schedules |
+| `veriloga-builtins` | Every generated model with its noise schedules |
 
 ## Building and testing
 
 ```bash
-# Build (library only)
-cargo build -p rspice-core
-
-# Full test suite: 184 integration test files under tests/
-cargo test -p rspice-core
-
-# With Verilog-A device tests (veriloga_*.rs oracle tests need the JIT)
-cargo test -p rspice-core --features veriloga-native
-
-# Generated Verilog-A built-in runtime checks (feature-gated)
-cargo test -p rspice-core --features veriloga-builtins --test generated_veriloga_runtime
-
-# Production-sized generated model build, with noise only when required
-cargo build -p rspice-core --features veriloga-model-vbic13
-cargo build -p rspice-core --features veriloga-model-vbic13,veriloga-builtins-noise
-
-# Complete model catalog without compiling the optional noise schedules
-cargo build -p rspice-core --features veriloga-builtins-models
+cargo test -p rspice-core                             # suites in tests/
+cargo test -p rspice-core --lib                       # unit tests
+cargo test -p rspice-core --features veriloga         # + veriloga_*.rs suites
+cargo test -p rspice-core --features veriloga-native  # same, native JIT
+cargo test -p rspice-core --features veriloga-model-diode-cmc \
+    --test generated_veriloga_feature_shards          # one generated model
+cargo build -p rspice-core \
+    --features veriloga-model-vbic13,veriloga-builtins-noise
 ```
 
-The solver-kernel micro-benchmark (analyze/factor/refactor/solve in isolation)
-lives with the rest of the benchmark rig, and measures `rspice-matrix` directly
-rather than through this crate's re-export:
-
-```bash
-cargo run --release -p rspice-bench -- klu
-```
-
-Library unit tests are excluded from the default package test target by
-`[lib] test = false`; run them explicitly with `cargo test -p rspice-core
---lib`. Doctests are off as well (`[lib] doctest = false`), so examples in
-rustdoc are checked by review rather than by `cargo test`.
-
-The integration suite in `tests/` includes oracle tests that pin device and
-analysis behavior to reference values (diode rectifier, VBIC excess phase, LTRA
-AC, native BSIM4), RF-analysis tests (HB Jacobian, Krylov and varactor, PSS
-shooting, pnoise folding, PAC conversion, STB loop gain), parser robustness
-tests, and a determinism test.
-
-### Conformance and benchmarking live elsewhere
-
-The ngspice, Xyce, GF180MCU, ISCAS85, Verilog-A, and digital-Verilog suites are
-[`rspice-conformance`](../../tools/rspice-conformance), along with the case-runner and
-oracle-capture binaries they drive. This crate declares no binaries at all, and
-`tools/ci/test_ci_configuration.py` asserts it holds no validation harness.
-
-For whole-process performance comparison against ngspice, see
-[rspice-bench](../../tools/rspice-bench/README.md).
+`[lib] test = false` keeps unit tests out of the default package target,
+hence the separate `--lib` run, and `doctest = false` leaves rustdoc examples
+checked by review. The WebAssembly suites run under `wasm-bindgen-test-runner`
+with `--target wasm32-unknown-unknown --release --no-default-features
+--features wasm,veriloga-wasm-jit`. The solver-kernel benchmark measures
+`rspice-matrix` directly: `cargo run --release -p rspice-bench -- klu`.
 
 Licensed under the [RSpice Personal Use License](../../LICENSE).
-
-### Physical-event flux tolerance
-
-`SimulationConfig::transient_event_flux_abstol` sets the absolute flux-linkage
-conservation tolerance at physical transient events, in weber-turns. Its
-default is `1e-24`, and values must be finite and positive. The shared netlist
-option is `.options eventfluxtol=1e-24`; ordered `option` commands also accept
-it. Explicit configuration overrides take precedence over authored options.
-This setting controls event conservation independently of charge tolerance
-and ordinary inductor timestep truncation. Existing device admission limits
-still apply. Checkpoint configuration identity version 107 binds this setting,
-the GP transport-event tracking policy, physical-event integration restart,
-exact-history stop-step fitting, accepted OneStep residual refresh across
-hybrid Gear2 intervals, and native diode charge/current events and normalized
-restart currents;
-checkpoints with an earlier configuration identity require a fresh run.
-Native GP models in ngspice mode now use ngspice 46's thermal constants
-(`k=1.38064852e-23`, `q=1.6021766208e-19`) for their temperature-scaled
-equations. BestAvailable, Xyce and VBIC retain their respective constants.
-Ordinary and periodic noise also use ngspice's constant pair for generic
-thermal and shot sources in ngspice mode. Model-specific noise constants
-remain owned by their model.
-
-`SimulationConfig::gp_transient_phase_model` selects `ExactDelay` (default)
-or `NgspiceWeil` independently of the evaluator dialect. The latter uses
-ngspice's discrete two-sample forward-current filter, with immutable trial
-evaluation and accepted state preserved across charge-integration restarts.
-Checkpoint format 49 stores its accepted input, two outputs, delay and step
-size; changing the selected phase law rejects the old checkpoint. Both phase
-operators are available through the public transient, checkpoint, continuation,
-and compression APIs. The nominal delay `TF*PTF*pi/180` must be finite and
-nonnegative; a negative delay is rejected before startup or checkpoint
-publication. Zero delay retains the ordinary GP equations. A physical arrival
-that cannot be represented within the timestep limits is diagnosed explicitly.
-
-Native GP acceptance reserves transport-record storage before advancing device
-histories. Capture and restore use fallible copies of BJT histories, and restart
-normalization consumes its owned checkpoint without duplicating it. Retained
-exact-delay samples, event sides, and derivative-order records count toward
-`ResourceLimits::max_result_values` along with the waveform and other checkpoint
-state.
-
-`ResourceLimits::max_transport_history_bytes` separately bounds native GP
-exact-delay record storage across the analysis (256 MiB by default). It includes
-spare capacity, event sides, derivative-order records, and simultaneous live and
-retained checkpoint copies. Initialization, acceptance, capture, and restore
-check the requested storage before allocating it. Resume applies the new
-caller's budget to the restored copy; the caller-owned input checkpoint is
-outside this analysis's ownership. Fixed device state, other model providers,
-and solver workspaces are outside this specific record-storage budget.
-
-These policy refusals carry `ResourceKind::TransportHistoryBytes`. Fallible GP
-transport initialization, growth, fixed BJT history lanes, owned UIC solution
-seeds, and BJT history copies preserve `SimulationError::Allocation` and the
-stable `allocation_failed` code, including through capture and restore.
-Both belong to the resource-error category and are not automatically retried.
-
-BJT restart and shooting initialization prepare this storage before changing
-accepted state; periodic reconstruction reserves all history generations before
-installing BJT bias. Resume uses restored BJT history without constructing a
-discarded replacement. This allocation contract covers BJT history storage and
-its UIC copies; other model state, caches, and solver workspaces have separate
-allocation paths.
-
-The shared delay buffer also enforces its fixed per-site ceiling of 1,048,576
-accepted records, counting ordinary samples, separate left limits, and known
-derivative-order records after pruning. Native GP propagates this refusal as
-`SimulationError::DeviceResourceLimit`, carrying the elaborated instance and
-`ResourceKind::TransportHistoryRecords` with requested/allowed counts. Its
-descriptor has the nonretryable `resource_limit` code. This record ceiling is
-distinct from the analysis-wide byte quota; malformed or oversized checkpoint
-data remains a state-validation error. Delay-buffer acceptance methods return
-`DelayAcceptanceError` so callers need not classify diagnostic text.
-
-The GP exact-transport path tracks all unknown events and
-known discontinuities through derivative order two. Solver-certified C2
-inputs retain their delay-history knots and interpolation error control but
-do not force another arrival onto the integration grid. This policy covers
-the currently implemented BE, trapezoidal, Gear2 and hybrid methods. Before
-solving the last adaptive intervals, exact-history runs fit a rounding-sized
-remainder to the requested horizon while preserving timestep bounds and event
-clocks. This avoids relabeling an already solved state with a different time.
-The hybrid integrator also refreshes retained OneStep static residuals during
-Gear2 intervals, so returning to trapezoidal integration uses the latest
-accepted currents.
-
-The exact-delay physical-event path supports smooth nodal behavioral voltage
-and current equations with analytic Jacobians and fixed-coordinate time
-partials. Behavioral currents may also read finite nonzero resistor-branch
-currents and uncoupled positive-inductance currents. These controls share the
-physical equations used by scalar lossless-line events. Voltage constraints
-preserve their full nonlinear equations during
-charge projection and rate reconstruction. Independent public tests cover
-nonlinear feedback, finite source currents, source charge impulses and CCCS
-fanout, OP/UIC startup, and packed continuation across three dialects. Local
-voltage seeding backtracks invalid trial values; the coupled physical solve
-still verifies charge, flux, rank and current balance. Constant independent
-voltage clamps retain algebraic CCCS fanout into resistive loads when every
-constitutive charge input is fixed. Original charge audits still reject
-inconsistent incoming storage that would require a voltage impulse. Behavioral voltage
-branch controls, ideal-source and zero-impedance current controls, coupled
-inductance controls, switched and stateful behavioral equations, CCVS voltage
-impulses, and remaining device providers require further implementation.
-
-Native diodes accompanying exact-delay GP or scalar lossless lines supply
-physical conduction and charge equations, including the resolved junction,
-sidewall, diffusion and overlap terms. Authored series resistance uses its
-elaborated resistor and junction node. Initial OP/UIC charge, outgoing finite
-`I(D)` and separate diode/source charge impulses share the joint event commit;
-checkpoint normalization retains the accepted displacement current. Public
-regressions cover charge jumps and series-RC response across three dialects and
-BE/Trap/Gear2, line arrivals, and packed restart. General constitutive-join and
-model-parameter qualification remains open in the core requirements ledger.
-
-Native GP physical events retain outgoing charge/flux rates and delay memory,
-then start a new integration epoch. Gear2 uses one BE interval before returning
-to second order. Capacitor/inductor error control and checkpoint restoration
-share the same accepted interval lengths at that boundary.
-
-Public transient qualification includes a manufactured nonlinear GP orbit
-with finite base/collector impedances, exponential current, Early feedback and
-TF diffusion charge. Independent harmonic current forcing produces prescribed
-base and collector voltages over three periods with a 1 us transport delay.
-Ngspice-mode trapezoidal and Xyce-mode TrapGear meet 2 uV base / 20 uV collector
-bounds on the complete trajectory. Independent public tests also check delayed
-exponential refinement, both polarities, temperature, area and multiplicity,
-private resistances, OP/UIC startup, cancellation, and checkpoint continuation.
-
-The selected Weil path is separately compared with ngspice 46 for a clamped
-NPN at 1 GHz, TF=1 ns and PTF=21/90 degrees. Both complete 20 ns trajectories
-retain all 5,008 recorded ngspice times, including startup. Maximum current
-errors are below 5.5 fA within the unchanged absolute-plus-signal tolerance;
-packed checkpoint resumes reproduce every remaining voltage and branch-current
-sample exactly. The committed decks, raw numeric samples and hash manifest
-are in `tests/testdata/gp_weil_*`. Each comparison qualifies its specific model,
-topology and parameters; the remaining core qualification ledger stays explicit
-about broader coverage.
-
-
-## Monte Carlo checkpoints and pooling
-
-`Engine::new_monte_carlo_checkpoint` binds an empty journal to a frozen netlist,
-sampling seed and policy, environment, ordered measurement names, and an explicit
-caller-supplied digest of the complete configured evaluator and prerequisites.
-The engine includes the source expressions, semantic circuit, AST overrides and
-numerical configuration in this population identity. Resource budgets and worker
-counts can change; the identity of the experiment cannot.
-
-`Engine::run_monte_carlo_measurements_checkpointed_with_abort` reuses completed
-rows and solves only missing trial indices. It accepts the same scalar evaluator
-as the ordinary configured study. A publication callback runs serially after each
-newly completed trial and can save the checkpoint at the caller's desired cadence.
-Completed rows remain available after cancellation, deadlines, fatal solver errors
-or publication failures. Ordinary statistical failures remain explicit completed
-rows and are not retried automatically. An interrupted trial remains unfinished.
-
-`MonteCarloCheckpoint::merge_with_limits` pools matching populations, accepts exact
-overlap only once, and rejects conflicting overlapping outcomes without modifying
-the destination. Resuming a pooled checkpoint rebuilds statistics from the exact
-trial samples in the requested range, including its failed-trial count. It does
-not average batch means or append duplicate observations. Ranges, histogram bins
-and mean-confidence settings can change in `MonteCarloStudyConfig` while the
-original circuit and evaluator contract remain frozen.
-
-`to_bytes_with_limits` and `from_bytes_with_limits` provide a versioned binary
-format with a content checksum, exact IEEE-754 value bits, trial identities and
-failure markers. Byte, trial and retained-value budgets are checked; malformed,
-nonfinite, duplicate, reordered or corrupted records are refused. These checkpoints
-currently carry numerical observations and trial failure markers. Simulation Studio
-checkpoint selection, worker publication, project retention and measurement-verdict
-metadata still require frontend integration.
