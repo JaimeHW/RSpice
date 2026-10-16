@@ -22,15 +22,18 @@
 
 use super::*;
 
-/// Side of a problem mark painted into one of this workspace's cells, and the
-/// advance from its left edge to where the text after it begins.
+/// Side of a problem mark painted into one of this workspace's cells, the
+/// advance from its left edge to where the text after it begins, and the air
+/// between the two.
 ///
-/// The kit keeps both of these to itself, so they are restated here once
-/// rather than in each of the nine painters that set a mark before a word.
-/// They are the kit's own values: a marked cell and an unmarked one beside it
-/// differ by exactly the advance, here as everywhere else.
-pub(super) const MARK_SIDE: f32 = 11.0;
-pub(super) const MARK_ADVANCE: f32 = 17.0;
+/// Named here, once, for the nine painters in this workspace that set a mark
+/// before a word — but read from the kit rather than copied out of it, so a
+/// marked cell and an unmarked one beside it differ by exactly the advance
+/// the rest of the product uses, now and after the kit moves it.
+pub(super) use crate::ui::widgets::{
+    PROBLEM_MARK_ADVANCE as MARK_ADVANCE, PROBLEM_MARK_GAP as MARK_GAP,
+    PROBLEM_MARK_SIDE as MARK_SIDE,
+};
 
 /// The page bar's content height, from the mockup's `.model-section-bar`
 /// (`min-height: 40px`).
