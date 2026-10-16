@@ -117,10 +117,12 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
 
     let generated =
         crate::workbench::menu_bar::build_menu_netlist(&app.state, crate::io::NetlistFormat::Spice);
-    let failed = |app: &mut RSpiceApp, error: String| {
-        app.state.ui.netlist.failed_generation_input_digest = Some(input_digest);
-        app.state.ui.netlist.generation_error = Some(error);
-    };
+    let failed =
+        |netlist: &mut crate::workbench::documents::netlist_document::NetlistDocumentState,
+         error: String| {
+            netlist.failed_generation_input_digest = Some(input_digest);
+            netlist.generation_error = Some(error);
+        };
     match generated {
         Ok(generated) => {
             match publish_generated_document(&app.state, input_digest, generated.source) {
@@ -162,7 +164,7 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
                     }
                     let Some(generated_artifact) = generated_document.generated_artifact() else {
                         failed(
-                            app,
+                            &mut app.state.ui.netlist,
                             "Generated document publication returned no generated artifact."
                                 .to_owned(),
                         );
@@ -180,7 +182,7 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
                         generated.warnings,
                     );
                 }
-                Err(error) => failed(app, error),
+                Err(error) => failed(&mut app.state.ui.netlist, error),
             }
         }
         Err(reasons) => {
@@ -189,7 +191,7 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
                 crate::diagnostics::LogSource::Studio,
                 crate::workbench::menu_bar::netlist_failure_text("Netlist generation", &reasons),
             );
-            failed(app, reasons.join("; "));
+            failed(&mut app.state.ui.netlist, reasons.join("; "));
         }
     }
 }

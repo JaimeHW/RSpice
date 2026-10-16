@@ -68,7 +68,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 app.state.simulation.execution.has_active_execution(),
             );
             let platform = platform_label();
-            let prompt = current_prompt(ctx, app);
+            let prompt = current_prompt(ctx, &mut app.state.workbench.prompt);
             let check_mark =
                 check_problem(check_counts).map_or(StatusMark::None, StatusMark::Problem);
             let others_desired = optional_status_width(ui, check.as_deref(), check_mark)
@@ -296,15 +296,18 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 /// The prompt the bar shows this frame. One that has expired is dropped here;
 /// one that has not asks for the frame that will drop it, because an idle
 /// window paints no frame of its own.
-fn current_prompt(ctx: &egui::Context, app: &mut RSpiceApp) -> Option<String> {
-    let prompt = app.state.workbench.prompt.as_ref()?;
+fn current_prompt(
+    ctx: &egui::Context,
+    slot: &mut Option<crate::workbench::state::StatusPrompt>,
+) -> Option<String> {
+    let prompt = slot.as_ref()?;
     match prompt.remaining() {
         Some(remaining) => {
             ctx.request_repaint_after(remaining);
             Some(prompt.text.clone())
         }
         None => {
-            app.state.workbench.prompt = None;
+            *slot = None;
             None
         }
     }
@@ -977,36 +980,6 @@ mod tests {
         }
     }
 
-    /// The status nodes one frame of the bar announces: label and liveness.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn announced_status(
-        app: &mut RSpiceApp,
-    ) -> Vec<(Option<String>, Option<egui::accesskit::Live>)> {
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        ctx.enable_accesskit();
-        let size = egui::vec2(1440.0, 900.0);
-        let output = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
-                ..Default::default()
-            },
-            |ui| {
-                let layout = LayoutSpec::resolve(size.x, size.y, &app.state.workbench);
-                show(ui, app, layout);
-            },
-        );
-        output
-            .platform_output
-            .accesskit_update
-            .expect("status bar accessibility tree")
-            .nodes
-            .iter()
-            .filter(|(_, node)| node.role() == egui::accesskit::Role::Status)
-            .map(|(_, node)| (node.label().map(str::to_owned), node.live()))
-            .collect()
-    }
-
     /// A prompt is the bar's answer to the gesture just made: drawn, and
     /// announced politely, until it expires, and then gone from the bar and
     /// from the state that held it.
@@ -1018,25 +991,53 @@ mod tests {
         app.state.workbench.activate(Workspace::Design);
         app.state.prompt("The schematic is read-only.");
 
-        assert_eq!(
-            announced_status(&mut app),
-            vec![(
-                Some("The schematic is read-only.".to_owned()),
-                Some(egui::accesskit::Live::Polite)
-            )]
-        );
-
-        let expired = crate::time_compat::Instant::now()
-            .checked_sub(crate::workbench::state::StatusPrompt::LIFETIME)
-            .expect("the session clock reaches back one prompt lifetime");
-        app.state
-            .workbench
-            .prompt
-            .as_mut()
-            .expect("the prompt is still held")
-            .issued = expired;
-        assert!(announced_status(&mut app).is_empty());
-        assert!(app.state.workbench.prompt.is_none());
+        let size = egui::vec2(1440.0, 900.0);
+        for expired in [false, true] {
+            if expired {
+                app.state
+                    .workbench
+                    .prompt
+                    .as_mut()
+                    .expect("the prompt is still held")
+                    .issued = crate::time_compat::Instant::now()
+                    .checked_sub(crate::workbench::state::StatusPrompt::LIFETIME)
+                    .expect("the session clock reaches back one prompt lifetime");
+            }
+            let ctx = egui::Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            ctx.enable_accesskit();
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    ..Default::default()
+                },
+                |ui| {
+                    let layout = LayoutSpec::resolve(size.x, size.y, &app.state.workbench);
+                    show(ui, &mut app, layout);
+                },
+            );
+            let announced: Vec<_> = output
+                .platform_output
+                .accesskit_update
+                .expect("status bar accessibility tree")
+                .nodes
+                .iter()
+                .filter(|(_, node)| node.role() == egui::accesskit::Role::Status)
+                .map(|(_, node)| (node.label().map(str::to_owned), node.live()))
+                .collect();
+            if expired {
+                assert!(announced.is_empty(), "{announced:?}");
+                assert!(app.state.workbench.prompt.is_none());
+            } else {
+                assert_eq!(
+                    announced,
+                    vec![(
+                        Some("The schematic is read-only.".to_owned()),
+                        Some(egui::accesskit::Live::Polite)
+                    )]
+                );
+            }
+        }
     }
 
     /// The segment states the same count wherever the reader is standing.
