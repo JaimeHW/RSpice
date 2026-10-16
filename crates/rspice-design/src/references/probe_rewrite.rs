@@ -118,31 +118,33 @@ fn remap_argument(
     let Ok(target) = ProbeTarget::parse(raw) else {
         return Ok(None);
     };
+    // A probe in the engine's spelling names its scope by written instance
+    // names, `xamp` for a cell drawn `amp`, so the renamed paths are matched
+    // by the names the deck writes them under.
     let device = current
         .then(|| target.scope.child(&target.leaf).ok())
         .flatten();
     let Some((from, to)) = mappings
         .iter()
         .filter(|(from, _)| {
-            target.scope.starts_with(from)
+            target.scope.engine_scope_starts_with(from)
                 || device
                     .as_ref()
-                    .is_some_and(|device| device.fold_key() == from.fold_key())
+                    .is_some_and(|device| device.same_engine_scope(from))
         })
         .max_by_key(|(from, _)| from.depth())
     else {
         return Ok(None);
     };
-    let moved = if let Some(tail) = target.scope.strip_prefix(from) {
+    let moved = if let Some(tail) = target.scope.strip_engine_scope_prefix(from) {
         ProbeTarget {
             scope: to.join(&tail).map_err(|error| error.to_string())?,
             leaf: target.leaf,
         }
     } else if current
-        && target
-            .scope
-            .child(&target.leaf)
-            .is_ok_and(|path| path.fold_key() == from.fold_key())
+        && device
+            .as_ref()
+            .is_some_and(|device| device.same_engine_scope(from))
     {
         let Some((leaf, _)) = to.segments().split_last() else {
             return Err("A device probe cannot be moved onto the design root.".to_owned());
@@ -190,6 +192,31 @@ mod tests {
                 .unwrap()
                 .as_deref(),
             Some("@/X9/M3[id]")
+        );
+    }
+
+    /// A probe placed on a descended sheet is stored as the engine asks for
+    /// it, scoped by written instance names: `xamp` for a cell drawn `amp`.
+    /// Renaming the instance moves the probe with it.
+    #[test]
+    fn a_probe_in_the_engines_spelling_follows_the_instance_it_names() {
+        let renamed = [("/amp", "/amp2"), ("/amp/B1", "/amp/B2")].map(|(from, to)| {
+            (
+                InstancePath::parse(from).unwrap(),
+                InstancePath::parse(to).unwrap(),
+            )
+        });
+        assert_eq!(
+            remap_instance_probes_many("V(xamp.n1)", &renamed[..1])
+                .unwrap()
+                .as_deref(),
+            Some("V(/amp2/n1)")
+        );
+        assert_eq!(
+            remap_instance_probes_many("I(xamp.b1)", &renamed[1..])
+                .unwrap()
+                .as_deref(),
+            Some("I(/amp/B2)")
         );
     }
 
