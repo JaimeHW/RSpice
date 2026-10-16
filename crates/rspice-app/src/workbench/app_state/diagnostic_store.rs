@@ -273,6 +273,14 @@ impl DiagnosticRecord {
 pub(in crate::workbench) enum DiagnosticOwner {
     /// The schematic and electrical rule checks, per cell view.
     DesignRules,
+    /// One symbol's pin contract against the interface its cell declares,
+    /// per symbol view.
+    ///
+    /// Not [`Self::DesignRules`]: those findings are about a schematic's
+    /// electrical rules and are keyed to a cell view that has a schematic,
+    /// while these are about the pins drawn on a symbol and stand or fall
+    /// with that symbol's own artwork.
+    SymbolPins,
     /// Everything a run has to be true before it can be dispatched: the
     /// design checks it re-runs, the plan, the technology, the model
     /// bindings, and the netlist the deck is generated from.
@@ -285,6 +293,7 @@ impl DiagnosticOwner {
     const fn key_prefix(self) -> &'static str {
         match self {
             Self::DesignRules => "design-rules",
+            Self::SymbolPins => "symbol-pins",
             Self::Dispatch => "dispatch",
             Self::Run => "run",
         }
@@ -302,6 +311,9 @@ pub(in crate::workbench) enum DiagnosticInputs {
     /// The complete live schematic working set behind one cell view's checks,
     /// exactly as the check receipt digests it.
     DesignCheck { subject: CellViewRef },
+    /// One symbol view's published artwork and the interface contract its
+    /// pins are compared against — exactly what the pin checks read.
+    SymbolPins { subject: CellViewRef },
     /// The configured topology closure and the active simulation plan.
     Dispatch,
     /// One retained run, and the drawing its cross-probe names resolve
@@ -313,6 +325,7 @@ impl DiagnosticInputs {
     pub(in crate::workbench) const fn owner(&self) -> DiagnosticOwner {
         match self {
             Self::DesignCheck { .. } => DiagnosticOwner::DesignRules,
+            Self::SymbolPins { .. } => DiagnosticOwner::SymbolPins,
             Self::Dispatch => DiagnosticOwner::Dispatch,
             Self::Run { .. } => DiagnosticOwner::Run,
         }
@@ -326,6 +339,10 @@ impl DiagnosticInputs {
                 "the schematic working set behind {}",
                 subject.display_path()
             ),
+            Self::SymbolPins { subject } => format!(
+                "the artwork of {} and the interface contract its pins are checked against",
+                subject.display_path()
+            ),
             Self::Dispatch => "the configured design and the active simulation plan".to_owned(),
             Self::Run { run_sequence } => {
                 format!("run {run_sequence} and the drawing its names resolve against")
@@ -336,7 +353,9 @@ impl DiagnosticInputs {
     fn key(&self) -> String {
         let owner = self.owner().key_prefix();
         match self {
-            Self::DesignCheck { subject } => format!("{owner}\u{1f}{}", subject.key()),
+            Self::DesignCheck { subject } | Self::SymbolPins { subject } => {
+                format!("{owner}\u{1f}{}", subject.key())
+            }
             Self::Dispatch => owner.to_owned(),
             Self::Run { run_sequence } => format!("{owner}\u{1f}{run_sequence}"),
         }
@@ -352,6 +371,14 @@ impl DiagnosticInputs {
             Self::DesignCheck { subject } => {
                 super::design_checks::live_input_digest(state, subject)
             }
+            // The artwork and the contract, through the one accessor the
+            // checks themselves read them through: a digest taken over
+            // anything else would be a second notion of staleness.
+            Self::SymbolPins { subject } => digest_of(&(
+                state.workspace.content.project.id(),
+                subject,
+                state.symbol_pin_check_inputs(subject)?,
+            )),
             Self::Dispatch => {
                 let (root, revision, closure) = state.configured_topology_revision();
                 digest_of(&(
@@ -605,9 +632,28 @@ impl AppState {
 pub(in crate::workbench) fn design_rule_code(
     violation_type: rspice_design::drc::DrcViolationType,
 ) -> String {
+    format!("DRC-{}", screaming_variant(violation_type))
+}
+
+/// The stable rule code for a symbol pin finding.
+///
+/// `SymbolUnplacedPin` becomes `SYMBOL-UNPLACED-PIN`. Derived from the variant
+/// exactly as [`design_rule_code`] is, and without its `DRC-` family: a
+/// symbol's pin contract is not one of a schematic's electrical rules, and a
+/// reader filtering the page by code is entitled to that distinction.
+pub(in crate::workbench) fn symbol_pin_rule_code(
+    violation_type: rspice_design::drc::DrcViolationType,
+) -> String {
+    screaming_variant(violation_type)
+}
+
+/// `FloatingNode` becomes `FLOATING-NODE`.
+///
+/// One derivation for every family, so two codes for one rule cannot drift
+/// apart on the word the rule is named by.
+fn screaming_variant(violation_type: rspice_design::drc::DrcViolationType) -> String {
     let variant = format!("{violation_type:?}");
     let mut code = String::with_capacity(variant.len() + 8);
-    code.push_str("DRC-");
     for (index, character) in variant.char_indices() {
         if character.is_ascii_uppercase() && index > 0 {
             code.push('-');
@@ -637,6 +683,11 @@ mod tests {
         assert_eq!(
             design_rule_code(DrcViolationType::ShortedOutputs),
             "DRC-SHORTED-OUTPUTS"
+        );
+        assert_eq!(
+            symbol_pin_rule_code(DrcViolationType::SymbolUnplacedPin),
+            "SYMBOL-UNPLACED-PIN",
+            "a symbol's pin contract is not one of a schematic's rules",
         );
     }
 

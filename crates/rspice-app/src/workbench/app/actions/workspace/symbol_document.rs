@@ -6,7 +6,10 @@
 //! with its own edit history, even though the two share a workspace.
 //!
 //! Also here: the pin checks that compare a symbol's ports against the
-//! schematic that instantiates it, since they read the same document.
+//! schematic that instantiates it, since they read the same document, and
+//! the publication of what they find as canonical records. Their findings
+//! used to stop at a field beside the canvas, so the one list of every
+//! standing condition held none of them.
 
 #[cfg(test)]
 mod tests;
@@ -14,12 +17,18 @@ mod tests;
 use rspice_schematic_editor::symbol_editor::interaction::SymbolRequestSource;
 use std::collections::BTreeMap;
 
-use crate::diagnostics::ConsoleMessage;
+use rspice_app_types::diagnostics::CanonicalDiagnosticMetadata;
+
+use crate::diagnostics::{ConsoleMessage, LogAnchor};
 use crate::state::{
     CellViewRef, ModelBoundSymbolDefinition, PinFindingKind, PortSpec,
     SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument, SymbolEditorMetadata,
 };
 use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::diagnostic_store::{
+    DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject,
+    symbol_pin_rule_code,
+};
 use crate::workbench::{SymbolCommitIntent, SymbolDocumentSnapshot};
 use rspice_design::symbol::publication::{
     EncodedSymbolEditorBundle, SymbolSaveCheck, check_symbol_pins, symbol_save_checks,
@@ -30,6 +39,9 @@ use rspice_design::symbol::edit::{
     symbol_metadata_snapshot_from_view, symbol_pin_position_remaps, symbol_snapshot_from_view,
 };
 use rspice_design::symbol::generated::{GENERATED_PORTS_KEY, decode_ports};
+
+/// Producer identity every symbol pin finding carries.
+const SYMBOL_PIN_PRODUCER: &str = "rspice.design.symbol.pins";
 
 impl AppState {
     pub(crate) fn symbol_editor_request_source(&self) -> SymbolRequestSource {
@@ -110,7 +122,16 @@ impl AppState {
     }
 
     pub(crate) fn active_symbol_ports(&self) -> Vec<PortSpec> {
-        let reference = &self.workspace.content.active_view;
+        self.symbol_ports(&self.workspace.content.active_view)
+    }
+
+    /// The interface contract one cell's symbol is checked against.
+    ///
+    /// Addressed by reference rather than only by what is in front of the
+    /// reader, because the currency of a published pin finding is decided by
+    /// the contract that finding was derived from — and navigating away from
+    /// a symbol does not change that symbol's contract.
+    pub(crate) fn symbol_ports(&self, reference: &CellViewRef) -> Vec<PortSpec> {
         let schematic_ref = CellViewRef::new(&reference.library, &reference.cell, "schematic");
         if self.workspace.content.active_view == schematic_ref {
             return self.schematic.document().interface_ports();
@@ -146,7 +167,14 @@ impl AppState {
     }
 
     pub(crate) fn load_active_symbol_document(&self) -> Result<SymbolDocument, String> {
-        let reference = &self.workspace.content.active_view;
+        self.load_symbol_document(&self.workspace.content.active_view)
+    }
+
+    /// One cell's symbol artwork, as published in the library.
+    pub(crate) fn load_symbol_document(
+        &self,
+        reference: &CellViewRef,
+    ) -> Result<SymbolDocument, String> {
         let Some(view) = self
             .library_manager
             .get_library(&reference.library)
@@ -160,7 +188,7 @@ impl AppState {
         if has_document {
             return Ok(document);
         }
-        let ports = self.active_symbol_ports();
+        let ports = self.symbol_ports(reference);
         if view.metadata.contains_key("generated") && !ports.is_empty() {
             return Ok(SymbolDocument::generated_from_ports(&ports));
         }
@@ -171,7 +199,16 @@ impl AppState {
         &self,
         document: &SymbolDocument,
     ) -> Result<SymbolEditorMetadata, String> {
-        let reference = &self.workspace.content.active_view;
+        self.load_symbol_editor_metadata(&self.workspace.content.active_view, document)
+    }
+
+    /// One cell's symbol authoring metadata, which is where its published
+    /// revision is recorded.
+    pub(crate) fn load_symbol_editor_metadata(
+        &self,
+        reference: &CellViewRef,
+        document: &SymbolDocument,
+    ) -> Result<SymbolEditorMetadata, String> {
         let Some(view) = self
             .library_manager
             .get_library(&reference.library)
@@ -579,34 +616,227 @@ impl AppState {
         Ok(true)
     }
 
-    pub(crate) fn run_active_symbol_pin_checks(&mut self) {
-        let ports = self.active_symbol_ports();
-        let reference = self.workspace.content.active_view.clone();
-        match self.load_active_symbol_document() {
-            Ok(document) => {
-                let result = check_symbol_pins(&document, &ports, &reference);
-
-                if result.violations().is_empty() {
-                    self.dialogs.drc_results = Some(result);
-                    self.dialogs.drc_checked_version = self.schematic.topology_version();
-                    self.push_user_message(ConsoleMessage::info("Symbol pins match schematic"));
-                    return;
-                }
-
-                // The findings stay in the receipt, which is what the Problems
-                // page and the canvas read. One Console line records that the
-                // check ran, at the severity of an event rather than of a
-                // finding: an error line here would stand on the Problems page
-                // as a problem of its own, beside the findings it counts.
-                let found = result.total_count();
-                self.push_user_message(ConsoleMessage::info(format!(
-                    "Symbol pin checks · {found} finding{}",
-                    if found == 1 { "" } else { "s" },
-                )));
-                self.dialogs.drc_results = Some(result);
-                self.dialogs.drc_checked_version = self.schematic.topology_version();
-            }
-            Err(error) => self.push_user_message(ConsoleMessage::warning(error)),
-        }
+    /// Everything the symbol pin checks read for one symbol view.
+    ///
+    /// One accessor, because the digest that decides whether a published pin
+    /// finding still describes the design has to be taken over exactly what
+    /// the check compared — and the check and the digest both read it here.
+    pub(in crate::workbench) fn symbol_pin_check_inputs(
+        &self,
+        reference: &CellViewRef,
+    ) -> Result<SymbolPinCheckInputs, String> {
+        let document = self.load_symbol_document(reference)?;
+        let revision = self
+            .load_symbol_editor_metadata(reference, &document)?
+            .revision;
+        let ports = self.symbol_ports(reference);
+        Ok(SymbolPinCheckInputs {
+            revision,
+            document,
+            ports,
+        })
     }
+
+    /// Publish what the symbol pin checks found, as canonical records.
+    ///
+    /// Its own entry point with its own guard rather than a loosened
+    /// [`Self::publish_active_design_check_result`]: that guard is right to
+    /// refuse a symbol, because schematic design-check evidence is keyed to a
+    /// cell view that has a schematic and carries a receipt the symbol checks
+    /// have no part in.
+    pub(crate) fn publish_active_symbol_pin_check_result(
+        &mut self,
+        result: &rspice_design::drc::DrcResult,
+    ) -> Result<(), String> {
+        if self.workspace.content.active_view_type() != crate::state::ViewType::Symbol {
+            return Err("symbol pin findings can only be published from a symbol view".to_owned());
+        }
+        let subject = self.workspace.content.active_view.clone();
+        // Derived before the batch is inserted, because resolving a route
+        // reads the state the insertion takes mutably.
+        let records = symbol_pin_records(self, &subject, result);
+        self.publish_diagnostics(DiagnosticInputs::SymbolPins { subject }, records)
+    }
+
+    /// How many pin findings stand against the active symbol view, or `None`
+    /// where the checks have not run against it.
+    ///
+    /// The distinction is the point: `Some(0)` says the checks ran and the
+    /// pins match, which is a different claim from nobody having looked, and
+    /// a control that offered to clear nothing would be a dead control.
+    pub(in crate::workbench) fn active_symbol_pin_finding_count(&self) -> Option<usize> {
+        self.active_symbol_pin_records()
+            .map(|records| records.len())
+    }
+
+    /// Withdraw the active symbol view's pin findings.
+    pub(in crate::workbench) fn clear_active_symbol_pin_checks(&mut self) {
+        let subject = self.workspace.content.active_view.clone();
+        self.withdraw_diagnostics(&DiagnosticInputs::SymbolPins { subject });
+    }
+
+    fn active_symbol_pin_records(&self) -> Option<&[DiagnosticRecord]> {
+        let published = DiagnosticInputs::SymbolPins {
+            subject: self.workspace.content.active_view.clone(),
+        };
+        self.diagnostics
+            .batches()
+            .find(|batch| batch.inputs == published)
+            .map(|batch| batch.records.as_slice())
+    }
+
+    /// Step the finding tour through the active symbol's pin findings, worst
+    /// first, and land on the pin the finding it stops at is about.
+    ///
+    /// Returns `false` where there is nothing to visit. The findings come from
+    /// the store rather than from a projection beside it, which is what lets
+    /// the finding this stops at be *the* current finding — the same selection
+    /// the Problems grid draws its current row from.
+    pub(crate) fn cycle_active_symbol_pin_finding(&mut self, step: isize) -> bool {
+        let mut visitable: Vec<VisitablePinFinding> = self
+            .active_symbol_pin_records()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|record| match &record.route {
+                Some(DiagnosticRoute::Anchor(anchor)) => Some(VisitablePinFinding {
+                    level: record.level,
+                    identity: record.canonical.diagnostic_id,
+                    anchor: anchor.clone(),
+                    message: record.message.clone(),
+                }),
+                Some(DiagnosticRoute::NetlistDiagnostic(_) | DiagnosticRoute::Repair(_))
+                | Some(DiagnosticRoute::CodeDocument { .. })
+                | None => None,
+            })
+            .collect();
+        if visitable.is_empty() {
+            return false;
+        }
+        // Worst first; stable within a severity.
+        visitable.sort_by(|left, right| right.level.cmp(&left.level));
+
+        let len = visitable.len() as isize;
+        let standing = self
+            .diagnostics
+            .current_finding()
+            .and_then(|current| visitable.iter().position(|found| found.identity == current));
+        let index = match standing {
+            // First jump lands on the worst finding, not the second one.
+            None if step >= 0 => 0,
+            None => (len - 1) as usize,
+            Some(current) => ((current as isize + step).rem_euclid(len)) as usize,
+        };
+        let found = visitable.swap_remove(index);
+        self.diagnostics.set_current_finding(Some(found.identity));
+        self.jump_to_log_anchor(found.anchor);
+        self.push_user_message(ConsoleMessage::info(format!(
+            "Finding {}/{} — {} · {}",
+            index + 1,
+            len,
+            found.level.display_name(),
+            found.message,
+        )));
+        true
+    }
+
+    pub(crate) fn run_active_symbol_pin_checks(&mut self) {
+        let reference = self.workspace.content.active_view.clone();
+        let inputs = match self.symbol_pin_check_inputs(&reference) {
+            Ok(inputs) => inputs,
+            Err(error) => {
+                self.push_user_message(ConsoleMessage::warning(error));
+                return;
+            }
+        };
+        let result = check_symbol_pins(&inputs.document, &inputs.ports, &reference);
+        let found = result.total_count();
+        if let Err(error) = self.publish_active_symbol_pin_check_result(&result) {
+            self.push_user_message(ConsoleMessage::warning(format!(
+                "Findings could not be recorded: {error}"
+            )));
+            return;
+        }
+        // One Console line records that the check ran, at the severity of an
+        // event rather than of a finding: an error line here would stand on
+        // the Problems page as a problem of its own, beside the findings it
+        // counts. The findings themselves are canonical records now, which is
+        // what the page, the counts and the canvas tour all read.
+        if found == 0 {
+            self.push_user_message(ConsoleMessage::info("Symbol pins match schematic"));
+            return;
+        }
+        self.push_user_message(ConsoleMessage::info(format!(
+            "Symbol pin checks · {found} finding{}",
+            if found == 1 { "" } else { "s" },
+        )));
+    }
+}
+
+/// One pin finding the tour can visit: how bad it is, what the store calls
+/// it, which pin it lands on, and what it says.
+struct VisitablePinFinding {
+    level: DiagnosticLevel,
+    identity: uuid::Uuid,
+    anchor: LogAnchor,
+    message: String,
+}
+
+/// Everything one symbol view's pin checks were derived from.
+///
+/// The published revision as well as the artwork, because a revision is what
+/// the instances placed against this symbol were wired to: republishing the
+/// same drawing under a new one is a new contract, and a finding measured
+/// against the old one no longer describes it.
+#[derive(Debug, Clone, serde::Serialize)]
+pub(in crate::workbench) struct SymbolPinCheckInputs {
+    pub(in crate::workbench) revision: u64,
+    pub(in crate::workbench) document: SymbolDocument,
+    pub(in crate::workbench) ports: Vec<PortSpec>,
+}
+
+/// One canonical record per pin finding.
+///
+/// The route is resolved through the one resolver every "go to this finding"
+/// surface shares, and a symbol pin location already addresses the pin on its
+/// own symbol — so following a finding lands on that pin rather than on the
+/// document that happens to hold it. No `drawn` test is needed, the way the
+/// schematic rule records need one: a pin location carries the symbol it is
+/// in, so it resolves without asking whichever drawing is in front of the
+/// reader where its object is.
+fn symbol_pin_records(
+    state: &AppState,
+    subject: &CellViewRef,
+    result: &rspice_design::drc::DrcResult,
+) -> Vec<DiagnosticRecord> {
+    let project = state.workspace.content.project.id();
+    let revision = state.workspace.content.project.revision().get();
+    let document_id = subject.key();
+    result
+        .violations()
+        .iter()
+        .map(|violation| {
+            let canonical = CanonicalDiagnosticMetadata::current(
+                SYMBOL_PIN_PRODUCER,
+                symbol_pin_rule_code(violation.violation_type),
+                document_id.clone(),
+                None,
+                revision,
+                format!("symbol-pins:{document_id}:{}", violation.id),
+                &violation.message,
+            );
+            let route =
+                crate::schematic::view::violations::location_anchor(state, &violation.location)
+                    .map(DiagnosticRoute::Anchor);
+            DiagnosticRecord::new(
+                canonical,
+                violation.severity.into(),
+                DiagnosticSubject::new(project, violation.location.display())
+                    .in_cell_view(subject.clone()),
+                violation.message.clone(),
+            )
+            .with_details(violation.violation_type.suggested_fix())
+            .with_rule(violation.violation_type.description())
+            .with_route(route)
+        })
+        .collect()
 }
