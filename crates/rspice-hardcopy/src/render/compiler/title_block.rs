@@ -168,7 +168,8 @@ impl SemanticSceneCompiler<'_> {
             // the canvas also places them on. The canvas centres a line on
             // that point while publication places a baseline on it, so each
             // is converted to a baseline here and a field's ink lands in the
-            // same place on screen and on paper.
+            // same place on screen and on paper. Each is set at the em whose
+            // capitals stand at its ISO 3098 height, as the canvas sets it.
             let at = |(numerator, denominator): (u64, u64)| {
                 (row_height * numerator / denominator) as i64
             };
@@ -186,7 +187,7 @@ impl SemanticSceneCompiler<'_> {
                 )?,
                 &truncate_title_block_text(&label, caption_chars),
                 SceneFont::Monospace,
-                lettering.caption_um,
+                drawing_sheet_mono_em_um(lettering.caption_um),
                 stroke.color,
                 text_rotation,
             )?;
@@ -200,7 +201,7 @@ impl SemanticSceneCompiler<'_> {
                 )?,
                 &truncate_title_block_text(&value, value_chars),
                 SceneFont::MonospaceMedium,
-                lettering.data_um,
+                drawing_sheet_mono_em_um(lettering.data_um),
                 stroke.color,
                 text_rotation,
             )?;

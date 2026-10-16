@@ -5,6 +5,7 @@
 
 mod plot_overlay;
 mod provenance;
+mod title_lettering;
 
 use lopdf::Document as ParsedPdf;
 use uuid::Uuid;
