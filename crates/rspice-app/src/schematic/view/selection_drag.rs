@@ -134,8 +134,8 @@ fn apply(
             {
                 return;
             }
-            if with_active_wire_topology(state, |schematic| {
-                schematic.move_all_vertices_at(from, position)
+            if with_active_wire_topology(state, |schematic, scope| {
+                schematic.move_all_vertices_at(from, position, scope)
             }) {
                 state
                     .dialogs
@@ -155,10 +155,12 @@ fn apply(
             {
                 return;
             }
-            with_active_wire_topology(state, |schematic| {
-                schematic.move_selection_with_rubber_band_resolved(delta, |component| {
-                    symbols.terminal_points(component)
-                })
+            with_active_wire_topology(state, |schematic, scope| {
+                schematic.move_selection_with_rubber_band_resolved(
+                    delta,
+                    |component| symbols.terminal_points(component),
+                    scope,
+                )
             });
             state
                 .dialogs
@@ -176,8 +178,8 @@ fn apply(
                 .document_policy
                 .wire_junctions
                 .automatic_junctions();
-            with_active_wire_topology(state, |schematic| {
-                schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions)
+            with_active_wire_topology(state, |schematic, scope| {
+                schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope)
             });
             // One undo entry for the whole gesture (no-ops deduplicate).
             if state.schematic.end_operation() {

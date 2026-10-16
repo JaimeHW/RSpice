@@ -14,7 +14,7 @@ use std::borrow::Cow;
 
 use egui::{Context, Id};
 
-use crate::state::{SchematicState, Selection, SheetCatalog};
+use crate::state::{ActiveSheetTopology, SchematicState, Selection, SheetCatalog};
 use crate::workbench::app_state::AppState;
 
 use super::{SchematicSymbolContext, SelectionWindow};
@@ -304,12 +304,27 @@ pub(super) fn active_junction_at(state: &AppState, point: crate::state::Point) -
 /// on without weakening their single-sheet behavior.
 pub(crate) fn with_active_wire_topology<R>(
     state: &mut AppState,
-    operation: impl FnOnce(&mut SchematicState) -> R,
+    operation: impl FnOnce(&mut SchematicState, &ActiveSheetTopology) -> R,
 ) -> R {
-    state.schematic.with_active_wire_topology(
-        |id| !object_is_on_active_sheet_in_workspace(&state.workspace, id),
-        operation,
-    )
+    state
+        .schematic
+        .with_active_wire_topology(off_active_sheet(&state.workspace), operation)
+}
+
+/// Whether an object belongs to one of the cell view's other sheets.
+pub(crate) fn off_active_sheet(
+    workspace: &crate::state::ProjectWorkspace,
+) -> impl Fn(u64) -> bool + '_ {
+    |id| !object_is_on_active_sheet_in_workspace(workspace, id)
+}
+
+/// The same operation on a copy of the schematic, as a preview runs it.
+pub(crate) fn with_active_wire_topology_of<R>(
+    state: &AppState,
+    schematic: &mut SchematicState,
+    operation: impl FnOnce(&mut SchematicState, &ActiveSheetTopology) -> R,
+) -> R {
+    schematic.with_active_wire_topology(off_active_sheet(&state.workspace), operation)
 }
 
 /// Finish the route being drawn on the active sheet. Conductors on the cell
@@ -318,7 +333,7 @@ pub(crate) fn with_active_wire_topology<R>(
 pub(crate) fn finish_wire_on_active_sheet(state: &mut AppState) -> Option<u64> {
     state
         .schematic
-        .finish_wire(|id| !object_is_on_active_sheet_in_workspace(&state.workspace, id))
+        .finish_wire(off_active_sheet(&state.workspace))
 }
 
 /// Protect hidden conductors around an operation that owns its own undo
@@ -330,10 +345,9 @@ pub(crate) fn with_hidden_wire_topology_preserved<R>(
     state: &mut AppState,
     operation: impl FnOnce(&mut SchematicState) -> R,
 ) -> R {
-    state.schematic.with_hidden_wire_topology_preserved(
-        |id| !object_is_on_active_sheet_in_workspace(&state.workspace, id),
-        operation,
-    )
+    state
+        .schematic
+        .with_hidden_wire_topology_preserved(off_active_sheet(&state.workspace), operation)
 }
 
 pub(super) fn active_sheet_has_objects(state: &AppState) -> bool {
@@ -547,8 +561,8 @@ mod tests {
         let hidden_wire = state.schematic.document().wires[0].clone();
         let hidden_junction = state.schematic.document().junctions[0];
 
-        assert!(with_active_wire_topology(&mut state, |schematic| {
-            schematic.move_all_vertices_at(origin, destination)
+        assert!(with_active_wire_topology(&mut state, |schematic, scope| {
+            schematic.move_all_vertices_at(origin, destination, scope)
         }));
 
         assert_eq!(

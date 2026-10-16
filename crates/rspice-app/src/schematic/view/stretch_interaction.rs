@@ -132,13 +132,14 @@ fn commit_armed_stretch_selection(state: &mut AppState, symbol_context: &Schemat
     state.schematic.begin_operation("stretch selection");
     // Another sheet's wire or junction can share the stretched segment's
     // coordinates; it neither anchors the stretch nor moves with it.
-    let stretched = with_active_wire_topology(state, |schematic| {
+    let stretched = with_active_wire_topology(state, |schematic, scope| {
         schematic.stretch_target_resolved(
             delta,
             target,
             policy,
             |component| symbol_context.terminal_points(component),
             |component| symbol_context.component_bounds_tuple(component),
+            scope,
         )
     });
     match stretched {
@@ -377,6 +378,37 @@ mod tests {
             state.schematic.undo_description(),
             Some("stretch selection")
         );
+    }
+
+    /// The preview runs with the other sheets out of reach, as the commit
+    /// does: Sheet 2's junction on the segment refuses neither.
+    #[test]
+    fn another_sheets_junction_does_not_refuse_the_stretch_preview() {
+        let mut state = selected_stretch_wire_in(
+            crate::schematic::view::sheet_visibility::two_sheet_state(&[7], &[21]),
+        );
+        let hidden = Junction::new(21, Point::new(10, 20));
+        state
+            .schematic
+            .document_mut_for_test()
+            .junctions
+            .push(hidden);
+        let symbols = schematic_symbol_context(&state);
+
+        let candidate = crate::schematic::view::preview::stretch_preview_candidate(
+            &state,
+            &symbols,
+            Point::new(0, 10),
+            crate::state::StretchTarget::WireSegment {
+                wire_id: 7,
+                segment_index: 1,
+            },
+            crate::state::StretchOrthogonalPolicy::default(),
+        )
+        .expect("the hidden junction is no anchor")
+        .expect("the stretch moves the segment");
+
+        assert_eq!(candidate.wires[0].points[1], Point::new(0, 30));
     }
 
     #[test]

@@ -106,17 +106,20 @@ fn commit_armed_move_selection(state: &mut AppState, symbol_context: &SchematicS
     state.schematic.begin_operation("move selection");
     // A wire end on another sheet can share a selected pin's coordinates;
     // the rubber band and its cleanup must not reach it.
-    let movement = with_active_wire_topology(state, |schematic| {
-        let movement = schematic.move_selection_with_mode_resolved(delta, mode, |component| {
-            symbol_context.terminal_points(component)
-        });
+    let movement = with_active_wire_topology(state, |schematic, scope| {
+        let movement = schematic.move_selection_with_mode_resolved(
+            delta,
+            mode,
+            |component| symbol_context.terminal_points(component),
+            scope,
+        );
         if matches!(movement, Ok(true)) {
             let automatic_junctions = schematic
                 .document()
                 .document_policy
                 .wire_junctions
                 .automatic_junctions();
-            schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions);
+            schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope);
         }
         movement
     });
@@ -308,6 +311,43 @@ mod tests {
             Point::new(0, 10)
         );
         assert_eq!(state.schematic.document().wires, vec![hidden]);
+    }
+
+    /// The preview shows what the commit will do, so it runs with the other
+    /// sheets out of reach too: Sheet 2's wire end on the part's pin
+    /// coordinates neither follows the preview nor refuses it.
+    #[test]
+    fn the_move_preview_leaves_another_sheets_wire_end_in_place() {
+        let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[1], &[20]);
+        state
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(Component::new(1, ComponentType::Resistor, Point::origin()));
+        let terminal = state.schematic.document().components[0].terminal_positions()[0].1;
+        let hidden = Wire::segment(20, terminal, Point::new(terminal.x - 40, terminal.y));
+        state
+            .schematic
+            .document_mut_for_test()
+            .wires
+            .push(hidden.clone());
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(1);
+        let symbols = schematic_symbol_context(&state);
+
+        let (candidate, result) = crate::schematic::view::preview::move_preview_candidate(
+            &state,
+            &symbols,
+            Point::new(0, 10),
+            crate::state::MoveSelectionMode::Connected,
+        );
+
+        assert_eq!(result, Ok(true));
+        assert_eq!(candidate.document().wires, vec![hidden]);
     }
 
     #[test]
