@@ -232,6 +232,67 @@ fn a_value_is_named_by_its_own_unit_not_the_strips() {
     );
 }
 
+/// The digit preference is a ceiling on a readout and a column width on a
+/// table, and the two spellings of a value are not the same string.
+///
+/// The defect: the strip legend, the cursor columns and the measurement rows
+/// all read `1.500000 V` at the default preference — seven digits claimed for
+/// a number that has two. The Table viewer keeps the padding, because its
+/// cells are right-aligned in fixed columns and the decimal points line up.
+#[test]
+fn a_readout_states_the_value_while_a_table_column_pads_it() {
+    let mut state = AppState::default();
+    state.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.5], "#fff"),
+        ]),
+    );
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    let model = &models[0];
+    let digits = 7;
+
+    assert_eq!(
+        model.format_trace_value(&model.traces[0], 1.5, digits, quantity_policy),
+        "1.5 V",
+        "the legend chip, the cursor columns and the measurement rows"
+    );
+    assert_eq!(
+        model.format_x(1.0e-3, digits, quantity_policy),
+        "1 ms",
+        "and the X column beside them"
+    );
+    assert_eq!(
+        rspice_results_ui::waves::readout::x_separation(
+            model,
+            0.0,
+            1.0e-3,
+            digits,
+            quantity_policy
+        ),
+        "1 ms  (1 kHz)",
+        "and the separation cell, which carried two padded numbers at once"
+    );
+    assert_eq!(
+        model
+            .format_sample(0, 1, digits, quantity_policy)
+            .as_deref(),
+        Some("1.500000 V"),
+        "while a table cell holds the reader's digits"
+    );
+    assert_eq!(
+        model.format_x_at(1, digits, quantity_policy),
+        "1.000000 s",
+        "as does the table's own X column"
+    );
+}
+
 #[test]
 fn a_slope_is_named_by_its_own_unit_not_the_strips() {
     let mut state = AppState::default();

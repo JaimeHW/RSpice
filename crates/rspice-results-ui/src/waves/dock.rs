@@ -473,7 +473,7 @@ pub fn marker_section(
             .iter()
             .find(|model| model.analysis_key == analysis_key);
         let position = model.map_or_else(
-            || fmt_si_significant(marker_x, "", significant_digits),
+            || super::units::as_readout(&fmt_si_significant(marker_x, "", significant_digits)),
             |model| {
                 format!(
                     "{} = {}",

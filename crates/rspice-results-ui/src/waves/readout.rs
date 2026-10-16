@@ -1,5 +1,6 @@
 //! Cursor values, branch readings and retained-sample measurements.
 
+use super::units::as_readout;
 use super::{
     NOISE_DENSITY_UNIT, ReadoutPolicy, StripModel, StripTrace, TraceKind, cursor_interpolation,
     trace_key,
@@ -440,21 +441,25 @@ pub fn x_separation(
     significant_digits: usize,
     quantity_policy: QuantityPresentationPolicy,
 ) -> String {
+    // A separation is read, not tabulated: "1 ms  (1 kHz)", never
+    // "1.000000 ms  (1.000000 kHz)" — two padded numbers in one cell.
     let dx = b - a;
     match model.x_scale {
         XScale::Linear if model.x_unit == "s" => {
-            let span = fmt_si_significant(dx, "s", significant_digits);
+            let span = as_readout(&fmt_si_significant(dx, "s", significant_digits));
             if dx == 0.0 {
                 span
             } else {
                 format!(
                     "{span}  ({})",
-                    quantity_policy.format_frequency(1.0 / dx.abs(), significant_digits)
+                    as_readout(
+                        &quantity_policy.format_frequency(1.0 / dx.abs(), significant_digits)
+                    )
                 )
             }
         }
-        XScale::Log10 => quantity_policy.format_frequency(dx, significant_digits),
-        _ => fmt_si_significant(dx, &model.x_unit, significant_digits),
+        XScale::Log10 => as_readout(&quantity_policy.format_frequency(dx, significant_digits)),
+        _ => as_readout(&fmt_si_significant(dx, &model.x_unit, significant_digits)),
     }
 }
 

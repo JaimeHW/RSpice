@@ -461,7 +461,9 @@ pub fn show_plot<'a>(
             let value = sample_at_with_shape(&expr.x, &expr.y, &expr.shape, x, interpolation);
             rows.push((
                 expr.label.clone(),
-                fmt_si_significant(value, "", significant_digits),
+                // The hover readout is a readout: the expression's value, not
+                // the reader's digit preference spelled out in zeros.
+                super::units::as_readout(&fmt_si_significant(value, "", significant_digits)),
             ));
         }
         rows
