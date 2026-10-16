@@ -91,7 +91,7 @@ impl SemanticSceneCompiler<'_> {
             .title_block_rows(template)
             .map(|rows| rows as u64)
             .ok_or_else(|| conversion_error("title block has no authored grid"))?;
-        let mut fields = rspice_design_model::design_management::resolve_drawing_sheet_title_fields(format, automatic_values)
+        let fields = rspice_design_model::design_management::resolve_drawing_sheet_title_fields(format, automatic_values)
             .into_iter()
             .map(|field| {
                 (
@@ -102,13 +102,11 @@ impl SemanticSceneCompiler<'_> {
                 )
             })
             .collect::<Vec<_>>();
+        // A block with no field to show is plotted as its outline alone, as
+        // the canvas draws it, rather than with fields the sheet does not
+        // carry.
         if fields.is_empty() {
-            fields.push((
-                "Format".to_owned(),
-                format.authored_size.label().to_owned(),
-                false,
-            ));
-            fields.push(("Description".to_owned(), format.display(), false));
+            return Ok(());
         }
         let visible_field_count = fields.len();
         let columns = fields.len().div_ceil(rows as usize).max(1) as u64;
