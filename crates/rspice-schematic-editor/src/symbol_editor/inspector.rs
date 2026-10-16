@@ -499,12 +499,7 @@ fn pin_section(
         .any(|port| port.name.eq_ignore_ascii_case(&active_name))
         && !ports.is_empty()
     {
-        property_row_problem(
-            ui,
-            "Interface",
-            "not in schematic",
-            Some(Problem::Warning),
-        );
+        property_row_problem(ui, "Interface", "not in schematic", Some(Problem::Warning));
     }
     let placed = document.pins[order].position.is_some();
     let on_grid = document.pins[order].terminal_on_grid();
@@ -639,7 +634,12 @@ fn shape_section(
                 &mut rotation,
                 &ARROW_ROTATIONS
                     .iter()
-                    .map(|degrees| (arrow_rotation_label(*degrees), arrow_rotation_label(*degrees)))
+                    .map(|degrees| {
+                        (
+                            arrow_rotation_label(*degrees),
+                            arrow_rotation_label(*degrees),
+                        )
+                    })
                     .collect::<Vec<_>>(),
                 true,
             ) && let Some(quarters) = ARROW_ROTATIONS

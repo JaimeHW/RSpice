@@ -79,8 +79,14 @@ fn print_symbol_editor_renders_for_review() {
     let path = directory.join("symbol-inspector.png");
     let height = inspector.content_height().max(1);
     std::fs::write(&path, inspector.png(height)).expect("write inspector render");
-    writeln!(report, "{} {}x{}", path.display(), inspector.width(), height)
-        .expect("write raster report");
+    writeln!(
+        report,
+        "{} {}x{}",
+        path.display(),
+        inspector.width(),
+        height
+    )
+    .expect("write raster report");
 
     let canvas = rspice_ui_kit::raster::render_themed(
         rspice_ui_kit::Theme::default(),
@@ -93,13 +99,7 @@ fn print_symbol_editor_renders_for_review() {
             let mut session = session.clone();
             let viewport = update_viewport(ui, &mut session, rect, &document, &response);
             draw_canvas(
-                ui,
-                viewport,
-                &document,
-                &metadata,
-                &ports,
-                &session,
-                &reference,
+                ui, viewport, &document, &metadata, &ports, &session, &reference,
             );
             surface::canvas_check_note(ui.ctx(), &document, &ports, stage);
         },

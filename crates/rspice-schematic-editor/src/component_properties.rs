@@ -7,9 +7,7 @@ mod context;
 mod dialog;
 mod evidence;
 mod form;
-pub use context::{
-    ComponentEditorContext, ComponentPropertyDialogResult, StimulusEditorContext,
-};
+pub use context::{ComponentEditorContext, ComponentPropertyDialogResult, StimulusEditorContext};
 pub use dialog::{
     ComponentPropertyDialogView, ComponentPropertyServices, render_component_property_dialog,
 };
@@ -461,8 +459,8 @@ impl ComponentPropertyDraft {
     }
 
     fn refresh_validation_summary(&mut self) {
-        self.global_error =
-            (!self.validation_errors.is_empty()).then(|| fields_need_fixing(self.validation_errors.len()));
+        self.global_error = (!self.validation_errors.is_empty())
+            .then(|| fields_need_fixing(self.validation_errors.len()));
     }
 }
 

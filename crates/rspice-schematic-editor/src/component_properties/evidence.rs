@@ -153,7 +153,11 @@ fn stimulus_body(
     // source and not a row.
     match (held, stimulus.definition.as_deref()) {
         (Some((definition, revision)), _) => {
-            evidence_row(ui, "Definition", &format!("{definition} \u{b7} r{revision}"));
+            evidence_row(
+                ui,
+                "Definition",
+                &format!("{definition} \u{b7} r{revision}"),
+            );
         }
         (None, Some(definition)) => {
             evidence_row(ui, "Definition", definition);

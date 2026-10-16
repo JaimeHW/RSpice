@@ -167,7 +167,8 @@ mod tests {
             production_source(&plain.replace('\n', "\r\n")),
             "fn shipped() {}\r\n\r\n"
         );
-        let gated = "fn shipped() {}\n#[cfg(all(test, not(target_arch = \"wasm32\")))]\nmod tests {}\n";
+        let gated =
+            "fn shipped() {}\n#[cfg(all(test, not(target_arch = \"wasm32\")))]\nmod tests {}\n";
         assert_eq!(production_source(gated), "fn shipped() {}\n");
         assert_eq!(production_source("fn shipped() {}\n"), "fn shipped() {}\n");
         // An out-of-line declaration is not a boundary, wherever it sits:

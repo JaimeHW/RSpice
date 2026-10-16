@@ -369,7 +369,11 @@ mod tests {
             (1e-18, "s", "1e-18 s"),
             (0.0, "V", "0"),
         ] {
-            assert_eq!(format_engineering_quantity(value, unit), expected, "{value}");
+            assert_eq!(
+                format_engineering_quantity(value, unit),
+                expected,
+                "{value}"
+            );
         }
     }
 
