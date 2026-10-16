@@ -82,9 +82,6 @@ const MARK_SIDE: f32 = 11.0;
 const MARK_ADVANCE: f32 = 17.0;
 
 const LEDGER_TITLE: &str = "Correlation evidence";
-/// Exactly the chain `CorrelationProjection::state_label` walks, in its order.
-/// The band states what the verdict is made of, so the sentence may not claim
-/// an input the verdict does not actually consume.
 
 fn correlation_dialog_error_id() -> egui::Id {
     egui::Id::new("model-correlation-submit-error")
