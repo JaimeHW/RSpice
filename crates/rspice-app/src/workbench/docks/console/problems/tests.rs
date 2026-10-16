@@ -253,6 +253,9 @@ fn row_of(cell: egui::Rect) -> egui::Rect {
 /// focus to key against, and the keyboard tests would pass by doing nothing.
 struct Harness {
     ctx: egui::Context,
+    /// The identity of the panel the page was last drawn in, which the body's
+    /// scroll position is kept under.
+    page: std::cell::Cell<Option<egui::Id>>,
 }
 
 impl Harness {
@@ -260,14 +263,44 @@ impl Harness {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
-        Self { ctx }
+        Self {
+            ctx,
+            page: std::cell::Cell::new(None),
+        }
     }
 
     fn frame(&self, state: &mut AppState, input: egui::RawInput) -> Render {
         let output = self.ctx.run_ui(input, |ui| {
-            egui::CentralPanel::default().show(ui, |ui| problems(ui, state));
+            egui::CentralPanel::default().show(ui, |ui| {
+                self.page.set(Some(ui.id()));
+                problems(ui, state);
+            });
         });
         collect(output)
+    }
+
+    /// Scroll the body to `offset`, as the reader's own scrolling would.
+    fn scroll_body_to(&self, offset: f32) {
+        let id = self.body_scroll_id();
+        let mut scroll =
+            egui::scroll_area::State::load(&self.ctx, id).expect("the body has been drawn");
+        scroll.offset.y = offset;
+        scroll.store(&self.ctx, id);
+    }
+
+    /// Where the body is scrolled to.
+    fn body_offset(&self) -> f32 {
+        egui::scroll_area::State::load(&self.ctx, self.body_scroll_id())
+            .expect("the body has been drawn")
+            .offset
+            .y
+    }
+
+    fn body_scroll_id(&self) -> egui::Id {
+        self.page
+            .get()
+            .expect("the page has been drawn")
+            .with(egui::IdSalt::new("workbench.problems"))
     }
 
     /// Draw a frame with nothing happening, which is what settles the sizing
@@ -1760,6 +1793,94 @@ fn a_clicked_row_stays_in_view_when_the_detail_region_opens() {
         "{lowest} stays in view"
     );
     assert_eq!(harness.focused(), Some(grid::body_id()));
+}
+
+/// The lowest message the body shows whole.
+fn lowest_whole_row(harness: &Harness, render: &Render) -> String {
+    let table = harness.table();
+    render
+        .texts
+        .iter()
+        .filter(|(text, cell)| {
+            text.starts_with("finding ")
+                && row_of(*cell).top() >= table.top() - 0.5
+                && row_of(*cell).bottom() <= table.bottom() + 0.5
+        })
+        .max_by(|left, right| left.1.min.y.total_cmp(&right.1.min.y))
+        .map(|(text, _)| text.clone())
+        .expect("rows are shown")
+}
+
+/// A dock that loses height brings back a current row the lost height hid.
+#[test]
+fn a_shrinking_body_brings_back_the_current_row_it_hid() {
+    let mut state = state_with_findings(60);
+    let order = reported(&state);
+    // The detail region is open throughout, so the only height the body
+    // loses is the dock's own.
+    state.diagnostics.set_current_finding(Some(order[0]));
+    let harness = Harness::new();
+    harness.settle(&mut state);
+    let render = harness.frame(&mut state, sized(egui::RawInput::default()));
+    let lowest = lowest_whole_row(&harness, &render);
+    let index: usize = lowest["finding ".len()..]
+        .parse()
+        .expect("a numbered finding");
+    state.diagnostics.set_current_finding(Some(order[index]));
+    harness.settle(&mut state);
+
+    let smaller = || {
+        sized_to(
+            egui::RawInput::default(),
+            HEIGHT - 3.0 * CONSOLE_ROW_MIN_HEIGHT,
+        )
+    };
+    let _ = harness.frame(&mut state, smaller());
+    let render = harness.frame(&mut state, smaller());
+    assert!(
+        harness.shows_whole(&render, &lowest),
+        "{lowest} is brought back into view",
+    );
+}
+
+/// A dock that loses height leaves the reader where they scrolled to when the
+/// current row was not in view: the reader had left it, and the lost height
+/// hid nothing they were looking at.
+#[test]
+fn a_shrinking_body_keeps_the_readers_place_away_from_the_current_row() {
+    let mut state = state_with_findings(60);
+    let order = reported(&state);
+    state.diagnostics.set_current_finding(Some(order[2]));
+    let harness = Harness::new();
+    harness.settle(&mut state);
+    harness.settle(&mut state);
+    let away = 30.0 * CONSOLE_ROW_MIN_HEIGHT;
+    harness.scroll_body_to(away);
+    let render = harness.frame(&mut state, sized(egui::RawInput::default()));
+    assert!(
+        !harness.shows_whole(&render, "finding 02"),
+        "precondition: the reader scrolled away from the current row",
+    );
+    let offset = harness.body_offset();
+
+    let smaller = || {
+        sized_to(
+            egui::RawInput::default(),
+            HEIGHT - 3.0 * CONSOLE_ROW_MIN_HEIGHT,
+        )
+    };
+    let _ = harness.frame(&mut state, smaller());
+    let render = harness.frame(&mut state, smaller());
+    assert!(
+        !harness.shows_whole(&render, "finding 02"),
+        "the current row is not pulled back",
+    );
+    assert!(
+        (harness.body_offset() - offset).abs() < 0.5,
+        "the body stays where the reader scrolled it: {} then {}",
+        offset,
+        harness.body_offset(),
+    );
 }
 
 /// A note under the rows that wraps is given the height it wraps to: the body

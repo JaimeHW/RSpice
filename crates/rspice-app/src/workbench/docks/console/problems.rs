@@ -139,9 +139,10 @@ impl Selection {
 /// stood on, the height it was given and where it was scrolled to.
 ///
 /// The body brings the current line into view when it moved under it — by a
-/// key, by a click or by the canvas tour — and when it lost height to the
-/// detail region a new selection opened. It leaves the reader's own scrolling
-/// alone otherwise.
+/// key, by a click or by the canvas tour — and when height the body lost, to
+/// the detail region a new selection opened or to a smaller dock, took the
+/// current line out of view. It leaves the reader's own scrolling alone
+/// otherwise.
 #[derive(Debug, Clone, Copy, Default)]
 struct BodyMemory {
     finding: Option<uuid::Uuid>,
@@ -362,6 +363,7 @@ fn table(
     let shrank = table.height + 0.5 < body.height;
     if (moved || shrank)
         && let Some(line) = cursor_line(table.arrangement, selection, cursor)
+        && (moved || shrink_hid(line, &body, table.height, pitch))
         && let Some(offset) = reveal_offset(line, body.offset, table.height, pitch)
     {
         area = area.vertical_scroll_offset(offset);
@@ -494,6 +496,19 @@ fn stand_on(
         }
         None => {}
     }
+}
+
+/// Whether the height the body lost since it was last drawn took line `line`
+/// out of view: the line showed then, if only in part, and the body's new
+/// bottom edge now cuts it.
+///
+/// A line the reader had scrolled away from is not brought back. Bringing it
+/// back is what took the reader's place from them whenever the dock shrank.
+fn shrink_hid(line: usize, body: &BodyMemory, height: f32, pitch: f32) -> bool {
+    let top = line as f32 * pitch;
+    let bottom = top + CONSOLE_ROW_MIN_HEIGHT;
+    let showed = bottom > body.offset + 0.5 && top < body.offset + body.height - 0.5;
+    showed && bottom - 0.5 > body.offset + height
 }
 
 /// One finding's row, with the click that selects it and the click that
