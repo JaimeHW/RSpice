@@ -1171,7 +1171,7 @@ fn validate_array_source_selection_direct(
     let mut captured_wire_ids = HashSet::new();
     for wire in &state.document.wires {
         let explicitly_selected = state.selection.objects.wires.contains(&wire.id);
-        let implicitly_selected = if wire.points.len() < 2 {
+        let implicitly_selected = if wire.points.len() < 2 || !(state.selection.on_sheet)(wire.id) {
             false
         } else {
             let last = wire.points.len() - 1;
@@ -1395,10 +1395,17 @@ fn capture_array_selection(
         state.selection.junctions.clone(),
         terminal_points_for,
     );
+    // A conductor joins the selected parts only on the sheet they are drawn
+    // on. Another sheet's wire between the same two points, or its junction
+    // on a copied wire's line, is not part of the circuit being repeated.
+    let on_sheet = state.selection.on_sheet;
+    objects
+        .wires
+        .retain(|wire| state.selection.objects.wires.contains(&wire.id) || on_sheet(wire.id));
     let selected_components = &state.selection.objects.components;
     let captured_wire_ids: HashSet<u64> = objects.wires.iter().map(|wire| wire.id).collect();
     for wire in &state.document.wires {
-        if captured_wire_ids.contains(&wire.id) || wire.points.len() < 2 {
+        if captured_wire_ids.contains(&wire.id) || wire.points.len() < 2 || !on_sheet(wire.id) {
             continue;
         }
         let last = wire.points.len() - 1;
@@ -1423,17 +1430,21 @@ fn capture_array_selection(
         .iter()
         .map(|component| component.id)
         .collect();
-    for junction in &state.document.junctions {
-        if objects.junctions.contains(&junction.pos)
-            || !objects
-                .wires
-                .iter()
-                .any(|wire| wire.contains_point(junction.pos))
-        {
-            continue;
-        }
-        objects.junctions.push(junction.pos);
-    }
+    let selected_junctions: Vec<Point> = state.selection.junctions.clone().collect();
+    objects.junctions = state
+        .document
+        .junctions
+        .iter()
+        .filter(|junction| on_sheet(junction.id))
+        .map(|junction| junction.pos)
+        .filter(|position| {
+            selected_junctions.contains(position)
+                || objects
+                    .wires
+                    .iter()
+                    .any(|wire| wire.contains_point(*position))
+        })
+        .collect();
     objects.junctions.sort_by_key(|point| (point.x, point.y));
     objects.junctions.dedup();
 

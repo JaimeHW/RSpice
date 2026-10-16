@@ -274,6 +274,49 @@ mod tests {
     }
 
     #[test]
+    fn the_array_takes_no_wire_or_junction_from_another_sheet() {
+        use crate::state::{Junction, Wire};
+        // R3 and R4 stand unconnected on the active sheet, under a selected
+        // wire. Sheet 2 reuses the layout: a wire joins its two parts at the
+        // same points, and a junction sits on the selected wire's line.
+        let mut state =
+            crate::schematic::view::sheet_visibility::two_sheet_state(&[1, 3, 5], &[2, 6]);
+        let r3 = Component::new(1, ComponentType::Resistor, Point::origin());
+        let r4 = Component::new(3, ComponentType::Resistor, Point::new(100, 0));
+        let r3_right = r3.terminal_positions()[1].1;
+        let r4_left = r4.terminal_positions()[0].1;
+        let drawing = state.schematic.document_mut_for_test();
+        drawing.components.extend([r3, r4]);
+        drawing.wires.push(Wire::segment(2, r3_right, r4_left));
+        drawing
+            .wires
+            .push(Wire::segment(5, Point::new(-50, -50), Point::new(150, -50)));
+        drawing
+            .junctions
+            .push(Junction::new(6, Point::new(50, -50)));
+
+        commit_array_of(&mut state, &[1, 3], &[5], Point::new(0, 200));
+
+        assert_eq!(state.dialogs.array_selection.canvas.preview_error, None);
+        let document = state.schematic.document();
+        assert_eq!(document.components.len(), 16);
+        assert!(
+            document
+                .wires
+                .iter()
+                .filter(|wire| wire.id != 2 && wire.id != 5)
+                .all(|wire| wire.points.iter().all(|point| point.y % 200 == 150)),
+            "only the selected wire is replicated: {:?}",
+            document.wires
+        );
+        assert_eq!(
+            document.junctions.len(),
+            1,
+            "Sheet 2's junction was replicated onto the array"
+        );
+    }
+
+    #[test]
     fn rejected_array_candidate_stays_armed_without_mutating_the_document() {
         let mut state = AppState::default();
         state
