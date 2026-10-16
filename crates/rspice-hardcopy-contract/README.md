@@ -14,7 +14,7 @@ winit, wgpu and rfd in its closure.
 
 ## What's in here
 
-- **`contract`** — identities (`HardcopyDocumentId`, `HardcopyPlanId`);
+- **`contract`**: identities (`HardcopyDocumentId`, `HardcopyPlanId`);
   `HardcopyDocumentKind` and the `HardcopyScope` values each kind admits;
   `ActiveHardcopySource`, the exact revision and content digest a plan is
   bound to. The setup: `PhysicalPageSetup` (paper, margins, orientation,
@@ -25,10 +25,10 @@ winit, wgpu and rfd in its closure.
   `HardcopyPlan` with its `PreviewPagination`; `HardcopyOutcome` and
   `HardcopyReceipt`, which records what the platform accepted and never
   claims more. The persisted `HardcopySetupStore` and `HardcopyReceiptLedger`.
-- **`mappings`** — `PrintMappingPresetCatalog`: reusable mapping tables owned
+- **`mappings`**: `PrintMappingPresetCatalog`, reusable mapping tables owned
   by the project or by a personal profile, routed by each table's declared
   save scope. Document-scoped mappings stay inside the document's setup.
-- **`sources`** — `HardcopySourceSet`: the persisted, digest-authenticated
+- **`sources`**: `HardcopySourceSet`, the persisted, digest-authenticated
   list of exact document revisions a multi-document print covers, and the
   source identity and validation helpers the document adapters share.
 

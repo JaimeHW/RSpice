@@ -15,7 +15,7 @@ eframe, winit, wgpu and rfd in its closure.
 
 ## What's in here
 
-- **`descriptor`** — `ProjectDescriptor`: the stable `ProjectId`, logical
+- **`descriptor`**: `ProjectDescriptor`, with the stable `ProjectId`, logical
   revision, name, root library and top cell, include search paths, the RSpice
   Cloud publication binding and the technology binding
   (`ProjectTechnologyBinding` and `ProjectSignedTechnologyPin`, re-exported
@@ -30,14 +30,14 @@ eframe, winit, wgpu and rfd in its closure.
   `PROJECT_CLOUD_PUBLICATION_BINDING_SCHEMA_VERSION`; bounded by
   `MAX_PROJECT_TECHNOLOGY_CHANGE_RECEIPTS` and
   `MAX_PROJECT_LIBRARY_MUTATION_RECEIPTS`.
-- **`library_publication`** — `ProjectLibraryPublicationReceipt`, the third
+- **`library_publication`**: `ProjectLibraryPublicationReceipt`, the third
   trail the descriptor carries: an immutable, hash-chained record of a
   published library snapshot (the exact digest and size of the validated
   project file it froze, revisions, identity and authority). The caller
   persists the artifact itself. Versioned
   by `PROJECT_LIBRARY_PUBLICATION_RECEIPT_SCHEMA_VERSION`; bounded by
   `MAX_PROJECT_LIBRARY_PUBLICATION_RECEIPTS`.
-- **`libraries`** — `ProjectLibraries`: the governed `LibraryCatalog` plus
+- **`libraries`**: `ProjectLibraries`, the governed `LibraryCatalog` plus
   the persisted selection and filter fields, serialized in the project file's
   existing `libraries` layout; the initial user library.
 

@@ -67,8 +67,8 @@ generated module is then the only device created for the card.
 | `Q` | Gummel-Poon (no `LEVEL`, `0/1/2`); VBIC (`4/9/11/12/13`) | Types `HICUML0`, `HICUML2`, `MEXTRAM505`, the `BJT505*`/`BJTD505*` variants and the `VBIC*` spellings; `LEVEL=11/12` under the Xyce dialect |
 | `D` | `LEVEL=0/1/2/3` | Types `DIODE_CMC` and `JUNCAP200`; `LEVEL=200/2002` |
 | `R` | Plain and model-card resistors | Types `R2_CMC`, `R2_ET_CMC` and `R3_CMC`; `LEVEL=1002/1003` |
-| `J` | JFET level 1; Parker-Skellern JFET2 (`LEVEL=2`) | — |
-| `Z` | MESFET `0/1`, MESA `2/3/4`, HFET1 `5`, HFET2 `6` | — |
+| `J` | JFET level 1; Parker-Skellern JFET2 (`LEVEL=2`) | None |
+| `Z` | MESFET `0/1`, MESA `2/3/4`, HFET1 `5`, HFET2 `6` | None |
 | `X` | The deck's subcircuits, then authored Verilog-A modules | Then a generated model by its model name |
 
 What fails closed, and how:
@@ -157,19 +157,19 @@ shooting `.PSS` and takes none.
 
 ## Entry points
 
-- `Netlist::parse` — deck text to a validated AST. The first line of a deck is
+- `Netlist::parse`: deck text to a validated AST. The first line of a deck is
   its title, never an element.
 - `Engine::new(SimulationConfig)` or `Engine::default()`, then its `run_*`
   methods. Each analysis family has variants that take an `&dyn AbortSignal`
   (`_with_abort`, `_and_abort`); frontends call those, which is what backs
   Ctrl-C in the CLI and `KeyboardInterrupt` in Python.
 - `SimulationConfig`, `ConvergenceConfig`, `ConvergencePreset` and
-  `SpiceDialect` — tolerances, convergence aids, and the dialect
+  `SpiceDialect`: tolerances, convergence aids, and the dialect
   (best-available, ngspice or Xyce) whose semantics apply.
-- `ResourceLimits` — the budget applied to untrusted input.
-- `execution::DeckPlan::from_netlist` — the analyses, run axes and coordinates
+- `ResourceLimits`: the budget applied to untrusted input.
+- `execution::DeckPlan::from_netlist`: the analyses, run axes and coordinates
   a deck authors, in the order every frontend executes them.
-- `SimulationError::descriptor()` — a stable code, category and retry flag, so
+- `SimulationError::descriptor()`: a stable code, category and retry flag, so
   a frontend classifies a failure without parsing its message.
 
 ## Solvers and convergence

@@ -11,14 +11,14 @@ author-controlled string is escaped at this boundary.
 
 ## What's in here
 
-- `src/lib.rs` — `render_bundle`, the bundle layout, dataset CSV, and HTML
+- `src/lib.rs`: `render_bundle`, the bundle layout, dataset CSV, and HTML
   escaping.
-- `page` — the `index.html` document and its external chrome
+- `page`: the `index.html` document and its external chrome
   (`src/assets/page.css`, `src/assets/page.js`).
-- `svg` — scenes rendered as inline SVG.
-- `hydration` — `ViewerRuntime`, the page loader (`src/assets/loader.js`), and
+- `svg`: scenes rendered as inline SVG.
+- `hydration`: `ViewerRuntime`, the page loader (`src/assets/loader.js`), and
   the digests it verifies before hydrating a figure.
-- `src/main.rs` and `build.rs` — the `rspice-publish` binary, which embeds the
+- `src/main.rs` and `build.rs`: the `rspice-publish` binary, which embeds the
   viewer runtime at build time.
 
 ## Boundaries

@@ -9,12 +9,12 @@ without the other depending on it.
 
 ## What's in here
 
-- `lib.rs` — `MeasurementUnit` (unknown, or a known symbol), `MeasurementUnits`
+- `lib.rs`: `MeasurementUnit` (unknown, or a known symbol), `MeasurementUnits`
   (the units of a published scalar, the scalar before projection, and its
   axis), and the operations over them: validation, conversion between
   compatible symbols, products, powers, and the interval unit of an affine
   scale.
-- `parse` — the private unit-expression parser. A symbol resolves to seven
+- `parse`: the private unit-expression parser. A symbol resolves to seven
   signed exponents (time, voltage, current, temperature, angle, logarithmic
   ratio, phase-noise density) plus a scale and an additive bias. Exponents are
   stored in half-unit steps, so `sqrt(Hz)` is an exact dimension rather than a
@@ -38,27 +38,27 @@ that fails any of them is rejected rather than truncated.
 - Deciding which unit a measurement carries is `rspice-core`'s
   `analysis::measure_units`, which re-exports these types rather than defining
   its own.
-- Formatting a value for a reader — engineering prefixes, decimal separators,
-  temperature and angle display preferences — is `rspice-app-types`'
+- Formatting a value for a reader (engineering prefixes, decimal separators,
+  temperature and angle display preferences) is `rspice-app-types`'
   `quantity`, which never rewrites a stored value.
 
 ## Entry points
 
-- `MeasurementUnit::known` — build a known unit from a symbol, rejecting
+- `MeasurementUnit::known`: build a known unit from a symbol, rejecting
   anything the grammar does not accept. `MeasurementUnit::Unknown` is the
   explicit record that a producer could not infer a unit; it is never a
   dimensionless one.
-- `MeasurementUnit::validate` and `MeasurementUnits::validate` — re-check a
+- `MeasurementUnit::validate` and `MeasurementUnits::validate`: re-check a
   deserialized unit, because the symbol travelled as text.
-- `MeasurementUnit::convert_value` — convert a value to a requested symbol.
+- `MeasurementUnit::convert_value`: convert a value to a requested symbol.
   It refuses incompatible dimensions, an unknown source unit, and any
   conversion whose result is not finite.
-- `MeasurementUnit::product` and `::power` — derive the unit of a computed
+- `MeasurementUnit::product` and `::power`: derive the unit of a computed
   quantity. Either returns `Unknown` rather than a wrong unit when an operand
   is unknown, carries a bias, or the result leaves the representable range.
-- `MeasurementUnit::interval` — the unit of a difference on an affine scale,
+- `MeasurementUnit::interval`: the unit of a difference on an affine scale,
   so a temperature span is kelvin rather than degrees Celsius.
-- `MeasurementUnit::same_scale_as` — whether two symbols have identical
+- `MeasurementUnit::same_scale_as`: whether two symbols have identical
   dimensions, scale and bias, which is the test for comparing two values
   without converting either.
 

@@ -29,7 +29,7 @@ Every pack here is tier `own`: authored by the RSpice project and covered by
 the repository LICENSE. The index machinery still carries the full license
 vocabulary (`permissive`, `copyleft`, `ambiguous`, `own`), because imported
 user content and Model Hub packs do have license diversity this tree does not
-exercise, and because `redistributable` — the shipping decision — is recorded
+exercise, and because `redistributable` (the shipping decision) is recorded
 per pack rather than inferred from the tier.
 
 `SHIPPING.toml` is the sole product allowlist. Repository presence does not

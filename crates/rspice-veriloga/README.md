@@ -44,7 +44,7 @@ runtime ABI.
 | `semantic` | Symbol table, type inference, discipline validation; rejects unsupported constructs with explicit errors rather than dropping them |
 | `ir` / `expr_converter` | Lowering to device-equation IR; the `autodiff` submodule generates derivative assignments by symbolic forward-mode differentiation, so Jacobians are analytic rather than finite-difference |
 | `canonical_ir` | Stable HIR/MIR artifact with validation, diagnostics and content digests: the single input every backend consumes |
-| `codegen` / `vm` | Emits the bytecode `CompiledModel` — assignment programs, per-stamp value and Jacobian programs, reactive programs, noise metadata — and the interpreter and per-instance context that run it |
+| `codegen` / `vm` | Emits the bytecode `CompiledModel` (assignment programs, per-stamp value and Jacobian programs, reactive programs, noise metadata), and the interpreter and per-instance context that run it |
 | `device` | `VerilogADevice`: the per-instance object the simulator drives |
 | `native/` | RSpice-owned native JIT: full native JIT or typed construction error, no bytecode fallback. x86-64 and desktop AArch64 on macOS, Linux and Windows, with platform-native executable memory and unwind registration |
 | `wasm_jit/` | Browser JIT: emits one WebAssembly module per model through `wasm-encoder` and validates it with `wasmparser`. The owning Web Worker compiles and instantiates it |
@@ -75,26 +75,26 @@ Every compile starts at `VerilogACompiler::new(CompilerOptions)`. The entry
 points differ along two axes: which artifact comes back, and where the source
 comes from.
 
-- `compile` / `compile_module` — source text to a bytecode `CompiledModel`.
+- `compile` / `compile_module`: source text to a bytecode `CompiledModel`.
   Compiling without a module name errors if the source declares more than one
   module, listing their names.
-- `compile_runtime` — source text to a `RuntimeCompileReport`: bytecode model
+- `compile_runtime`: source text to a `RuntimeCompileReport`, with bytecode model
   and canonical IR from one parse, cross-validated and qualified against the
   available backends. Nothing is written to disk.
-- `compile_canonical_ir` / `compile_canonical_ir_module` — the canonical
+- `compile_canonical_ir` / `compile_canonical_ir_module`: the canonical
   artifact alone, for a caller that only drives a JIT or the offline emitter.
-- `compile_file_with_metadata` / `compile_file_runtime_with_metadata` — the
+- `compile_file_with_metadata` / `compile_file_runtime_with_metadata`: the
   same products from a path, returning the include dependencies preprocessing
   discovered.
-- `compile_virtual_runtime` — the same products from a sealed
+- `compile_virtual_runtime`: the same products from a sealed
   `VirtualSourceBundle`, never touching the file system.
-- `VerilogADevice::try_new(name, model, nodes)` — the instance the simulator
+- `VerilogADevice::try_new(name, model, nodes)`: the instance the simulator
   drives directly, with no trait indirection: set parameters and simulation
   state, then `evaluate()` / `stamp()` / `stamp_reactive()` /
   `compute_jacobian()` inside the Newton loop, and `noise_sources()` for noise.
   `try_new_with_canonical_ir` is the form that admits the native JIT. The
   compiled model is shared, so a thousand instances of one model compile once.
-- `rust_backend::RustTranspiler` — the offline emitter; `rspice-veriloga-gen`
+- `rust_backend::RustTranspiler`: the offline emitter; `rspice-veriloga-gen`
   is the binary that drives it over a model tree.
 
 ```rust,ignore
@@ -123,7 +123,7 @@ carries tests pinning that.
   trailing name argument is a display label, not a correlation key.
 - **Indirect contributions**: `V(x): lhs == rhs` as constraint rows on a branch
   unknown, one per source, with analysis-constant control flow and an access
-  function — optionally under `ddt`, `idt` or `idtmod` — on the left side.
+  function (optionally under `ddt`, `idt` or `idtmod`) on the left side.
 - **System functions**: `$temperature`, `$vt`, `$thermal_vt`, `$abstime`,
   `$realtime`, `$simparam`, `$param_given`, `$port_connected`, `$mfactor`
   (with automatic multiplicity scaling), `$bound_step`, `$discontinuity`, and

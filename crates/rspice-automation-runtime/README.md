@@ -11,13 +11,13 @@ startup hook or ambient working directory.
 
 ## What's in here
 
-- `src/lib.rs` — `RuntimeTrustStore`, `VerifiedRuntime`, `NativeWorker`, the
+- `src/lib.rs`: `RuntimeTrustStore`, `VerifiedRuntime`, `NativeWorker`, the
   signed manifest types, and `runtime_inventory_digest`.
-- `worker/rspice_worker.py` — the trusted protocol worker the runtime runs.
+- `worker/rspice_worker.py`: the trusted protocol worker the runtime runs.
   Release assembly copies it into the runtime as `worker/rspice_worker.py`.
-- `src/bin/rspice-managed-runtime-packager.rs` — inventories and signs a
+- `src/bin/rspice-managed-runtime-packager.rs`: inventories and signs a
   staged runtime, then verifies the result with the code the application uses.
-- `src/bin/rspice-managed-runtime-qualifier.rs` — release qualification of one
+- `src/bin/rspice-managed-runtime-qualifier.rs`: release qualification of one
   signed runtime: verification, a validate and a run launch, hard
   cancellation and watchdog termination, reported as one JSON evidence line.
 

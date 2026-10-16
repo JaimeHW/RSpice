@@ -12,22 +12,22 @@ KLU C library.
 
 ## What's in here
 
-- **`sparse`** — `StaticMatrix` (real, frozen pattern), `ComplexMatrix` (the
+- **`sparse`**: `StaticMatrix` (real, frozen pattern), `ComplexMatrix` (the
   same structure with complex values, for the AC-family analyses),
   `TripletMatrix` for accumulating stamps, the `CscIndex`/`CscPatternToken`
   stamp handles, componentwise backward-error certification, explicit dense
   and extended-precision fallback solves, and `SparseLuSolver`, which keeps the
   pattern and analysis of the last matrix it solved until the pattern changes.
-- **`klu`** — `KluSolver`: maximum structural matching, block-triangular form
+- **`klu`**: `KluSolver`, with maximum structural matching, block-triangular form
   and AMD fill reduction inside each irreducible block, computed once per
   pattern; Gilbert-Peierls LU with diagonal-preference threshold pivoting
   confined to each block; allocation-free values-only refactorization on the
   stored pivots; and triangular solves, transposed and batched included.
-- **`dense_eigen`** — `qualified_dense_eigenspectrum`: a complete dense
+- **`dense_eigen`**: `qualified_dense_eigenspectrum`, a complete dense
   eigenspectrum with a per-eigenpair residual check. It lives here so faer's
   generic eigen code compiles in a package the workspace optimizes in its
   development and test profiles.
-- **Crate root** — `SolverOptions` and its policy enums
+- **Crate root**: `SolverOptions` and its policy enums
   (`RealSolverBackend`, `NumericFactorizationPolicy`, the circuit-LU
   orientation, scaling and robustness selectors), and `SolverError`.
 
@@ -41,17 +41,17 @@ KLU C library.
 
 ## Entry points
 
-- `StaticMatrix::from_triplets_with_options` — freeze a topology under an
+- `StaticMatrix::from_triplets_with_options`: freeze a topology under an
   explicit `SolverOptions`. `StaticMatrix::from_triplets` reads
   `SolverOptions::from_env()` instead (`RSPICE_SOLVER`, `RSPICE_PIVREL`,
   `RSPICE_PIVTOL`); embedding code should pass options so process
   environment cannot change numeric policy.
-- `StaticMatrix::get_index` and `stamp_direct` — resolve a stamp location once,
+- `StaticMatrix::get_index` and `stamp_direct`: resolve a stamp location once,
   then accumulate into it with no search.
-- `StaticMatrix::solve_into` — solve into a caller-owned vector, reusing it and
+- `StaticMatrix::solve_into`: solve into a caller-owned vector, reusing it and
   the internal workspaces after warm-up.
-- `ComplexMatrix::from_real_structure` — the complex twin of a real topology.
-- `StaticMatrixSolverCheckpoint` — the retained factor state a transient
+- `ComplexMatrix::from_real_structure`: the complex twin of a real topology.
+- `StaticMatrixSolverCheckpoint`: the retained factor state a transient
   checkpoint carries, so a resumed run continues on the same factors.
 
 ```rust

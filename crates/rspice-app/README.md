@@ -1,8 +1,8 @@
 # rspice-app
 
 The desktop and browser application host for RSpice, built on egui/eframe with
-a wgpu renderer. It binds the domain crates — design, project, simulation,
-results, model library, hardcopy — to host services, document lifecycles,
+a wgpu renderer. It binds the domain crates (design, project, simulation,
+results, model library, hardcopy) to host services, document lifecycles,
 commands and the workbench shell, and owns no circuit, dataset or engine
 semantics of its own. One state tree and one command registry serve desktop,
 browser and tablet, and the same crate builds both the native binary and the
@@ -14,7 +14,7 @@ wasm32 application image. Internal layering is checked by
 
 | Module | Contents |
 | :--- | :--- |
-| `workbench/` | The sole owner of application chrome — menu bar, contextual toolbar, activity rail, document strip, responsive docks and drawers, console, status bar, phone navigation and the central engineering surface — plus the commands, routing, documents, workflows and host lifecycle behind them |
+| `workbench/` | The sole owner of application chrome (menu bar, contextual toolbar, activity rail, document strip, responsive docks and drawers, console, status bar, phone navigation and the central engineering surface), plus the commands, routing, documents, workflows and host lifecycle behind them |
 | `state/` | The application-held domain owners and editor sessions: project workspace, library browser, model library and PDK configuration, Model Hub client, schematic and stimulus sessions |
 | `simulation/` | Analysis setup, source preparation and dispatch coordination |
 | `schematic/` | The application binding for the schematic and symbol editors |
@@ -61,8 +61,8 @@ editor with completion and a parameter tuner).
 - Design tokens, shared egui controls and the plot engine belong to
   `rspice-ui-kit`; schematic and symbol painting, editor interaction and SVG
   export belong to `rspice-schematic-editor`.
-- Portable value types — product identities, the instance-path grammar,
-  diagnostics records, property values and quantity policy — belong to
+- Portable value types (product identities, the instance-path grammar,
+  diagnostics records, property values and quantity policy) belong to
   `rspice-app-types`; this crate re-exports the ones its callers use.
 - Qualified desktop architectures take `rspice-core` with its default parallel
   and SIMD solver paths plus the native Verilog-A JIT; every other target takes
@@ -70,18 +70,18 @@ editor with completion and a parameter tuner).
 
 ## Entry points
 
-- `RSpiceApp` — the application root, constructed by both the desktop and the
+- `RSpiceApp`: the application root, constructed by both the desktop and the
   browser entry point. `main.rs` attaches the browser build to a
   `#rspice_canvas` element and requires a WebGPU-capable browser.
 - `publish_organization_drawing_sheet_package`,
   `inspect_drawing_sheet_package`, `verify_published_drawing_sheet_package` and
-  `drawing_sheet_publisher_public_key` — the signed drawing-sheet package
+  `drawing_sheet_publisher_public_key`: the signed drawing-sheet package
   contract. Private keys are accepted only by `tools/rspice-sheet-publisher`.
-- `ModelHub` with `ModelHubStore` and `ModelHubTransport` — the
+- `ModelHub` with `ModelHubStore` and `ModelHubTransport`: the
   model-distribution client: signed catalog, verified installation and the
   part shelf over foundation, installed, catalog and retained parts.
 - `RSpiceApp::install_project_library_lock_snapshot` with
-  `ProjectLibraryLockSnapshot` — the trusted in-process collaboration boundary
+  `ProjectLibraryLockSnapshot`: the trusted in-process collaboration boundary
   for revision-bound project-library edit locks.
 
 ## Feature flags

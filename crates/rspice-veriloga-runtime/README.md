@@ -45,19 +45,19 @@ crate, and an edge back to the engine would close a cycle.
 
 The callers are generated code and the engine-side adapter in `rspice-core`.
 
-- `GeneratedVerilogAModelDescriptor` — a model's identity and external
+- `GeneratedVerilogAModelDescriptor`: a model's identity and external
   contract: model and module names, source and checkpoint identities,
   terminals, parameters and internal nodes.
-- `GeneratedParameterAssignment` and `GeneratedParameterOrigin` — a value with
+- `GeneratedParameterAssignment` and `GeneratedParameterOrigin`: a value with
   its model-card or instance provenance; a value written through the wrong
   storage class is rejected, because `$param_given` depends on it.
-- `validate_generated_parameter` — a declared parameter's finiteness, integer
+- `validate_generated_parameter`: a declared parameter's finiteness, integer
   type, inclusive or exclusive bounds, and excluded values.
-- `GeneratedEvalContext`, `GeneratedStamper` and `GeneratedReactiveStamper` —
+- `GeneratedEvalContext`, `GeneratedStamper` and `GeneratedReactiveStamper`:
   what one evaluation reads, and where its contributions go.
-- `rspice_eval_ddt` and `rspice_eval_idt` — the analog operators over accepted
+- `rspice_eval_ddt` and `rspice_eval_idt`: the analog operators over accepted
   history.
-- `GeneratedVerilogAInstanceCheckpoint` — the per-instance state a transient
+- `GeneratedVerilogAInstanceCheckpoint`: the per-instance state a transient
   checkpoint carries.
 
 ## Persisted identities

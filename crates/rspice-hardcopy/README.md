@@ -16,13 +16,13 @@ refuses egui, eframe, winit, wgpu and rfd in its closure.
 
 ## What's in here
 
-- **`sources`** — the document adapters. Each resolves one kind of document
+- **`sources`**: the document adapters. Each resolves one kind of document
   into a `ResolvedHardcopyDocument`: its `ActiveHardcopySource` authority, a
   `HardcopySemanticDocument` (schematic, symbol, plot, result summary, report
   or aggregate), its bounds and its natural content extent in micrometres.
   `PreparedRetainedHardcopyResolution` captures the inputs a worker needs and
   round-trips them as a bounded snapshot.
-- **`render`** — `HardcopyRenderer`. The scene is validated before a byte is
+- **`render`**: `HardcopyRenderer`. The scene is validated before a byte is
   written: every primitive lies inside the page's content extent and every
   glyph is covered by the embedded IBM Plex faces from
   [`assets/fonts/`](../../assets/fonts); a page
@@ -30,7 +30,7 @@ refuses egui, eframe, winit, wgpu and rfd in its closure.
   krilla, and PDF/A-2b is returned only after krilla's archival validator
   accepts the complete document. Publication timestamps are explicit, never
   the wall clock, so output is reproducible.
-- **`worker`** — the browser-worker protocol, versioned by
+- **`worker`**: the browser-worker protocol, versioned by
   `HARDCOPY_WORKER_PROTOCOL_VERSION`, for source resolution, preview and
   publication. A response is bound to the plan digest and the part count it
   was issued for; per-page SVG and PNG parts can be packaged as one
