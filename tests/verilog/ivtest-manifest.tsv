@@ -145,7 +145,7 @@ br1006	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supporte
 br1007	vlg	gold	-	excluded:flag-Wselect-range	
 br1008	vlg	gold	L1	fail	differs from the gold file at line 1 (1 lines against 1)
 br1015a	vlg	ce	-	excluded:systemverilog:^=	
-br1019	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `sub1.monitor` is not a continuous net, branch, parameter or analog function
+br1019	vlg	passed	L4	pass	PASSED
 br1027	vlg	passed	L3	pass	PASSED
 br1027a	vlg	ce	L3	pass	language error: Parse error: Expected `input`, `output` or `inout` before a routine argument declaration (IEEE 1364-2005 section 10.2.1), found Identifier
 br1027c	vlg	ce	L3	pass	language error: Parse error: Expected `input`, `output` or `inout` before a routine argument declaration (IEEE 1364-2005 section 10.2.1), found Integer
@@ -212,10 +212,10 @@ br_gh1225b	vlg	ce	L1	refused:for	Parse error: Unsupported module item: for
 br_gh1225c	vlg	ce	L1	refused:for	Parse error: Unsupported module item: for
 br_gh1237	vlg	passed	L1	pass	PASSED
 br_gh127a	vlg	gold	L1	pass	matches the gold file
-br_gh127b	vlg	gold	L1	fail	compile error: Semantic error: Type mismatch in port `in` of instance `copy1`; IEEE 1364-2005 section 12.3.9 connects a port to a differently sized net by truncating or extend...
+br_gh127b	vlg	gold	L1	refused:port-width-conversion	Semantic error: Unsupported feature: port width conversion: port `in` of instance `copy1` is 2 bits and `i1` is 1 bits; IEEE 1364-2005 section 12.3.9 connects a...
 br_gh127c	vlg	gold	L1	fail	compile error: Semantic error: Invalid contribution: cannot contribute to `out`, which module `copy` declares an `input` port; IEEE 1364-2005 section 12.3.9.1 drives an input ...
-br_gh127d	vlg	gold	L1	fail	compile error: Semantic error: Type mismatch in port `out` of instance `copy1`; IEEE 1364-2005 section 12.3.9 connects a port to a differently sized net by truncating or exten...
-br_gh127e	vlg	gold	L1	fail	compile error: Semantic error: Type mismatch in port `out` of instance `copy1`; IEEE 1364-2005 section 12.3.9 connects a port to a differently sized net by truncating or exten...
+br_gh127d	vlg	gold	L1	refused:port-width-conversion	Semantic error: Unsupported feature: port width conversion: port `out` of instance `copy1` is 2 bits and `o1` is 1 bits; IEEE 1364-2005 section 12.3.9 connects ...
+br_gh127e	vlg	gold	L1	refused:port-width-conversion	Semantic error: Unsupported feature: port width conversion: port `out` of instance `copy1` is 2 bits and `o1` is 1 bits; IEEE 1364-2005 section 12.3.9 connects ...
 br_gh127f	vlg	gold	L1	fail	compile error: Semantic error: Invalid contribution: cannot contribute to `out`, which module `copy` declares an `input` port; IEEE 1364-2005 section 12.3.9.1 drives an input ...
 br_gh13	vlg	passed	L1	pass	PASSED
 br_gh14	vlg	passed	L1	pass	PASSED
@@ -240,7 +240,7 @@ br_gh244b	vlg	passed	L1	pass	PASSED
 br_gh25a	vlg	ce	L3	pass	language error: Parse error: Unexpected token: Function
 br_gh25b	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
 br_gh26	vlg	ce	L1	fail	compiled without error; ran to quiescence
-br_gh277a	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `dut.a` is not a continuous net, branch, parameter or analog function
+br_gh277a	vlg	passed	L4	pass	PASSED
 br_gh28	vlg	passed	L1	refused:module-item	Parse error: Unsupported module item: \test_str="hello"
 br_gh283a	vlg	passed	L1	pass	PASSED
 br_gh283b	vlg	passed	L1	pass	PASSED
@@ -277,7 +277,7 @@ br_gh632c	vlg	passed	L1	pass	PASSED
 br_gh674	vlg	passed	L3	refused:feature	Semantic error: Unsupported feature: parameter `av0`: an array declared inside a task or function has no executable form yet
 br_gh7	vlg	passed	L1	pass	PASSED
 br_gh732	vlg	gold	L6	fail	compile error: Parse error: Expected LParen, found Assign_
-br_gh782c	vlg	passed	L4	fail	compile error: Parse error: Unexpected token: Identifier
+br_gh782c	vlg	passed	L4	refused:compiler-directive	Parse error: Unsupported compiler directive: `unconnected_drive
 br_gh782d	vlg	passed	L4	pass	PASSED
 br_gh782e	vlg	passed	L4	fail	compile error: Parse error: Unexpected token: StringLiteral
 br_gh782f	vlg	passed	L7	fail	compile error: I/O error: Preprocessor error: line 3: unsupported `default_nettype `; supported net defaults are wire, tri and none
@@ -288,7 +288,7 @@ br_gh8	vlg	passed	L1	pass	PASSED
 br_gh827	vlg	gold	L1	pass	matches the gold file
 br_gh889	vlg	gold	-	excluded:sdf-annotate	
 br_gh9	vlg	passed	L1	pass	PASSED
-br_gh956a	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: analog port 'o' of instance 'sub.i' connects discrete net 'x' without a connect module
+br_gh956a	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: analog port 'o' of instance 'top.i1.i' connects discrete net 'x' without a connect module
 br_gh956b	vlg	ce	L7	refused:tranif1	Parse error: Unsupported module item: tranif1
 br_gh99a	vlg	passed	L1	pass	PASSED
 br_gh99b	vlg	passed	L1	pass	PASSED
@@ -416,10 +416,10 @@ decl_assign1	vlg	passed	L3	pass	PASSED
 def_nettype	vlg	passed	L7	fail	compile error: I/O error: Preprocessor error: line 118: unsupported `default_nettype tri0`; supported net defaults are wire, tri and none
 def_nettype_none	vlg	ce	L1	refused:implicit-net-declaration	Parse error: Unsupported implicit net declaration: `b` requires a net declaration under `default_nettype none`
 define1	vlg	passed	L1	pass	PASSED
-defparam	vlg	passed	L4	refused:hierarchical-reference	testbench gap: no root selection (-s main); Semantic error: Unsupported feature: hierarchical reference: `testmodA.value0` is not a continuous net, branch, parameter or analog function
+defparam	vlg	passed	L4	pass	testbench gap: no root selection (-s main); PASSED
 defparam2	vlg	gold	L4	refused:defparam	Parse error: Unsupported defparam target: an indexed scope; a `defparam` reaching into an instance array or a generate block (IEEE 1364-2005 section 12.2.1) is ...
 defparam3	vlg	gold	L4	refused:defparam	Parse error: Unsupported defparam target: an indexed scope; a `defparam` reaching into an instance array or a generate block (IEEE 1364-2005 section 12.2.1) is ...
-defparam3.5	vlg	passed	L4	refused:wire	Semantic error: Unsupported feature: port `out0` of instance `testmodA` is connected to `out0`, which is not a declared discrete-domain signal; this compiler do...
+defparam3.5	vlg	passed	L4	refused:structural-vector-port	Semantic error: Unsupported feature: structural vector port: port 'NameB.out0' is declared with no net or variable of its own, in a module that declares no disc...
 defparam4	vlg	gold	L4	refused:if	Parse error: Unsupported module item: if
 delay	vlg	gold	L1	pass	matches the gold file
 delay2	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
@@ -461,11 +461,11 @@ escape1	vlg	passed	-	excluded:nonstandard-systf:$I178
 escape2a	vlg	co	L1	pass	compiled
 escape2b	vlg	co	L1	pass	compiled
 escape2c	vlg	co	L1	pass	compiled
-escape3	vlg	passed	L1	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `.cpu3` is not a continuous net, branch, parameter or analog function
-escape4	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `bot.r` is not a continuous net, branch, parameter or analog function
-escape4b	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `bot.m` is not a continuous net, branch, parameter or analog function
+escape3	vlg	passed	L1	pass	PASSED
+escape4	vlg	passed	L4	pass	PASSED
+escape4b	vlg	passed	L4	pass	PASSED
 event2	vlg	passed	L3	pass	PASSED
-event3	vlg	gold	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `m1.e2` is not a continuous net, branch, parameter or analog function
+event3	vlg	gold	L4	pass	matches the gold file
 event3.15	vlg	passed	L3	pass	PASSED
 event_array	vlg	ce	L3	pass	language error: Semantic error: Invalid expression: `->` triggers a named event; write `-> name`
 event_list	vlg	passed	L3	pass	PASSED
@@ -539,7 +539,7 @@ genloop	vlg	passed	L1	refused:for	Parse error: Unsupported module item: for
 genvar_scopes	vlg	passed	L1	refused:for	Parse error: Unsupported module item: for
 hello1	vlg	passed	L1	pass	PASSED
 hier_ref_error	vlg	ce	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `my_task` is not declared in this module or its generated ancestors or enclosing instances
-hierspace	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `inst.x` is not a continuous net, branch, parameter or analog function
+hierspace	vlg	passed	L4	pass	PASSED
 idiv1	vlg	passed	L1	pass	PASSED
 idiv2	vlg	passed	L3	pass	PASSED
 idiv3	vlg	gold	L1	pass	matches the gold file
@@ -552,7 +552,7 @@ include1	vlg	passed	L1	fail	nothing to run: module `ivltests/include1.v` declare
 include2	vlg	passed	L1	fail	nothing to run: module `ivltests/include2.v` declares no digital nets, processes or drivers
 include3	vlg	passed	L1	fail	nothing to run: module `ivltests/include3.v` declares no digital nets, processes or drivers
 indef_width_concat	vlg	ce	L1	fail	compiled without error; ran to quiescence
-initmod	vlg	gold	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `M0.r` is not a continuous net, branch, parameter or analog function
+initmod	vlg	gold	L4	refused:feature	Semantic error: Unsupported feature: port `oB` of instance `M1` is connected to an expression; IEEE 1364-2005 section 12.3.9 permits one, and this compiler conn...
 initmod2	vlg	gold	L1	pass	matches the gold file
 inout	vlg	passed	L1	fail	compile error: Semantic error: Duplicate symbol: 'a' already defined
 inout2	vlg	passed	L1	pass	PASSED
@@ -712,7 +712,7 @@ parameter_override_invalid5	vlg	ce	L4	pass	language error: Semantic error: Undec
 parameter_override_invalid6	vlg	ce	L4	pass	language error: Semantic error: Invalid expression: `defparam i_a.B` assigns `B`, a `localparam` of module `a`; IEEE 1364-2005 section 12.2 lets no override reach a local param...
 patch1268	vlg	passed	L1	pass	PASSED
 pca1	vlg	passed	L1	pass	PASSED
-pic	vlg	gold	L5	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `piccpu_inst.d` is not a continuous net, branch, parameter or analog function
+pic	vlg	gold	L5	racy	passes in reverse order only; differs from the gold file at line 1 (200 lines against 200)
 port-test2	vlg	passed	L1	fail	compile error: Parse error: Expected port name, found Comma
 port-test3	vlg	ce	L1	pass	language error: Semantic error: Port 'data' is declared both `inout` and `reg`; IEEE 1364-2005 section 12.3.3 lets only an output port be a variable
 port-test4a	vlg	ce	L1	pass	language error: Parse error: Expected port name, found RParen
@@ -737,7 +737,7 @@ pr1008	vlg	gold	L1	pass	matches the gold file
 pr1022	vlg	passed	L1	pass	PASSED
 pr1024	vlg	passed	L3	pass	PASSED
 pr1026	vlg	gold	L1	racy	passes in reverse order only; differs from the gold file at line 1 (31 lines against 31)
-pr1029	vlg	passed	L1	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `.eric` is not a continuous net, branch, parameter or analog function
+pr1029	vlg	passed	L1	pass	PASSED
 pr1032	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
 pr1033	vlg	gold	L1	pass	matches the gold file
 pr1065	vlg	gold	L5	pass	matches the gold file
@@ -755,7 +755,7 @@ pr1403406	vlg	gold	L1	refused:$printtimescale	Semantic error: Unsupported featur
 pr1403406a	vlg	gold	-	excluded:flag-fivltests/pr1403406-1.cf	
 pr1403406b	vlg	gold	-	excluded:flag-fivltests/pr1403406-1.cf	
 pr142	vlg	passed	L3	pass	PASSED
-pr1421777	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `dut.tmp` is not a continuous net, branch, parameter or analog function
+pr1421777	vlg	passed	L4	pass	PASSED
 pr1444055	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
 pr1449749a	vlg	passed	L1	pass	PASSED
 pr1455873	vlg	passed	L1	pass	PASSED
@@ -842,7 +842,7 @@ pr1697250	vlg	passed	L1	pass	PASSED
 pr1697732	vlg	passed	L1	pass	PASSED
 pr1698499	vlg	gold	-	excluded:nonstandard-systf:$D_IN	
 pr1698658	vlg	gold	L1	pass	matches the gold file
-pr1698659	vlg	gold	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `lwr.lowervar` is not a continuous net, branch, parameter or analog function
+pr1698659	vlg	gold	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `othertop` is not declared in this module or its generated ancestors or enclosing instances
 pr1698820	vlg	gold	-	excluded:systemverilog:var	
 pr1699444	vlg	gold	L1	pass	matches the gold file
 pr1699519	vlg	gold	L1	fail	differs from the gold file at line 3 (4 lines against 4)
@@ -872,7 +872,7 @@ pr1742910	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS_UNSIZED__); PAS
 pr1745005	vlg	passed	-	excluded:systemverilog:ref	
 pr1746401	vlg	passed	L1	pass	PASSED
 pr1746848	vlg	gold	L1	pass	matches the gold file
-pr1752353	vlg	passed	L1	fail	compile error: Semantic error: Type mismatch in port `out` of instance `U1`; IEEE 1364-2005 section 12.3.9 connects a port to a differently sized net by truncating or extendin...
+pr1752353	vlg	passed	L1	refused:port-width-conversion	Semantic error: Unsupported feature: port width conversion: port `out` of instance `U1` is 32 bits and `tmp` is 8 bits; IEEE 1364-2005 section 12.3.9 connects a...
 pr1752823a	vlg	gold	L1	pass	matches the gold file
 pr1752823b	vlg	gold	L1	refused:statement	Parse error: Verilog-AMS digital construct not yet supported: `inf`
 pr1755593	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
@@ -920,8 +920,8 @@ pr1855504	vlg	gold	L1	racy	passes in source order only; differs from the gold fi
 pr1861212a	vlg	gold	L1	racy	passes in reverse order only; differs from the gold file at line 1 (2 lines against 3)
 pr1862744a	vlg	passed	-	excluded:flag-Winfloop	
 pr1862744b	vlg	ce	-	excluded:flag-Winfloop	
-pr1866215	vlg	gold	L1	fail	compile error: Semantic error: Invalid expression: physical port 'B0.CH' requires 1 lanes, but its connection supplies 7
-pr1866215b	vlg	gold	L1	fail	compile error: Semantic error: Invalid expression: physical port 'B0.CH' requires 1 lanes, but its connection supplies 16
+pr1866215	vlg	gold	L1	refused:structural-vector-port	Semantic error: Unsupported feature: structural vector port: port 'B0.CH' is declared with no net or variable of its own, in a module that declares no discrete-...
+pr1866215b	vlg	gold	L1	refused:structural-vector-port	Semantic error: Unsupported feature: structural vector port: port 'B0.CH' is declared with no net or variable of its own, in a module that declares no discrete-...
 pr1867161a	vlg	gold	L1	pass	matches the gold file
 pr1867161b	vlg	gold	L1	racy	passes in source order only; differs from the gold file at line 2 (5 lines against 6)
 pr1867332	vlg	co	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
@@ -948,7 +948,7 @@ pr1892959b	vlg	passed	L3	pass	PASSED
 pr1898983	vlg	gold	L4	refused:module-instance	Parse error: Unsupported module instance `sm`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler elabo...
 pr1901125	vlg	passed	L3	pass	PASSED
 pr1903157	vlg	co	L1	pass	compiled
-pr1903324	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `tstr.data_in_array` is not a continuous net, branch, parameter or analog function
+pr1903324	vlg	passed	L4	pass	PASSED
 pr1903343	vlg	gold	L3	pass	matches the gold file
 pr1903520	vlg	passed	L1	pass	PASSED
 pr1907192	vlg	passed	L4	pass	PASSED
@@ -1034,8 +1034,8 @@ pr2109179	vlg	passed	L1	pass	PASSED
 pr2117473	vlg	passed	L1	pass	PASSED
 pr2117488	vlg	passed	L1	pass	PASSED
 pr2119622	vlg	gold	L1	pass	matches the gold file
-pr2121536	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `lwr.lout` is not a continuous net, branch, parameter or analog function
-pr2121536b	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `lwr.lout` is not a continuous net, branch, parameter or analog function
+pr2121536	vlg	passed	L4	refused:port-width-conversion	Semantic error: Unsupported feature: port width conversion: port `lrtn` of instance `lwr` is 32 bits and `res` is 64 bits; IEEE 1364-2005 section 12.3.9 connect...
+pr2121536b	vlg	passed	L4	refused:port-width-conversion	Semantic error: Unsupported feature: port width conversion: port `lrtn` of instance `lwr` is 32 bits and `res` is 64 bits; IEEE 1364-2005 section 12.3.9 connect...
 pr2123190	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
 pr2132552	vlg	gold	L3	refused:task	Parse error: Unsupported task: a parameter declared inside a task or function; declare it in the module
 pr2136787	vlg	gold	L1	pass	matches the gold file
@@ -1072,7 +1072,7 @@ pr2215342	vlg	passed	-	excluded:flag-grelative-include
 pr2219441	vlg	passed	L4	refused:module-instance	Parse error: Unsupported module instance `child`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler el...
 pr2219441b	vlg	passed	L4	refused:module-instance	Parse error: Unsupported module instance `child`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler el...
 pr2224845	vlg	passed	L1	pass	PASSED
-pr2224949	vlg	passed	L1	fail	compile error: Semantic error: Type mismatch in port `b` of instance `dut`; IEEE 1364-2005 section 12.3.9 connects a port to a differently sized net by truncating or extending...
+pr2224949	vlg	passed	L1	refused:port-width-conversion	Semantic error: Unsupported feature: port width conversion: port `b` of instance `dut` is 16 bits and `b` is 64 bits; IEEE 1364-2005 section 12.3.9 connects a p...
 pr2233180	vlg	passed	L1	pass	PASSED
 pr2233180b	vlg	passed	L1	pass	PASSED
 pr2233180c	vlg	passed	L1	pass	PASSED
@@ -1092,8 +1092,8 @@ pr2305307	vlg	passed	L4	fail	no PASSED line (3 output lines)
 pr2305307b	vlg	passed	-	excluded:systemverilog:rand	
 pr2305307c	vlg	passed	L1	fail	no PASSED line (3 output lines)
 pr2306259	vlg	passed	L1	pass	PASSED
-pr2350934	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `block` is not declared in this module or its generated ancestors or enclosing instances
-pr2350934b	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `block` is not declared in this module or its generated ancestors or enclosing instances
+pr2350934	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `f` is not declared in the selected scope
+pr2350934b	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `f` is not declared in the selected scope
 pr2350988	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `f` is not declared in the selected scope
 pr2352834	vlg	passed	L1	pass	PASSED
 pr2355304	vlg	passed	L1	pass	PASSED
@@ -1129,7 +1129,7 @@ pr2597278	vlg	passed	L1	racy	passes in source order only; no PASSED line (1 outp
 pr2597278b	vlg	ce	L1	pass	language error: Semantic error: Invalid contribution: cannot contribute to `icim`, which is a `wire`; IEEE 1364-2005 section 6.2 lets a procedural assignment write only a varia...
 pr2605006	vlg	passed	L1	pass	PASSED
 pr2673846	vlg	passed	L1	pass	PASSED
-pr2688910	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `.passed` is not a continuous net, branch, parameter or analog function
+pr2688910	vlg	passed	L4	pass	PASSED
 pr2709097	vlg	passed	L5	pass	PASSED
 pr2715547	vlg	passed	L1	pass	PASSED
 pr2715558	vlg	gold	L7	fail	compile error: Parse error: Expected assignment target, found LParen
@@ -1335,12 +1335,12 @@ pr547	vlg	gold	L1	pass	testbench gap: no defines (__ICARUS__); matches the gold 
 pr556	vlg	gold	L1	pass	matches the gold file
 pr564	vlg	passed	L1	pass	PASSED
 pr569	vlg	gold	L1	pass	matches the gold file
-pr572	vlg	gold	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `.toplevel_event` is not a continuous net, branch, parameter or analog function
-pr572b	vlg	gold	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `.toplevel_event` is not a continuous net, branch, parameter or analog function
+pr572	vlg	gold	L4	pass	matches the gold file
+pr572b	vlg	gold	L4	pass	matches the gold file
 pr578	vlg	passed	L3	pass	PASSED
 pr584	vlg	gold	L1	pass	matches the gold file
 pr585	vlg	passed	L1	pass	PASSED
-pr587	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `u_bar.x` is not a continuous net, branch, parameter or analog function
+pr587	vlg	passed	L4	pass	PASSED
 pr590	vlg	gold	L1	racy	passes in reverse order only; differs from the gold file at line 4 (8 lines against 9)
 pr594	vlg	gold	L1	pass	matches the gold file
 pr596	vlg	gold	L1	fail	differs from the gold file at line 1 (50 lines against 49)
@@ -1377,7 +1377,7 @@ pr848	vlg	passed	L1	pass	PASSED
 pr856	vlg	passed	L1	pass	PASSED
 pr859	vlg	passed	L1	pass	PASSED
 pr860	vlg	passed	L1	pass	PASSED
-pr872	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `u1.bar` is not a continuous net, branch, parameter or analog function
+pr872	vlg	passed	L4	pass	PASSED
 pr902	vlg	gold	L1	pass	matches the gold file
 pr905	vlg	gold	L1	pass	matches the gold file
 pr910	vlg	gold	L1	racy	passes in reverse order only; differs from the gold file at line 1 (5 lines against 5)
@@ -1406,7 +1406,7 @@ ptest007	vlg	passed	L1	pass	PASSED
 ptest008	vlg	passed	L1	pass	PASSED
 ptest009	vlg	passed	L1	pass	PASSED
 ptest010	vlg	passed	L1	fail	compile error: Parse error: Expected Semicolon, found Comma
-ptest011	vlg	passed	L1	fail	compile error: Semantic error: Invalid expression: physical port 'b1.x' requires 1 lanes, but its connection supplies 4
+ptest011	vlg	passed	L1	refused:structural-vector-port	Semantic error: Unsupported feature: structural vector port: port 'b1.x' is declared with no net or variable of its own, in a module that declares no discrete-d...
 pullupdown	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
 pullupdown2	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
 pullupdown3	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
@@ -1487,10 +1487,10 @@ scanf4	vlg	passed	L5	pass	PASSED
 sched1	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
 sched2	vlg	passed	L1	pass	PASSED
 schedule	vlg	passed	L3	pass	PASSED
-scope1	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `U1.var1` is not a continuous net, branch, parameter or analog function
+scope1	vlg	passed	L4	pass	PASSED
 scope2	vlg	passed	L1	pass	PASSED
 scope2b	vlg	ce	L1	fail	compiled without error; ran to tick-ceiling
-scope4	vlg	passed	L5	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `test3.test4` is not a continuous net, branch, parameter or analog function
+scope4	vlg	passed	L5	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `test2.test3` is not a continuous net, branch, parameter or analog function
 scope5	vlg	passed	-	excluded:systemverilog:bit	
 scoped_events	vlg	gold	L4	refused:parameter	Parse error: Verilog-AMS digital construct not yet supported: `parameter`
 sdf1	vlg	gold	-	excluded:sdf-annotate	
@@ -1538,7 +1538,7 @@ select6	vlg	passed	L4	pass	PASSED
 select7	vlg	passed	L4	pass	PASSED
 select8	vlg	passed	L4	pass	PASSED
 select_padding	vlg	passed	L1	pass	PASSED
-shellho1	vlg	gold	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `top` is not declared in this module or its generated ancestors or enclosing instances
+shellho1	vlg	gold	L4	pass	matches the gold file
 shift1	vlg	gold	L1	pass	matches the gold file
 shift2	vlg	passed	L1	pass	PASSED
 shift3	vlg	passed	L1	pass	PASSED
@@ -1594,7 +1594,7 @@ supply2	vlg	passed	L7	refused:supply0	Parse error: Verilog-AMS digital construct
 switch_primitives	vlg	gold	L7	refused:bufif0	Parse error: Unsupported module item: bufif0
 sys_func_task_error	vlg	re	-	excluded:nonstandard-systf:$this_icarus_call_should_not_exist	
 talu	vlg	passed	L1	pass	PASSED
-task-scope	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `n.r` is not a continuous net, branch, parameter or analog function
+task-scope	vlg	passed	L4	pass	PASSED
 task3.14A	vlg	passed	L3	pass	PASSED
 task3.14B	vlg	passed	L3	pass	PASSED
 task3.14C	vlg	passed	L3	pass	PASSED
@@ -1679,7 +1679,7 @@ tranif1	vlg	gold	L7	fail	compile error: Parse error: Expected assignment target,
 tri0	vlg	passed	L7	refused:tri0	Parse error: Verilog-AMS digital construct not yet supported: `tri0`
 tri0b	vlg	passed	L7	refused:tri0	Parse error: Verilog-AMS digital construct not yet supported: `tri0`
 tri1	vlg	passed	L7	refused:tri1	Parse error: Verilog-AMS digital construct not yet supported: `tri1`
-tri2	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `s.p` is not a continuous net, branch, parameter or analog function
+tri2	vlg	passed	L4	pass	PASSED
 tri3	vlg	passed	L7	refused:tri1	Parse error: Verilog-AMS digital construct not yet supported: `tri1`
 triand	vlg	passed	L7	refused:triand	Parse error: Verilog-AMS digital construct not yet supported: `triand`
 trior	vlg	passed	L7	refused:trior	Parse error: Verilog-AMS digital construct not yet supported: `trior`
@@ -1714,7 +1714,7 @@ unary_or	vlg	passed	L1	pass	PASSED
 unary_xnor1	vlg	passed	L1	pass	PASSED
 unary_xnor2	vlg	passed	L1	pass	PASSED
 unary_xor	vlg	passed	L1	pass	PASSED
-uncon_drive	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `.pass` is not a continuous net, branch, parameter or analog function
+uncon_drive	vlg	passed	L4	refused:compiler-directive	Parse error: Unsupported compiler directive: `unconnected_drive
 undef	vlg	gold	L1	fail	compile error: Parse error: Invalid expression
 undef_lval_select	vlg	passed	L4	pass	testbench gap: no defines (__ICARUS__); PASSED
 undef_lval_select2	vlg	passed	L4	pass	testbench gap: no defines (__ICARUS__); PASSED
@@ -1741,7 +1741,7 @@ varlsfht2	vlg	passed	L3	pass	PASSED
 varrshft	vlg	passed	L1	pass	PASSED
 varrshft1	vlg	passed	L1	pass	PASSED
 varrshft2	vlg	passed	L3	pass	PASSED
-vcd-dup	vlg	gold	L5	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `m2.c1` is not a continuous net, branch, parameter or analog function
+vcd-dup	vlg	gold	L5	refused:$dumpvars	Semantic error: Unsupported feature: `$dumpvars` of a hierarchically named signal is not supported yet
 vector	vlg	gold	L1	pass	matches the gold file
 verify_two_var_delays	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: separate rise, fall and turn-off delays (IEEE 1364-2005 section 7.14); write a single delay expression instead
 vvp_scalar_value	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
@@ -1876,7 +1876,7 @@ br_gh1155	vvp	passed	L1	pass	PASSED
 br_gh1163	vvp	passed	-	excluded:systemverilog-systf:$bits	
 br_gh1180a	vvp	ce	-	excluded:flag-g2009	
 br_gh1180b	vvp	ce	-	excluded:flag-g2009	
-br_gh1181	vvp	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `dut.data_bus` is not a continuous net, branch, parameter or analog function
+br_gh1181	vvp	passed	L4	pass	PASSED
 br_gh1184	vvp	-	-	excluded:type-EF	
 br_gh1242	vvp	gold	L1	pass	matches the gold file
 br_gh1248	vvp	gold	-	excluded:flag-ginterconnect	
@@ -1923,7 +1923,7 @@ constfunc4_ams	vvp	passed	-	excluded:flag-gverilog-ams
 constfunc6_ams	vvp	passed	-	excluded:nonstandard-systf:$abs	
 constfunccall1	vvp	passed	L3	pass	PASSED
 constfunccall2	vvp	passed	-	excluded:flag-g2009	
-constfunccall3	vvp	ce	L4	refused:$rspice_reference_0	Semantic error: Unsupported feature: call to `$rspice_reference_0` inside a discrete-domain expression is not supported yet
+constfunccall3	vvp	ce	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `m1` is not declared in this module or its generated ancestors or enclosing instances
 decl_before_use1	vvp	ce	L1	fail	compiled without error; ran to quiescence
 decl_before_use2	vvp	ce	L1	fail	compiled without error; ran to quiescence
 decl_before_use3	vvp	ce	L3	pass	language error: Semantic error: Invalid expression: the named event `e` is used before its declaration (IEEE 1364-2005 section 4.5 declares only nets implicitly)
