@@ -17,6 +17,10 @@
 //! - [`handles`]: the retained handle that publishes bounded typed-array windows
 //! - [`js_interop`]: JavaScript value decoding and typed-array publication
 //! - [`runners`]: the authored-deck route and the direct entry points
+//! - [`support`]: the preflight every runner shares: parsing a deck and
+//!   building an engine under the browser's resource limits
+//! - [`hb_config`]: the harmonic-balance configuration of one authored `.HB`
+//!   card, resolved by `rspice-core`, with its failure as a browser error
 //! - [`exports`]: the `#[wasm_bindgen]` shims
 
 // Plan rule 2: no authored-input panic. Everything this surface reads comes
