@@ -12,7 +12,7 @@ use rspice_design_model::{
     Point,
     design_management::{
         CrossSheetPortAnchor, CrossSheetPortEndpoint, DesignManagementCatalog,
-        DesignManagementError, SchematicObjectKey, VariantObjectOverride,
+        DesignManagementError, SchematicObjectKey, SheetCatalog, VariantObjectOverride,
     },
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -33,10 +33,7 @@ impl Schematic {
                 .sheets()
                 .iter()
                 .enumerate()
-                .map(|(index, sheet)| {
-                    let ordinal = i32::try_from(index).unwrap_or(i32::MAX);
-                    (sheet.id(), Point::new(ordinal.saturating_mul(1_000_000), 0))
-                })
+                .map(|(index, sheet)| (sheet.id(), sheet_origin(index)))
                 .collect::<HashMap<_, _>>();
             let offset_for = |object_id: u64| {
                 design_management
@@ -212,6 +209,28 @@ impl Schematic {
         let repaired = identity.repair_document(&mut projected);
         Ok((projected, repaired))
     }
+}
+
+/// Where the projection places the sheet at `ordinal`, its place in the
+/// catalog. Pages are laid side by side a fixed stride apart, so coordinates
+/// two pages share in the drawing never meet in the projected document.
+fn sheet_origin(ordinal: usize) -> Point {
+    let ordinal = i32::try_from(ordinal).unwrap_or(i32::MAX);
+    Point::new(ordinal.saturating_mul(1_000_000), 0)
+}
+
+/// How far the projection moved one object from where its sheet draws it.
+///
+/// A coordinate read off the projected document — a terminal a check located,
+/// say — is on the canvas once this is taken back off it. An object no sheet
+/// claims belongs to the active sheet, as it does when the projection is made.
+pub fn projected_sheet_offset(catalog: &SheetCatalog, object_id: u64) -> Point {
+    catalog
+        .sheet_for_object(object_id)
+        .or(catalog.active_sheet_id())
+        .or_else(|| catalog.sheets().first().map(|sheet| sheet.id()))
+        .and_then(|id| catalog.sheets().iter().position(|sheet| sheet.id() == id))
+        .map_or_else(Point::origin, sheet_origin)
 }
 
 fn translated_point(point: Point, delta: Point) -> Result<Point, DesignManagementError> {

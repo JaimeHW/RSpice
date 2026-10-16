@@ -103,6 +103,9 @@ pub fn anchor(view: &DesignView<'_>, location: &DrcLocation) -> Option<Point> {
             .iter()
             .find(|label| label.name == *name && view.object_is_visible(label.id))
             .map(|l| l.pos),
+        // The checks locate a terminal in the projected document, which lays
+        // each sheet a stride further along; the canvas draws the sheet where
+        // it is authored, so the projection's offset comes back off.
         DrcLocation::Terminal {
             component_id,
             point,
@@ -112,7 +115,7 @@ pub fn anchor(view: &DesignView<'_>, location: &DrcLocation) -> Option<Point> {
             .components
             .iter()
             .any(|component| component.id == *component_id && view.object_is_visible(*component_id))
-            .then_some(*point),
+            .then(|| live_terminal_point(view.sheet_catalog, *component_id, *point)),
         // A finding inside an instantiated cellview has no coordinate in this
         // one. Placing it on the instance symbol would point the author at a
         // drawing that does not contain the defect.
@@ -121,6 +124,25 @@ pub fn anchor(view: &DesignView<'_>, location: &DrcLocation) -> Option<Point> {
         | DrcLocation::Global
         | DrcLocation::SymbolPin { .. } => None,
     }
+}
+
+/// Where a terminal the checks located on the projected document is drawn.
+///
+/// A drawing with no sheets is its own projection, and so is the first sheet
+/// of one; every later sheet is offset, by its component's sheet.
+pub fn live_terminal_point(
+    sheets: Option<&rspice_design_model::design_management::SheetCatalog>,
+    component_id: u64,
+    projected: Point,
+) -> Point {
+    let Some(sheets) = sheets else {
+        return projected;
+    };
+    let offset = rspice_design::schematic::owned::projected_sheet_offset(sheets, component_id);
+    Point::new(
+        projected.x.saturating_sub(offset.x),
+        projected.y.saturating_sub(offset.y),
+    )
 }
 
 /// The cursor in screen space, derived from the grid-unit hover the canvas
