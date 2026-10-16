@@ -127,7 +127,20 @@ pub(in crate::workbench) enum EmptyReason {
     NothingRan,
     /// A producer cannot be evaluated at all, in its own words.
     Unavailable(String),
-    /// Everything that ran found nothing.
+    /// Everything on record found nothing, but at least one of those empty
+    /// results was reached from inputs that have changed since: a stored
+    /// batch whose digest no longer matches the design. Said only when no
+    /// producer is unavailable, since a check that cannot run says less than
+    /// one that ran on an older design.
+    ///
+    /// A netlist validation is never the evidence behind an empty list: the
+    /// editor's collection is listed only while it holds findings, and those
+    /// are rows, stale or not. The code editors void a clean receipt when
+    /// their source moves, so an empty code collection still listed describes
+    /// the source as it stands.
+    OutOfDate,
+    /// Everything on record found nothing, and every one of those results
+    /// was reached from the inputs as they stand.
     NoFindings,
 }
 
@@ -157,6 +170,24 @@ impl Segment<'_> {
             Self::Stored { batch, .. } => batch.records.len(),
             Self::Netlist { collection, .. } => collection.len(),
             Self::Code { collection, .. } => collection.len(),
+        }
+    }
+
+    /// Whether anything this segment holds was reached from inputs that have
+    /// moved since. For an empty stored batch that is its standing alone:
+    /// the batch is the only record that the check ran.
+    fn out_of_date(&self) -> bool {
+        match self {
+            Self::Stored { standing, .. } => matches!(standing, BatchStanding::Stale),
+            Self::Netlist {
+                collection,
+                revision,
+            } => collection
+                .iter()
+                .any(|diagnostic| !netlist_current(diagnostic, *revision)),
+            Self::Code { collection, .. } => collection
+                .iter()
+                .any(|diagnostic| !diagnostic.canonical.is_current()),
         }
     }
 }
@@ -676,11 +707,11 @@ fn tally(segments: &[Segment<'_>]) -> (DiagnosticCounts, EmptyReason) {
             }
         }
     }
+    let empty = segments.iter().all(|segment| segment.len() == 0);
     let empty_reason = match unavailable {
-        Some(reason) if segments.iter().all(|segment| segment.len() == 0) => {
-            EmptyReason::Unavailable(reason)
-        }
+        Some(reason) if empty => EmptyReason::Unavailable(reason),
         _ if segments.is_empty() => EmptyReason::NothingRan,
+        _ if empty && segments.iter().any(Segment::out_of_date) => EmptyReason::OutOfDate,
         _ => EmptyReason::NoFindings,
     };
     (counts, empty_reason)
@@ -793,6 +824,84 @@ mod tests {
         let listing = listing(&state);
         assert_eq!(listing.len(), 0);
         assert_eq!(*listing.empty_reason(), EmptyReason::NoFindings);
+    }
+
+    /// A check that found nothing in a design that has since been edited
+    /// says nothing about the design in front of the reader, so the page
+    /// does not call that design clean until the check runs again.
+    #[test]
+    fn an_empty_batch_whose_inputs_moved_reads_as_out_of_date() {
+        let mut state = open_state();
+        let subject = state.workspace.content.active_schematic_reference();
+        let inputs = DiagnosticInputs::DesignCheck { subject };
+        state
+            .publish_diagnostics(inputs.clone(), Vec::new())
+            .expect("the design-check digest is available");
+        assert_eq!(*listing(&state).empty_reason(), EmptyReason::NoFindings);
+
+        state.workspace.content.connectivity.policy.width_mismatch =
+            crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+
+        let listed = listing(&state);
+        assert_eq!(listed.len(), 0);
+        assert_eq!(*listed.empty_reason(), EmptyReason::OutOfDate);
+        assert_eq!(
+            *listing_in_pass(&state, 3).empty_reason(),
+            EmptyReason::OutOfDate,
+            "the memoized list states the same reason",
+        );
+
+        state
+            .publish_diagnostics(inputs, Vec::new())
+            .expect("the design-check digest is available");
+        assert_eq!(
+            *listing(&state).empty_reason(),
+            EmptyReason::NoFindings,
+            "a check run over the design as it stands is evidence again",
+        );
+    }
+
+    /// One stale empty result is enough to withhold "no findings", and a
+    /// producer that cannot run at all is said before any of it.
+    #[test]
+    fn an_empty_list_states_the_weakest_evidence_behind_it() {
+        let state = open_state();
+        let empty = |inputs| DiagnosticBatch {
+            inputs,
+            input_digest: crate::product::ContentDigest::from_bytes([0; 32]),
+            records: Vec::new(),
+        };
+        let dispatch = empty(DiagnosticInputs::Dispatch);
+        let run = empty(DiagnosticInputs::Run { run_sequence: 4 });
+        let design = empty(DiagnosticInputs::DesignCheck {
+            subject: state.workspace.content.active_schematic_reference(),
+        });
+        let stored = |batch, standing| Segment::Stored { batch, standing };
+
+        let (_, reason) = tally(&[
+            stored(&dispatch, BatchStanding::Current),
+            stored(&run, BatchStanding::Stale),
+        ]);
+        assert_eq!(reason, EmptyReason::OutOfDate);
+
+        let (_, reason) = tally(&[
+            stored(&dispatch, BatchStanding::Current),
+            stored(&run, BatchStanding::Stale),
+            stored(
+                &design,
+                BatchStanding::Unavailable("the inputs cannot be read".to_owned()),
+            ),
+        ]);
+        assert_eq!(
+            reason,
+            EmptyReason::Unavailable("the inputs cannot be read".to_owned())
+        );
+
+        let (_, reason) = tally(&[
+            stored(&dispatch, BatchStanding::Current),
+            stored(&run, BatchStanding::Current),
+        ]);
+        assert_eq!(reason, EmptyReason::NoFindings);
     }
 
     /// The counts and the rows come from the same list, so they cannot
