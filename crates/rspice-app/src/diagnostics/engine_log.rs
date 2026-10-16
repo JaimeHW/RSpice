@@ -12,7 +12,7 @@ use rspice_simulation::engine_log::{admits, note_stderr_level, offer};
 /// again.
 pub(crate) fn publish(lines: Vec<EngineLogLine>, buffer: &mut LogBuffer) {
     for line in lines {
-        buffer.log(line.severity, LogSource::Engine, line.message, None);
+        buffer.log(line.severity, LogSource::Engine, line.message);
     }
 }
 

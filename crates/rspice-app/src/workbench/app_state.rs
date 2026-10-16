@@ -1030,6 +1030,46 @@ impl AppState {
         self.simulation.execution.request_simulate_run_set();
     }
 
+    /// Answer the gesture just made, on the status bar.
+    ///
+    /// For a refusal or transient feedback: "The schematic is read-only.",
+    /// "Select a retained result first." It is shown until the next prompt
+    /// replaces it or it expires, and it is never logged or notified, because
+    /// it is about the gesture, not an event in the session.
+    pub fn prompt(&mut self, text: impl Into<String>) {
+        self.workbench.prompt = Some(crate::workbench::state::StatusPrompt {
+            text: text.into(),
+            issued: crate::time_compat::Instant::now(),
+        });
+    }
+
+    /// Record an event in the Console and return its log id.
+    ///
+    /// Error: something the user asked for, or a background job, failed.
+    /// Warning: it completed, but the reader must know something. Info: a
+    /// record of what happened. A refusal is never recorded; it is a
+    /// [`Self::prompt`].
+    pub fn record(
+        &mut self,
+        severity: crate::diagnostics::LogSeverity,
+        source: crate::diagnostics::LogSource,
+        text: impl Into<String>,
+    ) -> u64 {
+        self.log_buffer.log(severity, source, text)
+    }
+
+    /// [`Self::record`], with a place the Console row jumps to.
+    pub fn record_anchored(
+        &mut self,
+        severity: crate::diagnostics::LogSeverity,
+        source: crate::diagnostics::LogSource,
+        text: impl Into<String>,
+        anchor: crate::diagnostics::LogAnchor,
+    ) -> u64 {
+        self.log_buffer
+            .log_anchored(severity, source, text, Some(anchor))
+    }
+
     fn log_severity_for_console(level: ConsoleLevel) -> crate::diagnostics::LogSeverity {
         match level {
             ConsoleLevel::Info => crate::diagnostics::LogSeverity::Info,
@@ -1040,7 +1080,7 @@ impl AppState {
 
     /// Push a legacy console message and mirror it into the structured log.
     pub fn push_console_message(&mut self, message: ConsoleMessage) {
-        self.push_console_message_with_source(crate::diagnostics::LogSource::System, message);
+        self.push_console_message_with_source(crate::diagnostics::LogSource::Studio, message);
     }
 
     /// Push a console message with an explicit structured-log source.
@@ -1050,11 +1090,11 @@ impl AppState {
         message: ConsoleMessage,
     ) {
         let severity = Self::log_severity_for_console(message.level);
-        self.log_buffer.log(severity, source, message.message, None);
+        self.record(severity, source, message.message);
     }
 
     pub fn push_user_message(&mut self, message: ConsoleMessage) {
-        self.push_console_message_with_source(crate::diagnostics::LogSource::User, message);
+        self.push_console_message_with_source(crate::diagnostics::LogSource::Studio, message);
     }
 
     /// Announce a committed plan command on the lifecycle status line and
@@ -1087,15 +1127,14 @@ impl AppState {
                 crate::diagnostics::LogSeverity::Info,
                 crate::diagnostics::LogSource::Plan,
                 message,
-                None,
             );
         }
     }
 
     /// Announce a refused plan command, as [`Self::record_plan_receipt`] does,
-    /// at warning severity so the Problems page lists it. The notice a refusal
-    /// also raises is the plan drain's titled toast, which is a separate
-    /// reporter: this is the record, and that is the notice.
+    /// at warning severity. The notice a refusal also raises is the plan
+    /// drain's titled toast, which is a separate reporter: this is the record,
+    /// and that is the notice.
     pub(crate) fn record_plan_refusal(&mut self, message: impl Into<String>) {
         let message = message.into();
         if self
@@ -1107,7 +1146,6 @@ impl AppState {
                 crate::diagnostics::LogSeverity::Warning,
                 crate::diagnostics::LogSource::Plan,
                 message,
-                None,
             );
         }
     }
@@ -1121,14 +1159,14 @@ impl AppState {
         match self.model_library_manager.select_library(name) {
             Ok(()) => true,
             Err(refusal) => {
-                self.push_user_message(ConsoleMessage::warning(refusal));
+                self.prompt(refusal);
                 false
             }
         }
     }
 
     pub fn push_sim_message(&mut self, message: ConsoleMessage) {
-        self.push_console_message_with_source(crate::diagnostics::LogSource::Simulation, message);
+        self.push_console_message_with_source(crate::diagnostics::LogSource::Run, message);
     }
 
     /// A simulation message that names something the reader can go to.
@@ -1138,13 +1176,11 @@ impl AppState {
         anchor: Option<crate::diagnostics::LogAnchor>,
     ) {
         let severity = Self::log_severity_for_console(message.level);
-        self.log_buffer.log_anchored(
-            severity,
-            crate::diagnostics::LogSource::Simulation,
-            message.message,
-            None,
-            anchor,
-        );
+        let source = crate::diagnostics::LogSource::Run;
+        match anchor {
+            Some(anchor) => self.record_anchored(severity, source, message.message, anchor),
+            None => self.record(severity, source, message.message),
+        };
     }
 
     pub fn clear_primary_log(&mut self) {

@@ -1410,20 +1410,16 @@ impl PreflightDialogState {
 /// back every entry in the session. The filter is what makes that row do what
 /// it says.
 ///
-/// Two rules match, and they are deliberately different in kind. The first is
-/// exact: an entry tagged with this producer's stable path. Nothing emits that
-/// tag yet — the simulation controller writes `None` for every entry's context
-/// — so the second rule carries the row today: a simulation entry that names
-/// the producer's own quantity, which is how the measurement and
-/// operating-point echoes name what they are reporting. The chip says which
-/// producer is being matched, and the empty state says plainly when nothing
-/// does.
+/// An entry matches when it is a run entry that names the producer's own
+/// quantity, which is how the measurement and operating-point echoes name what
+/// they are reporting. The chip says which producer is being matched, and the
+/// empty state says plainly when nothing does.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConsoleProducerFilter {
     /// Stable `dataset/…/analysis/…/…` path of the revealed producer.
     pub producer: String,
     /// The producer's own quantity or artifact name, as an emitted entry
-    /// would write it. Empty leaves only the exact tag rule.
+    /// would write it. Empty matches nothing.
     pub quantity: String,
     /// Ask the console body to scroll to the newest matching entry once.
     /// Consumed by the renderer, the way a preflight run request is.
@@ -1451,11 +1447,8 @@ impl ConsoleProducerFilter {
     }
 
     pub fn matches(&self, entry: &crate::diagnostics::LogEntry) -> bool {
-        if entry.context.as_deref() == Some(self.producer.as_str()) {
-            return true;
-        }
         !self.quantity.is_empty()
-            && entry.source == crate::diagnostics::LogSource::Simulation
+            && entry.source == crate::diagnostics::LogSource::Run
             && entry
                 .message
                 .to_ascii_lowercase()

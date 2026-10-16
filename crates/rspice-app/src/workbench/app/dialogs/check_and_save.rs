@@ -115,7 +115,7 @@ pub(crate) fn open_check_and_save_dialog(state: &mut AppState) {
                 let anchor = finding_anchor(state, finding);
                 state
                     .log_buffer
-                    .log_anchored(severity, LogSource::User, message, None, anchor);
+                    .log_anchored(severity, LogSource::Studio, message, anchor);
             }
             state.dialogs.check_and_save.open(report);
         }

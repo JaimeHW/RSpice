@@ -58,7 +58,6 @@ fn seeded_app() -> RSpiceApp {
         LogSeverity::Debug,
         LogSource::Engine,
         "HB Krylov solve: 12 iterations, relative residual 3.40e-09",
-        None,
     );
 
     let error =

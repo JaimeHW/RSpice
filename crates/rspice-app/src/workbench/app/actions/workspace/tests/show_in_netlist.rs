@@ -89,7 +89,7 @@ fn last_user_message(state: &AppState) -> String {
     state
         .log_buffer
         .entries()
-        .filter(|entry| entry.source == LogSource::User)
+        .filter(|entry| entry.source == LogSource::Studio)
         .last()
         .map(|entry| entry.message.clone())
         .unwrap_or_default()

@@ -1443,9 +1443,8 @@ impl SimulationController {
             });
         state.log_buffer.log_anchored(
             crate::diagnostics::LogSeverity::Error,
-            crate::diagnostics::LogSource::Simulation,
+            crate::diagnostics::LogSource::Run,
             message,
-            None,
             anchor,
         );
         if let Some(run_sequence) = run_sequence {

@@ -77,7 +77,7 @@ fn run_command_remains_actionable_and_surfaces_preflight_blockers() {
         .filter(|entry| entry.message.starts_with("Preflight blocked"))
         .last()
         .expect("a blocked pass states its outcome");
-    assert_eq!(outcome.source, crate::diagnostics::LogSource::User);
+    assert_eq!(outcome.source, crate::diagnostics::LogSource::Studio);
     assert_eq!(outcome.severity, crate::diagnostics::LogSeverity::Warning);
     assert!(
         outcome.message.contains("design revision"),
@@ -131,7 +131,7 @@ fn a_pass_states_its_outcome_where_the_notice_centre_lifts_it() {
         .filter(|entry| entry.message.starts_with("Preflight"))
         .last()
         .expect("every pass states its outcome");
-    assert_eq!(outcome.source, crate::diagnostics::LogSource::User);
+    assert_eq!(outcome.source, crate::diagnostics::LogSource::Studio);
     let blocked = app
         .state
         .workbench
@@ -993,12 +993,12 @@ fn a_models_route_to_a_departed_library_states_its_refusal() {
         "and never pins a corner against a library the selection did not move to"
     );
     assert!(
-        app.state.log_buffer.entries().any(|entry| {
-            entry
-                .message
+        app.state.workbench.prompt.as_ref().is_some_and(|prompt| {
+            prompt
+                .text
                 .contains("'removed since the report' is not loaded in this project")
         }),
-        "the refusal has to be stated"
+        "the refusal has to be stated, on the bar, as the answer to the gesture"
     );
 }
 

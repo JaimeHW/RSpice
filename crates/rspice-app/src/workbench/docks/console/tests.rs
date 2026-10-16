@@ -322,24 +322,15 @@ fn console_rows_paint_no_coloured_text() {
 
     let mut state = AppState::default();
     state.log_buffer.clear();
-    state.log_buffer.log(
-        LogSeverity::Error,
-        LogSource::Simulation,
-        "solve failed",
-        None,
-    );
-    state.log_buffer.log(
-        LogSeverity::Warning,
-        LogSource::Simulation,
-        "gmin stepping",
-        None,
-    );
-    state.log_buffer.log(
-        LogSeverity::Info,
-        LogSource::Simulation,
-        "run complete",
-        None,
-    );
+    state
+        .log_buffer
+        .log(LogSeverity::Error, LogSource::Run, "solve failed");
+    state
+        .log_buffer
+        .log(LogSeverity::Warning, LogSource::Run, "gmin stepping");
+    state
+        .log_buffer
+        .log(LogSeverity::Info, LogSource::Run, "run complete");
 
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
@@ -379,7 +370,7 @@ fn the_problem_badge_counts_records_and_not_log_entries() {
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
     app.state
         .log_buffer
-        .warning(LogSource::Simulation, "unrelated retained log warning");
+        .warning(LogSource::Run, "unrelated retained log warning");
     app.state.ui.netlist.diagnostics = std::sync::Arc::new(
         crate::workbench::documents::netlist_document::NetlistDiagnosticCollection::try_new(
             vec![
@@ -424,7 +415,7 @@ fn the_clear_control_clears_the_visible_page_through_its_command() {
     let mut app = RSpiceApp::test_instance();
     app.state
         .log_buffer
-        .warning(LogSource::Simulation, "visible console warning");
+        .warning(LogSource::Run, "visible console warning");
 
     app.state.workbench.console_page = ConsolePage::Problems;
     assert!(!Command::ClearConsole.is_enabled(&app));
@@ -443,7 +434,7 @@ fn clearing_console_preserves_diagnostics_measurements_and_run_history() {
     let mut state = AppState::default();
     state
         .log_buffer
-        .warning(LogSource::Simulation, "visible console warning");
+        .warning(LogSource::Run, "visible console warning");
     state.dialogs.drc_results = Some(DrcResult::new());
 
     let measurement = rspice_core::MeasureResult::success("gain", 42.0);
@@ -754,15 +745,13 @@ fn a_producer_filter_narrows_the_console_and_states_what_it_hid() {
     app.state.log_buffer.clear();
     app.state.log_buffer.log(
         crate::diagnostics::LogSeverity::Info,
-        LogSource::Simulation,
+        LogSource::Run,
         "  gain = 1.234000e1",
-        None,
     );
     app.state.log_buffer.log(
         crate::diagnostics::LogSeverity::Info,
-        LogSource::Simulation,
+        LogSource::Run,
         "Transient: 512 points, 3 waveforms",
-        None,
     );
     app.state.workbench.console_producer_filter =
         Some(crate::workbench::state::ConsoleProducerFilter::new(
@@ -800,9 +789,8 @@ fn an_unmatched_producer_says_why_the_console_looks_empty() {
     app.state.log_buffer.clear();
     app.state.log_buffer.log(
         crate::diagnostics::LogSeverity::Info,
-        LogSource::Simulation,
+        LogSource::Run,
         "Transient: 512 points, 3 waveforms",
-        None,
     );
     app.state.workbench.console_producer_filter =
         Some(crate::workbench::state::ConsoleProducerFilter::new(

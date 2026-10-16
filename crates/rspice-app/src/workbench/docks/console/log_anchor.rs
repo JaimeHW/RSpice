@@ -30,17 +30,14 @@ pub(super) fn log_row(
     let problem = log_problem(entry.severity);
     let source_color = t.color.text_dim;
     let message_color = log_message_color(&t, entry.severity);
-    let message = entry.context.as_ref().map_or_else(
-        || entry.message.clone(),
-        |context| format!("{} · {context}", entry.message),
-    );
+    let message = entry.message.as_str();
     let Some(anchor) = entry.anchor.as_ref() else {
         row(
             ui,
             problem,
             &entry.format_timestamp(),
             entry.source.name(),
-            &message,
+            message,
             source_color,
             message_color,
         );
@@ -54,7 +51,7 @@ pub(super) fn log_row(
         problem,
         &entry.format_timestamp(),
         entry.source.name(),
-        &message,
+        message,
         source_color,
         message_color,
         if refusal.is_some() {
@@ -219,9 +216,8 @@ mod tests {
             .activate(crate::workbench::state::Workspace::Results);
         state.log_buffer.log_anchored(
             crate::diagnostics::LogSeverity::Error,
-            LogSource::Simulation,
+            LogSource::Run,
             "Analysis failed: no DC path at OUT",
-            None,
             Some(crate::diagnostics::LogAnchor::Simulation {
                 nets: vec!["OUT".to_owned()],
                 devices: Vec::new(),
@@ -255,9 +251,8 @@ mod tests {
         };
         state.log_buffer.log_anchored(
             crate::diagnostics::LogSeverity::Error,
-            LogSource::Simulation,
+            LogSource::Run,
             "Analysis failed: no DC path at DELETED",
-            None,
             Some(anchor.clone()),
         );
 

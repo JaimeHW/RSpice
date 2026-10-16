@@ -570,7 +570,6 @@ fn export_support_bundle(app: &mut RSpiceApp, ctx: &Context, include_session_log
                     "severity": format!("{:?}", entry.severity),
                     "source": format!("{:?}", entry.source),
                     "message": redact_support_text(&entry.message, home.as_deref()),
-                    "context": entry.context.as_deref().map(|value| redact_support_text(value, home.as_deref())),
                 })
             })
             .collect::<Vec<_>>()

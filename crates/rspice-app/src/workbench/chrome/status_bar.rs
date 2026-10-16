@@ -68,9 +68,10 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 app.state.simulation.execution.has_active_execution(),
             );
             let platform = platform_label();
+            let prompt = current_prompt(ctx, app);
             let check_mark =
                 check_problem(check_counts).map_or(StatusMark::None, StatusMark::Problem);
-            let left_desired = optional_status_width(ui, check.as_deref(), check_mark)
+            let others_desired = optional_status_width(ui, check.as_deref(), check_mark)
                 + if visibility.coordinates {
                     desired_status_width(ui, &engineering, StatusMark::None)
                 } else {
@@ -91,6 +92,11 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 } else {
                     0.0
                 };
+            // The prompt takes what the other items leave and never squeezes
+            // one of them: it is the answer to a gesture, they are the state.
+            let prompt_width = optional_status_width(ui, prompt.as_deref(), StatusMark::None)
+                .min((bar_width - others_desired - right_desired).max(0.0));
+            let left_desired = prompt_width + others_desired;
             let groups = status_group_allocation(left_desired, right_desired, bar_width);
             ui.horizontal(|ui| {
                 ui.allocate_ui_with_layout(
@@ -99,6 +105,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                     |ui| {
                         ui.spacing_mut().item_spacing = Vec2::ZERO;
                         let desired = [
+                            prompt_width,
                             optional_status_width(ui, check.as_deref(), check_mark),
                             if visibility.coordinates {
                                 desired_status_width(ui, &engineering, StatusMark::None)
@@ -118,16 +125,33 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         // Rules go between items, so the last item on the left
                         // draws none: a rule there would face empty bar.
                         let last = if sheet_position.is_some() {
-                            3
+                            4
                         } else if visibility.selection {
-                            2
+                            3
                         } else if visibility.coordinates {
+                            2
+                        } else if check.is_some() {
                             1
                         } else {
                             0
                         };
+                        if let Some(prompt) = prompt.as_deref() {
+                            let response = status_item_sized(
+                                ui,
+                                prompt,
+                                StatusMark::None,
+                                false,
+                                last != 0,
+                                widths[0],
+                            );
+                            ctx.accesskit_node_builder(response.id, |node| {
+                                node.set_role(egui::accesskit::Role::Status);
+                                node.set_label(prompt);
+                                node.set_live(egui::accesskit::Live::Polite);
+                            });
+                        }
                         if let Some(check) = check.as_deref()
-                            && status_item_sized(ui, check, check_mark, true, last != 0, widths[0])
+                            && status_item_sized(ui, check, check_mark, true, last != 1, widths[1])
                                 .clicked()
                         {
                             Command::OpenProblems.execute(app);
@@ -138,8 +162,8 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                                 &engineering,
                                 StatusMark::None,
                                 false,
-                                last != 1,
-                                widths[1],
+                                last != 2,
+                                widths[2],
                             );
                         }
                         if visibility.selection {
@@ -148,15 +172,15 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                                 &selection,
                                 StatusMark::None,
                                 false,
-                                last != 2,
-                                widths[2],
+                                last != 3,
+                                widths[3],
                             );
                         }
                         // The page a multi-sheet drawing is open at reads
                         // beside where the cursor is, because both answer
                         // where the reader is rather than what is selected.
                         if let Some((text, detail)) = sheet_position.as_ref() {
-                            status_item_sized(ui, text, StatusMark::None, false, false, widths[3])
+                            status_item_sized(ui, text, StatusMark::None, false, false, widths[4])
                                 .on_hover_text(detail);
                         }
                     },
@@ -267,6 +291,23 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         node.set_role(egui::accesskit::Role::ContentInfo);
         node.set_label("Application status");
     });
+}
+
+/// The prompt the bar shows this frame. One that has expired is dropped here;
+/// one that has not asks for the frame that will drop it, because an idle
+/// window paints no frame of its own.
+fn current_prompt(ctx: &egui::Context, app: &mut RSpiceApp) -> Option<String> {
+    let prompt = app.state.workbench.prompt.as_ref()?;
+    match prompt.remaining() {
+        Some(remaining) => {
+            ctx.request_repaint_after(remaining);
+            Some(prompt.text.clone())
+        }
+        None => {
+            app.state.workbench.prompt = None;
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -934,6 +975,68 @@ mod tests {
                 "the rule at x = {x} faces empty bar"
             );
         }
+    }
+
+    /// The status nodes one frame of the bar announces: label and liveness.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn announced_status(
+        app: &mut RSpiceApp,
+    ) -> Vec<(Option<String>, Option<egui::accesskit::Live>)> {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let size = egui::vec2(1440.0, 900.0);
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..Default::default()
+            },
+            |ui| {
+                let layout = LayoutSpec::resolve(size.x, size.y, &app.state.workbench);
+                show(ui, app, layout);
+            },
+        );
+        output
+            .platform_output
+            .accesskit_update
+            .expect("status bar accessibility tree")
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.role() == egui::accesskit::Role::Status)
+            .map(|(_, node)| (node.label().map(str::to_owned), node.live()))
+            .collect()
+    }
+
+    /// A prompt is the bar's answer to the gesture just made: drawn, and
+    /// announced politely, until it expires, and then gone from the bar and
+    /// from the state that held it.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_bar_draws_the_prompt_and_drops_it_once_it_expires() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.authority.open_session();
+        app.state.workbench.activate(Workspace::Design);
+        app.state.prompt("The schematic is read-only.");
+
+        assert_eq!(
+            announced_status(&mut app),
+            vec![(
+                Some("The schematic is read-only.".to_owned()),
+                Some(egui::accesskit::Live::Polite)
+            )]
+        );
+
+        let expired = crate::time_compat::Instant::now()
+            .checked_sub(crate::workbench::state::StatusPrompt::LIFETIME)
+            .expect("the session clock reaches back one prompt lifetime");
+        app.state
+            .workbench
+            .prompt
+            .as_mut()
+            .expect("the prompt is still held")
+            .issued = expired;
+        assert!(announced_status(&mut app).is_empty());
+        assert!(app.state.workbench.prompt.is_none());
     }
 
     /// The segment states the same count wherever the reader is standing.

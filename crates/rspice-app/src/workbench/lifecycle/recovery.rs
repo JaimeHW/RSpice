@@ -960,7 +960,7 @@ pub(crate) fn open_diagnostics_folder(state: &AppState) -> Result<PathBuf, Strin
         writeln!(snapshot).expect("String writes cannot fail");
         writeln!(snapshot, "Session log").expect("String writes cannot fail");
         for entry in state.log_buffer.entries() {
-            write!(
+            writeln!(
                 snapshot,
                 "{} [{}] [{}] {}",
                 entry.format_timestamp(),
@@ -969,10 +969,6 @@ pub(crate) fn open_diagnostics_folder(state: &AppState) -> Result<PathBuf, Strin
                 entry.message
             )
             .expect("String writes cannot fail");
-            if let Some(context) = &entry.context {
-                write!(snapshot, " | {context}").expect("String writes cannot fail");
-            }
-            writeln!(snapshot).expect("String writes cannot fail");
         }
 
         let snapshot_path = directory.join("current-session.log");

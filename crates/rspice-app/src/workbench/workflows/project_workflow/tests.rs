@@ -1021,10 +1021,9 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
         )
         .unwrap(),
     );
-    state.log_buffer.warning(
-        crate::diagnostics::LogSource::Simulation,
-        "old project warning",
-    );
+    state
+        .log_buffer
+        .warning(crate::diagnostics::LogSource::Run, "old project warning");
     let project = project_named_with_results("browser-import.rspiceproj");
 
     assert!(apply_loaded_project(

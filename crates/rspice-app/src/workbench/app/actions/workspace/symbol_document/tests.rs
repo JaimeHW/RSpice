@@ -8,7 +8,7 @@
 
 use super::*;
 
-use crate::diagnostics::{LogSeverity, LogSource};
+use crate::diagnostics::LogSeverity;
 use crate::state::{
     Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, Point,
     PortDirection, SchematicState, SymbolPin, SymbolShape, View, ViewType, Wire, WireConnection,
@@ -479,7 +479,7 @@ fn symbol_pin_checks_keep_every_finding_and_log_one_line() {
     );
     let entries: Vec<_> = state.log_buffer.entries().collect();
     assert!(
-        entries.iter().all(|entry| entry.source != LogSource::Drc),
+        entries.iter().all(|entry| entry.anchor.is_none()),
         "a finding is a published record, not a line copied into the log",
     );
     let lines: Vec<_> = entries

@@ -12,7 +12,7 @@ use crate::state::{Bus, BusDeclaration, Component, ComponentType, NetLabel, Sche
 fn last_console(state: &AppState) -> String {
     state
         .log_buffer
-        .entries_by_source(LogSource::User)
+        .entries_by_source(LogSource::Studio)
         .last()
         .expect("the command reports to the console")
         .message
@@ -22,7 +22,7 @@ fn last_console(state: &AppState) -> String {
 fn last_console_severity(state: &AppState) -> LogSeverity {
     state
         .log_buffer
-        .entries_by_source(LogSource::User)
+        .entries_by_source(LogSource::Studio)
         .last()
         .expect("the command reports to the console")
         .severity

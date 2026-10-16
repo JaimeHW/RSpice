@@ -60,9 +60,8 @@ impl RSpiceApp {
             Ok(checkpoint) => {
                 self.state.log_buffer.log(
                     crate::diagnostics::LogSeverity::Debug,
-                    crate::diagnostics::LogSource::System,
+                    crate::diagnostics::LogSource::Studio,
                     format!("Autosaved checkpoint: {}", checkpoint.display()),
-                    None,
                 );
             }
             Err(e) => {

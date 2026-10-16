@@ -1302,17 +1302,13 @@ fn revealing_a_producer_log_narrows_the_console_to_that_producer() {
     app.state.workbench.console_visible = false;
     app.state.workbench.console_page = crate::workbench::state::ConsolePage::Problems;
     app.state.log_buffer.clear();
+    app.state
+        .log_buffer
+        .log(LogSeverity::Info, LogSource::Run, "  gain = 1.234000e1");
     app.state.log_buffer.log(
         LogSeverity::Info,
-        LogSource::Simulation,
-        "  gain = 1.234000e1",
-        None,
-    );
-    app.state.log_buffer.log(
-        LogSeverity::Info,
-        LogSource::Simulation,
+        LogSource::Run,
         "Transient: 512 points, 3 waveforms",
-        None,
     );
 
     crate::workbench::commands::result_navigation::reveal_producer_log(
@@ -1346,36 +1342,6 @@ fn revealing_a_producer_log_narrows_the_console_to_that_producer() {
         .map(|entry| entry.message.as_str())
         .collect();
     assert_eq!(matched, vec!["  gain = 1.234000e1"]);
-}
-
-/// An entry tagged with the producer's own identity matches regardless of
-/// what it says. Nothing emits that tag today, which is exactly why the rule
-/// has to exist before an emission site can be worth adding.
-#[test]
-fn a_producer_tagged_entry_matches_without_naming_its_quantity() {
-    use crate::diagnostics::{LogSeverity, LogSource};
-
-    let mut app = RSpiceApp::test_instance();
-    app.state.log_buffer.clear();
-    app.state.log_buffer.log(
-        LogSeverity::Info,
-        LogSource::Engine,
-        "solved in 4 iterations",
-        Some("dataset/7/analysis/3/quantity/V(out)".to_owned()),
-    );
-    let filter = crate::workbench::state::ConsoleProducerFilter::new(
-        "dataset/7/analysis/3/quantity/V(out)",
-        "V(out)",
-    );
-
-    assert_eq!(
-        app.state
-            .log_buffer
-            .entries()
-            .filter(|entry| filter.matches(entry))
-            .count(),
-        1
-    );
 }
 
 /// The simulation rail derives what it states once per frame.

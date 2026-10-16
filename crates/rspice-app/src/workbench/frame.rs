@@ -475,10 +475,12 @@ fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
         .filter(|entry| !shell_already_announced(entry.anchor.as_ref(), announced))
         .filter_map(|entry| {
             let category = match entry.source {
-                LogSource::Simulation | LogSource::Engine | LogSource::Netlist | LogSource::Drc => {
-                    NotificationCategory::Job
-                }
-                LogSource::User | LogSource::System => NotificationCategory::System,
+                LogSource::Run
+                | LogSource::Engine
+                | LogSource::Netlist
+                | LogSource::Hdl
+                | LogSource::VerilogA => NotificationCategory::Job,
+                LogSource::Studio => NotificationCategory::System,
                 // A plan receipt is a record of what was committed, not a
                 // notice, so the Console keeps it and this lifts nothing at
                 // any severity. A refusal is left here for the opposite
@@ -813,9 +815,8 @@ mod tests {
         app.state.simulation.retained.runs[0].success = true;
         app.state.log_buffer.log_anchored(
             LogSeverity::Info,
-            LogSource::Simulation,
+            LogSource::Run,
             "Simulation completed successfully",
-            None,
             Some(LogAnchor::ResultRun { run_sequence: 1 }),
         );
 
@@ -871,9 +872,8 @@ mod tests {
         // sealed with nothing retained.
         app.state.log_buffer.log_anchored(
             LogSeverity::Error,
-            LogSource::Simulation,
+            LogSource::Run,
             "Simulation completed with errors",
-            None,
             Some(LogAnchor::ResultRun { run_sequence: 1 }),
         );
 
@@ -1008,10 +1008,10 @@ mod tests {
             .set_background_task_attention(BackgroundTaskAttention::NotifyOnFailureOnly);
         app.state
             .log_buffer
-            .log(LogSeverity::Info, LogSource::Simulation, "completed", None);
+            .log(LogSeverity::Info, LogSource::Run, "completed");
         app.state
             .log_buffer
-            .log(LogSeverity::Error, LogSource::Simulation, "failed", None);
+            .log(LogSeverity::Error, LogSource::Run, "failed");
 
         synchronize_activity_stream(&ctx, &mut app);
         assert_eq!(app.state.ui.toasts.activity().len(), 1);
@@ -1023,12 +1023,9 @@ mod tests {
             .workspace_mut()
             .unwrap()
             .set_background_task_attention(BackgroundTaskAttention::Silent);
-        app.state.log_buffer.log(
-            LogSeverity::Error,
-            LogSource::Simulation,
-            "second failure",
-            None,
-        );
+        app.state
+            .log_buffer
+            .log(LogSeverity::Error, LogSource::Run, "second failure");
         synchronize_activity_stream(&ctx, &mut app);
         assert_eq!(app.state.ui.toasts.activity().len(), 1);
     }
@@ -1051,13 +1048,11 @@ mod tests {
             LogSeverity::Info,
             LogSource::Engine,
             "Transient noise: 4 device noise source(s) injected from seed 11",
-            None,
         );
         app.state.log_buffer.log(
             LogSeverity::Debug,
             LogSource::Engine,
             "HB Newton step 3: relative residual 2.10e-07",
-            None,
         );
 
         synchronize_activity_stream(&ctx, &mut app);
@@ -1080,11 +1075,10 @@ mod tests {
             LogSeverity::Warning,
             LogSource::Engine,
             "Convergence was attributed to net out",
-            None,
         );
         app.state
             .log_buffer
-            .log(LogSeverity::Info, LogSource::Simulation, "completed", None);
+            .log(LogSeverity::Info, LogSource::Run, "completed");
         synchronize_activity_stream(&ctx, &mut app);
         let mut lifted: Vec<String> = app
             .state
@@ -1101,6 +1095,35 @@ mod tests {
                 "Convergence was attributed to net out".to_owned(),
                 "completed".to_owned(),
             ]
+        );
+    }
+
+    /// A prompt is feedback on a gesture, not an event: it reaches neither the
+    /// Console nor the notice centre.
+    #[test]
+    fn a_prompt_is_neither_logged_nor_notified() {
+        let ctx = Context::default();
+        let mut app = RSpiceApp::test_instance();
+        let revision = app.state.log_buffer.revision();
+
+        app.state.prompt("Nothing was deleted.");
+        synchronize_activity_stream(&ctx, &mut app);
+
+        assert_eq!(app.state.log_buffer.revision(), revision);
+        assert!(
+            app.state
+                .log_buffer
+                .entries()
+                .all(|entry| entry.message != "Nothing was deleted.")
+        );
+        assert!(app.state.ui.toasts.activity().is_empty());
+        assert_eq!(
+            app.state
+                .workbench
+                .prompt
+                .as_ref()
+                .map(|prompt| prompt.text.as_str()),
+            Some("Nothing was deleted.")
         );
     }
 
@@ -1121,13 +1144,11 @@ mod tests {
             LogSeverity::Info,
             LogSource::Plan,
             "Receipt #7 \u{00b7} Reorder committed for instance 3.",
-            None,
         );
         app.state.log_buffer.log(
             LogSeverity::Warning,
             LogSource::Plan,
             "Remove rejected fail-closed: another analysis is bound to it.",
-            None,
         );
 
         synchronize_activity_stream(&ctx, &mut app);
@@ -1148,7 +1169,7 @@ mod tests {
         // not have changed.
         app.state
             .log_buffer
-            .log(LogSeverity::Info, LogSource::User, "opened", None);
+            .log(LogSeverity::Info, LogSource::Studio, "opened");
         synchronize_activity_stream(&ctx, &mut app);
         let activity = app.state.ui.toasts.activity();
         assert_eq!(activity.len(), 1);

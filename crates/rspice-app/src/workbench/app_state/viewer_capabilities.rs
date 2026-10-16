@@ -523,7 +523,7 @@ mod tests {
             .expect("test DRC receipt must publish");
         state
             .log_buffer
-            .log(LogSeverity::Error, LogSource::Drc, "old DRC anchor", None);
+            .log(LogSeverity::Error, LogSource::Studio, "old DRC anchor");
     }
 
     #[test]
@@ -731,7 +731,10 @@ mod tests {
         assert!(state.diagnostics.current_finding().is_none());
         assert!(state.current_blocking_drc_result().is_none());
         assert_eq!(
-            state.log_buffer.entries_by_source(LogSource::Drc).count(),
+            state
+                .log_buffer
+                .entries_by_source(LogSource::Studio)
+                .count(),
             0
         );
     }
@@ -761,7 +764,7 @@ mod tests {
         );
         state
             .log_buffer
-            .warning(LogSource::Simulation, "old project warning");
+            .warning(LogSource::Run, "old project warning");
         state.clear_design_execution_context();
 
         assert_eq!(

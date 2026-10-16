@@ -836,6 +836,28 @@ pub enum AnalysisLifecycleSeverity {
     Refusal,
 }
 
+/// The status bar's answer to the gesture just made.
+///
+/// Feedback, not a record: it is never logged and never notified, the next
+/// prompt replaces it, and it is gone [`StatusPrompt::LIFETIME`] after it was
+/// given.
+#[derive(Debug, Clone)]
+pub struct StatusPrompt {
+    pub text: String,
+    pub issued: crate::time_compat::Instant,
+}
+
+impl StatusPrompt {
+    pub const LIFETIME: std::time::Duration = std::time::Duration::from_secs(6);
+
+    /// How long the prompt has left on the bar, or `None` once it has expired.
+    pub fn remaining(&self) -> Option<std::time::Duration> {
+        Self::LIFETIME
+            .checked_sub(self.issued.elapsed())
+            .filter(|remaining| !remaining.is_zero())
+    }
+}
+
 /// The last outcome any Simulation Studio plan command announced.
 ///
 /// Only the Analyses route draws this; the other seven routes drain refusals
@@ -1163,6 +1185,9 @@ pub struct WorkbenchState {
     /// Last analysis lifecycle outcome announced by the transaction owner.
     #[serde(skip)]
     pub analysis_lifecycle_status: AnalysisLifecycleOutcome,
+    /// The status bar's feedback on the gesture just made.
+    #[serde(skip)]
+    pub prompt: Option<StatusPrompt>,
     /// Sequence of the outcome the Simulation Studio has already surfaced away
     /// from the Analyses page. Runtime-only, and deliberately not part of the
     /// outcome itself: the writers announce, and this records what a reader did
@@ -1437,6 +1462,7 @@ impl Default for WorkbenchState {
             simulation_surface_pending_scroll_delta_y: 0.0,
             simulation_surface_editor_anchor_y: None,
             analysis_lifecycle_status: AnalysisLifecycleOutcome::default(),
+            prompt: None,
             analysis_lifecycle_toasted_sequence: 0,
             simulation_workflow: None,
             selected_specification: None,
