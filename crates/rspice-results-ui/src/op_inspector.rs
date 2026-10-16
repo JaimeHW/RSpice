@@ -729,8 +729,9 @@ fn node_value_text(row: &OperatingPointValue) -> (String, bool) {
         ("non-finite".to_owned(), false)
     }
 }
-/// Side of the problem mark set before a refused value.
-const PROBLEM_MARK: f32 = 11.0;
+/// Side of the problem mark set before a refused value: the kit's own, so it
+/// matches every other marked line in the product.
+use rspice_ui_kit::widgets::PROBLEM_MARK_SIDE as PROBLEM_MARK;
 /// A value the solve did not produce: neutral words, right-aligned like every
 /// value in the column, behind a failure mark at the cell's leading edge.
 fn paint_refused_cell(ui: &Ui, cell: egui::Rect, text: &str, font: egui::FontId) {
