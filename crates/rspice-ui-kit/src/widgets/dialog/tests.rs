@@ -205,7 +205,10 @@ fn manager_phone_layout_uses_the_mockup_four_point_gutter() {
     assert_eq!(layout.surface_rect.width(), 382.0);
     assert_eq!(layout.surface_rect.top(), 4.0);
     assert_eq!(layout.surface_rect.height(), 836.0);
-    assert!(layout.fill_height);
+    // The viewport less the gutter is the ceiling here, not the height: a
+    // manager is as tall as what it holds, and 836 is what an unmeasured
+    // surface is held to.
+    assert!(!layout.fill_height);
     assert!(!layout.app_background);
 }
 
@@ -266,7 +269,15 @@ fn jobs_manager_geometry_matches_the_mockup_on_desktop_and_phone() {
     assert_eq!(desktop.surface_rect.size(), vec2(1_120.0, 680.0));
     assert_eq!(desktop.surface_rect.center(), desktop_screen.center());
     assert_eq!(desktop.radius, 4.0);
-    assert!(desktop.fill_height);
+    // 680 is the ceiling an unmeasured surface is held to, not a height the
+    // purpose pins itself at: a shorter queue makes a shorter dialog.
+    assert!(!desktop.fill_height);
+    assert_eq!(
+        DialogLayout::resolve(DialogSize::JobsManager, desktop_screen, Some(420.0))
+            .surface_rect
+            .height(),
+        420.0
+    );
     assert!(desktop.app_background);
 
     let phone_screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(390.0, 844.0));
@@ -275,6 +286,33 @@ fn jobs_manager_geometry_matches_the_mockup_on_desktop_and_phone() {
     assert_eq!(phone.surface_rect.size(), vec2(382.0, 836.0));
     assert_eq!(phone.radius, 4.0);
     assert!(phone.narrow);
+}
+
+/// The page-setup studio is as tall as the sheet form it holds, at both
+/// shapes.
+///
+/// It was pinned at 760 on the desktop and at the whole viewport below the
+/// breakpoint, which left 298 points of bare surface above the footer in a
+/// 900 point portrait and 19 on the desktop.
+#[test]
+fn schematic_page_setup_is_content_height_at_both_shapes() {
+    let desktop_screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(1_440.0, 900.0));
+    let desktop = DialogLayout::resolve(DialogSize::SchematicPageSetup, desktop_screen, Some(612.0));
+    assert_eq!(desktop.surface_rect.size(), vec2(1_280.0, 612.0));
+    assert_eq!(desktop.surface_rect.center(), desktop_screen.center());
+    assert!(!desktop.fill_height);
+    // 760 is the ceiling, and the viewport caps that in turn.
+    let unmeasured = DialogLayout::resolve(DialogSize::SchematicPageSetup, desktop_screen, None);
+    assert_eq!(unmeasured.surface_rect.height(), 760.0);
+
+    // Narrow: both side gutters go, the height stays the content's.
+    let narrow_screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(560.0, 900.0));
+    let narrow = DialogLayout::resolve(DialogSize::SchematicPageSetup, narrow_screen, Some(602.0));
+    assert_eq!(narrow.surface_rect.x_range(), narrow_screen.x_range());
+    assert_eq!(narrow.surface_rect.height(), 602.0);
+    assert_eq!(narrow.radius, 0.0);
+    assert!(narrow.narrow);
+    assert!(!narrow.fill_height);
 }
 
 #[test]
@@ -328,15 +366,27 @@ fn wide_workflow_narrows_to_the_gutter_at_the_mockup_breakpoint() {
     assert!(!layout.fill_height);
 }
 
+/// Edge to edge is about the side gutters, not about the height.
+///
+/// At the breakpoint the surface gives up both side gutters and reaches the
+/// viewport's own edges, and it stays exactly as tall as its content inside
+/// that width. It used to take the whole viewport, which is how a six-row
+/// form came to be painted down a 900 point phone screen.
 #[test]
 fn simulation_workflow_becomes_edge_to_edge_at_the_mockup_breakpoint() {
     let screen = Rect::from_min_size(egui::pos2(5.0, 7.0), vec2(820.0, 900.0));
     let layout = DialogLayout::resolve(DialogSize::SimulationWorkflow, screen, Some(500.0));
 
-    assert_eq!(layout.surface_rect, screen);
+    assert_eq!(layout.surface_rect.x_range(), screen.x_range());
+    assert_eq!(layout.surface_rect.height(), 500.0);
+    assert_eq!(layout.surface_rect.center(), screen.center());
     assert_eq!(layout.radius, 0.0);
     assert!(layout.narrow);
-    assert!(layout.fill_height);
+    assert!(!layout.fill_height);
+
+    // Content taller than the viewport is still held to it.
+    let overflowing = DialogLayout::resolve(DialogSize::SimulationWorkflow, screen, Some(1_200.0));
+    assert_eq!(overflowing.surface_rect, screen);
 }
 
 #[test]
