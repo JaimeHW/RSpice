@@ -56,37 +56,45 @@ fn print_symbol_editor_renders_for_review() {
     };
 
     let mut session = SymbolEditorSession::default();
-    session.select_pin("DATA[3:0]");
     interaction::bind_canvas_source(&mut session, source.clone());
 
-    let inspector = rspice_ui_kit::raster::render_themed(
-        rspice_ui_kit::Theme::default(),
-        vec2(360.0, 620.0),
-        |ui, _background| {
-            rspice_ui_kit::panels::panel_body(ui, |ui| {
-                let _ = inspector::show(
-                    ui,
-                    source.clone(),
-                    document.clone(),
-                    metadata.clone(),
-                    &ports,
-                    &session,
-                    interaction::SymbolEditCapabilities { edit: true },
-                );
-            });
-        },
-    );
-    let path = directory.join("symbol-inspector.png");
-    let height = inspector.content_height().max(1);
-    std::fs::write(&path, inspector.png(height)).expect("write inspector render");
-    writeln!(
-        report,
-        "{} {}x{}",
-        path.display(),
-        inspector.width(),
-        height
-    )
-    .expect("write raster report");
+    // The healthy pin, then the one the schematic does not declare: the
+    // mismatch row renders in no other state.
+    for (stem, pin) in [
+        ("symbol-inspector", "DATA[3:0]"),
+        ("symbol-inspector-mismatch", "SPARE"),
+    ] {
+        let mut session = session.clone();
+        session.select_pin(pin);
+        let inspector = rspice_ui_kit::raster::render_themed(
+            rspice_ui_kit::Theme::default(),
+            vec2(360.0, 620.0),
+            |ui, _background| {
+                rspice_ui_kit::panels::panel_body(ui, |ui| {
+                    let _ = inspector::show(
+                        ui,
+                        source.clone(),
+                        document.clone(),
+                        metadata.clone(),
+                        &ports,
+                        &session,
+                        interaction::SymbolEditCapabilities { edit: true },
+                    );
+                });
+            },
+        );
+        let path = directory.join(format!("{stem}.png"));
+        let height = inspector.content_height().max(1);
+        std::fs::write(&path, inspector.png(height)).expect("write inspector render");
+        writeln!(
+            report,
+            "{} {}x{}",
+            path.display(),
+            inspector.width(),
+            height
+        )
+        .expect("write raster report");
+    }
 
     let canvas = rspice_ui_kit::raster::render_themed(
         rspice_ui_kit::Theme::default(),
