@@ -18,7 +18,12 @@
 //! - Engine — `x1.x2.net`, with `:` accepted as an equal separator. Parsed
 //!   here and emitted only by [`InstancePath::to_engine_name`] and
 //!   [`InstancePath::engine_name_for`], because the engine names flattened
-//!   nodes this way and cannot name a non-ASCII instance at all.
+//!   nodes this way and cannot name a non-ASCII instance at all. Its segments
+//!   are the names the deck writes instances under, not the drawn ones: an
+//!   instance drawn `amp` is written `Xamp`, so its scope is `xamp`. A path
+//!   parsed back from this form therefore carries written names, and is
+//!   compared with a drawn path only through
+//!   [`InstancePath::same_engine_scope`].
 //! - Legacy — the spelling from before the root was implicit, in which the
 //!   root occupied a literal `top` segment. [`InstancePath::parse_legacy`]
 //!   accepts it and drops that one segment; deserialization uses it so
@@ -56,6 +61,32 @@ const ENGINE_SEPARATORS: [char; 2] = ['.', ':'];
 
 /// The wildcard that stands for exactly one instance in a pattern.
 const PATTERN_WILDCARD: &str = "*";
+
+/// The device prefix the deck writes every hierarchical instance under. Only a
+/// sub-circuit instance opens a scope, so every engine scope segment carries it.
+pub const SUBCIRCUIT_INSTANCE_PREFIX: &str = "X";
+
+/// The name the deck writes an instance drawn `drawn` under, for a device
+/// whose cards begin with `prefix`: the drawn name when it already begins with
+/// the prefix, compared without case, and the prefix in front of it otherwise.
+///
+/// The engine reads what an element is off the first letters of its name, so
+/// a resistor drawn `C4` is written `RC4` and a cell instance drawn `amp` is
+/// written `Xamp`. This is the one statement of that rule: the netlister, the
+/// design check and every engine address derive the written name from here.
+pub fn written_instance_name(prefix: &str, drawn: &str) -> String {
+    let prefixed = prefix.is_empty()
+        || drawn.is_empty()
+        || drawn
+            .as_bytes()
+            .get(..prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(prefix.as_bytes()));
+    if prefixed {
+        drawn.to_owned()
+    } else {
+        format!("{prefix}{drawn}")
+    }
+}
 
 /// An absolute path to a design instance, rooted at the implicit design root.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
@@ -190,21 +221,71 @@ impl InstancePath {
 
     /// The flattened node scope the engine uses, `x1.x2`.
     ///
+    /// The engine scopes a sub-circuit by the name the deck wrote its instance
+    /// under, lower-cased, and that is the drawn name under the `X` prefix: a
+    /// segment drawn `amp` is the scope `xamp`, and one drawn `X1` is `x1`.
+    /// Only a cell instance whose master the deck emits is descended into,
+    /// and the deck writes every one of those as an `X` card.
+    ///
     /// The root has no engine name: a flattened node at the root is named by
     /// its leaf alone, which is what [`InstancePath::engine_name_for`] gives.
     pub fn to_engine_name(&self) -> Result<String, HierarchyPathError> {
         if self.segments.is_empty() {
             return Err(HierarchyPathError::RootHasNoEngineName);
         }
-        let mut name = String::with_capacity(rendered_len(&self.segments));
+        let mut name = String::with_capacity(rendered_len(&self.segments) + self.segments.len());
         for segment in &self.segments {
             require_ascii(segment)?;
             if !name.is_empty() {
                 name.push(ENGINE_SEPARATOR);
             }
-            name.push_str(&segment.to_ascii_lowercase());
+            name.push_str(&engine_segment(segment));
         }
         Ok(name)
+    }
+
+    /// Whether the engine knows this path and `other` as one scope.
+    ///
+    /// A drawn path and the same occurrence parsed back from the engine form
+    /// are spelled differently — `/amp` and `/xamp` — so they are compared by
+    /// the name the deck writes each segment under. Two siblings whose written
+    /// names fold together are a duplicate the design check refuses, so in a
+    /// design that runs this never joins two occurrences.
+    pub fn same_engine_scope(&self, other: &Self) -> bool {
+        self.segments.len() == other.segments.len() && self.engine_scope_starts_with(other)
+    }
+
+    /// [`InstancePath::starts_with`], comparing each segment by the name the
+    /// deck writes it under, so either path may be in the engine's spelling.
+    pub fn engine_scope_starts_with(&self, prefix: &Self) -> bool {
+        prefix.segments.len() <= self.segments.len()
+            && prefix
+                .segments
+                .iter()
+                .zip(&self.segments)
+                .all(|(expected, actual)| same_written_segment(expected, actual))
+    }
+
+    /// The occurrence among `drawn` that this path names to the engine.
+    ///
+    /// This is how a scope read off a result, `xamp`, finds the instance the
+    /// author drew, `/amp`: the drawn occurrences are matched by their written
+    /// names. `None` when no drawn occurrence answers.
+    pub fn resolve_drawn<'a>(
+        &self,
+        drawn: impl IntoIterator<Item = &'a InstancePath>,
+    ) -> Option<&'a InstancePath> {
+        drawn
+            .into_iter()
+            .find(|candidate| candidate.same_engine_scope(self))
+    }
+
+    /// The remainder below `prefix`, as [`InstancePath::strip_prefix`] gives
+    /// it, with the prefix matched by [`InstancePath::engine_scope_starts_with`].
+    pub fn strip_engine_scope_prefix(&self, prefix: &Self) -> Option<Self> {
+        self.engine_scope_starts_with(prefix).then(|| Self {
+            segments: self.segments[prefix.segments.len()..].to_vec(),
+        })
     }
 
     /// The engine's name for a signal or device `leaf` inside this instance:
@@ -440,6 +521,25 @@ impl ProbeTarget {
         self.scope.engine_name_for(&self.leaf)
     }
 
+    /// This probe re-scoped onto the drawn occurrence its scope names, chosen
+    /// from `drawn` by [`InstancePath::resolve_drawn`]: `xamp.n1` read off a
+    /// result is `/amp/n1` in a design that drew `amp`. A probe at the root
+    /// needs no occurrence. `None` when no drawn occurrence answers.
+    pub fn resolve_drawn<'a>(
+        &self,
+        drawn: impl IntoIterator<Item = &'a InstancePath>,
+    ) -> Option<Self> {
+        let scope = if self.scope.is_root() {
+            InstancePath::root()
+        } else {
+            self.scope.resolve_drawn(drawn)?.clone()
+        };
+        Some(Self {
+            scope,
+            leaf: self.leaf.clone(),
+        })
+    }
+
     /// Alternate engine spelling for a lookup that found no literal signal.
     /// Callers must try the exact identity first: a deck can contain literal
     /// punctuation as well as flattened hierarchical names. Only the request
@@ -530,6 +630,37 @@ impl OccurrenceProbeSpelling {
         let engine = target.engine_name().ok()?;
         Some(Self {
             display: format!("{quantity}({target})"),
+            engine: format!("{quantity}({engine})"),
+        })
+    }
+
+    /// `quantity` of the element drawn `drawn`, which the deck writes under
+    /// `written`, read at `occurrence`.
+    ///
+    /// The deck can write an element under another name than the drawing
+    /// gives it — a resistor drawn `C4` is the card `RC4`, a limited VCVS
+    /// drawn `E1` is the behavioural source `B1` — and the engine knows it by
+    /// the written name alone. The reader is shown the drawn one. `None` as
+    /// for [`Self::for_leaf`].
+    pub fn for_element(
+        occurrence: &InstancePath,
+        quantity: char,
+        drawn: &str,
+        written: &str,
+    ) -> Option<Self> {
+        if occurrence.is_root() {
+            return Some(Self {
+                display: format!("{quantity}({drawn})"),
+                engine: format!("{quantity}({written})"),
+            });
+        }
+        let engine = occurrence.engine_name_for(written).ok()?;
+        let shown = ProbeTarget {
+            scope: occurrence.clone(),
+            leaf: drawn.to_owned(),
+        };
+        Some(Self {
+            display: format!("{quantity}({shown})"),
             engine: format!("{quantity}({engine})"),
         })
     }
@@ -699,6 +830,21 @@ fn validate_leaf(leaf: &str) -> Result<(), HierarchyPathError> {
     }
 }
 
+/// One scope segment as the engine spells it: the written instance name,
+/// lower-cased.
+fn engine_segment(segment: &str) -> String {
+    written_instance_name(SUBCIRCUIT_INSTANCE_PREFIX, segment).to_ascii_lowercase()
+}
+
+/// Whether two segments, each drawn or written, name one instance to the
+/// engine.
+fn same_written_segment(left: &str, right: &str) -> bool {
+    fold_eq(
+        &written_instance_name(SUBCIRCUIT_INSTANCE_PREFIX, left),
+        &written_instance_name(SUBCIRCUIT_INSTANCE_PREFIX, right),
+    )
+}
+
 fn require_ascii(name: &str) -> Result<(), HierarchyPathError> {
     if name.is_ascii() {
         Ok(())
@@ -846,11 +992,11 @@ mod tests {
 
     #[test]
     fn engine_forms_parse_alike_and_only_engine_names_use_separators() {
-        let dotted = InstancePath::parse("x1.x2.net").expect("dotted engine path");
-        let coloned = InstancePath::parse("x1:x2:net").expect("coloned engine path");
+        let dotted = InstancePath::parse("x1.x2.x3").expect("dotted engine path");
+        let coloned = InstancePath::parse("x1:x2:x3").expect("coloned engine path");
         assert_eq!(dotted, coloned);
-        assert_eq!(dotted.to_string(), "/x1/x2/net");
-        assert_eq!(dotted.to_engine_name().expect("engine name"), "x1.x2.net");
+        assert_eq!(dotted.to_string(), "/x1/x2/x3");
+        assert_eq!(dotted.to_engine_name().expect("engine name"), "x1.x2.x3");
 
         let scope = InstancePath::parse("/X1/X2").expect("scope");
         assert_eq!(scope.to_engine_name().expect("engine name"), "x1.x2");
@@ -1227,6 +1373,125 @@ mod tests {
             .expect("a device leaf spells the same way");
         assert_eq!(current.display(), "I(/X1/R2)");
         assert_eq!(current.engine(), "I(x1.r2)");
+    }
+
+    /// The deck writes a cell instance drawn `amp` as `Xamp`, and the engine
+    /// scopes everything inside it by that name. Asking for `amp.n1` names a
+    /// node the engine never solved.
+    #[test]
+    fn a_drawn_instance_is_scoped_by_the_name_the_deck_writes_it_under() {
+        let amp = InstancePath::parse("/amp").expect("drawn without its prefix");
+        assert_eq!(amp.to_engine_name().expect("engine scope"), "xamp");
+        assert_eq!(amp.engine_name_for("n1").expect("node"), "xamp.n1");
+        assert_eq!(
+            InstancePath::parse("/amp/X2/core")
+                .expect("nested")
+                .engine_name_for("R1")
+                .expect("device"),
+            "xamp.x2.xcore.r1"
+        );
+        assert_eq!(
+            InstancePath::parse("/Xamp")
+                .expect("drawn with its prefix")
+                .to_engine_name()
+                .expect("engine scope"),
+            "xamp"
+        );
+        assert_eq!(
+            ProbeTarget::engine_alias("/amp/n1").as_deref(),
+            Some("xamp.n1")
+        );
+        assert_eq!(
+            OccurrenceProbeSpelling::for_leaf(&amp, 'V', "n1")
+                .expect("spelled")
+                .engine(),
+            "V(xamp.n1)"
+        );
+    }
+
+    #[test]
+    fn the_written_name_carries_the_device_prefix_once() {
+        assert_eq!(written_instance_name("R", "C4"), "RC4");
+        assert_eq!(written_instance_name("R", "r1"), "r1");
+        assert_eq!(written_instance_name("X", "amp"), "Xamp");
+        assert_eq!(written_instance_name("X", "xamp"), "xamp");
+        assert_eq!(written_instance_name("MR", "M1"), "MRM1");
+        assert_eq!(
+            written_instance_name("R", "Ω1"),
+            "RΩ1",
+            "a non-ASCII head is compared without slicing through it"
+        );
+        assert_eq!(written_instance_name("", "free"), "free");
+        assert_eq!(written_instance_name("R", ""), "");
+    }
+
+    /// A scope read off a result carries written names, and finds the drawn
+    /// occurrence by them: `xamp.n1` is `/amp/n1`.
+    #[test]
+    fn an_engine_scope_resolves_to_the_drawn_instance_by_its_written_name() {
+        let drawn = [
+            InstancePath::parse("/amp").expect("drawn without its prefix"),
+            InstancePath::parse("/amp/X2").expect("nested"),
+            InstancePath::parse("/Xother").expect("drawn with its prefix"),
+        ];
+        for (engine, resolved) in [
+            ("xamp.n1", "/amp/n1"),
+            ("XAMP.N1", "/amp/N1"),
+            ("xamp.x2.n1", "/amp/X2/n1"),
+            ("xother.n1", "/Xother/n1"),
+            ("n1", "n1"),
+        ] {
+            let probe = ProbeTarget::parse(engine).expect("engine probe");
+            assert_eq!(
+                probe
+                    .resolve_drawn(&drawn)
+                    .map(|probe| probe.to_string())
+                    .as_deref(),
+                Some(resolved),
+                "{engine}"
+            );
+        }
+        assert!(
+            ProbeTarget::parse("xmissing.n1")
+                .expect("engine probe")
+                .resolve_drawn(&drawn)
+                .is_none()
+        );
+
+        let written = InstancePath::parse("/xamp").expect("written scope");
+        assert!(written.same_engine_scope(&drawn[0]));
+        assert!(!written.same_engine_scope(&drawn[1]));
+        assert!(drawn[1].engine_scope_starts_with(&written));
+        assert!(!drawn[2].engine_scope_starts_with(&written));
+        assert_eq!(
+            drawn[1]
+                .strip_engine_scope_prefix(&written)
+                .expect("below the written scope")
+                .to_string(),
+            "/X2"
+        );
+        assert_ne!(
+            written.fold_key(),
+            drawn[0].fold_key(),
+            "the drawn identity is not the engine's"
+        );
+    }
+
+    #[test]
+    fn an_element_is_shown_as_drawn_and_asked_for_as_written() {
+        let amp = InstancePath::parse("/amp").expect("drawn occurrence");
+        let inside = OccurrenceProbeSpelling::for_element(&amp, 'I', "E1", "B1")
+            .expect("an ASCII occurrence spells");
+        assert_eq!(inside.display(), "I(/amp/E1)");
+        assert_eq!(inside.engine(), "I(xamp.b1)");
+
+        let root = OccurrenceProbeSpelling::for_element(&InstancePath::root(), 'I', "C4", "RC4")
+            .expect("the root spells");
+        assert_eq!(root.display(), "I(C4)");
+        assert_eq!(root.engine(), "I(RC4)");
+
+        let unnameable = InstancePath::parse("/Xé").expect("a Unicode instance name is legal");
+        assert!(OccurrenceProbeSpelling::for_element(&unnameable, 'I', "R1", "R1").is_none());
     }
 
     #[test]
