@@ -1,8 +1,14 @@
 # Vendored client provenance
 
+`rspice-pack`, `rspice-cloud-domain`, `rspice-cloud-contract` and
+`rspice-cloud-client` are vendored, not authored here: the authoritative copy
+lives in the RSpice-Cloud repository, because a pack archive and a catalog
+snapshot must reach the same verdict in this application as they do in the
+service that signed them.
+
 Run `python tools/cloud/sync_vendored_client.py --source <clean-checkout>` to
-import the four crates and test fixtures from the authoritative RSpice-Cloud
-repository. Native licensing fixtures live beside their module in
+import those four crates and their test fixtures. Native licensing fixtures
+live beside their module in
 `crates/rspice-cloud-client/src/native_licensing/testdata/` and are included
 with the crate sources. The sync records the exact upstream commit and upstream
 file hashes, applies `vendor.patch`, and records the resulting file hashes and patch

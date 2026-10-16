@@ -45,22 +45,23 @@ oracle is a program rather than a file:
 - `verilog/` — digital Verilog run through Icarus Verilog and Verilator, two
   simulators that share no code with RSpice or with each other. RSpice-authored
   rather than vendored, and chosen for language coverage rather than scale: one
-  case per wave-1 construct the digital front end has to implement. Run by
+  case per construct the digital front end implements. Run by
   `tools/rspice-conformance/tests/verilog_oracles.rs`.
 
   The difference that matters is what a green run means when the oracles are
-  absent, which today they always are — neither binary is on CI. The suite then
-  checks corpus integrity, testbench generation, and its own comparator, and
-  reports the absence; it does **not** claim the circuits are right. Set
-  `RSPICE_VERILOG_ORACLES_REQUIRED=1` to turn that absence into a failure, which
-  is what CI should do once the binaries are installed. Nothing in RSpice
-  executes digital Verilog yet, so the RSpice arm of the comparison is present
-  and refuses by name until W2.3 lands.
+  absent, which on CI they always are — neither binary is installed there. The
+  suite then checks corpus integrity, testbench generation, and its own
+  comparator, and reports the absence; it does **not** claim the circuits are
+  right. `RSPICE_VERILOG_ORACLES_REQUIRED=1` turns that absence into a failure.
+  RSpice's own arm of the comparison runs behind the conformance crate's
+  `verilog-digital` feature, which is on by default; a construct the digital
+  front end does not implement is refused by name and recorded as `refused`,
+  never as a pass.
 
 **The mixed-signal reference corpus** combines all three ideas:
 
-- `mixed-corpus/` — the twelve designs of `MIXED_SIMULATION_PLAN.md` §7 (SPICE,
-  XSPICE and Verilog-AMS together) plus the P0.6 probes. Each design carries
+- `mixed-corpus/` — twelve designs (`c01`–`c12`) that exercise SPICE, XSPICE
+  and Verilog-AMS together, plus the `probes/` boundary cases. Each design carries
   its decks, oracle decks, checked-in ngspice/Xyce/co-simulation references,
   a `tolerance.toml` fixed before the first comparison, and `outcomes.tsv`:
   the recorded pass/refused/fail/wrong/unverified outcome of every design ×
