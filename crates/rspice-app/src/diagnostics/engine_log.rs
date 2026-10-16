@@ -1,18 +1,23 @@
 //! Engine log publication into the Console and desktop logger installation.
 
 use super::{LogBuffer, LogSource};
-use rspice_simulation::engine_log::EngineLogLine;
+use rspice_simulation::engine_log::{EngineLogLine, EngineLogOrigin};
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_simulation::engine_log::{admits, note_stderr_level, offer};
 
 /// Write one run's drained lines into the Console.
 ///
-/// The engine's text is carried unchanged: the `ENG` tag is what distinguishes
-/// an engine line from the studio's own, so nothing is prefixed to say it
-/// again.
+/// The text is carried unchanged: the source tag says whose words a line is —
+/// the engine's, the testbench's or the Verilog-A compiler's — so nothing is
+/// prefixed to say it again.
 pub(crate) fn publish(lines: Vec<EngineLogLine>, buffer: &mut LogBuffer) {
     for line in lines {
-        buffer.log(line.severity, LogSource::Engine, line.message);
+        let source = match line.origin {
+            EngineLogOrigin::Engine => LogSource::Engine,
+            EngineLogOrigin::Hdl => LogSource::Hdl,
+            EngineLogOrigin::VerilogA => LogSource::VerilogA,
+        };
+        buffer.log(line.severity, source, line.message);
     }
 }
 
@@ -163,6 +168,7 @@ mod tests {
             vec![EngineLogLine {
                 severity: LogSeverity::Info,
                 message: "Transient noise: 2 device noise source(s)".to_owned(),
+                origin: EngineLogOrigin::Engine,
             }]
         );
 
@@ -175,6 +181,27 @@ mod tests {
             rows[0].message, "Transient noise: 2 device noise source(s)",
             "the engine's text is carried unchanged"
         );
+    }
+
+    /// A testbench's output and a compiler finding are tagged as theirs, not
+    /// the engine's.
+    #[test]
+    fn a_line_is_tagged_with_the_part_of_the_run_that_said_it() {
+        let line = |origin, message: &str| EngineLogLine {
+            severity: LogSeverity::Warning,
+            message: message.to_owned(),
+            origin,
+        };
+        let mut buffer = LogBuffer::default();
+        publish(
+            vec![
+                line(EngineLogOrigin::Hdl, "edge 1 \u{2014} tb (tb.v:9)"),
+                line(EngineLogOrigin::VerilogA, "model.va:4:5: [VA-SEM-X] dropped"),
+            ],
+            &mut buffer,
+        );
+        let sources: Vec<_> = buffer.entries().map(|entry| entry.source).collect();
+        assert_eq!(sources, vec![LogSource::Hdl, LogSource::VerilogA]);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
