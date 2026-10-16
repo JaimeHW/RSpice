@@ -152,7 +152,7 @@ fn evaluate_optimization_objective(
                     config.objective_node
                 ))
             })?;
-    let ref_idx = if is_ground_like(&config.objective_ref) {
+    let ref_idx = if is_ground_like(netlist, &config.objective_ref) {
         Some(0usize)
     } else {
         resolve_node_index_case_insensitive(&dc.node_names, &config.objective_ref, abort)?
@@ -365,6 +365,50 @@ R2 out 0 1k
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
         assert!(abort.polls.load(Ordering::Relaxed) >= 12);
+    }
+
+    /// Under the ngspice dialect only `0` and `GND` are node 0; `GND!` is an
+    /// ordinary node, here held 1 V above ground. The objective is measured
+    /// against it, so the optimizer has to place V(out) 0.2 V above it, at
+    /// 1.2 V, which RLOAD = 2k/3 does. Measured against node 0 instead, the
+    /// 0.2 V target sits out of RLOAD's range and the search pins at its bound.
+    #[test]
+    fn an_objective_reference_the_dialect_does_not_ground_is_measured() {
+        const DECK: &str = "\
+Floating reference
+.param RLOAD=1k
+V1 in 0 2
+R1 in out {RLOAD}
+R2 out 0 1k
+VREF GND! 0 1
+RREF GND! 0 1k
+.op
+.end
+";
+        let config = OptimizationRunConfig {
+            objective_unit: "V".into(),
+            objective_ref: "GND!".into(),
+            target: Some(0.2),
+            ..Default::default()
+        };
+        let data = run_optimization_analysis_with_config_and_source_path_and_abort(
+            DECK,
+            &config,
+            None,
+            &rspice_core::NoAbort,
+        )
+        .unwrap();
+
+        let [objective] = data.best_objectives.as_slice() else {
+            panic!("one objective: {:?}", data.best_objectives);
+        };
+        assert!(
+            (objective.value - 0.2).abs() < 1e-3,
+            "V(out,GND!) = {}",
+            objective.value
+        );
+        let rload = data.best_variables["RLOAD"];
+        assert!((rload - 2000.0 / 3.0).abs() < 5.0, "RLOAD = {rload}");
     }
 }
 

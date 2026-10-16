@@ -266,12 +266,15 @@ fn execute_qualification_vector(
         return Err(QualificationExecutionError::Cancelled);
     }
 
+    // A probe names node 0 only where this deck's dialect folds its name onto
+    // it; `GND!` is an ordinary node to ngspice and is measured like one.
+    let ground = netlist.ground_policy();
     let mut references = Vec::with_capacity(vector.outputs.len());
     for output in &vector.outputs {
         let reference = vector
             .reference(&output.quantity)
             .expect("vector output/reference coverage validated before execution");
-        let observed = match measure_qualification_output(output, &executed) {
+        let observed = match measure_qualification_output(output, &executed, ground) {
             Ok(value) if value.is_finite() => value,
             Ok(_) => {
                 return failed_platform_outcome(
@@ -325,6 +328,7 @@ fn failed_platform_outcome(
 fn measure_qualification_output(
     output: &QualificationOutputDefinition,
     executed: &ExecutedQualificationAnalysis,
+    ground: rspice_core::netlist::GroundPolicy,
 ) -> Result<f64, String> {
     let (sweep_value, result) = match (executed, output.sample) {
         (
@@ -363,7 +367,7 @@ fn measure_qualification_output(
                     points.len()
                 )
             })?;
-            return measure_ac_output(&output.probe, point);
+            return measure_ac_output(&output.probe, point, ground);
         }
         (ExecutedQualificationAnalysis::Noise(points), sample) => {
             let index = selected_frequency_index(sample, points.len(), "noise sweep")?;
@@ -439,9 +443,10 @@ fn selected_time_index(sample: QualificationSample, point_count: usize) -> Resul
 fn measure_ac_output(
     probe: &QualificationProbe,
     point: &rspice_core::analysis::AcResult,
+    ground: rspice_core::netlist::GroundPolicy,
 ) -> Result<f64, String> {
     let node_voltage = |node: &str| -> Result<num_complex::Complex64, String> {
-        if is_ground_name(node) {
+        if ground.is_ground(node) {
             return Ok(num_complex::Complex64::new(0.0, 0.0));
         }
         let index = point
@@ -540,13 +545,6 @@ fn measure_transient_output(
             .ok_or_else(|| format!("transient time is unavailable at point {index}")),
         _ => Err("output probe is incompatible with a transient result".to_owned()),
     }
-}
-
-fn is_ground_name(name: &str) -> bool {
-    matches!(
-        name.trim().to_ascii_lowercase().as_str(),
-        "0" | "gnd" | "gnd!"
-    )
 }
 
 #[cfg(target_arch = "wasm32")]

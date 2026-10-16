@@ -181,7 +181,7 @@ pub(crate) fn run_hbnoise_analysis_from_hb_on_materialized_with_context(
         .output_ref
         .as_deref()
         .map(str::trim)
-        .filter(|node| !node.is_empty() && !is_ground_like(node));
+        .filter(|node| !node.is_empty() && !is_ground_like(netlist, node));
     if output_ref.is_some_and(|node| node.eq_ignore_ascii_case(config.output_node.trim())) {
         return Err(ServiceRunError::Failure(
             "HBNOISE output node and output reference cannot be the same node".to_owned(),

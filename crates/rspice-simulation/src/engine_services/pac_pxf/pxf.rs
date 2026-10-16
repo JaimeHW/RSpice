@@ -217,8 +217,11 @@ pub(crate) fn run_pxf_analysis_on_materialized_with_context(
     let group_delay_curve = result.group_delay_curve();
     let group_delay = (!group_delay_curve.is_empty()).then_some(group_delay_curve);
 
-    let output_label =
-        build_voltage_output_expr(config.output_node.trim(), config.output_ref.as_deref());
+    let output_label = build_voltage_output_expr(
+        netlist,
+        config.output_node.trim(),
+        config.output_ref.as_deref(),
+    );
 
     ensure_not_aborted(abort)?;
     Ok(PxfData {

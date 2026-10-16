@@ -331,6 +331,32 @@ fn failures_cancellation_and_cumulative_limits_do_not_publish_or_consume_ids() {
     assert_eq!(circuit.datasets().len(), 2);
 }
 
+/// To ngspice only `0` and `gnd` are node 0; `gnd!` is an ordinary node, here
+/// held at 0.25 V, and printing it prints that node.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_node_the_dialect_does_not_ground_prints_its_own_voltage() {
+    let engine = Engine::default();
+    let mut circuit = ControlCircuit::new(
+        Netlist::parse("DC\nV1 in 0 0\nV2 gnd! 0 0.25\nR1 in gnd! 1k\n.end\n").unwrap(),
+    )
+    .unwrap();
+    execute(&mut circuit, &engine, "dc", "V1 0 1 1").unwrap();
+    let print = |circuit: &mut ControlCircuit, vector: &str| {
+        let ControlCommandEffect::Presentation(presentation) =
+            execute(circuit, &engine, "print", vector).unwrap()
+        else {
+            panic!("print")
+        };
+        let ControlPresentationKind::Print(traces) = presentation.kind else {
+            panic!("print")
+        };
+        traces[0].y.samples.iter().map(|s| s.re).collect::<Vec<_>>()
+    };
+    assert_eq!(print(&mut circuit, "v(gnd!)"), vec![0.25, 0.25]);
+    assert_eq!(print(&mut circuit, "v(gnd)"), vec![0.0, 0.0]);
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn mixed_control_program_runs_dc_in_source_order() {

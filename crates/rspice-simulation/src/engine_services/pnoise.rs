@@ -231,7 +231,7 @@ fn run_pnoise_from_retained_state(
         .output_ref
         .as_deref()
         .map(str::trim)
-        .filter(|node| !node.is_empty() && !is_ground_like(node));
+        .filter(|node| !node.is_empty() && !is_ground_like(netlist, node));
 
     if config.noise_ref == PnoiseReference::Phase {
         // Only a shooting orbit holds its period as an unknown, so only a

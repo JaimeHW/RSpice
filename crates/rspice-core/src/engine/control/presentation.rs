@@ -529,7 +529,9 @@ impl ControlCircuit {
         {
             let unit = column.target.unit();
             (Column::TableCoordinate(index), lower, unit)
-        } else if matches!(lower.as_str(), "0" | "gnd" | "gnd!") {
+        } else if self.netlist.ground_policy().is_ground(&lower) {
+            // Node 0 as this deck's dialect names it, and nothing else: to
+            // ngspice `gnd!` is a node of its own and has a voltage.
             (Column::Ground, "v(0)".into(), SignalUnit::Volt)
         } else {
             let names = match &dataset.result {
