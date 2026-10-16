@@ -64,8 +64,10 @@ pub use selection_command::{
     NotePreviewStyle, PreviewPoint, SelectionImpact, SelectionPreview, ShapePreviewStroke,
     selection_command_workflow, workflow_preview_status,
 };
-pub(crate) use status_mark::{PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE};
-pub use status_mark::{Problem, StatusMark, paint_problem_mark, paint_status_mark, problem_line};
+pub use status_mark::{
+    PROBLEM_MARK_ADVANCE, PROBLEM_MARK_GAP, PROBLEM_MARK_SIDE, Problem, StatusMark,
+    paint_problem_mark, paint_status_mark, problem_line,
+};
 pub use switch::{SWITCH_WIDTH, paint_switch};
 pub use table::measurement_table;
 pub use toast::{
