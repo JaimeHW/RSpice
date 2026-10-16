@@ -1267,6 +1267,71 @@ fn part(id: u64, kind: ComponentType, name: &str) -> Component {
     Component::new(id, kind, Point::new(400 * id as i32, 0)).with_name_value(name, "1")
 }
 
+/// A global continues into every cellview that names it, so a terminal on one
+/// is connected only if something else in the design names it too. Touched
+/// once in the whole design, it is floating; touched once in each of two
+/// cells, it is two connections.
+#[test]
+fn a_global_touched_once_in_the_design_is_floating() {
+    let resistor = |nodes: [&str; 2]| {
+        labelled(vec![(
+            part(1, ComponentType::Resistor, "R1"),
+            vec![("+", nodes[0]), ("-", nodes[1])],
+        )])
+    };
+    let libraries = LibraryCatalog::default();
+    let contract = crate::connectivity_contract::ConnectivityContract::default();
+    let vref = DrcLocation::Node {
+        net_name: "vref!".to_owned(),
+    };
+
+    // R1 from `in` to `vref!`, and nothing else names `vref!`.
+    let views = buffers([("top", resistor(["in", "vref!"]))]);
+    let hierarchy =
+        HierarchySource::from_workspace(&libraries, &views).with_connectivity(&contract);
+    let result = run_check_with_hierarchy(
+        &views["work/top/schematic"],
+        &hierarchy,
+        DrcConfig::default(),
+    );
+    let floating = of_type(&result, DrcViolationType::FloatingNode);
+    let global = floating
+        .iter()
+        .find(|finding| finding.location == vref)
+        .unwrap_or_else(|| panic!("vref! is floating: {:?}", result.violations()));
+    assert_eq!(global.severity, DrcSeverity::Warning);
+
+    let views = buffers([
+        ("a", resistor(["vref!", "0"])),
+        ("b", resistor(["vref!", "0"])),
+    ]);
+    let hierarchy =
+        HierarchySource::from_workspace(&libraries, &views).with_connectivity(&contract);
+    let both = SchematicDocument {
+        components: vec![instance(1, "XA", "a"), instance(2, "XB", "b")],
+        ..SchematicDocument::default()
+    };
+    let result = run_check_with_hierarchy(&both, &hierarchy, DrcConfig::default());
+    assert!(
+        of_type(&result, DrcViolationType::FloatingNode).is_empty(),
+        "{:?}",
+        result.violations()
+    );
+
+    // Either cell alone touches it once, and the finding is stated inside it.
+    let one = SchematicDocument {
+        components: vec![instance(1, "XA", "a")],
+        ..SchematicDocument::default()
+    };
+    let result = run_check_with_hierarchy(&one, &hierarchy, DrcConfig::default());
+    assert_eq!(
+        placed(&result, DrcViolationType::FloatingNode),
+        vec![("/XA".to_owned(), Some("work/a/schematic".to_owned()))],
+        "{:?}",
+        result.violations()
+    );
+}
+
 /// What the cross-cellview driver rules leave alone: sources on different
 /// globals, a source on a port or on a local net of a cell placed twice —
 /// each occurrence's node is its own there — and a conflict confined to one

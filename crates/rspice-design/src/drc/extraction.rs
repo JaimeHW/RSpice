@@ -220,6 +220,7 @@ fn check_subject(
     let read_below = reach == CheckReach::Hierarchy || config.check_missing_ground;
     let mut reports = Vec::with_capacity(graph.views.len());
     let mut drives = GlobalDrives::default();
+    let mut touches = GlobalTouches::default();
     let mut design_reaches_ground = false;
     let mut subject_inputs = None;
     for (index, view) in graph.views.iter().enumerate() {
@@ -246,6 +247,9 @@ fn check_subject(
         }
         if reach == CheckReach::Hierarchy && config.check_shorted_outputs {
             drives.collect(index, &components, &globals);
+        }
+        if reach == CheckReach::Hierarchy && config.check_floating_nodes {
+            touches.collect(index, &components);
         }
         if index == SUBJECT {
             subject_inputs = Some((components, connectivity));
@@ -316,6 +320,18 @@ fn check_subject(
             }
             finding.id = next_id;
             result.add_violation(finding);
+            next_id += 1;
+        }
+        // A global touched once has its one terminal in exactly one
+        // occurrence, and the finding is stated there.
+        for (view, mut finding) in touches.floating(&occurrences, config.min_connections) {
+            if let Some(severity) = config.severity_overrides.get(&finding.violation_type) {
+                finding.severity = *severity;
+            }
+            let occurrence = graph.views[view].reference.as_ref().and_then(|reference| {
+                (view != SUBJECT).then(|| (&occurrences[view].paths[0], reference))
+            });
+            result.add_violation(restated(&finding, next_id, occurrence, None));
             next_id += 1;
         }
     }
@@ -880,6 +896,93 @@ struct GlobalDrives {
 
 /// The key ground takes in a pair of global nodes.
 const GROUND_KEY: &str = "0";
+
+/// Terminals on each global node, counted across the whole walk.
+///
+/// A cellview's own floating-node rule takes a terminal on a global as
+/// connected, because the global continues into every other cellview that
+/// names it. Whether anything else does name it is a question about the whole
+/// design, so the walk counts every terminal on each global at every
+/// occurrence of the cellview that holds it. A global the design touches fewer
+/// times than a node needs is floating, wherever its one terminal is drawn.
+#[derive(Default)]
+struct GlobalTouches {
+    /// By folded node name.
+    nodes: BTreeMap<String, GlobalTouched>,
+}
+
+#[derive(Default)]
+struct GlobalTouched {
+    /// The terminals on the node in each cellview that touches it, with the
+    /// node as that cellview spells it.
+    touches: Vec<(usize, u64, String)>,
+    /// An interface port stands on the node somewhere, so it continues into a
+    /// parent the walk does not see.
+    continues: bool,
+}
+
+impl GlobalTouches {
+    fn collect(&mut self, view: usize, components: &[ComponentInfo]) {
+        let mut in_view = BTreeMap::<String, (u64, String)>::new();
+        for component in components {
+            for pin in component.pins.iter().filter(|pin| pin.on_global) {
+                let key = pin.net_name.to_ascii_lowercase();
+                if component.is_interface_port {
+                    self.nodes.entry(key.clone()).or_default().continues = true;
+                }
+                in_view
+                    .entry(key)
+                    .or_insert_with(|| (0, pin.net_name.clone()))
+                    .0 += 1;
+            }
+        }
+        for (key, (terminals, node)) in in_view {
+            self.nodes
+                .entry(key)
+                .or_default()
+                .touches
+                .push((view, terminals, node));
+        }
+    }
+
+    /// Each global the design touches fewer than `min_connections` times, at
+    /// the cellview that touches it first.
+    fn floating(
+        &self,
+        occurrences: &[Occurrences],
+        min_connections: usize,
+    ) -> Vec<(usize, DrcViolation)> {
+        let mut findings = Vec::new();
+        for touched in self.nodes.values() {
+            let Some((view, _, node)) = touched.touches.first() else {
+                continue;
+            };
+            if touched.continues || crate::schematic::ground_names::is_ground_reference(node) {
+                continue;
+            }
+            let total = touched
+                .touches
+                .iter()
+                .map(|(view, terminals, _)| terminals.saturating_mul(occurrences[*view].count))
+                .fold(0u64, u64::saturating_add);
+            if total >= min_connections as u64 {
+                continue;
+            }
+            findings.push((
+                *view,
+                DrcViolation::new(
+                    0,
+                    DrcViolationType::FloatingNode,
+                    format!("Global node '{node}' has only {total} connection(s) in the design"),
+                    DrcLocation::Node {
+                        net_name: node.clone(),
+                    },
+                ),
+            ));
+        }
+        findings
+    }
+}
 
 /// What drives one global node, or one pair of them, across the walk.
 struct GlobalDriven {

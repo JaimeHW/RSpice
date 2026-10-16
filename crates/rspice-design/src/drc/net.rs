@@ -29,6 +29,7 @@ pub(super) struct NetInfo {
     /// The node continues outside this cellview: an interface port stands on
     /// it, or it is a global the deck declares. That is a connection no
     /// terminal here represents, so the node is not floating for want of it.
+    /// Whether a global is touched anywhere else is judged over the whole walk.
     pub(super) continues_outside: bool,
     /// How many of those terminals belong to drawn ground symbols. A ground
     /// symbol that reaches nothing else grounds nothing.

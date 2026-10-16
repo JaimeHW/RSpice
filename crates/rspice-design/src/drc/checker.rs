@@ -606,7 +606,9 @@ impl DrcChecker {
     /// or as a global the deck declares — is connected to something no
     /// terminal here represents, so that counts as one connection: an
     /// interface port a cell does not use inside is the parent's net in the
-    /// deck, not a dangling node.
+    /// deck, not a dangling node. Whether anything else in the design does
+    /// touch a global is a question about the whole design, which a
+    /// hierarchy check answers once over every cellview it walks.
     ///
     /// A node made only of terminals nothing meets is an open pin, and the
     /// open-pin rule names the terminal itself; saying it a second time about
