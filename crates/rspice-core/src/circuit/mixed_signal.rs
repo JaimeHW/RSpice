@@ -741,10 +741,15 @@ impl CircuitData {
             let Ok(thresholds) = instance.analog_input_thresholds() else {
                 continue;
             };
+            let mut declared = std::collections::BTreeMap::<(String, usize), usize>::new();
             for threshold in thresholds {
-                let Some(voltage) =
-                    instance.analog_threshold_sample(&threshold.port, threshold.element)
-                else {
+                let ordinal = declared
+                    .entry((threshold.port.clone(), threshold.element))
+                    .or_default();
+                let sample =
+                    instance.analog_threshold_sample(&threshold.port, threshold.element, *ordinal);
+                *ordinal += 1;
+                let Some(voltage) = sample else {
                     continue;
                 };
                 let net = instance

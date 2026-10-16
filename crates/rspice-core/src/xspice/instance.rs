@@ -1461,8 +1461,16 @@ impl XspiceInstance {
         self.mixed_input_thresholds_bound
     }
 
+    /// The crossing function of the `threshold`-th threshold declared on
+    /// `port[element]`, at the connected input's present value; see
+    /// [`super::CodeModel::analog_threshold_input_at`].
     #[cfg(feature = "veriloga")]
-    pub(crate) fn analog_threshold_sample(&self, port: &str, element: usize) -> Option<Value> {
+    pub(crate) fn analog_threshold_sample(
+        &self,
+        port: &str,
+        element: usize,
+        threshold: usize,
+    ) -> Option<Value> {
         let spec = self
             .port_indices
             .get(port)
@@ -1479,7 +1487,7 @@ impl XspiceInstance {
         }?;
         Some(
             self.model
-                .analog_threshold_input(&self.context, port, element, input),
+                .analog_threshold_input_at(&self.context, port, element, threshold, input),
         )
     }
 

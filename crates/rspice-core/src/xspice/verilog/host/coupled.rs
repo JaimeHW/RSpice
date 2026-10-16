@@ -40,12 +40,14 @@ pub(crate) trait DigitalActiveParticipant {
         false
     }
 
-    /// Read the connected quantity refreshed for a deferred converter.
+    /// Read the connected quantity refreshed for a deferred converter: the
+    /// crossing function of its `threshold`-th threshold on `port[element]`.
     fn analog_threshold_sample(
         &self,
         _instance: usize,
         _port: &str,
         _element: usize,
+        _threshold: usize,
     ) -> Option<f64> {
         None
     }
