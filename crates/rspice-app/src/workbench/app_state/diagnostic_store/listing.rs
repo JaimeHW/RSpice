@@ -136,8 +136,12 @@ enum Segment<'a> {
         batch: &'a DiagnosticBatch,
         standing: BatchStanding,
     },
-    /// The netlist editor's own canonical collection, read in place.
-    Netlist(&'a NetlistDiagnosticCollection),
+    /// The netlist editor's own canonical collection, read in place, and the
+    /// revision of the buffer in the editor now.
+    Netlist {
+        collection: &'a NetlistDiagnosticCollection,
+        revision: u64,
+    },
     /// One code editor's canonical collection, read in place, and the source
     /// bundle whose editor opens it.
     Code {
@@ -150,10 +154,37 @@ impl Segment<'_> {
     fn len(&self) -> usize {
         match self {
             Self::Stored { batch, .. } => batch.records.len(),
-            Self::Netlist(collection) => collection.len(),
+            Self::Netlist { collection, .. } => collection.len(),
             Self::Code { collection, .. } => collection.len(),
         }
     }
+}
+
+/// Whether a netlist finding describes the buffer in the editor now.
+///
+/// The editor marks its findings stale only while it draws, so an edit made
+/// with the editor off screen — a rename, an import, a fix applied from the
+/// Problems page — left them reading current. A finding bound to an older
+/// buffer revision than the editor holds is stale whatever it says about
+/// itself.
+fn netlist_current(
+    diagnostic: &crate::workbench::documents::netlist_document::Diagnostic,
+    revision: u64,
+) -> bool {
+    diagnostic.is_current() && diagnostic.canonical.revision == revision
+}
+
+/// Where a netlist finding stands, by the same rule as [`netlist_current`].
+fn netlist_standing(
+    diagnostic: &crate::workbench::documents::netlist_document::Diagnostic,
+    revision: u64,
+) -> RowStanding {
+    if diagnostic.is_current() && diagnostic.canonical.revision != revision {
+        return RowStanding::Stale(
+            "the netlist has been edited since this was reported".to_owned(),
+        );
+    }
+    source_standing(diagnostic.canonical.currentness)
 }
 
 /// The counts behind every badge and status segment, derived from exactly the
@@ -243,7 +274,7 @@ impl<'a> DiagnosticListing<'a> {
                 standing: BatchStanding::Unavailable(reason),
                 ..
             } => Some(reason.as_str()),
-            Segment::Stored { .. } | Segment::Netlist(_) | Segment::Code { .. } => None,
+            Segment::Stored { .. } | Segment::Netlist { .. } | Segment::Code { .. } => None,
         })
     }
 
@@ -332,15 +363,18 @@ fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<DiagnosticRow<
                 route: current.then(|| record.route.clone()).flatten(),
             })
         }
-        Segment::Netlist(collection) => {
+        Segment::Netlist {
+            collection,
+            revision,
+        } => {
             let diagnostic = collection.get(index)?;
-            let current = diagnostic.is_current();
+            let current = netlist_current(diagnostic, *revision);
             Some(DiagnosticRow {
                 id: diagnostic.canonical.diagnostic_id,
                 code: diagnostic.canonical.code.as_ref(),
                 producer: diagnostic.canonical.source.as_ref(),
                 level: diagnostic.severity.into(),
-                standing: source_standing(diagnostic.canonical.currentness),
+                standing: netlist_standing(diagnostic, *revision),
                 subject: netlist_subject(diagnostic),
                 location: netlist_location(diagnostic),
                 message: diagnostic.message.as_str(),
@@ -406,14 +440,17 @@ fn segment_facet<'a>(segment: &Segment<'a>, index: usize) -> Option<RowFacet<'a>
                 waived: record.waived(),
             })
         }
-        Segment::Netlist(collection) => {
+        Segment::Netlist {
+            collection,
+            revision,
+        } => {
             let diagnostic = collection.get(index)?;
             Some(RowFacet {
                 id: diagnostic.canonical.diagnostic_id,
                 code: diagnostic.canonical.code.as_ref(),
                 producer: diagnostic.canonical.source.as_ref(),
                 level: diagnostic.severity.into(),
-                current: diagnostic.is_current(),
+                current: netlist_current(diagnostic, *revision),
                 waived: diagnostic.canonical.suppression.is_some(),
             })
         }
@@ -537,7 +574,7 @@ pub(in crate::workbench) fn listing_in_pass(state: &AppState, pass: u64) -> Diag
             .iter()
             .filter_map(|segment| match segment {
                 Segment::Stored { batch, standing } => Some((batch.inputs.key(), standing.clone())),
-                Segment::Netlist(_) | Segment::Code { .. } => None,
+                Segment::Netlist { .. } | Segment::Code { .. } => None,
             })
             .collect(),
         counts: listed.counts,
@@ -586,7 +623,10 @@ fn segments<'a>(
     // so a clean parse there cannot be told from no parse.
     let netlist = state.ui.netlist.diagnostics.as_ref();
     if !netlist.is_empty() {
-        segments.push(Segment::Netlist(netlist));
+        segments.push(Segment::Netlist {
+            collection: netlist,
+            revision: state.ui.netlist.revision,
+        });
     }
     for (bundle, collection) in code_collections(state) {
         segments.push(Segment::Code { bundle, collection });
@@ -612,10 +652,13 @@ fn tally(segments: &[Segment<'_>]) -> (DiagnosticCounts, EmptyReason) {
                     counts.tally(standing, record.waived(), record.level);
                 }
             }
-            Segment::Netlist(collection) => {
+            Segment::Netlist {
+                collection,
+                revision,
+            } => {
                 for diagnostic in collection.iter() {
                     counts.tally(
-                        Tally::of_record(diagnostic.is_current()),
+                        Tally::of_record(netlist_current(diagnostic, *revision)),
                         diagnostic.canonical.suppression.is_some(),
                         diagnostic.severity.into(),
                     );
@@ -999,6 +1042,36 @@ mod tests {
         ));
         let stale = segment_row(&segment, 1).expect("the stale finding is a row");
         assert_eq!(stale.route, None);
+    }
+
+    /// The netlist editor marks its findings stale only while it draws. A
+    /// finding parsed from an older buffer than the one the editor holds is
+    /// stale on the page whether or not the editor has been drawn since.
+    #[test]
+    fn a_netlist_finding_older_than_the_buffer_reads_stale() {
+        use crate::workbench::documents::netlist_document::Diagnostic;
+
+        let mut state = open_state();
+        let finding = Diagnostic::error("unknown model nchh").with_line(Some(0));
+        state.ui.netlist.revision = finding.canonical.revision;
+        state.ui.netlist.diagnostics = Arc::new(
+            NetlistDiagnosticCollection::try_new(vec![finding], "nchh\n")
+                .expect("the fixture collection is well formed"),
+        );
+        let listed = listing(&state);
+        assert_eq!(listed.counts().errors, 1);
+        assert!(listed.row(0).expect("listed").current());
+
+        // An edit made with the editor off screen: nothing re-parsed.
+        state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
+
+        let listed = listing(&state);
+        assert_eq!(listed.counts().errors, 0);
+        assert_eq!(listed.counts().stale, 1);
+        let row = listed.row(0).expect("a stale finding keeps its row");
+        assert!(!row.current());
+        assert!(row.route.is_none(), "a stale finding offers no jump");
+        assert!(!listed.facet(0).expect("and its facet").current);
     }
 
     /// A batch whose inputs cannot be read is counted as that, not as stale:

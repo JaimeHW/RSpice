@@ -139,9 +139,15 @@ pub(crate) fn run(app: &mut RSpiceApp) {
     });
 
     if blocked {
-        app.state.workbench.console_visible = true;
-        app.state.workbench.console_page = ConsolePage::Problems;
+        show_blockers(app);
     }
+}
+
+/// Bring the reader to the blockers a pass just filed: the Problems page,
+/// listing them.
+fn show_blockers(app: &mut RSpiceApp) {
+    app.state.workbench.console_visible = true;
+    app.state.workbench.console_page = ConsolePage::Problems;
 }
 
 /// Run the same governed preflight used by the explicit Preflight command and
