@@ -36,4 +36,4 @@ tiff = { version = "0.11.3", default-features = false, features = ["deflate"] }
 ttf-parser = "0.25.1"
 
 [dev-dependencies]
-lopdf = { version = "0.44", default-features = false }
+lopdf = { version = "0.45", default-features = false }
