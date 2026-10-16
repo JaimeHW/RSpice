@@ -891,21 +891,55 @@ pub(crate) fn apply_quick_fix_for_finding(
         .diagnostics
         .iter()
         .find(|diagnostic| diagnostic.canonical.diagnostic_id == finding && diagnostic.is_current())
-        .and_then(|diagnostic| diagnostic.fix.clone())
+        .and_then(BoundQuickFix::of)
         .ok_or_else(|| {
             "That finding no longer offers a fix; validate the document again.".to_owned()
         })?;
     apply_quick_fix(state, &fix)
 }
 
-fn apply_quick_fix(
-    state: &mut AppState,
-    fix: &super::diagnostics::DiagnosticFix,
-) -> Result<String, String> {
+/// A fix, and the exact source it was computed against.
+///
+/// A fix is a byte range and the text that replaces it, so it means something
+/// only for the bytes it was read off. A finding's own currency cannot vouch
+/// for that: the editor marks its findings stale only while it is drawn, so
+/// a fix pressed from the Problems page with the editor off screen — twice, or
+/// after any other edit — would rewrite whatever bytes had moved into its
+/// range since.
+struct BoundQuickFix {
+    fix: super::diagnostics::DiagnosticFix,
+    /// The editor revision the finding was validated at.
+    revision: u64,
+    /// The digest of the exact buffer it was validated against.
+    validation_id: Arc<str>,
+}
+
+impl BoundQuickFix {
+    fn of(diagnostic: &super::diagnostics::Diagnostic) -> Option<Self> {
+        diagnostic.fix.clone().map(|fix| Self {
+            fix,
+            revision: diagnostic.canonical.revision,
+            validation_id: Arc::clone(&diagnostic.canonical.validation_id),
+        })
+    }
+}
+
+fn apply_quick_fix(state: &mut AppState, bound: &BoundQuickFix) -> Result<String, String> {
     if !super::active_netlist_source_is_editable(state) {
         return Err("Quick fixes cannot edit this read-only source.".to_owned());
     }
     let source = state.simulation.source.netlist_content.clone();
+    // The revision is the binding every editor path moves; the digest is what
+    // still holds against a writer that replaces the bytes without moving it.
+    if state.ui.netlist.revision != bound.revision
+        || crate::state::content_digest(&source).to_string() != *bound.validation_id
+    {
+        return Err(
+            "The source has changed since this fix was offered; validate the document again."
+                .to_owned(),
+        );
+    }
+    let fix = &bound.fix;
     if fix.span.start > fix.span.end
         || fix.span.end > source.len()
         || !source.is_char_boundary(fix.span.start)
@@ -924,17 +958,19 @@ fn apply_quick_fix(
     Ok(format!("Applied quick fix: {}", fix.label))
 }
 
-fn preferred_quick_fix(state: &AppState) -> Option<super::diagnostics::DiagnosticFix> {
+fn preferred_quick_fix(state: &AppState) -> Option<BoundQuickFix> {
     state
         .ui
         .netlist
         .diagnostics
         .iter()
-        .filter(|diagnostic| diagnostic.is_current())
+        .filter(|diagnostic| {
+            diagnostic.is_current() && diagnostic.canonical.revision == state.ui.netlist.revision
+        })
         .filter(|diagnostic| {
             diagnostic.line.or(diagnostic.source_line) == Some(state.ui.netlist.cursor_line)
         })
-        .find_map(|diagnostic| diagnostic.fix.clone())
+        .find_map(BoundQuickFix::of)
 }
 
 pub(crate) fn find_references_at_cursor(state: &mut AppState) -> Result<String, String> {
@@ -1999,5 +2035,127 @@ M1 d g s b nch W={w} L={l*2}\n\
         let renamed = state.workspace.content.netlist_source.as_deref().unwrap();
         assert!(renamed.contains(".func curve(x)"));
         assert!(renamed.contains("{curve(gain)}"));
+    }
+
+    const FIX_DECK: &str = "quick fix\nV1 out 0 1\nR1 out 0 1kk\n.op\n.end\n";
+
+    /// An editable project-owned deck, validated as the editor validates it:
+    /// one finding on `1kk` whose fix is bound to this exact revision and
+    /// buffer. Returns the finding's identity.
+    fn validated_fix_state() -> (AppState, uuid::Uuid) {
+        let provenance = crate::state::GeneratedProvenance::try_new(
+            "language-quick-fix-test",
+            crate::state::GenerationInput::new(
+                crate::product::ObjectRevision::INITIAL,
+                crate::state::content_digest("language-quick-fix-input"),
+            ),
+        )
+        .unwrap();
+        let artifact = crate::state::GeneratedArtifact::try_from_utf8(
+            provenance,
+            FIX_DECK.as_bytes().to_vec(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap();
+        let generated = crate::state::NetlistDocument::from_generated(
+            crate::state::NetlistDocumentId::new(),
+            artifact,
+        )
+        .unwrap();
+        let owned = generated
+            .create_editable_copy(
+                crate::state::NetlistDocumentId::new(),
+                generated.content_digest(),
+            )
+            .unwrap();
+        let mut state = AppState::default();
+        state.workspace.content.netlist_source = Some(FIX_DECK.to_owned());
+        state.workspace.content.netlist_document = Some(owned.clone());
+        state.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
+            deck_id: uuid::Uuid::new_v4(),
+            artifact_name: "fix.sp".to_owned(),
+            strategy: crate::state::OwnedNetlistEditStrategy::OwnedSource,
+            source_encoding: crate::state::NetlistTextEncoding::Utf8,
+            source_line_ending: crate::state::NetlistLineEnding::Lf,
+            imported_dialect: Some(crate::state::NetlistSourceDialect::RSpice),
+            compatibility_reviewed: true,
+            execution_profile: Some(crate::state::NetlistExecutionProfile::RSpiceCanonicalV1),
+            external_file_sha256: None,
+            save_history: Vec::new(),
+            revision_history: Vec::new(),
+            owned_includes: Vec::new(),
+        });
+        state.ui.netlist.generated_document = Some(generated);
+        state.ui.netlist.owned_document = Some(owned);
+        state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+        state.simulation.source.netlist_content = FIX_DECK.to_owned();
+        state.ui.netlist.revision = 7;
+
+        let start = FIX_DECK.find("1kk").unwrap();
+        let mut diagnostic = super::super::Diagnostic::error("unknown suffix kk");
+        diagnostic.fix = Some(super::super::diagnostics::DiagnosticFix {
+            label: "Replace with 1k".to_owned(),
+            span: start..start + 3,
+            replacement: "1k".to_owned(),
+        });
+        let mut diagnostic = diagnostic.with_line(Some(2));
+        diagnostic.bind_validation(7, &crate::state::content_digest(FIX_DECK).to_string());
+        let finding = diagnostic.canonical.diagnostic_id;
+        state.ui.netlist.diagnostics = Arc::new(
+            super::super::NetlistDiagnosticCollection::try_new(vec![diagnostic], FIX_DECK)
+                .unwrap(),
+        );
+        (state, finding)
+    }
+
+    /// Pressing a fix twice from the Problems page, with the editor off
+    /// screen and so nothing marking the finding stale, applies it once. The
+    /// second press is refused rather than rewriting the bytes that moved
+    /// into the first press's range.
+    #[test]
+    fn a_quick_fix_pressed_twice_applies_once() {
+        let (mut state, finding) = validated_fix_state();
+
+        apply_quick_fix_for_finding(&mut state, finding).expect("the fix applies to its own bytes");
+        let fixed = FIX_DECK.replace("1kk", "1k");
+        assert_eq!(state.simulation.source.netlist_content, fixed);
+        assert!(
+            state
+                .ui
+                .netlist
+                .diagnostics
+                .iter()
+                .all(super::super::Diagnostic::is_current),
+            "precondition: nothing marked the finding stale between the presses",
+        );
+
+        let refused = apply_quick_fix_for_finding(&mut state, finding)
+            .expect_err("a second press has no bytes of its own left to fix");
+        assert!(refused.contains("has changed"), "{refused}");
+        assert_eq!(
+            state.simulation.source.netlist_content, fixed,
+            "the refused press leaves the source exactly as the first one left it",
+        );
+    }
+
+    /// Any edit between validation and the press refuses the fix: one that
+    /// moves the revision, and one that replaces the bytes without moving it.
+    #[test]
+    fn a_quick_fix_is_refused_after_an_intervening_edit() {
+        let (mut state, finding) = validated_fix_state();
+        let edited = format!("* note\n{FIX_DECK}");
+        state.simulation.source.netlist_content = edited.clone();
+        state.ui.netlist.revision += 1;
+        assert!(apply_quick_fix_for_finding(&mut state, finding).is_err());
+        assert_eq!(state.simulation.source.netlist_content, edited);
+
+        let (mut state, finding) = validated_fix_state();
+        state.simulation.source.netlist_content = edited.clone();
+        assert!(
+            apply_quick_fix_for_finding(&mut state, finding).is_err(),
+            "the digest refuses bytes a writer replaced without moving the revision",
+        );
+        assert_eq!(state.simulation.source.netlist_content, edited);
     }
 }
