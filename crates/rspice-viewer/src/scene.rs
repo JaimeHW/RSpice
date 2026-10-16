@@ -7,9 +7,9 @@
 //! the reason a sheet hydrates at all.
 
 use egui::epaint::TextShape;
-use egui::{Align2, FontId, Pos2, Rect, Sense, Shape, Stroke as EguiStroke, Vec2};
+use egui::{Align2, Pos2, Rect, Sense, Shape, Stroke as EguiStroke, Vec2};
 use rspice_publication_contract::{
-    PathSegment, Point, Primitive, Scene, StrokePattern, TextAnchor, TextFont,
+    PathSegment, Point, Primitive, Scene, StrokePattern, TextAnchor,
 };
 
 use crate::theme::Palette;
@@ -266,21 +266,7 @@ pub fn paint_scene(
                 }
                 Primitive::Text(text) => {
                     let color = palette.resolve(text.paint);
-                    let font = match text.font {
-                        TextFont::Sans | TextFont::SansSemibold => {
-                            FontId::proportional(text.height_um as f32 * scale)
-                        }
-                        // The viewer lays out from egui's own families, which
-                        // carry one weight each, so a weighted class resolves
-                        // to the same face as its regular sibling -- as sans
-                        // semibold above already does. Rendering the contract's
-                        // weights apart needs weighted families installed here
-                        // first, which is a change to the viewer's typography
-                        // rather than to what the snapshot carries.
-                        TextFont::Monospace | TextFont::MonospaceMedium => {
-                            FontId::monospace(text.height_um as f32 * scale)
-                        }
-                    };
+                    let font = crate::fonts::text_font(text.font, text.height_um as f32 * scale);
                     let anchor = match text.anchor {
                         TextAnchor::Start => Align2::LEFT_BOTTOM,
                         TextAnchor::Middle => Align2::CENTER_BOTTOM,
