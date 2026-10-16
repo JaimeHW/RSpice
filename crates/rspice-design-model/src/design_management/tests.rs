@@ -316,17 +316,18 @@ fn drawing_sheet_title_resolution_is_one_renderer_independent_authority() {
                 .get_mut(&DrawingSheetTitleFieldId::SheetTitle)
                 .unwrap()
                 .value = "Power tree".to_owned();
-            // A release-process field is hidden until a sheet opts into it.
+            // An optional field is hidden until a sheet opts into it, and a
+            // shown one may be dropped.
             draft
                 .title_block
                 .fields
-                .get_mut(&DrawingSheetTitleFieldId::DrawnBy)
+                .get_mut(&DrawingSheetTitleFieldId::CheckedBy)
                 .unwrap()
                 .visible = true;
             draft
                 .title_block
                 .fields
-                .get_mut(&DrawingSheetTitleFieldId::CheckedBy)
+                .get_mut(&DrawingSheetTitleFieldId::ApprovedBy)
                 .unwrap()
                 .visible = false;
             // Legacy project-owned storage remains a migration fallback only.
@@ -367,11 +368,12 @@ fn drawing_sheet_title_resolution_is_one_renderer_independent_authority() {
         Some("Power tree")
     );
     assert_eq!(value(DrawingSheetTitleFieldId::DrawnBy), Some("—"));
+    assert_eq!(value(DrawingSheetTitleFieldId::CheckedBy), Some("—"));
     assert_eq!(
         value(DrawingSheetTitleFieldId::Organization),
         Some("RSpice Engineering")
     );
-    assert_eq!(value(DrawingSheetTitleFieldId::CheckedBy), None);
+    assert_eq!(value(DrawingSheetTitleFieldId::ApprovedBy), None);
     assert_eq!(
         value(DrawingSheetTitleFieldId::Scale),
         None,
@@ -2698,38 +2700,45 @@ fn an_organization_template_sealed_before_a_field_retired_still_loads() {
 }
 
 #[test]
-fn a_new_sheet_shows_only_the_fields_an_unreleased_drawing_can_fill() {
+fn a_new_sheet_shows_the_fields_iso_7200_requires_and_waits_on_the_rest() {
     let format = SchematicSheetFormat::default();
     let visible = resolve_drawing_sheet_title_fields(&format, &BTreeMap::new());
-    let hidden = [
+    // ISO 7200 makes the creator and the approval person mandatory, so a
+    // sheet names both before anyone has signed it.
+    for field in [
         DrawingSheetTitleFieldId::DrawnBy,
-        DrawingSheetTitleFieldId::CheckedBy,
         DrawingSheetTitleFieldId::ApprovedBy,
+    ] {
+        assert!(
+            visible
+                .iter()
+                .any(|resolved| resolved.id == field && resolved.value == "—"),
+            "{field:?} is mandatory in ISO 7200 and must start on the sheet"
+        );
+    }
+    // Checked by is not one of the standard's fields, Classification is set
+    // by a release policy, and Paper size restates the sheet in hand.
+    let hidden = [
+        DrawingSheetTitleFieldId::CheckedBy,
         DrawingSheetTitleFieldId::Classification,
+        DrawingSheetTitleFieldId::PaperSize,
     ];
     for field in hidden {
         assert!(
             !visible.iter().any(|resolved| resolved.id == field),
-            "{field:?} is filled by a release process and must not occupy a \
-             cell on a sheet that has never been released"
+            "{field:?} must wait until a sheet asks for it"
         );
         assert!(
             !field.policy().required_visible,
             "{field:?} must remain optional so it can default to hidden"
         );
     }
-    // Paper size is optional and restates the sheet in hand, so it waits too.
-    assert!(
-        !visible
-            .iter()
-            .any(|resolved| resolved.id == DrawingSheetTitleFieldId::PaperSize)
-    );
     assert_eq!(
         visible.len(),
-        DrawingSheetTitleFieldId::ALL.len() - hidden.len() - 1
+        DrawingSheetTitleFieldId::ALL.len() - hidden.len()
     );
 
-    // Fewer fields is the point: the cells that remain are wider, so more of
+    // A field a sheet does not spend is width the others keep, so more of
     // each value survives.
     let geometry = format.geometry().unwrap();
     let lettering = format.authored_size.lettering();
@@ -2745,7 +2754,7 @@ fn a_new_sheet_shows_only_the_fields_an_unreleased_drawing_can_fill() {
     .unwrap();
     assert!(
         shown > crowded,
-        "hiding the release fields must widen the remaining cells: {shown} vs {crowded}"
+        "hiding the optional fields must widen the remaining cells: {shown} vs {crowded}"
     );
 }
 

@@ -132,22 +132,18 @@ impl DrawingSheetTitleFieldId {
 
     /// Whether a new sheet shows this field.
     ///
-    /// The sign-off and classification cells are filled by a release
-    /// process, not by drawing the circuit, so a sheet that has never been
-    /// released would spend them on em dashes. They stay one click away in
-    /// Page Setup, and every field a sheet does show is one the engineer can
-    /// read: fewer columns means wider cells and more characters in each.
-    /// Paper size is optional in ISO 7200 and restates the sheet the reader
-    /// is holding, so it waits until a sheet asks for it too.
+    /// ISO 7200 makes the creator and the approval person mandatory, so
+    /// Drawn by and Approved by start on the sheet, empty until someone
+    /// signs. Checked by is not one of the standard's fields, Classification
+    /// is set by a release policy, and Paper size is optional and restates
+    /// the sheet the reader is holding, so those wait in Page Setup until a
+    /// sheet asks for them: every column a sheet does not spend is width the
+    /// remaining cells keep.
     #[must_use]
     pub const fn visible_by_default(self) -> bool {
         !matches!(
             self,
-            Self::DrawnBy
-                | Self::CheckedBy
-                | Self::ApprovedBy
-                | Self::Classification
-                | Self::PaperSize
+            Self::CheckedBy | Self::Classification | Self::PaperSize
         )
     }
 }
