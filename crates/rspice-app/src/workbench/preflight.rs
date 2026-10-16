@@ -34,8 +34,11 @@ use super::state::{
 /// the run executes.
 ///
 /// A blocked pass leaves the reader on the Problems page with the blockers
-/// listed; a clean one leaves them where they were. The outcome is recorded
-/// as a plan receipt and in the Console.
+/// listed; a clean one leaves them where they were. Either way the outcome is
+/// a Console line the notice centre lifts into a notice, which is where the
+/// reader is told of a finished job. It used to be a plan receipt, which no
+/// chrome draws and which the notice centre deliberately never lifts, so a
+/// clean pass with the Console collapsed said nothing anywhere.
 pub(crate) fn run(app: &mut RSpiceApp) {
     app.state.sync_active_schematic_to_workspace();
     let Collected {
@@ -126,7 +129,14 @@ pub(crate) fn run(app: &mut RSpiceApp) {
     // digest is taken over.
     app.state.workbench.preflight.report = Some(report.clone());
     app.state.publish_dispatch_diagnostics(&report);
-    app.state.record_plan_receipt(message);
+    // An event, at the severity of the pass rather than of its findings: the
+    // findings are records on the Problems page, and this says the pass ran
+    // and what it decided.
+    app.state.push_user_message(if blocked {
+        ConsoleMessage::warning(message)
+    } else {
+        ConsoleMessage::info(message)
+    });
 
     if blocked {
         app.state.workbench.console_visible = true;

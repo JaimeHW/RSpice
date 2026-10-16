@@ -62,12 +62,23 @@ fn run_command_remains_actionable_and_surfaces_preflight_blockers() {
         .as_ref()
         .expect("Run retains the same blocked report as explicit preflight");
     assert!(!report.blockers.is_empty());
-    // The outcome is stated on the status line, and the blockers are on the
-    // Problems page rather than in a modal over the design.
-    let outcome = app.state.workbench.analysis_lifecycle_status.message();
+    // The outcome is a Console line from the session, which the notice
+    // centre lifts — not a plan receipt, which nothing draws and the notice
+    // centre never lifts — and the blockers are on the Problems page rather
+    // than in a modal over the design.
+    let outcome = app
+        .state
+        .log_buffer
+        .entries()
+        .filter(|entry| entry.message.starts_with("Preflight blocked"))
+        .last()
+        .expect("a blocked pass states its outcome");
+    assert_eq!(outcome.source, crate::diagnostics::LogSource::User);
+    assert_eq!(outcome.severity, crate::diagnostics::LogSeverity::Warning);
     assert!(
-        outcome.contains("design revision"),
-        "preflight must distinguish the input-design revision from the simulation-plan revision: {outcome}"
+        outcome.message.contains("design revision"),
+        "preflight must distinguish the input-design revision from the simulation-plan revision: {}",
+        outcome.message
     );
     assert_eq!(
         app.state.workbench.console_page,
@@ -91,6 +102,45 @@ fn run_command_remains_actionable_and_surfaces_preflight_blockers() {
             "every blocker stands on the page: {blocker} is missing from {listed_messages:?}"
         );
     }
+}
+
+/// A clean pass with the Console collapsed used to show nothing anywhere: its
+/// outcome was a plan receipt, which no chrome draws and which the notice
+/// centre deliberately never lifts. Every pass now states its outcome as a
+/// session line the notice centre lifts, at the severity of the outcome.
+#[test]
+fn a_pass_states_its_outcome_where_the_notice_centre_lifts_it() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.authority.open_session();
+    app.state.workbench.console_visible = false;
+
+    run(&mut app);
+
+    let outcome = app
+        .state
+        .log_buffer
+        .entries()
+        .filter(|entry| entry.message.starts_with("Preflight"))
+        .last()
+        .expect("every pass states its outcome");
+    assert_eq!(outcome.source, crate::diagnostics::LogSource::User);
+    let blocked = app
+        .state
+        .workbench
+        .preflight
+        .report
+        .as_ref()
+        .is_some_and(|report| !report.blockers.is_empty());
+    assert_eq!(
+        outcome.severity,
+        if blocked {
+            crate::diagnostics::LogSeverity::Warning
+        } else {
+            crate::diagnostics::LogSeverity::Info
+        },
+        "{}",
+        outcome.message
+    );
 }
 
 #[test]
