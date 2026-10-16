@@ -276,7 +276,7 @@ fn single_connection_net_is_floating() {
     let result = check(&components, DrcConfig::default());
     let floating = of_type(&result, DrcViolationType::FloatingNode);
     assert_eq!(floating.len(), 1);
-    assert_eq!(floating[0].severity, DrcSeverity::Error);
+    assert_eq!(floating[0].severity, DrcSeverity::Warning);
     assert_eq!(
         floating[0].location,
         DrcLocation::Node {
@@ -749,17 +749,21 @@ fn violation_ids_are_unique_within_a_result() {
 
 #[test]
 fn summary_counts_match_violations() {
+    let mut unvalued = resistor(2, "R2", vec![pin("1", "a"), pin("2", "b")]);
+    unvalued.missing_parameters = vec!["Resistance".to_owned()];
     let components = vec![
-        // No ground (critical), floating "out" (error), duplicate name (critical).
+        // No ground (critical), duplicate name (critical), a missing value
+        // (error), and floating "out" (warning).
         resistor(0, "R1", vec![pin("1", "a"), pin("2", "out")]),
         resistor(1, "R1", vec![pin("1", "a"), pin("2", "b")]),
-        resistor(2, "R2", vec![pin("1", "a"), pin("2", "b")]),
+        unvalued,
     ];
     let result = check(&components, DrcConfig::default());
     let summary = result.summary();
     assert_eq!(summary.total, result.total_count());
     assert_eq!(summary.critical, 2);
     assert_eq!(summary.errors, 1);
+    assert_eq!(summary.warnings, 1);
     assert!(!summary.passed);
     assert!(result.has_errors());
 }

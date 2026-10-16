@@ -147,7 +147,6 @@ impl DrcViolationType {
             Self::RecursiveInstantiation => DrcSeverity::Critical,
 
             // Error - likely to cause simulation failure
-            Self::FloatingNode => DrcSeverity::Error,
             // An input nothing drives is a terminal the solver has no source
             // for. It is a stronger claim than an open passive leg because the
             // interface said what the pin is for.
@@ -167,6 +166,14 @@ impl DrcViolationType {
             }
 
             // Warning - may affect results
+            //
+            // A node with one connection is almost always a wiring slip, but
+            // it never stops the solver: a dangling resistor leg sits at the
+            // potential of its other end, and a dangling capacitor plate is an
+            // unforced island the conditioning shunt settles. The engine
+            // refuses the islands that cannot be solved on its own account,
+            // so an error here would refuse runs it completes.
+            Self::FloatingNode => DrcSeverity::Warning,
             Self::UnconnectedPin => DrcSeverity::Warning,
             // An output nothing loads still solves; the design just loses the
             // signal it drew.
