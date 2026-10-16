@@ -732,7 +732,7 @@ impl ProcessLowerer<'_> {
             // A dotted name the parser replaced with a reference symbol is
             // bound only when it reaches a task below this scope; the symbol
             // itself is never shown.
-            let message = if enable.name.starts_with("$rspice_reference_") {
+            let message = if crate::ast::is_reference_symbol(&enable.name) {
                 "a hierarchical task name reaches only a task of an instance below this \
                  scope (IEEE 1364-2005 section 12.5); an upward or cross-module task name is \
                  not supported yet"

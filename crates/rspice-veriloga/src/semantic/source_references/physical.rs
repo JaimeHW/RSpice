@@ -27,6 +27,9 @@ impl Resolver {
         symbol: &SmolStr,
         span: Span,
     ) -> CompileResult<()> {
+        if self.declares_digital(target, name) {
+            return self.import_digital(owner, target, name, symbol, span);
+        }
         if self.frames[target].physical.is_none() {
             let (expanded, nodes) = super::super::node_vectors::declarations(
                 &self.frames[target].source,

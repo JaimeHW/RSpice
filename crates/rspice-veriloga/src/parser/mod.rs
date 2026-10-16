@@ -3934,6 +3934,11 @@ impl<'a> Parser<'a> {
     fn skip_directive(&mut self) -> Result<(), ParseError> {
         let directive = self.current_span();
         let name = self.current().text.clone();
+        // Section 19.9 pulls the unconnected input ports of the modules that
+        // follow; skipping it would leave them floating, a different answer.
+        if name.as_deref() == Some("`unconnected_drive") {
+            return Err(self.unsupported_current("compiler directive"));
+        }
         self.advance();
         if name.as_deref() == Some("`default_nettype") {
             if self.at_end() || self.current_span().start >= directive.end {

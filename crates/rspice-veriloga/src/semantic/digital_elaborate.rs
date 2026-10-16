@@ -675,6 +675,23 @@ impl DigitalElaborator<'_> {
             processes: child.digital.processes.clone(),
             routines: child.digital.routines.clone(),
             routine_names: child.digital.routine_names.clone(),
+            signal_references: child
+                .digital
+                .signal_references
+                .iter()
+                .map(|(symbol, reference)| {
+                    let mut reference = reference.clone();
+                    if !reference.absolute {
+                        reference.path = match (path.is_empty(), reference.path.is_empty()) {
+                            (true, _) => reference.path.clone(),
+                            (_, true) => path.into(),
+                            _ => format!("{path}.{}", reference.path).into(),
+                        };
+                        reference.absolute = true;
+                    }
+                    (symbol.clone(), reference)
+                })
+                .collect(),
             continuous_assigns: child.digital.continuous_assigns.clone(),
             port_drivers,
             bit_aliases,
@@ -846,20 +863,14 @@ impl DigitalElaborator<'_> {
                         lookup_connection(&identifier.name, parent_scope, path, &port.name, span)?;
                     if outer.width != declared.width && !(resizes_variable && outer.width != 0) {
                         return Err(semantic_error(
-                            SemanticErrorKind::TypeMismatch {
-                                expected: format!("{}-bit connection", declared.width),
-                                found: format!(
-                                    "`{}`, which is {} bits",
-                                    outer.elaborated, outer.width
-                                ),
-                                context: format!(
-                                    "port `{}` of instance `{path}`; IEEE 1364-2005 section \
-                                     12.3.9 connects a port to a differently sized net by \
-                                     truncating or extending it, and this compiler joins the \
-                                     two into one net instead, which requires equal widths",
-                                    port.name
-                                ),
-                            },
+                            SemanticErrorKind::UnsupportedFeature(format!(
+                                "port width conversion: port `{}` of instance `{path}` is {} \
+                                 bits and `{}` is {} bits; IEEE 1364-2005 section 12.3.9 \
+                                 connects a port to a differently sized net by truncating or \
+                                 extending it, and this compiler joins the two into one net \
+                                 instead, which requires equal widths",
+                                port.name, declared.width, outer.elaborated, outer.width
+                            )),
                             span,
                         ));
                     }
