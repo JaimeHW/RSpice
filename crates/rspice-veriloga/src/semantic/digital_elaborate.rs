@@ -41,6 +41,11 @@
 //!   formal view differs from its actual instead uses an assignment, including
 //!   when the actual is a variable with no net resolution to share.
 //!
+//! * **A net of a different width is not collapsed.** Section 12.3.9 truncates
+//!   or extends such a connection the way an assignment does, so an input
+//!   becomes `assign port = net;` and an output `assign net = port;`. An inout
+//!   joins only the bits the two share, counted from the least significant.
+//!
 //! * **A bit- or part-select input/output connection becomes an implicit
 //!   continuous assignment.** An inout connection instead aliases the selected
 //!   wire bits. Each original driver contributes to the shared resolution, and
@@ -753,7 +758,6 @@ impl DigitalElaborator<'_> {
             // Only an output port is a variable here: the module's own
             // analysis refused any other (IEEE 1364-2005 section 12.3.3).
             let is_variable = declared.class.is_variable();
-            let resizes_variable = is_variable && !declared.class.is_real();
             let own = element_binding_name(declared, &child.digital.signals, path)?;
             let form = connections[index]
                 .map(|expression| connection_form(expression, parent_scope, path, &port.name))
@@ -782,19 +786,13 @@ impl DigitalElaborator<'_> {
                         span,
                     )?;
                     let width = select.width(span)?;
-                    if width != declared.width && !resizes_variable {
+                    if width != declared.width && declared.width == 0 {
                         return Err(semantic_error(
-                            SemanticErrorKind::TypeMismatch {
-                                expected: format!("{}-bit connection", declared.width),
-                                found: format!("a {width}-bit select of `{}`", outer.elaborated),
-                                context: format!(
-                                    "port `{}` of instance `{path}`; IEEE 1364-2005 section \
-                                     12.3.9 connects a port to a differently sized expression \
-                                     by truncating or extending it, and this compiler requires \
-                                     the two to agree",
-                                    port.name
-                                ),
-                            },
+                            SemanticErrorKind::UnsupportedFeature(format!(
+                                "port width conversion: port `{}` of instance `{path}` is \
+                                 real and its connection is a {width}-bit select of `{}`",
+                                port.name, outer.elaborated
+                            )),
                             span,
                         ));
                     }
@@ -854,9 +852,15 @@ impl DigitalElaborator<'_> {
                             for (position, coordinate) in
                                 coordinates.indices_msb_first().enumerate()
                             {
+                                // Bits pair from the least significant; a
+                                // wider side's extra bits join nothing.
+                                let left_bit = width - 1 - position as u32;
+                                if left_bit >= declared.width {
+                                    continue;
+                                }
                                 bit_aliases.push(super::digital::ElaboratedDigitalBitAlias {
                                     left: own.clone(),
-                                    left_bit: declared.width - 1 - position as u32,
+                                    left_bit,
                                     right: outer.elaborated.clone(),
                                     right_element: None,
                                     right_bit: outer.range.position_of(coordinate) as u32,
@@ -874,6 +878,43 @@ impl DigitalElaborator<'_> {
                         is_input_port: port.direction == PortDirection::Input,
                     }
                 }
+                // Section 12.3.9.2 drives an output's connection as an
+                // assignment drives its target, a concatenation included:
+                // `assign {carry, sum} = u1.y;`, truncated or extended.
+                Some(form @ ConnectionForm::Concat(_, span)) => {
+                    if port.direction != PortDirection::Output {
+                        return Err(expression_connection_error(path, &port.name, span));
+                    }
+                    port_drivers.push(assignment(
+                        form.lvalue(
+                            &|name, span| {
+                                self.lookup_connection(
+                                    name,
+                                    parent_scope,
+                                    parent_source,
+                                    path,
+                                    &port.name,
+                                    span,
+                                )
+                            },
+                            path,
+                            port,
+                        )?,
+                        Expression::Identifier(Identifier {
+                            name: own.clone(),
+                            span,
+                        }),
+                        span,
+                    ));
+                    Binding {
+                        elaborated: own,
+                        width: declared.width,
+                        range: declared.range.unwrap_or(super::VectorBounds::SCALAR),
+                        signed: declared.signedness.is_signed(),
+                        is_variable,
+                        is_input_port: false,
+                    }
+                }
                 Some(ConnectionForm::Net(identifier)) => {
                     let span = identifier.span;
                     let outer = self.lookup_connection(
@@ -884,14 +925,13 @@ impl DigitalElaborator<'_> {
                         &port.name,
                         span,
                     )?;
-                    if outer.width != declared.width && !(resizes_variable && outer.width != 0) {
+                    let converts = outer.width != declared.width;
+                    if converts && (outer.width == 0 || declared.width == 0) {
                         return Err(semantic_error(
                             SemanticErrorKind::UnsupportedFeature(format!(
                                 "port width conversion: port `{}` of instance `{path}` is {} \
-                                 bits and `{}` is {} bits; IEEE 1364-2005 section 12.3.9 \
-                                 connects a port to a differently sized net by truncating or \
-                                 extending it, and this compiler joins the two into one net \
-                                 instead, which requires equal widths",
+                                 bits and `{}` is {} bits; a real value has no bits to \
+                                 truncate or extend",
                                 port.name, declared.width, outer.elaborated, outer.width
                             )),
                             span,
@@ -919,7 +959,8 @@ impl DigitalElaborator<'_> {
                             is_input_port: false,
                         }
                     } else if declared.width != 0
-                        && (declared.range.unwrap_or(super::VectorBounds::SCALAR) != outer.range
+                        && (converts
+                            || declared.range.unwrap_or(super::VectorBounds::SCALAR) != outer.range
                             || declared.signedness.is_signed() != outer.signed)
                     {
                         // Collapse connectivity without erasing the formal's view.
@@ -929,13 +970,28 @@ impl DigitalElaborator<'_> {
                             // Generated converter instances may bind directly to
                             // a differently shaped variable. Inputs copy its
                             // value; variables cannot join a wire's resolution.
+                            // Section 12.3.9 reads a differently sized input as
+                            // `assign port = net;`, so the copy also truncates
+                            // or extends by the net's own signedness.
                             port_drivers.push(implicit_port_assignment(
                                 &own,
                                 &outer.elaborated,
                                 span,
                             ));
+                        } else if converts && port.direction == PortDirection::Output {
+                            // And a differently sized output as `assign net =
+                            // port;`: a wider net's extra bits are driven 0.
+                            port_drivers.push(implicit_port_assignment(
+                                &outer.elaborated,
+                                &own,
+                                span,
+                            ));
                         } else {
-                            for bit in 0..declared.width {
+                            // An inout joins the bits the two have in common,
+                            // counted from the least significant; the wider
+                            // side's other bits stay as their own drivers leave
+                            // them.
+                            for bit in 0..declared.width.min(outer.width) {
                                 bit_aliases.push(super::digital::ElaboratedDigitalBitAlias {
                                     left: own.clone(),
                                     left_bit: bit,
@@ -1131,6 +1187,47 @@ enum ConnectionForm<'a> {
         select: Box<SelectBounds>,
         span: Span,
     },
+    /// `.y({carry, sum[3:0]})`: a concatenation of the two forms above, which
+    /// an output port drives as one assignment target.
+    Concat(Vec<ConnectionForm<'a>>, Span),
+}
+
+impl ConnectionForm<'_> {
+    /// The connection as an assignment target in the connecting scope's
+    /// elaborated names, refusing a target an output port may not drive.
+    fn lvalue(
+        &self,
+        lookup: &dyn Fn(&SmolStr, Span) -> CompileResult<Binding>,
+        path: &str,
+        port: &crate::semantic::AnalyzedPort,
+    ) -> CompileResult<DigitalLValue> {
+        let driven = |name: &SmolStr, span: Span| -> CompileResult<Binding> {
+            let outer = lookup(name, span)?;
+            if outer.is_variable {
+                return Err(variable_connection_error(&outer, port, path, span));
+            }
+            if outer.is_input_port {
+                return Err(input_port_connection_error(&outer, port, path, span));
+            }
+            Ok(outer)
+        };
+        Ok(match self {
+            Self::Net(identifier) => DigitalLValue::Identifier {
+                name: driven(&identifier.name, identifier.span)?.elaborated,
+                span: identifier.span,
+            },
+            Self::Select { name, select, span } => {
+                select.lvalue(&driven(name, *span)?.elaborated, *span)
+            }
+            Self::Concat(elements, span) => DigitalLValue::Concat {
+                elements: elements
+                    .iter()
+                    .map(|element| element.lvalue(lookup, path, port))
+                    .collect::<CompileResult<_>>()?,
+                span: *span,
+            },
+        })
+    }
 }
 
 /// Which bits of a net a connection selects.
@@ -1242,15 +1339,30 @@ fn connection_form<'a>(
             }),
             span: select.span,
         }),
-        other => Err(semantic_error(
-            SemanticErrorKind::UnsupportedFeature(format!(
-                "port `{port}` of instance `{path}` is connected to an expression; IEEE \
-                 1364-2005 section 12.3.9 permits one, and this compiler connects a port to a \
-                 declared net or to a bit- or part-select of one, so name one of those"
-            )),
-            other.span(),
-        )),
+        Expression::ArrayLiteral(concat) if !concat.assignment_pattern => {
+            let mut elements = Vec::with_capacity(concat.elements.len());
+            for element in &concat.elements {
+                let crate::ast::ArrayLiteralElement::Value(value) = element else {
+                    return Err(expression_connection_error(path, port, element.span()));
+                };
+                elements.push(connection_form(value, scope, path, port)?);
+            }
+            Ok(ConnectionForm::Concat(elements, concat.span))
+        }
+        other => Err(expression_connection_error(path, port, other.span())),
     }
+}
+
+fn expression_connection_error(path: &str, port: &str, span: Span) -> CompileError {
+    semantic_error(
+        SemanticErrorKind::UnsupportedFeature(format!(
+            "port `{port}` of instance `{path}` is connected to an expression; IEEE 1364-2005 \
+             section 12.3.9 permits one, and this compiler connects a port to a declared net, \
+             a bit- or part-select of one, or an output port to a concatenation of those, so \
+             name one of those"
+        )),
+        span,
+    )
 }
 
 impl DigitalElaborator<'_> {
