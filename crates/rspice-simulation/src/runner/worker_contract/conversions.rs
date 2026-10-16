@@ -446,6 +446,42 @@ pub(super) fn emit_worker_engine_log(line: &crate::engine_log::EngineLogLine) {
     let _ = post_message.call1(&global, &JsValue::from(message));
 }
 
+/// Post what the run raised, once, as its solving thread ends: before the
+/// result message, so the UI holds the notices when it accepts the result.
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub(super) fn emit_worker_engine_notices(notices: &[rspice_core::notice::RecordedNotice]) {
+    use wasm_bindgen::JsCast as _;
+    use wasm_bindgen::JsValue;
+
+    let id = ACTIVE_WORKER_PROGRESS_ID.with(|active| active.get());
+    let Some(id) = id else {
+        return;
+    };
+    let message = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &message,
+        &JsValue::from_str("type"),
+        &JsValue::from_str("engineNotices"),
+    );
+    let _ = js_sys::Reflect::set(
+        &message,
+        &JsValue::from_str("id"),
+        &JsValue::from_f64(id as f64),
+    );
+    let Ok(notices) = serde_wasm_bindgen::to_value(notices) else {
+        return;
+    };
+    let _ = js_sys::Reflect::set(&message, &JsValue::from_str("notices"), &notices);
+
+    let global = js_sys::global();
+    let Ok(post_message) = js_sys::Reflect::get(&global, &JsValue::from_str("postMessage"))
+        .and_then(|value| value.dyn_into::<js_sys::Function>())
+    else {
+        return;
+    };
+    let _ = post_message.call1(&global, &JsValue::from(message));
+}
+
 /// The worker image's whole logger: it feeds the run's sink and nothing else.
 ///
 /// This image has no terminal and paints nothing, so there is no second reader
@@ -519,10 +555,10 @@ fn run_decoded_worker_request(
                 transient_checkpoint_observer: Some(Arc::new(emit_worker_transient_checkpoint)),
                 transient_sample_observer: stream_transient_samples
                     .then_some(emit_worker_transient_sample),
-                engine_log: Some(crate::engine_log::RunLogSink::observed(
-                    emit_worker_engine_log,
-                    verbose,
-                )),
+                engine_log: Some(
+                    crate::engine_log::RunLogSink::observed(emit_worker_engine_log, verbose)
+                        .observing_notices(emit_worker_engine_notices),
+                ),
                 ..Default::default()
             },
         ),
