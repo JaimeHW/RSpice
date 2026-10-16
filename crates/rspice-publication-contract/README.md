@@ -1,63 +1,79 @@
 # rspice-publication-contract
 
-The interchange schema for sealed RSpice circuit publications. A
-`PublicationSnapshot` is the complete, self-contained description of a published
-circuit page: metadata, disclosure decisions, resolved schematic scenes, the
-netlist deck, analysis records, exact result datasets, measurements, and the
-figures the author curated.
-
-Three programs meet here. The RSpice client builds a snapshot at publish time,
+The interchange schema for sealed RSpice circuit publications, shared so that
+the three programs that meet here cannot disagree on a byte. `rspice-app`
+builds a `PublicationSnapshot` at publish time,
 [`rspice-publish`](../rspice-publish) renders it into an immutable page bundle,
 and [`rspice-viewer`](../rspice-viewer) hydrates individual figures from
-`FigurePayload`s carved out of the same types. The crate has no dependency
-beyond `serde`, `serde_json`, and `thiserror`.
+`FigurePayload`s carved out of the same types. The crate depends only on
+`serde`, `serde_json` and `thiserror`.
 
-## Design rules
+## What's in here
 
-- **Typed data, never markup.** Every string is plain text that consumers escape
-  at their own boundary. Nothing in a snapshot can smuggle HTML, SVG, or script
-  into a rendered page.
-- **Resolved geometry, not authored objects.** Schematic and plot content is a
-  display list in integral micrometres (the hardcopy pipeline's convention), so
-  the renderer and viewer reproduce what the author saw without compiling the
-  editor's document model. Version skew between producing client and rendering
-  binary cannot change what a sealed page looks like.
-- **Exact numerics.** `TraceValues` carries IEEE-754 bit patterns, not decimal
-  strings, so a sealed snapshot never loses source precision to formatting.
-- **Strict envelopes.** Every type rejects unknown fields, roots carry an exact
-  schema version, and `from_canonical_bytes` enforces a hard size cap *before*
-  parsing.
-- **Deterministic bytes.** No unordered collection appears in the schema;
-  canonical serialization of equal values is byte-identical.
+Everything is in `src/lib.rs`:
 
-## Versions and caps
-
-`PUBLICATION_SNAPSHOT_SCHEMA_VERSION` is 4. Versions 2 and 3 remain decodable,
-their constants retained rather than deleted, because pages sealed under them
-are immutable and installed clients still produce them. v3 added typed page
-presentation, component/net identity, explicit signal bindings, and simulation
-provenance; v4 added typed `FAILVALUE` measurement evidence. Additive evolution
-happens by bumping the version, never by tolerating unrecognized content.
-`FIGURE_MANIFEST_SCHEMA_VERSION` is 1 and is exact, not a floor.
-
-Snapshots are capped at `MAX_PUBLICATION_SNAPSHOT_BYTES` (64 MiB, matching the
-hardcopy worker-snapshot transport cap) and one figure payload at
-`MAX_FIGURE_PAYLOAD_BYTES` (32 MiB). Inside that, thirty-odd `MAX_*` constants
-bound individual fields and collection lengths: title, description,
-author, label, unit, deck bytes, sheets, figures, analyses, datasets, traces per
-dataset. `validate()` enforces all of them.
+- **The snapshot.** `PublicationSnapshot` is the complete, self-contained
+  description of a published page: metadata, disclosure decisions, resolved
+  schematic scenes, the netlist deck, analysis records, exact result datasets
+  and measurements, page presentation, engineering identity and simulation
+  provenance, and the figures the author curated.
+- **The hydration handshake.** `FigureManifest` lists each hydratable figure
+  with its DOM id and payload digest; `FigurePayload` is one figure's scene and
+  the datasets its bindings read.
+- **Validation.** The `Validate` trait, implemented by all three roots, and
+  `ContractError`, which names the exact defect so a producing client's bug is
+  reportable rather than generic.
 
 ## Entry points
 
-`PublicationSnapshot`, `FigureManifest`, and `FigurePayload` each expose
-`canonical_bytes()` (validate, then serialize) and `from_canonical_bytes()`
-(enforce the cap, parse strictly, then validate). `ContractError` names the
-exact defect so a producing client's bug is reportable rather than generic.
+- `PublicationSnapshot::canonical_bytes` validates, then serializes; equal
+  values produce identical bytes.
+- `PublicationSnapshot::from_canonical_bytes` enforces the size cap, parses
+  strictly, then validates.
+- `FigureManifest` and `FigurePayload` expose the same pair.
+
+## Schema rules
+
+- **Typed data, never markup.** Every string is plain text that consumers
+  escape at their own boundary, so nothing in a snapshot can carry HTML, SVG or
+  script into a rendered page.
+- **Resolved geometry.** Schematic and plot content is a display list in
+  integral micrometres, so the renderer and viewer reproduce what the author
+  saw without compiling the editor's document model.
+- **Exact numerics.** `TraceValues` carries IEEE-754 bit patterns, not decimal
+  strings.
+- **Strict envelopes.** Every type rejects unknown fields, and the schema
+  evolves by bumping its version, never by tolerating unrecognized content.
+- **Deterministic bytes.** No unordered collection appears in the schema.
+
+## Versions and caps
+
+A producer writes `PUBLICATION_SNAPSHOT_SCHEMA_VERSION`. The legacy versions
+named by `PUBLICATION_SNAPSHOT_V2_SCHEMA_VERSION`,
+`PUBLICATION_SNAPSHOT_V3_SCHEMA_VERSION` and
+`PUBLICATION_SNAPSHOT_V4_SCHEMA_VERSION` still decode, because pages sealed
+under them are immutable. A snapshot that declares a legacy version is refused
+if it carries a field a later version introduced.
+`FIGURE_MANIFEST_SCHEMA_VERSION` versions the manifest and its payloads
+together, and both must declare it exactly.
+
+A snapshot is capped at `MAX_PUBLICATION_SNAPSHOT_BYTES`, and a manifest or a
+figure payload at `MAX_FIGURE_PAYLOAD_BYTES`, before parsing. The other `MAX_*`
+constants bound individual text fields and collection lengths, and `validate`
+enforces every one.
 
 ## Testing
 
 ```text
 cargo test -p rspice-publication-contract
+```
+
+`tests/fixtures/` holds the byte-exact snapshot and manifest fixtures the
+downstream crates build against. After a deliberate schema change, regenerate
+them with:
+
+```text
+cargo test -p rspice-publication-contract --test golden regenerate_fixtures -- --ignored
 ```
 
 Licensed under the [RSpice Personal Use License](../../LICENSE).
