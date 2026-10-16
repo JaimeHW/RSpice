@@ -79,22 +79,22 @@ fn schematic_zoom_commands_match_the_mockup_bounds_and_request_a_real_fit() {
     // its middle (audit E-1), so each step draws one.
     app.state.schematic.session.editor.zoom = 1.0;
     Command::ZoomIn.execute(&mut app);
-    draw_schematic_canvas(&mut app, 800.0, 600.0);
+    draw_schematic_canvas(&mut app.state, 800.0, 600.0);
     assert!((app.state.schematic.session.editor.zoom - 1.2).abs() < f64::EPSILON);
 
     app.state.schematic.session.editor.zoom = 1.0;
     app.execute_shortcut_command(Command::ZoomOut);
-    draw_schematic_canvas(&mut app, 800.0, 600.0);
+    draw_schematic_canvas(&mut app.state, 800.0, 600.0);
     assert!((app.state.schematic.session.editor.zoom - (1.0 / 1.2)).abs() < f64::EPSILON);
 
     app.state.schematic.session.editor.zoom = 0.251;
     Command::ZoomOut.execute(&mut app);
-    draw_schematic_canvas(&mut app, 800.0, 600.0);
+    draw_schematic_canvas(&mut app.state, 800.0, 600.0);
     assert_eq!(app.state.schematic.session.editor.zoom, 0.25);
 
     app.state.schematic.session.editor.zoom = 7.99;
     Command::ZoomIn.execute(&mut app);
-    draw_schematic_canvas(&mut app, 800.0, 600.0);
+    draw_schematic_canvas(&mut app.state, 800.0, 600.0);
     assert_eq!(app.state.schematic.session.editor.zoom, 8.0);
 
     app.state.schematic.session.editor.zoom = 3.5;
@@ -114,7 +114,7 @@ fn schematic_zoom_commands_match_the_mockup_bounds_and_request_a_real_fit() {
 
 /// Draw the schematic canvas for one frame in a `width` x `height` panel, so
 /// requests the commands leave for the canvas are carried out with its rect.
-fn draw_schematic_canvas(app: &mut RSpiceApp, width: f32, height: f32) {
+fn draw_schematic_canvas(state: &mut AppState, width: f32, height: f32) {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let _ = ctx.run_ui(
@@ -129,7 +129,7 @@ fn draw_schematic_canvas(app: &mut RSpiceApp, width: f32, height: f32) {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| {
-                    crate::schematic::view::render_schematic_view(ui, &mut app.state, None);
+                    crate::schematic::view::render_schematic_view(ui, state, None);
                 });
         },
     );
@@ -156,7 +156,7 @@ fn zoom_commands_keep_the_middle_of_the_canvas_where_it_was() {
     app.state.schematic.session.editor.needs_drawing_sheet_fit = false;
     app.state.schematic.session.editor.zoom = 0.5;
     app.state.schematic.session.editor.pan = (400.0 - 2000.0 * 0.5, 300.0 - 100.0 * 0.5);
-    draw_schematic_canvas(&mut app, 800.0, 600.0);
+    draw_schematic_canvas(&mut app.state, 800.0, 600.0);
     assert_eq!(world_at_canvas_centre(&app, 800.0, 600.0), (2000.0, 100.0));
 
     for (command, zoom) in [
@@ -166,7 +166,7 @@ fn zoom_commands_keep_the_middle_of_the_canvas_where_it_was() {
         (Command::ZoomOneToOne, 1.0),
     ] {
         app.execute_shortcut_command(command);
-        draw_schematic_canvas(&mut app, 800.0, 600.0);
+        draw_schematic_canvas(&mut app.state, 800.0, 600.0);
         let editor = &app.state.schematic.session.editor;
         assert!(
             (editor.zoom - zoom).abs() < 1e-9,
@@ -207,7 +207,7 @@ fn fit_sheet_shows_the_whole_sheet_on_a_small_canvas() {
     };
 
     Command::ZoomFit.execute(&mut app);
-    draw_schematic_canvas(&mut app, width, height);
+    draw_schematic_canvas(&mut app.state, width, height);
     assert!(
         fits_on_screen(&app),
         "Fit Sheet left the paper cropped at zoom {}",
@@ -219,7 +219,7 @@ fn fit_sheet_shows_the_whole_sheet_on_a_small_canvas() {
     app.state.schematic.session.editor.zoom = 0.25;
     for _ in 0..20 {
         Command::ZoomOut.execute(&mut app);
-        draw_schematic_canvas(&mut app, width, height);
+        draw_schematic_canvas(&mut app.state, width, height);
     }
     assert!(
         (app.state.schematic.session.editor.zoom - fit_zoom).abs() < 1e-9,
@@ -260,7 +260,7 @@ fn zoom_to_selection_frames_what_is_selected() {
     let (min, max) =
         crate::schematic::view::schematic_symbol_context(&app.state).component_bounds(&resistor);
     let (min_x, min_y, max_x, max_y) = (min.x, min.y, max.x, max.y);
-    draw_schematic_canvas(&mut app, 800.0, 600.0);
+    draw_schematic_canvas(&mut app.state, 800.0, 600.0);
     assert!(
         !Command::ZoomToSelection.is_enabled(&app),
         "nothing is selected"
@@ -274,7 +274,7 @@ fn zoom_to_selection_frames_what_is_selected() {
         .select_only_component(41);
     assert!(Command::ZoomToSelection.is_enabled(&app));
     Command::ZoomToSelection.execute(&mut app);
-    draw_schematic_canvas(&mut app, 800.0, 600.0);
+    draw_schematic_canvas(&mut app.state, 800.0, 600.0);
 
     let (x, y) = world_at_canvas_centre(&app, 800.0, 600.0);
     let centre = (
@@ -290,7 +290,7 @@ fn zoom_to_selection_frames_what_is_selected() {
 
 /// One frame of the canvas with these pointer events, on a context that
 /// lives across frames so egui can tell a drag from a click.
-fn drive_schematic_canvas(app: &mut RSpiceApp, ctx: &egui::Context, events: Vec<egui::Event>) {
+fn drive_schematic_canvas(state: &mut AppState, ctx: &egui::Context, events: Vec<egui::Event>) {
     let _ = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -304,7 +304,7 @@ fn drive_schematic_canvas(app: &mut RSpiceApp, ctx: &egui::Context, events: Vec<
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| {
-                    crate::schematic::view::render_schematic_view(ui, &mut app.state, None);
+                    crate::schematic::view::render_schematic_view(ui, state, None);
                 });
         },
     );
@@ -320,7 +320,7 @@ fn zoom_box_frames_the_dragged_rectangle_and_lets_go() {
     app.state.schematic.session.editor.pan = (0.0, 0.0);
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
-    drive_schematic_canvas(&mut app, &ctx, Vec::new());
+    drive_schematic_canvas(&mut app.state, &ctx, Vec::new());
 
     app.execute_shortcut_command(Command::ZoomBox);
     assert!(app.state.schematic.session.editor.zoom_box.armed);
@@ -339,7 +339,7 @@ fn zoom_box_frames_the_dragged_rectangle_and_lets_go() {
         vec![button(to, false)],
         Vec::new(),
     ] {
-        drive_schematic_canvas(&mut app, &ctx, events);
+        drive_schematic_canvas(&mut app.state, &ctx, events);
     }
 
     let editor = &app.state.schematic.session.editor;
