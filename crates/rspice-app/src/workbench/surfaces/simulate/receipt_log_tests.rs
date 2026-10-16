@@ -78,15 +78,13 @@ fn a_committed_plan_command_leaves_one_plan_receipt_in_the_console() {
     );
 }
 
-/// A refused command is recorded at `Warning`, and noticed exactly once.
+/// A refused command leaves exactly one record, at `Warning`, and no toast.
 ///
-/// The one notice is the drain's titled toast, which is what carries a refusal
-/// to a reader who is not on the page that raised it. The Console record is
-/// the other half of the pair and must not become a second notice for the same
-/// refusal; that the mirror never lifts it is asserted in `workbench::frame`.
+/// The Analyses lifecycle line states the refusal where the reader is, and
+/// the Console keeps the record; a toast would be a third statement of one
+/// refusal, at a severity the record does not have.
 #[test]
-fn a_refused_plan_command_is_recorded_once_and_noticed_once() {
-    let ctx = egui::Context::default();
+fn a_refused_plan_command_is_recorded_once_and_raises_no_toast() {
     let mut app = RSpiceApp::test_instance();
 
     apply_analysis_action(
@@ -94,23 +92,17 @@ fn a_refused_plan_command_is_recorded_once_and_noticed_once() {
         AnalysisInstanceId::new(),
         AnalysisAction::SetEnabled(true),
     );
-    drain_lifecycle_refusal(&ctx, &mut app.state);
 
     let entries = plan_entries(&app);
     assert_eq!(entries.len(), 1, "one refusal is one record: {entries:?}");
-    assert_eq!(
-        entries[0].0,
-        LogSeverity::Warning,
-        "a refusal is a problem, and the Problems page lists warnings and errors"
-    );
+    assert_eq!(entries[0].0, LogSeverity::Warning);
     assert_eq!(
         entries[0].1,
         app.state.workbench.analysis_lifecycle_status.message()
     );
-    assert_eq!(
-        app.state.ui.toasts.activity().len(),
-        1,
-        "the drain's toast is the one notice this refusal produces"
+    assert!(
+        app.state.ui.toasts.activity().is_empty(),
+        "a refusal raises no toast and no notice"
     );
 }
 

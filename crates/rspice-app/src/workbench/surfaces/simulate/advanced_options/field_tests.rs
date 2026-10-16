@@ -585,14 +585,21 @@ fn a_well_authors_what_it_holds_and_clears_when_it_is_emptied() {
 /// A value the record refuses is announced once and costs the plan nothing.
 ///
 /// Through the same funnel every refused plan command uses, so one refused
-/// field is one toast and one Console line. The well reverts on its own: its
-/// text is only retained while it is being typed into, so the next frame seeds
-/// it from the value the solve is actually using.
+/// field is one Console line. The well reverts on its own: its text is only
+/// retained while it is being typed into, so the next frame seeds it from the
+/// value the solve is actually using.
 #[test]
 fn a_refused_value_is_announced_once_and_leaves_the_plan_alone() {
+    let plan_records = |app: &RSpiceApp| {
+        app.state
+            .log_buffer
+            .entries()
+            .filter(|entry| entry.source == crate::diagnostics::LogSource::Plan)
+            .count()
+    };
     let (mut app, transient) = studio(AnalysisKind::Transient);
     let before = revision(&app);
-    let announced = app.state.workbench.analysis_lifecycle_status.sequence();
+    let announced = plan_records(&app);
 
     commit(
         &mut app,
@@ -620,7 +627,7 @@ fn a_refused_value_is_announced_once_and_leaves_the_plan_alone() {
         app.state.workbench.analysis_lifecycle_status.message()
     );
     assert_eq!(
-        app.state.workbench.analysis_lifecycle_status.sequence(),
+        plan_records(&app),
         announced + 1,
         "one refused field is one announcement, not two"
     );

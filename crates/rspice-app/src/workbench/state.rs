@@ -860,16 +860,15 @@ impl StatusPrompt {
 
 /// The last outcome any Simulation Studio plan command announced.
 ///
-/// Only the Analyses route draws this; the other seven routes drain refusals
-/// out of it into the toast system. That drain is keyed on `sequence`, which is
-/// why the sequence advances on a *change* of outcome and not on every
+/// Only the Analyses route draws this; the Console holds the record of each
+/// outcome. An outcome is new only when it *changes*, not on every
 /// restatement: three of the writers sit on the render path rather than in a
-/// click handler, and a per-frame bump would toast the same refusal forever.
+/// click handler, and recording each restatement would record the same
+/// refusal forever.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnalysisLifecycleOutcome {
     severity: AnalysisLifecycleSeverity,
     message: String,
-    sequence: u64,
 }
 
 impl Default for AnalysisLifecycleOutcome {
@@ -879,7 +878,6 @@ impl Default for AnalysisLifecycleOutcome {
         Self {
             severity: AnalysisLifecycleSeverity::Receipt,
             message: "No lifecycle command has been committed this session.".to_owned(),
-            sequence: 0,
         }
     }
 }
@@ -887,12 +885,6 @@ impl Default for AnalysisLifecycleOutcome {
 impl AnalysisLifecycleOutcome {
     pub fn message(&self) -> &str {
         &self.message
-    }
-
-    /// Advances only when the announced outcome differs from the one already
-    /// held. Readers compare it against the last value they acted on.
-    pub const fn sequence(&self) -> u64 {
-        self.sequence
     }
 
     pub const fn is_refusal(&self) -> bool {
@@ -916,8 +908,8 @@ impl AnalysisLifecycleOutcome {
     ///
     /// Three announcing sites sit on the render path rather than in a click
     /// handler, so a standing refusal is restated every frame. Restating it is
-    /// not an event: the sequence does not advance, and a reporter reading the
-    /// answer does not report it again.
+    /// not an event, and a reporter reading the answer does not report it
+    /// again.
     fn record(&mut self, severity: AnalysisLifecycleSeverity, message: impl Into<String>) -> bool {
         let message = message.into();
         if self.severity == severity && self.message == message {
@@ -925,7 +917,6 @@ impl AnalysisLifecycleOutcome {
         }
         self.severity = severity;
         self.message = message;
-        self.sequence += 1;
         true
     }
 }
@@ -1188,12 +1179,6 @@ pub struct WorkbenchState {
     /// The status bar's feedback on the gesture just made.
     #[serde(skip)]
     pub prompt: Option<StatusPrompt>,
-    /// Sequence of the outcome the Simulation Studio has already surfaced away
-    /// from the Analyses page. Runtime-only, and deliberately not part of the
-    /// outcome itself: the writers announce, and this records what a reader did
-    /// about it.
-    #[serde(skip)]
-    pub analysis_lifecycle_toasted_sequence: u64,
     /// Active Simulation Studio transaction. Drafts are runtime-only and are
     /// committed atomically by the dialog's primary action.
     #[serde(skip)]
@@ -1463,7 +1448,6 @@ impl Default for WorkbenchState {
             simulation_surface_editor_anchor_y: None,
             analysis_lifecycle_status: AnalysisLifecycleOutcome::default(),
             prompt: None,
-            analysis_lifecycle_toasted_sequence: 0,
             simulation_workflow: None,
             selected_specification: None,
             specification_editor_route_pending: false,

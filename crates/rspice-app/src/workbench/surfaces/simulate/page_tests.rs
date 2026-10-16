@@ -1571,8 +1571,15 @@ fn specification_policy_commits_atomically_and_rejects_an_invalid_yield_gate() {
 /// silently would leave the field showing text no run will use.
 #[test]
 fn a_refused_solver_value_reports_on_the_plan_lifecycle_channel() {
+    let plan_records = |app: &RSpiceApp| {
+        app.state
+            .log_buffer
+            .entries()
+            .filter(|entry| entry.source == crate::diagnostics::LogSource::Plan)
+            .count()
+    };
     let mut app = RSpiceApp::test_instance();
-    let committed = app.state.workbench.analysis_lifecycle_status.sequence();
+    let committed = plan_records(&app);
     app.state.sim_setup.session.options_draft.reltol = "not a number".to_owned();
 
     super::page_solver::commit_draft(&mut app);
@@ -1580,8 +1587,8 @@ fn a_refused_solver_value_reports_on_the_plan_lifecycle_channel() {
     let outcome = &app.state.workbench.analysis_lifecycle_status;
     assert!(outcome.is_refusal(), "{}", outcome.message());
     assert!(
-        outcome.sequence() > committed,
-        "a refusal is an event the surface has not drained yet"
+        plan_records(&app) > committed,
+        "a refusal is an event the Console records"
     );
     assert!(
         outcome.message().contains("were not applied"),

@@ -449,8 +449,6 @@ fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
     if revision == observed {
         return;
     }
-    let now = ctx.input(|input| input.time);
-    let session_elapsed = app.state.log_buffer.session_elapsed();
     let attention = app
         .state
         .ui
@@ -458,119 +456,46 @@ fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
         .workspace()
         .map(WorkspacePreferences::background_task_attention)
         .unwrap_or_default();
-    let announced = app.state.ui.observed_newest_run;
-    let retained_runs: Vec<(u64, usize)> = app
-        .state
-        .simulation
-        .retained
-        .runs
-        .iter()
-        .map(|run| (run.id, run.analyses.len()))
-        .collect();
+    if !attention.retains(true) {
+        app.state
+            .ui
+            .toasts
+            .synchronize_activity(revision, Vec::new());
+        return;
+    }
+    let now = ctx.input(|input| input.time);
+    let session_elapsed = app.state.log_buffer.session_elapsed();
     let entries = app
         .state
         .log_buffer
         .entries()
-        .filter(|entry| entry.id >= observed)
-        .filter(|entry| !shell_already_announced(entry.anchor.as_ref(), announced))
+        .filter(|entry| entry.id >= observed && entry.severity == LogSeverity::Error)
         .filter_map(|entry| {
+            // Only a studio or netlist failure is lifted. A run's failures
+            // are announced by the shell's run announcement and listed in
+            // Problems, and the engine's lines are that run's own account,
+            // so the run side is never lifted. A plan entry is a record of
+            // what was committed or refused. An Info or Warning line is a
+            // record too: the Console is where it is read.
             let category = match entry.source {
-                LogSource::Run
+                LogSource::Studio | LogSource::Netlist => NotificationCategory::System,
+                LogSource::Plan
+                | LogSource::Run
                 | LogSource::Engine
-                | LogSource::Netlist
                 | LogSource::Hdl
-                | LogSource::VerilogA => NotificationCategory::Job,
-                LogSource::Studio => NotificationCategory::System,
-                // A plan receipt is a record of what was committed, not a
-                // notice, so the Console keeps it and this lifts nothing at
-                // any severity. A refusal is left here for the opposite
-                // reason: it already reaches the notice centre as the plan
-                // drain's titled toast, and mirroring it would count one
-                // refusal twice.
-                LogSource::Plan => return None,
+                | LogSource::VerilogA => return None,
             };
-            let kind = match entry.severity {
-                LogSeverity::Error => ToastKind::Error,
-                LogSeverity::Warning => ToastKind::Warn,
-                LogSeverity::Info => ToastKind::Info,
-                LogSeverity::Debug | LogSeverity::Trace => return None,
-            };
-            // The engine's own account of a run is a log, not a stream of
-            // notices. A solve that states its transient-noise receipt, or
-            // traces a Newton iteration because the form asked it to, would
-            // otherwise raise one notification per line — and there may be two
-            // thousand of them. Its warnings and failures still reach the
-            // notice centre, which is the half a reader has to be told about.
-            if entry.source == LogSource::Engine && matches!(kind, ToastKind::Info) {
-                return None;
-            }
-            if !attention.retains(matches!(kind, ToastKind::Error)) {
-                return None;
-            }
             Some(MirroredEntry {
                 log_id: entry.id,
                 category,
-                kind,
+                kind: ToastKind::Error,
                 message: entry.message.clone(),
-                // A mirrored line used to carry no offer, because the log
-                // model had no destination field. Anchors are that field, so
-                // an anchored line arrives with somewhere to go — and with
-                // the identity that tells the notice centre this line and the
-                // run announcement are one event.
-                action: notification_action_for(entry.anchor.as_ref(), &retained_runs),
+                action: None,
                 created: project_log_timestamp(now, session_elapsed, entry.timestamp),
             })
         })
         .collect::<Vec<_>>();
     app.state.ui.toasts.synchronize_activity(revision, entries);
-}
-
-/// Whether [`announce_run_completion`] has already raised this line's run.
-///
-/// Both reporters describe one completion: the shell announces the run — with
-/// its identity and what it retained — and the console line the run wrote is
-/// the same completion said again. Only one of them belongs in the notice
-/// centre, and it is the shell's, because it is the one that names the run.
-///
-/// `synchronize_activity`'s own rule collapses two records that offer the same
-/// destination, which covers the pair only while both carry an offer. A run
-/// that retained nothing is offered nowhere, so that rule could not see the
-/// pair and the badge counted the run twice.
-fn shell_already_announced(
-    anchor: Option<&crate::diagnostics::LogAnchor>,
-    announced: Option<(u64, bool)>,
-) -> bool {
-    let Some(crate::diagnostics::LogAnchor::ResultRun { run_sequence }) = anchor else {
-        return false;
-    };
-    announced == Some((*run_sequence, true))
-}
-
-/// The notice-centre destination a log anchor names, where it names one the
-/// notice centre can reach.
-///
-/// Only anchors addressing a whole retained artefact map here. A schematic
-/// jump is an editor motion, not somewhere a session notice offers to send
-/// the reader days later, so those anchors deliberately produce no offer.
-///
-/// A run that retained no analysis produces no offer either. The dataset it
-/// would open is empty, and `Command::OpenRunInResults` refuses such a run by
-/// name — an offer whose only outcome is a refusal is worse than none.
-fn notification_action_for(
-    anchor: Option<&crate::diagnostics::LogAnchor>,
-    retained_runs: &[(u64, usize)],
-) -> Option<crate::ui::widgets::NotificationAction> {
-    match anchor? {
-        crate::diagnostics::LogAnchor::ResultRun { run_sequence } => retained_runs
-            .iter()
-            .any(|(id, retained)| id == run_sequence && *retained > 0)
-            .then_some(crate::ui::widgets::NotificationAction::OpenRunInResults {
-                run_sequence: *run_sequence,
-            }),
-        crate::diagnostics::LogAnchor::Schematic { .. }
-        | crate::diagnostics::LogAnchor::Symbol { .. }
-        | crate::diagnostics::LogAnchor::Simulation { .. } => None,
-    }
 }
 
 /// Project a timestamp from the log buffer's session clock onto egui's
@@ -790,10 +715,9 @@ mod tests {
     /// One finished run leaves one record.
     ///
     /// Two reporters describe every completion — the shell announces the run,
-    /// and the console line the run wrote is mirrored into the same stream.
-    /// They used to produce two rows, so the unread badge counted one run
-    /// twice and only one of the rows could open the dataset. This runs both
-    /// in the order the frame runs them, which no test did before.
+    /// and the run writes its console line. Only the announcement reaches the
+    /// notice centre; the line stays in the Console. This runs both in the
+    /// order the frame runs them.
     #[test]
     fn one_finished_run_leaves_one_activity_record() {
         use crate::diagnostics::{LogAnchor, LogSeverity};
@@ -851,11 +775,9 @@ mod tests {
     /// than none. A failure's account of itself is in the Console, so that is
     /// the one place it offers to go.
     ///
-    /// And it is reported *once*. The console line the run wrote is anchored
-    /// to the run like any other, and the notice centre's own rule collapses
-    /// two records only when both name the same destination — which this pair
-    /// never does, because neither of them names the dataset. So the pair used
-    /// to survive as two rows, one of which offered to open an empty dataset.
+    /// And it is reported *once*: the run's own failure line stays in the
+    /// Console, because a run's failures are the shell's announcement and a
+    /// Problems row.
     #[test]
     fn a_run_that_retained_nothing_is_announced_once_and_never_offers_its_dataset() {
         use crate::diagnostics::{LogAnchor, LogSeverity};
@@ -1008,10 +930,7 @@ mod tests {
             .set_background_task_attention(BackgroundTaskAttention::NotifyOnFailureOnly);
         app.state
             .log_buffer
-            .log(LogSeverity::Info, LogSource::Run, "completed");
-        app.state
-            .log_buffer
-            .log(LogSeverity::Error, LogSource::Run, "failed");
+            .log(LogSeverity::Error, LogSource::Studio, "failed");
 
         synchronize_activity_stream(&ctx, &mut app);
         assert_eq!(app.state.ui.toasts.activity().len(), 1);
@@ -1025,60 +944,46 @@ mod tests {
             .set_background_task_attention(BackgroundTaskAttention::Silent);
         app.state
             .log_buffer
-            .log(LogSeverity::Error, LogSource::Run, "second failure");
+            .log(LogSeverity::Error, LogSource::Studio, "second failure");
         synchronize_activity_stream(&ctx, &mut app);
         assert_eq!(app.state.ui.toasts.activity().len(), 1);
     }
 
-    /// An engine line is a log entry, and the log is not the notice centre.
-    ///
-    /// The Console now carries what `rspice-core` logs during a run: a receipt
-    /// per analysis, and one line per solver step when a form asked for the
-    /// trace. Lifting those would turn a single verbose harmonic-balance solve
-    /// into hundreds of notifications. What the engine *warns* about, and what
-    /// it fails on, still reaches the notice centre — which is the half that is
-    /// worth interrupting a reader for, and which the failure path already
-    /// depends on.
+    /// The notice centre is for failures the reader has to be told about, so
+    /// it lifts an Error from the studio or a netlist import and nothing else.
+    /// A run's failure is the shell's run announcement and a Problems row; the
+    /// engine's lines are that run's own account; a plan entry is a record of
+    /// what was committed; Info and Warning lines are records the Console
+    /// holds.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn engine_info_rows_never_reach_the_notice_centre() {
+    fn only_studio_and_netlist_failures_reach_the_notice_centre() {
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
-        app.state.log_buffer.log(
-            LogSeverity::Info,
+        let sources = [
+            LogSource::Studio,
+            LogSource::Plan,
+            LogSource::Run,
             LogSource::Engine,
-            "Transient noise: 4 device noise source(s) injected from seed 11",
-        );
-        app.state.log_buffer.log(
-            LogSeverity::Debug,
-            LogSource::Engine,
-            "HB Newton step 3: relative residual 2.10e-07",
-        );
+            LogSource::Netlist,
+            LogSource::Hdl,
+            LogSource::VerilogA,
+        ];
+        for source in sources {
+            for severity in [
+                LogSeverity::Error,
+                LogSeverity::Warning,
+                LogSeverity::Info,
+                LogSeverity::Debug,
+            ] {
+                app.state.log_buffer.log(
+                    severity,
+                    source,
+                    format!("{} {}", source.name(), severity.name()),
+                );
+            }
+        }
 
-        synchronize_activity_stream(&ctx, &mut app);
-        assert!(
-            app.state.ui.toasts.activity().is_empty(),
-            "an engine log line is not a notice: {:?}",
-            app.state
-                .ui
-                .toasts
-                .activity()
-                .iter()
-                .map(|record| record.message().to_owned())
-                .collect::<Vec<_>>()
-        );
-
-        // Both halves of the rule, on the same source: a warning and a failure
-        // the engine reports are still lifted, and the studio's own Info line
-        // at the same severity is untouched.
-        app.state.log_buffer.log(
-            LogSeverity::Warning,
-            LogSource::Engine,
-            "Convergence was attributed to net out",
-        );
-        app.state
-            .log_buffer
-            .log(LogSeverity::Info, LogSource::Run, "completed");
         synchronize_activity_stream(&ctx, &mut app);
         let mut lifted: Vec<String> = app
             .state
@@ -1092,8 +997,8 @@ mod tests {
         assert_eq!(
             lifted,
             vec![
-                "Convergence was attributed to net out".to_owned(),
-                "completed".to_owned(),
+                format!("APP {}", LogSeverity::Error.name()),
+                format!("NET {}", LogSeverity::Error.name()),
             ]
         );
     }
@@ -1125,54 +1030,5 @@ mod tests {
                 .map(|prompt| prompt.text.as_str()),
             Some("Nothing was deleted.")
         );
-    }
-
-    /// A plan entry is a record, and the notice centre never lifts one.
-    ///
-    /// Plan receipts and refusals are written to the Console so the session
-    /// holds a log of what was commanded. A refusal already reaches the notice
-    /// centre as the plan drain's titled toast, so mirroring the record would
-    /// count one refusal twice, and mirroring a receipt would make every
-    /// routine registry edit a notification. The rule is the source, not the
-    /// severity, which is why both are asserted here.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn a_plan_entry_is_recorded_without_becoming_a_notice() {
-        let ctx = Context::default();
-        let mut app = RSpiceApp::test_instance();
-        app.state.log_buffer.log(
-            LogSeverity::Info,
-            LogSource::Plan,
-            "Receipt #7 \u{00b7} Reorder committed for instance 3.",
-        );
-        app.state.log_buffer.log(
-            LogSeverity::Warning,
-            LogSource::Plan,
-            "Remove rejected fail-closed: another analysis is bound to it.",
-        );
-
-        synchronize_activity_stream(&ctx, &mut app);
-        assert!(
-            app.state.ui.toasts.activity().is_empty(),
-            "a plan record is not a notice: {:?}",
-            app.state
-                .ui
-                .toasts
-                .activity()
-                .iter()
-                .map(|record| record.message().to_owned())
-                .collect::<Vec<_>>()
-        );
-
-        // And the filter is the plan source alone. A user action at the same
-        // severity still reaches the stream, which is the behaviour this must
-        // not have changed.
-        app.state
-            .log_buffer
-            .log(LogSeverity::Info, LogSource::Studio, "opened");
-        synchronize_activity_stream(&ctx, &mut app);
-        let activity = app.state.ui.toasts.activity();
-        assert_eq!(activity.len(), 1);
-        assert_eq!(activity[0].message(), "opened");
     }
 }

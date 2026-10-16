@@ -155,7 +155,7 @@ fn keep_first(slot: &mut Option<RecoveryIntent>, candidate: Option<RecoveryInten
 
 pub(super) fn recovery(ui: &mut Ui, app: &mut RSpiceApp) {
     #[cfg(target_arch = "wasm32")]
-    poll_browser_manual_checkpoint(ui.ctx(), &mut app.state);
+    poll_browser_manual_checkpoint(&mut app.state);
     ensure_project_recovery_catalog(ui.ctx(), &mut app.state);
     let snapshot = RecoverySnapshot::capture(&app.state);
     let mut intent = None;
@@ -762,59 +762,50 @@ fn manual_checkpoint_pending() -> bool {
     BROWSER_MANUAL_CHECKPOINT_PENDING.with(std::cell::Cell::get)
 }
 
-fn create_manual_checkpoint(ctx: &Context, state: &mut AppState) {
-    #[cfg(not(target_arch = "wasm32"))]
+/// Create a checkpoint the reader asked for. The Console line is its record;
+/// a failure also reaches the notice centre through the activity mirror.
+#[cfg(not(target_arch = "wasm32"))]
+fn create_manual_checkpoint(_: &Context, state: &mut AppState) {
     match crate::workbench::lifecycle::project_checkpoint::create(
         state,
         crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::Manual,
     ) {
         Ok(checkpoint) => {
             state.dialogs.project_checkpoint_recovery.initialized = false;
-            let receipt = format!(
+            state.push_user_message(ConsoleMessage::info(format!(
                 "Created full-project checkpoint {} for revision {}",
                 short_identity(&checkpoint.checkpoint_id().to_string()),
                 checkpoint.project_revision()
-            );
-            state.push_user_message(ConsoleMessage::info(receipt.clone()));
-            state.ui.toasts.success(ctx, "Checkpoint created", receipt);
+            )));
         }
-        Err(error) => {
-            state.push_user_message(ConsoleMessage::error(error.clone()));
-            state
-                .ui
-                .toasts
-                .error_with_title(ctx, "Checkpoint failed", error);
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        let project_id = state.workspace.content.project.id().to_string();
-        let repaint = ctx.clone();
-        BROWSER_MANUAL_CHECKPOINT_PENDING.with(|pending| pending.set(true));
-        if let Err(error) = crate::workbench::lifecycle::project_checkpoint::start_create(
-            state,
-            crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::Manual,
-            move |result| {
-                BROWSER_MANUAL_CHECKPOINT_COMPLETIONS.with(|queue| {
-                    queue
-                        .borrow_mut()
-                        .push_back(BrowserManualCheckpointCompletion { project_id, result });
-                });
-                repaint.request_repaint();
-            },
-        ) {
-            BROWSER_MANUAL_CHECKPOINT_PENDING.with(|pending| pending.set(false));
-            state
-                .ui
-                .toasts
-                .error_with_title(ctx, "Checkpoint failed", error);
-        }
+        Err(error) => state.push_user_message(ConsoleMessage::error(error)),
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn poll_browser_manual_checkpoint(ctx: &Context, state: &mut AppState) {
+fn create_manual_checkpoint(ctx: &Context, state: &mut AppState) {
+    let project_id = state.workspace.content.project.id().to_string();
+    let repaint = ctx.clone();
+    BROWSER_MANUAL_CHECKPOINT_PENDING.with(|pending| pending.set(true));
+    if let Err(error) = crate::workbench::lifecycle::project_checkpoint::start_create(
+        state,
+        crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::Manual,
+        move |result| {
+            BROWSER_MANUAL_CHECKPOINT_COMPLETIONS.with(|queue| {
+                queue
+                    .borrow_mut()
+                    .push_back(BrowserManualCheckpointCompletion { project_id, result });
+            });
+            repaint.request_repaint();
+        },
+    ) {
+        BROWSER_MANUAL_CHECKPOINT_PENDING.with(|pending| pending.set(false));
+        state.push_user_message(ConsoleMessage::error(error));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn poll_browser_manual_checkpoint(state: &mut AppState) {
     let current_project_id = state.workspace.content.project.id().to_string();
     let completions = BROWSER_MANUAL_CHECKPOINT_COMPLETIONS
         .with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
@@ -829,21 +820,13 @@ fn poll_browser_manual_checkpoint(ctx: &Context, state: &mut AppState) {
         match completion.result {
             Ok(checkpoint) => {
                 state.dialogs.project_checkpoint_recovery.initialized = false;
-                let receipt = format!(
+                state.push_user_message(ConsoleMessage::info(format!(
                     "Created full-project checkpoint {} for revision {}",
                     short_identity(&checkpoint.checkpoint_id().to_string()),
                     checkpoint.project_revision()
-                );
-                state.push_user_message(ConsoleMessage::info(receipt.clone()));
-                state.ui.toasts.success(ctx, "Checkpoint created", receipt);
+                )));
             }
-            Err(error) => {
-                state.push_user_message(ConsoleMessage::error(error.clone()));
-                state
-                    .ui
-                    .toasts
-                    .error_with_title(ctx, "Checkpoint failed", error);
-            }
+            Err(error) => state.push_user_message(ConsoleMessage::error(error)),
         }
     }
 }
