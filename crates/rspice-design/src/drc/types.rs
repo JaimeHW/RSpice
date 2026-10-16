@@ -40,15 +40,15 @@ pub enum DrcViolationType {
     /// Node with only one connection (floating)
     FloatingNode,
     /// An unattached terminal no interface classified: a passive leg, a
-    /// primitive device terminal, or a pin declared `inout` or `supply`.
+    /// primitive device terminal, or a pin declared `inout`.
     ///
     /// Three findings cover an unattached terminal, and this is the one that
     /// claims nothing about direction. It keeps its name because that is what
     /// every surface already asks for when it means "an open terminal nobody
     /// declared anything about".
     UnconnectedPin,
-    /// A pin the bound cell interface declares an input, which no conductor
-    /// reaches: nothing drives it.
+    /// A pin the bound cell interface declares an input or a supply, which no
+    /// conductor reaches: nothing drives it, or nothing feeds its rail.
     UndrivenInput,
     /// A pin the bound cell interface declares an output — or an independent
     /// voltage source's `+` terminal — which no conductor reaches: it drives
@@ -89,8 +89,9 @@ pub enum DrcViolationType {
     //-------------------------------------------------------------------------
     // Hierarchy Issues
     //-------------------------------------------------------------------------
-    /// A cellview reaches itself through its own instances. The design has no
-    /// finite expansion, so nothing below the repeated occurrence is checked.
+    /// A cellview reaches itself through its own instances, directly or
+    /// through other cellviews. The design has no finite expansion, so nothing
+    /// below the repeated occurrence is checked.
     RecursiveInstantiation,
 
     //-------------------------------------------------------------------------
@@ -133,10 +134,10 @@ impl DrcViolationType {
     ///
     /// Three of them have no answer that holds for every object that can raise
     /// them: an empty reference, an invalid one, and a type that resolves to
-    /// nothing each cost the deck an instance only where an instance was going
-    /// to be written. This returns what they are worth on an object that writes
-    /// none; [`Self::severity_for_component`] is what a rule holding the
-    /// component asks.
+    /// nothing each matter only as far as they change what the deck writes.
+    /// This returns what they are worth on an object that writes nothing;
+    /// [`Self::severity_for_instance`] is what a rule holding the instance
+    /// asks.
     pub fn default_severity(&self) -> DrcSeverity {
         match self {
             // Critical - simulation cannot run
@@ -186,28 +187,28 @@ impl DrcViolationType {
             // Info
             Self::OffSheetConnectorWithoutPartner => DrcSeverity::Info,
 
-            // Info on an object that emits no instance; an error on one that
-            // does. See `severity_for_component`.
+            // Info on an object that emits no instance. See
+            // `severity_for_instance` for one that does.
             Self::EmptyName => DrcSeverity::Info,
             Self::InvalidName => DrcSeverity::Info,
             Self::UnknownComponent => DrcSeverity::Info,
         }
     }
 
-    /// The severity this violation type carries on one component.
+    /// The severity this violation type carries on one emitted instance.
     ///
-    /// `reference_required` is that component's own flag: true for an object
-    /// that emits a SPICE instance. Such an object is written with a reference
-    /// designator the deck accepts and a type that resolves to a source, a
-    /// model template, or a hierarchy master, so each of those three failures
-    /// is an instance the netlist cannot carry — a run that will not start,
-    /// not a note. An object that emits nothing loses nothing and keeps the
-    /// note.
-    pub fn severity_for_component(&self, reference_required: bool) -> DrcSeverity {
+    /// `written` says whether the deck still writes the instance. A run that
+    /// will not start is an error, not a note: an instance the netlist cannot
+    /// carry — a cell instance whose reference is not a path segment, or whose
+    /// master resolves to nothing — refuses the run. An instance the netlister
+    /// writes under a name it chose still runs, and the results carry that
+    /// name, so the finding is a warning the author has to see.
+    pub fn severity_for_instance(&self, written: bool) -> DrcSeverity {
         match self {
-            Self::EmptyName | Self::InvalidName | Self::UnknownComponent if reference_required => {
-                DrcSeverity::Error
+            Self::EmptyName | Self::InvalidName | Self::UnknownComponent if written => {
+                DrcSeverity::Warning
             }
+            Self::EmptyName | Self::InvalidName | Self::UnknownComponent => DrcSeverity::Error,
             _ => self.default_severity(),
         }
     }
@@ -232,7 +233,7 @@ impl DrcViolationType {
                 "Off-sheet connector has no partner on another sheet"
             }
             Self::ShortedOutputs => "Multiple declared outputs connected to the same net",
-            Self::RecursiveInstantiation => "Cellview instantiates itself",
+            Self::RecursiveInstantiation => "Cellview reaches itself through its instances",
             Self::MissingGround => "Circuit has no ground reference (node 0)",
             Self::SourceToSource => "Voltage source outputs directly connected",
             Self::DuplicateName => "Multiple components have the same name",
@@ -338,18 +339,15 @@ impl DrcViolation {
         self
     }
 
-    /// Re-base this finding's severity on the component that raised it.
+    /// Re-base this finding's severity on the instance that raised it.
     ///
-    /// `reference_required` is that component's own flag. Severity stays a
-    /// property of the finding rather than of its type alone, because a
-    /// naming or binding failure costs the deck an instance only where one was
-    /// going to be written: see
-    /// [`DrcViolationType::severity_for_component`]. A project's configured
-    /// override is applied after this and still wins.
-    pub fn with_component_severity(mut self, reference_required: bool) -> Self {
-        self.severity = self
-            .violation_type
-            .severity_for_component(reference_required);
+    /// `written` says whether the deck still writes that instance. Severity
+    /// stays a property of the finding rather than of its type alone, because
+    /// a naming or binding failure stops a run only where it costs the deck
+    /// the instance: see [`DrcViolationType::severity_for_instance`]. A
+    /// project's configured override is applied after this and still wins.
+    pub fn with_instance_severity(mut self, written: bool) -> Self {
+        self.severity = self.violation_type.severity_for_instance(written);
         self
     }
 }

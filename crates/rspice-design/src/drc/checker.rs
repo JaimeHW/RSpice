@@ -188,6 +188,14 @@ impl DrcChecker {
         result
     }
 
+    /// Report every emitted instance whose reference the schema refuses.
+    ///
+    /// How bad that is depends on what the deck does with it. The netlister
+    /// names an unnamed primitive `<prefix><id>` and prefixes one that starts
+    /// with the wrong letter, so the run starts and the results carry the
+    /// name it chose — which is why the finding states that name. Only an
+    /// instance the deck cannot write at all is an error: a cell instance
+    /// whose reference is not a path segment, or a name the card cannot hold.
     fn check_component_references(&mut self, components: &[ComponentInfo], result: &mut DrcResult) {
         let mut components = components.iter().collect::<Vec<_>>();
         components.sort_by_key(|component| component.id);
@@ -195,6 +203,11 @@ impl DrcChecker {
             if !component.reference_required {
                 continue;
             }
+            let written = component.deck_name.is_some();
+            let consequence = match component.deck_name.as_deref() {
+                Some(deck_name) => format!("; the netlist writes it as {deck_name}"),
+                None => "; the netlist cannot write this instance".to_owned(),
+            };
             if component.name.trim().is_empty() {
                 let id = self.next_id();
                 self.add_violation(
@@ -203,7 +216,7 @@ impl DrcChecker {
                         id,
                         DrcViolationType::EmptyName,
                         format!(
-                            "{} component #{} has no reference designator",
+                            "{} component #{} has no reference designator{consequence}",
                             component.component_type, component.id
                         ),
                         DrcLocation::Component {
@@ -211,7 +224,7 @@ impl DrcChecker {
                             name: String::new(),
                         },
                     )
-                    .with_component_severity(component.reference_required),
+                    .with_instance_severity(written),
                 );
             } else if let Some(error) = component.reference_error.as_deref() {
                 let id = self.next_id();
@@ -220,13 +233,17 @@ impl DrcChecker {
                     DrcViolation::new(
                         id,
                         DrcViolationType::InvalidName,
-                        format!("Invalid reference '{}': {error}", component.name),
+                        format!(
+                            "Invalid reference '{}': {}{consequence}",
+                            component.name,
+                            error.trim_end_matches('.')
+                        ),
                         DrcLocation::Component {
                             id: component.id,
                             name: component.name.clone(),
                         },
                     )
-                    .with_component_severity(component.reference_required),
+                    .with_instance_severity(written),
                 );
             }
         }
@@ -292,10 +309,11 @@ impl DrcChecker {
     /// can write.
     ///
     /// Only an object that emits a SPICE instance is asked: a structural
-    /// object writes none, so nothing is lost when its type binds to nothing,
-    /// and promoting that to an error would fail a drawing the netlister is
-    /// content with. `component_known == None` means the extraction boundary
-    /// held no hierarchy authority, and stays silent either way.
+    /// object writes none. Extraction only ever answers `Some(false)` for a
+    /// cell instance whose master it could not resolve, and such an instance
+    /// cannot be written under any name, so the finding is an error.
+    /// `component_known == None` means the extraction boundary held no
+    /// hierarchy authority, and stays silent either way.
     fn check_unknown_components(&mut self, components: &[ComponentInfo], result: &mut DrcResult) {
         let mut components = components
             .iter()
@@ -321,7 +339,7 @@ impl DrcChecker {
                         name: component.name.clone(),
                     },
                 )
-                .with_component_severity(component.reference_required)
+                .with_instance_severity(false)
                 .with_related(vec![component_name]),
             );
         }
@@ -331,16 +349,25 @@ impl DrcChecker {
     ///
     /// Three findings, because an unattached terminal is three different
     /// claims. A declared input nothing reaches is a pin the design said it
-    /// would feed and then did not, so it is an error. A declared output
-    /// nothing reaches still solves and merely loses the signal that was
-    /// drawn, so it is a warning. And a terminal no interface classified —
-    /// every passive leg and every primitive device terminal, which is most of
-    /// a real schematic — says nothing about direction at all, so it keeps the
-    /// unclassified finding: `InOut` and `Supply` are declarations that
-    /// deliberately decline to say, and are read the same way as no
-    /// declaration.
+    /// would feed and then did not, so it is an error — and so is a declared
+    /// supply pin, which states that the parent feeds this rail: left open,
+    /// the rail is fed by nothing. A declared output nothing reaches still
+    /// solves and merely loses the signal that was drawn, so it is a warning.
+    /// And a terminal no interface classified — every passive leg and every
+    /// primitive device terminal, which is most of a real schematic — says
+    /// nothing about direction at all, so it keeps the unclassified finding:
+    /// `InOut` is a declaration that deliberately declines to say, and is read
+    /// the same way as no declaration.
+    ///
+    /// Two terminals are not open pins at all. An input the netlister writes
+    /// `null` for when nothing meets it may legally stay open. And an
+    /// interface port's own terminal is where the node leaves for the parent,
+    /// so nothing inside the cellview has to meet it.
     fn check_unconnected_pins(&mut self, components: &[ComponentInfo], result: &mut DrcResult) {
-        let mut ordered_components = components.iter().collect::<Vec<_>>();
+        let mut ordered_components = components
+            .iter()
+            .filter(|component| !component.is_interface_port)
+            .collect::<Vec<_>>();
         ordered_components.sort_by_key(|component| component.id);
         for component in ordered_components {
             let mut pins = component.pins.iter().collect::<Vec<_>>();
@@ -351,7 +378,7 @@ impl DrcChecker {
                     .then_with(|| left.point.y.cmp(&right.point.y))
             });
             for pin in pins {
-                if pin.attached {
+                if pin.attached || pin.optional {
                     continue;
                 }
                 let id = self.next_id();
@@ -361,11 +388,18 @@ impl DrcChecker {
                         DrcViolationType::UndrivenInput,
                         format!("Input pin {}.{} has no driver", component_name, pin.name),
                     ),
+                    Some(PortDirection::Supply) => (
+                        DrcViolationType::UndrivenInput,
+                        format!(
+                            "Supply pin {}.{} is not connected; nothing feeds its rail",
+                            component_name, pin.name
+                        ),
+                    ),
                     Some(PortDirection::Out) => (
                         DrcViolationType::UnloadedOutput,
                         format!("Output pin {}.{} drives nothing", component_name, pin.name),
                     ),
-                    None | Some(PortDirection::InOut) | Some(PortDirection::Supply) => (
+                    None | Some(PortDirection::InOut) => (
                         DrcViolationType::UnconnectedPin,
                         format!("Pin {}.{} is not connected", component_name, pin.name),
                     ),
@@ -524,7 +558,19 @@ impl DrcChecker {
         );
     }
 
-    /// Check for floating nodes
+    /// Report every node with fewer connections than the configured minimum.
+    ///
+    /// A node that continues outside the cellview — through an interface port,
+    /// or as a global the deck declares — is connected to something no
+    /// terminal here represents, so that counts as one connection: an
+    /// interface port a cell does not use inside is the parent's net in the
+    /// deck, not a dangling node.
+    ///
+    /// A node made only of terminals nothing meets is an open pin, and the
+    /// open-pin rule names the terminal itself; saying it a second time about
+    /// the node would report one slip twice. The node is still reported when
+    /// that rule is off, because then nothing else would say it — except for
+    /// a terminal that may legally stay open, whose node the deck never writes.
     fn check_floating_nodes(&mut self, net_map: &HashMap<String, NetInfo>, result: &mut DrcResult) {
         let mut names = net_map.keys().collect::<Vec<_>>();
         names.sort();
@@ -533,17 +579,22 @@ impl DrcChecker {
             if net.connection_count == 0 {
                 continue;
             }
-            if net.connection_count < self.config.min_connections && !net.is_ground {
+            let only_open_terminals = net.unattached_count == net.connection_count;
+            if only_open_terminals
+                && (self.config.check_unconnected_pins
+                    || net.optional_open_count == net.connection_count)
+            {
+                continue;
+            }
+            let connections = net.connection_count + usize::from(net.continues_outside);
+            if connections < self.config.min_connections && !net.is_ground {
                 let id = self.next_id();
                 self.add_violation(
                     result,
                     DrcViolation::new(
                         id,
                         DrcViolationType::FloatingNode,
-                        format!(
-                            "Node '{}' has only {} connection(s)",
-                            name, net.connection_count
-                        ),
+                        format!("Node '{}' has only {} connection(s)", name, connections),
                         DrcLocation::Node {
                             net_name: name.clone(),
                         },

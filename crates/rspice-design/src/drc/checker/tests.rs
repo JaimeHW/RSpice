@@ -22,6 +22,8 @@ fn pin(name: &str, net: &str) -> PinInfo {
         direction: None,
         point: Point::origin(),
         attached: true,
+        optional: false,
+        on_global: false,
     }
 }
 
@@ -33,6 +35,8 @@ fn open_pin(name: &str, net: &str, point: Point) -> PinInfo {
         direction: None,
         point,
         attached: false,
+        optional: false,
+        on_global: false,
     }
 }
 
@@ -43,6 +47,16 @@ fn declared_open_pin(name: &str, net: &str, direction: PortDirection) -> PinInfo
         direction: Some(direction),
         ..open_pin(name, net, Point::origin())
     }
+}
+
+/// The name the netlister writes for a resistor called `name`: its own, or
+/// `R<id>` when it has none.
+fn written_name(id: u64, name: &str) -> Option<String> {
+    Some(if name.is_empty() {
+        format!("R{id}")
+    } else {
+        name.to_owned()
+    })
 }
 
 fn resistor(id: u64, name: &str, pins: Vec<PinInfo>) -> ComponentInfo {
@@ -56,6 +70,8 @@ fn resistor(id: u64, name: &str, pins: Vec<PinInfo>) -> ComponentInfo {
         is_ground_symbol: false,
         reference_required: true,
         reference_error: None,
+        deck_name: written_name(id, name),
+        is_interface_port: false,
         component_known: Some(true),
         missing_parameters: Vec::new(),
         out_of_range_parameters: Vec::new(),
@@ -75,6 +91,32 @@ fn vsource(id: u64, name: &str, plus_net: &str, minus_net: &str) -> ComponentInf
         is_ground_symbol: false,
         reference_required: true,
         reference_error: None,
+        deck_name: Some(name.to_owned()),
+        is_interface_port: false,
+        component_known: Some(true),
+        missing_parameters: Vec::new(),
+        out_of_range_parameters: Vec::new(),
+    }
+}
+
+/// An interface port standing on `net`, whose own terminal is where the node
+/// leaves for the parent.
+fn interface_port(id: u64, net: &str, attached: bool) -> ComponentInfo {
+    ComponentInfo {
+        id,
+        name: String::new(),
+        component_type: String::new(),
+        pins: vec![PinInfo {
+            attached,
+            ..pin("1", net)
+        }],
+        is_voltage_source: false,
+        is_current_source: false,
+        is_ground_symbol: false,
+        reference_required: false,
+        reference_error: None,
+        deck_name: None,
+        is_interface_port: true,
         component_known: Some(true),
         missing_parameters: Vec::new(),
         out_of_range_parameters: Vec::new(),
@@ -94,12 +136,16 @@ fn ground_symbol(id: u64, point: Point, attached: bool) -> ComponentInfo {
             direction: None,
             point,
             attached,
+            optional: false,
+            on_global: false,
         }],
         is_voltage_source: false,
         is_current_source: false,
         is_ground_symbol: true,
         reference_required: false,
         reference_error: None,
+        deck_name: None,
+        is_interface_port: false,
         component_known: Some(true),
         missing_parameters: Vec::new(),
         out_of_range_parameters: Vec::new(),
@@ -433,70 +479,159 @@ fn an_unattached_terminal_is_reported_and_the_gate_silences_it() {
 fn an_unattached_terminal_is_classified_by_what_declares_it() {
     let base = DrcConfig {
         check_missing_ground: false,
-        check_floating_nodes: false,
         ..DrcConfig::default()
     };
     let classify = |pin: PinInfo| {
         let result = check(&[resistor(1, "X1", vec![pin])], base.clone());
         let findings = result.violations();
         assert_eq!(findings.len(), 1, "{findings:?}");
-        (findings[0].violation_type, findings[0].severity)
+        (
+            findings[0].violation_type,
+            findings[0].severity,
+            findings[0].message.clone(),
+        )
     };
 
+    let (kind, severity, _) = classify(declared_open_pin("A", "n1", PortDirection::In));
     assert_eq!(
-        classify(declared_open_pin("A", "n1", PortDirection::In)),
+        (kind, severity),
         (DrcViolationType::UndrivenInput, DrcSeverity::Error)
     );
+    // A supply pin states that the parent feeds this rail. Open, nothing does.
+    let (kind, severity, message) = classify(declared_open_pin("VDD", "n1", PortDirection::Supply));
     assert_eq!(
-        classify(declared_open_pin("Y", "n1", PortDirection::Out)),
+        (kind, severity),
+        (DrcViolationType::UndrivenInput, DrcSeverity::Error)
+    );
+    assert!(message.contains("Supply pin X1.VDD"), "{message}");
+    assert!(message.contains("rail"), "{message}");
+    let (kind, severity, _) = classify(declared_open_pin("Y", "n1", PortDirection::Out));
+    assert_eq!(
+        (kind, severity),
         (DrcViolationType::UnloadedOutput, DrcSeverity::Warning)
     );
     for undeclared in [
         declared_open_pin("B", "n1", PortDirection::InOut),
-        declared_open_pin("VDD", "n1", PortDirection::Supply),
         open_pin("1", "n1", Point::origin()),
     ] {
+        let (kind, severity, _) = classify(undeclared);
         assert_eq!(
-            classify(undeclared),
+            (kind, severity),
             (DrcViolationType::UnconnectedPin, DrcSeverity::Warning)
         );
     }
 }
 
-/// Every leg of a passive is undeclared, so a drawing made of passives raises
-/// no undriven-input error however many terminals it leaves open. This is the
-/// regression the split exists to avoid.
+/// An open terminal is alone on a node of its own, and the open-pin finding
+/// names the terminal. Saying it again as a floating node would report one
+/// slip twice; with the open-pin rule off, the node is the only thing left to
+/// say it.
 #[test]
-fn open_passive_legs_raise_no_input_error() {
+fn an_open_terminal_is_reported_once() {
+    let components = [resistor(
+        1,
+        "R1",
+        vec![open_pin("1", "net1", Point::origin()), pin("2", "0")],
+    )];
+    let base = DrcConfig {
+        check_missing_ground: false,
+        ..DrcConfig::default()
+    };
+
+    let result = check(&components, base.clone());
+    assert_eq!(result.total_count(), 1, "{:?}", result.violations());
+    assert_eq!(
+        result.violations()[0].violation_type,
+        DrcViolationType::UnconnectedPin
+    );
+
     let result = check(
-        &[
-            resistor(
-                1,
-                "R1",
-                vec![
-                    open_pin("1", "a", Point::origin()),
-                    open_pin("2", "b", Point::new(10, 0)),
-                ],
-            ),
-            resistor(
-                2,
-                "C1",
-                vec![
-                    open_pin("1", "c", Point::new(20, 0)),
-                    open_pin("2", "d", Point::new(30, 0)),
-                ],
-            ),
-        ],
+        &components,
         DrcConfig {
-            check_missing_ground: false,
-            check_floating_nodes: false,
-            ..DrcConfig::default()
+            check_unconnected_pins: false,
+            ..base
         },
     );
-    assert_eq!(of_type(&result, DrcViolationType::UnconnectedPin).len(), 4);
-    assert!(of_type(&result, DrcViolationType::UndrivenInput).is_empty());
-    assert!(of_type(&result, DrcViolationType::UnloadedOutput).is_empty());
-    assert!(result.passed(), "{:?}", result.violations());
+    assert_eq!(result.total_count(), 1, "{:?}", result.violations());
+    assert_eq!(
+        result.violations()[0].violation_type,
+        DrcViolationType::FloatingNode
+    );
+}
+
+/// An input the netlister writes `null` for may stay open. It is neither an
+/// open pin nor a node: the deck never writes one.
+#[test]
+fn an_optional_input_left_open_is_not_reported() {
+    let mut set = declared_open_pin("set", "n1", PortDirection::In);
+    set.optional = true;
+    for check_unconnected_pins in [true, false] {
+        let result = check(
+            &[resistor(1, "A1", vec![set.clone()])],
+            DrcConfig {
+                check_missing_ground: false,
+                check_unconnected_pins,
+                ..DrcConfig::default()
+            },
+        );
+        assert!(result.violations().is_empty(), "{:?}", result.violations());
+    }
+}
+
+/// A node that continues outside the cellview is connected to something no
+/// terminal here represents. An interface port a cell does not use inside is
+/// the parent's net in the deck, and a global is the same node in every
+/// cellview that names it; neither is a dangling node because one cellview
+/// touches it once.
+#[test]
+fn a_node_that_continues_outside_the_cellview_is_not_floating() {
+    let config = DrcConfig {
+        check_missing_ground: false,
+        ..DrcConfig::default()
+    };
+
+    // The port alone on its net — bare, or with a stub of wire and nothing on
+    // it — is not an open pin and not a floating node.
+    for attached in [false, true] {
+        let unused_port = check(&[interface_port(1, "IN", attached)], config.clone());
+        assert!(
+            unused_port.violations().is_empty(),
+            "{:?}",
+            unused_port.violations()
+        );
+    }
+    // The port and one leg: two terminals here, and the parent's net beyond.
+    let used_port = check(
+        &[
+            interface_port(1, "IN", true),
+            resistor(2, "R1", vec![pin("1", "IN"), pin("2", "0")]),
+        ],
+        config.clone(),
+    );
+    assert!(
+        of_type(&used_port, DrcViolationType::FloatingNode).is_empty(),
+        "{:?}",
+        used_port.violations()
+    );
+
+    let mut on_global = pin("1", "vdd!");
+    on_global.on_global = true;
+    let global = check(
+        &[resistor(1, "R1", vec![on_global, pin("2", "0")])],
+        config.clone(),
+    );
+    assert!(
+        of_type(&global, DrcViolationType::FloatingNode).is_empty(),
+        "{:?}",
+        global.violations()
+    );
+
+    // The same single touch on a local node is still floating.
+    let local = check(
+        &[resistor(1, "R1", vec![pin("1", "vdd"), pin("2", "0")])],
+        config,
+    );
+    assert_eq!(of_type(&local, DrcViolationType::FloatingNode).len(), 1);
 }
 
 /// A voltage source has no interface to declare its drive terminal, so the `+`
@@ -522,32 +657,70 @@ fn an_open_voltage_source_drive_terminal_is_an_unloaded_output() {
     assert!(of_type(&result, DrcViolationType::UndrivenInput).is_empty());
 }
 
+/// A reference the schema refuses is an error only where the deck cannot
+/// write the instance. A primitive the netlister names or renames still runs,
+/// under the name the finding states, because the results will carry it.
 #[test]
-fn exact_reference_contract_emits_empty_and_invalid_names_only_when_required() {
-    let mut empty = resistor(3, "", vec![]);
-    let mut invalid = resistor(4, "C4", vec![]);
-    invalid.reference_error = Some("Resistor designators must begin with `R`.".to_owned());
+fn a_refused_reference_is_an_error_only_where_the_deck_cannot_write_it() {
+    let config = DrcConfig {
+        check_missing_ground: false,
+        check_floating_nodes: false,
+        check_unconnected_pins: false,
+        ..DrcConfig::default()
+    };
+
+    // What the extraction says of a resistor with no name, and of one named
+    // with another device's letter.
+    let unnamed = resistor(3, "", vec![]);
+    let mut misnamed = resistor(4, "C4", vec![]);
+    misnamed.reference_error = Some("Resistor designators must begin with `R`.".to_owned());
+    misnamed.deck_name = Some("RC4".to_owned());
     let mut structural = resistor(5, "", vec![]);
     structural.reference_required = false;
+    structural.deck_name = None;
     structural.component_type = "port".to_owned();
-    empty.reference_error = None;
-    let result = check(
-        &[empty, invalid, structural],
-        DrcConfig {
-            check_missing_ground: false,
-            check_floating_nodes: false,
-            check_unconnected_pins: false,
-            ..DrcConfig::default()
-        },
+    let result = check(&[unnamed, misnamed, structural], config.clone());
+
+    let empty = of_type(&result, DrcViolationType::EmptyName);
+    assert_eq!(empty.len(), 1, "a structural object owns no reference");
+    assert_eq!(empty[0].severity, DrcSeverity::Warning);
+    assert!(
+        empty[0].message.ends_with("the netlist writes it as R3"),
+        "{}",
+        empty[0].message
     );
-    let empty_findings = of_type(&result, DrcViolationType::EmptyName);
-    let invalid_findings = of_type(&result, DrcViolationType::InvalidName);
-    assert_eq!(empty_findings.len(), 1);
-    assert_eq!(invalid_findings.len(), 1);
-    assert_eq!(of_type(&result, DrcViolationType::DuplicateName).len(), 0);
-    // Neither instance can be written into the deck, so neither is a note.
-    assert_eq!(empty_findings[0].severity, DrcSeverity::Error);
-    assert_eq!(invalid_findings[0].severity, DrcSeverity::Error);
+    let invalid = of_type(&result, DrcViolationType::InvalidName);
+    assert_eq!(invalid.len(), 1);
+    assert_eq!(invalid[0].severity, DrcSeverity::Warning);
+    assert!(
+        invalid[0].message.ends_with("the netlist writes it as RC4"),
+        "{}",
+        invalid[0].message
+    );
+    assert!(result.passed(), "{:?}", result.violations());
+
+    // A cell instance whose reference is not a path segment has no name the
+    // deck can write it under.
+    let mut unusable = resistor(6, "X1-a", vec![]);
+    unusable.reference_error =
+        Some("Enter `X` followed by one or more ASCII letters, digits, or underscores.".to_owned());
+    unusable.deck_name = None;
+    let mut unnamed_cell = resistor(7, "", vec![]);
+    unnamed_cell.deck_name = None;
+    let result = check(&[unusable, unnamed_cell], config);
+    let invalid = of_type(&result, DrcViolationType::InvalidName);
+    assert_eq!(invalid.len(), 1);
+    assert_eq!(invalid[0].severity, DrcSeverity::Error);
+    assert!(
+        invalid[0]
+            .message
+            .ends_with("the netlist cannot write this instance"),
+        "{}",
+        invalid[0].message
+    );
+    let empty = of_type(&result, DrcViolationType::EmptyName);
+    assert_eq!(empty.len(), 1);
+    assert_eq!(empty[0].severity, DrcSeverity::Error);
     assert!(result.has_errors());
 }
 
@@ -593,22 +766,13 @@ fn unknown_component_requires_authoritative_resolution_and_honors_gate() {
     unresolved.component_known = Some(false);
     let mut unknown_authority = resistor(10, "X10", vec![]);
     unknown_authority.component_known = None;
-    // A structural object writes no instance, so a type that binds to nothing
-    // takes nothing out of the deck.
-    let mut structural = resistor(11, "", vec![]);
-    structural.component_type = "port".to_owned();
-    structural.reference_required = false;
-    structural.component_known = Some(false);
     let config = DrcConfig {
         check_missing_ground: false,
         check_floating_nodes: false,
         check_unconnected_pins: false,
         ..DrcConfig::default()
     };
-    let result = check(
-        &[unknown_authority, structural, unresolved.clone()],
-        config.clone(),
-    );
+    let result = check(&[unknown_authority, unresolved.clone()], config.clone());
     let unknown = of_type(&result, DrcViolationType::UnknownComponent);
     assert_eq!(unknown.len(), 1, "{:?}", result.violations());
     assert_eq!(
