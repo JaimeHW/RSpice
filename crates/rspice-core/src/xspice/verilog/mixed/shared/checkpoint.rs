@@ -3,8 +3,24 @@
 use super::*;
 use crate::xspice::verilog::host::checkpoint::{HostCheckpoint, HostCheckpointLimits};
 use crate::xspice::verilog::store::checkpoint::fingerprint;
+use rspice_veriloga::canonical_ir::digital::DigitalDriverId;
 use rspice_veriloga_runtime::absdelta::{AbsDeltaControls, AbsDeltaInterval};
 use serde::{Deserialize, Serialize};
+
+/// An instance's local-to-design driver map in the topology fingerprint. A
+/// driver identity is a (signal, index) pair, which JSON cannot take as a map
+/// key, so each key is written as `signal.index`. An empty map writes `{}` as
+/// the derived form did, so a checkpoint saved without drivers still matches.
+struct DriverMap<'a>(&'a std::collections::BTreeMap<DigitalDriverId, DigitalDriverId>);
+impl Serialize for DriverMap<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_map(
+            self.0.iter().map(|(local, global)| {
+                (format!("{}.{}", local.signal.index(), local.index), global)
+            }),
+        )
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -77,7 +93,7 @@ impl MixedDigitalCoordinator {
                     &map.name,
                     &map.signals,
                     &map.processes,
-                    &map.drivers,
+                    DriverMap(&map.drivers),
                     &map.connection_processes,
                     &map.analog_probes,
                     &map.source_files,

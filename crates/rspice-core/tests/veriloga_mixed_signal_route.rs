@@ -6629,3 +6629,74 @@ fn a_mixed_checkpoint_resumes_with_the_forces_in_effect() {
     assert!(!expected.is_empty(), "zs must move after the seam");
     assert_eq!(after(levels(&resumed, "zs")), expected);
 }
+
+const ASSIGNED_INPUT: &str = r#"
+`include "disciplines.vams"
+`timescale 1ns/1ns
+module assigned_input(p, n, a, y, z);
+    inout p, n;
+    electrical p, n;
+    input a;
+    output y, z;
+    wire a, y, z;
+    reg zr;
+    assign y = a;
+    assign z = zr;
+    initial zr = 1'b0;
+    analog I(p, n) <+ V(p, n) / 1000000.0;
+endmodule
+"#;
+
+/// A mixed checkpoint of a module whose A/D-fed input drives an `assign`
+/// saves, restores and resumes onto the uninterrupted run's edges. The
+/// instance's driver map is part of the coordinator's topology identity; a
+/// driver is keyed by a (signal, index) pair, which once failed the capture
+/// with "key must be a string".
+#[test]
+fn a_mixed_checkpoint_round_trips_an_assign_fed_by_an_a_d_input() {
+    use rspice_core::engine::{TransientCheckpoint, TransientStartupMode};
+    let model = ModelFile::new("assigned_input_checkpoint", ASSIGNED_INPUT);
+    let deck = format!(
+        "* an A/D-fed input into an assign across a checkpoint\n\
+         vin in 0 pulse(0 3.3 10n 0.1n 0.1n 20n 50n)\n\
+         x1 p 0 in ys zs assigned_input\n\
+         rp p 0 1meg\n\
+         ry ys 0 10k\n\
+         rz zs 0 10k\n\
+         .va \"{}\" assigned_input\n\
+         .tran 0.2n 120n\n\
+         .end\n",
+        model.deck_path()
+    );
+    let netlist = Netlist::parse(&deck).unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let (baseline, scheduled) = engine
+        .run_tran_checkpoint_schedule_with_startup_mode(
+            &netlist,
+            120e-9,
+            0.2e-9,
+            TransientStartupMode::OperatingPoint,
+            &[40e-9],
+        )
+        .unwrap();
+    let saved = &scheduled[0].checkpoint;
+    let text = saved
+        .to_bytes(rspice_core::engine::TransientCheckpointEncoding::Unpacked)
+        .unwrap();
+    let restored = TransientCheckpoint::from_bytes(&text).unwrap();
+    let (resumed, _) = engine
+        .run_tran_resume(&netlist, &restored, 120e-9, 0.2e-9)
+        .unwrap();
+    let after = |points: Vec<(f64, String)>| {
+        points
+            .into_iter()
+            .filter(|(at, _)| *at > saved.time)
+            .collect::<Vec<_>>()
+    };
+    let expected = after(levels(&baseline, "ys"));
+    assert!(
+        expected.len() >= 2,
+        "ys must follow the input after the seam: {expected:?}"
+    );
+    assert_eq!(after(levels(&resumed, "ys")), expected);
+}
