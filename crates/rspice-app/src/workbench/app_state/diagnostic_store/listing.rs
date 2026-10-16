@@ -129,15 +129,11 @@ pub(in crate::workbench) enum EmptyReason {
     Unavailable(String),
     /// Everything on record found nothing, but at least one of those empty
     /// results was reached from inputs that have changed since: a stored
-    /// batch whose digest no longer matches the design. Said only when no
-    /// producer is unavailable, since a check that cannot run says less than
-    /// one that ran on an older design.
-    ///
-    /// A netlist validation is never the evidence behind an empty list: the
-    /// editor's collection is listed only while it holds findings, and those
-    /// are rows, stale or not. The code editors void a clean receipt when
-    /// their source moves, so an empty code collection still listed describes
-    /// the source as it stands.
+    /// batch whose digest no longer matches the design, a netlist validated
+    /// against an older buffer revision than the editor holds, or a code
+    /// validation whose source bundle has moved past the revision and closure
+    /// it was run on. Said only when no producer is unavailable, since a
+    /// check that cannot run says less than one that ran on an older design.
     OutOfDate,
     /// Everything on record found nothing, and every one of those results
     /// was reached from the inputs as they stand.
@@ -150,17 +146,21 @@ enum Segment<'a> {
         batch: &'a DiagnosticBatch,
         standing: BatchStanding,
     },
-    /// The netlist editor's own canonical collection, read in place, and the
-    /// revision of the buffer in the editor now.
+    /// The netlist editor's own canonical collection, read in place, the
+    /// revision of the buffer in the editor now, and the revision the
+    /// collection was validated against, where it holds a validation.
     Netlist {
         collection: &'a NetlistDiagnosticCollection,
         revision: u64,
+        validated: Option<u64>,
     },
-    /// One code editor's canonical collection, read in place, and the source
-    /// bundle whose editor opens it.
+    /// One code editor's canonical collection, read in place, the source
+    /// bundle whose editor opens it, and whether the validation behind it
+    /// was run on that bundle as it stands.
     Code {
         bundle: Option<crate::state::ProjectSourceId>,
         collection: &'a CodeDiagnosticCollection,
+        source_current: bool,
     },
 }
 
@@ -173,21 +173,35 @@ impl Segment<'_> {
         }
     }
 
-    /// Whether anything this segment holds was reached from inputs that have
-    /// moved since. For an empty stored batch that is its standing alone:
-    /// the batch is the only record that the check ran.
+    /// Whether this segment's evidence was reached from inputs that have
+    /// moved since.
+    ///
+    /// Judged from the validation itself as well as from what it found: an
+    /// empty result has no finding to carry a revision, and an empty result
+    /// is the one case this is asked about.
     fn out_of_date(&self) -> bool {
         match self {
             Self::Stored { standing, .. } => matches!(standing, BatchStanding::Stale),
             Self::Netlist {
                 collection,
                 revision,
-            } => collection
-                .iter()
-                .any(|diagnostic| !netlist_current(diagnostic, *revision)),
-            Self::Code { collection, .. } => collection
-                .iter()
-                .any(|diagnostic| !diagnostic.canonical.is_current()),
+                validated,
+            } => {
+                *validated != Some(*revision)
+                    || collection
+                        .iter()
+                        .any(|diagnostic| !netlist_current(diagnostic, *revision))
+            }
+            Self::Code {
+                collection,
+                source_current,
+                ..
+            } => {
+                !source_current
+                    || collection
+                        .iter()
+                        .any(|diagnostic| !diagnostic.canonical.is_current())
+            }
         }
     }
 }
@@ -398,6 +412,7 @@ fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<DiagnosticRow<
         Segment::Netlist {
             collection,
             revision,
+            ..
         } => {
             let diagnostic = collection.get(index)?;
             let current = netlist_current(diagnostic, *revision);
@@ -420,7 +435,9 @@ fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<DiagnosticRow<
                 )),
             })
         }
-        Segment::Code { bundle, collection } => {
+        Segment::Code {
+            bundle, collection, ..
+        } => {
             let diagnostic = collection.as_slice().get(index)?;
             Some(DiagnosticRow {
                 id: diagnostic.canonical.diagnostic_id,
@@ -475,6 +492,7 @@ fn segment_facet<'a>(segment: &Segment<'a>, index: usize) -> Option<RowFacet<'a>
         Segment::Netlist {
             collection,
             revision,
+            ..
         } => {
             let diagnostic = collection.get(index)?;
             Some(RowFacet {
@@ -649,19 +667,25 @@ fn segments<'a>(
     }
 
     // A validation that ran and found nothing is still a validation that
-    // ran: an empty collection the editor holds a receipt for is a segment,
-    // so the page says "No findings" rather than "Nothing has been checked".
-    // The netlist editor publishes no such receipt outside its own module,
-    // so a clean parse there cannot be told from no parse.
+    // ran: an empty collection the editor holds a validation for is a
+    // segment, so the page says "No findings" rather than "Nothing has been
+    // checked" — or, once the buffer has moved past it, that the finding of
+    // nothing is out of date.
     let netlist = state.ui.netlist.diagnostics.as_ref();
-    if !netlist.is_empty() {
+    let validated = state.ui.netlist.validated_revision();
+    if !netlist.is_empty() || validated.is_some() {
         segments.push(Segment::Netlist {
             collection: netlist,
             revision: state.ui.netlist.revision,
+            validated,
         });
     }
-    for (bundle, collection) in code_collections(state) {
-        segments.push(Segment::Code { bundle, collection });
+    for (bundle, collection, source_current) in code_collections(state) {
+        segments.push(Segment::Code {
+            bundle,
+            collection,
+            source_current,
+        });
     }
     segments
 }
@@ -687,6 +711,7 @@ fn tally(segments: &[Segment<'_>]) -> (DiagnosticCounts, EmptyReason) {
             Segment::Netlist {
                 collection,
                 revision,
+                ..
             } => {
                 for diagnostic in collection.iter() {
                     counts.tally(
@@ -731,37 +756,64 @@ fn tally(segments: &[Segment<'_>]) -> (DiagnosticCounts, EmptyReason) {
 /// validation that produced it is on record as having run: a clean compile is
 /// evidence that the source was looked at. A failure collection that is empty
 /// is no failure, and says nothing.
+///
+/// Each comes with whether the token it was produced under still names the
+/// bundle's revision. The page voids a collection when the source moves, but
+/// an edit made where the page did not see it would otherwise leave a clean
+/// compile of older source standing as evidence about this one.
 fn code_collections(
     state: &AppState,
 ) -> Vec<(
     Option<crate::state::ProjectSourceId>,
     &CodeDiagnosticCollection,
+    bool,
 )> {
     let code = &state.ui.code_workspace;
-    let mut collections: Vec<(Option<crate::state::ProjectSourceId>, _)> = Vec::with_capacity(3);
+    let project = state.workspace.content.project.id();
+    let sources = &state.workspace.content.project_sources;
+    let veriloga_current =
+        |token: &rspice_simulation::project_veriloga::VerilogASourceOperationToken| {
+            token.project_id == project
+                && sources
+                    .get_bundle(token.bundle_id)
+                    .is_some_and(|bundle| bundle.revision().get() == token.revision)
+        };
+    let mut collections: Vec<(Option<crate::state::ProjectSourceId>, _, bool)> =
+        Vec::with_capacity(3);
     if let Some(receipt) = code.veriloga.receipt.as_ref() {
+        let token = receipt.compilation.token();
         collections.push((
-            Some(receipt.compilation.token().bundle_id),
+            Some(token.bundle_id),
             receipt.diagnostics.as_ref(),
+            veriloga_current(&token),
         ));
     }
     if !code.veriloga.last_failure.is_empty() {
+        let token = code.veriloga.last_failure_token.as_ref();
         collections.push((
-            code.veriloga
-                .last_failure_token
-                .as_ref()
-                .map(|token| token.bundle_id),
+            token.map(|token| token.bundle_id),
             code.veriloga.last_failure.as_ref(),
+            token.is_some_and(veriloga_current),
         ));
     }
     if !code.automation.diagnostics.is_empty() || code.automation.receipt.is_some() {
+        let bundle = crate::workbench::documents::code_workspace::active_source_bundle(
+            &state.workspace,
+            crate::state::ProjectSourceLanguage::RSpiceAutomation,
+        );
+        let token = code
+            .automation
+            .receipt
+            .as_ref()
+            .map(|receipt| &receipt.token)
+            .or(code.automation.diagnostic_token.as_ref());
+        let current = token.zip(bundle).is_some_and(|(token, bundle)| {
+            token.project_id == project && token.revision == bundle.revision().get()
+        });
         collections.push((
-            crate::workbench::documents::code_workspace::active_source_bundle(
-                &state.workspace,
-                crate::state::ProjectSourceLanguage::RSpiceAutomation,
-            )
-            .map(crate::state::ProjectSourceBundle::id),
+            bundle.map(crate::state::ProjectSourceBundle::id),
             code.automation.diagnostics.as_ref(),
+            current,
         ));
     }
     collections
@@ -1143,6 +1195,7 @@ mod tests {
         let segment = Segment::Code {
             bundle: Some(crate::state::ProjectSourceId::new()),
             collection: &collection,
+            source_current: true,
         };
 
         let current = segment_row(&segment, 0).expect("the current finding is a row");
@@ -1214,19 +1267,60 @@ mod tests {
         assert_eq!(*listing(&state).empty_reason(), EmptyReason::NothingRan);
 
         use crate::workbench::documents::code_workspace::{
-            AutomationValidationReceipt, SourceOperationToken,
+            AutomationValidationReceipt, SourceOperationToken, active_source_bundle,
         };
+        let bundle = active_source_bundle(
+            &state.workspace,
+            crate::state::ProjectSourceLanguage::RSpiceAutomation,
+        )
+        .expect("a project holds its automation bundle");
+        let (bundle_id, root) = (bundle.id(), bundle.root().logical_path().to_owned());
+        let root_content = bundle.root().content().to_owned();
         state.ui.code_workspace.automation.receipt = Some(AutomationValidationReceipt {
             token: SourceOperationToken {
                 project_id: state.workspace.content.project.id(),
-                revision: 1,
-                content_digest: crate::product::ContentDigest::from_bytes([7; 32]),
+                revision: bundle.revision().get(),
+                content_digest: bundle.closure_digest(),
             },
         });
 
         let listed = listing(&state);
         assert_eq!(listed.len(), 0);
         assert_eq!(*listed.empty_reason(), EmptyReason::NoFindings);
+
+        // An edit the page did not see: the clean validation is of older
+        // source than the bundle holds now.
+        state
+            .workspace
+            .content
+            .project_sources
+            .replace_bundle_file_content(bundle_id, &root, format!("{root_content}\n"))
+            .expect("the root accepts an added line");
+        assert_eq!(*listing(&state).empty_reason(), EmptyReason::OutOfDate);
+    }
+
+    /// A netlist that parsed clean is evidence the deck was looked at, and
+    /// stops being evidence about the deck once the buffer moves past the
+    /// revision it was parsed at. The editor re-parses only while it draws,
+    /// so an edit made with it off screen leaves exactly that.
+    #[test]
+    fn a_clean_netlist_validation_goes_out_of_date_with_its_buffer() {
+        let mut state = open_state();
+        assert_eq!(*listing(&state).empty_reason(), EmptyReason::NothingRan);
+
+        let revision = state.ui.netlist.revision;
+        state.ui.netlist.mark_validated_for_test(revision);
+        let listed = listing(&state);
+        assert_eq!(listed.len(), 0);
+        assert_eq!(*listed.empty_reason(), EmptyReason::NoFindings);
+
+        state.ui.netlist.revision = revision.wrapping_add(1);
+        assert_eq!(*listing(&state).empty_reason(), EmptyReason::OutOfDate);
+        assert_eq!(
+            *listing_in_pass(&state, 5).empty_reason(),
+            EmptyReason::OutOfDate,
+            "the memoized list states the same reason",
+        );
     }
 
     /// Every reader in one pass reads one decision about every batch, and a
