@@ -2,7 +2,7 @@
 
 use super::viewport::Viewport;
 use super::{SchematicSymbolContext, schematic_symbol_context};
-use crate::state::{DrawingSheetScale, DrawingSheetTitleFieldId};
+use crate::state::DrawingSheetTitleFieldId;
 use crate::workbench::app_state::AppState;
 use egui::{Painter, Rect};
 use rspice_schematic_editor::view::drawing_sheet::{self as sheet_view, DrawingSheetCanvas};
@@ -93,14 +93,7 @@ fn default_title_field_value(
             .revision
             .clone(),
         // Retired: never present in a normalized field set, so never resolved.
-        DrawingSheetTitleFieldId::Format => String::new(),
-        DrawingSheetTitleFieldId::Scale => match sheet.format.title_block.scale {
-            DrawingSheetScale::NotToScale => "NTS".to_owned(),
-            DrawingSheetScale::Ratio {
-                drawing_units,
-                reality_units,
-            } => format!("{drawing_units}:{reality_units}"),
-        },
+        DrawingSheetTitleFieldId::Format | DrawingSheetTitleFieldId::Scale => String::new(),
         DrawingSheetTitleFieldId::Date => state
             .workspace
             .content

@@ -200,14 +200,8 @@ pub(crate) fn open_title_block_fields(state: &mut AppState) -> Result<(), String
     };
     let settings = designs.drawing_sheet_settings();
     let document_control = settings.document_control.clone();
-    let automatic_values = title_field_automatic_values(
-        state,
-        sheet.name(),
-        page,
-        page_count,
-        &format,
-        &document_control,
-    );
+    let automatic_values =
+        title_field_automatic_values(state, sheet.name(), page, page_count, &document_control);
     let mut project_fields = settings.title_block_field_values.clone();
     // Preserve values authored by builds that predate project-owned title
     // fields. Saving this dialog performs the one-time authority migration.
@@ -297,14 +291,8 @@ fn open_staged_title_block_fields(state: &mut AppState) -> Result<(), String> {
                     .unwrap_or((1, u32::try_from(catalog.sheets().len()).unwrap_or(1)))
             })
     });
-    let automatic_values = title_field_automatic_values(
-        state,
-        &sheet_name,
-        page,
-        page_count,
-        &format,
-        &document_control,
-    );
+    let automatic_values =
+        title_field_automatic_values(state, &sheet_name, page, page_count, &document_control);
     state.dialogs.drawing_sheet_support.title_fields = TitleBlockFieldsState {
         open: true,
         staged_page_setup: true,
@@ -1516,7 +1504,6 @@ fn title_field_automatic_values(
     sheet_name: &str,
     page: u32,
     page_count: u32,
-    format: &SchematicSheetFormat,
     document_control: &DrawingSheetDocumentControl,
 ) -> BTreeMap<DrawingSheetTitleFieldId, String> {
     let mut values = BTreeMap::new();
@@ -1538,16 +1525,6 @@ fn title_field_automatic_values(
         document_control.revision.clone(),
     );
     values.insert(
-        DrawingSheetTitleFieldId::Scale,
-        match format.title_block.scale {
-            crate::state::DrawingSheetScale::NotToScale => "NTS".to_owned(),
-            crate::state::DrawingSheetScale::Ratio {
-                drawing_units,
-                reality_units,
-            } => format!("{drawing_units}:{reality_units}"),
-        },
-    );
-    values.insert(
         DrawingSheetTitleFieldId::Date,
         document_control.display_date().to_owned(),
     );
@@ -1566,10 +1543,9 @@ fn title_field_owner(id: DrawingSheetTitleFieldId) -> &'static str {
         | DrawingSheetTitleFieldId::DrawnBy
         | DrawingSheetTitleFieldId::CheckedBy
         | DrawingSheetTitleFieldId::ApprovedBy => "sheet",
-        DrawingSheetTitleFieldId::Scale => "drawing sheet",
         DrawingSheetTitleFieldId::Page => "document order",
         DrawingSheetTitleFieldId::Revision => "working revision",
-        DrawingSheetTitleFieldId::Format => "retired",
+        DrawingSheetTitleFieldId::Format | DrawingSheetTitleFieldId::Scale => "retired",
         DrawingSheetTitleFieldId::Date => "document",
         DrawingSheetTitleFieldId::Organization | DrawingSheetTitleFieldId::DocumentId => "project",
         DrawingSheetTitleFieldId::Classification => "project policy",

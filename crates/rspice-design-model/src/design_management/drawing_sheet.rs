@@ -1031,6 +1031,9 @@ pub struct DrawingSheetTitleBlock {
     pub rotation: DrawingSheetTitleBlockRotation,
     pub offset_x_um: i64,
     pub offset_y_um: i64,
+    /// The scale a sheet declared before the title block stopped lettering
+    /// one. Nothing reads or edits it now; it is kept so the sheets and
+    /// presets that carry it load and save unchanged.
     pub scale: DrawingSheetScale,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub managed_template: Option<DrawingSheetManagedTemplateSnapshot>,
@@ -1347,16 +1350,6 @@ impl<'de> Deserialize<'de> for SchematicSheetFormat {
             title_block: wire.title_block.0.unwrap_or_default(),
             inheritance: wire.inheritance,
         };
-        // Builds predating structured scale authority mirrored the scale into
-        // the generic title-field string. Normalize that redundant legacy
-        // copy before validation; renderers resolve Scale from `scale`.
-        format
-            .title_block
-            .fields
-            .entry(DrawingSheetTitleFieldId::Scale)
-            .or_default()
-            .value
-            .clear();
         format.title_block.normalize_title_field_set();
         format.title_block.normalize_managed_template();
         if legacy_title_block {
@@ -1434,22 +1427,11 @@ impl SchematicSheetFormat {
     }
 
     /// Apply this physical/frame format to an existing sheet without
-    /// overwriting title-field values owned by that target sheet. Page Setup
-    /// owns the declared scale, so its value follows the applied format while
-    /// the target retains the Scale field's visibility choice.
+    /// overwriting title-field values owned by that target sheet.
     #[must_use]
     pub fn with_target_sheet_title_fields(&self, target: &Self) -> Self {
         let mut format = self.clone();
         format.title_block.fields = target.title_block.fields.clone();
-        // Scale's value is resolved exclusively from the structured
-        // `title_block.scale`; only its target-owned visibility is retained.
-        format
-            .title_block
-            .fields
-            .entry(DrawingSheetTitleFieldId::Scale)
-            .or_default()
-            .value
-            .clear();
         clear_project_owned_title_values(&mut format);
         debug_assert!(format.validate().is_ok());
         format

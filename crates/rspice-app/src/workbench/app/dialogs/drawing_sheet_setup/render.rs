@@ -1398,14 +1398,6 @@ fn title_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fiel
                 unit,
             );
         });
-        ui.add_space(11.0);
-        text_field(
-            ui,
-            "Declared drawing scale",
-            &mut state.draft.declared_scale,
-            "1:1",
-            field_error(problems, "scale"),
-        );
     });
     ui.add_space(14.0);
     if resource_action(

@@ -2,9 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use rspice_design_model::design_management::{
-    DrawingSheetScale, DrawingSheetTitleFieldId, SheetCatalog, SheetId,
-};
+use rspice_design_model::design_management::{DrawingSheetTitleFieldId, SheetCatalog, SheetId};
 
 use super::*;
 
@@ -55,16 +53,6 @@ pub fn drawing_sheet_title_values(
             format.authored_size.label(),
             format.orientation.label().to_lowercase()
         ),
-    );
-    values.insert(
-        DrawingSheetTitleFieldId::Scale,
-        match format.title_block.scale {
-            DrawingSheetScale::NotToScale => "NTS".to_owned(),
-            DrawingSheetScale::Ratio {
-                drawing_units,
-                reality_units,
-            } => format!("{drawing_units}:{reality_units}"),
-        },
     );
     values.insert(
         DrawingSheetTitleFieldId::Date,

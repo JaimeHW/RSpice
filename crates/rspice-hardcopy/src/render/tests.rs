@@ -1431,18 +1431,11 @@ fn hardcopy_zone_labels_follow_the_selected_output_edges() {
 }
 
 #[test]
-fn structured_scale_authority_projects_even_when_legacy_field_storage_is_empty() {
-    let format = SchematicSheetFormat::default()
-        .try_update(|draft| {
-            draft
-                .title_block
-                .fields
-                .get_mut(&DrawingSheetTitleFieldId::Scale)
-                .unwrap()
-                .value
-                .clear();
-        })
-        .unwrap();
+fn a_plotted_title_block_declares_no_scale() {
+    // ISO 7200 keeps scale out of the title block, and a schematic is not
+    // drawn to one, so the plot letters no Scale cell even though the sheet
+    // still carries the ratio it was saved with.
+    let format = SchematicSheetFormat::default();
     let source = resolved_blank_schematic(&format);
     let schematic = SchematicHardcopySetup::new(
         SchematicHardcopyExtent::AuthoredDrawingSheet,
@@ -1471,12 +1464,12 @@ fn structured_scale_authority_projects_even_when_legacy_field_storage_is_empty()
             Some(text.as_str())
         })
         .collect::<Vec<_>>();
-    assert!(text.contains(&"\u{2022} Scale"));
-    assert!(text.contains(&"1:1"));
     assert!(
-        !text.iter().any(|line| line.starts_with("SCALE: NTS")),
-        "the structured ratio must not be replaced by an unrelated NTS value"
+        text.contains(&"\u{2022} Page"),
+        "the title block must still be plotted"
     );
+    assert!(!text.iter().any(|line| line.contains("Scale")));
+    assert!(!text.contains(&"1:1"));
 }
 
 #[test]

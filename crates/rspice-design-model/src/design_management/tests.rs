@@ -243,13 +243,13 @@ fn drawing_sheet_title_contract_matches_field_provenance_and_required_visibility
         DrawingSheetTitleFieldId::Date.policy().value_authority,
         DrawingSheetTitleFieldValueAuthority::Automatic
     );
-    assert_eq!(
-        DrawingSheetTitleFieldId::Scale.policy().value_authority,
-        DrawingSheetTitleFieldValueAuthority::Automatic
-    );
-    assert_eq!(
-        format.title_block.fields[&DrawingSheetTitleFieldId::Scale].value,
-        ""
+    // A schematic is not drawn to scale, and ISO 7200 keeps scale out of the
+    // title block, so a sheet carries no Scale field at all.
+    assert!(
+        !format
+            .title_block
+            .fields
+            .contains_key(&DrawingSheetTitleFieldId::Scale)
     );
     assert_eq!(DrawingSheetDisplayUnit::Inches.format_um(25_400), "1");
     assert_eq!(
@@ -372,7 +372,7 @@ fn drawing_sheet_title_resolution_is_one_renderer_independent_authority() {
     );
     assert_eq!(value(DrawingSheetTitleFieldId::CheckedBy), None);
     assert_eq!(
-        value(DrawingSheetTitleFieldId::Format),
+        value(DrawingSheetTitleFieldId::Scale),
         None,
         "a retired field resolves to nothing even when a value is offered"
     );
@@ -602,7 +602,7 @@ fn managed_title_logo_rejects_ambiguous_unbounded_and_excessive_geometry() {
 }
 
 #[test]
-fn applying_a_format_preserves_target_sheet_fields_but_updates_declared_scale() {
+fn applying_a_format_preserves_target_sheet_fields() {
     let source = SchematicSheetFormat::default()
         .try_update(|draft| {
             draft.title_block.scale = DrawingSheetScale::Ratio {
@@ -631,12 +631,6 @@ fn applying_a_format_preserves_target_sheet_fields_but_updates_declared_scale() 
                 .get_mut(&DrawingSheetTitleFieldId::DrawnBy)
                 .unwrap()
                 .value = "Target owner".to_owned();
-            draft
-                .title_block
-                .fields
-                .get_mut(&DrawingSheetTitleFieldId::Scale)
-                .unwrap()
-                .visible = false;
         })
         .unwrap();
 
@@ -651,17 +645,13 @@ fn applying_a_format_preserves_target_sheet_fields_but_updates_declared_scale() 
         "Target owner"
     );
     assert_eq!(
-        applied.title_block.fields[&DrawingSheetTitleFieldId::Scale].value,
-        ""
-    );
-    assert_eq!(
         applied.title_block.scale,
         DrawingSheetScale::Ratio {
             drawing_units: 2,
             reality_units: 5,
         }
     );
-    assert!(!applied.title_block.fields[&DrawingSheetTitleFieldId::Scale].visible);
+    assert!(applied.validate().is_ok());
 }
 
 #[test]
@@ -1310,13 +1300,17 @@ fn preset_storage_strips_authored_values_and_canonicalizes_custom_identity() {
 
 #[test]
 fn legacy_scale_mirror_and_missing_preset_references_normalize_safely() {
+    // Builds that lettered a Scale cell mirrored the scale into its field
+    // string; the field is retired now, so the stale copy goes with it.
     let mut legacy_format = serde_json::to_value(SchematicSheetFormat::default()).unwrap();
-    legacy_format["title_block"]["fields"]["scale"]["value"] =
-        serde_json::Value::String("stale 99:1".to_owned());
+    legacy_format["title_block"]["fields"]["scale"] =
+        serde_json::json!({ "value": "stale 99:1", "visible": true });
     let restored_format: SchematicSheetFormat = serde_json::from_value(legacy_format).unwrap();
-    assert_eq!(
-        restored_format.title_block.fields[&DrawingSheetTitleFieldId::Scale].value,
-        ""
+    assert!(
+        !restored_format
+            .title_block
+            .fields
+            .contains_key(&DrawingSheetTitleFieldId::Scale)
     );
     assert_eq!(
         restored_format.title_block.scale,

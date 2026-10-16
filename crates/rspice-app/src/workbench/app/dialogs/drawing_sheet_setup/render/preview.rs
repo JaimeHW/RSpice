@@ -204,9 +204,9 @@ fn draw_sheet_preview(
 }
 
 /// Resolve the page geometry independently from non-geometric transaction
-/// fields. An invalid reusable-preset name or declared drawing scale must
-/// disable Apply and receive validation feedback, but it must not make a
-/// physically valid page jump back to an earlier preview.
+/// fields. An invalid reusable-preset name must disable Apply and receive
+/// validation feedback, but it must not make a physically valid page jump
+/// back to an earlier preview.
 pub(super) fn geometry_preview_format(
     draft: &DrawingSheetDraft,
     fallback: &crate::state::SchematicSheetFormat,
@@ -214,7 +214,6 @@ pub(super) fn geometry_preview_format(
     let mut preview = draft.clone();
     let fallback_draft = DrawingSheetDraft::from_format(fallback);
     preview.save_custom_preset = false;
-    preview.declared_scale = fallback_draft.declared_scale;
     let sheet_title = preview
         .title_fields
         .get_mut(&crate::state::DrawingSheetTitleFieldId::SheetTitle);

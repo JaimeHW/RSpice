@@ -20,6 +20,11 @@ pub enum DrawingSheetTitleFieldId {
     /// it, deserialization drops it from the field set, and a sealed
     /// organization template keeps it in an order nothing reads it from.
     Format,
+    /// Retired. ISO 7200 places a drawing's scale outside its title block,
+    /// and a schematic is not drawn to one, so the cell only ever said 1:1
+    /// about a circuit that has no size. The variant remains, as
+    /// [`Self::Format`] did, so a sheet or sealed template that names it
+    /// still loads.
     Scale,
     DrawnBy,
     CheckedBy,
@@ -31,13 +36,12 @@ pub enum DrawingSheetTitleFieldId {
 }
 
 impl DrawingSheetTitleFieldId {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 12] = [
         Self::Project,
         Self::CellView,
         Self::SheetTitle,
         Self::Page,
         Self::Revision,
-        Self::Scale,
         Self::DrawnBy,
         Self::CheckedBy,
         Self::ApprovedBy,
@@ -52,7 +56,7 @@ impl DrawingSheetTitleFieldId {
     /// Deserialization drops these from the field set rather than refusing
     /// the sheet, so retiring a field costs no saved work. They are never
     /// written back.
-    pub const RETIRED: [Self; 1] = [Self::Format];
+    pub const RETIRED: [Self; 2] = [Self::Format, Self::Scale];
 
     /// Editable title-block values whose authority is the project rather than
     /// one sheet. Visibility remains sheet-owned, but the value is resolved
