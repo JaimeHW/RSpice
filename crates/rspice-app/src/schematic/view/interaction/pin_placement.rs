@@ -1,6 +1,6 @@
 //! Placement and document authority for a named pin sequence.
 
-use super::{AppState, ConsoleMessage, Point};
+use super::{AppState, Point};
 use crate::state::PendingPortSequence;
 
 /// Place the next name of the armed sequence, and stay armed until the names
@@ -12,16 +12,12 @@ use crate::state::PendingPortSequence;
 /// pins were named for a cell that is no longer the one on screen.
 pub(super) fn place_pending_port(state: &mut AppState, grid_pos: Point) {
     let Some(sequence) = state.schematic.session.editor.pending_port_sequence.clone() else {
-        state.push_user_message(ConsoleMessage::warning(
-            "Pin placement ended: no names are armed.".to_owned(),
-        ));
+        state.prompt("Pin placement ended: no names are armed.");
         state.schematic.cancel_tool();
         return;
     };
     if state.schematic_edit_read_only() || !placement_authority_matches(state, &sequence) {
-        state.push_user_message(ConsoleMessage::warning(
-            "Pin placement ended: the active schematic changed.".to_owned(),
-        ));
+        state.prompt("Pin placement ended: the active schematic changed.");
         state.schematic.cancel_tool();
         return;
     }
@@ -46,17 +42,13 @@ pub(super) fn place_pending_port(state: &mut AppState, grid_pos: Point) {
                 state.schematic.cancel_tool();
             }
             state.sync_active_schematic_to_workspace();
-            state.push_user_message(ConsoleMessage::info(format!(
+            state.prompt(format!(
                 "Placed pin {name} at ({}, {}).",
                 grid_pos.x, grid_pos.y
-            )));
+            ));
             log::info!("Placed interface port {name} as {stable_id} at {grid_pos:?}");
         }
-        Err(error) => {
-            state.push_user_message(ConsoleMessage::warning(format!(
-                "Pin {name} was not placed: {error}."
-            )));
-        }
+        Err(error) => state.prompt(format!("Pin {name} not placed: {error}.")),
     }
 }
 

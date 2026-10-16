@@ -49,7 +49,7 @@ fn bus_tap_batch_revalidates_live_geometry_and_preserves_atomic_undo() {
         let mut state = armed_bus_tap_state(sheets);
         let source = requests::editor_request_source(&state);
         for x in [20, 60] {
-            with_test_ui(|ui| handle_bus_tap_click(ui, &mut state, Point::new(x, 0), 6));
+            handle_bus_tap_click(&mut state, Point::new(x, 0), 6);
             let tap = state.schematic.document().bus_taps.last().unwrap();
             assert_eq!(tap.bus_point, Point::new(x, 0));
             assert_eq!(tap.connection_point, Point::new(x, 20));
@@ -85,13 +85,13 @@ fn bus_tap_batch_revalidates_live_geometry_and_preserves_atomic_undo() {
             .edit_bus_properties(&bus, Some(BusDeclaration::parse("ADDR[7:0]").unwrap()))
             .unwrap();
         let version = state.schematic.content_version();
-        with_test_ui(|ui| handle_bus_tap_click(ui, &mut state, Point::new(100, 0), 6));
+        handle_bus_tap_click(&mut state, Point::new(100, 0), 6);
         assert_eq!(state.schematic.document().bus_taps.len(), 1);
         assert_eq!(state.schematic.content_version(), version);
         assert_eq!(state.schematic.session.editor.tool, Tool::BusTap);
         assert!(state.schematic.undo());
         state.sync_active_schematic_to_workspace();
-        with_test_ui(|ui| handle_bus_tap_click(ui, &mut state, Point::new(100, 0), 6));
+        handle_bus_tap_click(&mut state, Point::new(100, 0), 6);
         assert_eq!(state.schematic.document().bus_taps.len(), 2);
         assert!(state.schematic.undo());
         assert!(state.schematic.undo());
@@ -159,7 +159,7 @@ fn bus_tap_click_cannot_commit_after_its_context_or_permission_changes() {
         }
         let content = state.schematic.content_version();
         let topology = state.schematic.topology_version();
-        with_test_ui(|ui| handle_bus_tap_click(ui, &mut state, Point::new(20, 0), 6));
+        handle_bus_tap_click(&mut state, Point::new(20, 0), 6);
         assert!(state.schematic.document().bus_taps.is_empty(), "{change}");
         assert!(
             state.schematic.document().buses[0].declaration.is_none(),

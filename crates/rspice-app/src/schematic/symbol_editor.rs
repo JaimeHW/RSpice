@@ -7,7 +7,7 @@ mod tests;
 
 use egui::{Sense, Ui, WidgetInfo, WidgetType, vec2};
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{PortSpec, SymbolDocument, SymbolEditorMetadata};
 use crate::ui::theme;
 use crate::ui::widgets::DialogChoice;
@@ -182,9 +182,11 @@ fn show_save_symbol_dialog(
                     state.ui.symbol.editor.save_dialog_open = false;
                     state.ui.symbol.editor.save_revision_note.clear();
                     state.ui.symbol.editor.save_error = None;
-                    state.push_user_message(ConsoleMessage::info(format!(
-                        "Saved symbol revision {revision}"
-                    )));
+                    state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        format!("Saved symbol revision {revision}"),
+                    );
                 }
                 Err(error) => state.ui.symbol.editor.save_error = Some(error),
             }
@@ -208,7 +210,7 @@ fn apply_surface_request(state: &mut AppState, request: SymbolSurfaceRequest) ->
             }
             let reference = &request.source.document;
             if let Err(error) = state.open_copy_cell_dialog(&reference.library, &reference.cell) {
-                state.push_user_message(ConsoleMessage::error(error));
+                state.prompt(error);
             }
         }
         SymbolSurfaceAction::GenerateFromSchematic => {
@@ -216,7 +218,7 @@ fn apply_surface_request(state: &mut AppState, request: SymbolSurfaceRequest) ->
                 return false;
             }
             if let Err(error) = state.generate_active_symbol_document() {
-                state.push_user_message(ConsoleMessage::warning(error));
+                state.prompt(error);
             }
         }
     }

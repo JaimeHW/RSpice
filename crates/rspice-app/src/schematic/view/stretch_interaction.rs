@@ -1,7 +1,6 @@
 //! Validate stretch canvas requests before the app-owned atomic commit.
 
 use super::{SchematicSymbolContext, requests::editor_request_source, viewport::Viewport};
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{Point, Tool};
 use crate::workbench::{
     app::{armed_stretch_selection_authority, cancel_armed_stretch_selection},
@@ -30,9 +29,7 @@ pub(super) fn handle_armed_stretch_selection(
         return;
     }
     if let Err(message) = armed_stretch_selection_authority(state) {
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "Stretch selection cancelled: {message}"
-        )));
+        state.prompt(format!("Stretch cancelled: {message}"));
         cancel_armed_stretch_selection(state);
         return;
     }
@@ -88,9 +85,7 @@ fn apply(state: &mut AppState, symbols: &SchematicSymbolContext, request: Stretc
 
 fn commit_armed_stretch_selection(state: &mut AppState, symbol_context: &SchematicSymbolContext) {
     if let Err(message) = armed_stretch_selection_authority(state) {
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "Stretch selection cancelled: {message}"
-        )));
+        state.prompt(format!("Stretch cancelled: {message}"));
         cancel_armed_stretch_selection(state);
         return;
     }
@@ -104,9 +99,7 @@ fn commit_armed_stretch_selection(state: &mut AppState, symbol_context: &Schemat
     {
         let draft = &mut state.dialogs.stretch_selection;
         draft.canvas.gesture.reset_candidate();
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "Stretch selection was not committed: {message}"
-        )));
+        state.prompt(format!("Stretch not committed: {message}"));
         return;
     }
     let delta = state.dialogs.stretch_selection.canvas.gesture.preview_delta;
@@ -118,10 +111,7 @@ fn commit_armed_stretch_selection(state: &mut AppState, symbol_context: &Schemat
         .target
         .expect("validated stretch target");
     if delta == Point::origin() {
-        state.push_user_message(ConsoleMessage::info(
-            "Stretch selection finished without changing geometry; no undo record was created."
-                .to_owned(),
-        ));
+        state.prompt("Nothing stretched.");
         cancel_armed_stretch_selection(state);
         return;
     }
@@ -137,25 +127,21 @@ fn commit_armed_stretch_selection(state: &mut AppState, symbol_context: &Schemat
         Ok(true) => {
             let recorded = state.schematic.end_operation();
             state.sync_active_schematic_to_workspace();
-            state.push_user_message(ConsoleMessage::info(format!(
-                "Stretched the selected geometry by ({}, {}) with {}; {}.",
-                delta.x,
-                delta.y,
-                policy.label(),
-                if recorded {
-                    "one undo record committed"
-                } else {
-                    "geometry was unchanged"
-                }
-            )));
+            state.prompt(if recorded {
+                format!(
+                    "Stretched the selection by ({}, {}) with {}.",
+                    delta.x,
+                    delta.y,
+                    policy.label(),
+                )
+            } else {
+                "Nothing stretched.".to_owned()
+            });
             cancel_armed_stretch_selection(state);
         }
         Ok(false) => {
             state.schematic.cancel_operation();
-            state.push_user_message(ConsoleMessage::info(
-                "Stretch selection produced no geometry change; no undo record was created."
-                    .to_owned(),
-            ));
+            state.prompt("Nothing stretched.");
             cancel_armed_stretch_selection(state);
         }
         Err(error) => {
@@ -163,9 +149,7 @@ fn commit_armed_stretch_selection(state: &mut AppState, symbol_context: &Schemat
             let draft = &mut state.dialogs.stretch_selection;
             draft.canvas.gesture.preview_error = Some(error.to_string());
             draft.canvas.gesture.reset_candidate();
-            state.push_user_message(ConsoleMessage::warning(format!(
-                "Stretch selection was not committed: {error}"
-            )));
+            state.prompt(format!("Stretch not committed: {error}"));
         }
     }
 }

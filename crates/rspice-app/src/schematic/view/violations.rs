@@ -8,7 +8,6 @@
 
 use egui::Painter;
 
-use crate::diagnostics::ConsoleMessage;
 use crate::workbench::app_state::AppState;
 use rspice_design::drc::{DrcLocation, DrcSeverity, DrcViolation};
 
@@ -30,24 +29,17 @@ pub(crate) fn cycle_violation(state: &mut AppState, step: isize) {
     // symbol rather than a spot in a drawing — and they are published as
     // records, so the tour reads them from the store and names each one by
     // the identity the grid names it by.
+    //
+    // With no findings, or none current, the command is disabled, so a press
+    // that reaches here anyway says nothing.
     if state.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
-        if !state.cycle_active_symbol_pin_finding(step) {
-            state.push_user_message(ConsoleMessage::info(
-                "No symbol pin findings — run the pin checks first",
-            ));
-        }
+        state.cycle_active_symbol_pin_finding(step);
         return;
     }
     let Some(result) = &state.dialogs.drc_results else {
-        state.push_user_message(ConsoleMessage::info(
-            "No check results — run design checks first",
-        ));
         return;
     };
     if state.dialogs.drc_checked_version != state.schematic.topology_version() {
-        state.push_user_message(ConsoleMessage::warning(
-            "Check results are stale — re-run design checks",
-        ));
         return;
     }
 
@@ -72,9 +64,7 @@ pub(crate) fn cycle_violation(state: &mut AppState, step: isize) {
         })
         .collect();
     if anchored.is_empty() {
-        state.push_user_message(ConsoleMessage::info(
-            "No findings with a canvas anchor — see the console summary",
-        ));
+        state.prompt("No finding has a place on the canvas; Problems lists them.");
         return;
     }
     // Worst first; stable within a severity.
@@ -102,13 +92,13 @@ pub(crate) fn cycle_violation(state: &mut AppState, step: isize) {
     // leaving the previous finding standing, which the tour has just left.
     state.diagnostics.set_current_finding(found.identity);
     state.jump_to_log_anchor(found.anchor);
-    state.push_user_message(ConsoleMessage::info(format!(
+    state.prompt(format!(
         "Finding {}/{} — {} · {}",
         index + 1,
         len,
         found.severity.display_name(),
         found.message,
-    )));
+    ));
 }
 
 /// One finding the tour can visit: what it is called, how bad it is, where it

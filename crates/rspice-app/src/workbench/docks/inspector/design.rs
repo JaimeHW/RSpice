@@ -1068,7 +1068,6 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
         {
             if writable {
                 let changed = crate::schematic::view::ensure_probe_visible_with_feedback(
-                    ui,
                     &mut app.state,
                     expression,
                     expression,
@@ -1078,7 +1077,6 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
                 }
             } else {
                 crate::schematic::view::ensure_retained_probe_visible_with_feedback(
-                    ui,
                     &mut app.state,
                     expression,
                     expression,

@@ -1,7 +1,6 @@
 //! Bind array canvas requests to the app-owned checked transaction.
 
 use super::{SchematicSymbolContext, requests::editor_request_source, viewport::Viewport};
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{SchematicArrayPlacement, Tool};
 use crate::workbench::{app::armed_array_selection_authority, app_state::AppState};
 use egui::{Response, Ui};
@@ -23,9 +22,7 @@ pub(super) fn handle_armed_array_selection(
         return;
     }
     if let Err(message) = armed_array_selection_authority(state) {
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "Create array cancelled: {message}"
-        )));
+        state.prompt(format!("Create array cancelled: {message}"));
         crate::workbench::app::cancel_armed_array_selection(state);
         return;
     }
@@ -89,9 +86,7 @@ pub(super) fn array_placement(state: &AppState) -> Result<SchematicArrayPlacemen
 
 fn commit_armed_array_selection(state: &mut AppState, symbol_context: &SchematicSymbolContext) {
     if let Err(message) = armed_array_selection_authority(state) {
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "Create array cancelled: {message}"
-        )));
+        state.prompt(format!("Create array cancelled: {message}"));
         crate::workbench::app::cancel_armed_array_selection(state);
         return;
     }
@@ -102,9 +97,7 @@ fn commit_armed_array_selection(state: &mut AppState, symbol_context: &Schematic
         Ok(plan) => plan,
         Err(message) => {
             state.dialogs.array_selection.canvas.reset_candidate();
-            state.push_user_message(ConsoleMessage::warning(format!(
-                "Create array was not committed: {message}"
-            )));
+            state.prompt(format!("Array not created: {message}"));
             return;
         }
     };
@@ -116,18 +109,13 @@ fn commit_armed_array_selection(state: &mut AppState, symbol_context: &Schematic
     ) {
         Ok(impact) => {
             state.sync_active_schematic_to_workspace();
-            state.push_user_message(ConsoleMessage::info(format!(
-                "Created {} new array members; one undo record committed.",
-                impact.replicas,
-            )));
+            state.prompt(format!("Created {} array members.", impact.replicas));
             crate::workbench::app::cancel_armed_array_selection(state);
         }
         Err(error) => {
             state.dialogs.array_selection.canvas.preview_error = Some(error.to_string());
             state.dialogs.array_selection.canvas.reset_candidate();
-            state.push_user_message(ConsoleMessage::warning(format!(
-                "Create array was not committed: {error}"
-            )));
+            state.prompt(format!("Array not created: {error}"));
         }
     }
 }

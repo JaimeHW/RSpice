@@ -8,7 +8,6 @@
 
 use egui::{Context, Response};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{Point, Tool, ViewType};
 use crate::workbench::app_state::{AppState, ContextTarget};
 use crate::workbench::commands::vocabulary::Command;
@@ -1035,9 +1034,9 @@ fn execute_context_action(
                 &state.library_manager,
                 &state.workspace.content.schematic_buffers,
             );
-            state.push_user_message(match outcome {
-                Ok(summary) => ConsoleMessage::info(summary),
-                Err(error) => ConsoleMessage::warning(error.to_string()),
+            state.prompt(match outcome {
+                Ok(summary) => summary,
+                Err(error) => error.to_string(),
             });
         }
         ContextAction::ReplaceInstance => open_replace_instance_dialog(state),

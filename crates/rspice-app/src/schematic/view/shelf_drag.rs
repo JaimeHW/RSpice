@@ -7,7 +7,6 @@
 
 use egui::{InputState, Key, Modifiers, Popup, Response};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{ComponentType, LibraryCellInstance, PendingStimulusPlacement, Point};
 use crate::workbench::app_state::AppState;
 
@@ -137,10 +136,10 @@ pub(super) fn commit_shelf_drop(
         state.schematic.cancel_tool();
         state.schematic.session.editor.pending_library_cell = None;
     }
-    state.push_user_message(ConsoleMessage::info(format!(
-        "Placed {label} at ({}, {}) from the component shelf.",
+    state.prompt(format!(
+        "Placed {label} at ({}, {}).",
         grid_pos.x, grid_pos.y
-    )));
+    ));
     ShelfDropOutcome::Placed
 }
 

@@ -18,7 +18,7 @@
 // The application's entry points come through the menu's own imports: this
 // group reaches nothing the menu does not already reach.
 use super::{
-    AppState, ConsoleMessage, ContextAction, StimulusLinkMode, clicked_source, commit_readoption,
+    AppState, ContextAction, StimulusLinkMode, clicked_source, commit_readoption,
     open_stimulus_definition, open_stimulus_link,
 };
 
@@ -125,8 +125,8 @@ pub(super) fn execute(action: ContextAction, state: &mut AppState) {
         _ => Ok(None),
     };
     match outcome {
-        Ok(Some(line)) => state.push_user_message(ConsoleMessage::info(line)),
+        Ok(Some(line)) => state.prompt(line),
         Ok(None) => {}
-        Err(refusal) => state.push_user_message(ConsoleMessage::warning(refusal)),
+        Err(refusal) => state.prompt(refusal),
     }
 }
