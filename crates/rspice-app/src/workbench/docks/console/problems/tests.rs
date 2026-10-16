@@ -1608,6 +1608,39 @@ fn a_related_place_is_stated_even_where_it_cannot_be_followed() {
     );
 }
 
+/// Closing the project, or replacing it with another, forgets how the last
+/// one's findings were being read: the next project's findings came from
+/// somewhere else, and a filter carried over would hide conditions nobody
+/// there chose to hide.
+#[test]
+fn closing_or_replacing_the_project_forgets_the_reading_position() {
+    use crate::workbench::app_state::problems_view::ProblemsView;
+    use crate::workbench::workflows::project_workflow::{
+        close_project_discard, create_new_project,
+    };
+
+    fn read_narrowly(state: &mut AppState) {
+        let view = &mut state.problems_view;
+        view.text = "ground".to_owned();
+        view.producer = Some("rspice.design.rules".to_owned());
+        view.waived = false;
+        view.severities.toggle(DiagnosticLevel::Hint);
+        view.order_by(ProblemColumn::Code);
+        view.grouping = ProblemGrouping::Code;
+        view.collapse("DRC-FLOATING-NODE", true);
+        view.explain = true;
+    }
+
+    let mut state = AppState::default();
+    read_narrowly(&mut state);
+    assert!(close_project_discard(&mut state));
+    assert_eq!(state.problems_view, ProblemsView::default());
+
+    read_narrowly(&mut state);
+    create_new_project(&mut state);
+    assert_eq!(state.problems_view, ProblemsView::default());
+}
+
 /// The page is not a severity filter over the session log.
 ///
 /// Before the canonical store it read the log buffer, so every refusal,

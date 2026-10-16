@@ -354,36 +354,4 @@ mod tests {
             },
         );
     }
-
-    fn read_narrowly(state: &mut crate::workbench::app_state::AppState) {
-        let view = &mut state.problems_view;
-        view.text = "ground".to_owned();
-        view.producer = Some("rspice.design.rules".to_owned());
-        view.waived = false;
-        view.severities.toggle(DiagnosticLevel::Hint);
-        view.order_by(ProblemColumn::Code);
-        view.grouping = ProblemGrouping::Code;
-        view.collapse("DRC-FLOATING-NODE", true);
-        view.explain = true;
-    }
-
-    /// Closing the project, or replacing it with another, forgets how the
-    /// last one's findings were being read: the next project's findings came
-    /// from somewhere else, and a filter carried over would hide conditions
-    /// nobody there chose to hide.
-    #[test]
-    fn closing_or_replacing_the_project_forgets_the_reading_position() {
-        use crate::workbench::workflows::project_workflow::{
-            close_project_discard, create_new_project,
-        };
-
-        let mut state = crate::workbench::app_state::AppState::default();
-        read_narrowly(&mut state);
-        assert!(close_project_discard(&mut state));
-        assert_eq!(state.problems_view, ProblemsView::default());
-
-        read_narrowly(&mut state);
-        create_new_project(&mut state);
-        assert_eq!(state.problems_view, ProblemsView::default());
-    }
 }
