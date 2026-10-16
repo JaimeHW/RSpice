@@ -290,11 +290,30 @@ impl AppState {
     fn navigate_to_log_anchor(&mut self, anchor: LogAnchor) {
         match anchor {
             LogAnchor::Schematic {
+                cell_view,
                 x,
                 y,
                 component,
                 wire,
             } => {
+                // The point and the object are the drawing's own, so the
+                // drawing opens first. A view that will not open — an edit
+                // in the inspector that cannot commit — leaves the reader
+                // where they were rather than selecting in the wrong view.
+                if !cell_view.key().eq_ignore_ascii_case(
+                    &self.workspace.content.active_schematic_reference().key(),
+                ) {
+                    self.open_workspace_view(cell_view.clone());
+                    if !cell_view.key().eq_ignore_ascii_case(
+                        &self.workspace.content.active_schematic_reference().key(),
+                    ) {
+                        self.push_user_message(ConsoleMessage::warning(format!(
+                            "{} could not be opened, so the finding was not followed.",
+                            cell_view.display_path()
+                        )));
+                        return;
+                    }
+                }
                 self.workbench
                     .activate(crate::workbench::state::Workspace::Design);
                 self.schematic.session.editor.center_request = Some(Point::new(x, y));

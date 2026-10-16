@@ -39,7 +39,7 @@ use rspice_project::lifecycle::ProjectLifecycle;
 use rspice_project::lifecycle::{PreparedBrowserSave, StagedBrowserSave};
 pub(crate) use rspice_project::lifecycle::{ProjectLifecycleError, RevertReviewToken, SaveScope};
 
-use crate::diagnostics::{ConsoleMessage, LogSeverity, LogSource};
+use crate::diagnostics::ConsoleMessage;
 use crate::io::ProjectSnapshot;
 #[cfg(target_arch = "wasm32")]
 use crate::product::ContentDigest;
@@ -1110,10 +1110,11 @@ fn adopt_successful_save(
 /// drawing, and advice that could veto a save the author explicitly asked for
 /// would be a gate wearing a preference's clothes.
 ///
-/// The explicit check command owns the full per-finding listing. A save that
-/// nobody asked to review states the outcome and offers the worst finding as
-/// the way into the evidence this run just published — the canvas badges, the
-/// check pill, and the finding-navigation commands all read it.
+/// The findings themselves are canonical records, published by the checks
+/// this runs: the Problems page lists them, and the canvas badges, the check
+/// pill and the finding tour read them. The Console gets one line, because a
+/// check having run is a session event. It does not copy a finding as well —
+/// a finding restated in the log stands on the page a second time.
 fn report_design_checks_after_save(state: &mut AppState) {
     if !state
         .ui
@@ -1141,25 +1142,6 @@ fn report_design_checks_after_save(state: &mut AppState) {
     } else {
         ConsoleMessage::warning(message)
     });
-    if let Some(worst) = result
-        .violations()
-        .iter()
-        .max_by_key(|violation| violation.severity)
-    {
-        let severity = if result.passed() {
-            LogSeverity::Warning
-        } else {
-            LogSeverity::Error
-        };
-        let anchor = crate::schematic::view::violations::finding_anchor(state, worst);
-        state.log_buffer.log_anchored(
-            severity,
-            LogSource::Drc,
-            worst.message.clone(),
-            None,
-            anchor,
-        );
-    }
 }
 
 #[cfg(target_arch = "wasm32")]

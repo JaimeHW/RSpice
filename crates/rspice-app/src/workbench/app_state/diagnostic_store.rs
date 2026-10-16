@@ -21,10 +21,11 @@
 //! buy nothing and cost the editors their publication model. The listing in
 //! [`listing`] reads them in place.
 
+mod current;
 pub(in crate::workbench) mod listing;
 mod producers;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
@@ -169,10 +170,11 @@ impl DiagnosticSubject {
 
 /// Where a finding is repaired.
 ///
-/// Every variant addresses an object, not a workspace: that is what makes
-/// following a finding land on the thing it is about rather than on whichever
-/// document happened to be open. A finding with no route is still a finding —
-/// the page renders it inert rather than offering a jump it cannot honour.
+/// Each variant addresses the most specific thing its producer can name — an
+/// object in a drawing, a record, a line of a source, or the destination a
+/// dispatch finding named for itself — rather than whichever document
+/// happened to be open. A finding with no route is still a finding: the page
+/// renders it inert rather than offering a jump it cannot honour.
 #[derive(Debug, Clone, PartialEq)]
 pub(in crate::workbench) enum DiagnosticRoute {
     /// A place in the drawing, or the objects a failed run named.
@@ -197,10 +199,80 @@ pub(in crate::workbench) enum DiagnosticRoute {
     Repair(PreflightRemediation),
 }
 
+/// What a finding is about, independent of when it was found or how it is
+/// worded: the producer, the rule, the document the object is in, and a
+/// stable key of the object itself.
+///
+/// This is what a finding's canonical identity is minted from, so it is also
+/// what decides whether a finding in a new pass is the same finding as one in
+/// the last. An identity bound to the pass instead — its ordinal, the project
+/// revision, the message — was re-minted by every re-check, and fixing one
+/// finding handed its identity to the next finding of the same rule.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(in crate::workbench) struct FindingKey {
+    pub(in crate::workbench) producer: Arc<str>,
+    pub(in crate::workbench) code: Arc<str>,
+    pub(in crate::workbench) document: Arc<str>,
+    pub(in crate::workbench) object: Arc<str>,
+}
+
+impl FindingKey {
+    pub(in crate::workbench) fn new(
+        producer: impl Into<Arc<str>>,
+        code: impl Into<Arc<str>>,
+        document: impl Into<Arc<str>>,
+        object: impl Into<Arc<str>>,
+    ) -> Self {
+        Self {
+            producer: producer.into(),
+            code: code.into(),
+            document: document.into(),
+            object: object.into(),
+        }
+    }
+}
+
+/// The canonical metadata of every finding one pass reported, in the order it
+/// reported them.
+///
+/// The one place a store record's identity is minted, so a surface that holds
+/// the findings rather than the records — the canvas tour holds violations —
+/// names them exactly as the records do by asking here. The occurrence index
+/// counts only findings whose keys are identical, in the order they were
+/// reported: it separates two findings about one object, and nothing else
+/// about the pass can move an identity.
+pub(in crate::workbench) fn mint_canonical(
+    keys: &[FindingKey],
+    revision: u64,
+    validation_id: &str,
+) -> Vec<CanonicalDiagnosticMetadata> {
+    let mut occurrences: HashMap<&FindingKey, usize> = HashMap::with_capacity(keys.len());
+    keys.iter()
+        .map(|key| {
+            let occurrence = occurrences.entry(key).or_insert(0);
+            let canonical = CanonicalDiagnosticMetadata::structural(
+                Arc::clone(&key.producer),
+                Arc::clone(&key.code),
+                Arc::clone(&key.document),
+                &key.object,
+                *occurrence,
+                revision,
+                validation_id,
+            );
+            *occurrence += 1;
+            canonical
+        })
+        .collect()
+}
+
 /// One condition, in the shape every consumer reads it in.
 #[derive(Debug, Clone)]
 pub(in crate::workbench) struct DiagnosticRecord {
     pub(in crate::workbench) canonical: CanonicalDiagnosticMetadata,
+    /// What the finding is about, as its identity was minted from it. A
+    /// republication that re-mints the current finding under a new
+    /// occurrence finds it again by this.
+    pub(in crate::workbench) key: FindingKey,
     pub(in crate::workbench) level: DiagnosticLevel,
     pub(in crate::workbench) subject: DiagnosticSubject,
     pub(in crate::workbench) message: String,
@@ -226,8 +298,17 @@ impl DiagnosticRecord {
         subject: DiagnosticSubject,
         message: impl Into<String>,
     ) -> Self {
+        // A record built from metadata alone is keyed by the document it is
+        // in; a structural producer states the object with `keyed`.
+        let key = FindingKey::new(
+            Arc::clone(&canonical.source),
+            Arc::clone(&canonical.code),
+            Arc::clone(&canonical.document_id),
+            "",
+        );
         Self {
             canonical,
+            key,
             level,
             subject,
             message: message.into(),
@@ -235,6 +316,12 @@ impl DiagnosticRecord {
             rule: String::new(),
             route: None,
         }
+    }
+
+    /// State the key the record's identity was minted from.
+    pub(in crate::workbench) fn keyed(mut self, key: FindingKey) -> Self {
+        self.key = key;
+        self
     }
 
     pub(in crate::workbench) fn with_details(mut self, details: impl Into<String>) -> Self {
@@ -258,8 +345,9 @@ impl DiagnosticRecord {
     /// A waived finding is a decision someone recorded, not a condition that
     /// went away, so it stays in the store and stays on the page — it just
     /// stops counting against the design. The decision itself rides on the
-    /// canonical record's suppression, which is the field the rule deck
-    /// writes, so there is exactly one place a waiver can be stated.
+    /// canonical record's suppression, so there is exactly one place a waiver
+    /// can be stated. Nothing records a waiver yet; this is the field one is
+    /// recorded in when something does.
     pub(in crate::workbench) const fn waived(&self) -> bool {
         self.canonical.suppression.is_some()
     }
@@ -273,23 +361,66 @@ impl DiagnosticRecord {
 pub(in crate::workbench) enum DiagnosticOwner {
     /// The schematic and electrical rule checks, per cell view.
     DesignRules,
+    /// One symbol's pin contract against the interface its cell declares,
+    /// per symbol view.
+    ///
+    /// Not [`Self::DesignRules`]: those findings are about a schematic's
+    /// electrical rules and are keyed to a cell view that has a schematic,
+    /// while these are about the pins drawn on a symbol and stand or fall
+    /// with that symbol's own artwork.
+    SymbolPins,
     /// Everything a run has to be true before it can be dispatched: the
-    /// design checks it re-runs, the plan, the technology, the model
-    /// bindings, and the netlist the deck is generated from.
+    /// plan, the technology, the model bindings, the hierarchy, and the
+    /// netlist the deck is generated from. The design rules it checks are
+    /// published under [`Self::DesignRules`], for the configured root.
     Dispatch,
     /// One failed run, attributed to the objects the engine named.
     Run,
 }
 
 impl DiagnosticOwner {
+    /// Every owner, in the order the page lists their batches.
+    ///
+    /// Beside the enum, so a new owner joins it in the same change: the
+    /// exhaustive [`Self::position`] makes the author give it a place, and
+    /// the assertion below holds this list to one owner per place. The tests
+    /// that must drive every owner walk this list rather than naming the
+    /// owners they happen to know about.
+    pub(in crate::workbench) const ALL: [Self; 4] = [
+        Self::DesignRules,
+        Self::SymbolPins,
+        Self::Dispatch,
+        Self::Run,
+    ];
+
+    /// This owner's place in [`Self::ALL`].
+    const fn position(self) -> usize {
+        match self {
+            Self::DesignRules => 0,
+            Self::SymbolPins => 1,
+            Self::Dispatch => 2,
+            Self::Run => 3,
+        }
+    }
+
     const fn key_prefix(self) -> &'static str {
         match self {
             Self::DesignRules => "design-rules",
+            Self::SymbolPins => "symbol-pins",
             Self::Dispatch => "dispatch",
             Self::Run => "run",
         }
     }
 }
+
+// `ALL` holds every owner exactly once, at its own position.
+const _: () = {
+    let mut index = 0;
+    while index < DiagnosticOwner::ALL.len() {
+        assert!(DiagnosticOwner::ALL[index].position() == index);
+        index += 1;
+    }
+};
 
 /// What a batch was derived from.
 ///
@@ -302,43 +433,90 @@ pub(in crate::workbench) enum DiagnosticInputs {
     /// The complete live schematic working set behind one cell view's checks,
     /// exactly as the check receipt digests it.
     DesignCheck { subject: CellViewRef },
-    /// The configured topology closure and the active simulation plan.
+    /// One symbol view's published artwork and the interface contract its
+    /// pins are compared against — exactly what the pin checks read.
+    SymbolPins { subject: CellViewRef },
+    /// The configured topology closure, the active simulation plan, and the
+    /// preflight report the findings came from.
     Dispatch,
-    /// One retained run, and the drawing its cross-probe names resolve
-    /// against.
+    /// One retained run, and the configured design and solver setup it was
+    /// dispatched against.
     Run { run_sequence: u64 },
+    /// One member of a campaign that never became a run — refused when it
+    /// was authorized or when it was started — and the configured design and
+    /// solver setup it was to run against. There is no run to retain, so the
+    /// member is named by its campaign and its place in it.
+    CampaignMember {
+        campaign: crate::product::SimulationCampaignId,
+        member_index: u32,
+    },
 }
 
 impl DiagnosticInputs {
     pub(in crate::workbench) const fn owner(&self) -> DiagnosticOwner {
         match self {
             Self::DesignCheck { .. } => DiagnosticOwner::DesignRules,
+            Self::SymbolPins { .. } => DiagnosticOwner::SymbolPins,
             Self::Dispatch => DiagnosticOwner::Dispatch,
-            Self::Run { .. } => DiagnosticOwner::Run,
+            Self::Run { .. } | Self::CampaignMember { .. } => DiagnosticOwner::Run,
         }
     }
 
-    /// What this batch was derived from, in words a reader can check against
-    /// the design. For a stale batch this is exactly what moved under it.
-    pub(in crate::workbench) fn description(&self) -> String {
+    /// What moved under a stale batch, as one clause a reader can check
+    /// against the design.
+    ///
+    /// A whole clause, as a source editor states its own stale findings, so
+    /// every stale row reads the same way wherever it came from: what the
+    /// batch was derived from, and that it has changed since.
+    pub(in crate::workbench) fn stale_reason(&self) -> String {
         match self {
             Self::DesignCheck { subject } => format!(
-                "the schematic working set behind {}",
+                "the schematic working set behind {} has changed since this was reported",
                 subject.display_path()
             ),
-            Self::Dispatch => "the configured design and the active simulation plan".to_owned(),
-            Self::Run { run_sequence } => {
-                format!("run {run_sequence} and the drawing its names resolve against")
-            }
+            Self::SymbolPins { subject } => format!(
+                "the artwork of {}, or the interface contract its pins are checked against, has \
+                 changed since this was reported",
+                subject.display_path()
+            ),
+            Self::Dispatch => "the configured design, the active simulation plan or the preflight \
+                               report has changed since this was reported"
+                .to_owned(),
+            Self::Run { run_sequence } => format!(
+                "the design or solver setup run {run_sequence} was dispatched against has changed \
+                 since this was reported"
+            ),
+            Self::CampaignMember { member_index, .. } => format!(
+                "the design or solver setup campaign member {member_index} was to run against has \
+                 changed since this was reported"
+            ),
         }
     }
 
+    /// Where the store files this batch.
+    ///
+    /// A cell view by the canonical key its receipt is filed under, so two
+    /// spellings of one view are one batch rather than two listing the same
+    /// findings. A run by its sequence padded to a fixed width, so the store's
+    /// order is the order the runs were made in and run 10 follows run 9.
     fn key(&self) -> String {
         let owner = self.owner().key_prefix();
         match self {
-            Self::DesignCheck { subject } => format!("{owner}\u{1f}{}", subject.key()),
+            Self::DesignCheck { subject } | Self::SymbolPins { subject } => {
+                let subject = crate::state::canonical_cell_view_owner_key(
+                    &subject.library,
+                    &subject.cell,
+                    &subject.view,
+                );
+                format!("{owner}\u{1f}{subject}")
+            }
             Self::Dispatch => owner.to_owned(),
-            Self::Run { run_sequence } => format!("{owner}\u{1f}{run_sequence}"),
+            Self::Run { run_sequence } => format!("{owner}\u{1f}{run_sequence:020}"),
+            // After every run, and in the order the campaign dispatched them.
+            Self::CampaignMember {
+                campaign,
+                member_index,
+            } => format!("{owner}\u{1f}member\u{1f}{campaign}\u{1f}{member_index:010}"),
         }
     }
 
@@ -347,13 +525,22 @@ impl DiagnosticInputs {
     /// `Err` is not "stale": it is "cannot be evaluated", which the reader is
     /// told in the producer's own words rather than having findings silently
     /// dropped or silently kept.
-    fn digest(&self, state: &AppState) -> Result<ContentDigest, String> {
+    fn digest(&self, scope: &DigestScope<'_>) -> Result<ContentDigest, String> {
+        let state = scope.state;
         match self {
             Self::DesignCheck { subject } => {
                 super::design_checks::live_input_digest(state, subject)
             }
+            // The artwork and the contract, through the one accessor the
+            // checks themselves read them through: a digest taken over
+            // anything else would be a second notion of staleness.
+            Self::SymbolPins { subject } => digest_of(&(
+                state.workspace.content.project.id(),
+                subject,
+                state.symbol_pin_check_inputs(subject)?,
+            )),
             Self::Dispatch => {
-                let (root, revision, closure) = state.configured_topology_revision();
+                let (root, revision, closure) = scope.configured_topology();
                 digest_of(&(
                     state.workspace.content.project.id(),
                     state.workspace.content.project.revision().get(),
@@ -361,6 +548,13 @@ impl DiagnosticInputs {
                     revision,
                     closure,
                     state.active_plan_revision(),
+                    // The report these findings were published from. Every
+                    // edit to a simulation input — plan, models, technology,
+                    // bindings, solver options — invalidates it at its own
+                    // commit boundary, and so does dispatching the run it
+                    // authorized. Once it is gone its findings describe a
+                    // pass nobody can act on, so they read stale with it.
+                    state.workbench.preflight.report.is_some(),
                 ))
             }
             Self::Run { run_sequence } => {
@@ -370,16 +564,86 @@ impl DiagnosticInputs {
                     .runs
                     .iter()
                     .any(|run| run.id == *run_sequence);
-                digest_of(&(
-                    state.workspace.content.project.id(),
-                    run_sequence,
-                    retained,
-                    // A failure names conductors and devices; an edited
-                    // drawing is no longer the one those names were read off.
-                    state.schematic.topology_version(),
-                ))
+                dispatched_setup_digest(scope, &(run_sequence, retained))
             }
+            // A refused member is decided as a member that ran is: against
+            // the design and setup it was to solve.
+            Self::CampaignMember {
+                campaign,
+                member_index,
+            } => dispatched_setup_digest(scope, &(campaign, member_index)),
         }
+    }
+}
+
+/// The configured design and solver setup a run is solved against, for the
+/// run or campaign member `identity` names.
+///
+/// A failure names conductors and devices; an edited design is no longer the
+/// one those names were read off. The design is the configured one — not
+/// whichever view the reader happens to have open, which staled a failure on
+/// opening another view and un-staled it on coming back — and it is its
+/// content: a value edit is the commonest repair for a run that would not
+/// converge, and the topology counter ignores it. The solver setup is the
+/// run's other input, and the other repair.
+fn dispatched_setup_digest(
+    scope: &DigestScope<'_>,
+    identity: &impl serde::Serialize,
+) -> Result<ContentDigest, String> {
+    let state = scope.state;
+    digest_of(&(
+        state.workspace.content.project.id(),
+        identity,
+        state.workspace.content.simulation_root_reference().key(),
+        scope.configured_content()?,
+        state.active_plan_revision(),
+        state.sim_setup.options.to_spice_options(),
+        format!("{:?}", state.sim_setup.reference_pvt.process),
+        state.sim_setup.reference_pvt.temperature_celsius.to_bits(),
+        state.model_library_manager.design_inspection_catalog_key(),
+    ))
+}
+
+/// The configured root, its revision, and the topology version of every cell
+/// view it instantiates.
+type ConfiguredTopology = (String, u64, Vec<(String, u64)>);
+
+/// The content digest of every cell view the configured design is made of,
+/// or why it cannot be read.
+type ConfiguredContent = Result<Vec<(String, ContentDigest)>, String>;
+
+/// The live state digests are taken against, for one reading of the store.
+///
+/// Each reading of the configured design walks the configured hierarchy, and
+/// every run batch reads the design's content — a campaign stands one batch
+/// per member — so each reading is taken once per scope and shared, never
+/// across scopes: a scope lives for one reading of the store and sees one
+/// state.
+struct DigestScope<'a> {
+    state: &'a AppState,
+    topology: std::cell::OnceCell<ConfiguredTopology>,
+    content: std::cell::OnceCell<ConfiguredContent>,
+}
+
+impl<'a> DigestScope<'a> {
+    fn new(state: &'a AppState) -> Self {
+        Self {
+            state,
+            topology: std::cell::OnceCell::new(),
+            content: std::cell::OnceCell::new(),
+        }
+    }
+
+    fn configured_topology(&self) -> &ConfiguredTopology {
+        self.topology
+            .get_or_init(|| self.state.configured_topology_revision())
+    }
+
+    fn configured_content(&self) -> Result<&[(String, ContentDigest)], String> {
+        self.content
+            .get_or_init(|| self.state.configured_design_content())
+            .as_deref()
+            .map_err(Clone::clone)
     }
 }
 
@@ -451,10 +715,56 @@ pub(crate) struct DiagnosticStore {
     /// An identity rather than an index, because every ordering here is a
     /// presentation choice: the grid sorts, filters and groups, the tour walks
     /// worst-severity-first, and an index means something different in each.
-    /// It also needs no invalidation — a finding that leaves the store stops
-    /// being current because nothing resolves it any more, which is what the
-    /// index could not do when a batch was republished under it.
+    /// A finding that leaves the store stops being current because nothing
+    /// resolves it any more, which is what the index could not do when a
+    /// batch was republished under it.
     current: Option<uuid::Uuid>,
+    /// What the current finding is about, captured while a record of it was
+    /// in reach.
+    ///
+    /// Identities are structural, so a re-check names an unchanged finding
+    /// exactly as before and this is not consulted. It is what carries the
+    /// selection across the republications that do re-mint: an occurrence
+    /// index that moved because an identical finding before it was fixed,
+    /// and a run outcome superseded by the next run's outcome for the same
+    /// analysis.
+    current_key: Option<FindingKey>,
+    /// Where the current finding was last seen among the source editors'
+    /// findings, when it is one of theirs.
+    source_anchor: Option<current::SourceAnchor>,
+    /// A current finding a search of the source editors' findings could
+    /// neither resolve nor re-anchor, and the collections it searched. The
+    /// search is not repeated until one of them changes.
+    unresolved: Option<(uuid::Uuid, current::SourceFingerprint)>,
+    /// The digest each retained run's outcome is decided against, taken when
+    /// the run was dispatched. A batch is opened only once the run fails
+    /// something, so a run that fails nothing costs the list nothing.
+    run_baselines: BTreeMap<u64, ContentDigest>,
+    /// Moves on every publication and withdrawal, so a memo taken over the
+    /// store's batches can tell it is describing a different store.
+    generation: u64,
+    /// What the current rendering pass decided about the list.
+    pass_memo: PassMemoCell,
+}
+
+/// The list's standings and counts for one rendering pass.
+///
+/// Behind a lock because every surface that reads the list holds the session
+/// immutably while it draws. A clone starts empty: a memo describes the store
+/// it was taken from, not a copy of it.
+#[derive(Default)]
+struct PassMemoCell(std::sync::Mutex<Option<listing::PassMemo>>);
+
+impl Clone for PassMemoCell {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl std::fmt::Debug for PassMemoCell {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("PassMemoCell")
+    }
 }
 
 impl DiagnosticStore {
@@ -462,6 +772,70 @@ impl DiagnosticStore {
         &self,
     ) -> impl Iterator<Item = &DiagnosticBatch> + Clone + '_ {
         self.batches.values()
+    }
+
+    /// The batch published for `inputs`, found the way the store files it.
+    pub(in crate::workbench) fn batch(
+        &self,
+        inputs: &DiagnosticInputs,
+    ) -> Option<&DiagnosticBatch> {
+        self.batches.get(&inputs.key())
+    }
+
+    const fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// The memo the given pass took over this generation of the store, if
+    /// one was taken.
+    fn pass_memo(&self, pass: u64, generation: u64) -> Option<listing::PassMemo> {
+        let memo = self
+            .pass_memo
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        memo.as_ref()
+            .filter(|memo| memo.pass == pass && memo.generation == generation)
+            .cloned()
+    }
+
+    fn remember_pass(&self, memo: listing::PassMemo) {
+        *self
+            .pass_memo
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(memo);
+    }
+
+    /// What the store holds for one run's failures, as (subject, message),
+    /// for the controller's tests: the controller sits below the shell and
+    /// cannot name a batch.
+    #[cfg(test)]
+    pub(crate) fn published_run_failures(&self, run_sequence: u64) -> Vec<(String, String)> {
+        self.batches
+            .values()
+            .filter(|batch| batch.inputs == DiagnosticInputs::Run { run_sequence })
+            .flat_map(|batch| batch.records.iter())
+            .map(|record| (record.subject.object.clone(), record.message.clone()))
+            .collect()
+    }
+
+    /// The campaign members the store holds as refused, as (the place each
+    /// stands in, subject, message), for the controller's tests.
+    #[cfg(test)]
+    pub(crate) fn published_member_refusals(&self) -> Vec<(String, String, String)> {
+        self.batches
+            .values()
+            .filter(|batch| matches!(batch.inputs, DiagnosticInputs::CampaignMember { .. }))
+            .flat_map(|batch| batch.records.iter())
+            .map(|record| {
+                (
+                    record.key.document.to_string(),
+                    record.subject.object.clone(),
+                    record.message.clone(),
+                )
+            })
+            .collect()
     }
 
     pub(in crate::workbench) fn request_route(&mut self, route: DiagnosticRoute) {
@@ -490,7 +864,54 @@ impl DiagnosticStore {
     /// something resolves it, which every reader of it does by looking the
     /// identity up in the list it is drawing.
     pub(crate) fn set_current_finding(&mut self, finding: Option<uuid::Uuid>) {
+        if finding == self.current {
+            return;
+        }
         self.current = finding;
+        self.current_key = finding
+            .and_then(|id| self.record(id))
+            .map(|record| record.key.clone());
+        self.source_anchor = None;
+        self.unresolved = None;
+    }
+
+    /// The record a held identity names, where this store holds it.
+    fn record(&self, id: uuid::Uuid) -> Option<&DiagnosticRecord> {
+        let batch = self.batches.get(self.owners.get(&id)?)?;
+        batch
+            .records
+            .iter()
+            .find(|record| record.canonical.diagnostic_id == id)
+    }
+
+    /// Remember what the current finding is about while a record of it is
+    /// still held, before a republication or a withdrawal takes it away.
+    fn capture_current_key(&mut self) {
+        if let Some(record) = self.current.and_then(|id| self.record(id)) {
+            self.current_key = Some(record.key.clone());
+        }
+    }
+
+    /// Stand on the same finding again after a republication re-minted it.
+    ///
+    /// Only when the held identity no longer resolves: a finding still in
+    /// the store is still the current one, whatever else moved.
+    fn reanchor_current(&mut self) {
+        let (Some(current), Some(key)) = (self.current, self.current_key.as_ref()) else {
+            return;
+        };
+        if self.owners.contains_key(&current) {
+            return;
+        }
+        let found = self
+            .batches
+            .values()
+            .flat_map(|batch| batch.records.iter())
+            .find(|record| record.key == *key)
+            .map(|record| record.canonical.diagnostic_id);
+        if found.is_some() {
+            self.current = found;
+        }
     }
 
     pub(in crate::workbench) fn clear(&mut self) {
@@ -498,6 +919,11 @@ impl DiagnosticStore {
         self.owners.clear();
         self.pending_route = None;
         self.current = None;
+        self.current_key = None;
+        self.source_anchor = None;
+        self.unresolved = None;
+        self.run_baselines.clear();
+        self.generation = self.generation.wrapping_add(1);
     }
 
     /// Replace a batch, and with it every identity the old one held.
@@ -511,6 +937,7 @@ impl DiagnosticStore {
         inputs: DiagnosticInputs,
         records: Vec<DiagnosticRecord>,
     ) -> Result<(), String> {
+        self.capture_current_key();
         let key = inputs.key();
         let replaced = self.batches.remove(&key);
         if let Some(replaced) = &replaced {
@@ -551,11 +978,15 @@ impl DiagnosticStore {
                 records,
             },
         );
+        self.generation = self.generation.wrapping_add(1);
+        self.reanchor_current();
         Ok(())
     }
 
     fn remove(&mut self, inputs: &DiagnosticInputs) {
+        self.capture_current_key();
         if let Some(removed) = self.batches.remove(&inputs.key()) {
+            self.generation = self.generation.wrapping_add(1);
             for record in &removed.records {
                 self.owners.remove(&record.canonical.diagnostic_id);
             }
@@ -574,7 +1005,7 @@ impl AppState {
         inputs: DiagnosticInputs,
         records: Vec<DiagnosticRecord>,
     ) -> Result<(), String> {
-        let digest = inputs.digest(self)?;
+        let digest = inputs.digest(&DigestScope::new(self))?;
         self.diagnostics.insert(digest, inputs, records)
     }
 
@@ -584,16 +1015,119 @@ impl AppState {
         self.diagnostics.remove(inputs);
     }
 
+    /// Withdraw the run outcomes a newly dispatched run supersedes.
+    ///
+    /// A run is a new measurement of the design as it now stands, so the
+    /// failures an earlier run reported stop standing the moment the next one
+    /// is dispatched — the way a simulator's run log starts over. Waiting for
+    /// the new run to finish instead would leave the earlier failure current
+    /// beside the new run's own failure of the same analysis, and both cannot
+    /// stand: they are one condition with one identity. A run that is
+    /// cancelled before it reports anything does not bring the earlier
+    /// failure back; that failure is still in the Console and in the earlier
+    /// run's own record.
+    ///
+    /// Members of one campaign do not supersede each other. They are
+    /// dispatched one after another, but each measures its own configuration,
+    /// and a campaign's outcome is all of them — the members that were
+    /// refused before they became runs included.
+    pub(crate) fn supersede_run_diagnostics(&mut self, dispatched: u64) {
+        let campaign = self.run_campaign(dispatched);
+        self.supersede_run_outcomes(Some(dispatched), campaign);
+    }
+
+    /// Withdraw every run outcome except the dispatched run's own and, inside
+    /// a campaign, the outcomes of that campaign's other members.
+    ///
+    /// A campaign member refused before it became a run is an attempt to
+    /// measure the design all the same, so it supersedes what earlier runs
+    /// reported exactly as a dispatched member does — and a campaign whose
+    /// every member is refused still replaces the last campaign's refusals
+    /// rather than standing beside them under the same identities.
+    fn supersede_run_outcomes(
+        &mut self,
+        dispatched: Option<u64>,
+        campaign: Option<crate::product::SimulationCampaignId>,
+    ) {
+        let superseded: Vec<DiagnosticInputs> = self
+            .diagnostics
+            .batches()
+            .filter(|batch| match batch.inputs {
+                DiagnosticInputs::Run { run_sequence } => {
+                    Some(run_sequence) != dispatched
+                        && (campaign.is_none() || self.run_campaign(run_sequence) != campaign)
+                }
+                DiagnosticInputs::CampaignMember {
+                    campaign: member_campaign,
+                    ..
+                } => campaign != Some(member_campaign),
+                DiagnosticInputs::DesignCheck { .. }
+                | DiagnosticInputs::SymbolPins { .. }
+                | DiagnosticInputs::Dispatch => false,
+            })
+            .map(|batch| batch.inputs.clone())
+            .collect();
+        for inputs in &superseded {
+            self.withdraw_diagnostics(inputs);
+        }
+        self.withdraw_retired_run_diagnostics();
+    }
+
+    /// Withdraw the outcomes of every run this session no longer retains.
+    ///
+    /// A pruned, deleted or cleared run has no outcome left to state: its
+    /// dataset is gone and its failure cannot be opened. Removing a run is
+    /// spread over the simulation state, so this is asked at the frame
+    /// boundary as well as wherever the shell itself retires a run. A refused
+    /// campaign member never had a run to retire; it stands until a later
+    /// measurement supersedes it.
+    pub(crate) fn withdraw_retired_run_diagnostics(&mut self) {
+        let retired: Vec<DiagnosticInputs> = self
+            .diagnostics
+            .batches()
+            .filter(|batch| match batch.inputs {
+                DiagnosticInputs::Run { run_sequence } => self
+                    .simulation
+                    .retained
+                    .runs
+                    .iter()
+                    .all(|run| run.id != run_sequence),
+                DiagnosticInputs::DesignCheck { .. }
+                | DiagnosticInputs::SymbolPins { .. }
+                | DiagnosticInputs::Dispatch
+                | DiagnosticInputs::CampaignMember { .. } => false,
+            })
+            .map(|batch| batch.inputs.clone())
+            .collect();
+        for inputs in &retired {
+            self.withdraw_diagnostics(inputs);
+        }
+    }
+
+    /// The campaign a retained run belongs to, if it belongs to one.
+    fn run_campaign(&self, run_sequence: u64) -> Option<crate::product::SimulationCampaignId> {
+        self.simulation
+            .retained
+            .run_by_sequence(run_sequence)
+            .and_then(|run| run.campaign_membership())
+            .map(|membership| membership.campaign_id())
+    }
+
     /// Where one published batch stands against the live design.
     pub(in crate::workbench) fn diagnostic_batch_standing(
         &self,
         batch: &DiagnosticBatch,
     ) -> BatchStanding {
-        match batch.inputs.digest(self) {
-            Ok(digest) if digest == batch.input_digest => BatchStanding::Current,
-            Ok(_) => BatchStanding::Stale,
-            Err(reason) => BatchStanding::Unavailable(reason),
-        }
+        batch_standing(batch, &DigestScope::new(self))
+    }
+}
+
+/// Where one published batch stands, digested within one scope.
+fn batch_standing(batch: &DiagnosticBatch, scope: &DigestScope<'_>) -> BatchStanding {
+    match batch.inputs.digest(scope) {
+        Ok(digest) if digest == batch.input_digest => BatchStanding::Current,
+        Ok(_) => BatchStanding::Stale,
+        Err(reason) => BatchStanding::Unavailable(reason),
     }
 }
 
@@ -605,9 +1139,28 @@ impl AppState {
 pub(in crate::workbench) fn design_rule_code(
     violation_type: rspice_design::drc::DrcViolationType,
 ) -> String {
+    format!("DRC-{}", screaming_variant(violation_type))
+}
+
+/// The stable rule code for a symbol pin finding.
+///
+/// `SymbolUnplacedPin` becomes `SYMBOL-UNPLACED-PIN`. Derived from the variant
+/// exactly as [`design_rule_code`] is, and without its `DRC-` family: a
+/// symbol's pin contract is not one of a schematic's electrical rules, and a
+/// reader filtering the page by code is entitled to that distinction.
+pub(in crate::workbench) fn symbol_pin_rule_code(
+    violation_type: rspice_design::drc::DrcViolationType,
+) -> String {
+    screaming_variant(violation_type)
+}
+
+/// `FloatingNode` becomes `FLOATING-NODE`.
+///
+/// One derivation for every family, so two codes for one rule cannot drift
+/// apart on the word the rule is named by.
+fn screaming_variant(violation_type: rspice_design::drc::DrcViolationType) -> String {
     let variant = format!("{violation_type:?}");
     let mut code = String::with_capacity(variant.len() + 8);
-    code.push_str("DRC-");
     for (index, character) in variant.char_indices() {
         if character.is_ascii_uppercase() && index > 0 {
             code.push('-');
@@ -621,12 +1174,6 @@ pub(in crate::workbench) fn design_rule_code(
 mod tests {
     use super::*;
 
-    fn completed_result() -> rspice_design::drc::DrcResult {
-        let mut result = rspice_design::drc::DrcResult::new();
-        result.completed = true;
-        result
-    }
-
     #[test]
     fn a_rule_code_is_derived_from_its_variant() {
         use rspice_design::drc::DrcViolationType;
@@ -638,37 +1185,130 @@ mod tests {
             design_rule_code(DrcViolationType::ShortedOutputs),
             "DRC-SHORTED-OUTPUTS"
         );
+        assert_eq!(
+            symbol_pin_rule_code(DrcViolationType::SymbolUnplacedPin),
+            "SYMBOL-UNPLACED-PIN",
+            "a symbol's pin contract is not one of a schematic's rules",
+        );
     }
 
-    /// Currency is the digest and nothing else, for every producer.
-    #[test]
-    fn an_input_change_stales_a_published_batch() {
-        let mut state = AppState::default();
-        state
-            .publish_active_design_check_result(completed_result())
-            .expect("the fixture publishes a receipt");
-        let inputs = DiagnosticInputs::DesignCheck {
-            subject: state.workspace.content.active_schematic_reference(),
+    /// A symbol view whose pins the checks can read: `work/amp/symbol`, with
+    /// one pin, beside a schematic that declares the matching port.
+    fn open_symbol_view(state: &mut AppState) -> crate::state::CellViewRef {
+        use crate::state::{
+            Cell, CellViewRef, ComponentType, Library, Point, PortDirection, SchematicState,
+            SymbolDocument, SymbolPin, View, ViewType,
         };
-        state
-            .publish_diagnostics(inputs.clone(), Vec::new())
-            .expect("an empty batch still records that the checks ran");
 
-        let batch = state
-            .diagnostics
-            .batches()
-            .find(|batch| batch.inputs == inputs)
-            .expect("the batch was just published")
-            .clone();
-        assert!(state.diagnostic_batch_standing(&batch).is_current());
-
-        state.workspace.content.connectivity.policy.width_mismatch =
-            crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
-
-        assert_eq!(
-            state.diagnostic_batch_standing(&batch),
-            BatchStanding::Stale,
+        let mut library = Library::new("work");
+        let mut amp = Cell::new("amp");
+        amp.add_view(View::new("schematic", ViewType::Schematic));
+        amp.add_view(View::new("symbol", ViewType::Symbol));
+        library.add_cell(amp);
+        state.library_manager.add_library(library);
+        let mut schematic = SchematicState::default();
+        let port = schematic.add_component(ComponentType::Port, Point::new(0, 0));
+        schematic
+            .document_mut_for_test()
+            .components
+            .iter_mut()
+            .find(|component| component.id == port)
+            .expect("the fixture just placed this port")
+            .value = "IN".to_owned();
+        state.workspace.insert_schematic_editor(
+            CellViewRef::new("work", "amp", "schematic").key(),
+            schematic,
         );
+        let symbol = CellViewRef::new("work", "amp", "symbol");
+        state.open_workspace_view(symbol.clone());
+        state
+            .store_active_symbol_document(&SymbolDocument {
+                pins: vec![SymbolPin::new("IN", PortDirection::In, None)],
+                ..SymbolDocument::default()
+            })
+            .expect("the fixture stores its symbol");
+        symbol
+    }
+
+    /// Currency is the digest and nothing else, for every producer: each
+    /// owner's batch is current as published, and stale once an input its
+    /// digest covers moves. Walks every owner, so a new one cannot be added
+    /// without saying here what stales it.
+    #[test]
+    fn an_input_change_stales_a_published_batch_for_every_owner() {
+        for owner in DiagnosticOwner::ALL {
+            let mut state = AppState::default();
+            let inputs = match owner {
+                DiagnosticOwner::DesignRules => DiagnosticInputs::DesignCheck {
+                    subject: state.workspace.content.active_schematic_reference(),
+                },
+                DiagnosticOwner::SymbolPins => DiagnosticInputs::SymbolPins {
+                    subject: open_symbol_view(&mut state),
+                },
+                DiagnosticOwner::Dispatch => DiagnosticInputs::Dispatch,
+                DiagnosticOwner::Run => {
+                    state.simulation.retained.runs =
+                        vec![crate::state::SimulationRun::new(3)].into();
+                    DiagnosticInputs::Run { run_sequence: 3 }
+                }
+            };
+            state
+                .publish_diagnostics(inputs.clone(), Vec::new())
+                .expect("an empty batch still records that the checks ran");
+            let batch = state
+                .diagnostics
+                .batches()
+                .find(|batch| batch.inputs == inputs)
+                .expect("the batch was just published")
+                .clone();
+            assert!(
+                state.diagnostic_batch_standing(&batch).is_current(),
+                "{owner:?} is current as published"
+            );
+
+            match owner {
+                DiagnosticOwner::DesignRules => {
+                    state.workspace.content.connectivity.policy.width_mismatch =
+                        crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+                }
+                DiagnosticOwner::SymbolPins => {
+                    // The artwork the pins are drawn on.
+                    let mut symbol = state
+                        .load_active_symbol_document()
+                        .expect("the fixture symbol loads");
+                    symbol.pins.push(crate::state::SymbolPin::new(
+                        "OUT",
+                        crate::state::PortDirection::Out,
+                        None,
+                    ));
+                    state
+                        .store_active_symbol_document(&symbol)
+                        .expect("the edited symbol stores");
+                }
+                DiagnosticOwner::Dispatch => {
+                    let plan = state
+                        .sim_setup
+                        .stable_analysis_plan_mut()
+                        .expect("the fixture owns a stable plan");
+                    let instance = plan.instances()[0].id();
+                    plan.edit(instance, |_| ())
+                        .expect("an analysis edit advances the plan revision");
+                }
+                DiagnosticOwner::Run => {
+                    // The configured design the failure's names were read off.
+                    state.schematic.add_component(
+                        crate::state::ComponentType::Resistor,
+                        crate::state::Point::new(0, 0),
+                    );
+                }
+            }
+
+            assert_eq!(
+                state.diagnostic_batch_standing(&batch),
+                BatchStanding::Stale,
+                "{owner:?} stales when an input it was derived from moves"
+            );
+        }
     }
 
     fn test_record(state: &AppState, message: &str) -> DiagnosticRecord {
@@ -702,6 +1342,357 @@ mod tests {
             .publish_diagnostics(DiagnosticInputs::Dispatch, vec![record])
             .expect("republishing the same finding is not a collision");
         assert_eq!(state.diagnostics.batches().count(), 1);
+    }
+
+    fn run_batches(state: &AppState) -> Vec<u64> {
+        state
+            .diagnostics
+            .batches()
+            .filter_map(|batch| match batch.inputs {
+                DiagnosticInputs::Run { run_sequence } => Some(run_sequence),
+                DiagnosticInputs::DesignCheck { .. }
+                | DiagnosticInputs::SymbolPins { .. }
+                | DiagnosticInputs::Dispatch
+                | DiagnosticInputs::CampaignMember { .. } => None,
+            })
+            .collect()
+    }
+
+    /// The next run supersedes the last one's outcome. Nothing withdrew a
+    /// failed run's batch before, so after a re-run that succeeded the status
+    /// bar went on saying "Problems · 1 error", current, forever.
+    #[test]
+    fn a_dispatched_run_supersedes_the_failures_earlier_runs_reported() {
+        let mut state = AppState::default();
+        state.simulation.retained.runs = vec![
+            crate::state::SimulationRun::new(1),
+            crate::state::SimulationRun::new(2),
+        ]
+        .into();
+        state.publish_run_failure("Transient", "Analysis failed: tran", None, 1);
+        assert_eq!(run_batches(&state), [1]);
+        let failed = state
+            .diagnostics
+            .batches()
+            .flat_map(|batch| batch.records.iter())
+            .map(|record| record.canonical.diagnostic_id)
+            .next()
+            .expect("the failure is published");
+        state.diagnostics.set_current_finding(Some(failed));
+
+        state.supersede_run_diagnostics(2);
+        assert!(
+            run_batches(&state).is_empty(),
+            "the earlier run's failure stops standing when the next run is dispatched"
+        );
+
+        // The next run fails the same way: the same condition, standing
+        // again, under the same identity — and still the current finding.
+        state.publish_run_failure("Transient", "Analysis failed: tran again", None, 2);
+        assert_eq!(run_batches(&state), [2]);
+        assert_eq!(state.diagnostics.current_finding(), Some(failed));
+        let republished = state
+            .diagnostics
+            .batches()
+            .flat_map(|batch| batch.records.iter())
+            .map(|record| record.canonical.diagnostic_id)
+            .next();
+        assert_eq!(republished, Some(failed));
+    }
+
+    /// A run with nothing retained has no outcome left to state.
+    #[test]
+    fn a_retired_run_takes_its_failure_with_it() {
+        let mut state = AppState::default();
+        state.simulation.retained.runs = vec![crate::state::SimulationRun::new(4)].into();
+        state.publish_run_failure("Transient", "Analysis failed: tran", None, 4);
+        state.withdraw_retired_run_diagnostics();
+        assert_eq!(run_batches(&state), [4], "a retained run's failure stands");
+
+        state.simulation.clear_runs();
+        state.withdraw_retired_run_diagnostics();
+        assert!(run_batches(&state).is_empty());
+    }
+
+    /// A campaign member refused at authorization is a finding about that
+    /// member, filed where its failures would have been had it run. It
+    /// supersedes what an earlier run reported, stands beside the members of
+    /// its own campaign, goes stale with the design, and gives way to the
+    /// next run outside the campaign. It used to reach only the Console.
+    #[test]
+    fn a_member_refused_at_authorization_stands_until_a_later_run_supersedes_it() {
+        use crate::simulation::controller::CampaignMemberRefusal;
+
+        let mut state = AppState::default();
+        let campaign = crate::product::SimulationCampaignId::new();
+        let mut sibling = crate::state::SimulationRun::new(5);
+        sibling
+            .set_campaign_membership(
+                crate::state::SimulationCampaignMembership::new(campaign, "Nightly", 2, 2)
+                    .expect("the fixture membership is valid"),
+            )
+            .expect("a fresh run joins its campaign");
+        state.simulation.retained.runs = vec![
+            crate::state::SimulationRun::new(4),
+            sibling,
+            crate::state::SimulationRun::new(6),
+        ]
+        .into();
+        state.publish_run_failure("Transient", "Analysis failed: tran", None, 4);
+
+        state.publish_campaign_member_refusal(
+            campaign,
+            1,
+            "Slow corner",
+            CampaignMemberRefusal::Authorization,
+            "could not authorize member: permit generation exhausted",
+        );
+        assert_eq!(
+            state.diagnostics.published_member_refusals(),
+            [(
+                "simulation-run/member-1".to_owned(),
+                "Slow corner · campaign member 1".to_owned(),
+                "The member could not be authorized: could not authorize member: permit \
+                 generation exhausted"
+                    .to_owned(),
+            )],
+        );
+        assert!(
+            run_batches(&state).is_empty(),
+            "the campaign supersedes the outcome an earlier run reported"
+        );
+        let refusal = state
+            .diagnostics
+            .batches()
+            .find(|batch| matches!(batch.inputs, DiagnosticInputs::CampaignMember { .. }))
+            .expect("the refusal is filed")
+            .clone();
+        assert_eq!(refusal.records[0].level, DiagnosticLevel::Error);
+        assert_eq!(&*refusal.records[0].key.code, "RUN-MEMBER-UNAUTHORIZED");
+        assert!(state.diagnostic_batch_standing(&refusal).is_current());
+
+        // The campaign's next member is dispatched beside it.
+        state.supersede_run_diagnostics(5);
+        assert_eq!(
+            state.diagnostics.published_member_refusals().len(),
+            1,
+            "members of one campaign do not supersede each other"
+        );
+
+        // An edit to the configured design stales it, as it stales a run.
+        state.schematic.add_component(
+            crate::state::ComponentType::Resistor,
+            crate::state::Point::new(0, 0),
+        );
+        assert_eq!(
+            state.diagnostic_batch_standing(&refusal),
+            BatchStanding::Stale
+        );
+
+        // The next run outside the campaign is a new measurement.
+        state.supersede_run_diagnostics(6);
+        assert!(state.diagnostics.published_member_refusals().is_empty());
+    }
+
+    /// A campaign run again whose member is refused again replaces the last
+    /// refusal of that member, under the same identity, rather than being
+    /// refused as a second finding with it.
+    #[test]
+    fn a_rerun_campaign_replaces_the_refusal_of_the_same_member() {
+        use crate::simulation::controller::CampaignMemberRefusal;
+
+        let mut state = AppState::default();
+        let refuse = |state: &mut AppState, campaign| {
+            state.publish_campaign_member_refusal(
+                campaign,
+                2,
+                "Slow corner",
+                CampaignMemberRefusal::Start,
+                "run sequence is exhausted",
+            );
+        };
+        refuse(&mut state, crate::product::SimulationCampaignId::new());
+        let first = state
+            .diagnostics
+            .batches()
+            .flat_map(|batch| batch.records.iter())
+            .map(|record| record.canonical.diagnostic_id)
+            .next()
+            .expect("the refusal is filed");
+        state.diagnostics.set_current_finding(Some(first));
+        let entries_before = state.log_buffer.entries().count();
+
+        refuse(&mut state, crate::product::SimulationCampaignId::new());
+
+        assert_eq!(state.diagnostics.batches().count(), 1);
+        assert_eq!(state.diagnostics.current_finding(), Some(first));
+        assert_eq!(
+            state.log_buffer.entries().count(),
+            entries_before,
+            "the store refused nothing"
+        );
+    }
+
+    /// A run failure names conductors in the configured design. Opening
+    /// another cell view moves nothing it was read off.
+    #[test]
+    fn a_run_failure_stays_current_while_another_view_is_open() {
+        let mut state = AppState::default();
+        state.simulation.retained.runs = vec![crate::state::SimulationRun::new(5)].into();
+        state.publish_run_failure("Transient", "Analysis failed: tran", None, 5);
+        let batch = state
+            .diagnostics
+            .batches()
+            .next()
+            .expect("the failure is published")
+            .clone();
+        assert!(state.diagnostic_batch_standing(&batch).is_current());
+
+        let root = state.workspace.content.active_view.clone();
+        state
+            .workspace
+            .insert_schematic_editor(root.key(), state.schematic.clone());
+        state.workspace.content.active_view =
+            crate::state::CellViewRef::new(&root.library, "elsewhere", &root.view);
+        state.schematic = crate::state::SchematicState::default();
+        state.schematic.add_component(
+            crate::state::ComponentType::Resistor,
+            crate::state::Point::new(0, 0),
+        );
+
+        assert!(
+            state.diagnostic_batch_standing(&batch).is_current(),
+            "the open view is not the design the run executed"
+        );
+    }
+
+    fn run_batch(state: &AppState, run_sequence: u64) -> DiagnosticBatch {
+        state
+            .diagnostics
+            .batch(&DiagnosticInputs::Run { run_sequence })
+            .expect("the run's outcome is published")
+            .clone()
+    }
+
+    /// A value edit is the commonest repair for a run that would not converge,
+    /// and the topology counter ignores it.
+    #[test]
+    fn a_value_edit_stales_a_run_failure() {
+        let mut state = AppState::default();
+        state.simulation.retained.runs = vec![crate::state::SimulationRun::new(6)].into();
+        state.schematic.add_component(
+            crate::state::ComponentType::Resistor,
+            crate::state::Point::new(0, 0),
+        );
+        state.publish_run_failure("Transient", "Analysis failed: tran", None, 6);
+        assert!(
+            state
+                .diagnostic_batch_standing(&run_batch(&state, 6))
+                .is_current()
+        );
+
+        state.schematic.document_mut_for_test().components[0].value = "10k".to_owned();
+
+        assert_eq!(
+            state.diagnostic_batch_standing(&run_batch(&state, 6)),
+            BatchStanding::Stale,
+        );
+    }
+
+    /// A failure is about the design the run was dispatched with. An edit
+    /// made while it solved is not what it solved, and must not become the
+    /// baseline the failure is decided against.
+    #[test]
+    fn a_failure_is_decided_against_the_design_that_was_dispatched() {
+        let mut state = AppState::default();
+        state.simulation.retained.runs = vec![crate::state::SimulationRun::new(7)].into();
+        state.schematic.add_component(
+            crate::state::ComponentType::Resistor,
+            crate::state::Point::new(0, 0),
+        );
+        state.open_run_outcome(7);
+        assert!(
+            state
+                .diagnostics
+                .batch(&DiagnosticInputs::Run { run_sequence: 7 })
+                .is_none(),
+            "a run that has failed nothing has nothing to list"
+        );
+
+        state.schematic.document_mut_for_test().components[0].value = "10k".to_owned();
+        state.publish_run_failure("Transient", "Analysis failed: tran", None, 7);
+        state.publish_run_failure("Operating point", "Analysis failed: op", None, 7);
+
+        let batch = run_batch(&state, 7);
+        assert_eq!(batch.records.len(), 2);
+        assert_eq!(
+            state.diagnostic_batch_standing(&batch),
+            BatchStanding::Stale,
+            "the design was edited after the run was dispatched"
+        );
+    }
+
+    /// The store lists runs in the order they were made.
+    ///
+    /// Two runs' outcomes stand together only where neither supersedes the
+    /// other, and a failure of one analysis in two plain runs is one condition
+    /// under one identity — so the two runs here fail different analyses.
+    #[test]
+    fn run_ten_is_filed_after_run_nine() {
+        let mut state = AppState::default();
+        state.simulation.retained.runs = vec![
+            crate::state::SimulationRun::new(9),
+            crate::state::SimulationRun::new(10),
+        ]
+        .into();
+        state.publish_run_failure("Transient", "Analysis failed: tran", None, 10);
+        state.publish_run_failure("Operating point", "Analysis failed: op", None, 9);
+        assert_eq!(run_batches(&state), [9, 10]);
+    }
+
+    /// A failure of one analysis in two plain runs is one condition, and the
+    /// later run's outcome supersedes the earlier one's at dispatch. Were the
+    /// earlier batch still standing, the second would be refused rather than
+    /// listed twice.
+    #[test]
+    fn one_analysis_failing_in_two_plain_runs_is_one_condition() {
+        let mut state = AppState::default();
+        state.simulation.retained.runs = vec![
+            crate::state::SimulationRun::new(9),
+            crate::state::SimulationRun::new(10),
+        ]
+        .into();
+        state.publish_run_failure("Transient", "Analysis failed: tran", None, 9);
+        state.supersede_run_diagnostics(10);
+        state.open_run_outcome(10);
+        state.publish_run_failure("Transient", "Analysis failed: tran", None, 10);
+        assert_eq!(run_batches(&state), [10]);
+    }
+
+    /// Receipts are filed under a cell view's canonical key; the batches they
+    /// describe must be too, or one view checked under two spellings lists
+    /// every finding twice.
+    #[test]
+    fn two_spellings_of_one_cell_view_are_one_batch() {
+        let mut state = AppState::default();
+        let subject = state.workspace.content.active_schematic_reference();
+        let respelled = crate::state::CellViewRef::new(
+            subject.library.to_uppercase(),
+            subject.cell.to_uppercase(),
+            &subject.view,
+        );
+        for subject in [subject, respelled.clone()] {
+            state
+                .publish_diagnostics(DiagnosticInputs::DesignCheck { subject }, Vec::new())
+                .expect("the design-check digest is available");
+        }
+        assert_eq!(state.diagnostics.batches().count(), 1);
+        assert!(
+            state
+                .diagnostics
+                .batch(&DiagnosticInputs::DesignCheck { subject: respelled })
+                .is_some()
+        );
     }
 
     /// Two conditions that mint one identity would shadow each other, so the

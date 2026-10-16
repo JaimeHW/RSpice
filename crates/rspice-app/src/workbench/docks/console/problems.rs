@@ -481,6 +481,9 @@ fn empty_state(reason: &EmptyReason) -> String {
             "Nothing has been checked. Run the checks to list what they find.".to_owned()
         }
         EmptyReason::Unavailable(reason) => format!("The checks cannot run: {reason}"),
+        EmptyReason::OutOfDate => {
+            "No findings when last checked. The design has changed since.".to_owned()
+        }
         EmptyReason::NoFindings => "No findings.".to_owned(),
     }
 }

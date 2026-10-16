@@ -2396,6 +2396,24 @@ pub struct NetlistDocumentState {
 }
 
 impl NetlistDocumentState {
+    /// The buffer revision the findings this editor holds were validated
+    /// against, or `None` where they are no validation: nothing has been
+    /// parsed yet, or the comparison is showing, for which the editor clears
+    /// its findings without parsing anything.
+    pub(crate) fn validated_revision(&self) -> Option<u64> {
+        if self.active_document == ActiveNetlistDocument::GeneratedDiff {
+            return None;
+        }
+        self.diag_revision
+    }
+
+    /// Record a settled parse of `revision`, as the editor does once it has
+    /// validated the buffer.
+    #[cfg(test)]
+    pub(crate) fn mark_validated_for_test(&mut self, revision: u64) {
+        self.diag_revision = Some(revision);
+    }
+
     /// Whether a retained Code-workspace transaction owns exclusive input.
     /// This is queried before painting, so keyboard shortcuts cannot mutate
     /// the document behind a modal during its opening frame.

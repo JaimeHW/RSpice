@@ -84,9 +84,15 @@ impl LogSource {
 /// A canvas location a console row can jump to (click-to-source).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum LogAnchor {
-    /// A schematic-space point, optionally with the object to select on
-    /// arrival.
+    /// A schematic-space point in one cell view, optionally with the object
+    /// to select on arrival.
+    ///
+    /// The cell view is part of the place: a point and an object id mean
+    /// something only in the drawing they were read off, and following one
+    /// into whichever view happened to be open selected an unrelated object
+    /// there.
     Schematic {
+        cell_view: crate::state::CellViewRef,
         x: i32,
         y: i32,
         component: Option<u64>,

@@ -7,9 +7,11 @@
 //!
 //! The list is built from segment descriptors rather than from a vector of
 //! rows: the netlist and code editors publish collections sized for a million
-//! records, and a page that materialized them to count them would do it sixty
-//! times a second. A segment reports its own counts from the summary its
-//! producer already keeps, and a row is built only when it is about to be
+//! records, and a page that materialized them would allocate a row per record
+//! sixty times a second. The counts are tallied from what each record says
+//! about itself — its standing, its waiver, its severity — by the rule the
+//! rows are drawn by, because a producer's own summary counts waived and
+//! stale records as if they stood. A row is built only when it is about to be
 //! drawn.
 
 use std::sync::Arc;
@@ -33,7 +35,8 @@ use crate::workbench::documents::netlist_document::NetlistDiagnosticCollection;
 pub(in crate::workbench) enum RowStanding {
     Current,
     /// The inputs this finding was derived from have moved. The words say
-    /// which, in the terms the producer measured them in.
+    /// which, in the terms the producer measured them in, as one full clause
+    /// a surface can print as it stands.
     Stale(String),
     /// The inputs cannot be read at all, in the producer's own words.
     Unavailable(String),
@@ -124,7 +127,16 @@ pub(in crate::workbench) enum EmptyReason {
     NothingRan,
     /// A producer cannot be evaluated at all, in its own words.
     Unavailable(String),
-    /// Everything that ran found nothing.
+    /// Everything on record found nothing, but at least one of those empty
+    /// results was reached from inputs that have changed since: a stored
+    /// batch whose digest no longer matches the design, a netlist validated
+    /// against an older buffer revision than the editor holds, or a code
+    /// validation whose source bundle has moved past the revision and closure
+    /// it was run on. Said only when no producer is unavailable, since a
+    /// check that cannot run says less than one that ran on an older design.
+    OutOfDate,
+    /// Everything on record found nothing, and every one of those results
+    /// was reached from the inputs as they stand.
     NoFindings,
 }
 
@@ -134,13 +146,21 @@ enum Segment<'a> {
         batch: &'a DiagnosticBatch,
         standing: BatchStanding,
     },
-    /// The netlist editor's own canonical collection, read in place.
-    Netlist(&'a NetlistDiagnosticCollection),
-    /// One code editor's canonical collection, read in place, and the source
-    /// bundle whose editor opens it.
+    /// The netlist editor's own canonical collection, read in place, the
+    /// revision of the buffer in the editor now, and the revision the
+    /// collection was validated against, where it holds a validation.
+    Netlist {
+        collection: &'a NetlistDiagnosticCollection,
+        revision: u64,
+        validated: Option<u64>,
+    },
+    /// One code editor's canonical collection, read in place, the source
+    /// bundle whose editor opens it, and whether the validation behind it
+    /// was run on that bundle as it stands.
     Code {
         bundle: Option<crate::state::ProjectSourceId>,
         collection: &'a CodeDiagnosticCollection,
+        source_current: bool,
     },
 }
 
@@ -148,22 +168,127 @@ impl Segment<'_> {
     fn len(&self) -> usize {
         match self {
             Self::Stored { batch, .. } => batch.records.len(),
-            Self::Netlist(collection) => collection.len(),
+            Self::Netlist { collection, .. } => collection.len(),
             Self::Code { collection, .. } => collection.len(),
+        }
+    }
+
+    /// Whether this segment's evidence was reached from inputs that have
+    /// moved since.
+    ///
+    /// Judged from the validation itself as well as from what it found: an
+    /// empty result has no finding to carry a revision, and an empty result
+    /// is the one case this is asked about.
+    fn out_of_date(&self) -> bool {
+        match self {
+            Self::Stored { standing, .. } => matches!(standing, BatchStanding::Stale),
+            Self::Netlist {
+                collection,
+                revision,
+                validated,
+            } => {
+                *validated != Some(*revision)
+                    || collection
+                        .iter()
+                        .any(|diagnostic| !netlist_current(diagnostic, *revision))
+            }
+            Self::Code {
+                collection,
+                source_current,
+                ..
+            } => {
+                !source_current
+                    || collection
+                        .iter()
+                        .any(|diagnostic| !diagnostic.canonical.is_current())
+            }
         }
     }
 }
 
+/// Whether a netlist finding describes the buffer in the editor now.
+///
+/// The editor marks its findings stale only while it draws, so an edit made
+/// with the editor off screen — a rename, an import, a fix applied from the
+/// Problems page — left them reading current. A finding bound to an older
+/// buffer revision than the editor holds is stale whatever it says about
+/// itself.
+fn netlist_current(
+    diagnostic: &crate::workbench::documents::netlist_document::Diagnostic,
+    revision: u64,
+) -> bool {
+    diagnostic.is_current() && diagnostic.canonical.revision == revision
+}
+
+/// Where a netlist finding stands, by the same rule as [`netlist_current`].
+fn netlist_standing(
+    diagnostic: &crate::workbench::documents::netlist_document::Diagnostic,
+    revision: u64,
+) -> RowStanding {
+    if diagnostic.is_current() && diagnostic.canonical.revision != revision {
+        return RowStanding::Stale(
+            "the netlist has been edited since this was reported".to_owned(),
+        );
+    }
+    source_standing(diagnostic.canonical.currentness)
+}
+
 /// The counts behind every badge and status segment, derived from exactly the
-/// rows the list holds.
+/// rows the list holds, under the rule the rows are drawn by: a current
+/// finding counts as an error or an advisory unless a waiver covers it, and
+/// a finding that is not current counts as what it is instead.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(in crate::workbench) struct DiagnosticCounts {
     pub(in crate::workbench) errors: usize,
     pub(in crate::workbench) advisories: usize,
+    /// The advisories that are warnings, rather than notes or hints.
+    pub(in crate::workbench) warnings: usize,
     /// Findings about a design that has since been edited. Counted on their
     /// own: a stale finding is neither an error nor an advisory about the
     /// design in front of the reader.
     pub(in crate::workbench) stale: usize,
+    /// Findings whose inputs cannot be read at all, so whether they still
+    /// stand cannot be said. Not stale: nothing is known to have moved.
+    pub(in crate::workbench) unavailable: usize,
+}
+
+impl DiagnosticCounts {
+    fn tally(&mut self, standing: Tally, waived: bool, level: DiagnosticLevel) {
+        match (standing, waived) {
+            (Tally::Stale, _) => self.stale += 1,
+            (Tally::Unavailable, _) => self.unavailable += 1,
+            (Tally::Current, true) => {}
+            (Tally::Current, false) if level.is_error() => self.errors += 1,
+            (Tally::Current, false) => {
+                self.advisories += 1;
+                if level == DiagnosticLevel::Warning {
+                    self.warnings += 1;
+                }
+            }
+        }
+    }
+}
+
+/// Where one finding stands, for counting it.
+#[derive(Debug, Clone, Copy)]
+enum Tally {
+    Current,
+    Stale,
+    Unavailable,
+}
+
+impl Tally {
+    const fn of_batch(standing: &BatchStanding) -> Self {
+        match standing {
+            BatchStanding::Current => Self::Current,
+            BatchStanding::Stale => Self::Stale,
+            BatchStanding::Unavailable(_) => Self::Unavailable,
+        }
+    }
+
+    const fn of_record(current: bool) -> Self {
+        if current { Self::Current } else { Self::Stale }
+    }
 }
 
 pub(in crate::workbench) struct DiagnosticListing<'a> {
@@ -195,7 +320,7 @@ impl<'a> DiagnosticListing<'a> {
                 standing: BatchStanding::Unavailable(reason),
                 ..
             } => Some(reason.as_str()),
-            Segment::Stored { .. } | Segment::Netlist(_) | Segment::Code { .. } => None,
+            Segment::Stored { .. } | Segment::Netlist { .. } | Segment::Code { .. } => None,
         })
     }
 
@@ -262,7 +387,7 @@ fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<DiagnosticRow<
                 level: record.level,
                 standing: match standing {
                     BatchStanding::Current => RowStanding::Current,
-                    BatchStanding::Stale => RowStanding::Stale(batch.inputs.description()),
+                    BatchStanding::Stale => RowStanding::Stale(batch.inputs.stale_reason()),
                     BatchStanding::Unavailable(reason) => RowStanding::Unavailable(reason.clone()),
                 },
                 subject: stored_subject(record),
@@ -284,15 +409,19 @@ fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<DiagnosticRow<
                 route: current.then(|| record.route.clone()).flatten(),
             })
         }
-        Segment::Netlist(collection) => {
+        Segment::Netlist {
+            collection,
+            revision,
+            ..
+        } => {
             let diagnostic = collection.get(index)?;
-            let current = diagnostic.is_current();
+            let current = netlist_current(diagnostic, *revision);
             Some(DiagnosticRow {
                 id: diagnostic.canonical.diagnostic_id,
                 code: diagnostic.canonical.code.as_ref(),
                 producer: diagnostic.canonical.source.as_ref(),
                 level: diagnostic.severity.into(),
-                standing: source_standing(diagnostic.canonical.currentness),
+                standing: netlist_standing(diagnostic, *revision),
                 subject: netlist_subject(diagnostic),
                 location: netlist_location(diagnostic),
                 message: diagnostic.message.as_str(),
@@ -306,7 +435,9 @@ fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<DiagnosticRow<
                 )),
             })
         }
-        Segment::Code { bundle, collection } => {
+        Segment::Code {
+            bundle, collection, ..
+        } => {
             let diagnostic = collection.as_slice().get(index)?;
             Some(DiagnosticRow {
                 id: diagnostic.canonical.diagnostic_id,
@@ -329,7 +460,11 @@ fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<DiagnosticRow<
                 related: diagnostic.canonical.related_locations.as_slice(),
                 quick_fixes: diagnostic.canonical.quick_fixes.as_slice(),
                 suppression: diagnostic.canonical.suppression.as_ref(),
+                // A finding about source that has since moved names a line
+                // the source may no longer have, so it offers no jump, like a
+                // stale finding in every other segment.
                 route: bundle
+                    .filter(|_| diagnostic.canonical.is_current())
                     .zip(diagnostic.source_path.as_ref())
                     .map(|(bundle, path)| DiagnosticRoute::CodeDocument {
                         bundle,
@@ -354,14 +489,18 @@ fn segment_facet<'a>(segment: &Segment<'a>, index: usize) -> Option<RowFacet<'a>
                 waived: record.waived(),
             })
         }
-        Segment::Netlist(collection) => {
+        Segment::Netlist {
+            collection,
+            revision,
+            ..
+        } => {
             let diagnostic = collection.get(index)?;
             Some(RowFacet {
                 id: diagnostic.canonical.diagnostic_id,
                 code: diagnostic.canonical.code.as_ref(),
                 producer: diagnostic.canonical.source.as_ref(),
                 level: diagnostic.severity.into(),
-                current: diagnostic.is_current(),
+                current: netlist_current(diagnostic, *revision),
                 waived: diagnostic.canonical.suppression.is_some(),
             })
         }
@@ -419,68 +558,188 @@ fn netlist_location(
 }
 
 /// Assemble the list for the design in front of the reader.
+///
+/// Every batch's standing is decided here, from the live design, which is
+/// exact and is not free: a design-check digest encodes and hashes the
+/// working set it covers. A surface drawn every frame reads
+/// [`listing_in_pass`] instead, which decides them once per pass.
 pub(in crate::workbench) fn listing(state: &AppState) -> DiagnosticListing<'_> {
     if !state.project_lifecycle.is_open() {
-        return DiagnosticListing {
-            segments: Vec::new(),
-            counts: DiagnosticCounts::default(),
-            empty_reason: EmptyReason::NoProject,
-        };
+        return closed_listing();
     }
-
-    let mut segments = Vec::new();
-    let mut counts = DiagnosticCounts::default();
-    let mut unavailable = None;
-
-    let mut stored: Vec<&DiagnosticBatch> = state.diagnostics.batches().collect();
-    stored.sort_by_key(|batch| batch.inputs.owner());
-    for batch in stored {
-        let standing = state.diagnostic_batch_standing(batch);
-        if let BatchStanding::Unavailable(reason) = &standing
-            && unavailable.is_none()
-        {
-            unavailable = Some(reason.clone());
-        }
-        for record in &batch.records {
-            match (standing.is_current(), record.waived()) {
-                (false, _) => counts.stale += 1,
-                (true, true) => {}
-                (true, false) if record.level.is_error() => counts.errors += 1,
-                (true, false) => counts.advisories += 1,
-            }
-        }
-        segments.push(Segment::Stored { batch, standing });
-    }
-
-    let netlist = state.ui.netlist.diagnostics.as_ref();
-    if !netlist.is_empty() {
-        let summary = netlist.summary();
-        counts.errors += summary.current_errors;
-        counts.advisories += summary.current_advisories();
-        counts.stale += summary.stale;
-        segments.push(Segment::Netlist(netlist));
-    }
-
-    for (bundle, collection) in code_collections(state) {
-        let summary = collection.summary();
-        counts.errors += summary.errors;
-        counts.advisories += summary.warnings + summary.information + summary.hints;
-        segments.push(Segment::Code { bundle, collection });
-    }
-
-    let empty_reason = match unavailable {
-        Some(reason) if segments.iter().all(|segment| segment.len() == 0) => {
-            EmptyReason::Unavailable(reason)
-        }
-        _ if segments.is_empty() => EmptyReason::NothingRan,
-        _ => EmptyReason::NoFindings,
-    };
-
+    // One scope for the whole list, so the configured hierarchy two owners'
+    // digests read is walked once rather than once per batch.
+    let scope = super::DigestScope::new(state);
+    let segments = segments(state, |batch| super::batch_standing(batch, &scope));
+    let (counts, empty_reason) = tally(&segments);
     DiagnosticListing {
         segments,
         counts,
         empty_reason,
     }
+}
+
+/// The same list as [`listing`], with every standing and count decided at
+/// most once per rendering pass.
+///
+/// Four surfaces state the list each frame — the tab badge, the page, and
+/// the status bar's text and mark — and each used to decide every batch's
+/// standing again, re-digesting the working set behind every checked view
+/// and walking the configured hierarchy for the dispatch findings, four
+/// times a frame. The first reader in a pass decides them, and every reader
+/// after it in that pass reads that answer.
+///
+/// The memo is keyed by the pass and by the store's own generation, which
+/// moves on every publication and withdrawal, so a batch published
+/// mid-pass is never read with another batch's standing. Within one pass an
+/// edit to the design is not reflected until the next pass, which every
+/// edit requests; that is the price, and a frame that agrees with itself is
+/// what it buys. Across passes nothing is reused, because nothing in the
+/// session counts every change to every input a digest covers, and a memo
+/// whose key missed one would be a staleness bug.
+pub(in crate::workbench) fn listing_in_pass(state: &AppState, pass: u64) -> DiagnosticListing<'_> {
+    if !state.project_lifecycle.is_open() {
+        return closed_listing();
+    }
+    let generation = state.diagnostics.generation();
+    if let Some(memo) = state.diagnostics.pass_memo(pass, generation) {
+        let segments = segments(state, |batch| {
+            memo.standings
+                .get(&batch.inputs.key())
+                .cloned()
+                .unwrap_or_else(|| state.diagnostic_batch_standing(batch))
+        });
+        return DiagnosticListing {
+            segments,
+            counts: memo.counts,
+            empty_reason: memo.empty_reason,
+        };
+    }
+    let listed = listing(state);
+    state.diagnostics.remember_pass(PassMemo {
+        pass,
+        generation,
+        standings: listed
+            .segments
+            .iter()
+            .filter_map(|segment| match segment {
+                Segment::Stored { batch, standing } => Some((batch.inputs.key(), standing.clone())),
+                Segment::Netlist { .. } | Segment::Code { .. } => None,
+            })
+            .collect(),
+        counts: listed.counts,
+        empty_reason: listed.empty_reason.clone(),
+    });
+    listed
+}
+
+/// What one rendering pass decided about the list, for the readers after
+/// the first in that pass.
+#[derive(Debug, Clone)]
+pub(in crate::workbench) struct PassMemo {
+    pub(super) pass: u64,
+    pub(super) generation: u64,
+    standings: std::collections::BTreeMap<String, BatchStanding>,
+    counts: DiagnosticCounts,
+    empty_reason: EmptyReason,
+}
+
+fn closed_listing<'a>() -> DiagnosticListing<'a> {
+    DiagnosticListing {
+        segments: Vec::new(),
+        counts: DiagnosticCounts::default(),
+        empty_reason: EmptyReason::NoProject,
+    }
+}
+
+/// Every segment of the list, with each stored batch's standing as
+/// `standing_of` decides it.
+fn segments<'a>(
+    state: &'a AppState,
+    mut standing_of: impl FnMut(&DiagnosticBatch) -> BatchStanding,
+) -> Vec<Segment<'a>> {
+    let mut segments = Vec::new();
+    let mut stored: Vec<&DiagnosticBatch> = state.diagnostics.batches().collect();
+    stored.sort_by_key(|batch| batch.inputs.owner());
+    for batch in stored {
+        let standing = standing_of(batch);
+        segments.push(Segment::Stored { batch, standing });
+    }
+
+    // A validation that ran and found nothing is still a validation that
+    // ran: an empty collection the editor holds a validation for is a
+    // segment, so the page says "No findings" rather than "Nothing has been
+    // checked" — or, once the buffer has moved past it, that the finding of
+    // nothing is out of date.
+    let netlist = state.ui.netlist.diagnostics.as_ref();
+    let validated = state.ui.netlist.validated_revision();
+    if !netlist.is_empty() || validated.is_some() {
+        segments.push(Segment::Netlist {
+            collection: netlist,
+            revision: state.ui.netlist.revision,
+            validated,
+        });
+    }
+    for (bundle, collection, source_current) in code_collections(state) {
+        segments.push(Segment::Code {
+            bundle,
+            collection,
+            source_current,
+        });
+    }
+    segments
+}
+
+/// The counts the list states, and why it is empty when it is — tallied from
+/// exactly what each row says about itself.
+fn tally(segments: &[Segment<'_>]) -> (DiagnosticCounts, EmptyReason) {
+    let mut counts = DiagnosticCounts::default();
+    let mut unavailable = None;
+    for segment in segments {
+        match segment {
+            Segment::Stored { batch, standing } => {
+                if let BatchStanding::Unavailable(reason) = standing
+                    && unavailable.is_none()
+                {
+                    unavailable = Some(reason.clone());
+                }
+                let standing = Tally::of_batch(standing);
+                for record in &batch.records {
+                    counts.tally(standing, record.waived(), record.level);
+                }
+            }
+            Segment::Netlist {
+                collection,
+                revision,
+                ..
+            } => {
+                for diagnostic in collection.iter() {
+                    counts.tally(
+                        Tally::of_record(netlist_current(diagnostic, *revision)),
+                        diagnostic.canonical.suppression.is_some(),
+                        diagnostic.severity.into(),
+                    );
+                }
+            }
+            Segment::Code { collection, .. } => {
+                for diagnostic in collection.iter() {
+                    counts.tally(
+                        Tally::of_record(diagnostic.canonical.is_current()),
+                        diagnostic.canonical.suppression.is_some(),
+                        diagnostic.severity.into(),
+                    );
+                }
+            }
+        }
+    }
+    let empty = segments.iter().all(|segment| segment.len() == 0);
+    let empty_reason = match unavailable {
+        Some(reason) if empty => EmptyReason::Unavailable(reason),
+        _ if segments.is_empty() => EmptyReason::NothingRan,
+        _ if empty && segments.iter().any(Segment::out_of_date) => EmptyReason::OutOfDate,
+        _ => EmptyReason::NoFindings,
+    };
+    (counts, empty_reason)
 }
 
 /// The canonical collections the code editors publish, each with the source
@@ -492,36 +751,71 @@ pub(in crate::workbench) fn listing(state: &AppState) -> DiagnosticListing<'_> {
 /// source moves — so both stand, and each names its own bundle through the
 /// token the compile was authorized under rather than through whichever
 /// bundle happens to be selected now.
+///
+/// A collection is listed when it holds findings, or when the compile or
+/// validation that produced it is on record as having run: a clean compile is
+/// evidence that the source was looked at. A failure collection that is empty
+/// is no failure, and says nothing.
+///
+/// Each comes with whether the token it was produced under still names the
+/// bundle's revision. The page voids a collection when the source moves, but
+/// an edit made where the page did not see it would otherwise leave a clean
+/// compile of older source standing as evidence about this one.
 fn code_collections(
     state: &AppState,
 ) -> Vec<(
     Option<crate::state::ProjectSourceId>,
     &CodeDiagnosticCollection,
+    bool,
 )> {
     let code = &state.ui.code_workspace;
-    let mut collections: Vec<(Option<crate::state::ProjectSourceId>, _)> = Vec::with_capacity(3);
+    let project = state.workspace.content.project.id();
+    let sources = &state.workspace.content.project_sources;
+    let veriloga_current =
+        |token: &rspice_simulation::project_veriloga::VerilogASourceOperationToken| {
+            token.project_id == project
+                && sources
+                    .get_bundle(token.bundle_id)
+                    .is_some_and(|bundle| bundle.revision().get() == token.revision)
+        };
+    let mut collections: Vec<(Option<crate::state::ProjectSourceId>, _, bool)> =
+        Vec::with_capacity(3);
     if let Some(receipt) = code.veriloga.receipt.as_ref() {
+        let token = receipt.compilation.token();
         collections.push((
-            Some(receipt.compilation.token().bundle_id),
+            Some(token.bundle_id),
             receipt.diagnostics.as_ref(),
+            veriloga_current(&token),
         ));
     }
-    collections.push((
-        code.veriloga
-            .last_failure_token
-            .as_ref()
-            .map(|token| token.bundle_id),
-        code.veriloga.last_failure.as_ref(),
-    ));
-    collections.push((
-        crate::workbench::documents::code_workspace::active_source_bundle(
+    if !code.veriloga.last_failure.is_empty() {
+        let token = code.veriloga.last_failure_token.as_ref();
+        collections.push((
+            token.map(|token| token.bundle_id),
+            code.veriloga.last_failure.as_ref(),
+            token.is_some_and(veriloga_current),
+        ));
+    }
+    if !code.automation.diagnostics.is_empty() || code.automation.receipt.is_some() {
+        let bundle = crate::workbench::documents::code_workspace::active_source_bundle(
             &state.workspace,
             crate::state::ProjectSourceLanguage::RSpiceAutomation,
-        )
-        .map(crate::state::ProjectSourceBundle::id),
-        code.automation.diagnostics.as_ref(),
-    ));
-    collections.retain(|(_, collection)| !collection.is_empty());
+        );
+        let token = code
+            .automation
+            .receipt
+            .as_ref()
+            .map(|receipt| &receipt.token)
+            .or(code.automation.diagnostic_token.as_ref());
+        let current = token.zip(bundle).is_some_and(|(token, bundle)| {
+            token.project_id == project && token.revision == bundle.revision().get()
+        });
+        collections.push((
+            bundle.map(crate::state::ProjectSourceBundle::id),
+            code.automation.diagnostics.as_ref(),
+            current,
+        ));
+    }
     collections
 }
 
@@ -582,6 +876,84 @@ mod tests {
         let listing = listing(&state);
         assert_eq!(listing.len(), 0);
         assert_eq!(*listing.empty_reason(), EmptyReason::NoFindings);
+    }
+
+    /// A check that found nothing in a design that has since been edited
+    /// says nothing about the design in front of the reader, so the page
+    /// does not call that design clean until the check runs again.
+    #[test]
+    fn an_empty_batch_whose_inputs_moved_reads_as_out_of_date() {
+        let mut state = open_state();
+        let subject = state.workspace.content.active_schematic_reference();
+        let inputs = DiagnosticInputs::DesignCheck { subject };
+        state
+            .publish_diagnostics(inputs.clone(), Vec::new())
+            .expect("the design-check digest is available");
+        assert_eq!(*listing(&state).empty_reason(), EmptyReason::NoFindings);
+
+        state.workspace.content.connectivity.policy.width_mismatch =
+            crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+
+        let listed = listing(&state);
+        assert_eq!(listed.len(), 0);
+        assert_eq!(*listed.empty_reason(), EmptyReason::OutOfDate);
+        assert_eq!(
+            *listing_in_pass(&state, 3).empty_reason(),
+            EmptyReason::OutOfDate,
+            "the memoized list states the same reason",
+        );
+
+        state
+            .publish_diagnostics(inputs, Vec::new())
+            .expect("the design-check digest is available");
+        assert_eq!(
+            *listing(&state).empty_reason(),
+            EmptyReason::NoFindings,
+            "a check run over the design as it stands is evidence again",
+        );
+    }
+
+    /// One stale empty result is enough to withhold "no findings", and a
+    /// producer that cannot run at all is said before any of it.
+    #[test]
+    fn an_empty_list_states_the_weakest_evidence_behind_it() {
+        let state = open_state();
+        let empty = |inputs| DiagnosticBatch {
+            inputs,
+            input_digest: crate::product::ContentDigest::from_bytes([0; 32]),
+            records: Vec::new(),
+        };
+        let dispatch = empty(DiagnosticInputs::Dispatch);
+        let run = empty(DiagnosticInputs::Run { run_sequence: 4 });
+        let design = empty(DiagnosticInputs::DesignCheck {
+            subject: state.workspace.content.active_schematic_reference(),
+        });
+        let stored = |batch, standing| Segment::Stored { batch, standing };
+
+        let (_, reason) = tally(&[
+            stored(&dispatch, BatchStanding::Current),
+            stored(&run, BatchStanding::Stale),
+        ]);
+        assert_eq!(reason, EmptyReason::OutOfDate);
+
+        let (_, reason) = tally(&[
+            stored(&dispatch, BatchStanding::Current),
+            stored(&run, BatchStanding::Stale),
+            stored(
+                &design,
+                BatchStanding::Unavailable("the inputs cannot be read".to_owned()),
+            ),
+        ]);
+        assert_eq!(
+            reason,
+            EmptyReason::Unavailable("the inputs cannot be read".to_owned())
+        );
+
+        let (_, reason) = tally(&[
+            stored(&dispatch, BatchStanding::Current),
+            stored(&run, BatchStanding::Current),
+        ]);
+        assert_eq!(reason, EmptyReason::NoFindings);
     }
 
     /// The counts and the rows come from the same list, so they cannot
@@ -647,15 +1019,16 @@ mod tests {
     #[test]
     fn a_stale_batch_offers_no_route() {
         let mut state = open_state();
+        let subject = state.workspace.content.active_schematic_reference();
         let anchored = record(&state, "T-ERROR", DiagnosticLevel::Error).with_route(Some(
             DiagnosticRoute::Anchor(crate::diagnostics::LogAnchor::Schematic {
+                cell_view: subject.clone(),
                 x: 0,
                 y: 0,
                 component: None,
                 wire: None,
             }),
         ));
-        let subject = state.workspace.content.active_schematic_reference();
         let inputs = DiagnosticInputs::DesignCheck {
             subject: subject.clone(),
         };
@@ -676,10 +1049,10 @@ mod tests {
         assert_eq!(
             row.standing,
             RowStanding::Stale(format!(
-                "the schematic working set behind {}",
+                "the schematic working set behind {} has changed since this was reported",
                 subject.display_path()
             )),
-            "a stale row says what moved under it, not merely that it is stale",
+            "a stale row says in one clause what moved under it, not merely that it is stale",
         );
     }
 
@@ -709,6 +1082,286 @@ mod tests {
         let row = listing.row(0).expect("the finding is listed");
         assert_eq!(row.subject, "pin A");
         assert_eq!(row.location, reference.display_path());
+    }
+
+    fn waiver() -> rspice_app_types::diagnostics::DiagnosticSuppression {
+        rspice_app_types::diagnostics::DiagnosticSuppression {
+            rule: "TEST".to_owned(),
+            scope: "project".to_owned(),
+            justification_required: false,
+        }
+    }
+
+    /// The netlist and code collections are counted by the rule their rows
+    /// are drawn by. Their producers' summaries counted a waived finding as
+    /// an error and a stale code finding as current, so the badge claimed
+    /// findings the rows did not.
+    #[test]
+    fn source_collections_count_what_their_rows_say() {
+        use crate::workbench::documents::netlist_document::{
+            Diagnostic, DiagnosticSeverity as NetlistSeverity,
+        };
+        use rspice_app_types::diagnostics::{
+            DiagnosticCurrentness, DiagnosticSeverity, SourceDiagnostic,
+        };
+
+        let mut state = open_state();
+        let mut waived =
+            Diagnostic::current("rspice.test", "T-WAIVED", NetlistSeverity::Error, "a");
+        waived.canonical.suppression = Some(waiver());
+        let mut stale = Diagnostic::current("rspice.test", "T-STALE", NetlistSeverity::Error, "b");
+        stale
+            .canonical
+            .mark_currentness(DiagnosticCurrentness::StaleSource);
+        let standing = Diagnostic::current("rspice.test", "T-ERROR", NetlistSeverity::Error, "c");
+        state.ui.netlist.diagnostics = Arc::new(
+            NetlistDiagnosticCollection::try_new(vec![waived, stale, standing], "")
+                .expect("the fixture collection is well formed"),
+        );
+
+        let code = |code: &str| {
+            SourceDiagnostic::current(
+                "rspice.test",
+                code,
+                DiagnosticSeverity::Warning,
+                code,
+                "",
+                Some("flow.py".to_owned()),
+                None,
+                None,
+                Some(1),
+                None,
+            )
+        };
+        let mut stale_code = code("T-STALE-CODE");
+        stale_code
+            .canonical
+            .mark_currentness(DiagnosticCurrentness::StaleSource);
+        let mut waived_code = code("T-WAIVED-CODE");
+        waived_code.canonical.suppression = Some(waiver());
+        state.ui.code_workspace.automation.diagnostics = Arc::new(
+            CodeDiagnosticCollection::try_new(vec![stale_code, waived_code, code("T-CODE")])
+                .expect("the fixture collection is well formed"),
+        );
+
+        let listed = listing(&state);
+        assert_eq!(listed.len(), 6, "every finding keeps its row");
+        assert_eq!(
+            listed.counts(),
+            DiagnosticCounts {
+                errors: 1,
+                advisories: 1,
+                warnings: 1,
+                stale: 2,
+                unavailable: 0,
+            }
+        );
+        let mut from_rows = DiagnosticCounts::default();
+        for index in 0..listed.len() {
+            let facet = listed.facet(index).expect("every row has a facet");
+            from_rows.tally(Tally::of_record(facet.current), facet.waived, facet.level);
+        }
+        assert_eq!(listed.counts(), from_rows, "the counts are the rows' own");
+    }
+
+    /// A code finding about source that has moved since offers no jump to
+    /// the line it named, as no stale finding in another segment does.
+    #[test]
+    fn a_stale_code_finding_offers_no_route() {
+        use rspice_app_types::diagnostics::{
+            DiagnosticCurrentness, DiagnosticSeverity, SourceDiagnostic,
+        };
+
+        let finding = |code: &str| {
+            SourceDiagnostic::current(
+                "rspice.test",
+                code,
+                DiagnosticSeverity::Error,
+                code,
+                "",
+                Some("flow.py".to_owned()),
+                None,
+                None,
+                Some(3),
+                None,
+            )
+        };
+        let mut moved = finding("T-MOVED");
+        moved
+            .canonical
+            .mark_currentness(DiagnosticCurrentness::StaleSource);
+        let collection = CodeDiagnosticCollection::try_new(vec![finding("T-CURRENT"), moved])
+            .expect("the fixture collection is well formed");
+        let segment = Segment::Code {
+            bundle: Some(crate::state::ProjectSourceId::new()),
+            collection: &collection,
+            source_current: true,
+        };
+
+        let current = segment_row(&segment, 0).expect("the current finding is a row");
+        assert!(matches!(
+            current.route,
+            Some(DiagnosticRoute::CodeDocument { line: Some(3), .. })
+        ));
+        let stale = segment_row(&segment, 1).expect("the stale finding is a row");
+        assert_eq!(stale.route, None);
+    }
+
+    /// The netlist editor marks its findings stale only while it draws. A
+    /// finding parsed from an older buffer than the one the editor holds is
+    /// stale on the page whether or not the editor has been drawn since.
+    #[test]
+    fn a_netlist_finding_older_than_the_buffer_reads_stale() {
+        use crate::workbench::documents::netlist_document::Diagnostic;
+
+        let mut state = open_state();
+        let finding = Diagnostic::error("unknown model nchh").with_line(Some(0));
+        state.ui.netlist.revision = finding.canonical.revision;
+        state.ui.netlist.diagnostics = Arc::new(
+            NetlistDiagnosticCollection::try_new(vec![finding], "nchh\n")
+                .expect("the fixture collection is well formed"),
+        );
+        let listed = listing(&state);
+        assert_eq!(listed.counts().errors, 1);
+        assert!(listed.row(0).expect("listed").current());
+
+        // An edit made with the editor off screen: nothing re-parsed.
+        state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
+
+        let listed = listing(&state);
+        assert_eq!(listed.counts().errors, 0);
+        assert_eq!(listed.counts().stale, 1);
+        let row = listed.row(0).expect("a stale finding keeps its row");
+        assert!(!row.current());
+        assert!(row.route.is_none(), "a stale finding offers no jump");
+        assert!(!listed.facet(0).expect("and its facet").current);
+    }
+
+    /// A batch whose inputs cannot be read is counted as that, not as stale:
+    /// nothing is known to have moved, and the row says the checks cannot run.
+    #[test]
+    fn an_unreadable_batch_counts_as_unavailable_rather_than_stale() {
+        let state = open_state();
+        let batch = DiagnosticBatch {
+            inputs: DiagnosticInputs::Dispatch,
+            input_digest: crate::product::ContentDigest::from_bytes([0; 32]),
+            records: vec![record(&state, "T-ERROR", DiagnosticLevel::Error)],
+        };
+        let segments = vec![Segment::Stored {
+            batch: &batch,
+            standing: BatchStanding::Unavailable("the inputs cannot be read".to_owned()),
+        }];
+
+        let (counts, _) = tally(&segments);
+
+        assert_eq!(counts.unavailable, 1);
+        assert_eq!(counts.stale, 0);
+        assert_eq!(counts.errors, 0);
+    }
+
+    /// A validation that ran clean is evidence that the source was looked at,
+    /// so the page says there is nothing wrong rather than that nobody looked.
+    #[test]
+    fn a_clean_validation_reads_as_no_findings() {
+        let mut state = open_state();
+        assert_eq!(*listing(&state).empty_reason(), EmptyReason::NothingRan);
+
+        use crate::workbench::documents::code_workspace::{
+            AutomationValidationReceipt, SourceOperationToken, active_source_bundle,
+        };
+        let bundle = active_source_bundle(
+            &state.workspace,
+            crate::state::ProjectSourceLanguage::RSpiceAutomation,
+        )
+        .expect("a project holds its automation bundle");
+        let (bundle_id, root) = (bundle.id(), bundle.root().logical_path().to_owned());
+        let root_content = bundle.root().content().to_owned();
+        state.ui.code_workspace.automation.receipt = Some(AutomationValidationReceipt {
+            token: SourceOperationToken {
+                project_id: state.workspace.content.project.id(),
+                revision: bundle.revision().get(),
+                content_digest: bundle.closure_digest(),
+            },
+        });
+
+        let listed = listing(&state);
+        assert_eq!(listed.len(), 0);
+        assert_eq!(*listed.empty_reason(), EmptyReason::NoFindings);
+
+        // An edit the page did not see: the clean validation is of older
+        // source than the bundle holds now.
+        state
+            .workspace
+            .content
+            .project_sources
+            .replace_bundle_file_content(bundle_id, &root, format!("{root_content}\n"))
+            .expect("the root accepts an added line");
+        assert_eq!(*listing(&state).empty_reason(), EmptyReason::OutOfDate);
+    }
+
+    /// A netlist that parsed clean is evidence the deck was looked at, and
+    /// stops being evidence about the deck once the buffer moves past the
+    /// revision it was parsed at. The editor re-parses only while it draws,
+    /// so an edit made with it off screen leaves exactly that.
+    #[test]
+    fn a_clean_netlist_validation_goes_out_of_date_with_its_buffer() {
+        let mut state = open_state();
+        assert_eq!(*listing(&state).empty_reason(), EmptyReason::NothingRan);
+
+        let revision = state.ui.netlist.revision;
+        state.ui.netlist.mark_validated_for_test(revision);
+        let listed = listing(&state);
+        assert_eq!(listed.len(), 0);
+        assert_eq!(*listed.empty_reason(), EmptyReason::NoFindings);
+
+        state.ui.netlist.revision = revision.wrapping_add(1);
+        assert_eq!(*listing(&state).empty_reason(), EmptyReason::OutOfDate);
+        assert_eq!(
+            *listing_in_pass(&state, 5).empty_reason(),
+            EmptyReason::OutOfDate,
+            "the memoized list states the same reason",
+        );
+    }
+
+    /// Every reader in one pass reads one decision about every batch, and a
+    /// publication in the middle of the pass is never read with the standing
+    /// of the batch it replaced.
+    #[test]
+    fn one_pass_decides_each_standing_once_and_a_publication_invalidates_it() {
+        let mut state = open_state();
+        let subject = state.workspace.content.active_schematic_reference();
+        state
+            .publish_diagnostics(
+                DiagnosticInputs::DesignCheck {
+                    subject: subject.clone(),
+                },
+                vec![record(&state, "T-ERROR", DiagnosticLevel::Error)],
+            )
+            .expect("the design-check digest is available");
+
+        assert_eq!(listing_in_pass(&state, 7).counts().errors, 1);
+        // Moved under the batch mid-pass: the pass keeps the answer it
+        // already gave, and the next pass sees the move.
+        state.workspace.content.connectivity.policy.width_mismatch =
+            crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+        assert_eq!(listing_in_pass(&state, 7).counts().errors, 1);
+        assert_eq!(listing_in_pass(&state, 8).counts().stale, 1);
+        assert_eq!(
+            listing(&state).counts().stale,
+            1,
+            "the unmemoized list is exact"
+        );
+
+        // A publication moves the store's generation, so the same pass
+        // decides again rather than reading the replaced batch's standing.
+        state
+            .publish_diagnostics(
+                DiagnosticInputs::DesignCheck { subject },
+                vec![record(&state, "T-ERROR", DiagnosticLevel::Error)],
+            )
+            .expect("the design-check digest is available");
+        assert_eq!(listing_in_pass(&state, 8).counts().errors, 1);
+        assert_eq!(listing_in_pass(&state, 8).counts().stale, 0);
     }
 
     /// Counting and filtering read facets, which spell nothing out. A facet

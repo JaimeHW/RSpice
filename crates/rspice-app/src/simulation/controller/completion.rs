@@ -406,3 +406,55 @@ impl SimulationController {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An analysis the engine failed reaches the Problems page through the
+    /// controller's own failure path: one finding, about that analysis in
+    /// that run, in the engine's words. Nothing drove this path into the
+    /// store before, so removing the publication broke no test.
+    #[test]
+    fn a_failed_analysis_is_published_as_a_finding_about_its_run() {
+        let mut state = AppState::default();
+        let mut controller = SimulationController::new();
+        let export_io = super::super::tests::MockExportWorkflowIo::default();
+        let run_sequence = state.simulation.start_run().id;
+        let run = state
+            .simulation
+            .retained
+            .run_by_sequence_mut(run_sequence)
+            .expect("the test run is retained");
+        run.mark_running()
+            .expect("the test run enters running state");
+        state.simulation.execution.active_execution = run.execution_identity();
+        controller.current_run_id = Some(run_sequence);
+        controller.current_analysis_label = Some("Transient".to_owned());
+        controller.current_provenance = Some(
+            AnalysisResultProvenance::new(
+                crate::product::AnalysisInstanceId::new(),
+                crate::product::ObjectRevision::INITIAL,
+                crate::product::ContentDigest::from_bytes([0x39; 32]),
+                Vec::new(),
+            )
+            .expect("synthetic prepared-task provenance is valid"),
+        );
+        controller.current_analysis_idx = 1;
+        controller.total_analyses = 1;
+
+        controller.accept_completion(
+            &mut state,
+            &export_io,
+            Err(SimulationError::SolverError("singular matrix".to_owned())),
+        );
+
+        let published = state.diagnostics.published_run_failures(run_sequence);
+        assert_eq!(published.len(), 1, "{published:?}");
+        assert_eq!(published[0].0, format!("Transient · run {run_sequence}"));
+        assert!(
+            published[0].1.contains("singular matrix"),
+            "the finding states the engine's failure: {published:?}"
+        );
+    }
+}
