@@ -6,7 +6,7 @@
 //! of the same pass, which is what lets a generated line name the schematic
 //! object that produced it.
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{
     GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry, GenerationInput,
     NetlistDocument, NetlistDocumentId,
@@ -36,9 +36,12 @@ pub(super) fn reconcile_documents(app: &mut RSpiceApp) {
         && crate::workbench::documents::netlist_document::active_dependency(&app.state).is_none()
     {
         crate::workbench::documents::netlist_document::close_active_dependency(&mut app.state);
-        app.state.push_user_message(ConsoleMessage::warning(
-            "The previously open dependency is no longer in the canonical source closure; its root document was restored.",
-        ));
+        app.state.record(
+            LogSeverity::Warning,
+            LogSource::Netlist,
+            "The open include file is no longer part of the netlist; the top-level deck is shown \
+             instead.",
+        );
     }
 
     refresh_generated_artifact(app);
@@ -187,8 +190,8 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
         }
         Err(reasons) => {
             app.state.record(
-                crate::diagnostics::LogSeverity::Error,
-                crate::diagnostics::LogSource::Studio,
+                LogSeverity::Error,
+                LogSource::Studio,
                 crate::workbench::menu_bar::netlist_failure_text("Netlist generation", &reasons),
             );
             failed(&mut app.state.ui.netlist, reasons.join("; "));
@@ -514,7 +517,6 @@ fn source_line_component(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diagnostics::{LogSeverity, LogSource};
     use crate::state::{Component, ComponentType, LibraryCellInstance, Point, SchematicState};
 
     /// The line `YMEMRISTOR MR1 …` is the memristor drawn `MR1`: a

@@ -1,6 +1,5 @@
 //! Owned-revision save and generated-revision comparison.
 
-use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
@@ -198,7 +197,7 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
             };
             match result {
                 Ok(()) => dialog.open = false,
-                Err(error) => app.state.push_user_message(ConsoleMessage::warning(error)),
+                Err(error) => app.state.prompt(error),
             }
         }
         DialogChoice::Secondary => {
@@ -207,7 +206,7 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
                 dialog.selected_history_index,
             ) {
                 Ok(()) => dialog.open = false,
-                Err(error) => app.state.push_user_message(ConsoleMessage::warning(error)),
+                Err(error) => app.state.prompt(error),
             }
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => dialog.open = false,

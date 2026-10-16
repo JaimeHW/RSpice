@@ -3,7 +3,7 @@
 use egui::{Align, Layout, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::automation_workflow::ArtifactKind;
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -91,7 +91,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                         && let Err(error) =
                             crate::workbench::documents::code_workspace::open_source_workspace_dialog(app)
                     {
-                        app.state.push_user_message(ConsoleMessage::error(error));
+                        app.state.prompt(error);
                     }
                 },
             );
@@ -233,8 +233,7 @@ fn handle_automation_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
             .ui
             .messages()
             .text(MessageId::AutomationDropOneSource);
-        app.state
-            .push_user_message(ConsoleMessage::warning(message));
+        app.state.prompt(message);
         return;
     }
     let file = &dropped[0];
@@ -278,9 +277,11 @@ fn handle_automation_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
         .map(|_| ())
     });
     if let Err(error) = result {
-        app.state.push_user_message(ConsoleMessage::error(format!(
-            "Automation drop import failed: {error}"
-        )));
+        app.state.record(
+            LogSeverity::Error,
+            LogSource::Studio,
+            format!("Automation drop import failed: {error}"),
+        );
     }
 }
 
@@ -787,13 +788,9 @@ fn code_pane(
                     );
                 }
                 Ok(false) => {}
-                Err(error) => {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                            "Could not update {}: {error}",
-                            selected_path
-                        )))
-                }
+                Err(error) => app
+                    .state
+                    .prompt(format!("Could not update {selected_path}: {error}")),
             }
         }
         interaction
@@ -834,9 +831,7 @@ fn code_pane(
                         crate::workbench::documents::code_workspace::LanguageToolView::CodeActions;
                 }
             }
-            Err(error) => app
-                .state
-                .push_user_message(crate::diagnostics::ConsoleMessage::error(error)),
+            Err(error) => app.state.prompt(error),
         }
     }
     drop(preceding_input);
@@ -847,8 +842,7 @@ fn code_pane(
             ProjectSourceLanguage::RSpiceAutomation,
             selected_path,
         ) {
-            app.state
-                .push_user_message(crate::diagnostics::ConsoleMessage::error(error));
+            app.state.prompt(error);
         }
         input.route(
             ui.ctx(),

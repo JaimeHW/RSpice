@@ -4,7 +4,7 @@
 //! typing into a generated view, and opening an existing owned document never
 //! rewrites its bytes from the current generated primary.
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::NetlistDocumentId;
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
@@ -20,9 +20,7 @@ pub(super) fn open_ownership_dialog(
         return;
     }
     if state.ui.netlist.generated_document.is_none() {
-        state.push_user_message(ConsoleMessage::warning(
-            "Generate a current primary artifact before creating owned source.",
-        ));
+        state.prompt("Generate the netlist before making an editable copy.");
         return;
     }
     let dialog = &mut state.ui.netlist.ownership_dialog;
@@ -327,9 +325,11 @@ pub(super) fn open_owned_source(state: &mut AppState) -> bool {
         {
             Ok(document) => document,
             Err(error) => {
-                state.push_user_message(ConsoleMessage::error(format!(
-                    "Could not create owned SPICE source: {error}"
-                )));
+                state.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    format!("The editable SPICE copy could not be created: {error}"),
+                );
                 return false;
             }
         };
@@ -348,9 +348,11 @@ pub(super) fn open_owned_source(state: &mut AppState) -> bool {
             owned.replace_editable_source(owned.content_digest(), source.as_bytes().to_vec())
         };
         if let Err(error) = transition {
-            state.push_user_message(ConsoleMessage::error(format!(
-                "Could not initialize owned SPICE source: {error}"
-            )));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("The editable SPICE copy could not be created: {error}"),
+            );
             return false;
         }
         state.ui.netlist.owned_document = Some(owned);
