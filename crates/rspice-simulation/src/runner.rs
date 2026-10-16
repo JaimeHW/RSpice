@@ -1277,6 +1277,59 @@ mod tests {
         );
     }
 
+    /// A model the compiler accepted with a caveat says so in the run's log:
+    /// an analog `$strobe` is parsed and dropped, and the author must not be
+    /// left believing the model prints.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_verilog_a_compiler_warning_reaches_the_run_log() {
+        let directory =
+            std::env::temp_dir().join(format!("rspice_runner_va_log_{}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("create the model directory");
+        let model = directory.join("strober.va");
+        std::fs::write(
+            &model,
+            "module strober(p, n);\n\
+             \x20 inout p, n;\n\
+             \x20 electrical p, n;\n\
+             \x20 analog begin\n\
+             \x20   I(p, n) <+ V(p, n) / 1000.0;\n\
+             \x20   $strobe(\"v=%g\", V(p, n));\n\
+             \x20 end\n\
+             endmodule\n",
+        )
+        .expect("write the model");
+        let deck = format!(
+            "* compiler warning run log\nV1 a 0 1\nR1 a p 1k\nx1 p 0 strober\n.va \"{}\" strober\n.end\n",
+            model.display().to_string().replace('\\', "/")
+        );
+        let lines = engine_log_of_run(
+            AnalysisSpec::Transient {
+                stop_time: 10e-9,
+                step_time: 1e-9,
+                start_time: 0.0,
+                max_timestep: None,
+                uic: false,
+            },
+            &deck,
+        );
+        let finding = lines
+            .iter()
+            .find(|line| line.message.contains("[VA-SEM-NO-EFFECT-SYSTEM-TASK]"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "the compiler's finding is not in the log: {:?}",
+                    lines.iter().map(|line| &line.message).collect::<Vec<_>>()
+                )
+            });
+        assert_eq!(finding.origin, crate::engine_log::EngineLogOrigin::VerilogA);
+        assert_eq!(
+            finding.severity,
+            rspice_app_types::diagnostics::LogSeverity::Warning
+        );
+        assert!(finding.message.contains("'$strobe'"), "{}", finding.message);
+    }
+
     /// A one-tone nonlinear HB solve traces its Newton iterations when the
     /// form asks for them, and traces nothing when it does not.
     ///

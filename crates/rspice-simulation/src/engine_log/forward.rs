@@ -1,14 +1,16 @@
 //! Lines the engine reports by callback rather than through the logger: a
-//! digital testbench's own output.
+//! digital testbench's own output and the Verilog-A compiler's findings.
 
 use super::*;
 use rspice_core::config::{HdlOutputRecord, HdlOutputSink, HdlSeverity, HdlStream};
+use rspice_veriloga::{CompileDiagnosticSeverity, SourceCompileDiagnostic};
 
 /// Delivers lines to the run that was executing on the thread that made it,
 /// from whichever thread the engine later calls back on.
 ///
-/// Not held to the warning limit: a testbench's `$display` is the user's own
-/// output.
+/// Neither producer is held to the warning limit: a testbench's `$display` is
+/// the user's own output, and the engine hands each distinct compiler finding
+/// over once.
 #[derive(Clone)]
 pub(crate) struct RunLineForwarder {
     scope: LogScope,
@@ -49,6 +51,11 @@ impl RunLineForwarder {
             line.message = format!("{point}: {}", line.message);
         }
         run.sink.deliver(line);
+    }
+
+    /// One nonfatal compiler finding, in the words the command line prints it.
+    pub(crate) fn forward_compiler_diagnostic(&self, diagnostic: &SourceCompileDiagnostic) {
+        self.forward(compiler_line(diagnostic));
     }
 
     /// An HDL output sink that writes this run's log.
@@ -109,6 +116,19 @@ fn hdl_line(record: &HdlOutputRecord) -> Option<EngineLogLine> {
         message,
         origin: EngineLogOrigin::Hdl,
     })
+}
+
+/// The run log line for one compiler finding: the command line's own text,
+/// which is the finding's `Display`, so the two never word it apart.
+fn compiler_line(diagnostic: &SourceCompileDiagnostic) -> EngineLogLine {
+    EngineLogLine {
+        severity: match diagnostic.severity {
+            CompileDiagnosticSeverity::Error => LogSeverity::Error,
+            CompileDiagnosticSeverity::Warning => LogSeverity::Warning,
+        },
+        message: diagnostic.to_string(),
+        origin: EngineLogOrigin::VerilogA,
+    }
 }
 
 #[cfg(test)]
@@ -193,9 +213,8 @@ mod tests {
         let queue = Arc::new(Mutex::new(EngineLogQueue::default()));
         {
             let _guard = install(RunLogSink::queued(Arc::clone(&queue), false));
-            let hdl = RunLineForwarder::for_current_run()
-                .expect("a run is installed")
-                .hdl_output();
+            let forwarder = RunLineForwarder::for_current_run().expect("a run is installed");
+            let hdl = forwarder.clone().hdl_output();
             std::thread::scope(|threads| {
                 threads.spawn(|| {
                     for index in 0..7 {
@@ -203,10 +222,28 @@ mod tests {
                     }
                 });
             });
+            forwarder.forward_compiler_diagnostic(&SourceCompileDiagnostic {
+                severity: CompileDiagnosticSeverity::Warning,
+                phase: rspice_veriloga::CompileDiagnosticPhase::Semantic,
+                code: "VA-SEM-NO-EFFECT-SYSTEM-TASK".into(),
+                message: "$strobe has no effect in analog blocks".into(),
+                path: Some("model.va".into()),
+                byte_start: Some(0),
+                byte_end: Some(1),
+                line: Some(4),
+                column: Some(5),
+            });
         }
         let lines = lock_queue(&queue).drain();
-        assert_eq!(lines.len(), 7, "{lines:?}");
-        assert!(lines.iter().all(|line| line.origin == EngineLogOrigin::Hdl));
+        assert_eq!(lines.len(), 8, "{lines:?}");
+        assert!(lines[..7].iter().all(|line| line.origin == EngineLogOrigin::Hdl));
+        assert_eq!(lines[7].origin, EngineLogOrigin::VerilogA);
+        assert_eq!(lines[7].severity, LogSeverity::Warning);
+        assert_eq!(
+            lines[7].message,
+            "Warning: model.va:4:5: [VA-SEM-NO-EFFECT-SYSTEM-TASK] $strobe has no effect in \
+             analog blocks"
+        );
         assert_eq!(lock_queue(&queue).suppressed_warnings(), 0);
     }
 

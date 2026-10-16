@@ -81,8 +81,8 @@ impl EngineBridge {
     }
 
     /// Send what the engine reports by callback rather than through the
-    /// logger — a digital testbench's output — to the log of the run
-    /// executing on this thread.
+    /// logger — a digital testbench's output and the Verilog-A compiler's
+    /// nonfatal findings — to the log of the run executing on this thread.
     ///
     /// The transient still collects the testbench's records for its result;
     /// this sink is the one that collection forwards to.
@@ -91,8 +91,10 @@ impl EngineBridge {
             return self;
         };
         let mut config = self.engine.config().clone();
-        config.hdl.output = Some(forwarder.hdl_output());
-        self.engine = rspice_core::Engine::new(config);
+        config.hdl.output = Some(forwarder.clone().hdl_output());
+        self.engine = rspice_core::Engine::new(config).with_compiler_diagnostic_handler(
+            move |diagnostic| forwarder.forward_compiler_diagnostic(diagnostic),
+        );
         self
     }
 
