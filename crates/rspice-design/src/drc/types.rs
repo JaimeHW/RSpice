@@ -20,6 +20,14 @@ pub enum DrcSeverity {
 }
 
 impl DrcSeverity {
+    /// Every severity a rule can be reported at, weakest first.
+    ///
+    /// Declared so a surface offering the choice offers all of it: a rule deck
+    /// that could only promote, because the control listed three of the four,
+    /// would be a deck a team cannot use to demote a finding they have
+    /// reviewed and accepted.
+    pub const ALL: [Self; 4] = [Self::Info, Self::Warning, Self::Error, Self::Critical];
+
     /// Get display name
     pub fn display_name(&self) -> &'static str {
         match self {
@@ -31,8 +39,36 @@ impl DrcSeverity {
     }
 }
 
+/// Which part of the design a rule reads.
+///
+/// The same grouping the violation types are declared in, named so a surface
+/// listing every rule can band them instead of printing twenty-eight rows in
+/// one run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DrcRuleCategory {
+    Connectivity,
+    Electrical,
+    Hierarchy,
+    Naming,
+    Component,
+    SymbolContract,
+}
+
+impl DrcRuleCategory {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Connectivity => "Connectivity",
+            Self::Electrical => "Electrical",
+            Self::Hierarchy => "Hierarchy",
+            Self::Naming => "Naming",
+            Self::Component => "Components",
+            Self::SymbolContract => "Symbol contract",
+        }
+    }
+}
+
 /// Type of DRC violation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum DrcViolationType {
     //-------------------------------------------------------------------------
     // Connectivity Issues
@@ -129,6 +165,141 @@ pub enum DrcViolationType {
 }
 
 impl DrcViolationType {
+    /// Every rule the checker can report, in the order they are declared.
+    ///
+    /// Declaration order groups the rules by [`Self::category`], so a surface
+    /// walking this list in order can band each run without sorting it.
+    /// Exhaustive by construction: the compiler rejects a variant added to the
+    /// enum and not to this array, because the array's length is fixed.
+    pub const ALL: [Self; 28] = [
+        Self::FloatingNode,
+        Self::UnconnectedPin,
+        Self::UndrivenInput,
+        Self::UnloadedOutput,
+        Self::OrphanNetLabel,
+        Self::DanglingWire,
+        Self::MalformedBus,
+        Self::UnnamedBus,
+        Self::BusRangeConflict,
+        Self::DanglingBusTap,
+        Self::MixedBusTap,
+        Self::DuplicateBusMemberDriver,
+        Self::VectorWidthMismatch,
+        Self::OffSheetConnectorWithoutPartner,
+        Self::ShortedOutputs,
+        Self::MissingGround,
+        Self::SourceToSource,
+        Self::RecursiveInstantiation,
+        Self::DuplicateName,
+        Self::EmptyName,
+        Self::InvalidName,
+        Self::CaseCollidingNetNames,
+        Self::MissingParameter,
+        Self::ValueOutOfRange,
+        Self::UnknownComponent,
+        Self::SymbolUnplacedPin,
+        Self::SymbolOrphanedPin,
+        Self::SymbolPinOffGrid,
+    ];
+
+    /// The part of the design this rule reads.
+    pub const fn category(&self) -> DrcRuleCategory {
+        match self {
+            Self::FloatingNode
+            | Self::UnconnectedPin
+            | Self::UndrivenInput
+            | Self::UnloadedOutput
+            | Self::OrphanNetLabel
+            | Self::DanglingWire
+            | Self::MalformedBus
+            | Self::UnnamedBus
+            | Self::BusRangeConflict
+            | Self::DanglingBusTap
+            | Self::MixedBusTap
+            | Self::DuplicateBusMemberDriver
+            | Self::VectorWidthMismatch
+            | Self::OffSheetConnectorWithoutPartner => DrcRuleCategory::Connectivity,
+            Self::ShortedOutputs | Self::MissingGround | Self::SourceToSource => {
+                DrcRuleCategory::Electrical
+            }
+            Self::RecursiveInstantiation => DrcRuleCategory::Hierarchy,
+            Self::DuplicateName
+            | Self::EmptyName
+            | Self::InvalidName
+            | Self::CaseCollidingNetNames => DrcRuleCategory::Naming,
+            Self::MissingParameter | Self::ValueOutOfRange | Self::UnknownComponent => {
+                DrcRuleCategory::Component
+            }
+            Self::SymbolUnplacedPin | Self::SymbolOrphanedPin | Self::SymbolPinOffGrid => {
+                DrcRuleCategory::SymbolContract
+            }
+        }
+    }
+
+    /// What this rule is called where a reader picks it out of a list.
+    ///
+    /// Shorter than [`Self::description`], which states the condition: a deck
+    /// names the rule in one column and says what it finds in the next.
+    pub const fn label(&self) -> &'static str {
+        match self {
+            Self::FloatingNode => "Floating node",
+            Self::UnconnectedPin => "Unconnected pin",
+            Self::UndrivenInput => "Undriven input",
+            Self::UnloadedOutput => "Unloaded output",
+            Self::OrphanNetLabel => "Orphan net label",
+            Self::DanglingWire => "Dangling wire",
+            Self::MalformedBus => "Malformed bus",
+            Self::UnnamedBus => "Unnamed bus",
+            Self::BusRangeConflict => "Bus range conflict",
+            Self::DanglingBusTap => "Dangling bus tap",
+            Self::MixedBusTap => "Mixed bus tap",
+            Self::DuplicateBusMemberDriver => "Duplicate bus member driver",
+            Self::VectorWidthMismatch => "Vector width mismatch",
+            Self::OffSheetConnectorWithoutPartner => "Off-sheet connector without partner",
+            Self::ShortedOutputs => "Shorted outputs",
+            Self::MissingGround => "Missing ground",
+            Self::SourceToSource => "Source to source",
+            Self::RecursiveInstantiation => "Recursive instantiation",
+            Self::DuplicateName => "Duplicate name",
+            Self::EmptyName => "Empty name",
+            Self::InvalidName => "Invalid name",
+            Self::CaseCollidingNetNames => "Case-colliding net names",
+            Self::MissingParameter => "Missing parameter",
+            Self::ValueOutOfRange => "Value out of range",
+            Self::UnknownComponent => "Unknown component",
+            Self::SymbolUnplacedPin => "Unplaced symbol pin",
+            Self::SymbolOrphanedPin => "Orphaned symbol pin",
+            Self::SymbolPinOffGrid => "Symbol pin off grid",
+        }
+    }
+
+    /// The stable identity this rule is named by outside the program: on a
+    /// published finding, and as the key a stored rule deck sets a severity
+    /// against.
+    ///
+    /// Derived from the variant rather than written out, so a rule cannot be
+    /// added with a code that belongs to another one.
+    pub fn rule_code(&self) -> String {
+        let variant = format!("{self:?}");
+        let mut code = String::with_capacity(variant.len() + 8);
+        code.push_str("DRC-");
+        for (index, character) in variant.char_indices() {
+            if character.is_ascii_uppercase() && index > 0 {
+                code.push('-');
+            }
+            code.push(character.to_ascii_uppercase());
+        }
+        code
+    }
+
+    /// The rule `code` names, or `None` where this build has no such rule.
+    ///
+    /// A linear scan of [`Self::ALL`] rather than a second table of codes: the
+    /// only caller is a stored deck being read back, once per load.
+    pub fn from_rule_code(code: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|rule| rule.rule_code() == code)
+    }
+
     /// Get the default severity for this violation type.
     ///
     /// Three of them have no answer that holds for every object that can raise
