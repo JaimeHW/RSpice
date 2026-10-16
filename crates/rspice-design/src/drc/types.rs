@@ -245,45 +245,8 @@ impl DrcViolationType {
         }
     }
 
-    /// What this rule is called where a reader picks it out of a list.
-    ///
-    /// Shorter than [`Self::description`], which states the condition: a deck
-    /// names the rule in one column and says what it finds in the next.
-    pub const fn label(&self) -> &'static str {
-        match self {
-            Self::FloatingNode => "Floating node",
-            Self::UnconnectedPin => "Unconnected pin",
-            Self::UndrivenInput => "Undriven input",
-            Self::UnloadedOutput => "Unloaded output",
-            Self::OrphanNetLabel => "Orphan net label",
-            Self::DanglingWire => "Dangling wire",
-            Self::MalformedBus => "Malformed bus",
-            Self::UnnamedBus => "Unnamed bus",
-            Self::BusRangeConflict => "Bus range conflict",
-            Self::DanglingBusTap => "Dangling bus tap",
-            Self::MixedBusTap => "Mixed bus tap",
-            Self::DuplicateBusMemberDriver => "Duplicate bus member driver",
-            Self::VectorWidthMismatch => "Vector width mismatch",
-            Self::OffSheetConnectorWithoutPartner => "Off-sheet connector without partner",
-            Self::ShortedOutputs => "Shorted outputs",
-            Self::MissingGround => "Missing ground",
-            Self::SourceToSource => "Source to source",
-            Self::RecursiveInstantiation => "Recursive instantiation",
-            Self::DuplicateName => "Duplicate name",
-            Self::EmptyName => "Empty name",
-            Self::InvalidName => "Invalid name",
-            Self::CaseCollidingNetNames => "Case-colliding net names",
-            Self::MissingParameter => "Missing parameter",
-            Self::ValueOutOfRange => "Value out of range",
-            Self::UnknownComponent => "Unknown component",
-            Self::UnresolvedReference => "Unresolved reference",
-            Self::SymbolUnplacedPin => "Unplaced symbol pin",
-            Self::SymbolOrphanedPin => "Orphaned symbol pin",
-            Self::SymbolPinOffGrid => "Symbol pin off grid",
-        }
-    }
-
-    /// Get the default severity for this violation type.
+    /// Get the default severity for this violation type, from its entry in
+    /// the rule table, where the reason for each one is written.
     ///
     /// Three of them have no answer that holds for every object that can raise
     /// them: an empty reference, an invalid one, and a type that resolves to
@@ -291,63 +254,8 @@ impl DrcViolationType {
     /// This returns what they are worth on an object that writes nothing;
     /// [`Self::severity_for_instance`] is what a rule holding the instance
     /// asks.
-    pub fn default_severity(&self) -> DrcSeverity {
-        match self {
-            // Critical - simulation cannot run
-            Self::MissingGround => DrcSeverity::Critical,
-            Self::DuplicateName => DrcSeverity::Critical,
-            // A cellview that reaches itself has no finite expansion, so there
-            // is no deck to run.
-            Self::RecursiveInstantiation => DrcSeverity::Critical,
-
-            // Error - likely to cause simulation failure
-            // An input nothing drives is a terminal the solver has no source
-            // for. It is a stronger claim than an open passive leg because the
-            // interface said what the pin is for.
-            Self::UndrivenInput => DrcSeverity::Error,
-            Self::ShortedOutputs => DrcSeverity::Error,
-            Self::SourceToSource => DrcSeverity::Error,
-            Self::MissingParameter => DrcSeverity::Error,
-            // The engine refuses a card that names an element it does not have.
-            Self::UnresolvedReference => DrcSeverity::Error,
-            Self::CaseCollidingNetNames => DrcSeverity::Error,
-            Self::MalformedBus
-            | Self::BusRangeConflict
-            | Self::DanglingBusTap
-            | Self::MixedBusTap
-            | Self::DuplicateBusMemberDriver
-            | Self::VectorWidthMismatch => DrcSeverity::Error,
-            Self::SymbolUnplacedPin | Self::SymbolOrphanedPin | Self::SymbolPinOffGrid => {
-                DrcSeverity::Error
-            }
-
-            // Warning - may affect results
-            //
-            // A node with one connection is almost always a wiring slip, but
-            // it never stops the solver: a dangling resistor leg sits at the
-            // potential of its other end, and a dangling capacitor plate is an
-            // unforced island the conditioning shunt settles. The engine
-            // refuses the islands that cannot be solved on its own account,
-            // so an error here would refuse runs it completes.
-            Self::FloatingNode => DrcSeverity::Warning,
-            Self::UnconnectedPin => DrcSeverity::Warning,
-            // An output nothing loads still solves; the design just loses the
-            // signal it drew.
-            Self::UnloadedOutput => DrcSeverity::Warning,
-            Self::DanglingWire => DrcSeverity::Warning,
-            Self::OrphanNetLabel => DrcSeverity::Warning,
-            Self::ValueOutOfRange => DrcSeverity::Warning,
-            Self::UnnamedBus => DrcSeverity::Warning,
-
-            // Info
-            Self::OffSheetConnectorWithoutPartner => DrcSeverity::Info,
-
-            // Info on an object that emits no instance. See
-            // `severity_for_instance` for one that does.
-            Self::EmptyName => DrcSeverity::Info,
-            Self::InvalidName => DrcSeverity::Info,
-            Self::UnknownComponent => DrcSeverity::Info,
-        }
+    pub const fn default_severity(&self) -> DrcSeverity {
+        self.rule().default_severity
     }
 
     /// The severity this violation type carries on one emitted instance.

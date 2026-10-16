@@ -81,6 +81,12 @@ pub enum DeckIssue {
     /// The deck is not one this build can read at all. None of it is applied,
     /// and it is written back exactly as it was read.
     Unreadable { reason: String },
+    /// A row sets a rule below the lowest severity a deck may set it to. The
+    /// rule is checked at that floor; the row is written back as stored.
+    BelowFloor {
+        rule: DrcViolationType,
+        stored: DrcSeverity,
+    },
 }
 
 impl std::fmt::Display for DeckIssue {
@@ -106,6 +112,15 @@ impl std::fmt::Display for DeckIssue {
                 "the rule deck cannot be read ({reason}); no rule in it is applied, and it is \
                  saved back unchanged"
             ),
+            Self::BelowFloor { rule, stored } => write!(
+                formatter,
+                "the rule deck sets {} to {}, below {}, the lowest it may be set to; it is \
+                 checked at {}",
+                rule.rule_code(),
+                stored.display_name(),
+                rule.rule().floor.display_name(),
+                rule.rule().floor.display_name(),
+            ),
         }
     }
 }
@@ -116,12 +131,34 @@ pub enum DeckEditRefusal {
     /// The stored deck is one this build cannot read, so an edit here would
     /// either be lost on save or overwrite a deck this build never understood.
     Unread(DeckIssue),
+    /// The severity is below the lowest the rule may be set to. Its entry in
+    /// the rule table says why.
+    BelowFloor { rule: DrcViolationType },
 }
 
 impl std::fmt::Display for DeckEditRefusal {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Unread(issue) => write!(formatter, "{issue}"),
+            Self::BelowFloor { rule } => {
+                let entry = rule.rule();
+                if entry.floor >= DrcSeverity::Error {
+                    write!(
+                        formatter,
+                        "{} cannot be set below {}: a finding of it refuses the run whatever the \
+                         page reports it as",
+                        entry.title,
+                        entry.floor.display_name()
+                    )
+                } else {
+                    write!(
+                        formatter,
+                        "{} cannot be set below {}",
+                        entry.title,
+                        entry.floor.display_name()
+                    )
+                }
+            }
         }
     }
 }
@@ -144,8 +181,14 @@ impl DesignRuleDeck {
 
     /// The severity this deck sets for `rule`, or `None` where it defers to
     /// the rule's own default.
+    ///
+    /// Never below the rule's floor: a stored row below it — written by hand,
+    /// or by a build whose floor was lower — is applied at the floor and
+    /// reported by [`Self::issues`].
     pub fn severity(&self, rule: DrcViolationType) -> Option<DrcSeverity> {
-        self.severities.get(&rule).copied()
+        self.severities
+            .get(&rule)
+            .map(|stored| (*stored).max(rule.rule().floor))
     }
 
     /// What `rule` will be reported as: its default unless this deck says
@@ -166,7 +209,8 @@ impl DesignRuleDeck {
     ///
     /// `severity` equal to the rule's own default clears the entry instead of
     /// writing it. A row kept for the same code because its severity could
-    /// not be read is replaced: the reader has now decided it.
+    /// not be read is replaced: the reader has now decided it. A severity
+    /// below the rule's floor is refused, with the reason.
     pub fn set_severity(
         &mut self,
         rule: DrcViolationType,
@@ -175,6 +219,9 @@ impl DesignRuleDeck {
         self.editable()?;
         if severity == rule.default_severity() {
             return self.clear(rule);
+        }
+        if severity < rule.rule().floor {
+            return Err(DeckEditRefusal::BelowFloor { rule });
         }
         let replaced = self.retained.remove(rule.rule_code()).is_some();
         Ok(self.severities.insert(rule, severity) != Some(severity) || replaced)
@@ -200,11 +247,12 @@ impl DesignRuleDeck {
         Ok(())
     }
 
-    /// Each rule this deck decides, in declaration order.
+    /// Each rule this deck decides, in declaration order, at the severity it
+    /// is applied at.
     pub fn entries(&self) -> impl Iterator<Item = (DrcViolationType, DrcSeverity)> + '_ {
         self.severities
             .iter()
-            .map(|(rule, severity)| (*rule, *severity))
+            .map(|(rule, severity)| (*rule, (*severity).max(rule.rule().floor)))
     }
 
     /// The deck as [`super::DrcConfig::severity_overrides`] takes it.
@@ -212,19 +260,24 @@ impl DesignRuleDeck {
     /// Empty for a deck this build could not read: a check run under part of
     /// a deck it does not understand would be run under a policy nobody wrote.
     pub fn severity_overrides(&self) -> HashMap<DrcViolationType, DrcSeverity> {
-        self.severities
-            .iter()
-            .map(|(rule, severity)| (*rule, *severity))
-            .collect()
+        self.entries().collect()
     }
 
     /// Everything in the stored deck this build did not apply as written, in
     /// a stable order: the whole deck first where it was not read, then each
-    /// kept row by its code.
+    /// row below its rule's floor, then each kept row by its code.
     pub fn issues(&self) -> Vec<DeckIssue> {
         let mut issues = Vec::new();
         if let Some(unread) = &self.unread {
             issues.push(unread.issue.clone());
+        }
+        for (rule, stored) in &self.severities {
+            if *stored < rule.rule().floor {
+                issues.push(DeckIssue::BelowFloor {
+                    rule: *rule,
+                    stored: *stored,
+                });
+            }
         }
         for (code, stored) in &self.retained {
             issues.push(if DrcViolationType::from_rule_code(code).is_some() {
@@ -587,6 +640,72 @@ mod tests {
                 serde_json::from_str::<serde_json::Value>(stored).unwrap()
             );
         }
+    }
+
+    /// A rule whose finding refuses the run cannot be demoted below an error:
+    /// the deck refuses, and says why.
+    #[test]
+    fn a_severity_below_the_rules_floor_is_refused_with_the_reason() {
+        let mut deck = DesignRuleDeck::default();
+        let refusal = deck
+            .set_severity(DrcViolationType::DuplicateName, DrcSeverity::Warning)
+            .expect_err("two cards with one name refuse the run");
+        assert_eq!(
+            refusal,
+            DeckEditRefusal::BelowFloor {
+                rule: DrcViolationType::DuplicateName
+            }
+        );
+        assert!(refusal.to_string().contains("refuses the run"), "{refusal}");
+        assert!(deck.is_empty());
+        // Critical down to Error is within the floor.
+        assert_eq!(
+            deck.set_severity(DrcViolationType::DuplicateName, DrcSeverity::Error),
+            Ok(true)
+        );
+        // A rule that may only be raised: its default is a note, and a deck
+        // may set it no lower than an error.
+        assert!(
+            deck.set_severity(DrcViolationType::UnknownComponent, DrcSeverity::Warning)
+                .is_err()
+        );
+        assert_eq!(
+            deck.set_severity(DrcViolationType::UnknownComponent, DrcSeverity::Info),
+            Ok(false),
+            "its own default is not an override"
+        );
+    }
+
+    /// A stored row below the floor is reported and applied at the floor, and
+    /// written back as it was stored.
+    #[test]
+    fn a_stored_row_below_the_floor_is_clamped_and_reported() {
+        let stored = serde_json::json!({
+            "schema_version": 1,
+            "severities": {"DRC-SOURCE-TO-SOURCE": "Info", "DRC-DANGLING-WIRE": "Info"},
+        });
+        let deck = read(&stored.to_string());
+        assert_eq!(
+            deck.severity(DrcViolationType::SourceToSource),
+            Some(DrcSeverity::Error)
+        );
+        assert_eq!(
+            deck.severity_overrides()
+                .get(&DrcViolationType::SourceToSource),
+            Some(&DrcSeverity::Error)
+        );
+        assert_eq!(
+            deck.severity(DrcViolationType::DanglingWire),
+            Some(DrcSeverity::Info)
+        );
+        assert_eq!(
+            deck.issues(),
+            [DeckIssue::BelowFloor {
+                rule: DrcViolationType::SourceToSource,
+                stored: DrcSeverity::Info,
+            }]
+        );
+        assert_eq!(written(&deck), stored);
     }
 
     /// The listing a surface walks is the listing the checker can report, and

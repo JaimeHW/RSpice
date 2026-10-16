@@ -15,6 +15,7 @@ pub use extraction::{
 };
 pub use input::{BrokenReference, ComponentInfo, ParameterRangeIssue, PinInfo};
 pub use rule_deck::{DESIGN_RULE_DECK_SCHEMA_VERSION, DeckEditRefusal, DeckIssue, DesignRuleDeck};
+pub use rules::DrcRule;
 pub use types::{
     DrcLocation, DrcResult, DrcRuleCategory, DrcSeverity, DrcSummary, DrcViolation,
     DrcViolationType,
