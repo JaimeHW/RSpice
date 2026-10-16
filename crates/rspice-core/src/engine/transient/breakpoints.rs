@@ -1351,7 +1351,7 @@ impl Engine {
                 }
                 Err(err) => {
                     log::warn!(
-                        "Failed to collect XSPICE '{}' transient breakpoints: {:?}",
+                        "Could not collect the transient breakpoints of XSPICE model '{}': {}",
                         instance.model_name(),
                         err
                     );
