@@ -52,7 +52,10 @@ const OUTER_HEADER_H: f32 = 58.0;
 /// when it also carried a monogram, a kicker naming the model twice and a
 /// sentence describing what correlation is for.
 const SUMMARY_H: f32 = 46.0;
-const LEDGER_H: f32 = 54.0;
+/// One line: the band's title on the left, the measures and the verdict on the
+/// right. It was 54 px when a second line under the title named the three
+/// terms of the gate the verdict beside it already resolves.
+const LEDGER_H: f32 = 46.0;
 /// A section's own band: its kicker line and the section's title. It was
 /// 70 px when a sentence under the title described what the section below it
 /// is for, and the rule has come up by exactly that sentence's ink and lead.
@@ -82,7 +85,6 @@ const LEDGER_TITLE: &str = "Correlation evidence";
 /// Exactly the chain `CorrelationProjection::state_label` walks, in its order.
 /// The band states what the verdict is made of, so the sentence may not claim
 /// an input the verdict does not actually consume.
-const LEDGER_CHAIN: &str = "Needs a suite bound to this model revision, evaluated metrics without open dispositions, and a retained review approval.";
 
 fn correlation_dialog_error_id() -> egui::Id {
     egui::Id::new("model-correlation-submit-error")
@@ -941,21 +943,13 @@ fn evidence_ledger(ui: &mut Ui, projection: &CorrelationProjection) {
         Pos2::new(content.left(), rect.top()),
         Pos2::new((segments_left - 16.0).max(content.left()), rect.bottom()),
     );
-    paint_elided(
-        ui,
-        copy,
-        LEDGER_TITLE,
-        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+    let title_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
+    ui.painter().with_clip_rect(copy).text(
+        Pos2::new(copy.left(), center),
+        Align2::LEFT_CENTER,
+        design_system::elide_text(ui, LEDGER_TITLE, &title_font, copy.width().max(1.0)),
+        title_font,
         t.color.text,
-        11.0,
-    );
-    paint_elided(
-        ui,
-        copy,
-        LEDGER_CHAIN,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-        29.0,
     );
 
     let description = measures
@@ -967,7 +961,7 @@ fn evidence_ledger(ui: &mut Ui, projection: &CorrelationProjection) {
         ui,
         &response,
         LEDGER_TITLE,
-        &format!("{LEDGER_CHAIN} {description}. Verdict: {state}"),
+        &format!("{description}. Verdict: {state}"),
     );
 }
 

@@ -1660,7 +1660,7 @@ fn catalog_pane(ui: &mut Ui, row: &HubLedgerRow, proof: Option<&PackReProof>, he
             match row.installed.as_ref() {
                 Some(installed) => {
                     property(ui, "Installed", &installed.version, "this machine");
-                    verdict = Some(evidence(installed, proof));
+                    verdict = evidence(installed, proof);
                 }
                 None => property(
                     ui,
@@ -1684,39 +1684,31 @@ fn catalog_pane(ui: &mut Ui, row: &HubLedgerRow, proof: Option<&PackReProof>, he
             // hashes to the published digest" into "the retained archive no lon" —
             // a phrase that reads as reassurance.
             if let Some((value, origin)) = verdict {
-                if value.starts_with("verified") {
-                    ui.label(RichText::new(&value).small().color(t.color.text_dim));
-                } else {
-                    marked_line(ui, Problem::Warning, &value);
-                }
+                marked_line(ui, Problem::Warning, &value);
                 ui.label(RichText::new(origin).small().color(t.color.text_faint));
             }
         },
     );
 }
 
-/// What is known about the bytes of one installed release, and who says so.
-fn evidence(installed: &InstalledRelease, proof: Option<&PackReProof>) -> (String, &'static str) {
+/// What is wrong with the bytes of one installed release, and who says so.
+///
+/// Nothing when the archive is sound: a release that re-proved cleanly needs
+/// no sentence saying so, and a release nothing has re-proved is already the
+/// Attention cell's "never re-proved" two lines above — one fact, one owner.
+fn evidence(
+    installed: &InstalledRelease,
+    proof: Option<&PackReProof>,
+) -> Option<(String, &'static str)> {
     match (installed.archive, proof) {
-        (Some(ArchiveEvidence::DiffersFromCatalog), _) => (
+        (Some(ArchiveEvidence::DiffersFromCatalog), _) => Some((
             "the retained archive no longer hashes to the published digest".to_owned(),
             "startup comparison against the signed catalog",
-        ),
+        )),
         (_, Some(PackReProof::Failed(reason))) => {
-            (reason.clone(), "re-proof under the release key")
+            Some((reason.clone(), "re-proof under the release key"))
         }
-        (_, Some(PackReProof::Verified)) => (
-            "verified end to end under the release key".to_owned(),
-            "re-proved this session",
-        ),
-        (Some(ArchiveEvidence::MatchesCatalog), None) => (
-            "the archive matches the published digest; nothing has re-proved it".to_owned(),
-            "startup comparison against the signed catalog",
-        ),
-        (_, None) => (
-            "nothing has re-proved this release".to_owned(),
-            "no catalog entry to compare the archive against",
-        ),
+        (_, Some(PackReProof::Verified) | None) => None,
     }
 }
 
