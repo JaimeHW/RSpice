@@ -17,10 +17,8 @@ const MIN_BOX_PIXELS: f64 = 4.0;
 fn screen_to_world(viewport: &Viewport, pos: Pos2) -> (f64, f64) {
     let zoom = f64::from(viewport.zoom).max(f64::EPSILON);
     (
-        (f64::from(pos.x) - f64::from(viewport.bounds.min.x) - f64::from(viewport.offset.x))
-            / zoom,
-        (f64::from(pos.y) - f64::from(viewport.bounds.min.y) - f64::from(viewport.offset.y))
-            / zoom,
+        (f64::from(pos.x) - f64::from(viewport.bounds.min.x) - f64::from(viewport.offset.x)) / zoom,
+        (f64::from(pos.y) - f64::from(viewport.bounds.min.y) - f64::from(viewport.offset.y)) / zoom,
     )
 }
 
@@ -52,9 +50,11 @@ pub(super) fn handle_zoom_box(
     }
     if response.drag_stopped_by(PointerButton::Primary) {
         let zoom = f64::from(viewport.zoom);
-        let framed = zoom_box.world_rect().filter(|(min_x, min_y, max_x, max_y)| {
-            (max_x - min_x) * zoom >= MIN_BOX_PIXELS && (max_y - min_y) * zoom >= MIN_BOX_PIXELS
-        });
+        let framed = zoom_box
+            .world_rect()
+            .filter(|(min_x, min_y, max_x, max_y)| {
+                (max_x - min_x) * zoom >= MIN_BOX_PIXELS && (max_y - min_y) * zoom >= MIN_BOX_PIXELS
+            });
         zoom_box.disarm();
         if let Some(rect) = framed {
             state.schematic.session.editor.zoom_request = Some(ZoomRequest::Frame(rect));

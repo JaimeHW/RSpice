@@ -87,8 +87,8 @@ mod tests {
             execute_action(&mut app, request);
             // The canvas carries the zoom out on its next frame, about its
             // middle (audit E-1); what the route decides is whether to ask.
-            let expected_request = matches!(change, "none" | "read-only")
-                .then_some(ZoomRequest::By(1.2));
+            let expected_request =
+                matches!(change, "none" | "read-only").then_some(ZoomRequest::By(1.2));
             assert_eq!(
                 app.state.schematic.session.editor.zoom_request, expected_request,
                 "{change}"

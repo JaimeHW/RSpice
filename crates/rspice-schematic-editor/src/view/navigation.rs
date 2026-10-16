@@ -376,7 +376,14 @@ mod tests {
         let available = Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 300.0));
         let mut pan = (0.0, 0.0);
         let mut zoom = 0.25;
-        apply_zoom_about(&mut zoom, &mut pan, available, available.center(), 0.001, 0.1);
+        apply_zoom_about(
+            &mut zoom,
+            &mut pan,
+            available,
+            available.center(),
+            0.001,
+            0.1,
+        );
         assert_eq!(zoom, 0.1);
     }
 
@@ -388,7 +395,11 @@ mod tests {
         let mut zoom = 0.5;
         let mut pan = (-800.0, 40.0);
         let before = world_at_centre(zoom, pan);
-        for request in [ZoomRequest::By(1.2), ZoomRequest::To(1.0), ZoomRequest::By(0.5)] {
+        for request in [
+            ZoomRequest::By(1.2),
+            ZoomRequest::To(1.0),
+            ZoomRequest::By(0.5),
+        ] {
             apply_zoom_request(&mut zoom, &mut pan, (400.0, 300.0), request, 0.25);
             let after = world_at_centre(zoom, pan);
             assert!((after.0 - before.0).abs() < 1e-9 && (after.1 - before.1).abs() < 1e-9);

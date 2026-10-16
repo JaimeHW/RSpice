@@ -1448,10 +1448,9 @@ impl Command {
             Self::ZoomToSelection => {
                 let symbol_context = schematic_symbol_context(&app.state);
                 let schematic = &app.state.schematic;
-                if let Some((min_x, min_y, max_x, max_y)) = symbol_context.selection_bounds(
-                    schematic.document(),
-                    &schematic.session.editor.selection,
-                ) {
+                if let Some((min_x, min_y, max_x, max_y)) = symbol_context
+                    .selection_bounds(schematic.document(), &schematic.session.editor.selection)
+                {
                     app.state.schematic.session.editor.zoom_request = Some(ZoomRequest::Frame((
                         f64::from(min_x),
                         f64::from(min_y),

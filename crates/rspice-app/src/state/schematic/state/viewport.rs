@@ -37,8 +37,7 @@ impl SchematicState {
         viewport_height: f64,
         screen_inset: f64,
     ) -> f64 {
-        let (zoom, _) =
-            world_rect_framing(paper, viewport_width, viewport_height, screen_inset);
+        let (zoom, _) = world_rect_framing(paper, viewport_width, viewport_height, screen_inset);
         zoom_floor(zoom)
     }
 

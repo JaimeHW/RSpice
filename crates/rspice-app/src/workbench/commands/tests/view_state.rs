@@ -168,7 +168,11 @@ fn zoom_commands_keep_the_middle_of_the_canvas_where_it_was() {
         app.execute_shortcut_command(command);
         draw_schematic_canvas(&mut app, 800.0, 600.0);
         let editor = &app.state.schematic.session.editor;
-        assert!((editor.zoom - zoom).abs() < 1e-9, "{command:?}: zoom {}", editor.zoom);
+        assert!(
+            (editor.zoom - zoom).abs() < 1e-9,
+            "{command:?}: zoom {}",
+            editor.zoom
+        );
         let (x, y) = world_at_canvas_centre(&app, 800.0, 600.0);
         assert!(
             (x - 2000.0).abs() < 1e-6 && (y - 100.0).abs() < 1e-6,
@@ -257,7 +261,10 @@ fn zoom_to_selection_frames_what_is_selected() {
         crate::schematic::view::schematic_symbol_context(&app.state).component_bounds(&resistor);
     let (min_x, min_y, max_x, max_y) = (min.x, min.y, max.x, max.y);
     draw_schematic_canvas(&mut app, 800.0, 600.0);
-    assert!(!Command::ZoomToSelection.is_enabled(&app), "nothing is selected");
+    assert!(
+        !Command::ZoomToSelection.is_enabled(&app),
+        "nothing is selected"
+    );
 
     app.state
         .schematic
