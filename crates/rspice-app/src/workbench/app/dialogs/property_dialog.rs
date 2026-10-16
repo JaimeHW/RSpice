@@ -13,10 +13,8 @@ use crate::workbench::app::dialogs::stimulus_link::{
     StimulusLinkMode, commit_readoption, open_stimulus_definition, open_stimulus_link,
 };
 use crate::workbench::app_state::AppState;
-use crate::workbench::state::{ModelsPage, Workspace};
 use rspice_schematic_editor::component_properties::{
-    ComponentEditorContext, ComponentModelContext, ComponentPropertyDialogResult,
-    StimulusEditorContext,
+    ComponentEditorContext, ComponentPropertyDialogResult, StimulusEditorContext,
 };
 
 /// Render the floating schematic component editor.
@@ -182,33 +180,6 @@ pub fn render_property_dialog(
     }
 
     match result {
-        ComponentPropertyDialogResult::OpenModel
-        | ComponentPropertyDialogResult::OpenQualification => {
-            let model = editor_context
-                .editor
-                .model
-                .as_ref()
-                .map(|model| model.name.clone());
-            let library = editor_context
-                .editor
-                .model
-                .as_ref()
-                .and_then(|model| model.library.clone());
-            state.tabbed_property_dialog.close();
-            state.workbench.activate(Workspace::Models);
-            state.workbench.models_page =
-                if result == ComponentPropertyDialogResult::OpenQualification {
-                    ModelsPage::Qualification
-                } else {
-                    ModelsPage::Models
-                };
-            if let Some(model) = model {
-                state.workbench.selected_model = Some(model);
-            }
-            if let Some(library) = library {
-                state.select_model_library(&library);
-            }
-        }
         ComponentPropertyDialogResult::AdoptStimulus
         | ComponentPropertyDialogResult::ExtractStimulus => {
             // The link transaction is about the instance on the sheet, not
@@ -496,42 +467,24 @@ fn component_editor_context(state: &AppState) -> ComponentPropertyContext {
         return ComponentPropertyContext::default();
     };
 
-    let instance_path = format!(
-        "{}/{}",
-        state.workspace.content.active_view.display_path(),
-        component.name
-    );
+    // The master an instance stands for, and nothing for a primitive: the
+    // engine is not a library, and `R / Resistor` beside `R1` said the word
+    // the subtitle under it already says.
     let library_cell = component
         .library_cell
         .as_ref()
         .map(|binding| format!("{}/{}/{}", binding.library, binding.cell, binding.view))
-        .unwrap_or_else(|| {
-            format!(
-                "{} / {}",
-                component.kind.spice_prefix(),
-                component.kind.display_name()
-            )
-        });
+        .unwrap_or_default();
 
     let mut editor = ComponentEditorContext {
-        glyph: component_editor_glyph(component.kind).to_owned(),
+        // One word for what this part is: the device for a primitive, the
+        // cell and the view it is opened through for an instance.
         subtitle: component
             .library_cell
             .as_ref()
-            .map(|binding| format!("{} · {} view", component.kind.display_name(), binding.view))
-            .unwrap_or_else(|| format!("{} · SPICE primitive", component.kind.display_name())),
-        instance_path,
+            .map(|binding| format!("{} ({})", binding.cell, binding.view))
+            .unwrap_or_else(|| component.kind.display_name().to_owned()),
         library_cell,
-        family: format!(
-            "{} · {}",
-            component.kind.display_name(),
-            if component.library_cell.is_some() {
-                "library"
-            } else {
-                "primitive"
-            }
-        ),
-        model: component_model_context(state, component),
         stimulus: None,
     };
     let (stimulus, retained_table) = component_stimulus_context(state, component);
@@ -581,194 +534,6 @@ fn component_stimulus_context(
     (Some(editor), retained_table)
 }
 
-fn component_editor_glyph(kind: ComponentType) -> &'static str {
-    match kind {
-        ComponentType::OpAmp => "△",
-        ComponentType::VoltageSourceAc
-        | ComponentType::VoltageSourceSin
-        | ComponentType::CurrentSourceAc
-        | ComponentType::CurrentSourceSin => "~",
-        ComponentType::VoltageSourcePulse | ComponentType::CurrentSourcePulse => "∿",
-        ComponentType::VoltageSourcePwl | ComponentType::CurrentSourcePwl => "⌁",
-        ComponentType::VoltageSource => "+",
-        ComponentType::CurrentSource => "I",
-        ComponentType::Ground => "0",
-        ComponentType::Port | ComponentType::RfPort => "P",
-        ComponentType::CellInstance => "▣",
-        ComponentType::XspiceInverter | ComponentType::XspiceBuffer => "⊳",
-        kind if kind.is_xspice() => "⊞",
-        _ => kind.spice_prefix(),
-    }
-}
-
-fn component_model_context(
-    state: &AppState,
-    component: &Component,
-) -> Option<ComponentModelContext> {
-    let params = crate::state::parse_params_string(&component.params);
-    let declared = params
-        .get("model")
-        .cloned()
-        .or_else(|| {
-            model_is_component_value(component.kind)
-                .then(|| component.value.trim().to_owned())
-                .filter(|value| !value.is_empty())
-        })
-        .or_else(|| component.library_cell.as_ref()?.module_name.clone())
-        .or_else(|| {
-            component
-                .library_cell
-                .as_ref()
-                .map(|binding| binding.cell.clone())
-        });
-    let Some(declared) = declared else {
-        if let Some(name) = generated_inline_model_name(component) {
-            return Some(ComponentModelContext {
-                name,
-                library: None,
-                source: "Netlist generator".to_owned(),
-                section: "not applicable".to_owned(),
-                status: "inline model - generated from instance parameters".to_owned(),
-                can_open: false,
-                can_qualify: false,
-            });
-        }
-        return builtin_primitive_model_name(component.kind).map(|name| ComponentModelContext {
-            name,
-            library: None,
-            source: "Built-in device kernel".to_owned(),
-            section: "not sectioned".to_owned(),
-            status: "built-in exact stamp".to_owned(),
-            can_open: false,
-            can_qualify: false,
-        });
-    };
-
-    let selected_library = params
-        .get("model_library")
-        .map(|library| library.trim().to_owned())
-        .filter(|library| !library.is_empty());
-    let mut matches = state
-        .model_library_manager
-        .libraries_sorted()
-        .into_iter()
-        .filter_map(|library| {
-            library
-                .models
-                .values()
-                .find(|model| model.name.eq_ignore_ascii_case(&declared))
-                .map(|model| {
-                    (
-                        library.name.clone(),
-                        model.name.clone(),
-                        model
-                            .file_path
-                            .as_ref()
-                            .or(library.root_path.as_ref())
-                            .map(|path| path.display().to_string())
-                            .unwrap_or_else(|| "in-memory catalog".to_owned()),
-                    )
-                })
-        })
-        .collect::<Vec<_>>();
-    matches.sort_by(|left, right| left.0.cmp(&right.0));
-
-    let binding = component.library_cell.as_ref();
-    let effective_provider = state
-        .model_library_manager
-        .effective_definition_provider(
-            crate::state::model_library::ModelConsumerScope::PrimitiveModel,
-            &declared,
-        )
-        .ok()
-        .flatten();
-    let metadata_conflicts = selected_library.as_deref().is_some_and(|selected| {
-        effective_provider
-            .as_ref()
-            .is_some_and(|provider| !provider.library.eq_ignore_ascii_case(selected))
-    });
-    let catalog_match = effective_provider.as_ref().and_then(|provider| {
-        matches.iter().find(|(library, model, _)| {
-            library == &provider.library && model == &provider.definition
-        })
-    });
-    if let Some((library, model, source)) = catalog_match {
-        let status = if metadata_conflicts {
-            "project provider resolved · instance metadata conflicts"
-        } else if matches.len() > 1 {
-            "project-global catalog provider resolved"
-        } else if matches.len() == 1 {
-            "unique catalog binding resolved"
-        } else {
-            "provider selection requires catalog governance"
-        };
-        let section = binding
-            .and_then(|binding| binding.model_section.clone())
-            .or_else(|| params.get("section").cloned())
-            .unwrap_or_else(|| {
-                format!(
-                    "{} process corner",
-                    state.sim_setup.reference_pvt.process.short_name()
-                )
-            });
-        Some(ComponentModelContext {
-            name: model.clone(),
-            library: Some(library.clone()),
-            source: format!("{library} · {source}"),
-            section,
-            status: status.to_owned(),
-            can_open: true,
-            can_qualify: true,
-        })
-    } else {
-        let source = selected_library
-            .as_ref()
-            .map(|library| format!("{library} · unresolved catalog selection"))
-            .or_else(|| {
-                binding
-                    .and_then(|binding| binding.source_path.as_ref())
-                    .map(|path| path.display().to_string())
-            })
-            .or_else(|| {
-                binding
-                    .map(|binding| format!("{}/{}/{}", binding.library, binding.cell, binding.view))
-            })
-            .unwrap_or_else(|| "No catalog source resolved".to_owned());
-        Some(ComponentModelContext {
-            name: declared,
-            library: selected_library,
-            source,
-            section: binding
-                .and_then(|binding| binding.model_section.clone())
-                .or_else(|| params.get("section").cloned())
-                .unwrap_or_else(|| {
-                    format!(
-                        "{} process corner",
-                        state.sim_setup.reference_pvt.process.short_name()
-                    )
-                }),
-            status: "declared binding · catalog unverified".to_owned(),
-            can_open: false,
-            can_qualify: false,
-        })
-    }
-}
-
-fn builtin_primitive_model_name(kind: ComponentType) -> Option<String> {
-    if matches!(
-        kind,
-        ComponentType::Ground | ComponentType::Port | ComponentType::CellInstance
-    ) {
-        return None;
-    }
-    let prefix = kind.spice_prefix();
-    Some(if prefix.is_empty() {
-        kind.display_name().to_owned()
-    } else {
-        format!("{prefix} primitive")
-    })
-}
-
 fn model_is_component_value(kind: ComponentType) -> bool {
     matches!(
         kind,
@@ -790,41 +555,6 @@ fn model_is_component_value(kind: ComponentType) -> bool {
             | ComponentType::Nmesfet
             | ComponentType::Pmesfet
     )
-}
-
-fn generated_inline_model_name(component: &Component) -> Option<String> {
-    let prefix = match component.kind {
-        ComponentType::Nmos => "nmos",
-        ComponentType::Pmos => "pmos",
-        ComponentType::NVdmos => "nvdmos",
-        ComponentType::PVdmos => "pvdmos",
-        ComponentType::NmosSoi => "nmossoi",
-        ComponentType::PmosSoi => "pmossoi",
-        ComponentType::NpnBjt | ComponentType::NpnBjt4 | ComponentType::NpnBjt5 => "npn",
-        ComponentType::PnpBjt | ComponentType::PnpBjt4 | ComponentType::PnpBjt5 => "pnp",
-        ComponentType::Njfet => "njf",
-        ComponentType::Pjfet => "pjf",
-        ComponentType::Nmesfet => "nmf",
-        ComponentType::Pmesfet => "pmf",
-        ComponentType::VSwitch => "sw",
-        ComponentType::ISwitch => "isw",
-        ComponentType::GenericSwitch => "sw",
-        ComponentType::Diode => "d",
-        ComponentType::SaturableInductor => "core",
-        ComponentType::Memristor => "mem",
-        ComponentType::CoupledTransmissionLine => "cpl",
-        ComponentType::LossyTransmissionLine => {
-            let params = crate::state::parse_params_string(&component.params);
-            if params.get("kind").is_some_and(|kind| kind == "txl") {
-                "txl"
-            } else {
-                "ltra"
-            }
-        }
-        kind if kind.is_xspice() => return Some(format!("{}_model", component.name)),
-        _ => return None,
-    };
-    Some(format!("{prefix}_{}", component.name))
 }
 
 fn component_property_session_error(state: &AppState) -> Option<String> {
@@ -979,8 +709,15 @@ mod tests {
         );
     }
 
+    /// Which library executes a model is a project-global decision, and the
+    /// editor cannot commit an instance that contradicts it.
+    ///
+    /// The dialog no longer states the binding at all: the design inspector
+    /// owns it, and the card the editor used to draw beside the form showed a
+    /// "Section" of `TT process corner` — the project's reference corner — for
+    /// every instance that named no section of its own.
     #[test]
-    fn model_context_uses_the_project_global_provider_for_duplicate_names() {
+    fn an_instance_cannot_override_the_project_global_model_provider() {
         use crate::state::model_library::{
             DeviceModel, ModelConsumerScope, ModelLibrary, ModelType,
         };
@@ -1005,12 +742,6 @@ mod tests {
             .with_name_value("D1", "shared_diode");
         component.params = "model_library=beta".to_owned();
 
-        let context = component_model_context(&state, &component).expect("model context");
-
-        assert_eq!(context.library.as_deref(), Some("beta"));
-        assert_eq!(context.name, "shared_diode");
-        assert_eq!(context.section, "TT process corner");
-        assert!(context.source.starts_with("beta ·"));
         let values = HashMap::from([(
             "model_library".to_owned(),
             PropertyValue::String("beta".to_owned()),

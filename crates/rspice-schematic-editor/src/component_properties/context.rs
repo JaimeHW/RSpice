@@ -13,12 +13,12 @@
 /// schematic, where a reader can act on them without first dismissing a modal.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ComponentEditorContext {
-    pub glyph: String,
+    /// What this part is, in one word: the device for a primitive, the cell
+    /// and view for an instance of a master.
     pub subtitle: String,
-    pub instance_path: String,
+    /// The master an instance stands for. Empty for a primitive, which the
+    /// engine implements and no library holds.
     pub library_cell: String,
-    pub family: String,
-    pub model: Option<ComponentModelContext>,
     /// Where this instance stands with the project's stimulus library.
     /// `None` for anything that is not an independent source, which is every
     /// component with no waveform to adopt.
@@ -45,19 +45,6 @@ pub struct StimulusEditorContext {
     pub library_is_empty: bool,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ComponentModelContext {
-    pub name: String,
-    /// Exact catalog library identity when the binding was resolved from a
-    /// model library. Model names alone are not globally unique.
-    pub library: Option<String>,
-    pub source: String,
-    pub section: String,
-    pub status: String,
-    pub can_open: bool,
-    pub can_qualify: bool,
-}
-
 /// Result of the component editor interaction.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ComponentPropertyDialogResult {
@@ -68,10 +55,6 @@ pub enum ComponentPropertyDialogResult {
     Applied,
     /// User clicked OK - commit and close after the host accepts the change.
     AppliedAndClose,
-    /// Open the selected model's source/catalog record.
-    OpenModel,
-    /// Open qualification evidence for the selected model.
-    OpenQualification,
     /// Close the editor and open the adopt half of the stimulus link dialog.
     AdoptStimulus,
     /// Close the editor and open the save half of the stimulus link dialog.
