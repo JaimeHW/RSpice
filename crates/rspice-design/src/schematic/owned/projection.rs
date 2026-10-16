@@ -344,19 +344,12 @@ fn projected_cross_sheet_anchor(
                     domain: "cross-sheet component anchor",
                     identity: component_id.to_string(),
                 })?;
-            let point = component_terminal_point(component, terminal_name).ok_or_else(|| {
+            component_terminal_point(component, terminal_name).ok_or_else(|| {
                 DesignManagementError::MissingReference {
                     domain: "cross-sheet component terminal",
                     identity: format!("{}:{}", component_id, terminal_name),
                 }
-            })?;
-            if !source.wires.iter().any(|wire| wire.contains_point(point)) {
-                return Err(DesignManagementError::MissingReference {
-                    domain: "cross-sheet component terminal connection",
-                    identity: format!("{}:{}", component_id, terminal_name),
-                });
-            }
-            point
+            })?
         }
     };
     let anchor = translated_point(authored_point, delta)?;
@@ -373,7 +366,10 @@ fn projected_cross_sheet_anchor(
                 });
             }
         }
-        CrossSheetPortAnchor::ComponentTerminal { component_id, .. } => {
+        CrossSheetPortAnchor::ComponentTerminal {
+            component_id,
+            terminal_name,
+        } => {
             if !projected
                 .components
                 .iter()
@@ -384,7 +380,141 @@ fn projected_cross_sheet_anchor(
                     identity: component_id.to_string(),
                 });
             }
+            // The pin must sit on a wire of its own sheet. Every sheet shares
+            // the drawing's coordinates, so the authored document would let
+            // another page's wire through the same point satisfy the check;
+            // the projected one has laid the pages apart.
+            if !projected.wires.iter().any(|wire| wire.contains_point(anchor)) {
+                return Err(DesignManagementError::MissingReference {
+                    domain: "cross-sheet component terminal connection",
+                    identity: format!("{}:{}", component_id, terminal_name),
+                });
+            }
         }
     }
     Ok(anchor)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::wire::Wire;
+    use super::*;
+    use rspice_design_model::design_management::{
+        CrossSheetDiscipline, CrossSheetPortDefinition, CrossSheetPortDirection,
+        CrossSheetSignalType, MoveBoundaryResolution, MoveSelectionRequest, SheetDefinition,
+        SheetPortPolicy, SheetTemplate,
+    };
+
+    const KEY: &str = "work/top/schematic";
+
+    /// Input holds wire 1 through the origin; the resistor 3 moves to Output
+    /// with a contract naming its pin at the origin. Output has no wire there.
+    fn contract_on_an_unwired_pin() -> (Schematic, DesignManagementCatalog) {
+        let schematic = Schematic::from_document(SchematicDocument {
+            components: vec![Component::new(
+                3,
+                ComponentType::Resistor,
+                Point::new(20, 0),
+            )],
+            wires: vec![Wire::segment(1, Point::origin(), Point::new(10, 0))],
+            ..SchematicDocument::default()
+        });
+        let terminal_name = schematic.document.components[0]
+            .terminal_positions()
+            .into_iter()
+            .find(|(_, point)| *point == Point::origin())
+            .map(|(name, _)| name.to_string())
+            .expect("a pin at the origin");
+        let mut catalog = DesignManagementCatalog::default();
+        let input = catalog
+            .bootstrap_for_cell_view(KEY, "Input", [1, 3])
+            .expect("first sheet");
+        let sheets = catalog.sheet_catalog_mut(KEY).expect("sheet catalog");
+        let output = sheets
+            .create_sheet(
+                SheetDefinition {
+                    name: "Output".to_owned(),
+                    template: SheetTemplate::AnalogSchematic,
+                    port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                    explicit_page_number: Some(2),
+                },
+                Some(input),
+            )
+            .expect("second sheet");
+        sheets
+            .move_selection(MoveSelectionRequest {
+                expected_catalog_revision: sheets.revision(),
+                object_ids: vec![3],
+                destination_sheet_id: output,
+                boundary_resolution: MoveBoundaryResolution::ExplicitPorts {
+                    ports: vec![CrossSheetPortDefinition {
+                        net_name: "BIAS".to_owned(),
+                        first: CrossSheetPortEndpoint {
+                            sheet_id: input,
+                            anchor: CrossSheetPortAnchor::WirePoint {
+                                wire_id: 1,
+                                point: Point::origin(),
+                            },
+                        },
+                        second: CrossSheetPortEndpoint {
+                            sheet_id: output,
+                            anchor: CrossSheetPortAnchor::ComponentTerminal {
+                                component_id: 3,
+                                terminal_name,
+                            },
+                        },
+                        direction: CrossSheetPortDirection::Output,
+                        signal_type: CrossSheetSignalType::Analog,
+                        discipline: CrossSheetDiscipline::Electrical,
+                    }],
+                },
+            })
+            .expect("move with an explicit boundary contract");
+        (schematic, catalog)
+    }
+
+    /// The pin on Output has no wire. Input's wire passes through the same
+    /// drawing coordinates, but Input is another page: the contract is stale
+    /// and must say so rather than hang a port on an unwired pin.
+    #[test]
+    fn a_pin_contract_is_not_satisfied_by_another_sheets_wire() {
+        let (schematic, catalog) = contract_on_an_unwired_pin();
+
+        let Err(error) = schematic.materialize_design_management_schematic(&catalog, KEY) else {
+            panic!("a port hung on a pin with no wire on its own sheet");
+        };
+
+        assert!(
+            matches!(
+                error,
+                DesignManagementError::MissingReference {
+                    domain: "cross-sheet component terminal connection",
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
+    }
+
+    /// The same pin with a wire of its own on Output satisfies the contract.
+    #[test]
+    fn a_pin_contract_is_satisfied_by_a_wire_on_its_own_sheet() {
+        let (mut schematic, mut catalog) = contract_on_an_unwired_pin();
+        schematic
+            .document
+            .wires
+            .push(Wire::segment(4, Point::origin(), Point::new(0, 10)));
+        let sheets = catalog.sheet_catalog_mut(KEY).expect("sheet catalog");
+        let output = sheets.sheets()[1].id();
+        sheets
+            .assign_objects(sheets.revision(), output, [4])
+            .expect("the wire joins Output");
+
+        assert!(
+            schematic
+                .materialize_design_management_schematic(&catalog, KEY)
+                .is_ok(),
+            "the pin is wired on its own sheet"
+        );
+    }
 }
