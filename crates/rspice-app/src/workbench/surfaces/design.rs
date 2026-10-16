@@ -23,7 +23,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         read_only_banner(ui);
     }
     occurrence_scope_banner(ui, app);
-    tool_options::show(ui, app);
+    tool_options::show(ui, &mut app.state);
     let content_rect = ui.available_rect_before_wrap();
     let view_type = app.state.workspace.content.active_view_type();
     let canvas_document = matches!(view_type, ViewType::Schematic | ViewType::Testbench);

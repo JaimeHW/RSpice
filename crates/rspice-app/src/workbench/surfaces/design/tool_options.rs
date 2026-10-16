@@ -13,16 +13,16 @@ use crate::state::{MoveSelectionMode, StretchOrthogonalPolicy, Tool};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{SegmentedWidth, segmented};
-use crate::workbench::RSpiceApp;
+use crate::workbench::AppState;
 
 /// Air between the command's name and its options.
 const NAME_GAP: f32 = 12.0;
 
-pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    match app.state.schematic.session.editor.tool {
-        Tool::MoveSelection if app.state.dialogs.move_selection.armed => {
+pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
+    match state.schematic.session.editor.tool {
+        Tool::MoveSelection if state.dialogs.move_selection.armed => {
             strip(ui, "Move", |ui| {
-                let mode = &mut app.state.dialogs.move_selection.mode;
+                let mode = &mut state.dialogs.move_selection.mode;
                 let mut selected = MoveSelectionMode::ALL
                     .iter()
                     .position(|candidate| candidate == mode)
@@ -39,9 +39,9 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
             });
         }
-        Tool::StretchSelection if app.state.dialogs.stretch_selection.armed => {
+        Tool::StretchSelection if state.dialogs.stretch_selection.armed => {
             strip(ui, "Stretch", |ui| {
-                let policy = &mut app.state.dialogs.stretch_selection.policy;
+                let policy = &mut state.dialogs.stretch_selection.policy;
                 let mut orthogonal = *policy == StretchOrthogonalPolicy::PreserveOrthogonal;
                 if ui
                     .checkbox(&mut orthogonal, "Keep wires orthogonal")
@@ -82,54 +82,53 @@ mod tests {
     use super::*;
     use crate::state::{ComponentType, Point, Wire};
 
-    fn armed_move() -> RSpiceApp {
-        let mut app = RSpiceApp::test_instance();
-        let id = app
-            .state
+    fn armed_move() -> AppState {
+        let mut state = AppState::default();
+        let id = state
             .schematic
             .add_component(ComponentType::Resistor, Point::origin());
-        app.state
+        state
             .schematic
             .session
             .editor
             .selection
             .select_only_component(id);
-        crate::workbench::app::arm_move_selection(&mut app.state);
-        app
+        crate::workbench::app::arm_move_selection(&mut state);
+        state
     }
 
-    fn armed_stretch() -> RSpiceApp {
-        let mut app = RSpiceApp::test_instance();
-        app.state
+    fn armed_stretch() -> AppState {
+        let mut state = AppState::default();
+        state
             .schematic
             .document_mut_for_test()
             .wires
             .push(Wire::new(7, vec![Point::new(0, 0), Point::new(20, 0)]));
-        app.state.schematic.session.editor.selection.select_wire(7);
-        crate::workbench::app::arm_stretch_selection(&mut app.state);
-        app
+        state.schematic.session.editor.selection.select_wire(7);
+        crate::workbench::app::arm_stretch_selection(&mut state);
+        state
     }
 
     /// The strip belongs to the armed command, not to the canvas: it is there
     /// while Move or Stretch is running and at no other time.
     #[test]
     fn the_strip_is_there_only_while_a_tool_with_an_option_is_armed() {
-        fn painted(app: &mut RSpiceApp) -> bool {
+        fn painted(state: &mut AppState) -> bool {
             let mut shown = false;
-            let _ = rspice_ui_kit::raster::render(egui::vec2(900.0, 60.0), |ui, _background| {
+            let _ = crate::ui::raster::render(egui::vec2(900.0, 60.0), |ui, _background| {
                 let before = ui.cursor().top();
-                show(ui, app);
+                show(ui, state);
                 shown = ui.cursor().top() > before;
             });
             shown
         }
 
-        assert!(!painted(&mut RSpiceApp::test_instance()));
+        assert!(!painted(&mut AppState::default()));
         assert!(painted(&mut armed_move()));
         assert!(painted(&mut armed_stretch()));
 
         let mut cancelled = armed_move();
-        crate::workbench::app::cancel_armed_move_selection(&mut cancelled.state);
+        crate::workbench::app::cancel_armed_move_selection(&mut cancelled);
         assert!(!painted(&mut cancelled));
     }
 
@@ -146,7 +145,7 @@ mod tests {
         let stderr = std::io::stderr();
         let mut report = stderr.lock();
 
-        for (stem, mut app) in [("move", armed_move()), ("stretch", armed_stretch())] {
+        for (stem, mut state) in [("move", armed_move()), ("stretch", armed_stretch())] {
             for (mode_stem, mode) in [("dark", Mode::Dark), ("light", Mode::Light)] {
                 let canvas = crate::ui::raster::render_themed(
                     crate::ui::Theme {
@@ -154,7 +153,7 @@ mod tests {
                         ..crate::ui::Theme::default()
                     },
                     egui::vec2(900.0, 64.0),
-                    |ui, _background| show(ui, &mut app),
+                    |ui, _background| show(ui, &mut state),
                 );
                 let height = canvas.content_height().max(1);
                 let path = directory.join(format!("tool-options-{stem}-{mode_stem}.png"));

@@ -146,27 +146,26 @@ fn move_and_stretch_open_no_dialog() {
 #[test]
 #[ignore = "writes PNGs for a human to look at; run with --ignored"]
 fn render_selection_forms() {
-    use crate::state::{Bus, BusDeclaration, Component, ComponentType, Point};
+    use crate::state::{Bus, BusDeclaration, ComponentType, Point};
     use crate::ui::tokens::Mode;
     use crate::workbench::app::RSpiceApp;
+    use crate::workbench::app_state::AppState;
     use std::io::Write as _;
 
-    fn with_a_selected_resistor(app: &mut RSpiceApp) -> u64 {
-        let id = app
-            .state
+    fn with_a_selected_resistor(state: &mut AppState) {
+        let id = state
             .schematic
             .add_component(ComponentType::Resistor, Point::origin());
-        app.state
+        state
             .schematic
             .session
             .editor
             .selection
             .select_only_component(id);
-        id
     }
 
-    fn with_a_selected_bus(app: &mut RSpiceApp) {
-        app.state.schematic.document_mut_for_test().buses.push(
+    fn with_a_selected_bus(state: &mut AppState) {
+        state.schematic.document_mut_for_test().buses.push(
             Bus::segment(
                 1,
                 Point::new(0, 0),
@@ -175,12 +174,7 @@ fn render_selection_forms() {
             )
             .unwrap(),
         );
-        app.state
-            .schematic
-            .session
-            .editor
-            .selection
-            .select_only_bus(1);
+        state.schematic.session.editor.selection.select_only_bus(1);
     }
 
     let directory = std::env::var("RSPICE_RASTER_DIR")
@@ -189,45 +183,12 @@ fn render_selection_forms() {
     let stderr = std::io::stderr();
     let mut report = stderr.lock();
 
-    type Open = fn(&mut RSpiceApp);
-    type Draw = fn(&mut RSpiceApp, &egui::Context);
-    let surfaces: [(&str, Open, Draw); 4] = [
-        (
-            "create-array",
-            |app| {
-                with_a_selected_resistor(app);
-                super::array::open_array_selection_dialog(&mut app.state);
-            },
-            |app, ctx| app.render_array_selection_dialog(ctx),
-        ),
-        (
-            "rename",
-            |app| {
-                with_a_selected_resistor(app);
-                super::rename::open_selected_object_rename(&mut app.state);
-            },
-            |app, ctx| app.render_rename_selection_dialog(ctx),
-        ),
-        (
-            "bulk-edit",
-            |app| {
-                let _ = Component::new(0, ComponentType::Resistor, Point::origin());
-                with_a_selected_resistor(app);
-                super::bulk_edit::open_selection_bulk_edit_dialog(&mut app.state);
-            },
-            |app, ctx| app.render_selection_bulk_edit_dialog(ctx),
-        ),
-        (
-            "object-properties-bus",
-            |app| {
-                with_a_selected_bus(app);
-                crate::workbench::app::open_selected_object_properties(&mut app.state);
-            },
-            |app, ctx| app.render_object_properties_dialog(ctx),
-        ),
-    ];
-
-    for (stem, open, draw) in surfaces {
+    for stem in [
+        "create-array",
+        "rename",
+        "bulk-edit",
+        "object-properties-bus",
+    ] {
         for (size_stem, size) in [
             ("1024x640", egui::vec2(1024.0, 640.0)),
             ("760x900", egui::vec2(760.0, 900.0)),
@@ -235,14 +196,36 @@ fn render_selection_forms() {
         ] {
             for (mode_stem, mode) in [("dark", Mode::Dark), ("light", Mode::Light)] {
                 let mut app = RSpiceApp::test_instance();
-                open(&mut app);
+                match stem {
+                    "create-array" => {
+                        with_a_selected_resistor(&mut app.state);
+                        super::array::open_array_selection_dialog(&mut app.state);
+                    }
+                    "rename" => {
+                        with_a_selected_resistor(&mut app.state);
+                        super::rename::open_selected_object_rename(&mut app.state);
+                    }
+                    "bulk-edit" => {
+                        with_a_selected_resistor(&mut app.state);
+                        super::bulk_edit::open_selection_bulk_edit_dialog(&mut app.state);
+                    }
+                    _ => {
+                        with_a_selected_bus(&mut app.state);
+                        crate::workbench::app::open_selected_object_properties(&mut app.state);
+                    }
+                }
                 let canvas = crate::ui::raster::render_themed(
                     crate::ui::Theme {
                         mode,
                         ..crate::ui::Theme::default()
                     },
                     size,
-                    |ui, _background| draw(&mut app, ui.ctx()),
+                    |ui, _background| match stem {
+                        "create-array" => app.render_array_selection_dialog(ui.ctx()),
+                        "rename" => app.render_rename_selection_dialog(ui.ctx()),
+                        "bulk-edit" => app.render_selection_bulk_edit_dialog(ui.ctx()),
+                        _ => app.render_object_properties_dialog(ui.ctx()),
+                    },
                 );
                 let height = canvas.content_height().max(1);
                 let path = directory.join(format!("{stem}-{size_stem}-{mode_stem}.png"));

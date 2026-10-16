@@ -15,11 +15,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Problem;
 
-pub(crate) const BODY_HEIGHT: f32 = 230.0;
-pub(crate) const CONTEXT_WIDTH: f32 = 260.0;
 pub(crate) const PURPOSE_HEIGHT: f32 = 35.0;
-pub(crate) const SURFACE_HEIGHT: f32 = 370.0;
-pub(crate) const TRANSACTION_HEIGHT: f32 = 37.0;
 
 pub(crate) fn purpose_line(ui: &mut Ui, description: &str) {
     let t = Tokens::get(ui.ctx());
