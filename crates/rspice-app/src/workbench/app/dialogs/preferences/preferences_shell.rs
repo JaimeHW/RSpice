@@ -123,8 +123,8 @@ fn row_matches(title: &str, help: &str, query: &str) -> bool {
 /// The two things a reader is looking for when they open Preferences: how the
 /// application behaves, or how engineering quantities are read and written.
 ///
-/// A rail of eight entries does not need groups to be navigable, but it does
-/// need them to be *predictable*: a reader after the grid size looks under
+/// A rail this short does not need groups to be navigable, but it does need
+/// them to be *predictable*: a reader after the grid size looks under
 /// engineering, and one after the colour mode does not read past Interface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CategoryGroup {
@@ -158,18 +158,20 @@ pub(super) enum PreferenceCategory {
     Shortcuts,
     Units,
     Schematic,
+    DesignRules,
     Projects,
     Results,
 }
 
 impl PreferenceCategory {
-    pub(super) const ALL: [Self; 8] = [
+    pub(super) const ALL: [Self; 9] = [
         Self::Appearance,
         Self::Accessibility,
         Self::Workspace,
         Self::Shortcuts,
         Self::Units,
         Self::Schematic,
+        Self::DesignRules,
         Self::Projects,
         Self::Results,
     ];
@@ -182,6 +184,7 @@ impl PreferenceCategory {
             Self::Shortcuts => "Shortcuts",
             Self::Units => "Units and notation",
             Self::Schematic => "Schematic editor",
+            Self::DesignRules => "Design rules",
             Self::Projects => "Projects and files",
             Self::Results => "Results and precision",
         }
@@ -192,7 +195,7 @@ impl PreferenceCategory {
             Self::Appearance | Self::Accessibility | Self::Workspace | Self::Shortcuts => {
                 CategoryGroup::Interface
             }
-            Self::Units | Self::Schematic | Self::Projects | Self::Results => {
+            Self::Units | Self::Schematic | Self::DesignRules | Self::Projects | Self::Results => {
                 CategoryGroup::Engineering
             }
         }
@@ -206,6 +209,7 @@ impl PreferenceCategory {
             Self::Shortcuts => "shortcuts",
             Self::Units => "units",
             Self::Schematic => "schematic",
+            Self::DesignRules => "design-rules",
             Self::Projects => "projects",
             Self::Results => "results",
         }
@@ -922,7 +926,7 @@ fn render_scrolling_page(
 
 /// Every page in rail order, each showing only the rows that matched.
 ///
-/// All eight run because a query is about the settings, not about the page
+/// All of them run because a query is about the settings, not about the page
 /// that happens to be open; the rows themselves decide whether they appear,
 /// and a page contributing nothing contributes no heading either.
 fn render_filtered_pages(ui: &mut Ui, mut render_page: impl FnMut(&mut Ui, PreferenceCategory)) {
@@ -1014,7 +1018,7 @@ struct FooterResponse {
 }
 
 /// The page inset at this width: a phone gives up less of it to the gutter.
-fn content_inset(ui: &Ui) -> f32 {
+pub(super) fn content_inset(ui: &Ui) -> f32 {
     if ui.ctx().content_rect().width() <= PHONE_MAX_WIDTH {
         PHONE_CONTENT_INSET
     } else {
@@ -1115,13 +1119,38 @@ pub(super) fn preference_row<R>(
     help: &str,
     add_value: impl FnOnce(&mut Ui) -> R,
 ) {
-    if let Some(query) = active_query(ui.ctx()) {
-        if !row_matches(title, help, &query) {
-            return;
-        }
-        accept_filtered_row(ui);
+    if !row_passes_filter(ui, title, help) {
+        return;
     }
     setting_row(ui, title, help, add_value);
+}
+
+/// Whether a setting named `title`, helped by `help`, belongs on the page as it
+/// is currently filtered — counting it as a match, and naming its page, when it
+/// does.
+///
+/// [`preference_row`] is the usual caller. It is exposed because a page whose
+/// settings are the rows of a table rather than a stack of setting rows still
+/// has to answer the one search field the shell owns; a page that ignored it
+/// would keep every one of its rows on screen under a query that matches none
+/// of them.
+pub(super) fn row_passes_filter(ui: &mut Ui, title: &str, help: &str) -> bool {
+    let Some(query) = active_query(ui.ctx()) else {
+        return true;
+    };
+    if !row_matches(title, help, &query) {
+        return false;
+    }
+    accept_filtered_row(ui);
+    true
+}
+
+/// Whether the pages are being read as a flat list of search results.
+///
+/// A table's own column headings and group bands are structure, not settings,
+/// so they are left out of that list exactly as [`section_heading`] is.
+pub(super) fn filtering(ui: &Ui) -> bool {
+    active_query(ui.ctx()).is_some()
 }
 
 /// Count a match and, if this is the first on its page, name the page.

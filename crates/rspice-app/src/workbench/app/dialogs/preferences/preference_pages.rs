@@ -43,6 +43,7 @@ pub(super) fn render(
         }
         PreferenceCategory::Units => units(ui, state),
         PreferenceCategory::Schematic => schematic(ui, state),
+        PreferenceCategory::DesignRules => super::design_rules::render(ui, state),
         PreferenceCategory::Projects => projects(ui, state),
         PreferenceCategory::Results => results(ui, state),
     }
@@ -961,6 +962,11 @@ pub(super) fn restore_defaults(category: PreferenceCategory, state: &mut AppStat
             ],
             &[],
         ),
+        PreferenceCategory::DesignRules => {
+            // The deck is project state, not a preference key, so the reset
+            // clears it rather than restoring a stored default.
+            super::design_rules::restore_defaults(&mut state.workspace.content);
+        }
         PreferenceCategory::Projects => {
             state.ui.autosave_minutes = super::DEFAULT_AUTOSAVE_MINUTES;
             preferences.restore_defaults(
