@@ -344,6 +344,15 @@ impl CheckAndSaveValidationReport {
                     configured_hierarchy,
                     DrcConfig {
                         check_missing_ground: true,
+                        // The project's rule deck decides what each finding is
+                        // reported as, so what blocks a validated save is the
+                        // severity the team signed off on rather than the
+                        // severity this build happens to ship.
+                        severity_overrides: state
+                            .workspace
+                            .content
+                            .design_rules
+                            .severity_overrides(),
                         ..DrcConfig::default()
                     },
                 );
@@ -475,7 +484,18 @@ impl CheckAndSaveValidationReport {
             let projected = projected_document(execution_projection.as_ref().ok(), key)
                 .filter(|_| key != &root_schematic_key);
             if let (Some(hierarchy), Some(schematic)) = (configured_hierarchy.as_ref(), projected) {
-                let drc = run_check_with_hierarchy(schematic, hierarchy, DrcConfig::default());
+                let drc = run_check_with_hierarchy(
+                    schematic,
+                    hierarchy,
+                    DrcConfig {
+                        severity_overrides: state
+                            .workspace
+                            .content
+                            .design_rules
+                            .severity_overrides(),
+                        ..DrcConfig::default()
+                    },
+                );
                 if !drc.completed {
                     insert_finding(
                         &mut findings,

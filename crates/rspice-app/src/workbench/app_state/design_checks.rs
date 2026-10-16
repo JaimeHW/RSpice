@@ -374,9 +374,17 @@ fn project_root_reference(state: &AppState) -> CellViewRef {
     )
 }
 
+/// The checker profile one cell view is checked under.
+///
+/// The severity overrides come from the project's own rule deck rather than
+/// being left empty, which is what made every rule's shipped default the only
+/// severity a design could be checked at. They are folded into the digest
+/// below, so moving a rule in the deck stales the reports that were produced
+/// under the previous one instead of relabelling their findings.
 fn design_check_config(state: &AppState, subject: &CellViewRef) -> DrcConfig {
     DrcConfig {
         check_missing_ground: owner_key(subject) == owner_key(&project_root_reference(state)),
+        severity_overrides: state.workspace.content.design_rules.severity_overrides(),
         ..DrcConfig::default()
     }
 }

@@ -430,6 +430,9 @@ fn connectivity_drc_config(state: &AppState) -> DrcConfig {
     );
     DrcConfig {
         check_missing_ground: state.workspace.content.active_schematic_reference() == root,
+        // The same project rule deck the interactive checks are run under, so
+        // this page cannot state a severity the Problems page disagrees with.
+        severity_overrides: state.workspace.content.design_rules.severity_overrides(),
         ..DrcConfig::default()
     }
 }

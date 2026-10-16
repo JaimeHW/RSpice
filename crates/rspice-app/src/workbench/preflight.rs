@@ -272,6 +272,11 @@ fn collect_report(state: &AppState) -> PreflightReport {
             &hierarchy_source,
             rspice_design::drc::DrcConfig {
                 check_missing_ground: true,
+                // A rule the project's deck promoted to an error blocks the
+                // run, and one it demoted does not. Preflight reading the
+                // shipped defaults instead would have contradicted the deck at
+                // the one moment it is consulted for.
+                severity_overrides: state.workspace.content.design_rules.severity_overrides(),
                 ..rspice_design::drc::DrcConfig::default()
             },
         );
