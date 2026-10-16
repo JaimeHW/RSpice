@@ -266,6 +266,10 @@ pub struct Module {
     pub analog_final: Option<AnalogBlock>,
     /// Module instances
     pub instances: Vec<ModuleInstance>,
+    /// `defparam` assignments as written (IEEE 1364-2005 section 12.2.1).
+    /// Folded into instance overrides before analysis, so no later pass
+    /// reads them.
+    pub(crate) defparams: Vec<DefparamAssignment>,
     /// Function definitions
     pub functions: Vec<FunctionDef>,
     /// Discrete-domain net declarations (`wire`), in declaration order
@@ -397,6 +401,7 @@ impl Module {
             analog_initial: None,
             analog_final: None,
             instances: Vec::new(),
+            defparams: Vec::new(),
             functions: Vec::new(),
             digital_nets: Vec::new(),
             digital_variables: Vec::new(),
@@ -1970,6 +1975,27 @@ pub struct ModuleInstance {
     pub connections: Vec<Connection>,
     pub parameters: Vec<ParameterOverride>,
     pub span: Span,
+}
+
+/// One `hierarchical_parameter_identifier = constant_expression` of a
+/// `defparam` (IEEE 1364-2005 section 12.2.1). `path` ends with the
+/// parameter's name; every name before it is an instance.
+#[derive(Debug, Clone)]
+pub(crate) struct DefparamAssignment {
+    pub path: Vec<(SmolStr, Span)>,
+    pub value: Expression,
+    pub span: Span,
+}
+
+impl DefparamAssignment {
+    /// The target as written, `u1.l.P`.
+    pub(crate) fn target(&self) -> String {
+        self.path
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>()
+            .join(".")
+    }
 }
 
 /// Parameter override on a module instance. `name == None` is an ordered

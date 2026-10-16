@@ -480,6 +480,13 @@ impl<'a> Parser<'a> {
         let mut module = Module::new(name, start);
         module.time_scale = self.time_scale;
 
+        let port_parameters = if self.check(TokenKind::Hash) {
+            self.parse_parameter_port_list(&mut module)?;
+            Some(module.parameters.len())
+        } else {
+            None
+        };
+
         // Optional port list
         if self.check(TokenKind::LParen) {
             self.parse_port_list(&mut module)?;
@@ -494,6 +501,18 @@ impl<'a> Parser<'a> {
 
         self.expect(TokenKind::Endmodule)?;
         module.span = start.extend(self.previous_span());
+        // IEEE 1364-2005 section 12.2: with a parameter port list, a
+        // `parameter` the body declares is a local parameter, which no
+        // override reaches. Declaration order is kept for their dependencies.
+        if let Some(ported) = port_parameters
+            && module.parameters.len() > ported
+        {
+            let local: Vec<_> = module.parameters.drain(ported..).collect();
+            module.localparams.extend(local);
+            module
+                .localparams
+                .sort_by_key(|parameter| parameter.span.start);
+        }
 
         module.hierarchical_names = std::mem::take(&mut self.hierarchical_names);
         module.reserved_identifiers = self.authored_identifiers.clone();
@@ -770,6 +789,9 @@ impl<'a> Parser<'a> {
                 let var = self.parse_variable_decl()?;
                 module.variables.push(var);
             }
+            TokenKind::AmsDigital if self.digital_keyword_is("defparam") => {
+                self.parse_defparam(module)?;
+            }
             TokenKind::AmsDigital
                 if self.digital_keyword_is("time") || self.digital_keyword_is("event") =>
             {
@@ -995,6 +1017,67 @@ impl<'a> Parser<'a> {
             instance.span = declaration_start.extend(declaration_end);
         }
         Ok(instances)
+    }
+
+    /// `defparam hierarchical_parameter_identifier = constant_expression
+    /// {, ...};` (IEEE 1364-2005 section 12.2.1).
+    ///
+    /// A generate block parses its items into a module with no name; a
+    /// `defparam` there may change only parameters inside that block's
+    /// hierarchy, a restriction the instance-level folding cannot honour yet,
+    /// so it is refused by name.
+    fn parse_defparam(&mut self, module: &mut Module) -> Result<(), ParseError> {
+        let keyword = self.current_span();
+        if module.name.is_empty() {
+            return Err(ParseError::new(
+                ParseErrorKind::UnsupportedConstruct {
+                    context: "generate block".to_string(),
+                    found: "`defparam`; IEEE 1364-2005 section 12.2.1 confines one inside a \
+                            generate block to that block's own hierarchy, which this compiler \
+                            does not resolve yet; write the value as a `#(...)` override on the \
+                            instance"
+                        .to_string(),
+                },
+                keyword,
+            ));
+        }
+        self.advance();
+        loop {
+            let start = self.current_span();
+            let mut path = Vec::new();
+            loop {
+                let span = self.current_span();
+                let name = self.expect_identifier("defparam target")?;
+                path.push((SmolStr::from(name), span));
+                if self.check(TokenKind::LBracket) {
+                    return Err(ParseError::new(
+                        ParseErrorKind::UnsupportedConstruct {
+                            context: "defparam target".to_string(),
+                            found: "an indexed scope; a `defparam` reaching into an instance \
+                                    array or a generate block (IEEE 1364-2005 section 12.2.1) is \
+                                    not resolved yet"
+                                .to_string(),
+                        },
+                        self.current_span(),
+                    ));
+                }
+                if !self.match_token(TokenKind::Dot) {
+                    break;
+                }
+            }
+            self.expect(TokenKind::Assign_)?;
+            let value = self.parse_expression()?;
+            module.defparams.push(DefparamAssignment {
+                path,
+                value,
+                span: start.extend(self.previous_span()),
+            });
+            if !self.match_token(TokenKind::Comma) {
+                break;
+            }
+        }
+        self.expect(TokenKind::Semicolon)?;
+        Ok(())
     }
 
     fn parse_instance_parameter_overrides(&mut self) -> Result<Vec<ParameterOverride>, ParseError> {
@@ -1450,9 +1533,62 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a parameter declaration (one or more comma-separated assignments)
+    /// `module_parameter_port_list ::= # ( parameter_declaration { ,
+    /// parameter_declaration } )` (IEEE 1364-2005 A.1.3). Each declaration
+    /// opens with `parameter` and gives every name its value, as one in the
+    /// module body does.
+    fn parse_parameter_port_list(&mut self, module: &mut Module) -> Result<(), ParseError> {
+        self.expect(TokenKind::Hash)?;
+        self.expect(TokenKind::LParen)?;
+        loop {
+            let attributes = self.parse_attributes()?;
+            if !self.check(TokenKind::Parameter) {
+                return Err(ParseError::expected(
+                    "`parameter`, which opens each declaration of a module parameter port list \
+                     (IEEE 1364-2005 A.1.3)"
+                        .to_string(),
+                    format!("{:?}", self.current().kind),
+                    self.current_span(),
+                ));
+            }
+            let declarations = self.parse_parameter_items(&attributes, true)?;
+            if let Some(declaration) = declarations
+                .iter()
+                .find(|declaration| declaration.default.is_none())
+            {
+                return Err(ParseError::expected(
+                    format!(
+                        "a value for parameter `{}`; IEEE 1364-2005 A.2.4 gives every \
+                         parameter assignment one",
+                        declaration.name
+                    ),
+                    "none".to_string(),
+                    declaration.span,
+                ));
+            }
+            module.parameters.extend(declarations);
+            if !self.match_token(TokenKind::Comma) {
+                break;
+            }
+        }
+        self.expect(TokenKind::RParen)?;
+        Ok(())
+    }
+
     fn parse_parameter(
         &mut self,
         attributes: &[Attribute],
+    ) -> Result<Vec<ParameterDecl>, ParseError> {
+        self.parse_parameter_items(attributes, false)
+    }
+
+    /// One `parameter` or `localparam` declaration. In a parameter port list
+    /// it ends at the comma before the next `parameter` or at the closing
+    /// parenthesis; in a module body, at its semicolon.
+    fn parse_parameter_items(
+        &mut self,
+        attributes: &[Attribute],
+        in_port_list: bool,
     ) -> Result<Vec<ParameterDecl>, ParseError> {
         let start = self.current_span();
         self.advance(); // consume 'parameter' or 'localparam'
@@ -1557,12 +1693,17 @@ impl<'a> Parser<'a> {
                 span: item_start.extend(self.previous_span()),
             });
 
+            if in_port_list && self.check(TokenKind::Comma) && self.peek_is(TokenKind::Parameter) {
+                break;
+            }
             if !self.match_token(TokenKind::Comma) {
                 break;
             }
         }
 
-        self.expect(TokenKind::Semicolon)?;
+        if !in_port_list {
+            self.expect(TokenKind::Semicolon)?;
+        }
         Ok(decls)
     }
 
@@ -3629,25 +3770,6 @@ impl<'a> Parser<'a> {
             .text
             .clone()
             .unwrap_or_else(|| format!("{:?}", self.current().kind).to_lowercase());
-        // `defparam` gets its clause and its alternative rather than the bare
-        // keyword refusal. It is the one construct in this set an author
-        // reaches for by accident — it is the *other* way to give a parameter a
-        // value, and IEEE 1364-2005 section 12.2.1 deprecates it in favour of
-        // the one this compiler reads — so a diagnostic that only says "not
-        // supported" leaves the author with nothing to do.
-        if keyword == "defparam" {
-            return ParseError::new(
-                ParseErrorKind::UnsupportedConstruct {
-                    context: "module item".to_string(),
-                    found: "`defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect \
-                            as a `#(...)` override on the instance and deprecates it in favour \
-                            of one, so write the override — and note that a parameter override \
-                            on a *digital* instance is itself refused, per section 12.2"
-                        .to_string(),
-                },
-                self.current_span(),
-            );
-        }
         ParseError::new(
             ParseErrorKind::UnsupportedAmsConstruct { keyword },
             self.current_span(),

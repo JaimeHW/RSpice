@@ -384,6 +384,7 @@ pub use analog_events::AnalogEventBinding;
 mod array_coordinates;
 mod bounded_loop;
 mod constant_dependencies;
+pub(crate) mod defparam;
 mod digital;
 mod digital_elaborate;
 pub(crate) mod digital_routines;
