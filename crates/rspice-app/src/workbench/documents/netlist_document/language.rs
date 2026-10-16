@@ -2103,8 +2103,7 @@ M1 d g s b nch W={w} L={l*2}\n\
         diagnostic.bind_validation(7, &crate::state::content_digest(FIX_DECK).to_string());
         let finding = diagnostic.canonical.diagnostic_id;
         state.ui.netlist.diagnostics = Arc::new(
-            super::super::NetlistDiagnosticCollection::try_new(vec![diagnostic], FIX_DECK)
-                .unwrap(),
+            super::super::NetlistDiagnosticCollection::try_new(vec![diagnostic], FIX_DECK).unwrap(),
         );
         (state, finding)
     }
