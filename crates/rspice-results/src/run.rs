@@ -17,6 +17,7 @@ use crate::waveform::RetainedWaveform;
 use rspice_app_types::product::{
     AnalysisInstanceId, ContentDigest, DatasetId, JobId, RunId, SimulationCampaignId,
 };
+use rspice_app_types::run_log::RunLog;
 
 /// Immutable membership of one run in a reviewed multi-plan campaign.
 ///
@@ -261,6 +262,11 @@ pub struct SimulationRun<A = AnalysisResult> {
     specification_verdicts: Option<Vec<SpecificationVerdict>>,
     /// Optional immutable grouping identity for a multi-plan campaign.
     campaign_membership: Option<SimulationCampaignMembership>,
+    /// What the run said about itself and what the engines it drove said,
+    /// in order. Kept from `Preparing` on, so a run that failed or was
+    /// cancelled keeps its account of why. It is not result content: no
+    /// digest or identity of the run reads it.
+    pub log: RunLog,
 }
 
 impl<A> AsRef<SimulationRun<A>> for SimulationRun<A> {
@@ -294,6 +300,7 @@ impl<A> SimulationRun<A> {
             success,
             specification_verdicts,
             campaign_membership,
+            log,
         } = self;
         SimulationRun {
             job_id,
@@ -311,6 +318,7 @@ impl<A> SimulationRun<A> {
             success,
             specification_verdicts,
             campaign_membership,
+            log,
         }
     }
 
@@ -340,6 +348,7 @@ impl<A> SimulationRun<A> {
             success: true,
             specification_verdicts: None,
             campaign_membership: None,
+            log: RunLog::default(),
         }
     }
 
@@ -381,6 +390,7 @@ impl<A> SimulationRun<A> {
             success: true,
             specification_verdicts: None,
             campaign_membership: None,
+            log: RunLog::default(),
         }
     }
 

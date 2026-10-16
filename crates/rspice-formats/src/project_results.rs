@@ -16,6 +16,7 @@ use rspice_app_types::product::{
     AnalysisInstanceId, ContentDigest, DatasetId, DerivedAnalysisIdentity, JobId, ModelSourceId,
     ObjectRevision, ProjectId, RunId, SimulationPlanId,
 };
+use rspice_app_types::run_log::RunLog;
 use rspice_design_model::cell_view::CellViewRef;
 use rspice_results::analysis_payload::AnalysisResultPayload;
 use rspice_results::analysis_result::AnalysisResult;
@@ -1275,6 +1276,13 @@ pub struct ProjectSimulationRun {
     /// current run with no authored specifications.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub specification_verdicts: Option<Vec<SpecificationVerdict>>,
+    /// The run's own log. Absent is empty, which is every run written before
+    /// runs kept one. Like retention it is outside the dataset digest, and the
+    /// result history's fingerprint reads past it
+    /// ([`ProjectSimulationResults::without_run_logs`]): it is the run's
+    /// account of itself, not result content, so it needs no schema era.
+    #[serde(default, skip_serializing_if = "RunLog::is_empty")]
+    pub log: RunLog,
 }
 
 impl ProjectSimulationRun {
@@ -1404,6 +1412,7 @@ impl ProjectSimulationRun {
         }
         run.restore_lifecycle(restored_lifecycle, self.elapsed_time)?;
         run.analyses = analyses;
+        run.log = self.log;
         run.set_retention(self.retention);
         run.success = !was_active && self.success;
         run.restore_campaign_membership(campaign_membership)?;
@@ -1716,6 +1725,7 @@ impl ProjectSimulationRun {
             elapsed_time: run.elapsed_time,
             success,
             specification_verdicts: run.specification_verdicts().map(<[_]>::to_vec),
+            log: run.log.clone(),
         }
     }
 }

@@ -1,76 +1,24 @@
 //! The session log the Console page shows.
 //!
-//! A chronological, verbatim transcript: each entry carries its severity, the
-//! part of the product that wrote it and the time on the session clock.
+//! A chronological, verbatim transcript of the session: each entry carries its
+//! severity, the part of the product that wrote it and the wall-clock time it
+//! was written. A run writes two lines here, its start and its end, both
+//! anchored to it; everything else it says is in its own log, which the run
+//! owns.
 //!
 //! ```text
-//! studio events ────┐
-//! run lifecycle ────┼──► LogBuffer ──► Console page
-//! engine log ───────┘
+//! studio events ──────────┐
+//! run start and end ──────┼──► LogBuffer ──► Console page
+//! plan and netlist ───────┘
+//! run lines, engine log ─────► SimulationRun::log
 //! ```
 
-use crate::time_compat::Instant;
 use std::collections::VecDeque;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-// =============================================================================
-// Log Severity Levels
-// =============================================================================
-
-pub use rspice_app_types::diagnostics::LogSeverity;
-
-// =============================================================================
-// Log Source Attribution
-// =============================================================================
-
-/// The part of the product an entry came from.
-///
-/// Design checks have no source here: their findings are the Problems page's,
-/// tied to the place they were found, not lines in a transcript.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum LogSource {
-    /// Every studio event, whether the user asked for it or a background
-    /// service did it: opened, saved, exported, imported, restored, failed.
-    #[serde(alias = "User", alias = "System", alias = "Drc")]
-    Studio,
-    /// Simulation-plan lifecycle outcomes: the receipt a committed plan
-    /// command left, or the refusal that kept one from committing.
-    ///
-    /// Its own source because the Console is this product's session log of
-    /// plan commands, the way a Spectre log records every command with its
-    /// outcome, and because the activity mirror has to be able to leave these
-    /// where they are. A receipt is a record of what was committed, not a
-    /// notice to chase the reader with.
-    Plan,
-    /// A run's lifecycle: queued, started, finished, failed.
-    #[serde(alias = "Simulation")]
-    Run,
-    /// The circuit engine's own account of a solve.
-    Engine,
-    /// Netlist import and parse notices.
-    Netlist,
-    /// The digital (HDL) engine's own account of a co-simulation.
-    Hdl,
-    /// The Verilog-A compiler and runtime.
-    VerilogA,
-}
-
-impl LogSource {
-    /// The tag the Console's source column prints.
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::Studio => "APP",
-            Self::Plan => "PLAN",
-            Self::Run => "RUN",
-            Self::Engine => "ENG",
-            Self::Netlist => "NET",
-            Self::Hdl => "HDL",
-            Self::VerilogA => "VA",
-        }
-    }
-}
+pub use rspice_app_types::diagnostics::{LogSeverity, LogSource};
 
 // =============================================================================
 // Log Entry
@@ -128,7 +76,7 @@ pub enum LogAnchor {
 pub struct LogEntry {
     /// Unique sequential ID for ordering
     pub id: u64,
-    /// Timestamp relative to session start
+    /// Wall-clock time the entry was written, since the Unix epoch.
     pub timestamp: Duration,
     /// Severity level
     pub severity: LogSeverity,
@@ -142,14 +90,21 @@ pub struct LogEntry {
 }
 
 impl LogEntry {
-    /// Format timestamp as HH:MM:SS.mmm
+    /// The time on the reader's clock, as HH:MM:SS.mmm.
     pub fn format_timestamp(&self) -> String {
-        let total_secs = self.timestamp.as_secs();
-        let hours = total_secs / 3600;
-        let mins = (total_secs % 3600) / 60;
-        let secs = total_secs % 60;
-        let millis = self.timestamp.subsec_millis();
-        format!("{:02}:{:02}:{:02}.{:03}", hours, mins, secs, millis)
+        u64::try_from(self.timestamp.as_millis())
+            .ok()
+            .and_then(crate::time_compat::local_date_time)
+            .map(|local| {
+                format!(
+                    "{:02}:{:02}:{:02}.{:03}",
+                    local.hour(),
+                    local.minute(),
+                    local.second(),
+                    local.millisecond()
+                )
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -169,8 +124,6 @@ pub struct LogBuffer {
     capacity: usize,
     /// Next entry ID (monotonically increasing)
     next_id: u64,
-    /// Session start time for relative timestamps
-    session_start: Instant,
 }
 
 impl Default for LogBuffer {
@@ -186,7 +139,6 @@ impl LogBuffer {
             entries: VecDeque::with_capacity(capacity.min(1024)), // Pre-allocate up to 1K
             capacity,
             next_id: 0,
-            session_start: Instant::now(),
         }
     }
 
@@ -212,7 +164,7 @@ impl LogBuffer {
         let id = self.next_id;
         let entry = LogEntry {
             id,
-            timestamp: self.session_start.elapsed(),
+            timestamp: crate::time_compat::unix_epoch(),
             severity,
             source,
             message: message.into(),
@@ -243,14 +195,6 @@ impl LogBuffer {
     /// (paired with `len()` to also detect `clear`).
     pub fn revision(&self) -> u64 {
         self.next_id
-    }
-
-    /// Elapsed time on the same session clock used by [`LogEntry::timestamp`].
-    ///
-    /// UI projections can subtract an entry timestamp from this value to
-    /// preserve the event's original age when mapping it onto another clock.
-    pub fn session_elapsed(&self) -> Duration {
-        self.session_start.elapsed()
     }
 
     /// Get entries filtered by source

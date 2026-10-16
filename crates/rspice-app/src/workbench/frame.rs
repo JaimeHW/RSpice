@@ -464,7 +464,7 @@ fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
         return;
     }
     let now = ctx.input(|input| input.time);
-    let session_elapsed = app.state.log_buffer.session_elapsed();
+    let wall_now = crate::time_compat::unix_epoch();
     let entries = app
         .state
         .log_buffer
@@ -491,17 +491,17 @@ fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
                 kind: ToastKind::Error,
                 message: entry.message.clone(),
                 action: None,
-                created: project_log_timestamp(now, session_elapsed, entry.timestamp),
+                created: project_log_timestamp(now, wall_now, entry.timestamp),
             })
         })
         .collect::<Vec<_>>();
     app.state.ui.toasts.synchronize_activity(revision, entries);
 }
 
-/// Project a timestamp from the log buffer's session clock onto egui's
-/// monotonic clock while preserving the event's original age.
-fn project_log_timestamp(now: f64, session_elapsed: Duration, timestamp: Duration) -> f64 {
-    now - session_elapsed.saturating_sub(timestamp).as_secs_f64()
+/// Project a log entry's wall-clock timestamp onto egui's monotonic clock
+/// while preserving the event's original age.
+fn project_log_timestamp(now: f64, wall_now: Duration, timestamp: Duration) -> f64 {
+    now - wall_now.saturating_sub(timestamp).as_secs_f64()
 }
 
 fn pointer_is_coarse(ctx: &Context, retained_touch_capability: bool) -> bool {

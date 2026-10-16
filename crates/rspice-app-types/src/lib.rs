@@ -10,5 +10,6 @@ pub mod product;
 pub mod property;
 pub mod quantity;
 pub mod raw_probe;
+pub mod run_log;
 pub mod source_revision;
 pub mod text_validation;

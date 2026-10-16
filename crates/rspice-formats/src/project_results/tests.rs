@@ -85,3 +85,37 @@ fn a_transient_state_names_one_of_its_dependencies_and_a_finite_time() {
         assert!(error.contains("not a finite time"), "{time_s}: {error}");
     }
 }
+
+/// A run's log is read back from the project as it was written, and a run
+/// with nothing in its log writes no log at all, so a project from before
+/// runs kept one is the same file.
+#[test]
+fn a_runs_log_survives_the_project_file_and_an_empty_one_is_not_written() {
+    use rspice_app_types::diagnostics::{LogSeverity, LogSource};
+    use rspice_app_types::run_log::RunLogLine;
+
+    let mut run = SimulationRun::<AnalysisResult>::new(
+        4,
+        1_760_613_845.0,
+        rspice_results::run::ExecutionTarget::LocalDesktop,
+    );
+    run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
+        .expect("a fresh run takes provenance");
+    let persist = |run: &SimulationRun| {
+        ProjectSimulationRun::from_run::<_, RetainedWaveform>(run, |_| {
+            unreachable!("the run retained no analyses")
+        })
+    };
+    let written = serde_json::to_value(persist(&run)).expect("serializes");
+    assert!(written.get("log").is_none(), "{written}");
+
+    run.log.push(RunLogLine {
+        unix_ms: 1_760_613_846_020,
+        severity: LogSeverity::Warning,
+        source: LogSource::Hdl,
+        message: "tb.v:14: $error: output stuck low".to_owned(),
+    });
+    let text = serde_json::to_string(&persist(&run)).expect("serializes");
+    let read: ProjectSimulationRun = serde_json::from_str(&text).expect("deserializes");
+    assert_eq!(read.into_run().expect("restores").log, run.log);
+}

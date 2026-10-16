@@ -1309,18 +1309,29 @@ impl SimulationController {
         Ok(())
     }
 
-    /// Write what the engine logged since the previous frame into the Console.
+    /// Write what the engine logged since the previous frame into the run's
+    /// own log.
     ///
     /// Drained beside the live transient samples because it is the same kind of
     /// thing: evidence the running analysis published that the UI thread owns
-    /// presenting. The severity and the `ENG` source are the queue's own
-    /// (`diagnostics::engine_log`), so the projection has one reader.
+    /// presenting. The run's log rather than the session's: a verbose solve
+    /// must not push the session's history out of the Console, and the run
+    /// keeps its account of itself after the session ends.
     fn publish_engine_log(&mut self, state: &mut AppState) {
         let lines = self.runner.drain_engine_log();
         if lines.is_empty() {
             return;
         }
-        crate::diagnostics::engine_log::publish(lines, &mut state.log_buffer);
+        if let Some(run) = self
+            .current_run_id
+            .and_then(|run_sequence| state.simulation.retained.run_by_sequence_mut(run_sequence))
+        {
+            crate::diagnostics::engine_log::publish(
+                lines,
+                &mut run.log,
+                crate::time_compat::checked_unix_time_ms().unwrap_or_default(),
+            );
+        }
     }
 
     fn publish_live_transient_samples(&mut self, state: &mut AppState) {

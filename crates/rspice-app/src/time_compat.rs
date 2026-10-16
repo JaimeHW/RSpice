@@ -108,6 +108,72 @@ pub(crate) fn utc_stamp(unix_ms: u64) -> String {
     )
 }
 
+/// A millisecond timestamp on the reader's own clock.
+///
+/// For what the reader saw happen in this session and wants to place against
+/// the clock on the wall: a log line, a run's start. `None` for a timestamp the
+/// calendar cannot place.
+pub(crate) fn local_date_time(unix_ms: u64) -> Option<time::OffsetDateTime> {
+    let utc =
+        time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(unix_ms) * 1_000_000).ok()?;
+    let offset = time::UtcOffset::from_whole_seconds(local_offset_seconds(utc.unix_timestamp()))
+        .unwrap_or(time::UtcOffset::UTC);
+    Some(utc.to_offset(offset))
+}
+
+/// The local zone's offset from UTC at one instant, in seconds east.
+///
+/// Asked of the platform once per quarter hour of timestamps, because the
+/// Console writes the time of every row it paints and an offset moves only
+/// at a zone transition, which falls on a quarter hour. UTC where the
+/// platform cannot read its zone.
+pub(crate) fn local_offset_seconds(unix_seconds: i64) -> i32 {
+    thread_local! {
+        static HELD: std::cell::RefCell<std::collections::HashMap<i64, i32>> =
+            std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    const QUARTER_HOUR: i64 = 900;
+    const HELD_QUARTERS: usize = 1_024;
+    let quarter = unix_seconds.div_euclid(QUARTER_HOUR);
+    HELD.with(|held| {
+        let mut held = held.borrow_mut();
+        if let Some(offset) = held.get(&quarter) {
+            return *offset;
+        }
+        if held.len() >= HELD_QUARTERS {
+            held.clear();
+        }
+        let offset = zone_offset_seconds(quarter * QUARTER_HOUR);
+        held.insert(quarter, offset);
+        offset
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn zone_offset_seconds(unix_seconds: i64) -> i32 {
+    use chrono::{Offset, TimeZone};
+    chrono::DateTime::from_timestamp(unix_seconds, 0).map_or(0, |utc| {
+        chrono::Local
+            .offset_from_utc_datetime(&utc.naive_utc())
+            .fix()
+            .local_minus_utc()
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn zone_offset_seconds(unix_seconds: i64) -> i32 {
+    // `getTimezoneOffset` is minutes *west* of UTC.
+    let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(
+        unix_seconds as f64 * 1_000.0,
+    ));
+    let minutes_west = date.get_timezone_offset();
+    if minutes_west.is_finite() {
+        (-minutes_west * 60.0) as i32
+    } else {
+        0
+    }
+}
+
 #[cfg(test)]
 pub(crate) use tests::with_unix_epoch;
 
@@ -172,5 +238,18 @@ mod tests {
                 assert_eq!(checked_unix_time_ms(), Ok(42));
             }
         });
+    }
+
+    /// Whatever zone the machine running the test is in, the local clock is
+    /// that zone's offset from the same instant in UTC.
+    #[test]
+    fn the_local_clock_is_the_same_instant_on_the_zones_offset() {
+        let unix_ms = 1_760_613_845_250; // 2025-10-16 11:24:05.250 UTC
+        let local = local_date_time(unix_ms).expect("a placeable instant");
+        let offset = local_offset_seconds(1_760_613_845);
+        assert_eq!(local.offset().whole_seconds(), offset);
+        assert_eq!(local.unix_timestamp(), 1_760_613_845);
+        assert_eq!(local.millisecond(), 250);
+        assert!((-12 * 3_600..=14 * 3_600).contains(&offset), "{offset} s");
     }
 }

@@ -88,8 +88,9 @@ fn full_digest(
         expression_groups,
         marker_history,
     } = fields;
+    let results = results.without_run_logs();
     let result_fields = (
-        results,
+        &*results,
         reports,
         visualizations,
         markers,
@@ -100,5 +101,53 @@ fn full_digest(
     match marker_history {
         Some(highest) => super::digest(&("result-marker-allocation-v1", result_fields, highest)),
         None => super::digest(&result_fields),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::results::{ProjectSimulationResultsData, ProjectSimulationRun};
+    use rspice_app_types::diagnostics::{LogSeverity, LogSource};
+    use rspice_app_types::run_log::RunLogLine;
+    use rspice_results::run::{ExecutionTarget, SimulationRun};
+    use rspice_results::waveform::RetainedWaveform;
+
+    /// A run's log is not result content: neither the run's dataset digest
+    /// nor the result history's fingerprint reads it.
+    #[test]
+    fn two_runs_differing_only_in_their_logs_digest_equal() {
+        let quiet = SimulationRun::<rspice_results::analysis_result::AnalysisResult>::new(
+            3,
+            1_760_613_845.0,
+            ExecutionTarget::LocalDesktop,
+        );
+        let mut logged = quiet.clone();
+        logged.log.push(RunLogLine {
+            unix_ms: 1_760_613_845_250,
+            severity: LogSeverity::Warning,
+            source: LogSource::Engine,
+            message: "Gmin stepping was needed to find the operating point".to_owned(),
+        });
+        let persist = |run: &SimulationRun| {
+            ProjectSimulationRun::from_run::<_, RetainedWaveform>(run, |_| {
+                unreachable!("the run retained no analyses")
+            })
+        };
+        let (quiet, logged) = (persist(&quiet), persist(&logged));
+        assert!(!logged.log.is_empty());
+        assert_eq!(quiet.dataset_content_digest, logged.dataset_content_digest);
+
+        let history = |run: ProjectSimulationRun| {
+            ProjectSimulationResults::from(ProjectSimulationResultsData {
+                runs: vec![run],
+                ..ProjectSimulationResultsData::default()
+            })
+        };
+        let presentation = ResultPresentation::default();
+        let fingerprint = |results: &ProjectSimulationResults| {
+            digest(results, &[], &[], &presentation).expect("the history fingerprints")
+        };
+        assert_eq!(fingerprint(&history(quiet)), fingerprint(&history(logged)));
     }
 }
