@@ -635,38 +635,51 @@ fn drc_violation_digest(violation: &DrcViolation) -> ContentDigest {
     writer.finish()
 }
 
+/// The identity tag for one location kind. Like [`drc_violation_type_tag`],
+/// a tag is only ever added.
+fn drc_location_tag(location: &DrcLocation) -> u8 {
+    match location {
+        DrcLocation::Point { .. } => 0,
+        DrcLocation::Component { .. } => 1,
+        DrcLocation::Wire { .. } => 2,
+        DrcLocation::NetLabel { .. } => 3,
+        DrcLocation::Node { .. } => 4,
+        DrcLocation::Global => 5,
+        DrcLocation::SymbolPin { .. } => 6,
+        DrcLocation::Bus { .. } => 7,
+        DrcLocation::BusTap { .. } => 8,
+        DrcLocation::Terminal { .. } => 9,
+        DrcLocation::InsideInstance { .. } => 10,
+    }
+}
+
 fn encode_drc_location(writer: &mut CanonicalWriter, location: &DrcLocation) {
     writer.domain("drc-location");
+    writer.u8(drc_location_tag(location));
     match location {
         DrcLocation::Point { x, y } => {
-            writer.u8(0);
             writer.f64(*x);
             writer.f64(*y);
         }
         DrcLocation::Component { id, name } => {
-            writer.u8(1);
             writer.u64(*id);
             writer.string(name);
         }
         DrcLocation::Wire { id } => {
-            writer.u8(2);
             writer.u64(*id);
         }
         DrcLocation::NetLabel { name } => {
-            writer.u8(3);
             writer.string(name);
         }
         DrcLocation::Node { net_name } => {
-            writer.u8(4);
             writer.string(net_name);
         }
-        DrcLocation::Global => writer.u8(5),
+        DrcLocation::Global => {}
         DrcLocation::SymbolPin {
             reference,
             pin_name,
             point,
         } => {
-            writer.u8(6);
             writer.string(&reference.library);
             writer.string(&reference.cell);
             writer.string(&reference.view);
@@ -677,11 +690,9 @@ fn encode_drc_location(writer: &mut CanonicalWriter, location: &DrcLocation) {
             });
         }
         DrcLocation::Bus { id } => {
-            writer.u8(7);
             writer.u64(*id);
         }
         DrcLocation::BusTap { id } => {
-            writer.u8(8);
             writer.u64(*id);
         }
         DrcLocation::Terminal {
@@ -690,7 +701,6 @@ fn encode_drc_location(writer: &mut CanonicalWriter, location: &DrcLocation) {
             pin_name,
             point,
         } => {
-            writer.u8(9);
             writer.u64(*component_id);
             writer.string(component_name);
             writer.string(pin_name);
@@ -698,7 +708,6 @@ fn encode_drc_location(writer: &mut CanonicalWriter, location: &DrcLocation) {
             writer.i32(point.y);
         }
         DrcLocation::InsideInstance { path, view, inner } => {
-            writer.u8(10);
             let segments = path.segments();
             writer.sequence(segments.len());
             for segment in segments {
