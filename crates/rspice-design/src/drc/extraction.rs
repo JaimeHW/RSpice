@@ -428,6 +428,8 @@ fn restated(
 /// its own net map: a ground-named node is evidence only once some terminal
 /// that is not a drawn ground symbol's stands on it. Node 0 is global, so the
 /// evidence is about the whole design wherever in the hierarchy it is found.
+/// It is node 0 as the deck writes it: a terminal on a `GND!` the deck writes
+/// under its own name grounds nothing.
 fn reaches_ground(components: &[ComponentInfo]) -> bool {
     components
         .iter()
@@ -436,7 +438,7 @@ fn reaches_ground(components: &[ComponentInfo]) -> bool {
             component
                 .pins
                 .iter()
-                .any(|pin| crate::schematic::ground_names::is_ground_reference(&pin.net_name))
+                .any(|pin| crate::schematic::ground_names::writes_node_zero(&pin.net_name))
         })
 }
 
@@ -1028,7 +1030,7 @@ impl GlobalTouches {
             let Some((view, _, node)) = touched.touches.first() else {
                 continue;
             };
-            if touched.continues || crate::schematic::ground_names::is_ground_reference(node) {
+            if touched.continues || crate::schematic::ground_names::writes_node_zero(node) {
                 continue;
             }
             let total = touched

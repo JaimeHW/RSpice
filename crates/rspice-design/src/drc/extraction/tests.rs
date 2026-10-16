@@ -1998,3 +1998,4 @@ fn a_controlling_reference_must_name_one_instance() {
 }
 
 mod electrical_rules;
+mod ground_rules;
