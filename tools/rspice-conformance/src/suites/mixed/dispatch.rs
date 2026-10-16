@@ -28,7 +28,7 @@
 //! `rspice_core::Engine` entries directly, and the case records
 //! `dispatch = "engine"` with the reason ([`ENGINE_FALLBACKS`]).
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -499,6 +499,7 @@ fn headless_case(request: &CaseRequest<'_>, origin: &Path, source: &str) -> Case
         .iter()
         .map(|task| (task.instance_id, task.label.clone()))
         .collect();
+    let unrun = state_only_transients(&tasks);
     let abort = DeadlineAbort::new(Instant::now(), request.budget.as_millis());
     let mut input = HeadlessRunInput::new(&circuit, origin, tasks);
     input.resolver = HeadlessSourceResolver::Native {
@@ -521,6 +522,9 @@ fn headless_case(request: &CaseRequest<'_>, origin: &Path, source: &str) -> Case
     let mut runner = rspice_simulation::runner::SimulationRunner::new();
     while let Some(task) = pending.pop_front() {
         let instance = task.instance_id();
+        if unrun.contains(&instance) {
+            continue;
+        }
         let label = labels.get(&instance).cloned().unwrap_or_default();
         let resolved = match task.resolve_dependency_artifacts(&artifacts) {
             Ok(resolved) => resolved,
@@ -570,6 +574,37 @@ fn headless_case(request: &CaseRequest<'_>, origin: &Path, source: &str) -> Case
         result.results.push(observation(&simulated, &label));
     }
     result
+}
+
+/// The transients that only name the state a small-signal card linearizes
+/// around, which the case keeps in its graph and does not run.
+///
+/// A card around a transient state names the deck's `.tran` as its parent, and
+/// preparation reads the parent's card to bind the state. The card's own run
+/// then runs that transient to the state (`linearize_at_state`), so running the
+/// parent as well runs the same transient a second time for a result no
+/// quantity of the cell reads: the cell compares the card's result, and the
+/// transient's own cell runs the same deck. A transient another task reads is
+/// still run.
+fn state_only_transients(tasks: &[HeadlessTaskRequest]) -> HashSet<AnalysisInstanceId> {
+    let is_state = |task: &HeadlessTaskRequest| split_state(&task.analysis.analysis_line).is_some();
+    let mut parents: HashSet<AnalysisInstanceId> = tasks
+        .iter()
+        .filter(|task| is_state(task))
+        .flat_map(|task| task.dependencies.iter().copied())
+        .collect();
+    for task in tasks.iter().filter(|task| !is_state(task)) {
+        for dependency in &task.dependencies {
+            parents.remove(dependency);
+        }
+    }
+    parents.retain(|parent| {
+        tasks.iter().any(|task| {
+            task.instance_id == *parent
+                && matches!(task.analysis.spec, AnalysisSpec::Transient { .. })
+        })
+    });
+    parents
 }
 
 /// Lower the deck's cards into the explicit task graph a study would carry.
@@ -1719,6 +1754,46 @@ mod tests {
         let empty = seal_hdl("t\n.hdl \"../empty.vams\"\n.end\n", &origin, "cxx")
             .expect_err("a source with neither modules nor rules is refused");
         assert_eq!(empty.token.as_deref(), Some("compile_refusal"), "{empty:?}");
+    }
+
+    /// Only the transient a card around a state names, and nothing else reads,
+    /// is left unrun.
+    #[test]
+    fn only_a_transient_that_names_a_state_is_left_unrun() {
+        let dir = tempfile::tempdir().unwrap();
+        let origin = dir.path().join("deck.cir");
+        let circuit = "t\nV1 in 0 PULSE(0 1 1n 1n 1n 5n 10n)\nR1 in out 1k\nC1 out 0 1p\n.end\n";
+        let tasks = |cards: &[&str]| {
+            let cards: Vec<String> = cards.iter().map(|card| (*card).to_owned()).collect();
+            headless_tasks(
+                circuit,
+                &origin,
+                &cards,
+                &PreparedVerilogARuntimeSet::default(),
+            )
+            .expect("the deck lowers")
+        };
+        let at_state = tasks(&[".tran 0.1n 20n", ".ac dec 2 1k 1meg actimes=15n"]);
+        let transient: Vec<AnalysisInstanceId> = at_state
+            .iter()
+            .filter(|task| matches!(task.analysis.spec, AnalysisSpec::Transient { .. }))
+            .map(|task| task.instance_id)
+            .collect();
+        assert_eq!(transient.len(), 1);
+        assert_eq!(
+            state_only_transients(&at_state),
+            transient.into_iter().collect::<HashSet<_>>()
+        );
+        assert!(state_only_transients(&tasks(&[".tran 0.1n 20n", ".ac dec 2 1k 1meg"])).is_empty());
+        let read = tasks(&[
+            ".tran 0.1n 20n",
+            ".ac dec 2 1k 1meg actimes=15n",
+            ".four 100meg v(out)",
+        ]);
+        assert!(
+            state_only_transients(&read).is_empty(),
+            "a Fourier analysis reads the transient's trajectory"
+        );
     }
 
     #[test]
