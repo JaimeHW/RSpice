@@ -2396,16 +2396,6 @@ pub struct NetlistDocumentState {
 }
 
 impl NetlistDocumentState {
-    /// Whether the diagnostics were parsed for the buffer as it stands.
-    ///
-    /// Parsing waits for the editor to be drawn and for typing to settle, so a
-    /// collection can describe an earlier revision of the buffer — one edited
-    /// off screen, or still being typed into. An empty collection of that kind
-    /// is not evidence that the buffer as it stands is clean.
-    pub(crate) fn diagnostics_are_current(&self) -> bool {
-        self.diag_revision == Some(self.revision)
-    }
-
     /// Whether a retained Code-workspace transaction owns exclusive input.
     /// This is queried before painting, so keyboard shortcuts cannot mutate
     /// the document behind a modal during its opening frame.
