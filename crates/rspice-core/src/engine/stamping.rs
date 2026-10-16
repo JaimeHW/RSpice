@@ -244,7 +244,7 @@ impl Engine {
         floor: Value,
     ) -> Result<(), SimulationError> {
         if circuit.settled_compact_model_private_nodes.is_some() {
-            return Ok(());
+            return Self::release_restamped_private_nodes(circuit, matrix, rhs, floor);
         }
         let mut settled = Vec::new();
         let mut nodes: Vec<NodeId> = circuit
@@ -286,6 +286,70 @@ impl Engine {
         Ok(())
     }
 
+    /// Every operating-point assembly after the one that settled them: a
+    /// settled node whose column or right-hand side a stamp now writes is no
+    /// longer unconnected.
+    ///
+    /// The first assembly reads one bias. A stamp the model writes only
+    /// under `if (V(c) > 0.5)` is absent at `V(c) = 0`, so the node settled
+    /// there, and the floor then decides its voltage: 0 V, whatever the stamp
+    /// says once it appears. Where the node then has an equation and a
+    /// reader, its row and its column, it is the model's own again:
+    /// it leaves the settled set, gives back the floor in this assembly and
+    /// every later one, and this assembly's solve is the system with the
+    /// stamp. Where it has only one of them, no value is canonical, and the
+    /// operating point refuses, naming the node.
+    ///
+    /// Only settled nodes are read, and only the locations already stamped
+    /// in this assembly; a circuit with none settled pays nothing.
+    fn release_restamped_private_nodes(
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &[Value],
+        floor: Value,
+    ) -> Result<(), SimulationError> {
+        let Some(settled) = circuit.settled_compact_model_private_nodes.as_mut() else {
+            return Ok(());
+        };
+        if settled.is_empty() {
+            return Ok(());
+        }
+        let mut released = Vec::new();
+        let mut refused = None;
+        settled.retain(|&node| {
+            if refused.is_some() {
+                return true;
+            }
+            // The node settled on an empty column and right-hand side; its
+            // row may hold what it held then, a branch incidence with no
+            // flow, as BSIM-SOI's unconnected thermal node does.
+            let index = node - 1;
+            let column_quiet = matrix.column_is_deficient_beyond_diagonal(index, floor);
+            if column_quiet && rhs.get(index).is_none_or(|&value| value == 0.0) {
+                return true;
+            }
+            if column_quiet || matrix.row_is_deficient_beyond_diagonal(index, floor) {
+                refused = Some(node);
+                return true;
+            }
+            released.push(node);
+            false
+        });
+        for &node in &released {
+            circuit.compact_model_private_nodes.insert(node);
+            if floor != 0.0 {
+                matrix.add(node - 1, node - 1, -floor);
+            }
+        }
+        match refused {
+            Some(node) => Err(SimulationError::Circuit(format!(
+                "a stamp on {} appeared after it was pinned as unconnected",
+                Self::compact_model_node_name(circuit, node)
+            ))),
+            None => Ok(()),
+        }
+    }
+
     /// The post-condition of [`Self::settle_compact_model_private_nodes`]: a
     /// settled node reads 0 V within the voltage tolerance, so the flows the
     /// model sends into it balance. One that reads anything else is the
@@ -314,11 +378,7 @@ impl Engine {
         node: NodeId,
         unread: bool,
     ) -> SimulationError {
-        let name = circuit
-            .node_names_sorted()
-            .get(node - 1)
-            .cloned()
-            .unwrap_or_else(|| format!("#{node}"));
+        let name = Self::compact_model_node_name(circuit, node);
         let reason = if unread {
             "its compact model drives a current into it and gives that current no path"
         } else {
@@ -326,6 +386,14 @@ impl Engine {
              the model's other equations"
         };
         SimulationError::Circuit(format!("node {name} has no DC path: {reason}"))
+    }
+
+    fn compact_model_node_name(circuit: &CircuitData, node: NodeId) -> String {
+        circuit
+            .node_names_sorted()
+            .get(node - 1)
+            .cloned()
+            .unwrap_or_else(|| format!("#{node}"))
     }
 
     /// The small-signal twin of [`Engine::pin_unconstrained_xspice_event_rows`].

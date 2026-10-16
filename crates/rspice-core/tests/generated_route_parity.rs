@@ -1162,6 +1162,73 @@ fn a_private_node_a_conditional_stamp_drives_is_not_refused_on_its_starting_bias
     );
 }
 
+/// Writes `body` as module `name` with one port `a` and the private nodes
+/// `x` and `c`, runs it from `Vs a 0 1`, and returns the trace.
+fn conditional_private_node_trace(name: &str, body: &str) -> Vec<Entry> {
+    let path = std::env::temp_dir().join(format!("rspice_{name}_{}.va", std::process::id()));
+    std::fs::write(
+        &path,
+        format!(
+            "`include \"disciplines.vams\"\nmodule {name}(a);\ninout a;\nelectrical a;\n\
+             electrical x, c;\nanalog begin\n  I(c) <+ V(c) - 1.0;\n{body}end\nendmodule\n"
+        ),
+    )
+    .expect("write the module");
+    let source = path.display().to_string().replace('\\', "/");
+    let deck = format!("* {name}\n.va \"{source}\" {name}\nVs a 0 1\nX1 a {name}\n.end\n");
+    let trace = operating_point_trace(&deck, &["a", "x1.x", "x1.c"], &["Vs"]);
+    let _ = std::fs::remove_file(&path);
+    trace
+}
+
+/// A private node every stamp of which sits under `if (V(c) > 0.5)` has an
+/// empty row, column and right-hand side at the starting bias, `V(c) = 0`,
+/// and settles there as unconnected. The operating point, `c = 1`, turns the
+/// stamps on and they hold `x` at `V(c)`: the node leaves the settled set,
+/// and the solve reads `x = 1`, not the floor's 0 V, and the source sees
+/// both conductances.
+#[test]
+fn a_settled_private_node_a_later_stamp_reaches_is_released() {
+    let trace = conditional_private_node_trace(
+        "late",
+        "  I(a) <+ V(a) / 1000.0;\n  if (V(c) > 0.5) begin\n\
+         \x20   I(x) <+ (V(x) - V(c)) / 1000.0;\n    I(a) <+ 1.0e-3 * V(x);\n  end\n",
+    );
+    assert_eq!(trace[0].text.as_deref(), Some("ok"), "{trace:?}");
+    assert!(
+        (traced(&trace, "op.v(x1.c)") - 1.0).abs() < 1.0e-9,
+        "{trace:?}"
+    );
+    assert!(
+        (traced(&trace, "op.v(x1.x)") - 1.0).abs() < 1.0e-9,
+        "x follows c, not the floor: {trace:?}"
+    );
+    assert!(
+        (traced(&trace, "op.i(Vs)") + 2.0e-3).abs() < 1.0e-9,
+        "{trace:?}"
+    );
+}
+
+/// The same late stamp, but one that only reads `x`: once it appears, `x`'s
+/// voltage reaches `I(a)` while no equation holds `x`, so the 0 V the floor
+/// gave it is no answer, and the operating point refuses by name.
+#[test]
+fn a_settled_private_node_a_later_stamp_only_reads_is_refused_by_name() {
+    let trace = conditional_private_node_trace(
+        "lateread",
+        "  I(a) <+ V(a) / 1000.0;\n  if (V(c) > 0.5) begin\n    I(a) <+ 1.0e-3 * V(x);\n  end\n",
+    );
+    let message = trace[0]
+        .text
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    assert!(
+        message.contains("a stamp on x1.x appeared after it was pinned as unconnected"),
+        "the refusal names the node: {trace:?}"
+    );
+}
+
 /// A private node only a `ddt()` drives still has no DC path: its row is
 /// empty at every bias of an operating point, and the model reads it, so the
 /// operating point refuses it by name.

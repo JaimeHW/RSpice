@@ -620,7 +620,8 @@ pub struct CircuitData {
     pub(crate) compact_model_private_nodes: HashSet<NodeId>,
     /// The nodes the first operating-point assembly dropped from
     /// [`Self::compact_model_private_nodes`] because nothing reads their
-    /// voltage, or `None` before that assembly
+    /// voltage, or `None` before that assembly; a node a later assembly's
+    /// stamps reach leaves it and rejoins the private set
     /// (`Engine::settle_compact_model_private_nodes`).
     pub(crate) settled_compact_model_private_nodes: Option<Vec<NodeId>>,
     /// Of [`Self::compact_model_private_nodes`], those whose row some
