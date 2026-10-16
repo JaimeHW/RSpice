@@ -1087,6 +1087,12 @@ fn frequency_sweep_fields(
     choice_row(ui, "Sweep", SWEEP_KINDS, &mut sweep.sweep);
 }
 
+/// Whether `draft`'s form chooses its probe from the loop probes the drawing
+/// places, which the page has to gather for it.
+pub(super) fn offers_placed_loop_probes(draft: &AnalysisDraft) -> bool {
+    matches!(draft, AnalysisDraft::Stb(_) | AnalysisDraft::Pstb(_))
+}
+
 /// Render the form for `draft`.
 pub(super) fn form(
     ui: &mut Ui,

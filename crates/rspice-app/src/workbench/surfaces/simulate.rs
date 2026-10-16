@@ -2296,11 +2296,13 @@ fn analysis_form_body(
         AnalysisDraft::Noise(_) | AnalysisDraft::TransferFunction(_)
     )
     .then(|| noise_domain_catalog(ui, app));
-    // Only the stability form offers the drawing's loop probes, and the scan
+    // Only the stability forms offer the drawing's loop probes, and the scan
     // allocates. Every other analysis leaves it unmeasured.
-    let placed_loop_probes = matches!(draft, AnalysisDraft::Stb(_))
-        .then(|| app.state.schematic.placed_loop_probe_names())
-        .unwrap_or_default();
+    let placed_loop_probes = if analysis_form::offers_placed_loop_probes(draft) {
+        app.state.schematic.placed_loop_probe_names()
+    } else {
+        Vec::new()
+    };
     // Only the S-parameter form reads the design's RF ports, and the
     // derivation walks the design's nets. Every other analysis leaves it
     // unmeasured.
