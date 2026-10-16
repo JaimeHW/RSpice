@@ -34,7 +34,7 @@ impl RSpiceApp {
             .describe(DESCRIPTION)
             .primary_enabled(validation.is_ok())
             // Enter types a line of the note; the primary places it.
-            .commit_on_enter(false)
+            .primary_on_enter(false)
             .status(match refusal.as_deref() {
                 Some(message) => Err(message),
                 None => Ok(None),

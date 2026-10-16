@@ -24,7 +24,7 @@ pub fn show(
     if let Some(index) = rows.select("Type", "design-note-kind", kind.label(), &labels) {
         *kind = DesignNoteKind::ALL[index];
     }
-    let response = rows.multiline("Text", text_id(), text, sample(*kind), TEXT_LINES);
+    let response = rows.text_multiline("Text", text_id(), text, sample(*kind), TEXT_LINES);
     Some(response.id)
 }
 
