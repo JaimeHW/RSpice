@@ -65,7 +65,9 @@ fn severity_color(
 /// only.
 pub fn anchor(view: &DesignView<'_>, location: &DrcLocation) -> Option<Point> {
     match location {
-        DrcLocation::Point { x, y } => Some(Point::new(*x as i32, *y as i32)),
+        DrcLocation::Point { x, y } => {
+            live_point(view.sheet_catalog, Point::new(*x as i32, *y as i32))
+        }
         DrcLocation::Component { id, .. } => view
             .document
             .components
@@ -143,6 +145,26 @@ pub fn live_terminal_point(
         projected.x.saturating_sub(offset.x),
         projected.y.saturating_sub(offset.y),
     )
+}
+
+/// Where a point the checks located on the projected document is drawn, or
+/// `None` where it is on a sheet other than the one in view.
+///
+/// A bare point names no object to ask for its sheet, so the sheet is the one
+/// the projection laid the coordinate on. A drawing with no sheets is its own
+/// projection, and one with no active sheet shows every sheet.
+pub fn live_point(
+    sheets: Option<&rspice_design_model::design_management::SheetCatalog>,
+    projected: Point,
+) -> Option<Point> {
+    let Some(sheets) = sheets.filter(|sheets| !sheets.sheets().is_empty()) else {
+        return Some(projected);
+    };
+    let (sheet, point) = rspice_design::schematic::owned::projected_point_sheet(sheets, projected)?;
+    sheets
+        .active_sheet_id()
+        .is_none_or(|active| active == sheet)
+        .then_some(point)
 }
 
 /// The cursor in screen space, derived from the grid-unit hover the canvas

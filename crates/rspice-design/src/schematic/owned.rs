@@ -20,7 +20,7 @@ mod object_edits;
 mod placement;
 mod probes;
 mod projection;
-pub use projection::projected_sheet_offset;
+pub use projection::{projected_point_sheet, projected_sheet_offset};
 pub mod properties;
 pub mod references;
 pub mod sheet_topology;

@@ -164,3 +164,48 @@ fn a_terminal_on_a_later_sheet_is_anchored_where_that_sheet_draws_it() {
         Point::new(10, 20)
     );
 }
+
+/// A finding located at a bare point — the missing-ground anchor, a bus
+/// diagnostic — has no object to ask for its sheet. The projection laid the
+/// point on the second sheet, so it is badged where that sheet draws it, and
+/// only while that sheet is in view.
+#[test]
+fn a_point_on_a_later_sheet_is_anchored_where_that_sheet_draws_it() {
+    let mut catalog = catalog_with_hidden_object(30);
+    let first = catalog
+        .active_sheet_id()
+        .expect("the first sheet is active");
+    let second = catalog
+        .sheet_for_object(30)
+        .expect("assigned to the second sheet");
+    let document = SchematicDocument::default();
+    let point = DrcLocation::Point {
+        x: 1_000_040.0,
+        y: 60.0,
+    };
+
+    fn view<'a>(document: &'a SchematicDocument, catalog: &'a SheetCatalog) -> DesignView<'a> {
+        DesignView {
+            document,
+            canvas_cache: None,
+            sheet_catalog: Some(catalog),
+            review_markers: Default::default(),
+        }
+    }
+
+    catalog.set_active(second).unwrap();
+    assert_eq!(
+        anchor(&view(&document, &catalog), &point),
+        Some(Point::new(40, 60))
+    );
+
+    catalog.set_active(first).unwrap();
+    assert_eq!(anchor(&view(&document, &catalog), &point), None);
+    assert_eq!(
+        anchor(
+            &view(&document, &catalog),
+            &DrcLocation::Point { x: 40.0, y: 60.0 }
+        ),
+        Some(Point::new(40, 60))
+    );
+}
