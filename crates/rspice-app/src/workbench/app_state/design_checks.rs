@@ -657,6 +657,68 @@ mod tests {
         );
     }
 
+    /// A finding re-reported in other words — the rule's message reworded,
+    /// or a value it quotes changed — is the same finding. Its identity is
+    /// the rule, the cell view and the object, and nothing the message says
+    /// is part of it, so the current selection stays on it and so does a
+    /// waiver recorded against it. An identity hashed from the message, as
+    /// the source editors' own identities are, would have re-keyed it.
+    #[test]
+    fn rewording_a_finding_keeps_its_identity_its_selection_and_its_waiver() {
+        let mut state = AppState::default();
+        publish_pass(
+            &mut state,
+            &[
+                (open_pin(4, "R1", "A"), "Pin R1.A is not connected"),
+                (open_pin(7, "R2", "B"), "Pin R2.B is not connected"),
+            ],
+        );
+        let identity = identity_of(&state, "Pin R2.B");
+        state.diagnostics.set_current_finding(Some(identity));
+        // A waiver is recorded against a finding by what the finding is.
+        let subject = state.workspace.content.active_schematic_reference();
+        let waived = |state: &AppState| {
+            state
+                .diagnostics
+                .batch(&DiagnosticInputs::DesignCheck {
+                    subject: subject.clone(),
+                })
+                .and_then(|batch| {
+                    batch
+                        .records
+                        .iter()
+                        .find(|record| record.canonical.diagnostic_id == identity)
+                })
+                .map(|record| (record.key.clone(), record.message.clone()))
+        };
+        let (waiver_key, _) = waived(&state).expect("the finding is published");
+
+        publish_pass(
+            &mut state,
+            &[
+                (open_pin(4, "R1", "A"), "Pin R1.A is not connected"),
+                (
+                    open_pin(7, "R2", "B"),
+                    "Terminal B of R2 has no connection (2 nets within 10 grid units)",
+                ),
+            ],
+        );
+
+        assert_eq!(identity_of(&state, "Pin R2.B"), identity);
+        assert_eq!(
+            state.diagnostics.current_finding(),
+            Some(identity),
+            "the current selection stays on the reworded finding",
+        );
+        let (key, message) = waived(&state).expect("the waived identity still resolves");
+        assert_eq!(key, waiver_key, "what a waiver names is unchanged");
+        assert_eq!(
+            message,
+            "Terminal B of R2 has no connection (2 nets within 10 grid units)",
+            "the finding states its new words under its old identity",
+        );
+    }
+
     /// Fixing one finding takes its identity away with it. With an ordinal in
     /// the identity, the next finding of the same rule inherited it — and a
     /// selection, or a waiver, on the fixed finding moved to that one.
