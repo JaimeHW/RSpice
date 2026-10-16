@@ -1694,7 +1694,7 @@ mod tests {
             plan_shortcut_import(&base, &artifact, &ShortcutImportOptions::default()).unwrap();
         let mut published = base.clone();
         let receipt = apply_shortcut_import(&mut published, &plan, |_| Ok(())).unwrap();
-        let receipt_id = receipt.id();
+        let receipt_source = receipt.source_name().to_owned();
         let mut state = ShortcutImportDialogState {
             open: true,
             pending: ImportPending::Commit,
@@ -1709,7 +1709,10 @@ mod tests {
         state.complete_commit(Ok(receipt));
         assert!(!state.cancel_requested);
         assert!(!state.is_open());
-        assert_eq!(state.last_receipt.as_ref().unwrap().id(), receipt_id);
+        assert_eq!(
+            state.last_receipt.as_ref().unwrap().source_name(),
+            receipt_source
+        );
     }
 
     #[test]
@@ -1734,7 +1737,7 @@ mod tests {
             plan_shortcut_import(&base, &artifact, &ShortcutImportOptions::default()).unwrap();
         let mut published = base.clone();
         let receipt = apply_shortcut_import(&mut published, &plan, |_| Ok(())).unwrap();
-        let receipt_id = receipt.id();
+        let receipt_source = receipt.source_name().to_owned();
         let mut state = ShortcutImportDialogState {
             last_receipt: Some(receipt),
             ..ShortcutImportDialogState::default()
@@ -1743,7 +1746,8 @@ mod tests {
         let action = state.begin_rollback().unwrap();
         assert!(matches!(
             action,
-            ShortcutPortabilityAction::RollbackImport(receipt) if receipt.id() == receipt_id
+            ShortcutPortabilityAction::RollbackImport(receipt)
+                if receipt.source_name() == receipt_source
         ));
         state.complete_rollback(Err("durable store unavailable".to_owned()));
         assert!(state.last_receipt.is_some());

@@ -13,7 +13,7 @@
 
 use egui::{Context, Grid, RichText, ScrollArea, Ui};
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{ProjectSourceBundle, ProjectSourceLanguage};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -645,7 +645,8 @@ impl RSpiceApp {
         // Nothing owns the failure when the draft it belonged to was cleared
         // by the same call, so the console states it instead of losing it.
         if stated.is_none() {
-            self.state.push_user_message(ConsoleMessage::error(error));
+            self.state
+                .record(LogSeverity::Error, LogSource::Studio, error);
         }
     }
 
@@ -691,21 +692,25 @@ impl RSpiceApp {
                         file_action,
                     )
                 {
-                    self.state.push_user_message(ConsoleMessage::error(error));
+                    self.state.prompt(error);
                 }
             }
             NetlistLifecycleAction::Commit => {
                 match crate::workbench::documents::netlist_document::commit_netlist_lifecycle_action(
                     &mut self.state,
                 ) {
-                    Ok(message) => self.state.push_user_message(ConsoleMessage::info(message)),
+                    Ok(message) => {
+                        self.state
+                            .record(LogSeverity::Info, LogSource::Studio, message);
+                    }
                     Err(error) => {
                         if let Some(transaction) =
                             self.state.ui.netlist.lifecycle_dialog.transaction.as_mut()
                         {
                             transaction.error = Some(error);
                         } else {
-                            self.state.push_user_message(ConsoleMessage::error(error));
+                            self.state
+                                .record(LogSeverity::Error, LogSource::Studio, error);
                         }
                     }
                 }
@@ -720,7 +725,7 @@ impl RSpiceApp {
                         deck_id,
                     )
                 {
-                    self.state.push_user_message(ConsoleMessage::error(error));
+                    self.state.prompt(error);
                 }
             }
             NetlistLifecycleAction::OpenHistory => {
@@ -736,20 +741,34 @@ impl RSpiceApp {
                 match crate::workbench::documents::netlist_document::copy_active_dependency_to_project(
                     &mut self.state,
                 ) {
-                    Ok(_) => self.state.push_user_message(ConsoleMessage::info(
-                        messages.text(MessageId::NetlistCopySucceeded),
-                    )),
-                    Err(error) => self.state.push_user_message(ConsoleMessage::error(error)),
+                    Ok(_) => {
+                        self.state.record(
+                            LogSeverity::Info,
+                            LogSource::Studio,
+                            messages.text(MessageId::NetlistCopySucceeded),
+                        );
+                    }
+                    Err(error) => {
+                        self.state
+                            .record(LogSeverity::Error, LogSource::Studio, error);
+                    }
                 }
             }
             NetlistLifecycleAction::ReleaseIncludeOwnership => {
                 match crate::workbench::documents::netlist_document::release_active_dependency_from_project(
                     &mut self.state,
                 ) {
-                    Ok(()) => self.state.push_user_message(ConsoleMessage::info(
-                        messages.text(MessageId::NetlistReleaseSucceeded),
-                    )),
-                    Err(error) => self.state.push_user_message(ConsoleMessage::error(error)),
+                    Ok(()) => {
+                        self.state.record(
+                            LogSeverity::Info,
+                            LogSource::Studio,
+                            messages.text(MessageId::NetlistReleaseSucceeded),
+                        );
+                    }
+                    Err(error) => {
+                        self.state
+                            .record(LogSeverity::Error, LogSource::Studio, error);
+                    }
                 }
             }
             NetlistLifecycleAction::BeginInclude(file_action) => {
@@ -757,14 +776,17 @@ impl RSpiceApp {
                     &mut self.state,
                     file_action,
                 ) {
-                    self.state.push_user_message(ConsoleMessage::error(error));
+                    self.state.prompt(error);
                 }
             }
             NetlistLifecycleAction::CommitInclude => {
                 match crate::workbench::documents::netlist_document::commit_owned_include_lifecycle_action(
                     &mut self.state,
                 ) {
-                    Ok(message) => self.state.push_user_message(ConsoleMessage::info(message)),
+                    Ok(message) => {
+                        self.state
+                            .record(LogSeverity::Info, LogSource::Studio, message);
+                    }
                     Err(error) => {
                         if let Some(transaction) = self
                             .state
@@ -797,7 +819,7 @@ impl RSpiceApp {
                     .set_include_search_paths(paths)
                     .map_err(|error| error.to_string())
                 {
-                    self.state.push_user_message(ConsoleMessage::error(error));
+                    self.state.prompt(error);
                 } else {
                     self.state.workspace.content.project_metadata_dirty = true;
                     // The chain decides which file every relative include
@@ -902,7 +924,8 @@ impl RSpiceApp {
         match choice {
             DialogChoice::Primary => match code_workspace::commit_source_workspace_dialog(self) {
                 Ok(message) => {
-                    self.state.push_user_message(ConsoleMessage::info(message));
+                    self.state
+                        .record(LogSeverity::Info, LogSource::Studio, message);
                 }
                 Err(error) => {
                     if let Some(state) = self

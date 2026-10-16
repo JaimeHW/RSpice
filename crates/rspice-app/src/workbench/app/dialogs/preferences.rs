@@ -10,7 +10,7 @@ pub(crate) mod workspace_layout_manager;
 
 use egui::{Context, Id};
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::commands::ShortcutContext;
 use crate::workbench::shortcuts::artifacts::{
     ShortcutArtifactExportOutcome, ShortcutArtifactImportOutcome, ShortcutImportReceipt,
@@ -115,9 +115,8 @@ impl RSpiceApp {
         }
 
         if let Some(label) = actions.updated_profile_label {
-            self.state.push_console_message(ConsoleMessage::info(
-                engineering_profile_updated_message(label),
-            ));
+            self.state
+                .prompt(engineering_profile_updated_message(label));
         }
         if shell_response.restore_defaults_requested {
             preference_pages::restore_defaults(category, &mut self.state);
@@ -167,9 +166,8 @@ impl RSpiceApp {
     ) {
         let mut candidate = self.state.ui.preferences.shortcut_profiles().clone();
         if let Err(error) = candidate.replace_active(profile.clone()) {
-            self.state.push_user_message(ConsoleMessage::error(format!(
-                "Shortcut policy was not saved: {error}"
-            )));
+            self.state
+                .prompt(format!("Shortcut policy was not saved: {error}"));
             return;
         }
         self.state.dialogs.shortcut_policy_candidate = Some(profile);
@@ -322,9 +320,11 @@ impl RSpiceApp {
                 if result.as_ref().is_ok_and(|outcome| {
                     !matches!(outcome, ShortcutArtifactExportOutcome::Cancelled)
                 }) {
-                    self.state.push_console_message(ConsoleMessage::info(
-                        "Shortcut profile export was handed to the selected platform destination.",
-                    ));
+                    self.state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        "Exported the keyboard shortcut profile.",
+                    );
                 }
                 self.state
                     .dialogs
@@ -397,10 +397,11 @@ impl RSpiceApp {
                         .dialogs
                         .shortcut_portability
                         .import_source_failed(message.clone());
-                    self.state
-                        .push_console_message(ConsoleMessage::error(format!(
-                            "Shortcut import source could not be opened: {message}"
-                        )));
+                    self.state.record(
+                        LogSeverity::Error,
+                        LogSource::Studio,
+                        format!("Shortcut profile could not be opened for import: {message}"),
+                    );
                 }
             }
         }
@@ -414,8 +415,7 @@ impl RSpiceApp {
         {
             if self.state.shortcut_library_publication_completion_pending() {
                 let _ = self.state.take_shortcut_library_publication_completion();
-                let message = "Canonical shortcut publication completed without its retained workflow owner. The stored state is authoritative; the interrupted workflow was recovered and no further publication will start until this completion is acknowledged.";
-                log::error!("{message}");
+                let message = "Saving keyboard shortcuts finished after the dialog that started it had closed. The saved shortcuts are in effect; review them in Preferences.";
                 self.state.dialogs.shortcut_editor.persistence_pending = false;
                 self.state.dialogs.shortcut_editor.error_summary = Some(message.to_owned());
                 self.state.dialogs.shortcut_policy_candidate = None;
@@ -427,7 +427,8 @@ impl RSpiceApp {
                     .dialogs
                     .shortcut_portability
                     .complete_rollback(Err(message.to_owned()));
-                self.state.push_user_message(ConsoleMessage::error(message));
+                self.state
+                    .record(LogSeverity::Error, LogSource::Studio, message);
             }
             return;
         }
@@ -456,41 +457,41 @@ impl AppState {
                 match result {
                     Ok(()) => {
                         self.dialogs.shortcut_editor.close_and_discard();
-                        self.push_console_message(ConsoleMessage::info(
-                            "Keyboard shortcut profile saved after complete collision and reserved-binding validation.",
-                        ));
+                        self.prompt("Keyboard shortcuts saved.");
                     }
                     Err(error) => {
-                        self.dialogs.shortcut_editor.error_summary =
-                            Some(format!("Shortcut profile was not saved: {error}"));
-                        self.push_console_message(ConsoleMessage::error(format!(
-                            "Shortcut profile was not saved: {error}"
-                        )));
+                        let message = format!("Shortcut profile was not saved: {error}");
+                        self.dialogs.shortcut_editor.error_summary = Some(message.clone());
+                        self.record(LogSeverity::Error, LogSource::Studio, message);
                     }
                 }
             }
             ShortcutLibraryPublicationContinuation::Policy => {
                 self.dialogs.shortcut_policy_candidate = None;
                 match result {
-                    Ok(()) => self.push_console_message(ConsoleMessage::info(
-                        "Shortcut binding policy saved to the canonical user profile.",
-                    )),
-                    Err(error) => self.push_user_message(ConsoleMessage::error(format!(
-                        "Shortcut policy was not saved: {error}"
-                    ))),
+                    Ok(()) => self.prompt("Shortcut policy saved."),
+                    Err(error) => {
+                        self.record(
+                            LogSeverity::Error,
+                            LogSource::Studio,
+                            format!("Shortcut policy was not saved: {error}"),
+                        );
+                    }
                 }
             }
             ShortcutLibraryPublicationContinuation::Import(receipt) => {
                 if result.is_ok() {
-                    self.push_console_message(ConsoleMessage::info(format!(
-                        "Imported shortcut profile '{}' \u{00b7} receipt {}.",
-                        receipt.source_name(),
-                        receipt.id()
-                    )));
+                    self.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        format!("Imported shortcut profile '{}'.", receipt.source_name()),
+                    );
                 } else if let Err(error) = &result {
-                    self.push_user_message(ConsoleMessage::error(format!(
-                        "Shortcut profile import was not saved: {error}"
-                    )));
+                    self.record(
+                        LogSeverity::Error,
+                        LogSource::Studio,
+                        format!("Shortcut profile import was not saved: {error}"),
+                    );
                 }
                 self.dialogs
                     .shortcut_portability
@@ -498,13 +499,17 @@ impl AppState {
             }
             ShortcutLibraryPublicationContinuation::Rollback => {
                 if result.is_ok() {
-                    self.push_console_message(ConsoleMessage::info(
-                        "Shortcut import was rolled back through its retained receipt.",
-                    ));
+                    self.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        "Undid the shortcut profile import.",
+                    );
                 } else if let Err(error) = &result {
-                    self.push_user_message(ConsoleMessage::error(format!(
-                        "Shortcut import rollback was not saved: {error}"
-                    )));
+                    self.record(
+                        LogSeverity::Error,
+                        LogSource::Studio,
+                        format!("Undoing the shortcut profile import was not saved: {error}"),
+                    );
                 }
                 self.dialogs.shortcut_portability.complete_rollback(result);
             }
@@ -551,9 +556,7 @@ fn close_preferences(state: &mut AppState) {
         .workbench
         .replace_route(fallback, RouteTransitionSource::User)
     {
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "Could not close Preferences: {error}"
-        )));
+        state.prompt(format!("Could not close Preferences: {error}"));
     }
 }
 
@@ -581,9 +584,7 @@ pub(in crate::workbench) fn engineering_profile_detail(
 }
 
 fn engineering_profile_updated_message(label: &str) -> String {
-    format!(
-        "Engineering profile updated · {label} capability-availability context is active. Existing project documents remain available."
-    )
+    format!("Engineering profile set to {label}. Open project documents are unchanged.")
 }
 
 #[cfg(test)]
@@ -985,7 +986,7 @@ mod tests {
     fn engineering_profile_copy_describes_implemented_behavior() {
         assert_eq!(
             engineering_profile_updated_message("Power electronics"),
-            "Engineering profile updated · Power electronics capability-availability context is active. Existing project documents remain available."
+            "Engineering profile set to Power electronics. Open project documents are unchanged."
         );
     }
 }

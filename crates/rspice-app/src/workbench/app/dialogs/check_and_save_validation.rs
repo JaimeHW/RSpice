@@ -10,7 +10,6 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 use sha2::{Digest as _, Sha256};
 
-use crate::diagnostics::LogAnchor;
 use crate::product::ContentDigest;
 use crate::state::{
     CellViewRef, SymbolResolver, ValidatedRevisionDependency, ValidationFindingCounts,
@@ -48,12 +47,6 @@ pub(crate) struct CheckAndSaveFinding {
     /// that holds it, so a coordinate carried over from another sheet would
     /// send the canvas to a spot in a document nobody asked to see.
     pub(crate) location: Option<DrcLocation>,
-}
-
-/// Where a located finding sends the canvas, through the one resolver every
-/// other finding surface uses.
-pub(crate) fn finding_anchor(state: &AppState, finding: &CheckAndSaveFinding) -> Option<LogAnchor> {
-    crate::schematic::view::violations::location_anchor(state, finding.location.as_ref()?)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1189,13 +1182,9 @@ mod tests {
         );
     }
 
-    /// A finding that knows where it is has to be able to take the author
-    /// there. The location resolves through the one anchor resolver every
-    /// finding surface uses, and the jump through the one owner of centering
-    /// and selection, so a console row and a canvas badge for the same finding
-    /// cannot land in two places.
+    /// A finding about the active document names the object it is about.
     #[test]
-    fn a_located_finding_centers_and_selects_the_object_it_names() {
+    fn a_located_finding_names_the_object_it_is_about() {
         let mut state = AppState::default();
         let resistor = state
             .schematic
@@ -1208,7 +1197,6 @@ mod tests {
             .find(|component| component.id == resistor)
             .expect("the placed resistor is retained");
         placed.name = "Q1".to_owned();
-        let position = placed.pos;
 
         let report = CheckAndSaveValidationReport::collect(&state).expect("report");
         // One refused designator is one finding. The netlister writes this
@@ -1231,28 +1219,6 @@ mod tests {
             ),
             "a designator refused on the active document names its instance: {located:?}"
         );
-
-        let anchor = finding_anchor(&state, located).expect("a located finding resolves an anchor");
-        state.jump_to_log_anchor(anchor);
-        assert_eq!(
-            state.schematic.session.editor.center_request,
-            Some(position)
-        );
-        assert!(
-            state
-                .schematic
-                .session
-                .editor
-                .selection
-                .has_component(resistor)
-        );
-
-        // A finding about the project rather than the drawing offers no jump.
-        let unlocated = CheckAndSaveFinding {
-            location: None,
-            ..located.clone()
-        };
-        assert!(finding_anchor(&state, &unlocated).is_none());
     }
 
     /// A first save checks every document, and every cellview exactly once.

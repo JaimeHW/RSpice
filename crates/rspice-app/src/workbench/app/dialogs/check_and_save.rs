@@ -2,10 +2,10 @@
 
 use egui::{Align, Align2, Context, Frame, Layout, Margin, Sense, Stroke, Ui, vec2};
 
-use crate::diagnostics::{ConsoleMessage, LogSeverity, LogSource};
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{
     AdvisoryDisposition, MAX_VALIDATED_REVISION_NOTE_LEN, ValidatedRevisionJournal,
-    ValidatedRevisionRequest, ValidatedSchematicRevisionId,
+    ValidatedRevisionRequest,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -18,9 +18,7 @@ use crate::workbench::workflows::project_workflow::{
 };
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::check_and_save_validation::{
-    CheckAndSaveValidationReport, finding_anchor,
-};
+use crate::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport;
 use crate::workbench::app::dialogs::operation_primitives::{
     CONTEXT_WIDTH, SURFACE_HEIGHT, TRANSACTION_HEIGHT, ellipsized_text, operation_steps,
     paint_body_dividers,
@@ -64,64 +62,46 @@ struct CheckAndSavePreconditions<'a> {
 
 pub(crate) fn open_check_and_save_dialog(state: &mut AppState) {
     if !state.project_lifecycle.is_open() {
-        state.push_user_message(ConsoleMessage::warning(
-            "Check and save requires an open project.".to_owned(),
-        ));
+        state.prompt("Check and save needs an open project.");
         return;
     }
+    // Check and save is greyed on a read-only project or schematic.
     if state.schematic.session.read_only
         || state.active_view_read_only()
         || state.workbench.safe_mode.project_read_only()
     {
-        state.push_user_message(ConsoleMessage::warning(
-            "Check and save is unavailable because the active project or schematic is read-only."
-                .to_owned(),
-        ));
         return;
     }
     state.sync_active_schematic_to_workspace();
     crate::workbench::menu_bar::run_design_rule_check(state);
     match CheckAndSaveValidationReport::collect(state) {
         Ok(report) => {
+            // One line for the check. The dialog lists every finding, and
+            // Problems lists the design-check ones where they can be visited.
             let blockers = report.blockers().len();
             let advisories = report.advisories().len();
-            state.push_user_message(if blockers == 0 {
-                ConsoleMessage::info(format!(
-                    "Check and save validation completed: 0 blockers, {advisories} advisories"
-                ))
-            } else {
-                ConsoleMessage::warning(format!(
-                    "Check and save validation found {blockers} blockers and {advisories} advisories"
-                ))
-            });
-            // A located finding is reported as a clickable row: the location it
-            // carries resolves through the same anchor the design-check rows
-            // use, so one click lands on the object the finding is about.
-            for (finding, severity, kind) in report
-                .blockers()
-                .iter()
-                .map(|finding| (finding, LogSeverity::Warning, "blocker"))
-                .chain(
-                    report
-                        .advisories()
-                        .iter()
-                        .map(|finding| (finding, LogSeverity::Info, "advisory")),
-                )
-            {
-                let message = format!(
-                    "Check and save {kind} \u{00b7} {} \u{00b7} {}",
-                    finding.source, finding.message
-                );
-                let anchor = finding_anchor(state, finding);
-                state
-                    .log_buffer
-                    .log_anchored(severity, LogSource::Studio, message, anchor);
-            }
+            state.record(
+                if blockers == 0 {
+                    LogSeverity::Info
+                } else {
+                    LogSeverity::Warning
+                },
+                LogSource::Studio,
+                format!(
+                    "Check and save: {blockers} blocker{}, {advisories} advisor{}.",
+                    if blockers == 1 { "" } else { "s" },
+                    if advisories == 1 { "y" } else { "ies" }
+                ),
+            );
             state.dialogs.check_and_save.open(report);
         }
-        Err(error) => state.push_user_message(ConsoleMessage::warning(format!(
-            "Check and save validation could not be completed: {error}"
-        ))),
+        Err(error) => {
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Check and save could not complete its checks: {error}"),
+            );
+        }
     }
 }
 
@@ -286,10 +266,9 @@ impl RSpiceApp {
             .find(|component| component.name.eq_ignore_ascii_case(instance))
             .map(|component| component.id)
         else {
-            self.state
-                .push_user_message(ConsoleMessage::warning(format!(
-                    "Instance '{instance}' is no longer in the active schematic."
-                )));
+            self.state.prompt(format!(
+                "Instance '{instance}' is no longer in the active schematic."
+            ));
             return;
         };
         self.state
@@ -302,9 +281,9 @@ impl RSpiceApp {
             &self.state.library_manager,
             &self.state.workspace.content.schematic_buffers,
         );
-        self.state.push_user_message(match outcome {
-            Ok(summary) => ConsoleMessage::info(summary),
-            Err(error) => ConsoleMessage::warning(error.to_string()),
+        self.state.prompt(match outcome {
+            Ok(summary) => summary,
+            Err(error) => error.to_string(),
         });
         match CheckAndSaveValidationReport::collect(&self.state) {
             Ok(report) => self.state.dialogs.check_and_save.report = Some(report),
@@ -411,7 +390,10 @@ impl RSpiceApp {
         self.state.sync_active_schematic_to_workspace();
         match save_active_for_continuation(&mut self.state) {
             SaveRequestOutcome::CanonicalComplete => {
-                complete_validated_save(&mut self.state, revision_id, false);
+                // Only a browser save that is still landing keeps the
+                // revision's id; this one has landed.
+                let _ = revision_id;
+                complete_validated_save(&mut self.state, false);
             }
             #[cfg(target_arch = "wasm32")]
             SaveRequestOutcome::CanonicalPending(transaction) => {
@@ -464,7 +446,7 @@ impl RSpiceApp {
                 expected_journal,
                 expected_design_digest,
                 original_dirty,
-                "The native save did not complete synchronously; no validated revision was committed.",
+                "The save did not finish; no validated revision was saved.",
             ),
         }
     }
@@ -484,8 +466,8 @@ impl RSpiceApp {
         let revision_id = dialog.pending_revision_id;
         match event {
             rspice_project::lifecycle::SaveContinuationEvent::Saved(_) => {
-                if let Some(id) = revision_id {
-                    complete_validated_save(&mut self.state, id, false);
+                if revision_id.is_some() {
+                    complete_validated_save(&mut self.state, false);
                 } else {
                     rollback_pending_validated_save(
                         &mut self.state,
@@ -494,8 +476,8 @@ impl RSpiceApp {
                 }
             }
             rspice_project::lifecycle::SaveContinuationEvent::SavedWithNewerChanges(_) => {
-                if let Some(id) = revision_id {
-                    complete_validated_save(&mut self.state, id, true);
+                if revision_id.is_some() {
+                    complete_validated_save(&mut self.state, true);
                 } else {
                     rollback_pending_validated_save(
                         &mut self.state,
@@ -512,7 +494,7 @@ impl RSpiceApp {
             rspice_project::lifecycle::SaveContinuationEvent::Conflict(_) => {
                 rollback_pending_validated_save(
                     &mut self.state,
-                    "The canonical browser project changed outside RSpice. Reopen it or save an independent copy; no validated revision was committed locally.",
+                    "The project changed outside RSpice. Reopen it or save a separate copy; no validated revision was saved.",
                 );
             }
             rspice_project::lifecycle::SaveContinuationEvent::Failed(_, error) => {
@@ -525,7 +507,7 @@ impl RSpiceApp {
                 rollback_pending_validated_save(
                     &mut self.state,
                     &format!(
-                        "RSpice could not adopt the published bytes as the canonical project: {error}. The destination may contain the revision; reopen it before retrying."
+                        "The project was written but RSpice could not reopen it: {error}. The destination may hold the revision; reopen it before retrying."
                     ),
                 );
             }
@@ -547,21 +529,21 @@ fn revision_note_error(note: &str) -> Option<String> {
     None
 }
 
-fn complete_validated_save(
-    state: &mut AppState,
-    revision_id: ValidatedSchematicRevisionId,
-    newer_changes: bool,
-) {
+fn complete_validated_save(state: &mut AppState, newer_changes: bool) {
     clear_pending_save_state(state);
     state.dialogs.check_and_save.saved = true;
     state.dialogs.check_and_save.saved_with_newer_changes = newer_changes;
     state.dialogs.check_and_save.validation_error = None;
     state.dialogs.check_and_save.dirty = false;
     state.dialogs.check_and_save.discard_confirm = false;
-    state.push_user_message(ConsoleMessage::info(format!(
-        "Saved validated schematic revision {}",
-        revision_id.as_uuid()
-    )));
+    let message = match state.dialogs.check_and_save.report.as_ref() {
+        Some(report) => format!(
+            "Saved a validated revision of {}.",
+            report.document_scope_label()
+        ),
+        None => "Saved a validated revision.".to_owned(),
+    };
+    state.record(LogSeverity::Info, LogSource::Studio, message);
 }
 
 fn rollback_validated_save(
@@ -603,15 +585,15 @@ fn rollback_validated_save(
         Ok(()) => match crate::workbench::lifecycle::project_lifecycle::refresh_registry(state) {
             Ok(()) => message.to_owned(),
             Err(error) => format!(
-                "{message} The journal rollback completed, but the project dirty-state registry could not be refreshed: {error}. Reopen the project before retrying."
+                "{message} The revision was taken back, but the project's unsaved-changes state could not be refreshed: {error}. Reopen the project before retrying."
             ),
         },
         Err(error) => format!(
-            "{message} The local journal was left unchanged because {error}; close and reopen the project before retrying."
+            "{message} The revision could not be taken back because {error}; close and reopen the project before retrying."
         ),
     };
     state.dialogs.check_and_save.validation_error = Some(detail.clone());
-    state.push_user_message(ConsoleMessage::warning(detail));
+    state.record(LogSeverity::Warning, LogSource::Studio, detail);
 }
 
 fn rollback_exact_journal(
@@ -631,46 +613,22 @@ fn rollback_exact_journal(
 
 #[cfg(target_arch = "wasm32")]
 fn rollback_pending_validated_save(state: &mut AppState, message: &str) {
-    let Some(view_key) = state.dialogs.check_and_save.pending_view_key.take() else {
-        clear_pending_save_state(state);
-        let detail = format!(
-            "{message} The validated source identity is unavailable; close and reopen the project before retrying."
-        );
-        state.dialogs.check_and_save.validation_error = Some(detail.clone());
-        state.push_user_message(ConsoleMessage::warning(detail));
-        return;
-    };
-    let Some(journal) = state.dialogs.check_and_save.pending_original_journal.take() else {
-        clear_pending_save_state(state);
-        let detail = format!(
-            "{message} The local rollback journal is unavailable; close and reopen the project before retrying."
-        );
-        state.dialogs.check_and_save.validation_error = Some(detail.clone());
-        state.push_user_message(ConsoleMessage::warning(detail));
-        return;
-    };
-    let Some(expected_journal) = state.dialogs.check_and_save.pending_expected_journal.take()
+    let dialog = &mut state.dialogs.check_and_save;
+    let pending = (
+        dialog.pending_view_key.take(),
+        dialog.pending_original_journal.take(),
+        dialog.pending_expected_journal.take(),
+        dialog.pending_expected_design_digest.take(),
+    );
+    let (Some(view_key), Some(journal), Some(expected_journal), Some(expected_design_digest)) =
+        pending
     else {
         clear_pending_save_state(state);
         let detail = format!(
-            "{message} The publication journal guard is unavailable; close and reopen the project before retrying."
+            "{message} The revision could not be taken back because the save that held it is gone; close and reopen the project before retrying."
         );
         state.dialogs.check_and_save.validation_error = Some(detail.clone());
-        state.push_user_message(ConsoleMessage::warning(detail));
-        return;
-    };
-    let Some(expected_design_digest) = state
-        .dialogs
-        .check_and_save
-        .pending_expected_design_digest
-        .take()
-    else {
-        clear_pending_save_state(state);
-        let detail = format!(
-            "{message} The working-design guard is unavailable; close and reopen the project before retrying."
-        );
-        state.dialogs.check_and_save.validation_error = Some(detail.clone());
-        state.push_user_message(ConsoleMessage::warning(detail));
+        state.record(LogSeverity::Warning, LogSource::Studio, detail);
         return;
     };
     let dirty = state.dialogs.check_and_save.pending_original_dirty;
