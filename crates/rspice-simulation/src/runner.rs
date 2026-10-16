@@ -1263,9 +1263,17 @@ mod tests {
         let edge = lines
             .iter()
             .find(|line| line.message.starts_with("edge 1"))
-            .unwrap_or_else(|| panic!("the testbench's display is not in the log: {:?}", messages()));
+            .unwrap_or_else(|| {
+                panic!(
+                    "the testbench's display is not in the log: {:?}",
+                    messages()
+                )
+            });
         assert_eq!(edge.origin, crate::engine_log::EngineLogOrigin::Hdl);
-        assert_eq!(edge.severity, rspice_app_types::diagnostics::LogSeverity::Info);
+        assert_eq!(
+            edge.severity,
+            rspice_app_types::diagnostics::LogSeverity::Info
+        );
         assert_eq!(
             lines
                 .iter()

@@ -41,10 +41,7 @@ impl RunLineForwarder {
         // engine's own lines do, when the calling thread is inside this run.
         let point = log_scope::capture()
             .filter(|current| {
-                std::ptr::addr_eq(
-                    current.owner() as *const _,
-                    self.scope.owner() as *const _,
-                )
+                std::ptr::addr_eq(current.owner() as *const _, self.scope.owner() as *const _)
             })
             .and_then(|current| current.point().map(str::to_owned));
         if let Some(point) = point {
@@ -136,7 +133,13 @@ mod tests {
     use super::*;
     use rspice_core::config::{HdlOrigin, HdlPoint};
 
-    fn record(stream: HdlStream, text: &str, scope: &str, file: &str, line: u32) -> HdlOutputRecord {
+    fn record(
+        stream: HdlStream,
+        text: &str,
+        scope: &str,
+        file: &str,
+        line: u32,
+    ) -> HdlOutputRecord {
         HdlOutputRecord {
             point: HdlPoint::Transient { time: 1.2e-6 },
             tick: 1200,
@@ -189,7 +192,10 @@ mod tests {
         ))
         .expect("$finish(1) is reported");
         assert_eq!(finish.severity, LogSeverity::Info);
-        assert_eq!(finish.message, "$finish at 1.2 \u{b5}s \u{2014} tb (tb.v:20)");
+        assert_eq!(
+            finish.message,
+            "$finish at 1.2 \u{b5}s \u{2014} tb (tb.v:20)"
+        );
     }
 
     #[test]
@@ -236,7 +242,11 @@ mod tests {
         }
         let lines = lock_queue(&queue).drain();
         assert_eq!(lines.len(), 8, "{lines:?}");
-        assert!(lines[..7].iter().all(|line| line.origin == EngineLogOrigin::Hdl));
+        assert!(
+            lines[..7]
+                .iter()
+                .all(|line| line.origin == EngineLogOrigin::Hdl)
+        );
         assert_eq!(lines[7].origin, EngineLogOrigin::VerilogA);
         assert_eq!(lines[7].severity, LogSeverity::Warning);
         assert_eq!(

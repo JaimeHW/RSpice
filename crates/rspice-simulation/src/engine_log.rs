@@ -899,7 +899,9 @@ mod tests {
         }
         let mut queue = lock_queue(&queue);
         let messages: Vec<_> = queue.drain().into_iter().map(|line| line.message).collect();
-        let mut expected: Vec<String> = (1..=5).map(|index| format!("M{index}: vds clamped")).collect();
+        let mut expected: Vec<String> = (1..=5)
+            .map(|index| format!("M{index}: vds clamped"))
+            .collect();
         expected.push(FURTHER_WARNINGS_SUPPRESSED.to_owned());
         expected.push("R1: negative resistance".to_owned());
         expected.extend(std::iter::repeat_n("singular matrix".to_owned(), 7));

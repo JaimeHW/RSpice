@@ -131,7 +131,10 @@ mod tests {
     #[test]
     fn a_run_says_a_line_once_on_every_thread_it_hands_work_to() {
         assert!(first_saying("outside"));
-        assert!(first_saying("outside"), "outside a run nothing is remembered");
+        assert!(
+            first_saying("outside"),
+            "outside a run nothing is remembered"
+        );
         let _run = enter(Some(LogScope::new(Arc::new("run"))));
         assert!(first_saying("Circuit: 2 nodes"));
         let captured = capture();
@@ -144,7 +147,10 @@ mod tests {
         });
         assert!(!first_saying("Circuit: 3 nodes"));
         let _next = enter(Some(LogScope::new(Arc::new("next run"))));
-        assert!(first_saying("Circuit: 2 nodes"), "the next run starts with nothing said");
+        assert!(
+            first_saying("Circuit: 2 nodes"),
+            "the next run starts with nothing said"
+        );
     }
 
     fn owner_name(scope: &LogScope) -> Option<&'static str> {
@@ -196,6 +202,9 @@ mod tests {
             assert_eq!(scope.point(), Some("sample 3"));
             assert_eq!(owner_name(&scope), Some("run"));
         }
-        assert_eq!(capture().and_then(|scope| scope.point().map(str::to_owned)), None);
+        assert_eq!(
+            capture().and_then(|scope| scope.point().map(str::to_owned)),
+            None
+        );
     }
 }

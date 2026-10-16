@@ -92,9 +92,10 @@ impl EngineBridge {
         };
         let mut config = self.engine.config().clone();
         config.hdl.output = Some(forwarder.clone().hdl_output());
-        self.engine = rspice_core::Engine::new(config).with_compiler_diagnostic_handler(
-            move |diagnostic| forwarder.forward_compiler_diagnostic(diagnostic),
-        );
+        self.engine =
+            rspice_core::Engine::new(config).with_compiler_diagnostic_handler(move |diagnostic| {
+                forwarder.forward_compiler_diagnostic(diagnostic)
+            });
         self
     }
 
