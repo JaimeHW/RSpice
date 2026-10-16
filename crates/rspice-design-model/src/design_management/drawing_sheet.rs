@@ -614,7 +614,8 @@ pub enum DrawingSheetTitleFieldId {
     /// owns that fact and the border itself shows it. The variant remains
     /// only so sheets authored before it was withdrawn still load — it is
     /// absent from [`Self::ALL`], so nothing offers, resolves, or renders
-    /// it, and deserialization drops it from the field set.
+    /// it, deserialization drops it from the field set, and a sealed
+    /// organization template keeps it in an order nothing reads it from.
     Format,
     Scale,
     DrawnBy,
@@ -1031,6 +1032,13 @@ impl DrawingSheetManagedTemplateSnapshot {
             content_digest: ContentDigest::from_bytes([0; 32]),
         };
         snapshot.validate_shape()?;
+        // A stored snapshot may name a retired field, because it was sealed
+        // before the field was withdrawn; a new one is sealed without it.
+        if snapshot.field_order.len() != DrawingSheetTitleFieldId::ALL.len() {
+            return Err(DesignManagementError::NumericRange(
+                "drawing sheet managed template field order",
+            ));
+        }
         snapshot.content_digest = snapshot.compute_content_digest()?;
         Ok(snapshot)
     }
@@ -1066,11 +1074,16 @@ impl DrawingSheetManagedTemplateSnapshot {
                 "drawing sheet managed template geometry",
             ));
         }
+        // The order is sealed by the digest, so one captured before a field
+        // was retired still names it. It must name every current field and
+        // no field twice; a retired one is skipped wherever it is read.
         let expected = DrawingSheetTitleFieldId::ALL
             .into_iter()
             .collect::<BTreeSet<_>>();
-        let actual = self.field_order.iter().copied().collect::<BTreeSet<_>>();
-        if self.field_order.len() != DrawingSheetTitleFieldId::ALL.len() || actual != expected {
+        let distinct = self.field_order.iter().copied().collect::<BTreeSet<_>>();
+        if distinct.len() != self.field_order.len()
+            || self.field_order().collect::<BTreeSet<_>>() != expected
+        {
             return Err(DesignManagementError::NumericRange(
                 "drawing sheet managed template field order",
             ));
@@ -1133,9 +1146,13 @@ impl DrawingSheetManagedTemplateSnapshot {
         self.rows as usize
     }
 
-    #[must_use]
-    pub fn field_order(&self) -> &[DrawingSheetTitleFieldId] {
-        &self.field_order
+    /// The template's field order, less any field the product has since
+    /// retired.
+    pub fn field_order(&self) -> impl Iterator<Item = DrawingSheetTitleFieldId> + '_ {
+        self.field_order
+            .iter()
+            .copied()
+            .filter(|field| !DrawingSheetTitleFieldId::RETIRED.contains(field))
     }
 
     #[must_use]
@@ -1173,8 +1190,7 @@ pub fn resolve_drawing_sheet_title_fields(
 ) -> Vec<ResolvedDrawingSheetTitleField> {
     format
         .title_block_field_order()
-        .iter()
-        .copied()
+        .into_iter()
         .filter_map(|id| {
             let authored = format.title_block.fields.get(&id)?;
             authored.visible.then(|| {
@@ -1877,16 +1893,17 @@ impl SchematicSheetFormat {
     }
 
     #[must_use]
-    pub fn title_block_field_order(&self) -> &[DrawingSheetTitleFieldId] {
+    pub fn title_block_field_order(&self) -> Vec<DrawingSheetTitleFieldId> {
         self.title_block
             .managed_template
             .as_ref()
             .filter(|_| {
                 self.title_block.template == DrawingSheetTitleBlockTemplate::OrganizationManaged
             })
-            .map_or(&DrawingSheetTitleFieldId::ALL, |snapshot| {
-                snapshot.field_order()
-            })
+            .map_or_else(
+                || DrawingSheetTitleFieldId::ALL.to_vec(),
+                |snapshot| snapshot.field_order().collect(),
+            )
     }
 
     /// Captured organization logo for the exact effective title contract.

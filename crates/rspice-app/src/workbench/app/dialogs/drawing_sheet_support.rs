@@ -746,7 +746,7 @@ fn title_block_fields_body(
     });
     let field_order = state.format.as_ref().map_or_else(
         || DrawingSheetTitleFieldId::ALL.to_vec(),
-        |format| format.title_block_field_order().to_vec(),
+        SchematicSheetFormat::title_block_field_order,
     );
     let locked_fields = state
         .format
@@ -1353,8 +1353,7 @@ fn apply_title_block_fields(app: &mut RSpiceApp) -> Result<String, String> {
             .as_ref()
             .expect("managed format was filtered above")
             .title_block_field_order()
-            .iter()
-            .copied()
+            .into_iter()
             .find(|field| {
                 snapshot.locks_field(*field)
                     && managed_title_field_value_changed(&transaction, *field)

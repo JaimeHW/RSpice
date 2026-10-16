@@ -451,7 +451,7 @@ fn managed_title_templates_are_versioned_digest_verified_and_layout_authoritativ
             draft.title_block.managed_template = Some(snapshot.clone());
         })
         .unwrap();
-    assert_eq!(custom.title_block_field_order(), reversed.as_slice());
+    assert_eq!(custom.title_block_field_order(), reversed);
     assert_eq!(
         custom.title_block_dimensions_um(DrawingSheetTitleBlockTemplate::OrganizationManaged),
         Some((160_000, 40_000))
@@ -2610,6 +2610,95 @@ fn a_sheet_authored_before_a_field_retired_still_loads_without_it() {
             .title_block
             .fields
             .contains_key(&DrawingSheetTitleFieldId::DocumentId)
+    );
+}
+
+#[test]
+fn an_organization_template_sealed_before_a_field_retired_still_loads() {
+    let managed = SchematicSheetFormat::default()
+        .try_update(|draft| {
+            draft.title_block.template = DrawingSheetTitleBlockTemplate::OrganizationManaged;
+        })
+        .unwrap();
+    // The built-in template exactly as a build that still offered the sheet
+    // format sealed it: fourteen fields, and a digest over all fourteen.
+    let sealed_order = [
+        "project",
+        "cell-view",
+        "sheet-title",
+        "page",
+        "revision",
+        "format",
+        "scale",
+        "drawn-by",
+        "checked-by",
+        "approved-by",
+        "date",
+        "organization",
+        "document-id",
+        "classification",
+    ];
+    let sealed_digest = "51714aad10ff2f84fb2bb451212d0e39659310c069b00ff49f40afdde92b300d";
+    let mut wire = serde_json::to_value(&managed).unwrap();
+    wire["title_block"]["fields"]["format"] = serde_json::json!({ "value": "", "visible": true });
+    wire["title_block"]["managed_template"]["field_order"] = serde_json::json!(sealed_order);
+    wire["title_block"]["managed_template"]["content_digest"] = serde_json::json!(sealed_digest);
+
+    let restored: SchematicSheetFormat = serde_json::from_value(wire).unwrap();
+    let snapshot = restored.title_block.managed_template.as_ref().unwrap();
+    assert_eq!(
+        snapshot.content_digest().to_string(),
+        sealed_digest,
+        "the seal is the record of what was released, so loading must not re-seal it"
+    );
+    assert_eq!(
+        restored.title_block_field_order(),
+        DrawingSheetTitleFieldId::ALL,
+        "the retired field keeps its place in the seal and nowhere else"
+    );
+    assert!(
+        !resolve_drawing_sheet_title_fields(&restored, &BTreeMap::new())
+            .iter()
+            .any(|field| field.id == DrawingSheetTitleFieldId::Format)
+    );
+    let rewritten = serde_json::to_value(&restored).unwrap();
+    assert_eq!(
+        rewritten["title_block"]["managed_template"]["field_order"],
+        serde_json::json!(sealed_order)
+    );
+    assert_eq!(
+        serde_json::from_value::<SchematicSheetFormat>(rewritten).unwrap(),
+        restored
+    );
+
+    let mut with_retired = DrawingSheetTitleFieldId::ALL.to_vec();
+    with_retired.push(DrawingSheetTitleFieldId::Format);
+    assert!(
+        DrawingSheetManagedTemplateSnapshot::try_new(
+            "example.release-title-block",
+            "2026.10",
+            180_000,
+            50_000,
+            5,
+            with_retired,
+            Vec::new(),
+        )
+        .is_err(),
+        "a template sealed today must not name a field the product withdrew"
+    );
+    let mut repeated = DrawingSheetTitleFieldId::ALL.to_vec();
+    repeated.push(DrawingSheetTitleFieldId::Page);
+    assert!(
+        DrawingSheetManagedTemplateSnapshot::try_new(
+            "example.release-title-block",
+            "2026.10",
+            180_000,
+            50_000,
+            5,
+            repeated,
+            Vec::new(),
+        )
+        .is_err()
     );
 }
 
