@@ -528,7 +528,24 @@ fn violation_targets_net(violation: &DrcViolation, net: &DesignNet) -> bool {
             .terminals
             .iter()
             .any(|terminal| terminal.component_id == *id),
-        _ => false,
+        // An open terminal stands alone on a node of its own, and that node
+        // is the row the finding belongs to: the component's other pins are
+        // on other nets the finding says nothing about.
+        DrcLocation::Terminal {
+            component_id,
+            pin_name,
+            ..
+        } => net.terminals.iter().any(|terminal| {
+            terminal.component_id == *component_id && terminal.pin.eq_ignore_ascii_case(pin_name)
+        }),
+        // A finding inside an instantiated cellview is about that cellview's
+        // nets, not this one's.
+        DrcLocation::InsideInstance { .. }
+        | DrcLocation::Point { .. }
+        | DrcLocation::Bus { .. }
+        | DrcLocation::BusTap { .. }
+        | DrcLocation::Global
+        | DrcLocation::SymbolPin { .. } => false,
     }
 }
 
@@ -744,6 +761,13 @@ fn build_manual_repairs(
 ) -> Vec<ConnectivityRepair> {
     let mut repairs = Vec::new();
     for violation in drc.violations() {
+        // A repair is a wire drawn in this view. A finding inside an
+        // instantiated cellview has no endpoint here to choose and nowhere
+        // here to reveal, and a row per occurrence of it would offer the same
+        // nothing several times; it is repaired in its own cellview.
+        if matches!(violation.location, DrcLocation::InsideInstance { .. }) {
+            continue;
+        }
         if !matches!(
             violation.violation_type,
             // Every unattached terminal belongs here, whatever the interface
@@ -1146,6 +1170,42 @@ impl RSpiceApp {
     }
 
     fn reveal_connectivity_target(&mut self, target: RevealTarget) {
+        // The checks locate a terminal on the projected document, which lays
+        // later sheets a stride along; the canvas centres on it where its
+        // sheet draws it.
+        let target = match target {
+            RevealTarget::Violation(DrcLocation::Terminal {
+                component_id,
+                component_name,
+                pin_name,
+                point,
+            }) => {
+                let sheets = self
+                    .state
+                    .workspace
+                    .content
+                    .design_management
+                    .sheet_catalog(
+                        &self
+                            .state
+                            .workspace
+                            .content
+                            .active_schematic_reference()
+                            .key(),
+                    );
+                RevealTarget::Violation(DrcLocation::Terminal {
+                    point: rspice_schematic_editor::view::violations::live_terminal_point(
+                        sheets,
+                        component_id,
+                        point,
+                    ),
+                    component_id,
+                    component_name,
+                    pin_name,
+                })
+            }
+            other => other,
+        };
         self.state.dialogs.connectivity_manager.close();
         self.state.workbench.workspace = crate::workbench::state::Workspace::Design;
         if let RevealTarget::Label { view_key, .. } = &target
@@ -2312,6 +2372,90 @@ mod tests {
         assert!(
             reason.contains("XABSENT"),
             "the dialog must show the projection's own reason: {reason}"
+        );
+    }
+
+    /// An open pin is listed on the net row it stands on, and is offered as a
+    /// repair here. A defect inside a placed cell is neither: it is on none of
+    /// this view's nets, and no wire drawn here repairs it — so it is not
+    /// offered once per occurrence as a row with nothing to choose and nowhere
+    /// to go.
+    #[test]
+    fn only_this_views_findings_are_net_issues_and_repairs() {
+        let mut state = AppState::default();
+        let mut work = crate::state::Library::new("work");
+        let mut pad = crate::state::Cell::new("pad");
+        pad.add_view(crate::state::View::new(
+            "schematic",
+            crate::state::ViewType::Schematic,
+        ));
+        work.add_cell(pad);
+        state.library_manager.add_library(work);
+        let mut master = SchematicState::default();
+        master.add_component(crate::state::ComponentType::Resistor, Point::new(30, 0));
+        state
+            .workspace
+            .insert_schematic_editor("work/pad/schematic".to_owned(), master);
+        for x in [400, 600] {
+            let mut binding = crate::state::LibraryCellInstance::new("work", "pad", "schematic");
+            binding.bind_interface(&[]);
+            state
+                .schematic
+                .add_library_cell_component(Point::new(x, 400), binding);
+        }
+        let resistor = state
+            .schematic
+            .add_component(crate::state::ComponentType::Resistor, Point::new(30, 0));
+        state.sync_active_schematic_to_workspace();
+
+        let report =
+            build_report(&state, &ConnectivityPolicy::default()).expect("a resolved design");
+
+        assert!(
+            report
+                .drc
+                .violations()
+                .iter()
+                .any(|finding| matches!(finding.location, DrcLocation::InsideInstance { .. })),
+            "the fixture's cell carries findings of its own: {:?}",
+            report.drc.violations()
+        );
+        let open_rows = report
+            .nets
+            .iter()
+            .filter(|row| row.component_ids == vec![resistor])
+            .collect::<Vec<_>>();
+        assert_eq!(open_rows.len(), 2, "one row per open leg");
+        assert!(
+            open_rows
+                .iter()
+                .all(|row| row.issue.contains("is not connected")),
+            "{open_rows:?}"
+        );
+        assert!(
+            report.repairs.iter().all(|repair| !matches!(
+                &repair.reveal,
+                RevealTarget::Violation(DrcLocation::InsideInstance { .. })
+            )),
+            "{:?}",
+            report
+                .repairs
+                .iter()
+                .map(|repair| &repair.object)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            report
+                .repairs
+                .iter()
+                .filter(|repair| matches!(
+                    &repair.reveal,
+                    RevealTarget::Violation(DrcLocation::Terminal { component_id, .. })
+                        if *component_id == resistor
+                ))
+                .count(),
+            2,
+            "both open legs of the view's own resistor are offered"
         );
     }
 
