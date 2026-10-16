@@ -685,22 +685,22 @@ fn app_with_an_open_root(
 
 /// A current source driving `OUT` through a capacitor to ground: nothing
 /// conducts from `OUT` to ground at DC, and the source forces current in.
-fn forced_capacitor_island() -> (
-    Vec<(crate::state::ComponentType, crate::state::Point)>,
-    Vec<(crate::state::Point, crate::state::Point)>,
-) {
+fn app_with_a_forced_capacitor_island(
+    operating_point: bool,
+) -> (RSpiceApp, crate::state::CellViewRef) {
     use crate::state::{ComponentType, Point};
-    (
-        vec![
+    app_with_an_open_root(
+        &[
             (ComponentType::Ground, Point::new(0, 40)),
             (ComponentType::CurrentSource, Point::new(0, 10)),
             (ComponentType::Capacitor, Point::new(100, -10)),
         ],
-        vec![
+        &[
             (Point::new(0, -10), Point::new(80, -10)),
             (Point::new(120, -10), Point::new(120, 30)),
             (Point::new(120, 30), Point::new(0, 30)),
         ],
+        operating_point,
     )
 }
 
@@ -719,8 +719,7 @@ fn preflight_blockers(app: &RSpiceApp) -> &[PreflightIssue] {
 /// the net was drawn, and located on the wire that draws it in the root.
 #[test]
 fn a_forced_node_without_a_dc_path_is_the_engines_refusal_on_the_drawn_net() {
-    let (components, wires) = forced_capacitor_island();
-    let (mut app, root) = app_with_an_open_root(&components, &wires, true);
+    let (mut app, root) = app_with_a_forced_capacitor_island(true);
 
     run(&mut app);
 
@@ -774,8 +773,7 @@ fn a_forced_node_without_a_dc_path_is_the_engines_refusal_on_the_drawn_net() {
 /// the same drawing is then authorized.
 #[test]
 fn a_node_shunt_set_where_the_solver_options_are_clears_the_refusal() {
-    let (components, wires) = forced_capacitor_island();
-    let (mut app, _) = app_with_an_open_root(&components, &wires, true);
+    let (mut app, _) = app_with_a_forced_capacitor_island(true);
     run(&mut app);
     let island = preflight_blockers(&app)
         .iter()
@@ -816,8 +814,7 @@ fn a_node_shunt_set_where_the_solver_options_are_clears_the_refusal() {
 /// not know, so it is left to the engine.
 #[test]
 fn a_transient_only_plan_is_not_refused_for_a_forced_island() {
-    let (components, wires) = forced_capacitor_island();
-    let (mut app, _) = app_with_an_open_root(&components, &wires, false);
+    let (mut app, _) = app_with_a_forced_capacitor_island(false);
 
     run(&mut app);
 
