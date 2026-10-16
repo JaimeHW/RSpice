@@ -21,6 +21,7 @@
 //! buy nothing and cost the editors their publication model. The listing in
 //! [`listing`] reads them in place.
 
+mod current;
 pub(in crate::workbench) mod listing;
 mod producers;
 
@@ -596,6 +597,13 @@ pub(crate) struct DiagnosticStore {
     /// and a run outcome superseded by the next run's outcome for the same
     /// analysis.
     current_key: Option<FindingKey>,
+    /// Where the current finding was last seen among the source editors'
+    /// findings, when it is one of theirs.
+    source_anchor: Option<current::SourceAnchor>,
+    /// A current finding a search of the source editors' findings could
+    /// neither resolve nor re-anchor, and the collections it searched. The
+    /// search is not repeated until one of them changes.
+    unresolved: Option<(uuid::Uuid, current::SourceFingerprint)>,
     /// Moves on every publication and withdrawal, so a memo taken over the
     /// store's batches can tell it is describing a different store.
     generation: u64,
@@ -686,6 +694,8 @@ impl DiagnosticStore {
         }
         self.current = finding;
         self.current_key = finding.and_then(|id| self.record(id)).map(|record| record.key.clone());
+        self.source_anchor = None;
+        self.unresolved = None;
     }
 
     /// The record a held identity names, where this store holds it.
@@ -733,6 +743,8 @@ impl DiagnosticStore {
         self.pending_route = None;
         self.current = None;
         self.current_key = None;
+        self.source_anchor = None;
+        self.unresolved = None;
         self.generation = self.generation.wrapping_add(1);
     }
 
