@@ -18,14 +18,23 @@
 ///
 /// The boundary is located structurally rather than by a literal, so it holds
 /// under either line ending and under both spellings this crate uses:
-/// `#[cfg(test)]` and `#[cfg(all(test, not(target_arch = "wasm32")))]`. A file
-/// that declares test-only code and no `mod tests` is a panic rather than a
-/// scan of nothing: a guard with nothing left to guard should be a red test,
-/// not a green one.
+/// `#[cfg(test)]` and `#[cfg(all(test, not(target_arch = "wasm32")))]`.
+///
+/// Only an inline `mod tests {` is a boundary. An out-of-line `mod tests;`
+/// declares another file, and in this slice one of them sits at the top of
+/// its host — cutting there left four lines of a four-hundred-line surface
+/// scanned, which is a guard that has quietly stopped guarding. A file that
+/// declares test-only code and names no test module at all is a panic for
+/// the same reason.
 fn production_source(source: &str) -> &str {
-    let Some(boundary) = source.find("mod tests") else {
+    let boundary = source.match_indices("mod tests").find(|(at, _)| {
+        source[at + "mod tests".len()..]
+            .trim_start()
+            .starts_with('{')
+    });
+    let Some((boundary, _)) = boundary else {
         assert!(
-            !source.contains("#[cfg(test"),
+            !source.contains("#[cfg(test") || source.contains("mod tests"),
             "the scanned source declares test-only code and no `mod tests` block to stop at"
         );
         return source;
@@ -142,7 +151,7 @@ mod tests {
                 shipped.lines().count()
             );
             assert!(
-                !shipped.contains("mod tests"),
+                !shipped.contains("mod tests {"),
                 "{name} was scanned with its test module included"
             );
         }
@@ -161,6 +170,10 @@ mod tests {
         let gated = "fn shipped() {}\n#[cfg(all(test, not(target_arch = \"wasm32\")))]\nmod tests {}\n";
         assert_eq!(production_source(gated), "fn shipped() {}\n");
         assert_eq!(production_source("fn shipped() {}\n"), "fn shipped() {}\n");
+        // An out-of-line declaration is not a boundary, wherever it sits:
+        // cutting at one at the top of a file leaves the file unscanned.
+        let out_of_line = "#[cfg(test)]\nmod tests;\nfn shipped() {}\n";
+        assert_eq!(production_source(out_of_line), out_of_line);
     }
 
     /// A file that carries test-only code without the boundary is refused.

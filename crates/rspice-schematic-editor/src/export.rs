@@ -165,7 +165,6 @@ fn export_to_svg_with_resolved_symbol_entries(
   .bus-tap {{ stroke: {wire_color}; stroke-width: {tap_width}; fill: none; stroke-linecap: round; }}\n\
   .junction {{ fill: {wire_color}; stroke: none; }}\n\
   .component {{ stroke: {comp_color}; stroke-width: {comp_width}; fill: none; }}\n\
-  .symbol-resolution-error {{ stroke: {comp_color}; stroke-width: {comp_width}; fill: none; }}\n\
   .text {{ font-family: monospace; font-size: {font_size}px; fill: {text_color}; }}\n\
   .design-note-anchor {{ fill: {text_color}; stroke: none; }}\n\
   .design-note-requirement-link .text {{ text-decoration: underline; }}\n\
@@ -622,14 +621,18 @@ fn write_symbol_resolution_error(
     let kind = escape_xml(component.kind.display_name());
     let reason = escape_xml(reason);
     let label = escape_xml(&symbol_resolution_error_label(component));
+    // The group carries the ink the drawing is in, which its children
+    // inherit: a placeholder is part of the drawing, and an exported
+    // schematic has no second colour to spend on an alarm. The label's own
+    // class gives it back the fill the group takes away.
     writeln!(
         svg,
-        "<g class=\"symbol-resolution-error\" data-component-kind=\"{kind}\" data-error=\"{reason}\">"
+        "<g class=\"symbol-resolution-error\" data-component-kind=\"{kind}\" data-error=\"{reason}\" \
+         stroke=\"{stroke}\" stroke-width=\"{width}\" fill=\"none\">",
+        stroke = config.component_color,
+        width = config.component_stroke_width
     )
     .unwrap();
-    // The group's own stroke, which the sheet's stylesheet sets to the ink
-    // the drawing is in: a placeholder is part of the drawing, and an
-    // exported schematic has no second colour to spend on an alarm.
     writeln!(
         svg,
         "<rect x=\"{x}\" y=\"{y}\" width=\"{size}\" height=\"{size}\"/>"
