@@ -121,7 +121,9 @@ impl PreparedRunSnapshot {
             let tasks = self.tasks.iter().map(refused_task).collect();
             refusals.push(EngineRefusal {
                 kind: EngineRefusalKind::Build {
-                    message: format!("Could not install prepared project Verilog-A runtimes: {error}"),
+                    message: format!(
+                        "Could not install prepared project Verilog-A runtimes: {error}"
+                    ),
                     instance: None,
                 },
                 tasks,
@@ -171,10 +173,13 @@ impl PreparedRunSnapshot {
             .as_deref()
             .unwrap_or(&self.executable_netlist);
         let temperature = match (&task.task.spec, &task.execution_environment) {
-            (AnalysisSpec::DcOp {
-                temperature_celsius,
-                ..
-            }, _) => RunTemperature::OperatingPoint(*temperature_celsius),
+            (
+                AnalysisSpec::DcOp {
+                    temperature_celsius,
+                    ..
+                },
+                _,
+            ) => RunTemperature::OperatingPoint(*temperature_celsius),
             (_, Some(environment)) => RunTemperature::Point(environment.temperature_celsius),
             (_, None) => RunTemperature::Deck,
         };
@@ -293,9 +298,10 @@ impl PreparedRunSnapshot {
 ///
 /// A build refusal refuses every task that builds the deck. A forced floating
 /// node is refused only by the analyses that solve their own deck's DC bias
-/// through the shared boundary that checks it before solving; a loop through a
-/// winding by every analysis that solves a DC operating point; a loop of
-/// voltage sources alone by every analysis.
+/// through the shared boundary that checks it before solving. A loop of fixed
+/// branch voltages is refused by every analysis that solves a DC point of its
+/// own deck, a `.DC` sweep among them: every such solve is singular, whatever
+/// the sweep value.
 fn task_refusals(task: &PreparedTask, verdict: &DeckVerdict) -> Vec<EngineRefusalKind> {
     match verdict {
         DeckVerdict::Refused(kinds) => kinds.clone(),
@@ -310,16 +316,18 @@ fn task_refusals(task: &PreparedTask, verdict: &DeckVerdict) -> Vec<EngineRefusa
                     nodes: fatal_no_dc_path_nodes.clone(),
                 });
             }
-            let solves_dc = checks_dc_bias
+            let solves_dc_point = checks_dc_bias
                 || (matches!(task.task.spec, AnalysisSpec::DcSweep { .. })
+                    && task.transient_state.is_none()
                     && task.dependency_bindings.is_empty());
-            refused.extend(
-                loops
-                    .iter()
-                    .filter(|branch_loop| !branch_loop.through_inductor || solves_dc)
-                    .cloned()
-                    .map(EngineRefusalKind::BranchVoltageLoop),
-            );
+            if solves_dc_point {
+                refused.extend(
+                    loops
+                        .iter()
+                        .cloned()
+                        .map(EngineRefusalKind::BranchVoltageLoop),
+                );
+            }
             refused
         }
     }

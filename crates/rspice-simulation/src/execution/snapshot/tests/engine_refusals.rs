@@ -70,7 +70,7 @@ fn rshunt_in_the_deck_clears_the_forced_island() {
 
 /// A source across a winding is a loop of fixed branch voltages in the DC
 /// solve, which every operating point refuses. A transient steps the winding
-/// as an impedance and is not refused for it.
+/// as an impedance; its startup is left to the engine and is not claimed.
 #[test]
 fn a_source_across_a_winding_is_refused_where_a_dc_point_is_solved() {
     let refusals = refusals_of(
@@ -91,17 +91,50 @@ fn a_source_across_a_winding_is_refused_where_a_dc_point_is_solved() {
     assert_eq!(refusals[0].tasks[0].analysis, instance_id("op"));
 }
 
+/// Two sources across one node pair are the same singular DC solve, stated
+/// with the same scope; the loop says it holds no winding.
+#[test]
+fn a_loop_of_voltage_sources_alone_is_refused_where_a_dc_point_is_solved() {
+    let refusals = refusals_of(
+        "source across source\nV1 a 0 1\nV2 a 0 2\nR1 a 0 1k\n.op\n.end\n",
+        vec![
+            prepared("op", "DC Operating Point", task()),
+            prepared("tran", "Transient", transient_task()),
+        ],
+    );
+
+    assert_eq!(refusals.len(), 1, "{refusals:?}");
+    let EngineRefusalKind::BranchVoltageLoop(branch_loop) = &refusals[0].kind else {
+        panic!("{refusals:?}");
+    };
+    assert!(!branch_loop.through_inductor);
+    assert_eq!(
+        refusals[0].tasks,
+        [RefusedTask {
+            analysis: instance_id("op"),
+            label: "DC Operating Point".to_owned(),
+        }]
+    );
+}
+
 /// The run's own deck is covered, so preparation accepts it. One Run Set
 /// point shortens the device below every bin, and the build of that point's
 /// deck is refused: the refusal names the instance, its evaluated geometry,
 /// the nearest bin, and only the task at that point.
+///
+/// The device sits in a cell, as a drawn transistor does below the root, and
+/// its geometry is evaluated when the cell is placed, against the deck's
+/// parameters as the point's override card leaves them.
 #[test]
 fn an_instance_outside_its_bins_at_one_point_is_refused_at_that_point_only() {
     let mut run = parts();
     run.executable_netlist = "binned at one point\n\
 .param LVAL=0.5u\n\
-V1 d 0 1\n\
+.subckt cell d\n\
 M1 d d 0 0 NCH W=1u L={LVAL}\n\
+.ends cell\n\
+V1 d 0 1\n\
+X1 d cell\n\
 .model NCH.0 NMOS LEVEL=1 LMIN=0.28u LMAX=0.5u WMIN=0.5u WMAX=2u VTO=0.4\n\
 .model NCH.1 NMOS LEVEL=1 LMIN=0.5u LMAX=1.2u WMIN=0.5u WMAX=2u VTO=0.9\n\
 .op\n\
@@ -116,7 +149,7 @@ M1 d d 0 0 NCH W=1u L={LVAL}\n\
     let EngineRefusalKind::UncoveredModelBin(gap) = &refusals[0].kind else {
         panic!("{refusals:?}");
     };
-    assert!(gap.element.eq_ignore_ascii_case("m1"), "{gap:?}");
+    assert!(gap.element.to_ascii_lowercase().ends_with("m1"), "{gap:?}");
     assert!(
         gap.length
             .is_some_and(|length| (length - 0.1e-6).abs() < 1e-15),
