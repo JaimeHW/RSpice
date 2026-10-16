@@ -1371,6 +1371,25 @@ pub struct PreflightDialogState {
     /// loop consumes it on its next pass, so the request records intent
     /// without its origin naming the workflow.
     pub(in crate::workbench) run_and_queue_requested: bool,
+    /// A pass whose decks the engine is still building, off the UI thread.
+    pub(in crate::workbench) checking: Option<PreflightCheck>,
+}
+
+/// What a pass decided before its engine build began, held until the build
+/// says what the engine refuses.
+#[derive(Debug, Clone)]
+pub(in crate::workbench) struct PreflightCheck {
+    /// The report as far as the press took it: the revisions it inspected,
+    /// and its advisories. The engine's refusals join its blockers.
+    pub(in crate::workbench) report: PreflightReport,
+    /// What the report authorizes if the engine refuses nothing.
+    pub(in crate::workbench) contract: PreparedPreflightContract,
+    /// Whether the run is queued once the report authorizes it: a Run press
+    /// rather than a check alone.
+    pub(in crate::workbench) queue: bool,
+    /// The dispatch inputs as they stood at the press, which the findings
+    /// are decided against. `None` when they could not be read then.
+    pub(in crate::workbench) inputs_at_press: Option<crate::product::ContentDigest>,
 }
 
 impl PreflightDialogState {

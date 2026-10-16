@@ -9,7 +9,8 @@
 //! circuit — or the build's own error — says what the engine will refuse.
 //! Nothing is solved.
 
-use std::collections::HashMap;
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 
 use rspice_core::circuit::DcBranchVoltageLoop;
 use rspice_core::engine::ModelBinCoverageGap;
@@ -60,6 +61,16 @@ pub struct EngineRefusal {
     pub tasks: Vec<RefusedTask>,
 }
 
+/// How far a pass over a run's decks has got.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DeckBuildProgress {
+    /// Distinct decks built so far.
+    pub built: usize,
+    /// Distinct decks the pass builds: one per deck and temperature the run
+    /// dispatches.
+    pub total: usize,
+}
+
 /// The temperature the runner applies to a task's deck before parsing it.
 #[derive(Clone, Copy, PartialEq)]
 enum RunTemperature {
@@ -98,9 +109,10 @@ enum DeckVerdict {
     Refused(Vec<EngineRefusalKind>),
 }
 
-/// One deck a task dispatches, and the label it is dispatched under.
-struct DispatchedDeck {
-    source: String,
+/// One deck a task dispatches, and the label it is dispatched under. Borrowed
+/// from the snapshot unless the task composes it.
+struct DispatchedDeck<'a> {
+    source: Cow<'a, str>,
     temperature: RunTemperature,
     label: String,
 }
@@ -114,6 +126,17 @@ impl PreparedRunSnapshot {
     pub fn engine_refusals(
         &self,
         abort: &dyn rspice_core::abort_signal::AbortSignal,
+    ) -> Vec<EngineRefusal> {
+        self.engine_refusals_reporting(abort, &|_| {})
+    }
+
+    /// [`Self::engine_refusals`], telling `progress` how many distinct decks
+    /// it builds and each time it has built one. Empty when `abort` stopped
+    /// it.
+    pub fn engine_refusals_reporting(
+        &self,
+        abort: &dyn rspice_core::abort_signal::AbortSignal,
+        progress: &dyn Fn(DeckBuildProgress),
     ) -> Vec<EngineRefusal> {
         let mut refusals: Vec<EngineRefusal> = Vec::new();
         if !self.project_veriloga_runtimes.is_empty()
@@ -132,43 +155,67 @@ impl PreparedRunSnapshot {
             return refusals;
         }
 
-        let mut verdicts: HashMap<(String, (u8, u64)), Option<DeckVerdict>> = HashMap::new();
+        // Every deck every task dispatches, in dispatch order, so the pass can
+        // say how many it builds before it builds the first.
+        let mut dispatched = Vec::new();
         for task in &self.tasks {
             if matches!(task.task.spec, AnalysisSpec::Fft { .. }) {
                 // A recorded FFT transforms its producer's waveform and builds
                 // no circuit of its own.
                 continue;
             }
-            for deck in self.dispatched_decks(task, abort) {
-                if abort.is_aborted() {
-                    return Vec::new();
-                }
-                let verdict = verdicts
-                    .entry((deck.source, deck.temperature.key()))
-                    .or_insert_with_key(|(source, _)| {
-                        self.build_verdict(source, deck.temperature, abort)
-                    });
-                let Some(verdict) = verdict else {
-                    continue;
-                };
-                let refused = RefusedTask {
-                    analysis: task.authored_instance_id,
-                    label: deck.label,
-                };
-                for kind in task_refusals(task, verdict) {
-                    record(&mut refusals, kind, &refused);
-                }
+            if abort.is_aborted() {
+                return Vec::new();
+            }
+            dispatched.extend(
+                self.dispatched_decks(task, abort)
+                    .into_iter()
+                    .map(|deck| (task, deck)),
+            );
+        }
+        let total = dispatched
+            .iter()
+            .map(|(_, deck)| (deck.source.as_ref(), deck.temperature.key()))
+            .collect::<HashSet<_>>()
+            .len();
+        let mut built = 0;
+        progress(DeckBuildProgress { built, total });
+
+        let mut verdicts: HashMap<(Cow<'_, str>, (u8, u64)), Option<DeckVerdict>> =
+            HashMap::new();
+        for (task, deck) in dispatched {
+            if abort.is_aborted() {
+                return Vec::new();
+            }
+            let key = (deck.source, deck.temperature.key());
+            let fresh = !verdicts.contains_key(&key);
+            let verdict = verdicts.entry(key).or_insert_with_key(|(source, _)| {
+                self.build_verdict(source, deck.temperature, abort)
+            });
+            if fresh {
+                built += 1;
+                progress(DeckBuildProgress { built, total });
+            }
+            let Some(verdict) = verdict else {
+                continue;
+            };
+            let refused = RefusedTask {
+                analysis: task.authored_instance_id,
+                label: deck.label,
+            };
+            for kind in task_refusals(task, verdict) {
+                record(&mut refusals, kind, &refused);
             }
         }
         refusals
     }
 
     /// The decks one task's engine calls build, as the runner composes them.
-    fn dispatched_decks(
-        &self,
-        task: &PreparedTask,
+    fn dispatched_decks<'a>(
+        &'a self,
+        task: &'a PreparedTask,
         abort: &dyn rspice_core::abort_signal::AbortSignal,
-    ) -> Vec<DispatchedDeck> {
+    ) -> Vec<DispatchedDeck<'a>> {
         let source = task
             .executable_netlist_override
             .as_deref()
@@ -202,7 +249,7 @@ impl PreparedRunSnapshot {
                     )
                     .ok()
                     .map(|source| DispatchedDeck {
-                        source,
+                        source: Cow::Owned(source),
                         temperature,
                         label: format!("{} \u{00b7} {}", task.label, process.short_name()),
                     })
@@ -210,7 +257,7 @@ impl PreparedRunSnapshot {
                 .collect();
         }
         vec![DispatchedDeck {
-            source: source.to_owned(),
+            source: Cow::Borrowed(source),
             temperature,
             label: task.label.clone(),
         }]

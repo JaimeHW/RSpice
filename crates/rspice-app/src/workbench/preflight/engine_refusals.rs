@@ -50,6 +50,17 @@ pub(super) fn engine_refusal_issues(
         .collect()
 }
 
+/// The blocker for a build pass that ended without saying what the engine
+/// refuses. A run the pass could not speak for is not authorized.
+pub(super) fn no_verdict_issue() -> PreflightIssue {
+    PreflightIssue {
+        check: BUILD_CHECK.to_owned(),
+        observed: "The engine's build of the dispatched decks ended without a verdict.".to_owned(),
+        required: "A deck the engine can elaborate at every dispatched point".to_owned(),
+        remediation: PreflightRemediation::NetlistSource { line: None },
+    }
+}
+
 fn issues_for(refusal: &EngineRefusal, drawing: &DrawnDesign) -> Vec<PreflightIssue> {
     let refused_by = refused_by(&refusal.tasks);
     match &refusal.kind {

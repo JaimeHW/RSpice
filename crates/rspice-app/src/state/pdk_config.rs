@@ -53,6 +53,7 @@ pub use rspice_simulation::pdk::PdkTechnologyRegistry;
 #[cfg(test)]
 pub(crate) use rspice_simulation::pdk::test_fixtures::{
     fixture_archive as signed_technology_test_fixture,
+    fixture_archive_with_models as signed_technology_test_fixture_with_models,
     fixture_archive_with_symbols as signed_symbol_technology_test_fixture,
     fixture_archive_with_veriloga as signed_veriloga_technology_test_fixture,
     fixture_archive_with_veriloga_source as signed_veriloga_source_test_fixture,

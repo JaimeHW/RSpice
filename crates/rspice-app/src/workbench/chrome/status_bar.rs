@@ -62,10 +62,20 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 format!("{}%", (zoom_factor(app) * 100.0).round())
             };
             let availability = app.simulation_controller.engine_availability();
-            let engine = simulation_engine_status(&app.state.simulation, &availability);
+            let checking = app
+                .state
+                .workbench
+                .preflight
+                .checking
+                .as_ref()
+                .and(app.simulation_controller.engine_check_progress());
+            let engine = match checking {
+                Some(progress) => Some(engine_check_status(progress)),
+                None => simulation_engine_status(&app.state.simulation, &availability),
+            };
             let engine_mark = engine_status_mark(
                 &availability,
-                app.state.simulation.execution.has_active_execution(),
+                app.state.simulation.execution.has_active_execution() || checking.is_some(),
             );
             let platform = platform_label();
             let check_mark =
@@ -418,6 +428,20 @@ fn simulation_engine_status(
         "Engine {phase} · {}%",
         simulation_progress_percent(simulation.execution.progress)
     ))
+}
+
+/// The engine segment while preflight has the engine building the run's
+/// decks: how many of them it has built, once it has counted them.
+fn engine_check_status(progress: crate::simulation::execution::DeckBuildProgress) -> String {
+    if progress.total == 0 {
+        return "Engine checking".to_owned();
+    }
+    format!(
+        "Engine checking · {} of {} deck{}",
+        progress.built,
+        progress.total,
+        if progress.total == 1 { "" } else { "s" }
+    )
 }
 
 /// The mark in front of the engine segment: a failure when the engine cannot

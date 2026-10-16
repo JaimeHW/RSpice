@@ -809,6 +809,7 @@ impl Command {
                         && !state.simulation.execution.trigger_simulation
                 }
             }
+            Self::PreflightChecks => state.workbench.preflight.checking.is_none(),
             // Both edit the plan catalog through the active plan's stable
             // identity, so a project whose plan never migrated to it has
             // nothing to select, nothing to add to, and no dialog worth opening.
@@ -881,7 +882,10 @@ impl Command {
                     && !state.ui.netlist.generated_history.is_empty()
                     && state.ui.netlist.generated_document.is_some()
             }
-            Self::StopSimulation => stop_simulation_enabled(&state.simulation),
+            Self::StopSimulation => {
+                state.workbench.preflight.checking.is_some()
+                    || stop_simulation_enabled(&state.simulation)
+            }
             Self::ClearResults => {
                 state.simulation.retained.has_results()
                     && !state.simulation.execution.has_active_execution()
@@ -1871,7 +1875,9 @@ impl Command {
                 }
             }
             Self::StopSimulation => {
-                if stop_simulation_enabled(&app.state.simulation) {
+                if app.state.workbench.preflight.checking.is_some() {
+                    super::preflight::cancel(&mut app.state, &mut app.simulation_controller);
+                } else if stop_simulation_enabled(&app.state.simulation) {
                     if let Err(error) = app.state.simulation.request_abort_active_run() {
                         app.state
                             .push_sim_message(crate::diagnostics::ConsoleMessage::warning(error));

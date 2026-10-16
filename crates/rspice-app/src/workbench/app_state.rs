@@ -770,6 +770,14 @@ impl AppState {
         );
     }
 
+    /// The same contract, with `models` as the signed package's model library.
+    #[cfg(test)]
+    pub(crate) fn provision_test_project_technology_with_models(&mut self, models: Vec<u8>) {
+        self.provision_test_project_technology_fixture(
+            crate::state::pdk_config::signed_technology_test_fixture_with_models(models),
+        );
+    }
+
     #[cfg(test)]
     pub(crate) fn provision_test_project_veriloga_technology_contract(&mut self) {
         self.provision_test_project_technology_fixture(

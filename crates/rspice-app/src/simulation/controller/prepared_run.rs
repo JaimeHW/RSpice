@@ -394,17 +394,6 @@ impl SimulationController {
         Ok(metadata)
     }
 
-    /// What the engine refuses when it builds the decks the retained run
-    /// dispatches. Empty when no run is retained.
-    pub(crate) fn prepared_run_engine_refusals(
-        &self,
-    ) -> Vec<crate::simulation::execution::EngineRefusal> {
-        self.run_authorization
-            .retained_snapshot()
-            .map(|snapshot| snapshot.engine_refusals(&rspice_core::NoAbort))
-            .unwrap_or_default()
-    }
-
     /// Freeze and start a declared-order campaign of independent simulation
     /// plans. Every member is prepared in a cloned project view before any
     /// engine work begins, so a later member never observes edits made while

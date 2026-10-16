@@ -12,20 +12,28 @@
 //! each one's own destination is what following the row does. What this module
 //! still owns is the pass itself: run the checks, prepare the immutable
 //! snapshot, and queue only what that snapshot authorizes.
+//!
+//! The last of the checks is the engine's own: every deck the prepared run
+//! dispatches is built, without solving, and what the engine refuses there
+//! blocks the run. That build runs off the UI thread over the decks frozen at
+//! the press; the pass finishes when the frame loop finds its verdict, and an
+//! edit made meanwhile leaves the verdict stale rather than racing it.
 
 mod engine_refusals;
 
 use crate::diagnostics::ConsoleMessage;
+use crate::simulation::SimulationController;
+use crate::simulation::controller::EngineCheckOutcome;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 
 use super::state::{
-    ConsolePage, ModelsPage, PreflightAdvisory, PreflightIssue, PreflightRemediation,
-    PreflightReport, PreparedPreflightContract, Workspace,
+    ConsolePage, ModelsPage, PreflightAdvisory, PreflightCheck, PreflightIssue,
+    PreflightRemediation, PreflightReport, PreparedPreflightContract, Workspace,
 };
 
-/// Run every local preflight check, retain the exact report for the current
-/// project revision, and publish what it found.
+/// Run every local preflight check and the engine's build pass, retain the
+/// exact report for the current project revision, and publish what it found.
 ///
 /// The design rules are checked once, over the configured root, and their
 /// findings are published by the design-rule producer exactly as the Check
@@ -39,55 +47,67 @@ use super::state::{
 /// reader is told of a finished job. It used to be a plan receipt, which no
 /// chrome draws and which the notice centre deliberately never lifts, so a
 /// clean pass with the Console collapsed said nothing anywhere.
+///
+/// When the checks before it pass, the pass ends with the engine building the
+/// run's decks on a worker; [`poll`] finishes it.
 pub(crate) fn run(app: &mut RSpiceApp) {
-    app.state.sync_active_schematic_to_workspace();
+    start(&mut app.state, &mut app.simulation_controller, false);
+}
+
+/// Start a pass. `queue` asks for the run to be queued once the pass
+/// authorizes it.
+fn start(state: &mut AppState, controller: &mut SimulationController, queue: bool) {
+    if let Some(check) = state.workbench.preflight.checking.as_mut() {
+        // The decks being built are the ones this press would build. A Run
+        // press during a check alone asks for the run it authorizes.
+        check.queue |= queue;
+        return;
+    }
+    state.sync_active_schematic_to_workspace();
     let Collected {
         mut report,
         design_rules,
-    } = collect(&app.state);
+    } = collect(state);
     if let Some(result) = design_rules
-        && let Err(error) = app
-            .state
-            .publish_configured_root_design_check_result(result)
+        && let Err(error) = state.publish_configured_root_design_check_result(result)
     {
-        app.state.push_user_message(ConsoleMessage::warning(format!(
+        state.push_user_message(ConsoleMessage::warning(format!(
             "Design-rule findings could not be recorded: {error}"
         )));
     }
     if report.blockers.is_empty() {
-        match app
-            .simulation_controller
-            .prepare_run_set_for_preflight(&app.state)
-        {
+        match controller.prepare_run_set_for_preflight(state) {
             Ok(metadata) => {
                 report
                     .advisories
                     .extend(metadata.advisories.into_iter().map(PreflightAdvisory::from));
+                let contract = PreparedPreflightContract {
+                    snapshot_digest: metadata.snapshot_digest,
+                    source_digest: metadata.source_digest,
+                    receipt_digest: metadata.receipt_digest,
+                    receipt_label: metadata.receipt_label,
+                    analysis_ids: metadata.analysis_ids,
+                    task_count: metadata.task_count,
+                    saved_output_contract_count: metadata.saved_output_contract_count,
+                    pvt_point_count: metadata.pvt_point_count,
+                    target: metadata.target,
+                    save_policy: metadata.save_policy,
+                    model_identity_count: metadata.model_identity_count,
+                };
                 // What the engine refuses when it builds the decks this run
                 // dispatches. Only a prepared run has decks to build, so these
-                // are decided here, against exactly those decks, and they keep
-                // the run from being authorized.
-                let refusals = engine_refusals::engine_refusal_issues(
-                    &app.state,
-                    &app.simulation_controller.prepared_run_engine_refusals(),
-                );
-                if !refusals.is_empty() {
-                    report.blockers.extend(refusals);
-                } else {
-                    report.prepared = Some(PreparedPreflightContract {
-                        snapshot_digest: metadata.snapshot_digest,
-                        source_digest: metadata.source_digest,
-                        receipt_digest: metadata.receipt_digest,
-                        receipt_label: metadata.receipt_label,
-                        analysis_ids: metadata.analysis_ids,
-                        task_count: metadata.task_count,
-                        saved_output_contract_count: metadata.saved_output_contract_count,
-                        pvt_point_count: metadata.pvt_point_count,
-                        target: metadata.target,
-                        save_policy: metadata.save_policy,
-                        model_identity_count: metadata.model_identity_count,
+                // are decided against exactly those decks, and they keep the
+                // run from being authorized until the build says otherwise.
+                if controller.start_engine_check() {
+                    state.workbench.preflight.checking = Some(PreflightCheck {
+                        report,
+                        contract,
+                        queue,
+                        inputs_at_press: state.dispatch_inputs_at_press().ok(),
                     });
+                    return;
                 }
+                report.blockers.push(engine_refusals::no_verdict_issue());
             }
             Err(error) => report.blockers.push(PreflightIssue {
                 check: preparation_check_label(error.stage()).to_owned(),
@@ -97,14 +117,135 @@ pub(crate) fn run(app: &mut RSpiceApp) {
             }),
         }
     }
-    if report.prepared.is_none() {
-        app.simulation_controller.clear_prepared_run();
+    conclude(state, controller, report, None, queue);
+}
+
+/// Finish the pass whose decks the engine was building, once it has a
+/// verdict. Called once per frame; does nothing while the build runs.
+///
+/// A pass whose run is no longer the one retained — an edit since the press
+/// dropped it, or another preparation replaced it — authorizes nothing. Its
+/// findings are still published, against the inputs as they stood at the
+/// press, so they read as stale rather than as current.
+pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) {
+    let Some(check) = state.workbench.preflight.checking.as_ref() else {
+        // A pass whose state was dropped — a replaced session — has nothing
+        // left to finish.
+        controller.cancel_engine_check();
+        return;
+    };
+    if controller.engine_check_progress().is_none() {
+        // The controller dropped the build: the design was replaced under it.
+        let revision = check.report.project_revision;
+        state.workbench.preflight.checking = None;
+        state.push_user_message(ConsoleMessage::warning(format!(
+            "Preflight stopped · the design was replaced while revision {revision} was checked \
+             · nothing was queued"
+        )));
+        return;
     }
-    let current_plan = app.state.active_plan_revision();
+    let Some(outcome) = controller.poll_engine_check() else {
+        return;
+    };
+    let Some(PreflightCheck {
+        mut report,
+        contract,
+        queue,
+        inputs_at_press,
+    }) = state.workbench.preflight.checking.take()
+    else {
+        return;
+    };
+    let EngineCheckOutcome {
+        refusals,
+        current: retained,
+    } = outcome;
+    match refusals {
+        Some(refusals) => {
+            let refused = engine_refusals::engine_refusal_issues(state, &refusals);
+            if refused.is_empty() {
+                report.prepared = Some(contract);
+            } else {
+                report.blockers.extend(refused);
+            }
+        }
+        None => report.blockers.push(engine_refusals::no_verdict_issue()),
+    }
     let (topology_root, topology_revision, topology_closure) =
-        app.state.configured_topology_revision();
+        state.configured_topology_revision();
+    let unedited = report.is_current_for(
+        state.workspace.content.project.revision().get(),
+        &topology_root,
+        topology_revision,
+        &topology_closure,
+        state.active_plan_revision(),
+    );
+    if retained && unedited {
+        conclude(state, controller, report, inputs_at_press, queue);
+    } else {
+        if retained {
+            // The run is still the one checked, but the design it was
+            // prepared from has moved: it authorizes nothing now.
+            controller.clear_prepared_run();
+        }
+        conclude_stale(state, report, inputs_at_press);
+    }
+}
+
+/// Stop the pass whose decks the engine is building. Nothing it found is
+/// published, and the run it was checking is not authorized.
+pub(crate) fn cancel(state: &mut AppState, controller: &mut SimulationController) {
+    let Some(check) = state.workbench.preflight.checking.take() else {
+        return;
+    };
+    controller.cancel_engine_check();
+    controller.clear_prepared_run();
+    state.push_user_message(ConsoleMessage::warning(format!(
+        "Preflight cancelled · design revision {} was not checked · nothing was queued",
+        check.report.project_revision
+    )));
+}
+
+/// A pass whose run is no longer the one retained: its findings are
+/// published against the inputs it checked, and nothing is authorized or
+/// queued. The report is not retained — whatever moved the run has already
+/// said what the session's report is.
+fn conclude_stale(
+    state: &mut AppState,
+    mut report: PreflightReport,
+    inputs_at_press: Option<crate::product::ContentDigest>,
+) {
+    report.prepared = None;
+    if let Some(inputs_at_press) = inputs_at_press {
+        state.publish_dispatch_diagnostics_against(&report, inputs_at_press);
+    }
+    state.push_user_message(ConsoleMessage::warning(format!(
+        "Preflight stale · the design changed while revision {} was checked · {} finding{} \
+         marked stale · nothing was queued",
+        report.project_revision,
+        report.blockers.len(),
+        if report.blockers.len() == 1 { "" } else { "s" }
+    )));
+}
+
+/// Retain a finished pass's report, publish what it found, say what it
+/// decided, and queue the run when the press asked for one and the report
+/// authorizes it.
+fn conclude(
+    state: &mut AppState,
+    controller: &mut SimulationController,
+    report: PreflightReport,
+    inputs_at_press: Option<crate::product::ContentDigest>,
+    queue: bool,
+) {
+    if report.prepared.is_none() {
+        controller.clear_prepared_run();
+    }
+    let current_plan = state.active_plan_revision();
+    let (topology_root, topology_revision, topology_closure) =
+        state.configured_topology_revision();
     let blocked = !report.is_runnable_for(
-        app.state.workspace.content.project.revision().get(),
+        state.workspace.content.project.revision().get(),
         &topology_root,
         topology_revision,
         &topology_closure,
@@ -139,19 +280,24 @@ pub(crate) fn run(app: &mut RSpiceApp) {
     // Retained before its findings are published: the findings stand only
     // while the report they came from does, and that is part of what their
     // digest is taken over.
-    app.state.workbench.preflight.report = Some(report.clone());
-    app.state.publish_dispatch_diagnostics(&report);
+    state.workbench.preflight.report = Some(report.clone());
+    match inputs_at_press {
+        Some(inputs_at_press) => state.publish_dispatch_diagnostics_against(&report, inputs_at_press),
+        None => state.publish_dispatch_diagnostics(&report),
+    }
     // An event, at the severity of the pass rather than of its findings: the
     // findings are records on the Problems page, and this says the pass ran
     // and what it decided.
-    app.state.push_user_message(if blocked {
+    state.push_user_message(if blocked {
         ConsoleMessage::warning(message)
     } else {
         ConsoleMessage::info(message)
     });
 
     if blocked {
-        show_blockers(&mut app.state);
+        show_blockers(state);
+    } else if queue {
+        queue_retained_run(state);
     }
 }
 
@@ -168,6 +314,9 @@ fn show_blockers(state: &mut AppState) {
 /// queue only the exact immutable snapshot it authorizes. A retained current
 /// report is reusable; the controller still rebuilds and digest-compares the
 /// live contract when it consumes the one-shot permit.
+///
+/// While the engine builds the decks, the run is queued when [`poll`] finds
+/// that they authorize it, and not before.
 pub(crate) fn run_and_queue(app: &mut RSpiceApp) {
     if app.state.simulation.execution.has_active_execution()
         || app.state.simulation.execution.trigger_simulation
@@ -178,23 +327,34 @@ pub(crate) fn run_and_queue(app: &mut RSpiceApp) {
         return;
     }
 
-    if queue_retained_run(app) {
+    // A report retained while a check is building decks is the one that
+    // check will replace, so it authorizes nothing.
+    if app.state.workbench.preflight.checking.is_none() && queue_retained_run(&mut app.state) {
         return;
     }
 
-    run(app);
-    let _ = queue_retained_run(app);
+    start(&mut app.state, &mut app.simulation_controller, true);
+}
+
+/// Whether a press asked for a run the engine pass in flight will queue once
+/// it authorizes one.
+pub(crate) fn run_awaits_check(state: &AppState) -> bool {
+    state
+        .workbench
+        .preflight
+        .checking
+        .as_ref()
+        .is_some_and(|check| check.queue)
 }
 
 /// Queue a retained authorized report only while every revision it names is
 /// still current.
-fn queue_retained_run(app: &mut RSpiceApp) -> bool {
-    let project_revision = app.state.workspace.content.project.revision().get();
+fn queue_retained_run(state: &mut AppState) -> bool {
+    let project_revision = state.workspace.content.project.revision().get();
     let (topology_root, topology_revision, topology_closure) =
-        app.state.configured_topology_revision();
-    let current_plan = app.state.active_plan_revision();
-    let runnable = app
-        .state
+        state.configured_topology_revision();
+    let current_plan = state.active_plan_revision();
+    let runnable = state
         .workbench
         .preflight
         .report
@@ -212,9 +372,26 @@ fn queue_retained_run(app: &mut RSpiceApp) -> bool {
         return false;
     }
 
-    app.state.request_run_set_simulation();
-    app.state.workbench.activate(Workspace::Simulate);
+    state.request_run_set_simulation();
+    state.workbench.activate(Workspace::Simulate);
     true
+}
+
+#[cfg(test)]
+impl RSpiceApp {
+    /// Block until the pass in flight has a verdict, and finish it, as the
+    /// frame loop would on the frame that finds it.
+    pub(crate) fn settle_preflight(&mut self) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
+        while self.state.workbench.preflight.checking.is_some() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the engine pass did not finish"
+            );
+            poll(&mut self.state, &mut self.simulation_controller);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
 }
 
 /// What one pass found: the report the run is queued against, and the

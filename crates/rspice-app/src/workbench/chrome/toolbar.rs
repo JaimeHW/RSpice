@@ -351,7 +351,9 @@ fn toolbar_outer_gap(viewport_width: f32) -> f32 {
 }
 
 fn run_control_label(app: &RSpiceApp, layout: LayoutSpec) -> String {
-    if app.state.simulation.cancellation_is_pending() {
+    if app.state.workbench.preflight.checking.is_some() {
+        "Stop".to_owned()
+    } else if app.state.simulation.cancellation_is_pending() {
         "Stopping…".to_owned()
     } else if app.state.simulation.execution.has_active_execution() {
         "Stop".to_owned()
@@ -1621,7 +1623,10 @@ fn context_separator(ui: &mut egui::Ui, layout: LayoutSpec) {
 }
 
 fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    let execution_active = app.state.simulation.execution.has_active_execution();
+    // A preflight whose decks the engine is building is stopped the way a run
+    // is: the control is Stop until it finishes.
+    let checking = app.state.workbench.preflight.checking.is_some();
+    let execution_active = app.state.simulation.execution.has_active_execution() || checking;
     let cancellation_pending = app.state.simulation.cancellation_is_pending();
     let command = if execution_active {
         Command::StopSimulation
@@ -1657,7 +1662,9 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         Layout::left_to_right(Align::Center),
         |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
-            let accessibility_label = if cancellation_pending {
+            let accessibility_label = if checking {
+                "Stop the preflight check".to_owned()
+            } else if cancellation_pending {
                 "Simulation cancellation in progress".to_owned()
             } else if execution_active {
                 "Stop active simulation".to_owned()

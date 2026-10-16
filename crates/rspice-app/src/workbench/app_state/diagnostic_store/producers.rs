@@ -212,6 +212,26 @@ impl AppState {
     /// the bindings move — which is exactly what the report's own currency
     /// rule already said and what no surface but the report could state.
     pub(in crate::workbench) fn publish_dispatch_diagnostics(&mut self, report: &PreflightReport) {
+        let records = self.dispatch_records(report);
+        self.publish_or_state_refusal(DiagnosticInputs::Dispatch, records);
+    }
+
+    /// The same records, decided against the dispatch inputs as they stood
+    /// when the pass that found them began (`Self::dispatch_inputs_at_press`),
+    /// so an edit made while the engine built the decks leaves them stale.
+    pub(in crate::workbench) fn publish_dispatch_diagnostics_against(
+        &mut self,
+        report: &PreflightReport,
+        inputs_at_press: crate::product::ContentDigest,
+    ) {
+        let records = self.dispatch_records(report);
+        let published = self
+            .diagnostics
+            .insert(inputs_at_press, DiagnosticInputs::Dispatch, records);
+        self.state_refusal(published);
+    }
+
+    fn dispatch_records(&self, report: &PreflightReport) -> Vec<DiagnosticRecord> {
         let project = self.workspace.content.project.id();
         let revision = report.project_revision;
         // Keyed by what each finding names as the thing to change, which is
@@ -253,7 +273,7 @@ impl AppState {
                 records.push(advisory_record(project, key, canonical, advisory));
             }
         }
-        self.publish_or_state_refusal(DiagnosticInputs::Dispatch, records);
+        records
     }
 
     /// Publish, and say so in the Console if the store refuses.

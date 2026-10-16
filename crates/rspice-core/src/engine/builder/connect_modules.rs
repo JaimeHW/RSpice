@@ -50,14 +50,18 @@ use rspice_veriloga::disciplines::DisciplineDb;
 
 use crate::{ElaborationError, ElaborationErrorKind, SimulationError};
 
-/// A clause-7 refusal about one boundary node.
+/// A clause-7 refusal about the deck's connect rules.
 ///
-/// Selection happens per boundary rather than per instance, and several of
-/// these run before any X-card is reached at all — choosing the deck's
-/// `connectrules` block is a design-level decision — so the subject is the
-/// node or the source rather than an instance. `ElaborationError` carries no
+/// Several of these run before any X-card is reached at all — choosing the
+/// deck's `connectrules` block is a design-level decision — so their subject
+/// is the source rather than an instance. `ElaborationError` carries no
 /// instance for those, which is what tells a workbench it has nothing to mark
 /// on the schematic and should report against the deck instead.
+///
+/// A refusal about one boundary is different: the boundary is one instance's
+/// port, and the rules that cannot settle it are refused by that instance, as
+/// a port that would bring a second event domain onto a node is. Those name
+/// it (see [`connect_error`] and [`check_execution`]).
 fn connect_refusal(detail: impl Into<String>) -> ElaborationError {
     ElaborationError::new(ElaborationErrorKind::ConnectRule, detail)
 }
@@ -182,9 +186,9 @@ pub(super) fn select_for_boundary(
     );
 
     let resolved = resolve_disciplines(&signal, table, db, None, ResolutionMode::Basic)
-        .map_err(|error| connect_error(node_label, &error))?;
+        .map_err(|error| connect_error(node_label, instance_name, &error))?;
     let plan = plan_connect_modules(&signal, &resolved, table, db)
-        .map_err(|error| connect_error(node_label, &error))?;
+        .map_err(|error| connect_error(node_label, instance_name, &error))?;
 
     let Some(insertion) = plan.insertions.into_iter().next() else {
         return Ok(None);
@@ -212,10 +216,10 @@ pub(super) fn select_for_boundary(
             Some(value_kind),
             db,
         )
-        .map_err(|error| connect_error(node_label, &error))?;
+        .map_err(|error| connect_error(node_label, instance_name, &error))?;
     let parameters = rule
         .numeric_parameters()
-        .map_err(|error| connect_error(node_label, &error))?
+        .map_err(|error| connect_error(node_label, instance_name, &error))?
         .into_iter()
         .map(|(name, value)| (name.to_string(), value))
         .collect();
@@ -229,14 +233,18 @@ pub(super) fn select_for_boundary(
     }))
 }
 
+/// The connect rules cannot settle the boundary `instance_name`'s port makes
+/// at `node_label`.
 fn connect_error(
     node_label: &str,
+    instance_name: &str,
     error: &rspice_veriloga::connect::ConnectError,
 ) -> SimulationError {
     connect_refusal(format!(
         "node '{node_label}' is a mixed-discipline connection and its connect rules do not \
          settle it: {error}"
     ))
+    .instance(instance_name)
     .into()
 }
 
@@ -336,10 +344,12 @@ pub(super) fn expected_library_module(kind: super::XspiceAutoBridgeKind) -> Opti
 }
 
 /// Selection must carry an authenticated execution decision from its source.
+/// A refusal names `instance_name`, whose port the boundary is.
 pub(super) fn check_execution(
     selected: &PlannedConnectModule,
     kind: super::XspiceAutoBridgeKind,
     node_label: &str,
+    instance_name: &str,
 ) -> Result<(), SimulationError> {
     if let Some(net) = selected.supply_net()
         && !matches!(
@@ -354,6 +364,7 @@ pub(super) fn check_execution(
             selected.name,
             super::xspice_auto_bridge_kind_label(kind)
         ))
+        .instance(instance_name)
         .module(selected.name.as_str())
         .into());
     }
@@ -371,6 +382,7 @@ pub(super) fn check_execution(
              vsup a level for an authored module",
             selected.name
         ))
+        .instance(instance_name)
         .module(selected.name.as_str())
         .into());
     }
@@ -380,7 +392,7 @@ pub(super) fn check_execution(
     Err(connect_refusal(format!(
         "node '{node_label}' selects connect module '{}' (instance '{}') without its prepared source execution binding",
         selected.name, selected.instance
-    )).module(selected.name.as_str()).into())
+    )).instance(instance_name).module(selected.name.as_str()).into())
 }
 
 // ---------------------------------------------------------------------------
@@ -679,7 +691,7 @@ impl DesignConnectRules {
                 Some(boundary_value_kind(kind)),
                 db,
             )
-            .map_err(|error| connect_error(node_label, &error))?;
+            .map_err(|error| connect_error(node_label, instance_name, &error))?;
         let key = format!(
             "{}:{:?}",
             selected.name,
@@ -779,7 +791,7 @@ pub(super) fn attach_to_planned_bridges(
         else {
             continue;
         };
-        check_execution(&selected, bridge.kind, &node_label)?;
+        check_execution(&selected, bridge.kind, &node_label, &instance_name)?;
         log::info!(
             "Node '{}' bridges through connect module '{}' as instance '{}'",
             node_label,
