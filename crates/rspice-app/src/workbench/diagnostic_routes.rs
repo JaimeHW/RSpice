@@ -25,7 +25,9 @@ use crate::diagnostics::ConsoleMessage;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::state::{PreflightRemediation, ProjectPage, SimulationPage, Workspace};
+use crate::workbench::state::{
+    DrawnObject, PreflightRemediation, ProjectPage, SimulationPage, Workspace,
+};
 
 /// Apply the route a consumer asked for, if one is outstanding.
 ///
@@ -230,6 +232,39 @@ pub(in crate::workbench) fn apply_remediation(
             if let Err(error) = netlist_document::open_source_location(&mut app.state, None, cursor)
             {
                 app.state.push_user_message(ConsoleMessage::warning(error));
+            }
+        }
+        // The object an engine refusal named, in the view that draws it. The
+        // view opens first so the object is looked up in its own drawing, and
+        // one that drawing no longer holds is said rather than selected.
+        PreflightRemediation::Drawing { cell_view, object } => {
+            use rspice_design::drc::DrcLocation;
+
+            let location = match &object {
+                DrawnObject::Net { wire: Some(id), .. } => DrcLocation::Wire { id: *id },
+                DrawnObject::Component { id, name }
+                | DrawnObject::Net {
+                    component: Some(id),
+                    name,
+                    ..
+                } => DrcLocation::Component {
+                    id: *id,
+                    name: name.clone(),
+                },
+                DrawnObject::Net { name, .. } => DrcLocation::Node {
+                    net_name: name.clone(),
+                },
+            };
+            app.state.open_workspace_view(cell_view.clone());
+            match crate::schematic::view::violations::location_anchor_in(
+                &app.state, &cell_view, &location,
+            ) {
+                Some(anchor) => app.state.jump_to_log_anchor(anchor),
+                None => app.state.push_user_message(ConsoleMessage::warning(format!(
+                    "{} no longer draws {}.",
+                    cell_view.display_path(),
+                    object.name()
+                ))),
             }
         }
     }

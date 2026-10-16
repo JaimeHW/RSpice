@@ -13,7 +13,7 @@
 //! still owns is the pass itself: run the checks, prepare the immutable
 //! snapshot, and queue only what that snapshot authorizes.
 
-mod topology;
+mod engine_refusals;
 
 use crate::diagnostics::ConsoleMessage;
 use crate::workbench::RSpiceApp;
@@ -63,19 +63,31 @@ pub(crate) fn run(app: &mut RSpiceApp) {
                 report
                     .advisories
                     .extend(metadata.advisories.into_iter().map(PreflightAdvisory::from));
-                report.prepared = Some(PreparedPreflightContract {
-                    snapshot_digest: metadata.snapshot_digest,
-                    source_digest: metadata.source_digest,
-                    receipt_digest: metadata.receipt_digest,
-                    receipt_label: metadata.receipt_label,
-                    analysis_ids: metadata.analysis_ids,
-                    task_count: metadata.task_count,
-                    saved_output_contract_count: metadata.saved_output_contract_count,
-                    pvt_point_count: metadata.pvt_point_count,
-                    target: metadata.target,
-                    save_policy: metadata.save_policy,
-                    model_identity_count: metadata.model_identity_count,
-                });
+                // What the engine refuses when it builds the decks this run
+                // dispatches. Only a prepared run has decks to build, so these
+                // are decided here, against exactly those decks, and they keep
+                // the run from being authorized.
+                let refusals = engine_refusals::engine_refusal_issues(
+                    &app.state,
+                    &app.simulation_controller.prepared_run_engine_refusals(),
+                );
+                if !refusals.is_empty() {
+                    report.blockers.extend(refusals);
+                } else {
+                    report.prepared = Some(PreparedPreflightContract {
+                        snapshot_digest: metadata.snapshot_digest,
+                        source_digest: metadata.source_digest,
+                        receipt_digest: metadata.receipt_digest,
+                        receipt_label: metadata.receipt_label,
+                        analysis_ids: metadata.analysis_ids,
+                        task_count: metadata.task_count,
+                        saved_output_contract_count: metadata.saved_output_contract_count,
+                        pvt_point_count: metadata.pvt_point_count,
+                        target: metadata.target,
+                        save_policy: metadata.save_policy,
+                        model_identity_count: metadata.model_identity_count,
+                    });
+                }
             }
             Err(error) => report.blockers.push(PreflightIssue {
                 check: preparation_check_label(error.stage()).to_owned(),
@@ -359,18 +371,6 @@ fn collect(state: &AppState) -> Collected {
                 remediation: PreflightRemediation::DesignChecks,
             });
         }
-
-        // What the engine itself refuses to start on. Reaching elaboration to
-        // learn that a node has no DC path costs the author a queued run and
-        // an engine message that names deck nodes; deciding it here names the
-        // drawing's own nodes and instances before anything is dispatched.
-        blockers.extend(topology::topology_blockers(
-            root_schematic,
-            &rspice_design::connectivity::extract_with_hierarchy(
-                root_schematic,
-                Some(&hierarchy_source),
-            ),
-        ));
     }
 
     match state.sim_setup.stable_analysis_plan() {

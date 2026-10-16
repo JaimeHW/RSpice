@@ -12,7 +12,8 @@ use rspice_app_types::diagnostics::CanonicalDiagnosticMetadata;
 use crate::diagnostics::LogAnchor;
 use crate::state::ConvergenceAttribution;
 use crate::workbench::state::{
-    ModelsPage, PreflightAdvisory, PreflightIssue, PreflightRemediation, PreflightReport,
+    DrawnObject, ModelsPage, PreflightAdvisory, PreflightIssue, PreflightRemediation,
+    PreflightReport,
 };
 
 use super::super::AppState;
@@ -38,6 +39,8 @@ const PREFLIGHT_PRODUCER: &str = "rspice.simulation.preflight";
 const MODEL_BINDING_PRODUCER: &str = "rspice.models.binding";
 /// The deck the run is generated from.
 const NETLIST_PRODUCER: &str = "rspice.netlist.generator";
+/// The engine's own build of a dispatched deck, for what it refuses there.
+const ENGINE_PRODUCER: &str = "rspice.engine.elaboration";
 
 impl AppState {
     /// One record for a failed analysis, attributed to the objects the engine
@@ -325,6 +328,18 @@ fn remediation_key(remediation: &PreflightRemediation) -> String {
             corner.as_deref().unwrap_or_default()
         ),
         PreflightRemediation::NetlistSource { .. } => "netlist-source".to_owned(),
+        // The drawn object, in the view that draws it: two engine refusals
+        // about one net are one place, wherever the deck spelled it.
+        PreflightRemediation::Drawing { cell_view, object } => match object {
+            DrawnObject::Component { id, .. } => {
+                format!("drawing:{}:component:{id}", cell_view.key())
+            }
+            DrawnObject::Net { name, .. } => format!(
+                "drawing:{}:net:{}",
+                cell_view.key(),
+                name.to_ascii_lowercase()
+            ),
+        },
     }
 }
 
@@ -334,10 +349,15 @@ fn blocker_record(
     canonical: CanonicalDiagnosticMetadata,
     issue: &PreflightIssue,
 ) -> DiagnosticRecord {
+    let subject = DiagnosticSubject::new(project, remediation_subject(&issue.remediation));
+    let subject = match &issue.remediation {
+        PreflightRemediation::Drawing { cell_view, .. } => subject.in_cell_view(cell_view.clone()),
+        _ => subject,
+    };
     DiagnosticRecord::new(
         canonical,
         DiagnosticLevel::Error,
-        DiagnosticSubject::new(project, remediation_subject(&issue.remediation)),
+        subject,
         issue.observed.clone(),
     )
     .keyed(key)
@@ -380,6 +400,7 @@ const fn remediation_producer(remediation: &PreflightRemediation) -> (&'static s
         PreflightRemediation::Models { .. } => (MODEL_BINDING_PRODUCER, "MODEL"),
         PreflightRemediation::ProjectTechnology => (MODEL_BINDING_PRODUCER, "TECH"),
         PreflightRemediation::NetlistSource { .. } => (NETLIST_PRODUCER, "NETLIST"),
+        PreflightRemediation::Drawing { .. } => (ENGINE_PRODUCER, "ENGINE"),
         PreflightRemediation::DesignChecks | PreflightRemediation::SimulationPlan { .. } => {
             (PREFLIGHT_PRODUCER, "RUN")
         }
@@ -411,6 +432,7 @@ fn remediation_subject(remediation: &PreflightRemediation) -> String {
             format!("Generated netlist · line {line}")
         }
         PreflightRemediation::NetlistSource { line: None } => "Generated netlist".to_owned(),
+        PreflightRemediation::Drawing { object, .. } => object.name().to_owned(),
     }
 }
 

@@ -1145,6 +1145,42 @@ pub enum PreflightRemediation {
         /// landing on an arbitrary one would be worse than landing on none.
         line: Option<usize>,
     },
+    /// One object drawn in the configured design, in the cell view that draws
+    /// it.
+    ///
+    /// An engine refusal names deck nodes and elements. They are read back to
+    /// the drawing through the hierarchy the deck was written from, so the
+    /// finding opens the owning cell view — a sub-cell's, for a node inside
+    /// an instance — and selects what the engine named there.
+    Drawing {
+        cell_view: crate::state::CellViewRef,
+        object: DrawnObject,
+    },
+}
+
+/// An object on one sheet, named the way the sheet names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DrawnObject {
+    Component {
+        id: u64,
+        name: String,
+    },
+    /// A net, selected through one wire it runs on, or through a component
+    /// on it when it is drawn pin to pin.
+    Net {
+        name: String,
+        wire: Option<u64>,
+        component: Option<u64>,
+    },
+}
+
+impl DrawnObject {
+    /// The name the drawing gives it.
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Component { name, .. } | Self::Net { name, .. } => name,
+        }
+    }
 }
 
 impl PreflightRemediation {
