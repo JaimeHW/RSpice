@@ -635,43 +635,274 @@ fn unresolved_hierarchy_is_an_ordered_preflight_blocker() {
     assert_eq!(hierarchy.remediation, PreflightRemediation::DesignChecks);
 }
 
-/// The Solver surface states that a node without a DC path is refused at
-/// preflight. The report is where that statement has to become true, or
-/// the author learns it from the engine after the run was queued.
-#[test]
-fn a_topology_the_engine_refuses_is_an_ordered_preflight_blocker() {
-    use crate::state::{ComponentType, Point, Wire};
+/// The configured root, open in the editor, drawn from `components` and
+/// `wires`, with `OUT` labelling the net at (0, -10). The plan keeps its
+/// transient, and an enabled operating point joins it when asked for.
+fn app_with_an_open_root(
+    components: &[(crate::state::ComponentType, crate::state::Point)],
+    wires: &[(crate::state::Point, crate::state::Point)],
+    operating_point: bool,
+) -> (RSpiceApp, crate::state::CellViewRef) {
+    use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+    use crate::state::{NetLabel, Point, Wire};
 
-    let mut state = AppState::default();
-    state
-        .schematic
-        .add_component(ComponentType::Ground, Point::new(0, 40));
-    state
-        .schematic
-        .add_component(ComponentType::VoltageSource, Point::new(0, 10));
-    state
-        .schematic
-        .add_component(ComponentType::Capacitor, Point::new(100, -10));
-    state
-        .schematic
-        .document_mut_for_test()
-        .wires
-        .push(Wire::segment(1, Point::new(0, -10), Point::new(80, -10)));
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.authority.open_session();
+    disable_global_process_axis(&mut app.state);
+    let root = app.state.workspace.content.simulation_root_reference();
+    assert_eq!(
+        app.state.workspace.content.active_schematic_reference(),
+        root,
+        "the fixture draws in the open root"
+    );
+    for &(kind, at) in components {
+        app.state.schematic.add_component(kind, at);
+    }
+    let document = app.state.schematic.document_mut_for_test();
+    for (id, &(from, to)) in (1001..).zip(wires) {
+        document.wires.push(Wire::segment(id, from, to));
+    }
+    document
+        .net_labels
+        .push(NetLabel::new(2001, Point::new(0, -10), "OUT"));
+    if operating_point {
+        let plan = app
+            .state
+            .sim_setup
+            .stable_analysis_plan_mut()
+            .expect("a default state owns a stable plan");
+        let position = plan.instances().len();
+        plan.insert_draft_with_id(
+            crate::product::AnalysisInstanceId::new(),
+            AnalysisDraft::for_kind(AnalysisKind::OperatingPoint),
+            true,
+            position,
+        )
+        .expect("an operating point has no prerequisites");
+    }
+    (app, root)
+}
 
-    let report = collect_report(&state);
+/// A current source driving `OUT` through a capacitor to ground: nothing
+/// conducts from `OUT` to ground at DC, and the source forces current in.
+fn forced_capacitor_island() -> (
+    Vec<(crate::state::ComponentType, crate::state::Point)>,
+    Vec<(crate::state::Point, crate::state::Point)>,
+) {
+    use crate::state::{ComponentType, Point};
+    (
+        vec![
+            (ComponentType::Ground, Point::new(0, 40)),
+            (ComponentType::CurrentSource, Point::new(0, 10)),
+            (ComponentType::Capacitor, Point::new(100, -10)),
+        ],
+        vec![
+            (Point::new(0, -10), Point::new(80, -10)),
+            (Point::new(120, -10), Point::new(120, 30)),
+            (Point::new(120, 30), Point::new(0, 30)),
+        ],
+    )
+}
 
-    let topology = report
+fn preflight_blockers(app: &RSpiceApp) -> &[PreflightIssue] {
+    &app.state
+        .workbench
+        .preflight
+        .report
+        .as_ref()
+        .expect("the pass retains its report")
         .blockers
+}
+
+/// A node the operating point refuses to bias is refused before the run,
+/// as the engine refuses it: by the operating point that solves it, named as
+/// the net was drawn, and located on the wire that draws it in the root.
+#[test]
+fn a_forced_node_without_a_dc_path_is_the_engines_refusal_on_the_drawn_net() {
+    let (components, wires) = forced_capacitor_island();
+    let (mut app, root) = app_with_an_open_root(&components, &wires, true);
+
+    run(&mut app);
+
+    let blockers = preflight_blockers(&app);
+    let island = blockers
         .iter()
         .find(|issue| issue.check == "Nodes without a DC path")
-        .expect("the capacitor's far terminal reaches no reference");
+        .unwrap_or_else(|| panic!("the operating point refuses OUT: {blockers:?}"));
+    assert!(island.observed.contains("'OUT'"), "{island:?}");
+    assert!(island.observed.contains("Operating point"), "{island:?}");
     assert!(
-        topology
-            .observed
-            .contains("No DC path to ground from node(s)"),
-        "{topology:?}"
+        !island.observed.contains("Transient"),
+        "the transient is not claimed: {island:?}"
     );
-    assert_eq!(topology.remediation, PreflightRemediation::DesignChecks);
+    let remediation = island.remediation.clone();
+    let PreflightRemediation::Drawing { cell_view, object } = &remediation else {
+        panic!("the finding is located on the drawing: {island:?}");
+    };
+    assert_eq!(cell_view, &root);
+    let crate::workbench::state::DrawnObject::Net { name, wire, .. } = object else {
+        panic!("the finding names a net: {island:?}");
+    };
+    assert_eq!(name, "OUT");
+    let wire = wire.expect("OUT is drawn on a wire");
+    assert!(
+        app.state
+            .workbench
+            .preflight
+            .report
+            .as_ref()
+            .is_some_and(|report| report.prepared.is_none()),
+        "a refused run is not authorized"
+    );
+
+    app.state.workbench.activate(Workspace::Verify);
+    apply_remediation(&mut app, remediation);
+
+    assert_eq!(
+        app.state.workspace.content.active_schematic_reference(),
+        root
+    );
+    assert_eq!(app.state.workbench.workspace, Workspace::Design);
+    assert!(
+        app.state.schematic.session.editor.selection.has_wire(wire),
+        "following the finding selects the wire that draws OUT"
+    );
+}
+
+/// The finding names the setting that clears it as the Solver page labels it,
+/// and setting it there gives every node the DC path the engine checks for:
+/// the same drawing is then authorized.
+#[test]
+fn a_node_shunt_set_where_the_solver_options_are_clears_the_refusal() {
+    let (components, wires) = forced_capacitor_island();
+    let (mut app, _) = app_with_an_open_root(&components, &wires, true);
+    run(&mut app);
+    let island = preflight_blockers(&app)
+        .iter()
+        .find(|issue| issue.check == "Nodes without a DC path")
+        .expect("unshunted, the operating point refuses OUT")
+        .clone();
+    assert!(
+        island.required.contains("Node shunt to ground · RSHUNT")
+            && island.required.contains("Solver & convergence"),
+        "{island:?}"
+    );
+
+    let options = crate::simulation::dialog::SimulationOptions {
+        rshunt: Some(1.0e9),
+        ..app.state.sim_setup.options.clone()
+    };
+    app.state.sim_setup.commit_options(&options);
+    app.state
+        .sim_setup
+        .commit_active_plan_configuration_change("Updated simulation solver options.")
+        .expect("the plan takes the shunt");
+    app.invalidate_simulation_preflight();
+    run(&mut app);
+
+    let report = app
+        .state
+        .workbench
+        .preflight
+        .report
+        .as_ref()
+        .expect("the pass retains its report");
+    assert!(report.blockers.is_empty(), "{:?}", report.blockers);
+    assert!(report.prepared.is_some(), "the shunted run is authorized");
+}
+
+/// The same drawing run only by the transient is not refused at preflight:
+/// a transient refuses the node from its startup waveform, which a build does
+/// not know, so it is left to the engine.
+#[test]
+fn a_transient_only_plan_is_not_refused_for_a_forced_island() {
+    let (components, wires) = forced_capacitor_island();
+    let (mut app, _) = app_with_an_open_root(&components, &wires, false);
+
+    run(&mut app);
+
+    let blockers = preflight_blockers(&app);
+    assert!(
+        blockers
+            .iter()
+            .all(|issue| issue.check != "Nodes without a DC path"),
+        "{blockers:?}"
+    );
+}
+
+/// A coupling capacitor's node has no DC path either, but nothing forces
+/// current into it and the engine solves it. The old drawing-level check
+/// refused it; the run is now authorized.
+#[test]
+fn an_unforced_coupling_node_is_not_refused() {
+    use crate::state::{ComponentType, Point};
+
+    let (mut app, _) = app_with_an_open_root(
+        &[
+            (ComponentType::Ground, Point::new(0, 40)),
+            (ComponentType::VoltageSource, Point::new(0, 10)),
+            (ComponentType::Capacitor, Point::new(100, -10)),
+            (ComponentType::Capacitor, Point::new(160, -10)),
+        ],
+        &[
+            (Point::new(0, -10), Point::new(80, -10)),
+            (Point::new(120, -10), Point::new(140, -10)),
+            (Point::new(180, -10), Point::new(180, 30)),
+            (Point::new(180, 30), Point::new(0, 30)),
+        ],
+        true,
+    );
+
+    run(&mut app);
+
+    let report = app
+        .state
+        .workbench
+        .preflight
+        .report
+        .as_ref()
+        .expect("the pass retains its report");
+    assert!(report.blockers.is_empty(), "{:?}", report.blockers);
+    assert!(report.prepared.is_some(), "the run is authorized");
+}
+
+/// A source across a winding is singular in every DC solve. The operating
+/// point refuses it, and the finding is shown on the winding that closed the
+/// loop.
+#[test]
+fn a_source_across_a_winding_is_refused_on_the_winding() {
+    use crate::state::{ComponentType, Point};
+
+    let (mut app, root) = app_with_an_open_root(
+        &[
+            (ComponentType::Ground, Point::new(0, 40)),
+            (ComponentType::VoltageSource, Point::new(0, 10)),
+            (ComponentType::Inductor, Point::new(100, -10)),
+        ],
+        &[
+            (Point::new(0, -10), Point::new(80, -10)),
+            (Point::new(120, -10), Point::new(120, 30)),
+            (Point::new(120, 30), Point::new(0, 30)),
+        ],
+        true,
+    );
+
+    run(&mut app);
+
+    let blockers = preflight_blockers(&app);
+    let closed = blockers
+        .iter()
+        .find(|issue| issue.check == "Voltage-source loops")
+        .unwrap_or_else(|| panic!("the operating point refuses the loop: {blockers:?}"));
+    assert!(closed.observed.contains("inductor"), "{closed:?}");
+    let PreflightRemediation::Drawing { cell_view, object } = &closed.remediation else {
+        panic!("the finding is located on the drawing: {closed:?}");
+    };
+    assert_eq!(cell_view, &root);
+    let crate::workbench::state::DrawnObject::Component { name, .. } = object else {
+        panic!("the finding names the winding: {closed:?}");
+    };
+    assert!(name.starts_with('L'), "{closed:?}");
 }
 
 /// A loop of voltage sources is one fact with one owner: the design rule that
@@ -680,23 +911,20 @@ fn a_topology_the_engine_refuses_is_an_ordered_preflight_blocker() {
 /// which it used to, so the page listed the loop twice.
 #[test]
 fn a_voltage_source_loop_is_stated_once_by_the_rule_that_owns_it() {
-    use crate::state::{ComponentType, Point, Wire};
+    use crate::state::{ComponentType, Point};
 
-    let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
-    let root = app.state.workspace.content.simulation_root_reference();
-    let editor = &mut app
-        .state
-        .workspace
-        .schematic_editor_mut(&root.key())
-        .expect("default configured root buffer")
-        .editor;
-    editor.add_component(ComponentType::Ground, Point::new(0, 40));
-    editor.add_component(ComponentType::VoltageSource, Point::new(0, 10));
-    editor.add_component(ComponentType::VoltageSource, Point::new(60, 10));
-    let wires = &mut editor.document_mut_for_test().wires;
-    wires.push(Wire::segment(1, Point::new(0, -10), Point::new(60, -10)));
-    wires.push(Wire::segment(2, Point::new(0, 30), Point::new(60, 30)));
+    let (mut app, _) = app_with_an_open_root(
+        &[
+            (ComponentType::Ground, Point::new(0, 40)),
+            (ComponentType::VoltageSource, Point::new(0, 10)),
+            (ComponentType::VoltageSource, Point::new(60, 10)),
+        ],
+        &[
+            (Point::new(0, -10), Point::new(60, -10)),
+            (Point::new(0, 30), Point::new(60, 30)),
+        ],
+        true,
+    );
 
     run(&mut app);
 

@@ -96,7 +96,6 @@ pub use generated_veriloga_catalog::{
     generated_veriloga_devices, generated_veriloga_library_binding,
     validate_generated_veriloga_binding,
 };
-pub use ground_names::is_ground_reference;
 pub(crate) use hierarchy::SheetMoveConnectivityPlan;
 pub use hierarchy::{
     HierarchyExtractionPlan, HierarchyExtractionTerminal, HierarchyNetConnectivity,

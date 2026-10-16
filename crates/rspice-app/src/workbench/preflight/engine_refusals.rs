@@ -20,6 +20,7 @@ use rspice_app_types::hierarchy_path::{InstancePath, ProbeTarget};
 use rspice_design::connectivity::summary::DesignNet;
 use rspice_simulation::execution::{EngineRefusal, EngineRefusalKind, RefusedTask};
 
+use crate::simulation::plan::NumericOverrideOption;
 use crate::state::{CellViewRef, Component, ViewType};
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::{DrawnObject, PreflightIssue, PreflightRemediation};
@@ -63,13 +64,23 @@ fn issues_for(refusal: &EngineRefusal, drawing: &DrawnDesign) -> Vec<PreflightIs
                          into it: capacitors and current sources do not conduct at DC, so \
                          nothing sets its operating-point voltage. Refused by {refused_by}."
                     ),
-                    required: "A conducting path from the node to ground, or .OPTIONS \
-                               RSHUNT=<ohms> in the deck to shunt every node"
-                        .to_owned(),
+                    // The setting as the Solver page labels it, so the
+                    // reader can find it; the card only says what it writes.
+                    required: format!(
+                        "A conducting path from the node to ground, or a resistance in {} on \
+                         the Solver & convergence page, which shunts every node to ground",
+                        NumericOverrideOption::Rshunt.label()
+                    ),
                     remediation,
                 }
             })
             .collect(),
+        // A loop of voltage sources alone is the design rule's: it finds the
+        // same loop across the hierarchy without a deck, and its error already
+        // blocks the run, so stating it here would list one loop twice.
+        EngineRefusalKind::BranchVoltageLoop(branch_loop) if !branch_loop.through_inductor => {
+            Vec::new()
+        }
         EngineRefusalKind::BranchVoltageLoop(branch_loop) => {
             let members: Vec<String> = branch_loop
                 .members
@@ -77,27 +88,16 @@ fn issues_for(refusal: &EngineRefusal, drawing: &DrawnDesign) -> Vec<PreflightIs
                 .map(|member| drawing.element(member).0)
                 .collect();
             // The element that closed the loop is where it is shown.
-            let closing = branch_loop
-                .members
-                .last()
-                .map_or(PreflightRemediation::NetlistSource { line: None }, |member| {
-                    drawing.element(member).1
-                });
-            let (what, why) = if branch_loop.through_inductor {
-                (
-                    "Voltage sources and inductors",
-                    "the DC solve shorts each inductor, so the loop's current is undetermined",
-                )
-            } else {
-                (
-                    "Voltage sources",
-                    "the loop states two voltages for one node pair",
-                )
-            };
+            let closing = branch_loop.members.last().map_or(
+                PreflightRemediation::NetlistSource { line: None },
+                |member| drawing.element(member).1,
+            );
             vec![PreflightIssue {
                 check: LOOP_CHECK.to_owned(),
                 observed: format!(
-                    "{what} {} form a closed loop: {why}. Refused by {refused_by}.",
+                    "Voltage sources and inductors {} form a closed loop: the DC solve shorts \
+                     each inductor, so the current around the loop is undetermined. Refused by \
+                     {refused_by}.",
                     members.join(", ")
                 ),
                 required: "A resistive element inside the loop".to_owned(),
