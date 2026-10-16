@@ -1,17 +1,16 @@
 //! Symbol publication effects on placed instances and their attached conductors.
 
 use crate::state::{CellViewRef, Point, SchematicState};
+use rspice_design::symbol::edit::SymbolInstanceWiring;
 use std::collections::{BTreeMap, HashMap};
 
 impl SchematicState {
-    pub(crate) fn remap_symbol_instance_wires(
+    pub(crate) fn apply_symbol_instance_wiring(
         &mut self,
-        reference: &CellViewRef,
+        wiring: &SymbolInstanceWiring,
         pin_remaps: &HashMap<String, (Point, Point)>,
     ) -> bool {
-        let changed = self
-            .design
-            .remap_symbol_instance_wires(reference, pin_remaps);
+        let changed = self.design.apply_symbol_instance_wiring(wiring, pin_remaps);
         if changed {
             self.session.is_dirty = true;
         }

@@ -34,7 +34,10 @@ use rspice_design::symbol::publication::{
 };
 
 use rspice_design::library::metadata::{metadata_ports, module_interface_view};
+use rspice_design::schematic::document::SchematicDocument;
+use rspice_design::schematic::history::SchematicSnapshot;
 use rspice_design::symbol::edit::{
+    SymbolParentEdit, SymbolParentWiring, places_symbol, resolve_symbol_instance_wiring,
     symbol_metadata_snapshot_from_view, symbol_pin_position_remaps, symbol_snapshot_from_view,
 };
 use rspice_design::symbol::generated::{GENERATED_PORTS_KEY, decode_ports};
@@ -255,31 +258,20 @@ impl AppState {
         if self.active_view_read_only() {
             return Err(self.read_only_master_message());
         }
-        let previous_document = self.load_active_symbol_document().ok();
-        let Some(()) = self
-            .library_manager
-            .edit_library(&reference.library)
-            .and_then(|mut library| {
-                library.restore_symbol_snapshot(&reference.cell, &reference.view, snapshot)
-            })
-        else {
-            return Err(format!("View '{}' not found", reference.display_path()));
-        };
-
-        if let Some(previous_document) = previous_document {
-            let pin_remaps = symbol_pin_position_remaps(
-                &previous_document,
-                &snapshot.document,
-                &snapshot.renames,
-            );
-            self.workspace
-                .for_each_schematic_editor_mut(|_, schematic| {
-                    schematic.remap_symbol_instance_wires(&reference, &pin_remaps);
-                });
-            self.schematic
-                .remap_symbol_instance_wires(&reference, &pin_remaps);
-        }
-        self.apply_symbol_pin_renames(&reference, &snapshot.renames);
+        self.with_symbol_parent_edit(|state| {
+            let Some(()) = state
+                .library_manager
+                .edit_library(&reference.library)
+                .and_then(|mut library| {
+                    library.restore_symbol_snapshot(&reference.cell, &reference.view, snapshot)
+                })
+            else {
+                return Err(format!("View '{}' not found", reference.display_path()));
+            };
+            state.apply_symbol_parent_edit(&snapshot.document, &snapshot.renames);
+            state.apply_symbol_pin_renames(&reference, &snapshot.renames);
+            Ok(())
+        })?;
         self.workspace.content.set_active_dirty(true);
         Ok(())
     }
@@ -292,29 +284,127 @@ impl AppState {
         if self.active_view_read_only() {
             return Err(self.read_only_master_message());
         }
-        let previous_document = self.load_active_symbol_document().ok();
-        let Some(result) = self
-            .library_manager
-            .edit_library(&reference.library)
-            .and_then(|mut library| {
-                library.store_symbol_document(&reference.cell, &reference.view, document)
-            })
-        else {
-            return Err(format!("View '{}' not found", reference.display_path()));
-        };
-        result?;
-        if let Some(previous_document) = previous_document {
-            let pin_remaps =
-                symbol_pin_position_remaps(&previous_document, document, &BTreeMap::new());
-            self.workspace
-                .for_each_schematic_editor_mut(|_, schematic| {
-                    schematic.remap_symbol_instance_wires(&reference, &pin_remaps);
-                });
-            self.schematic
-                .remap_symbol_instance_wires(&reference, &pin_remaps);
-        }
+        self.with_symbol_parent_edit(|state| {
+            let Some(result) = state
+                .library_manager
+                .edit_library(&reference.library)
+                .and_then(|mut library| {
+                    library.store_symbol_document(&reference.cell, &reference.view, document)
+                })
+            else {
+                return Err(format!("View '{}' not found", reference.display_path()));
+            };
+            result?;
+            state.apply_symbol_parent_edit(document, &BTreeMap::new());
+            Ok(())
+        })?;
         self.workspace.content.set_active_dirty(true);
         Ok(())
+    }
+
+    /// Run one complete symbol edit: its parent wiring is resolved before it
+    /// and recorded in each parent's history after it.
+    fn with_symbol_parent_edit<R>(&mut self, edit: impl FnOnce(&mut Self) -> R) -> R {
+        self.begin_symbol_parent_edit();
+        let result = edit(self);
+        self.finish_symbol_parent_edit();
+        result
+    }
+
+    /// Hold, in every open schematic that places the active symbol's cell,
+    /// the wire vertices each instance terminal holds now.
+    ///
+    /// Any edit still held open is finished first: its end never arrived, and
+    /// resolving over it would read its half-moved vertices as the baseline.
+    pub(crate) fn begin_symbol_parent_edit(&mut self) {
+        self.finish_symbol_parent_edit();
+        let Ok(base) = self.load_active_symbol_document() else {
+            return;
+        };
+        let reference = self.workspace.content.active_view.clone();
+        let content = &self.workspace.content;
+        let mut parents: Vec<SymbolParentWiring> = content
+            .schematic_buffers
+            .iter()
+            .filter_map(|(key, design)| {
+                parent_wiring(
+                    Some(key.clone()),
+                    design.document(),
+                    content.design_management.sheet_catalog(key),
+                    &reference,
+                    &base,
+                )
+            })
+            .collect();
+        let active_key = content.active_schematic_reference().key();
+        parents.extend(parent_wiring(
+            None,
+            self.schematic.document(),
+            content.design_management.sheet_catalog(&active_key),
+            &reference,
+            &base,
+        ));
+        let key = content.active_key();
+        self.ui
+            .symbol
+            .history
+            .begin_parent_edit(key, SymbolParentEdit { base, parents });
+    }
+
+    /// Carry the held wire ends to where `document` puts their terminals.
+    fn apply_symbol_parent_edit(
+        &mut self,
+        document: &SymbolDocument,
+        renames: &BTreeMap<String, String>,
+    ) {
+        let key = self.workspace.content.active_key();
+        let Some(edit) = self.ui.symbol.history.parent_edit(&key) else {
+            return;
+        };
+        let pin_remaps = symbol_pin_position_remaps(&edit.base, document, renames);
+        for parent in &edit.parents {
+            match &parent.buffer {
+                Some(buffer) => {
+                    self.workspace
+                        .for_each_schematic_editor_mut(|key, schematic| {
+                            if key == buffer {
+                                schematic.apply_symbol_instance_wiring(&parent.wiring, &pin_remaps);
+                            }
+                        });
+                }
+                None => {
+                    self.schematic
+                        .apply_symbol_instance_wiring(&parent.wiring, &pin_remaps);
+                }
+            }
+        }
+    }
+
+    /// Close the held edit: each parent it changed gets one undo record
+    /// spanning the whole edit.
+    pub(crate) fn finish_symbol_parent_edit(&mut self) {
+        const DESCRIPTION: &str = "move wires with symbol pins";
+        let Some(edit) = self.ui.symbol.history.take_parent_edit() else {
+            return;
+        };
+        for parent in edit.parents {
+            match parent.buffer {
+                Some(buffer) => {
+                    let mut before = Some(parent.before);
+                    self.workspace
+                        .for_each_schematic_editor_mut(|key, schematic| {
+                            if key == buffer
+                                && let Some(before) = before.take()
+                            {
+                                schematic.commit_undo_from(before, DESCRIPTION);
+                            }
+                        });
+                }
+                None => {
+                    self.schematic.commit_undo_from(parent.before, DESCRIPTION);
+                }
+            }
+        }
     }
 
     /// Atomically publish symbol geometry and its authoring-only metadata.
@@ -338,12 +428,43 @@ impl AppState {
         metadata: &SymbolEditorMetadata,
         intent: &SymbolCommitIntent,
     ) -> Result<(), String> {
-        let reference = self.workspace.content.active_view.clone();
         if self.active_view_read_only() {
             return Err(self.read_only_master_message());
         }
+        self.with_symbol_parent_edit(|state| {
+            state.publish_active_symbol_edit(document, metadata, intent)
+        })
+    }
+
+    /// Publish one frame of a canvas gesture.
+    ///
+    /// The gesture is one edit however many frames publish it: the parents'
+    /// wiring is resolved at its first frame, every frame moves the held ends
+    /// from that baseline, and the canvas closes it with
+    /// [`AppState::finish_symbol_parent_edit`] when the pointer lets go.
+    pub(crate) fn store_symbol_canvas_frame(
+        &mut self,
+        document: &SymbolDocument,
+        metadata: &SymbolEditorMetadata,
+    ) -> Result<(), String> {
+        if self.active_view_read_only() {
+            return Err(self.read_only_master_message());
+        }
+        let key = self.workspace.content.active_key();
+        if self.ui.symbol.history.parent_edit(&key).is_none() {
+            self.begin_symbol_parent_edit();
+        }
+        self.publish_active_symbol_edit(document, metadata, &SymbolCommitIntent::default())
+    }
+
+    fn publish_active_symbol_edit(
+        &mut self,
+        document: &SymbolDocument,
+        metadata: &SymbolEditorMetadata,
+        intent: &SymbolCommitIntent,
+    ) -> Result<(), String> {
+        let reference = self.workspace.content.active_view.clone();
         let bundle = EncodedSymbolEditorBundle::encode(document, metadata)?;
-        let previous_document = self.load_active_symbol_document().ok();
         let Some(()) = self
             .library_manager
             .edit_library(&reference.library)
@@ -354,16 +475,7 @@ impl AppState {
             return Err(format!("View '{}' not found", reference.display_path()));
         };
 
-        if let Some(previous_document) = previous_document {
-            let pin_remaps =
-                symbol_pin_position_remaps(&previous_document, document, &intent.renames);
-            self.workspace
-                .for_each_schematic_editor_mut(|_, schematic| {
-                    schematic.remap_symbol_instance_wires(&reference, &pin_remaps);
-                });
-            self.schematic
-                .remap_symbol_instance_wires(&reference, &pin_remaps);
-        }
+        self.apply_symbol_parent_edit(document, &intent.renames);
         let renamed = self.apply_symbol_pin_renames(&reference, &intent.renames);
         if renamed > 0 {
             self.push_user_message(ConsoleMessage::info(format!(
@@ -847,4 +959,37 @@ fn symbol_pin_records(
             .with_route(route)
         })
         .collect()
+}
+
+/// One open schematic's hold on the instances of `reference`, or `None` when
+/// it places none.
+///
+/// A wire end belongs to a terminal only when the wire is drawn on the
+/// instance's own sheet. An object no sheet claims stands on the active
+/// sheet, which is where the canvas draws it.
+fn parent_wiring(
+    buffer: Option<String>,
+    document: &SchematicDocument,
+    catalog: Option<&crate::state::SheetCatalog>,
+    reference: &CellViewRef,
+    symbol: &SymbolDocument,
+) -> Option<SymbolParentWiring> {
+    if !places_symbol(document, reference) {
+        return None;
+    }
+    let sheet_of = |id: u64| {
+        catalog.and_then(|catalog| {
+            catalog
+                .sheet_for_object(id)
+                .or_else(|| catalog.active_sheet_id())
+        })
+    };
+    let wiring = resolve_symbol_instance_wiring(document, reference, symbol, |component, wire| {
+        sheet_of(component) == sheet_of(wire)
+    });
+    Some(SymbolParentWiring {
+        buffer,
+        before: SchematicSnapshot::capture(document),
+        wiring,
+    })
 }

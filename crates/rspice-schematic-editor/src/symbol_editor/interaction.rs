@@ -4,8 +4,8 @@ use egui::Pos2;
 use rspice_app_types::product::ProjectId;
 use rspice_design::occurrence::DocumentOccurrence;
 use rspice_design::symbol::{
-    SYMBOL_TERMINAL_GRID, SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata, SymbolShape,
-    SymbolTextAlign, SymbolTextSize, pin_side_against_body,
+    SYMBOL_TERMINAL_GRID, SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata, SymbolPin,
+    SymbolShape, SymbolTextAlign, SymbolTextSize, pin_side_against_body,
 };
 use rspice_design_model::{
     Point, cell_view::CellViewRef, port::PortDirection, symbol_pin::SymbolPinSide,
@@ -141,6 +141,8 @@ pub struct SymbolEditOutcome {
     pub changed: bool,
     pub undo_before: Option<Box<SymbolDocument>>,
     pub edit_denied: bool,
+    /// Why a requested edit was refused, for the host to tell the author.
+    pub refusal: Option<String>,
 }
 
 pub fn edit_canvas(
@@ -248,7 +250,7 @@ fn handle_canvas_interaction(
             return false;
         }
         let delta = body_point - last_point;
-        if delta == Point::origin() {
+        if delta == Point::origin() || group_lands_on_a_pin(edit, document, delta) {
             return false;
         }
         record_drag_symbol_edit(edit, document);
@@ -263,16 +265,23 @@ fn handle_canvas_interaction(
             edit.session.clear_drag_state();
             return false;
         }
-        if document.pin(&name).and_then(|pin| pin.position) != Some(terminal_point) {
+        if document.pin(&name).and_then(|pin| pin.position) != Some(terminal_point)
+            && let Some(moved) = pin_placed_at(document, &name, terminal_point)
+        {
+            // Passing over another pin holds this one at its last free
+            // point; it never lands there, even for one frame.
+            if moved
+                .position
+                .is_some_and(|point| pin_at(document, &name, point).is_some())
+            {
+                return false;
+            }
+            if document.pin(&name) == Some(&moved) {
+                return false;
+            }
             record_drag_symbol_edit(edit, document);
-            let bounds = document.body_bounds();
             if let Some(pin) = document.pin_mut(&name) {
-                let side = inferred_side_from_point(terminal_point, bounds);
-                let offset = match side {
-                    SymbolPinSide::Left | SymbolPinSide::Right => terminal_point.y,
-                    SymbolPinSide::Top | SymbolPinSide::Bottom => terminal_point.x,
-                };
-                pin.set_side_and_offset(side, offset, bounds);
+                *pin = moved;
                 return true;
             }
         }
@@ -428,6 +437,24 @@ fn grab_belongs_to_group(
     hit_shape(document, viewport, pointer).is_some_and(|index| selection.shapes.contains(&index))
 }
 
+/// Whether moving the selection by `delta` would put a selected pin on a pin
+/// that stays where it is.
+fn group_lands_on_a_pin(edit: &CanvasEdit<'_>, document: &SymbolDocument, delta: Point) -> bool {
+    let selection = edit.session.effective_selection();
+    let pin_delta = snap_to_terminal_grid(delta);
+    selection.pins.iter().any(|name| {
+        document
+            .pin(name)
+            .and_then(|pin| pin.position)
+            .is_some_and(|position| {
+                let moved = position + pin_delta;
+                document.pins.iter().any(|other| {
+                    !selection.contains_pin(&other.name) && other.position == Some(moved)
+                })
+            })
+    })
+}
+
 /// Move every selected object by `delta` as one edit.
 ///
 /// Terminals travel by the same delta rounded to the terminal pitch, so a
@@ -491,21 +518,24 @@ fn place_selected_pin(
     if edit.deny_read_only_edit() {
         return false;
     }
-    if document.pin(&name).is_none() {
+    let Some(placed) = pin_placed_at(document, &name, point) else {
+        return false;
+    };
+    if let Some(other) = placed
+        .position
+        .and_then(|position| pin_at(document, &name, position))
+    {
+        edit.outcome.refusal = Some(format!(
+            "Pin {name} was not placed: pin {other} already stands there, and two pins on one point would join their nets in every schematic that places this symbol."
+        ));
         return false;
     }
     let changed = document.pin(&name).and_then(|pin| pin.position) != Some(point);
     if changed {
         edit.record_undo(document);
     }
-    let bounds = document.body_bounds();
     if let Some(pin) = document.pin_mut(&name) {
-        let side = inferred_side_from_point(point, bounds);
-        let offset = match side {
-            SymbolPinSide::Left | SymbolPinSide::Right => point.y,
-            SymbolPinSide::Top | SymbolPinSide::Bottom => point.x,
-        };
-        pin.set_side_and_offset(side, offset, bounds);
+        *pin = placed;
         edit.session.select_pin(name);
         edit.session.tool = SymbolTool::Select;
         return changed;
@@ -548,6 +578,31 @@ fn finish_pending_polyline(edit: &mut CanvasEdit<'_>, document: &mut SymbolDocum
 /// which on a tall body reads an outer left pin as a rail.
 fn inferred_side_from_point(point: Point, bounds: (Point, Point)) -> SymbolPinSide {
     pin_side_against_body(point, PortDirection::InOut, Some(bounds))
+}
+
+/// Pin `name` as it would stand if dropped at `point`.
+fn pin_placed_at(document: &SymbolDocument, name: &str, point: Point) -> Option<SymbolPin> {
+    let mut pin = document.pin(name)?.clone();
+    let bounds = document.body_bounds();
+    let side = inferred_side_from_point(point, bounds);
+    let offset = match side {
+        SymbolPinSide::Left | SymbolPinSide::Right => point.y,
+        SymbolPinSide::Top | SymbolPinSide::Bottom => point.x,
+    };
+    pin.set_side_and_offset(side, offset, bounds);
+    Some(pin)
+}
+
+/// The pin other than `name` whose terminal stands at `point`.
+///
+/// Two terminals on one point are one node in every schematic that places
+/// the symbol, so no edit may put a pin there.
+fn pin_at<'a>(document: &'a SymbolDocument, name: &str, point: Point) -> Option<&'a str> {
+    document
+        .pins
+        .iter()
+        .find(|pin| !pin.name.eq_ignore_ascii_case(name) && pin.position == Some(point))
+        .map(|pin| pin.name.as_str())
 }
 
 fn add_rectangle(edit: &mut CanvasEdit<'_>, document: &mut SymbolDocument, point: Point) -> bool {

@@ -6,6 +6,7 @@ use super::{SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_EDITOR_METADATA_KEY, SymbolDocu
 use crate::library::View;
 use crate::schematic::component::Component;
 use crate::schematic::document::SchematicDocument;
+use crate::schematic::history::SchematicSnapshot;
 use rspice_design_model::{Point, cell_view::CellViewRef};
 
 /// What an author meant by a symbol edit, beyond the geometry it produced.
@@ -58,15 +59,56 @@ impl SymbolDocumentSnapshot {
     }
 }
 
+/// One open schematic that places the edited cell, held for the length of a
+/// symbol edit.
+#[derive(Debug, Clone)]
+pub struct SymbolParentWiring {
+    /// The open schematic buffer's key, or `None` for the active schematic.
+    pub buffer: Option<String>,
+    /// The schematic before the edit's first change. The edit reaches the
+    /// schematic as one undo record taken from here when it ends.
+    pub before: SchematicSnapshot,
+    pub wiring: SymbolInstanceWiring,
+}
+
+/// A symbol edit in progress, and the parent schematics it carries along.
+///
+/// A pin drag publishes the symbol on every frame, but it is one edit: its
+/// wire ownership is resolved at the first frame and each parent records one
+/// undo step when it ends.
+#[derive(Debug, Clone)]
+pub struct SymbolParentEdit {
+    /// The symbol before the edit's first change.
+    pub base: SymbolDocument,
+    pub parents: Vec<SymbolParentWiring>,
+}
+
 /// Committed symbol edits and publication depths, keyed by cellview.
 #[derive(Debug, Clone, Default)]
 pub struct SymbolHistory {
     undo_stacks: HashMap<String, Vec<SymbolDocumentSnapshot>>,
     redo_stacks: HashMap<String, Vec<SymbolDocumentSnapshot>>,
     save_points: HashMap<String, usize>,
+    /// The edit whose parent wiring is held open, by the cellview it edits.
+    parent_edit: Option<(String, SymbolParentEdit)>,
 }
 
 impl SymbolHistory {
+    pub fn begin_parent_edit(&mut self, key: String, edit: SymbolParentEdit) {
+        self.parent_edit = Some((key, edit));
+    }
+
+    pub fn parent_edit(&self, key: &str) -> Option<&SymbolParentEdit> {
+        self.parent_edit
+            .as_ref()
+            .filter(|(owner, _)| owner == key)
+            .map(|(_, edit)| edit)
+    }
+
+    pub fn take_parent_edit(&mut self) -> Option<SymbolParentEdit> {
+        self.parent_edit.take().map(|(_, edit)| edit)
+    }
+
     /// Whether the cellview carries edits its last published revision does
     /// not contain. This is the single authority: no surface re-derives
     /// dirtiness by comparing documents or reading a stored modified flag.
@@ -175,98 +217,190 @@ pub fn symbol_pin_position_remaps(
     remaps
 }
 
-pub fn remap_symbol_instance_wires(
-    schematic: &mut SchematicDocument,
+/// One wire vertex that a placed instance's terminal holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalWireEnd {
+    pub component_id: u64,
+    /// The pin's name in the symbol the hold was resolved against, lowercased.
+    pub terminal: String,
+    pub wire_id: u64,
+    pub point_index: usize,
+    /// Where the vertex stood when the hold was resolved.
+    pub point: Point,
+}
+
+/// Which wire vertices the terminals of every placed instance of one cell hold
+/// in one schematic.
+///
+/// A symbol edit moves a pin, and every wire end that pin held has to move
+/// with it. Which ends those are is a question about ownership, and it can
+/// only be answered by position *before* anything moves: once a dragged pin
+/// passes over another pin's point, a vertex at that point no longer says
+/// whose it is. So the hold is resolved once, when the edit starts, and the
+/// edit then moves vertices by the terminal that holds them, never by where
+/// they happen to sit.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SymbolInstanceWiring {
+    ends: Vec<TerminalWireEnd>,
+}
+
+impl SymbolInstanceWiring {
+    pub fn ends(&self) -> &[TerminalWireEnd] {
+        &self.ends
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ends.is_empty()
+    }
+}
+
+/// Whether the schematic places at least one instance of `reference`.
+pub fn places_symbol(schematic: &SchematicDocument, reference: &CellViewRef) -> bool {
+    schematic
+        .components
+        .iter()
+        .any(|component| is_instance_of(component, reference))
+}
+
+/// Resolve which wire vertices each terminal of each instance of `reference`
+/// holds, with the terminals where `symbol` puts them.
+///
+/// A vertex is held when it sits exactly on the terminal and its wire is drawn
+/// on the instance's own sheet: `same_sheet(component_id, wire_id)` answers
+/// that, since a cell view's sheets share one coordinate space and a wire on
+/// another sheet can sit on the same point without touching the instance. A
+/// vertex that two terminals both sit on belongs to neither, so a pin edit
+/// leaves it where it is rather than guessing.
+pub fn resolve_symbol_instance_wiring(
+    schematic: &SchematicDocument,
     reference: &CellViewRef,
-    pin_remaps: &HashMap<String, (Point, Point)>,
-) -> bool {
-    if pin_remaps.is_empty() {
-        return false;
-    }
-
-    let mut world_remaps = Vec::new();
+    symbol: &SymbolDocument,
+    same_sheet: impl Fn(u64, u64) -> bool,
+) -> SymbolInstanceWiring {
+    let mut claims: Vec<TerminalWireEnd> = Vec::new();
     for component in &schematic.components {
-        append_component_symbol_remaps(component, reference, pin_remaps, &mut world_remaps);
-    }
-    if world_remaps.is_empty() {
-        return false;
-    }
-
-    let mut updates: Vec<(usize, usize, Point)> = Vec::new();
-    for (wire_index, wire) in schematic.wires.iter().enumerate() {
-        for (point_index, point) in wire.points.iter().enumerate() {
-            if let Some((_, new_position)) = world_remaps
-                .iter()
-                .find(|(old_position, _)| point == old_position)
-            {
-                updates.push((wire_index, point_index, *new_position));
+        if !is_instance_of(component, reference) {
+            continue;
+        }
+        let terminals = instance_terminal_points(component, symbol);
+        if terminals.is_empty() {
+            continue;
+        }
+        for wire in &schematic.wires {
+            if !same_sheet(component.id, wire.id) {
+                continue;
+            }
+            for (point_index, point) in wire.points.iter().enumerate() {
+                claims.extend(
+                    terminals
+                        .iter()
+                        .filter(|(_, terminal)| terminal == point)
+                        .map(|(name, _)| TerminalWireEnd {
+                            component_id: component.id,
+                            terminal: name.clone(),
+                            wire_id: wire.id,
+                            point_index,
+                            point: *point,
+                        }),
+                );
             }
         }
     }
-    if updates.is_empty() {
-        return false;
+    let mut holders: HashMap<(u64, usize), usize> = HashMap::new();
+    for claim in &claims {
+        *holders
+            .entry((claim.wire_id, claim.point_index))
+            .or_default() += 1;
     }
-
-    for (wire_index, point_index, new_position) in updates {
-        if let Some(wire) = schematic.wires.get_mut(wire_index)
-            && point_index < wire.points.len()
-        {
-            wire.points[point_index] = new_position;
-        }
-    }
-    true
+    claims.retain(|claim| holders.get(&(claim.wire_id, claim.point_index)) == Some(&1));
+    SymbolInstanceWiring { ends: claims }
 }
 
-fn append_component_symbol_remaps(
-    component: &Component,
-    reference: &CellViewRef,
+/// Put every held vertex where its terminal now stands.
+///
+/// `pin_remaps` is [`symbol_pin_position_remaps`] from the symbol the wiring
+/// was resolved against to the symbol as it is now. A terminal it does not
+/// name has not moved since then, so its vertices go back to where they were
+/// resolved; that is what makes the result depend only on the two symbols and
+/// not on the path a drag took between them.
+pub fn apply_symbol_instance_wiring(
+    schematic: &mut SchematicDocument,
+    wiring: &SymbolInstanceWiring,
     pin_remaps: &HashMap<String, (Point, Point)>,
-    world_remaps: &mut Vec<(Point, Point)>,
-) {
-    let Some(binding) = component.library_cell.as_ref() else {
-        return;
-    };
-    if !binding.library.eq_ignore_ascii_case(&reference.library)
-        || !binding.cell.eq_ignore_ascii_case(&reference.cell)
-    {
-        return;
-    }
-
-    if binding.terminal_order.is_empty() {
-        for &(old_offset, new_offset) in pin_remaps.values() {
-            push_world_pin_remap(component, old_offset, new_offset, world_remaps);
-        }
-        return;
-    }
-
-    for terminal_name in &binding.terminal_order {
-        let Some(&(old_offset, new_offset)) = pin_remaps.get(&terminal_name.to_ascii_lowercase())
+) -> bool {
+    let mut changed = false;
+    for end in &wiring.ends {
+        let target = match pin_remaps.get(&end.terminal) {
+            Some(&(_, new_offset)) => {
+                let Some(component) = schematic
+                    .components
+                    .iter()
+                    .find(|component| component.id == end.component_id)
+                else {
+                    continue;
+                };
+                world_terminal_point(component, new_offset)
+            }
+            None => end.point,
+        };
+        let Some(vertex) = schematic
+            .wires
+            .iter_mut()
+            .find(|wire| wire.id == end.wire_id)
+            .and_then(|wire| wire.points.get_mut(end.point_index))
         else {
             continue;
         };
-        push_world_pin_remap(component, old_offset, new_offset, world_remaps);
+        if *vertex != target {
+            *vertex = target;
+            changed = true;
+        }
     }
+    changed
 }
 
-fn push_world_pin_remap(
+fn is_instance_of(component: &Component, reference: &CellViewRef) -> bool {
+    component.library_cell.as_ref().is_some_and(|binding| {
+        binding.library.eq_ignore_ascii_case(&reference.library)
+            && binding.cell.eq_ignore_ascii_case(&reference.cell)
+    })
+}
+
+/// The instance's terminals, by lowercased pin name, in schematic space.
+fn instance_terminal_points(
     component: &Component,
-    old_offset: Point,
-    new_offset: Point,
-    world_remaps: &mut Vec<(Point, Point)>,
-) {
-    let old_offset = component.transform_point(old_offset);
-    let new_offset = component.transform_point(new_offset);
-    let old_position = Point::new(
-        component.pos.x.saturating_add(old_offset.x),
-        component.pos.y.saturating_add(old_offset.y),
-    );
-    let new_position = Point::new(
-        component.pos.x.saturating_add(new_offset.x),
-        component.pos.y.saturating_add(new_offset.y),
-    );
-    if old_position != new_position {
-        world_remaps.push((old_position, new_position));
-    }
+    symbol: &SymbolDocument,
+) -> Vec<(String, Point)> {
+    let terminal_order = component
+        .library_cell
+        .as_ref()
+        .map(|binding| binding.terminal_order.as_slice())
+        .unwrap_or_default();
+    symbol
+        .pins
+        .iter()
+        .filter(|pin| {
+            terminal_order.is_empty()
+                || terminal_order
+                    .iter()
+                    .any(|terminal| terminal.eq_ignore_ascii_case(&pin.name))
+        })
+        .filter_map(|pin| {
+            let offset = pin.position? - symbol.origin;
+            Some((
+                pin.name.to_ascii_lowercase(),
+                world_terminal_point(component, offset),
+            ))
+        })
+        .collect()
+}
+
+fn world_terminal_point(component: &Component, offset: Point) -> Point {
+    let offset = component.transform_point(offset);
+    Point::new(
+        component.pos.x.saturating_add(offset.x),
+        component.pos.y.saturating_add(offset.y),
+    )
 }
 
 pub fn symbol_snapshot_from_view(
