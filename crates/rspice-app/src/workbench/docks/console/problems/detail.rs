@@ -390,9 +390,8 @@ mod tests {
 
         // Once the text has moved on, the finding's range no longer names
         // the bytes in front of the reader, so it offers nothing to apply.
-        netlist.standing = RowStanding::Stale(
-            "the source has been edited since this was reported".to_owned(),
-        );
+        netlist.standing =
+            RowStanding::Stale("the source has been edited since this was reported".to_owned());
         assert!(
             applicable_fix(&netlist).is_none(),
             "a stale finding offers no fix, whatever route it still carries",
