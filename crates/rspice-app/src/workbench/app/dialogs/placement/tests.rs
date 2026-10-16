@@ -156,7 +156,10 @@ fn render_net_label_entry() {
     let directory = raster_directory();
     let stderr = std::io::stderr();
     let mut report = stderr.lock();
-    let cases: [(&str, fn(&mut RSpiceApp)); 3] = [
+    /// A render case: the file stem its PNG takes, and the state to open.
+    type EntryCase = (&'static str, fn(&mut RSpiceApp));
+
+    let cases: [EntryCase; 3] = [
         ("net-label-empty", |app| {
             app.state.schematic.session.editor.tool = Tool::Label;
             crate::workbench::app::open_net_label_placement(&mut app.state, Point::new(30, 50));
