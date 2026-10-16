@@ -367,8 +367,9 @@ pub(in crate::workbench) enum DiagnosticOwner {
     /// with that symbol's own artwork.
     SymbolPins,
     /// Everything a run has to be true before it can be dispatched: the
-    /// design checks it re-runs, the plan, the technology, the model
-    /// bindings, and the netlist the deck is generated from.
+    /// plan, the technology, the model bindings, the hierarchy, and the
+    /// netlist the deck is generated from. The design rules it checks are
+    /// published under [`Self::DesignRules`], for the configured root.
     Dispatch,
     /// One failed run, attributed to the objects the engine named.
     Run,
@@ -399,7 +400,8 @@ pub(in crate::workbench) enum DiagnosticInputs {
     /// One symbol view's published artwork and the interface contract its
     /// pins are compared against — exactly what the pin checks read.
     SymbolPins { subject: CellViewRef },
-    /// The configured topology closure and the active simulation plan.
+    /// The configured topology closure, the active simulation plan, and the
+    /// preflight report the findings came from.
     Dispatch,
     /// One retained run, and the drawing its cross-probe names resolve
     /// against.
@@ -428,7 +430,10 @@ impl DiagnosticInputs {
                 "the artwork of {} and the interface contract its pins are checked against",
                 subject.display_path()
             ),
-            Self::Dispatch => "the configured design and the active simulation plan".to_owned(),
+            Self::Dispatch => {
+                "the configured design, the active simulation plan and the preflight report"
+                    .to_owned()
+            }
             Self::Run { run_sequence } => {
                 format!("run {run_sequence} and the drawing its names resolve against")
             }
@@ -482,13 +487,20 @@ impl DiagnosticInputs {
                     .runs
                     .iter()
                     .any(|run| run.id == *run_sequence);
+                // A failure names conductors and devices; an edited design is
+                // no longer the one those names were read off. The design is
+                // the configured one, as the dispatch checks digest it — not
+                // whichever view the reader happens to have open, which
+                // staled a failure on opening another view and un-staled it
+                // on coming back.
+                let (root, revision, closure) = state.configured_topology_revision();
                 digest_of(&(
                     state.workspace.content.project.id(),
                     run_sequence,
                     retained,
-                    // A failure names conductors and devices; an edited
-                    // drawing is no longer the one those names were read off.
-                    state.schematic.topology_version(),
+                    root,
+                    revision,
+                    closure,
                 ))
             }
         }
@@ -753,6 +765,80 @@ impl AppState {
         self.diagnostics.remove(inputs);
     }
 
+    /// Withdraw the run outcomes a newly dispatched run supersedes.
+    ///
+    /// A run is a new measurement of the design as it now stands, so the
+    /// failures an earlier run reported stop standing the moment the next one
+    /// is dispatched — the way a simulator's run log starts over. Waiting for
+    /// the new run to finish instead would leave the earlier failure current
+    /// beside the new run's own failure of the same analysis, and both cannot
+    /// stand: they are one condition with one identity. A run that is
+    /// cancelled before it reports anything does not bring the earlier
+    /// failure back; that failure is still in the Console and in the earlier
+    /// run's own record.
+    ///
+    /// Members of one campaign do not supersede each other. They are
+    /// dispatched one after another, but each measures its own configuration,
+    /// and a campaign's outcome is all of them.
+    pub(crate) fn supersede_run_diagnostics(&mut self, dispatched: u64) {
+        let campaign = self.run_campaign(dispatched);
+        let superseded: Vec<DiagnosticInputs> = self
+            .diagnostics
+            .batches()
+            .filter(|batch| match batch.inputs {
+                DiagnosticInputs::Run { run_sequence } => {
+                    run_sequence != dispatched
+                        && (campaign.is_none() || self.run_campaign(run_sequence) != campaign)
+                }
+                DiagnosticInputs::DesignCheck { .. }
+                | DiagnosticInputs::SymbolPins { .. }
+                | DiagnosticInputs::Dispatch => false,
+            })
+            .map(|batch| batch.inputs.clone())
+            .collect();
+        for inputs in &superseded {
+            self.withdraw_diagnostics(inputs);
+        }
+        self.withdraw_retired_run_diagnostics();
+    }
+
+    /// Withdraw the outcomes of every run this session no longer retains.
+    ///
+    /// A pruned, deleted or cleared run has no outcome left to state: its
+    /// dataset is gone and its failure cannot be opened. Removing a run is
+    /// spread over the simulation state, so this is asked at the frame
+    /// boundary as well as wherever the shell itself retires a run.
+    pub(crate) fn withdraw_retired_run_diagnostics(&mut self) {
+        let retired: Vec<DiagnosticInputs> = self
+            .diagnostics
+            .batches()
+            .filter(|batch| match batch.inputs {
+                DiagnosticInputs::Run { run_sequence } => self
+                    .simulation
+                    .retained
+                    .runs
+                    .iter()
+                    .all(|run| run.id != run_sequence),
+                DiagnosticInputs::DesignCheck { .. }
+                | DiagnosticInputs::SymbolPins { .. }
+                | DiagnosticInputs::Dispatch => false,
+            })
+            .map(|batch| batch.inputs.clone())
+            .collect();
+        for inputs in &retired {
+            self.withdraw_diagnostics(inputs);
+        }
+    }
+
+    /// The campaign a retained run belongs to, if it belongs to one.
+    fn run_campaign(&self, run_sequence: u64) -> Option<crate::product::SimulationCampaignId> {
+        self.simulation
+            .retained
+            .run_by_sequence(run_sequence)
+            .and_then(|run| run.campaign_membership())
+            .map(|membership| membership.campaign_id())
+    }
+
     /// Where one published batch stands against the live design.
     pub(in crate::workbench) fn diagnostic_batch_standing(
         &self,
@@ -895,6 +981,108 @@ mod tests {
             .publish_diagnostics(DiagnosticInputs::Dispatch, vec![record])
             .expect("republishing the same finding is not a collision");
         assert_eq!(state.diagnostics.batches().count(), 1);
+    }
+
+    fn run_batches(state: &AppState) -> Vec<u64> {
+        state
+            .diagnostics
+            .batches()
+            .filter_map(|batch| match batch.inputs {
+                DiagnosticInputs::Run { run_sequence } => Some(run_sequence),
+                DiagnosticInputs::DesignCheck { .. }
+                | DiagnosticInputs::SymbolPins { .. }
+                | DiagnosticInputs::Dispatch => None,
+            })
+            .collect()
+    }
+
+    /// The next run supersedes the last one's outcome. Nothing withdrew a
+    /// failed run's batch before, so after a re-run that succeeded the status
+    /// bar went on saying "Problems · 1 error", current, forever.
+    #[test]
+    fn a_dispatched_run_supersedes_the_failures_earlier_runs_reported() {
+        let mut state = AppState::default();
+        state.simulation.retained.runs = vec![
+            crate::state::SimulationRun::new(1),
+            crate::state::SimulationRun::new(2),
+        ]
+        .into();
+        state.publish_run_failure("Transient", "Analysis failed: tran", None, 1);
+        assert_eq!(run_batches(&state), [1]);
+        let failed = state
+            .diagnostics
+            .batches()
+            .flat_map(|batch| batch.records.iter())
+            .map(|record| record.canonical.diagnostic_id)
+            .next()
+            .expect("the failure is published");
+        state.diagnostics.set_current_finding(Some(failed));
+
+        state.supersede_run_diagnostics(2);
+        assert!(
+            run_batches(&state).is_empty(),
+            "the earlier run's failure stops standing when the next run is dispatched"
+        );
+
+        // The next run fails the same way: the same condition, standing
+        // again, under the same identity — and still the current finding.
+        state.publish_run_failure("Transient", "Analysis failed: tran again", None, 2);
+        assert_eq!(run_batches(&state), [2]);
+        assert_eq!(state.diagnostics.current_finding(), Some(failed));
+        let republished = state
+            .diagnostics
+            .batches()
+            .flat_map(|batch| batch.records.iter())
+            .map(|record| record.canonical.diagnostic_id)
+            .next();
+        assert_eq!(republished, Some(failed));
+    }
+
+    /// A run with nothing retained has no outcome left to state.
+    #[test]
+    fn a_retired_run_takes_its_failure_with_it() {
+        let mut state = AppState::default();
+        state.simulation.retained.runs = vec![crate::state::SimulationRun::new(4)].into();
+        state.publish_run_failure("Transient", "Analysis failed: tran", None, 4);
+        state.withdraw_retired_run_diagnostics();
+        assert_eq!(run_batches(&state), [4], "a retained run's failure stands");
+
+        state.simulation.clear_runs();
+        state.withdraw_retired_run_diagnostics();
+        assert!(run_batches(&state).is_empty());
+    }
+
+    /// A run failure names conductors in the configured design. Opening
+    /// another cell view moves nothing it was read off.
+    #[test]
+    fn a_run_failure_stays_current_while_another_view_is_open() {
+        let mut state = AppState::default();
+        state.simulation.retained.runs = vec![crate::state::SimulationRun::new(5)].into();
+        state.publish_run_failure("Transient", "Analysis failed: tran", None, 5);
+        let batch = state
+            .diagnostics
+            .batches()
+            .next()
+            .expect("the failure is published")
+            .clone();
+        assert!(state.diagnostic_batch_standing(&batch).is_current());
+
+        let root = state.workspace.content.active_view.clone();
+        state
+            .workspace
+            .insert_schematic_editor(root.key(), state.schematic.clone());
+        state.workspace.content.active_view =
+            crate::state::CellViewRef::new(&root.library, "elsewhere", &root.view);
+        state.schematic = crate::state::SchematicState::default();
+        state.schematic.add_component(
+            crate::state::ComponentType::Resistor,
+            crate::state::Point::new(0, 0),
+        );
+
+        assert!(
+            state.diagnostic_batch_standing(&batch).is_current(),
+            "the open view is not the design the run executed"
+        );
     }
 
     /// Two conditions that mint one identity would shadow each other, so the

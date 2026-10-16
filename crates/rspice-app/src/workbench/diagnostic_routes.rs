@@ -22,7 +22,12 @@ use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::{PreflightRemediation, ProjectPage, VerificationPage, Workspace};
 
 /// Apply the route a consumer asked for, if one is outstanding.
+///
+/// Also the store's frame boundary for the one withdrawal nothing else can
+/// announce: a run the simulation state retired — cleared with the result
+/// history, or deleted — takes its outcome with it here.
 pub(crate) fn apply_pending(ctx: &Context, app: &mut RSpiceApp) {
+    app.state.withdraw_retired_run_diagnostics();
     let Some(route) = app.state.diagnostics.take_pending_route() else {
         return;
     };
