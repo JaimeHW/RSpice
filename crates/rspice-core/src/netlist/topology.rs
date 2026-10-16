@@ -287,13 +287,22 @@ impl DcGroundPathDiagnostics {
 pub fn analyze_dc_ground_paths(
     elements: &[Element],
 ) -> Result<DcGroundPathDiagnostics, ConnectivityAnalysisError> {
-    analyze_dc_ground_paths_with_ic_modes(elements, CapacitorIcDcMode::EnforcedConstraint, false)
+    analyze_dc_ground_paths_with_ic_modes(
+        elements,
+        CapacitorIcDcMode::EnforcedConstraint,
+        false,
+        None,
+    )
 }
 
+/// [`analyze_dc_ground_paths`] under the build's own initial-condition
+/// contract, against the build's reference: `0` and its aliases, and
+/// `reference`, the net a deck that names no node 0 has aliased to it.
 pub(crate) fn analyze_dc_ground_paths_with_ic_modes(
     elements: &[Element],
     capacitor_ic_mode: CapacitorIcDcMode,
     inductor_ic_enforced: bool,
+    reference: Option<&str>,
 ) -> Result<DcGroundPathDiagnostics, ConnectivityAnalysisError> {
     let mut union = NodeUnion::default();
     let mut order: Vec<String> = Vec::new();
@@ -354,6 +363,14 @@ pub(crate) fn analyze_dc_ground_paths_with_ic_modes(
             }
         }
     }
+    // The aliased net is node 0, so a terminal a card ties to node 0 by its
+    // syntax alone is on it too.
+    if let Some(reference) = reference {
+        let (zero, aliased) = (node_key("0"), node_key(reference));
+        if union.index_by_key.contains_key(&zero) && union.index_by_key.contains_key(&aliased) {
+            union.union_nodes("0", reference);
+        }
+    }
 
     // Classify whole DC-conductive components, not merely source terminals.
     // A nonzero current source whose output terminals belong to different
@@ -388,6 +405,7 @@ pub(crate) fn analyze_dc_ground_paths_with_ic_modes(
     let Some(ground) = union
         .index_by_key
         .get(&node_key("0"))
+        .or_else(|| reference.and_then(|reference| union.index_by_key.get(&node_key(reference))))
         .map(|index| union.root_of(*index))
     else {
         // No ground reference at all. Circuit validation owns that report;
@@ -397,7 +415,7 @@ pub(crate) fn analyze_dc_ground_paths_with_ic_modes(
 
     let no_dc_path_nodes: Vec<String> = order
         .into_iter()
-        .filter(|node| !is_ground_name(node))
+        .filter(|node| !is_reference(node, reference))
         .filter(|node| authored_nodes.contains(&node_key(node)))
         .filter(|node| {
             union
@@ -579,14 +597,21 @@ impl SupplyReachability {
 /// the design's power, so it is neither a rail nor an edge. A source between
 /// two non-ground nodes states a difference and not a level, so it is neither
 /// either.
-pub(crate) fn analyze_supply_reachability(elements: &[Element]) -> SupplyReachability {
+///
+/// Ground is the build's reference: `0` and its aliases, and `reference`, the
+/// net a deck that names no node 0 has aliased to it. A rail stated against
+/// that net is a rail exactly as one stated against `0` is.
+pub(crate) fn analyze_supply_reachability(
+    elements: &[Element],
+    reference: Option<&str>,
+) -> SupplyReachability {
     let mut union = NodeUnion::default();
     for element in elements {
         union.collect_element_nodes(element);
     }
     for element in elements {
         for (left, right) in passive_short_pairs(element) {
-            if is_ground_name(left) || is_ground_name(right) {
+            if is_reference(left, reference) || is_reference(right, reference) {
                 continue;
             }
             union.union_nodes(left, right);
@@ -595,7 +620,7 @@ pub(crate) fn analyze_supply_reachability(elements: &[Element]) -> SupplyReachab
 
     let mut rails_by_component: BTreeMap<usize, Vec<SupplyRail>> = BTreeMap::new();
     for element in elements {
-        let Some(rail) = supply_rail_of(element) else {
+        let Some(rail) = supply_rail_of(element, reference) else {
             continue;
         };
         let Some(index) = union.index_by_key.get(&node_key(&rail.node)) else {
@@ -641,7 +666,7 @@ fn passive_short_pairs(element: &Element) -> Vec<(&str, &str)> {
 }
 
 /// The rail this element establishes, if it establishes one.
-fn supply_rail_of(element: &Element) -> Option<SupplyRail> {
+fn supply_rail_of(element: &Element, reference: Option<&str>) -> Option<SupplyRail> {
     let ElementKind::VoltageSource(spec) = &element.kind else {
         return None;
     };
@@ -649,7 +674,10 @@ fn supply_rail_of(element: &Element) -> Option<SupplyRail> {
     let [positive, negative] = element.nodes.as_slice() else {
         return None;
     };
-    let (node, level) = match (is_ground_name(positive), is_ground_name(negative)) {
+    let (node, level) = match (
+        is_reference(positive, reference),
+        is_reference(negative, reference),
+    ) {
         (false, true) => (positive, level),
         (true, false) => (negative, -level),
         _ => return None,
@@ -1252,6 +1280,13 @@ fn is_ground_name(name: &str) -> bool {
     crate::naming::is_spice_ground_name(name)
 }
 
+/// Whether `name` is the build's node 0: ground by name, or `reference`, the
+/// net a deck that names no node 0 has aliased to it. Nets compare as
+/// [`node_key`] compares them, without regard to case.
+fn is_reference(name: &str, reference: Option<&str>) -> bool {
+    is_ground_name(name) || reference.is_some_and(|reference| reference.eq_ignore_ascii_case(name))
+}
+
 fn should_replace_representative(current: &str, candidate: &str) -> bool {
     if is_ground_name(current) {
         return false;
@@ -1750,6 +1785,7 @@ mod tests {
             &flat,
             CapacitorIcDcMode::EnforcedConstraint,
             false,
+            None,
         )
         .expect("Xyce capacitor-IC topology is supported");
         assert!(enforced.no_dc_path_nodes.is_empty());
@@ -1758,6 +1794,7 @@ mod tests {
             &flat,
             CapacitorIcDcMode::TransientSeedOnly,
             false,
+            None,
         )
         .expect("transient-only capacitor-IC topology is supported");
         assert_eq!(seed_only.no_dc_path_nodes, ["OUT"]);
@@ -1774,6 +1811,51 @@ mod tests {
                     .op\n\
                     .end\n";
         assert!(dc_ground_paths_of(deck).is_empty());
+    }
+
+    /// A deck that names no node 0 is judged against the net the build aliases
+    /// to it, as a deck naming `0` is against `0`: `b` floats from `ref`, and a
+    /// rail stated against `ref` reaches `a`.
+    #[test]
+    fn an_aliased_reference_is_ground_to_both_walks() {
+        let deck = "aliased reference\n\
+                    v1 vdd ref dc 1.8\n\
+                    r1 vdd a 1k\n\
+                    r2 a ref 1k\n\
+                    i1 ref b 1m\n\
+                    c1 b ref 1p\n\
+                    .op\n\
+                    .end\n";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let flat = flatten_netlist_with_models(&netlist)
+            .expect("deck flattens")
+            .elements;
+        let paths = |reference| {
+            analyze_dc_ground_paths_with_ic_modes(
+                &flat,
+                CapacitorIcDcMode::EnforcedConstraint,
+                false,
+                reference,
+            )
+            .expect("topology is supported")
+        };
+        assert!(paths(None).no_dc_path_nodes.is_empty());
+        let aliased = paths(Some("ref"));
+        assert_eq!(aliased.no_dc_path_nodes, ["B"]);
+        assert_eq!(aliased.fatal_nodes().collect::<Vec<_>>(), ["B"]);
+
+        assert!(
+            analyze_supply_reachability(&flat, None)
+                .rails_reaching("a")
+                .is_empty()
+        );
+        let rails = analyze_supply_reachability(&flat, Some("REF"));
+        let levels: Vec<_> = rails
+            .rails_reaching("a")
+            .iter()
+            .map(|rail| (rail.source.as_str(), rail.level))
+            .collect();
+        assert_eq!(levels, [("V1", 1.8)]);
     }
 
     #[test]

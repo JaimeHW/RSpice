@@ -94,7 +94,13 @@ pub(super) struct BoundarySupplies {
 }
 
 impl BoundarySupplies {
-    pub(super) fn new(netlist: &Netlist, flat_elements: &[Element]) -> Self {
+    /// `reference` is the net a deck that names no node 0 has aliased to it,
+    /// which is ground to a rail as `0` is.
+    pub(super) fn new(
+        netlist: &Netlist,
+        flat_elements: &[Element],
+        reference: Option<&str>,
+    ) -> Self {
         let parameter = netlist
             .options
             .auto_bridge_param_name("d")
@@ -107,7 +113,7 @@ impl BoundarySupplies {
         Self {
             declared,
             parameter,
-            reachability: analyze_supply_reachability(flat_elements),
+            reachability: analyze_supply_reachability(flat_elements, reference),
             reported: RefCell::new(BTreeSet::new()),
         }
     }

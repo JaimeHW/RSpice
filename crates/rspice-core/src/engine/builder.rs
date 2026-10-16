@@ -6284,6 +6284,7 @@ impl Engine {
             self.nodal_shunt_conductance() > 0.0,
             capacitor_ic_dc_mode(self.config.spice_dialect),
             self.config.spice_dialect == SpiceDialect::Xyce,
+            reference,
         );
         if !floating_nodes.analysis_complete {
             log::debug!(
@@ -6298,7 +6299,8 @@ impl Engine {
         // mixed instances the element loop creates below and by the XSPICE
         // auto-bridge planner after it. Built from the same flattened elements
         // the DC topology walk above reads.
-        let boundary_supplies = boundary_supply::BoundarySupplies::new(netlist, &flat_elements);
+        let boundary_supplies =
+            boundary_supply::BoundarySupplies::new(netlist, &flat_elements, reference);
 
         for (element_index, element) in flat_elements.iter().enumerate() {
             if element_index.is_multiple_of(64) {

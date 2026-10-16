@@ -359,28 +359,38 @@ fn sweep(netlist: &Netlist, node: &str) -> Vec<(f64, f64)> {
 /// drives V(vdd) into a node `rpull` also holds at V(vdd): v(y) = V(vdd)
 /// exactly. A static 3.3 V supply would read `a` low below 2.475 V and drive
 /// `y` to (3.3/20 + V/10k)/(1/20 + 1/10k) above it.
+///
+/// A deck that names no node 0 takes `V1`'s negative net, `ref`, as its
+/// reference, and a rail stated against that net is a rail exactly as one
+/// stated against `0` is.
 #[test]
 fn an_inferred_rail_binds_live_in_a_sweep_of_the_rail() {
     let module = SourceFile::new("v", BUFFER);
-    let deck = parse(&format!(
-        "* inferred live rail\n\
-         V1 vdd 0 DC 3.3\n\
-         r1 vdd a 1k\n\
-         r2 a 0 2k\n\
-         rpull y vdd 10k\n\
-         xb a y buf1\n\
-         .hdl \"{}\"\n\
-         .dc V1 0.1 3.6 0.1\n\
-         .end\n",
-        module.path()
-    ));
-    let points = sweep(&deck, "y");
-    assert_eq!(points.len(), 36, "every sweep point solves: {points:?}");
-    for (supply, level) in points {
-        assert!(
-            (level - supply).abs() <= 1.0e-9 + 1.0e-9 * supply,
-            "v(y) = V(vdd) = {supply} V live, got {level}"
+    for ground in ["0", "ref"] {
+        let deck = parse(&format!(
+            "* inferred live rail\n\
+             V1 vdd {ground} DC 3.3\n\
+             r1 vdd a 1k\n\
+             r2 a {ground} 2k\n\
+             rpull y vdd 10k\n\
+             xb a y buf1\n\
+             .hdl \"{}\"\n\
+             .dc V1 0.1 3.6 0.1\n\
+             .end\n",
+            module.path()
+        ));
+        let points = sweep(&deck, "y");
+        assert_eq!(
+            points.len(),
+            36,
+            "every sweep point solves with ground {ground}: {points:?}"
         );
+        for (supply, level) in points {
+            assert!(
+                (level - supply).abs() <= 1.0e-9 + 1.0e-9 * supply,
+                "v(y) = V(vdd) = {supply} V live with ground {ground}, got {level}"
+            );
+        }
     }
 }
 
