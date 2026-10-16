@@ -20,6 +20,7 @@ use crate::schematic::component::{Component, LibraryCellInstance};
 use crate::schematic::component_type::ComponentType;
 use crate::schematic::document::SchematicDocument;
 use crate::schematic::document_policy::NetNamingPolicy;
+use crate::schematic::ground_names::is_ground_reference;
 use crate::schematic::net_label::NetLabel;
 use crate::schematic::wire::WireSegment;
 use rspice_design_model::Point;
@@ -833,7 +834,8 @@ where
         }
     }
 
-    /// Bind every ground symbol's net, and every net labelled `0`, to node 0.
+    /// Bind every ground symbol's net, and every net named by a ground alias
+    /// (`0`, `GND`, `GND!`, `GROUND`, any case), to node 0.
     ///
     /// Standard schematic semantics: separate ground symbols are the same
     /// electrical node even with no drawn wire between them, as the deck's
@@ -853,17 +855,15 @@ where
                 self.join_ground(net_id);
             }
         }
-        let labelled_zero: Vec<usize> = self
+        // The same predicate decides the deck's node name, so the design has
+        // exactly the ground nets the deck has: one.
+        let labelled_ground: Vec<usize> = self
             .nets
             .iter()
-            .filter(|net| {
-                net.label
-                    .as_deref()
-                    .is_some_and(|label| label.trim() == "0")
-            })
+            .filter(|net| net.label.as_deref().is_some_and(is_ground_reference))
             .map(|net| net.id)
             .collect();
-        for net_id in labelled_zero {
+        for net_id in labelled_ground {
             self.join_ground(net_id);
         }
     }
