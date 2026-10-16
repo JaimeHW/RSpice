@@ -99,6 +99,16 @@ def workflow_step_body(job: str, name: str) -> str:
     return body[1].split("- name:", 1)[0]
 
 
+def workflow_named_steps(job: str) -> list[tuple[str, str]]:
+    """Every `- name:` step of a job, paired with its YAML body."""
+    parts = job.split("- name: ")[1:]
+    steps = []
+    for part in parts:
+        name, _, body = part.partition("\n")
+        steps.append((name.strip(), body.split("- name:", 1)[0]))
+    return steps
+
+
 def folded_run_command(step: str) -> str:
     """The command in a step's `run: >-` scalar, without what follows the block.
 
@@ -804,6 +814,84 @@ class CiConfigurationTests(unittest.TestCase):
             "the format gate's floor must equal the number of hand-written members, "
             "so an enumeration that silently collapses fails instead of passing",
         )
+
+    def test_every_quality_check_reports_even_after_one_has_failed(self) -> None:
+        """A red job must say which of its checks failed, not just the first.
+
+        The job runs twenty-one independent checks in sequence, and a job stops
+        at its first failing step. One rustfmt break therefore reported a
+        formatting problem and nothing at all about actionlint, these
+        configuration tests, the crate boundaries, fifteen harnesses or Clippy
+        -- none of which had run, though a reader scanning a red job has no way
+        to tell "did not run" from "passed". Each check carries its own
+        condition so that it reports regardless.
+
+        The condition is `!cancelled()` and not `always()`, so cancelling a run
+        still stops it. It is deliberately not `continue-on-error`, which would
+        let a failing check stop failing the job -- this changes what gets
+        reported, never what is enforced.
+        """
+        job = workflow_job_body(read_text(".github/workflows/ci.yml"), "quality")
+        steps = workflow_named_steps(job)
+        self.assertGreater(len(steps), 20, "the quality job's steps were not found")
+
+        # The toolchain install is the one named step every cargo check needs,
+        # so it is referenced by id rather than by position.
+        self.assertIn("id: toolchain", workflow_step_body(job, "Install Rust toolchain"))
+
+        for name, body in steps:
+            if name == "Install Rust toolchain":
+                continue
+            self.assertIn(
+                "!cancelled()",
+                body,
+                f"the {name!r} step stops reporting as soon as an earlier check "
+                f"fails; give it `if: ${{{{ !cancelled() }}}}`",
+            )
+            self.assertNotIn(
+                "continue-on-error",
+                body,
+                f"{name!r} would no longer fail the job",
+            )
+
+        # A step that drives cargo or rustfmt itself cannot run without the
+        # toolchain, and would otherwise fail for a reason unrelated to what it
+        # checks. Read from the step's own command, so a new cargo step is
+        # covered without being listed here. Comment lines are dropped first: a
+        # step's body runs to the next `- name:`, so a comment written above the
+        # following step sits in this one, and several of them discuss cargo.
+        for name, body in steps:
+            if name == "Install Rust toolchain":
+                continue
+            lines = [
+                line for line in body.splitlines() if not line.lstrip().startswith("#")
+            ]
+            command = "\n".join(lines).split("run:", 1)
+            command = command[1] if len(command) == 2 else ""
+            if re.search(r"\b(cargo|rustfmt)\b", command):
+                self.assertIn(
+                    "steps.toolchain.outcome == 'success'",
+                    body,
+                    f"{name!r} runs cargo or rustfmt, so it must require the "
+                    "toolchain install to have succeeded",
+                )
+
+        # These three reach cargo from inside the script they run rather than
+        # from the step's command, so no reading of the workflow alone can find
+        # them. Asserting the names exist means a rename fails here instead of
+        # quietly dropping the requirement.
+        named = dict(steps)
+        for name in (
+            "Formatting gate regression tests",
+            "CI configuration tests",
+            "UI incremental build identity regressions",
+        ):
+            self.assertIn(name, named, "a renamed step still needs the toolchain")
+            self.assertIn(
+                "steps.toolchain.outcome == 'success'",
+                named[name],
+                f"{name!r} runs cargo from the script it invokes",
+            )
 
     def test_surface_crates_are_linted_and_tested_on_every_change(self) -> None:
         """rspice-wasm and rspice-engine-adapter gate on pull requests.
