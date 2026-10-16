@@ -4297,16 +4297,16 @@ fn result_browser_analysis_head(
     // finish wears the mark that owns that colour, in front of its name.
     let mut text_left = glyph_rect.right() + 5.0;
     if !ok {
-        const MARK_SIDE: f32 = 11.0;
+        use crate::ui::widgets::{PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE};
         crate::ui::widgets::paint_problem_mark(
             ui.painter(),
             egui::Rect::from_center_size(
-                egui::pos2(text_left + MARK_SIDE * 0.5, rect.center().y),
-                egui::Vec2::splat(MARK_SIDE),
+                egui::pos2(text_left + PROBLEM_MARK_SIDE * 0.5, rect.center().y),
+                egui::Vec2::splat(PROBLEM_MARK_SIDE),
             ),
             crate::ui::widgets::Problem::Failure,
         );
-        text_left += MARK_SIDE + 6.0;
+        text_left += PROBLEM_MARK_ADVANCE;
     }
     let text_right = rect.right() - 8.0 - count_width - 8.0;
     let label_end = ui

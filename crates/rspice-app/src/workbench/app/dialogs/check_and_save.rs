@@ -46,10 +46,10 @@ const NEWER_CHANGES_HINT: &str = "Edits made after validation are still unsaved.
 /// surface instead of as a table.
 const CHECK_AND_SAVE_BODY_HEIGHT: f32 = 179.0;
 /// Side of a leading problem mark, and the advance from its left edge to the
-/// text behind it. Both match the kit's own problem line, so a marked line
-/// here sits where a marked line sits anywhere else.
-const MARK_SIDE: f32 = 11.0;
-const MARK_ADVANCE: f32 = 17.0;
+/// text behind it. Read from the kit rather than restated here, so a marked
+/// line in this dialog sits where a marked line sits anywhere else, now and
+/// after the kit moves it.
+use crate::ui::widgets::{PROBLEM_MARK_ADVANCE as MARK_ADVANCE, PROBLEM_MARK_SIDE as MARK_SIDE};
 /// The first frame's height hint: the shared operation surface less the
 /// 112 pt the change preview used to add to the body under it.
 const CHECK_AND_SAVE_SURFACE_HEIGHT: f32 = SURFACE_HEIGHT - 51.0;

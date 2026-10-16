@@ -104,9 +104,12 @@ pub(crate) fn problem_note(ui: &mut Ui, problem: Problem, text: &str) -> Respons
     .inner
 }
 
-/// The mark's side, the gap behind it, and the line it is centred on.
-const PROBLEM_NOTE_MARK: f32 = 11.0;
-const PROBLEM_NOTE_GAP: f32 = 6.0;
+/// The mark's side and the gap behind it, read from the kit so a note's mark
+/// is the mark every other panel sets.
+use crate::ui::widgets::{
+    PROBLEM_MARK_GAP as PROBLEM_NOTE_GAP, PROBLEM_MARK_SIDE as PROBLEM_NOTE_MARK,
+};
+/// The line the mark is centred on.
 const PROBLEM_NOTE_LINE: f32 = 16.0;
 
 pub(crate) fn field_label<R>(ui: &mut Ui, label: &str, content: impl FnOnce(&mut Ui) -> R) -> R {
