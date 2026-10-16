@@ -32,7 +32,6 @@ mod pane;
 mod schematic_command;
 mod segmented;
 mod select;
-mod selection_command;
 mod status_mark;
 mod switch;
 mod table;
@@ -60,10 +59,6 @@ pub use schematic_command::{SchematicCommandPreview, schematic_command_workflow}
 pub use segmented::{SegmentedWidth, segmented};
 pub use select::{SelectOutput, select};
 pub use select::{select_mono_with_response, select_with_disabled, select_with_response};
-pub use selection_command::{
-    NotePreviewStyle, PreviewPoint, SelectionImpact, SelectionPreview, ShapePreviewStroke,
-    selection_command_workflow, workflow_preview_status,
-};
 pub use status_mark::{
     PROBLEM_MARK_ADVANCE, PROBLEM_MARK_GAP, PROBLEM_MARK_SIDE, Problem, StatusMark,
     paint_problem_mark, paint_status_mark, problem_line,
