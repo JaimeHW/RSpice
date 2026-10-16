@@ -40,6 +40,10 @@ fn disable_global_process_axis(state: &mut AppState) {
 fn run_command_remains_actionable_and_surfaces_preflight_blockers() {
     let mut app = RSpiceApp::test_instance();
     app.state.schematic = crate::state::SchematicState::default();
+    // A filter left from earlier reading, narrowing the page to nothing the
+    // pass will file.
+    app.state.problems_view.text = "no blocker says this".to_owned();
+    app.state.problems_view.producer = Some("rspice.netlist.parser".to_owned());
 
     assert!(Command::RunSimulation.is_enabled(&app));
     Command::RunSimulation.execute(&mut app);
@@ -86,6 +90,10 @@ fn run_command_remains_actionable_and_surfaces_preflight_blockers() {
         "a blocked pass leaves the reader where its findings are listed"
     );
     assert!(app.state.workbench.console_visible);
+    assert!(
+        !app.state.problems_view.is_filtered(),
+        "a filter from earlier reading must not hide the blockers"
+    );
     let blockers: Vec<String> = report
         .blockers
         .iter()
