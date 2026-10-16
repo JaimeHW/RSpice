@@ -109,11 +109,11 @@ rspice-model-library = { workspace = true, features = ["catalog-test-observation
 rspice-design = { workspace = true, features = ["symbol-test-observation", "schematic-test-fixtures"] }
 zip.workspace = true
 rustyhdf5 = { version = "1.93", default-features = false }
-arrow-array = "59"
-arrow-ipc = "59"
-arrow-schema = "59"
+arrow-array = "60"
+arrow-ipc = "60"
+arrow-schema = "60"
 matfile = "0.5"
-parquet = { version = "59", default-features = false, features = ["arrow"] }
+parquet = { version = "60", default-features = false, features = ["arrow"] }
 wat = "1"
 fst-writer = "0.3"
 

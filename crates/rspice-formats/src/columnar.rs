@@ -1,6 +1,5 @@
 //! Arrow IPC and Parquet codecs for numeric results and selected tables.
 
-use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
 
@@ -185,17 +184,10 @@ pub fn encode_parquet_table(
                 },
                 true,
             )
-            .with_metadata(
-                [
-                    ("label".to_owned(), source.column_label(column).to_owned()),
-                    (
-                        "unit".to_owned(),
-                        source.column_unit(column).unwrap_or_default().to_owned(),
-                    ),
-                ]
-                .into_iter()
-                .collect(),
-            )
+            .with_metadata([
+                ("label", source.column_label(column)),
+                ("unit", source.column_unit(column).unwrap_or_default()),
+            ])
         })
         .collect::<Vec<_>>();
     let schema = Arc::new(Schema::new(fields));
@@ -240,7 +232,7 @@ pub struct ColumnarLimits {
 }
 
 struct DecodedColumnarTable {
-    metadata: HashMap<String, String>,
+    metadata: arrow_schema::Metadata,
     columns: Vec<(String, Vec<f64>, Option<String>)>,
 }
 
@@ -382,7 +374,7 @@ fn decode_parquet_table(
 fn decode_arrow_batches(
     format: &str,
     batches: impl IntoIterator<Item = Result<arrow_array::RecordBatch, arrow_schema::ArrowError>>,
-    metadata: HashMap<String, String>,
+    metadata: arrow_schema::Metadata,
     limits: ColumnarLimits,
     batch_error: &'static str,
 ) -> Result<DecodedColumnarTable, ColumnarReadError> {
@@ -519,7 +511,7 @@ impl<'a> ColumnarAccumulator<'a> {
 
     fn finish(
         self,
-        metadata: HashMap<String, String>,
+        metadata: arrow_schema::Metadata,
     ) -> Result<DecodedColumnarTable, ColumnarReadError> {
         if self.schema.is_none() {
             return Err(adapter_error(self.format, ColumnarReadFailure::Empty));
@@ -634,9 +626,8 @@ mod tests {
     };
     use crate::table::EngineeringTableSource;
     use arrow_array::{Array, ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray};
-    use arrow_schema::{DataType, Field, Schema};
+    use arrow_schema::{DataType, Field, Metadata, Schema};
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
-    use std::collections::HashMap;
     use std::sync::Arc;
 
     #[test]
@@ -680,7 +671,7 @@ mod tests {
         ] {
             let valid = selected.is_some() && time[1].is_some();
             let metadata = selected
-                .map(|name| ("rspice.coordinate".into(), name.into()))
+                .map(|name| ("rspice.coordinate", name))
                 .into_iter()
                 .collect();
             let batch = RecordBatch::try_new(
@@ -799,7 +790,7 @@ mod tests {
         let error = decode_arrow_batches(
             "arrow_ipc",
             [Ok::<_, arrow_schema::ArrowError>(batch.clone())],
-            HashMap::new(),
+            Metadata::new(),
             limits,
             "invalid Arrow record batch",
         )
@@ -821,7 +812,7 @@ mod tests {
         let error = decode_arrow_batches(
             "arrow_ipc",
             [Ok::<_, arrow_schema::ArrowError>(batch)],
-            HashMap::new(),
+            Metadata::new(),
             limits,
             "invalid Arrow record batch",
         )
@@ -863,7 +854,7 @@ mod tests {
         let error = decode_arrow_batches(
             "arrow_ipc",
             batches,
-            HashMap::new(),
+            Metadata::new(),
             ColumnarLimits {
                 max_columns: 2,
                 max_rows: 3,
@@ -1019,10 +1010,7 @@ mod tests {
     #[test]
     fn metadata_selects_coordinate_and_domain_before_pairing_signals() {
         let table = || DecodedColumnarTable {
-            metadata: HashMap::from([
-                ("rspice.coordinate".into(), "x".into()),
-                ("rspice.analysis".into(), " AC ".into()),
-            ]),
+            metadata: Metadata::from([("rspice.coordinate", "x"), ("rspice.analysis", " AC ")]),
             columns: vec![
                 ("gain_IM".into(), vec![-0.0], None),
                 ("x".into(), vec![3.0], None),
@@ -1050,12 +1038,8 @@ mod tests {
         );
 
         let mut invalid = table();
-        invalid
-            .metadata
-            .insert("rspice.coordinate".into(), "missing".into());
-        invalid
-            .metadata
-            .insert("rspice.analysis".into(), " UNKNOWN ".into());
+        invalid.metadata.insert("rspice.coordinate", "missing");
+        invalid.metadata.insert("rspice.analysis", " UNKNOWN ");
         let error = finish_columnar_table("arrow_ipc", invalid).unwrap_err();
         assert!(
             matches!(&error.reason, ColumnarReadFailure::MissingCoordinate(name) if name == "missing")
@@ -1067,9 +1051,7 @@ mod tests {
 
         let mut invalid = table();
         invalid.columns.remove(0);
-        invalid
-            .metadata
-            .insert("rspice.analysis".into(), " UNKNOWN ".into());
+        invalid.metadata.insert("rspice.analysis", " UNKNOWN ");
         let error = finish_columnar_table("parquet", invalid).unwrap_err();
         assert!(
             matches!(&error.reason, ColumnarReadFailure::AnalysisDomain(source) if source.value == "unknown")
