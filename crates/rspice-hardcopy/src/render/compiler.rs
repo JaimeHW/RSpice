@@ -1231,7 +1231,7 @@ impl<'a> SemanticSceneCompiler<'a> {
                         + drawing_sheet_mono_baseline_offset_um(lettering.data_um) as i64,
                 )?,
                 &truncate_title_block_text(&value, value_chars),
-                SceneFont::Monospace,
+                SceneFont::MonospaceMedium,
                 lettering.data_um,
                 stroke.color,
                 text_rotation,

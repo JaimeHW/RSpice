@@ -125,6 +125,10 @@ const IBM_PLEX_MONO_REGULAR: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../assets/fonts/IBMPlexMono-Regular.ttf"
 ));
+const IBM_PLEX_MONO_MEDIUM: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../assets/fonts/IBMPlexMono-Medium.ttf"
+));
 
 /// Stable publication timestamp. PDF/A requires this explicit value; the
 /// renderer never substitutes wall-clock time because that would make output
@@ -426,6 +430,12 @@ pub enum SceneFont {
     Sans,
     SansSemibold,
     Monospace,
+    /// Monospace at the next stroke weight up, which a title-block value is
+    /// lettered in so that it outranks the caption naming it. The two are one
+    /// ISO 3098 height step apart, and that step reads as a hierarchy only on
+    /// a drawing lettered wholly in capitals; a sheet carrying case-bearing
+    /// identifiers has to carry the difference in stroke instead.
+    MonospaceMedium,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -732,6 +742,7 @@ struct FontCoverage {
     sans: ttf_parser::Face<'static>,
     semibold: ttf_parser::Face<'static>,
     mono: ttf_parser::Face<'static>,
+    mono_medium: ttf_parser::Face<'static>,
 }
 
 impl FontCoverage {
@@ -743,6 +754,8 @@ impl FontCoverage {
                 .map_err(|_| HardcopyRenderError::InvalidEmbeddedFont("IBM Plex Sans Semibold"))?,
             mono: ttf_parser::Face::parse(IBM_PLEX_MONO_REGULAR, 0)
                 .map_err(|_| HardcopyRenderError::InvalidEmbeddedFont("IBM Plex Mono Regular"))?,
+            mono_medium: ttf_parser::Face::parse(IBM_PLEX_MONO_MEDIUM, 0)
+                .map_err(|_| HardcopyRenderError::InvalidEmbeddedFont("IBM Plex Mono Medium"))?,
         })
     }
 
@@ -756,6 +769,7 @@ impl FontCoverage {
             SceneFont::Sans => &self.sans,
             SceneFont::SansSemibold => &self.semibold,
             SceneFont::Monospace => &self.mono,
+            SceneFont::MonospaceMedium => &self.mono_medium,
         };
         for character in text.chars() {
             if face.glyph_index(character).is_none() {

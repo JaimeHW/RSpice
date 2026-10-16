@@ -18,10 +18,11 @@ pub(super) const PUBLICATION_SANS: &str = "RSpice Plex Sans";
 /// See [`PUBLICATION_SANS`].
 pub(super) const PUBLICATION_MONO: &str = "RSpice Plex Mono";
 /// Every publishable face, as family, CSS weight, and face data.
-pub(super) const PUBLICATION_FACES: [(&str, &str, &[u8]); 3] = [
+pub(super) const PUBLICATION_FACES: [(&str, &str, &[u8]); 4] = [
     (PUBLICATION_SANS, "400", IBM_PLEX_SANS_REGULAR),
     (PUBLICATION_SANS, "600", IBM_PLEX_SANS_SEMIBOLD),
     (PUBLICATION_MONO, "400", IBM_PLEX_MONO_REGULAR),
+    (PUBLICATION_MONO, "500", IBM_PLEX_MONO_MEDIUM),
 ];
 
 pub(super) fn page_primitives<'a>(
