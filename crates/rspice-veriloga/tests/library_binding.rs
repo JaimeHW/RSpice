@@ -76,7 +76,10 @@ fn prepare_files(
     compiler().prepare_library_unit_runtime_source_with_diagnostics(
         &paths,
         &UnitLibraries {
-            files: files.iter().map(|(_, library)| library.to_string()).collect(),
+            files: files
+                .iter()
+                .map(|(_, library)| library.to_string())
+                .collect(),
             declared: declared.iter().map(|library| library.to_string()).collect(),
             configs: Vec::new(),
         },
@@ -166,7 +169,8 @@ fn the_default_liblist_orders_the_search() {
 #[test]
 fn a_cell_clause_binds_every_instance_of_its_cell() {
     for rule in ["cell leaf use gateLib.leaf;", "cell leaf liblist gateLib;"] {
-        let prepared = prepare(&format!("config cfg; design work.top; {rule} endconfig\n")).unwrap();
+        let prepared =
+            prepare(&format!("config cfg; design work.top; {rule} endconfig\n")).unwrap();
         assert_eq!(
             bound(&prepared, "cfg"),
             ["cfg=work.top", "cfg.u1=gateLib.leaf", "cfg.u2=gateLib.leaf"],
@@ -175,10 +179,9 @@ fn a_cell_clause_binds_every_instance_of_its_cell() {
     }
     // Naming a library selects only the instances that would otherwise bind
     // to that library's cell.
-    let prepared = prepare(
-        "config cfg; design work.top; cell gateLib.leaf use rtlLib.leaf; endconfig\n",
-    )
-    .unwrap();
+    let prepared =
+        prepare("config cfg; design work.top; cell gateLib.leaf use rtlLib.leaf; endconfig\n")
+            .unwrap();
     assert_eq!(bound(&prepared, "cfg")[1], "cfg.u1=rtlLib.leaf");
     let prepared = prepare(
         "config cfg; design work.top; default liblist gateLib; \
@@ -196,7 +199,8 @@ fn an_instance_clause_binds_one_instance() {
         "instance top.u2 use gateLib.leaf;",
         "instance top.u2 liblist gateLib;",
     ] {
-        let prepared = prepare(&format!("config cfg; design work.top; {rule} endconfig\n")).unwrap();
+        let prepared =
+            prepare(&format!("config cfg; design work.top; {rule} endconfig\n")).unwrap();
         assert_eq!(
             bound(&prepared, "cfg"),
             ["cfg=work.top", "cfg.u1=rtlLib.leaf", "cfg.u2=gateLib.leaf"],
@@ -413,8 +417,11 @@ fn a_module_name_is_declared_once_per_library() {
         message.contains("'leaf'") && message.contains("one library 'rtlLib'"),
         "{message}"
     );
-    prepare_files(&[(&first, "rtlLib"), (&second, "gateLib")], &["rtlLib", "gateLib"])
-        .expect("two libraries may each declare leaf");
+    prepare_files(
+        &[(&first, "rtlLib"), (&second, "gateLib")],
+        &["rtlLib", "gateLib"],
+    )
+    .expect("two libraries may each declare leaf");
 }
 
 /// A library is named by a simple identifier.
@@ -422,8 +429,8 @@ fn a_module_name_is_declared_once_per_library() {
 fn a_library_name_is_an_identifier() {
     let files = Sources::new();
     let top = files.write("top.v", TOP);
-    let error = prepare_files(&[(&top, "not a name")], &[])
-        .expect_err("a library name with spaces");
+    let error =
+        prepare_files(&[(&top, "not a name")], &[]).expect_err("a library name with spaces");
     assert!(error.to_string().contains("not a library name"), "{error}");
 }
 

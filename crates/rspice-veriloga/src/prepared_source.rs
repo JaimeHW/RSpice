@@ -69,7 +69,8 @@ impl UnitLibraries {
         characters
             .next()
             .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
-            && characters.all(|character| character.is_ascii_alphanumeric() || "_$".contains(character))
+            && characters
+                .all(|character| character.is_ascii_alphanumeric() || "_$".contains(character))
     }
 }
 

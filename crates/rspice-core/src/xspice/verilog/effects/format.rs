@@ -954,10 +954,7 @@ mod tests {
             time_unit: -9,
             time_format: &time_format,
         };
-        assert_eq!(
-            format(&[Literal("%m %l")], &context),
-            "x1.u2 gateLib.leaf"
-        );
+        assert_eq!(format(&[Literal("%m %l")], &context), "x1.u2 gateLib.leaf");
     }
 
     #[test]
