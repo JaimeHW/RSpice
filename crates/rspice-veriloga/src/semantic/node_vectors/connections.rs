@@ -426,6 +426,26 @@ pub(in crate::semantic) fn bind(
         }
         let mut actuals = Vec::new();
         parent.append(actual, &mut actuals, 0)?;
+        if actuals.len() != lanes.len()
+            && lanes.len() == 1
+            && child.digital.signals.is_empty()
+            && child.contributions.is_empty()
+            && child.statements.is_empty()
+        {
+            // A port that stands as one lane of a module with no behavior of
+            // either domain: a purely structural module, which only the
+            // instances inside it connect, and whose vector ports neither
+            // domain expanded.
+            return Err(SemanticError::new(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "structural vector port: port '{path}.{formal}' is declared with no net \
+                     or variable of its own, in a module that declares no discrete-domain \
+                     signal for it"
+                )),
+                actual.span(),
+            )
+            .into());
+        }
         if actuals.len() != lanes.len() {
             return Err(error(
                 format!(

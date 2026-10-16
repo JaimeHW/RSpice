@@ -18,7 +18,9 @@ impl<'a> ConnectionShapes<'a> {
         source: &crate::ast::Module,
     ) -> Result<Self, Vec<DigitalLoweringDiagnostic>> {
         let digital = &module.digital;
-        let (signals, arrays, ids) = lower_signals(&digital.signals)?;
+        // Only shapes are asked of this table, and a borrowed declaration
+        // already has its target's shape.
+        let (signals, arrays, ids) = lower_signals(&digital.signals, |_| false)?;
         let constants = constants::resolve(
             &digital.constants,
             digital.time_scale,

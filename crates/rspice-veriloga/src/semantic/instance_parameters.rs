@@ -96,6 +96,100 @@ pub(super) fn validate_array_replacements(
     Ok(())
 }
 
+/// The author's error in an override that failed to close, when there is one.
+///
+/// IEEE 1364-2005 section 12.2 makes a parameter value a constant expression
+/// in the scope that assigns it, so an operand that scope never declares is
+/// undeclared, and one it declares as a net or variable is not constant. Both
+/// read as a missing lowering if the closing failure is reported as is.
+///
+/// Only a failure is reclassified, never a success. A scope with generate
+/// constructs declares names this check does not see, so it is left alone.
+pub(super) fn override_operand_error(
+    expression: &Expression,
+    parent: &Module,
+) -> Option<CompileError> {
+    if !parent.generates.is_empty() || parent.generate_template.is_some() {
+        return None;
+    }
+    let constant = |name: &str| {
+        parent
+            .parameters
+            .iter()
+            .chain(&parent.localparams)
+            .any(|parameter| parameter.name == name)
+            || parent.aliasparams.iter().any(|alias| alias.alias == name)
+            || parent
+                .genvars
+                .iter()
+                .any(|genvar| genvar.names.iter().any(|declared| declared == name))
+    };
+    let other = |name: &str| {
+        parent.ports.iter().any(|port| port.name == name)
+            || parent
+                .port_declarations
+                .iter()
+                .any(|declaration| declaration.names.iter().any(|declared| declared == name))
+            || parent
+                .variables
+                .iter()
+                .any(|declaration| declaration.items.iter().any(|item| item.name == name))
+            || parent
+                .nets
+                .iter()
+                .any(|declaration| declaration.names.iter().any(|declared| declared == name))
+            || parent.branches.iter().any(|branch| branch.name == name)
+            || parent
+                .digital_nets
+                .iter()
+                .flat_map(|declaration| &declaration.items)
+                .chain(
+                    parent
+                        .digital_variables
+                        .iter()
+                        .flat_map(|declaration| &declaration.items),
+                )
+                .any(|item| item.name == name)
+            || parent
+                .instances
+                .iter()
+                .any(|instance| instance.name == name)
+            || parent
+                .functions
+                .iter()
+                .any(|function| function.name == name)
+            || parent
+                .digital_routines
+                .iter()
+                .any(|routine| routine.name == name)
+    };
+    let mut found = None;
+    crate::ast::visit_expression(expression, &mut |operand| {
+        if found.is_some() {
+            return;
+        }
+        let Expression::Identifier(identifier) = operand else {
+            return;
+        };
+        let name = identifier.name.as_str();
+        if name.contains('.') || constant(name) {
+            return;
+        }
+        let kind = if other(name) {
+            SemanticErrorKind::InvalidExpression(format!(
+                "`{name}` is not a constant; IEEE 1364-2005 section 12.2 makes a parameter \
+                 value a constant expression, which a net or variable is not"
+            ))
+        } else {
+            SemanticErrorKind::UndeclaredSymbol {
+                name: identifier.name.clone(),
+            }
+        };
+        found = Some(SemanticError::new(kind, identifier.span).into());
+    });
+    found
+}
+
 pub(super) fn close_override(
     declaration: &ParameterDecl,
     expression: Expression,

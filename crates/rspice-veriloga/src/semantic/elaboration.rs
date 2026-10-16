@@ -1342,13 +1342,19 @@ impl<'a> HierarchyElaborator<'a> {
                     parent_source.time_scale,
                 )
                 .map_err(|message| {
-                    semantic_error(
-                        SemanticErrorKind::InvalidExpression(format!(
-                            "parameter '{}' of instance '{path}': {message}",
-                            parameter.name
-                        )),
-                        override_expression.span(),
+                    super::instance_parameters::override_operand_error(
+                        override_expression,
+                        parent_source,
                     )
+                    .unwrap_or_else(|| {
+                        semantic_error(
+                            SemanticErrorKind::InvalidExpression(format!(
+                                "parameter '{}' of instance '{path}': {message}",
+                                parameter.name
+                            )),
+                            override_expression.span(),
+                        )
+                    })
                 })?;
                 crate::canonical_ir::digital_lower::elaboration_constant(
                     &expression,

@@ -781,6 +781,10 @@ struct AdcBridge {
     root_only: bool,
     threshold_behavior: crate::xspice::AnalogThresholdBehavior,
     converter_input: Option<(usize, String, usize)>,
+    /// Which of the converter's thresholds on `converter_input`'s element
+    /// this root detects, counted in declaration order; zero for the first
+    /// and for every bridge that is not a root detector.
+    converter_threshold: usize,
 }
 
 impl AdcBridge {
@@ -2839,6 +2843,7 @@ impl MixedSignalHost {
             root_only: false,
             threshold_behavior: crate::xspice::AnalogThresholdBehavior::Hysteresis,
             converter_input: None,
+            converter_threshold: 0,
         });
         self.state.accepted_adc_voltages.push(0.0);
         self.state.accepted_adc_decisions.push(None);
@@ -2864,17 +2869,36 @@ impl MixedSignalHost {
                 detail: "A/D thresholds must be finite and low <= high".into(),
             });
         }
+        let input = (instance, threshold.port.clone(), threshold.element);
+        let ordinal = self
+            .state
+            .bridges
+            .adc
+            .iter()
+            .filter(|bridge| bridge.converter_input.as_ref() == Some(&input))
+            .count();
+        // A second threshold on one element is a second net crossing, and is
+        // named apart; the first keeps the name every existing image hashes.
+        let suffix = if ordinal == 0 {
+            String::new()
+        } else {
+            format!("#{ordinal}")
+        };
         self.state.bridges.make_mut().adc.push(AdcBridge {
             signal: None,
             bit: 0,
-            signal_name: format!("{instance_name}.{}[{}]", threshold.port, threshold.element),
+            signal_name: format!(
+                "{instance_name}.{}[{}]{suffix}",
+                threshold.port, threshold.element
+            ),
             positive: 0,
             negative: 0,
             low: threshold.low,
             high: threshold.high,
             root_only: true,
             threshold_behavior: threshold.behavior,
-            converter_input: Some((instance, threshold.port.clone(), threshold.element)),
+            converter_input: Some(input),
+            converter_threshold: ordinal,
         });
         self.state.accepted_adc_voltages.push(0.0);
         self.state.accepted_adc_decisions.push(None);
@@ -2887,14 +2911,14 @@ impl MixedSignalHost {
     /// converter publishes. Samples belong to this trial and disappear on rollback.
     pub(crate) fn sample_converter_inputs(
         &mut self,
-        mut sample: impl FnMut(usize, &str, usize) -> Option<f64>,
+        mut sample: impl FnMut(usize, &str, usize, usize) -> Option<f64>,
     ) -> Result<(), MixedSignalError> {
         let Some(trial) = self.trial.as_mut() else {
             return Ok(());
         };
         for (index, bridge) in self.state.bridges.adc.iter().enumerate() {
             if let Some((instance, port, element)) = &bridge.converter_input {
-                let value = sample(*instance, port, *element)
+                let value = sample(*instance, port, *element, bridge.converter_threshold)
                     .filter(|value| value.is_finite())
                     .ok_or_else(|| MixedSignalError::InvalidBridge {
                         detail: format!(

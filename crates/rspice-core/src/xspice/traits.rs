@@ -835,6 +835,27 @@ pub trait CodeModel: Send + Sync {
         input
     }
 
+    /// The quantity the `threshold`-th declared input threshold on
+    /// `port[element]` compares, counting that element's declarations from
+    /// zero in the order [`Self::analog_input_thresholds`] lists them.
+    ///
+    /// One crossing function per element cannot carry a band whose two edges
+    /// both follow a supply net: `input − low·V(supply)` and
+    /// `input − high·V(supply)` cross zero at different instants. Such a
+    /// converter declares each edge as its own zero threshold on the same
+    /// element and returns that edge's crossing function here. The default is
+    /// [`Self::analog_threshold_input`] for every declaration.
+    fn analog_threshold_input_at(
+        &self,
+        ctx: &super::CmContext,
+        port: &str,
+        element: usize,
+        _threshold: usize,
+        input: Value,
+    ) -> Value {
+        self.analog_threshold_input(ctx, port, element, input)
+    }
+
     /// Initialize instance state
     ///
     /// Called once when the instance is created.

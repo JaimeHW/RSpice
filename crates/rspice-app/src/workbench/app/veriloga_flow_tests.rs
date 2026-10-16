@@ -185,7 +185,10 @@ impl User {
         for point in &points[1..] {
             schematic.extend_wire(*point);
         }
-        assert!(schematic.finish_wire().is_some(), "the wire is drawn");
+        assert!(
+            schematic.finish_wire(|_| false).is_some(),
+            "the wire is drawn"
+        );
     }
 
     /// The other terminal of a two-terminal device placed by [`Self::place`].

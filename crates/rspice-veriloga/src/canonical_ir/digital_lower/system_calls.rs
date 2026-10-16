@@ -382,6 +382,18 @@ impl ProcessLowerer<'_> {
             }
             return DigitalSystemArgument::Empty;
         };
+        if crate::ast::is_reference_symbol(&identifier.name) {
+            // IEEE 1364-2005 section 18.1.2 dumps such a signal under the
+            // scopes of its own path, which the dump writer does not lay out.
+            self.error(
+                format!(
+                    "`{}` of a hierarchically named signal is not supported yet",
+                    call.name
+                ),
+                identifier.span,
+            );
+            return DigitalSystemArgument::Empty;
+        }
         if let Some(signal) = self.resolved_signal(&identifier.name) {
             return DigitalSystemArgument::Signal(signal);
         }

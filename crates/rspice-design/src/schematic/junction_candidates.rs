@@ -52,7 +52,11 @@ pub fn collect_junction_candidates(wires: &[Wire]) -> Vec<Point> {
                 if !tested.insert(pair) || segments[left].0 == segments[right].0 {
                     continue;
                 }
+                // `intersection` rounds a crossing that falls between grid
+                // points; a dot there would lie on one wire and join nothing.
                 if let Some(point) = segments[left].1.intersection(&segments[right].1)
+                    && segments[left].1.contains_point(point)
+                    && segments[right].1.contains_point(point)
                     && point != segments[left].1.start
                     && point != segments[left].1.end
                     && point != segments[right].1.start
@@ -66,4 +70,30 @@ pub fn collect_junction_candidates(wires: &[Wire]) -> Vec<Point> {
     let mut candidates: Vec<_> = candidates.into_iter().collect();
     candidates.sort_by_key(|point| (point.x, point.y));
     candidates
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A free-angle wire from (0,0) to (70,30) crosses y = 10 at x = 23⅓.
+    /// The nearest grid point lies on the horizontal wire only, so a dot
+    /// offered there would join nothing.
+    #[test]
+    fn a_crossing_between_grid_points_is_not_offered() {
+        let between = [
+            Wire::new(1, vec![Point::new(0, 0), Point::new(70, 30)]),
+            Wire::new(2, vec![Point::new(0, 10), Point::new(70, 10)]),
+        ];
+        assert!(collect_junction_candidates(&between).is_empty());
+
+        let on_grid = [
+            Wire::new(1, vec![Point::new(0, 0), Point::new(40, 40)]),
+            Wire::new(2, vec![Point::new(0, 20), Point::new(40, 20)]),
+        ];
+        assert_eq!(
+            collect_junction_candidates(&on_grid),
+            vec![Point::new(20, 20)]
+        );
+    }
 }

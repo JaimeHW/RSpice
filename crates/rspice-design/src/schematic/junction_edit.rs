@@ -4,23 +4,27 @@ use super::{
     document::SchematicDocument,
     identity::SchematicIdentity,
     net_label::{Junction, NetLabel},
-    wire::Wire,
+    wire::{Wire, WireSegment},
 };
 use rspice_design_model::Point;
 use std::collections::HashSet;
 
-/// Row/column interval index over orthogonal wire segments. Built once per
-/// topology pass; point queries scan only the point's row and column
-/// buckets instead of every wire — junction maintenance drops from
-/// O(wires² · points) to O(segments + vertices · bucket).
+/// Row/column interval index over wire segments. Built once per topology
+/// pass; point queries scan only the point's row and column buckets instead
+/// of every wire — junction maintenance drops from O(wires² · points) to
+/// O(segments + vertices · bucket).
 ///
-/// Diagonal segments are deliberately absent: `Wire::contains_point` only
-/// recognizes orthogonal segments, and this index mirrors its semantics.
+/// 45° and free-angle segments sit in a plain list. The extractor connects
+/// through a junction on a diagonal's interior (`WireSegment::contains_point`
+/// is exact at any angle), so maintenance must see those interiors too, or it
+/// deletes the junction that joins them.
 struct SegmentIndex {
     /// Horizontal segments: y → (x0, x1, wire id) with x0 ≤ x1.
     rows: std::collections::HashMap<i32, Vec<(i32, i32, u64)>>,
     /// Vertical segments: x → (y0, y1, wire id) with y0 ≤ y1.
     cols: std::collections::HashMap<i32, Vec<(i32, i32, u64)>>,
+    /// Segments that are neither horizontal nor vertical.
+    diagonals: Vec<(WireSegment, u64)>,
     /// (wire id, vertex) pairs — distinguishes interiors from vertices.
     vertices: HashSet<(u64, Point)>,
     /// Wire ids at each vertex (also covers degenerate single-point wires).
@@ -32,6 +36,7 @@ impl SegmentIndex {
         let mut index = Self {
             rows: std::collections::HashMap::new(),
             cols: std::collections::HashMap::new(),
+            diagonals: Vec::new(),
             vertices: HashSet::new(),
             vertex_wires: std::collections::HashMap::new(),
         };
@@ -48,6 +53,8 @@ impl SegmentIndex {
                 } else if a.x == b.x {
                     let (y0, y1) = if a.y <= b.y { (a.y, b.y) } else { (b.y, a.y) };
                     index.cols.entry(a.x).or_default().push((y0, y1, wire.id));
+                } else {
+                    index.diagonals.push((WireSegment::new(a, b), wire.id));
                 }
             }
         }
@@ -72,6 +79,12 @@ impl SegmentIndex {
                     .map(|&(_, _, id)| id),
             );
         }
+        out.extend(
+            self.diagonals
+                .iter()
+                .filter(|(segment, _)| segment.contains_point(v))
+                .map(|&(_, id)| id),
+        );
         out.sort_unstable();
         out.dedup();
     }
@@ -281,5 +294,54 @@ mod tests {
 
         assert_eq!(remove_orphan_junctions(&mut document), 0);
         assert_eq!(document.junctions, vec![Junction::new(3, point)]);
+    }
+
+    /// The extractor joins two wires through a junction on a diagonal's
+    /// interior, so maintenance must see that interior: dropping the dot
+    /// would silently split one net into two.
+    #[test]
+    fn a_junction_on_a_diagonal_crossing_survives_maintenance() {
+        let point = Point::new(20, 20);
+        for crossing in [
+            Wire::new(1, vec![Point::new(0, 20), Point::new(40, 20)]),
+            Wire::new(1, vec![Point::new(0, 40), Point::new(40, 0)]),
+        ] {
+            let mut document = SchematicDocument {
+                wires: vec![
+                    crossing,
+                    Wire::new(2, vec![Point::new(0, 0), Point::new(40, 40)]),
+                ],
+                ..SchematicDocument::default()
+            };
+            document.junctions.push(Junction::new(3, point));
+
+            assert_eq!(remove_orphan_junctions(&mut document), 0);
+            auto_place_junctions(&mut document, &mut SchematicIdentity::with_cursor(4));
+            assert_eq!(document.junctions, vec![Junction::new(3, point)]);
+        }
+    }
+
+    #[test]
+    fn a_wire_ending_inside_a_diagonal_gets_a_dot() {
+        let mut document = SchematicDocument {
+            wires: vec![
+                Wire::new(1, vec![Point::new(0, 0), Point::new(40, 40)]),
+                Wire::new(2, vec![Point::new(20, 60), Point::new(20, 20)]),
+            ],
+            ..SchematicDocument::default()
+        };
+
+        assert!(auto_place_junctions(
+            &mut document,
+            &mut SchematicIdentity::with_cursor(3)
+        ));
+        assert_eq!(
+            document
+                .junctions
+                .iter()
+                .map(|junction| junction.pos)
+                .collect::<Vec<_>>(),
+            vec![Point::new(20, 20)]
+        );
     }
 }

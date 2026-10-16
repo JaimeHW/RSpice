@@ -314,6 +314,9 @@ pub struct Module {
     /// Authored defaults before an external override selects this module as root.
     pub(crate) unspecialized_parameters: Option<Vec<ParameterDecl>>,
     pub(crate) foreign_physical: std::collections::BTreeMap<SmolStr, ForeignPhysicalReference>,
+    /// Discrete-domain signals of another scope this module names
+    /// hierarchically, under the symbol of the declaration borrowed for them.
+    pub(crate) foreign_digital: std::collections::BTreeMap<SmolStr, ForeignDigitalReference>,
     pub(crate) hierarchical_parameter_values: std::collections::HashSet<SmolStr>,
     pub(crate) hierarchical_parameter_given: std::collections::HashSet<SmolStr>,
     /// The library the source declaring this module was read into, when a
@@ -419,6 +422,7 @@ impl Module {
             reference_context: None,
             unspecialized_parameters: None,
             foreign_physical: Default::default(),
+            foreign_digital: Default::default(),
             hierarchical_parameter_values: Default::default(),
             hierarchical_parameter_given: Default::default(),
             library: None,
@@ -489,6 +493,22 @@ pub(crate) struct ForeignPhysicalReference {
     pub span: Span,
 }
 
+/// A discrete-domain net or variable of another scope, named hierarchically
+/// (IEEE 1364-2005 sections 12.5 and 12.6).
+///
+/// The referring module declares a borrowed copy of the target's declaration
+/// under the reference's symbol, so its bodies are checked against the
+/// target's type; lowering then binds that symbol to the target's own signal
+/// and allocates nothing for the copy.
+#[derive(Debug, Clone)]
+pub(crate) struct ForeignDigitalReference {
+    /// Root-relative in a selected context, otherwise relative to the caller.
+    pub path: SmolStr,
+    /// The target's name in its own scope.
+    pub name: SmolStr,
+    pub span: Span,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct HierarchicalScopeKey {
     pub name: SmolStr,
@@ -509,6 +529,13 @@ pub(crate) struct ScopedHierarchicalReference {
     pub scopes: Vec<HierarchicalScopeKey>,
     /// Lexically bound index expressions before their values were closed.
     pub index_dependencies: Vec<Expression>,
+}
+
+/// Whether `name` is the symbol the parser, or generate expansion after it,
+/// gave a hierarchical name. Neither spelling is an identifier an author can
+/// write, so no declared name is mistaken for one.
+pub(crate) fn is_reference_symbol(name: &str) -> bool {
+    name.starts_with("$rspice_reference_") || name.starts_with("$rspice_bound_reference_")
 }
 
 /// An authored path. Scope selectors are distinct from terminal vector/array selectors.

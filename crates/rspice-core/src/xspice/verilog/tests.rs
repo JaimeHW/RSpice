@@ -1447,6 +1447,7 @@ use crate::config::{HdlSeverity, HdlStream};
 
 mod defparam;
 mod files;
+mod hierarchical;
 mod overrides;
 mod ports;
 mod threads;

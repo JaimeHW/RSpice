@@ -26,7 +26,8 @@ use super::move_interaction::handle_armed_move_selection;
 use super::navigation::primary_pan_gesture_active;
 use super::selection_drag::handle_select_dragging;
 use super::sheet_visibility::{
-    active_junction_at, active_wire_at, objects_on_active_sheet, retain_selection_on_active_sheet,
+    active_junction_at, active_wire_at, finish_wire_on_active_sheet, objects_on_active_sheet,
+    retain_selection_on_active_sheet,
 };
 use super::snap_resolution::resolve_grid_pointer;
 use super::stretch_interaction::handle_armed_stretch_selection;
@@ -142,7 +143,7 @@ pub(super) fn handle_tool_interactions(
                 Some(wire_pos) if state.schematic.session.editor.wire_drawing.active => {
                     state.schematic.extend_wire(wire_pos);
                     if finish_on_conductor {
-                        let _ = state.schematic.finish_wire();
+                        let _ = finish_wire_on_active_sheet(state);
                     }
                 }
                 Some(wire_pos) => state.start_canvas_wire(ui.ctx(), wire_pos),
@@ -292,7 +293,7 @@ fn finish_active_route(ui: &Ui, state: &mut AppState) -> bool {
         return false;
     }
     if state.schematic.session.editor.wire_drawing.active {
-        return state.schematic.finish_wire().is_some();
+        return finish_wire_on_active_sheet(state).is_some();
     }
     if state.schematic.session.editor.bus_drawing.active {
         return match state.schematic.finish_bus() {

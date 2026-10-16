@@ -57,6 +57,10 @@ pub struct AnalyzedDigital {
     /// this one (IEEE 1364-2005 section 12.5): the parser's symbol, mapped to
     /// the instance names and then the routine's name.
     pub routine_names: std::collections::BTreeMap<SmolStr, Vec<SmolStr>>,
+    /// Signals of other scopes this module names hierarchically (IEEE
+    /// 1364-2005 sections 12.5 and 12.6), by the symbol of the declaration
+    /// borrowed for each. Lowering binds the symbol to the target's signal.
+    pub signal_references: std::collections::BTreeMap<SmolStr, DigitalSignalReference>,
     /// Continuous assignments, in declaration order.
     pub continuous_assigns: Vec<AnalyzedContinuousAssign>,
     /// Instantiated child modules, elaborated flat into this module's scope.
@@ -76,6 +80,20 @@ pub struct AnalyzedDigital {
     /// never with the parent's, which would be a wrong answer wearing a right
     /// one's clothes.
     pub constants: DigitalConstants,
+}
+
+/// The target of a hierarchical reference to a discrete-domain signal.
+#[derive(Debug, Clone)]
+pub struct DigitalSignalReference {
+    /// The target scope's instance path. Below the compiled root when
+    /// `absolute`; otherwise below the referring scope.
+    pub path: SmolStr,
+    pub absolute: bool,
+    /// The target's name in its own scope.
+    pub name: SmolStr,
+    /// The reference as written, for diagnostics: `u1.q`.
+    pub written: SmolStr,
+    pub span: Span,
 }
 
 /// A scalar parameter retained exactly outside the analog numeric ABI.
@@ -571,6 +589,9 @@ pub struct ElaboratedDigitalInstance {
     pub routines: Vec<super::digital_routines::AnalyzedDigitalRoutine>,
     /// The instance's hierarchical routine names, relative to it.
     pub routine_names: std::collections::BTreeMap<SmolStr, Vec<SmolStr>>,
+    /// The instance's hierarchical signal references, every path below the
+    /// compiled root.
+    pub signal_references: std::collections::BTreeMap<SmolStr, DigitalSignalReference>,
     /// The instance's continuous assignments, in declaration order.
     pub continuous_assigns: Vec<AnalyzedContinuousAssign>,
     /// The implicit continuous assignments of this instance's variable output
@@ -790,9 +811,17 @@ impl SemanticAnalyzer {
             bit_aliases: Vec::new(),
             processes,
             routines,
+            // Generate expansion rebinds a name it defers under a symbol of
+            // its own, so both tables are asked.
             routine_names: module
                 .hierarchical_names
                 .iter()
+                .chain(
+                    module
+                        .pending_hierarchical_references
+                        .iter()
+                        .map(|(symbol, reference)| (symbol, &reference.source)),
+                )
                 .filter(|(_, name)| {
                     !name.absolute
                         && name.branch.is_none()
@@ -802,6 +831,34 @@ impl SemanticAnalyzer {
                 .map(|(symbol, name)| {
                     let segments = name.segments.iter().map(|segment| segment.name.clone());
                     (symbol.clone(), segments.collect())
+                })
+                .collect(),
+            signal_references: module
+                .foreign_digital
+                .iter()
+                .map(|(symbol, reference)| {
+                    let written = module.hierarchical_names.get(symbol).map_or_else(
+                        || format!("{}.{}", reference.path, reference.name),
+                        |name| {
+                            let segments = name.segments.iter().map(|s| s.name.as_str());
+                            let path = segments.collect::<Vec<_>>().join(".");
+                            if name.absolute {
+                                format!("$root.{path}")
+                            } else {
+                                path
+                            }
+                        },
+                    );
+                    (
+                        symbol.clone(),
+                        DigitalSignalReference {
+                            path: reference.path.clone(),
+                            absolute: module.reference_context.is_some(),
+                            name: reference.name.clone(),
+                            written: written.into(),
+                            span: reference.span,
+                        },
+                    )
                 })
                 .collect(),
             continuous_assigns,

@@ -127,6 +127,9 @@ mod analog;
 // A/D and D/A bridges
 mod bridges;
 
+// The connect-rule converters: one law for every built-in boundary
+mod connect_bridges;
+
 // Xyce-compatible analog digital output devices
 mod digital_output;
 
