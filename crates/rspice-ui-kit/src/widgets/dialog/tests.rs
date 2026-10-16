@@ -297,7 +297,8 @@ fn jobs_manager_geometry_matches_the_mockup_on_desktop_and_phone() {
 #[test]
 fn schematic_page_setup_is_content_height_at_both_shapes() {
     let desktop_screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(1_440.0, 900.0));
-    let desktop = DialogLayout::resolve(DialogSize::SchematicPageSetup, desktop_screen, Some(612.0));
+    let desktop =
+        DialogLayout::resolve(DialogSize::SchematicPageSetup, desktop_screen, Some(612.0));
     assert_eq!(desktop.surface_rect.size(), vec2(1_280.0, 612.0));
     assert_eq!(desktop.surface_rect.center(), desktop_screen.center());
     assert!(!desktop.fill_height);
