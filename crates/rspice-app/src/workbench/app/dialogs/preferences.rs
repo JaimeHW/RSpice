@@ -1,6 +1,5 @@
 //! Preferences — canonical mockup shell with durable, validated settings.
 
-mod design_rules;
 mod preference_pages;
 mod preferences_shell;
 #[cfg(test)]
