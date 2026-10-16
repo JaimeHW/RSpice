@@ -5477,18 +5477,30 @@ impl Engine {
         });
         let (built, reference) =
             self.elaborate_circuit(netlist, default_ports, transient_stop_time, None, abort)?;
-        let Some(reference) = reference else {
-            return Ok(*built);
+        let built = match reference {
+            None => built,
+            Some(reference) => {
+                drop(built);
+                self.elaborate_circuit(
+                    netlist,
+                    default_ports,
+                    transient_stop_time,
+                    Some(&reference),
+                    abort,
+                )?
+                .0
+            }
         };
-        drop(built);
-        self.elaborate_circuit(
-            netlist,
-            default_ports,
-            transient_stop_time,
-            Some(&reference),
-            abort,
-        )
-        .map(|(built, _)| *built)
+        if log::log_enabled!(log::Level::Info) {
+            let inventory = built.circuit.inventory_line();
+            // A run elaborates the same circuit for its operating point, each
+            // sweep point and each Monte Carlo sample; it says what it built
+            // once for each circuit that differs.
+            if crate::log_scope::first_saying(&inventory) {
+                log::info!("{inventory}");
+            }
+        }
+        Ok(*built)
     }
 
     /// One elaboration of the deck, with `reference`, when given, aliased to

@@ -240,8 +240,9 @@ fn is_device_collection(field_type: &str) -> bool {
         .is_some_and(|first| first.is_ascii_uppercase())
 }
 
-/// The code `device_count()` runs, with its comments and all whitespace
-/// stripped out.
+/// The code `device_count()` sums, with its comments and all whitespace
+/// stripped out: the body of `device_inventory()`, which counts each family
+/// and which the run log's circuit inventory reads too.
 ///
 /// The end of the body is found by brace depth rather than by matching a
 /// closing line, so regrouping or reindenting the sum keeps it scanned.
@@ -254,12 +255,12 @@ fn device_count_code() -> String {
         .filter(|line| !line.starts_with("//"));
     let signature = lines
         .by_ref()
-        .find(|line| line.starts_with("pub fn device_count(&self)"))
-        .expect("introspection.rs declares `pub fn device_count(&self)`");
+        .find(|line| line.starts_with("pub(crate) fn device_inventory(&self)"))
+        .expect("introspection.rs declares `pub(crate) fn device_inventory(&self)`");
     let mut depth = brace_delta(signature);
     assert!(
         depth > 0,
-        "the device_count signature does not open its own body"
+        "the device_inventory signature does not open its own body"
     );
 
     let mut code = String::new();
@@ -268,13 +269,13 @@ fn device_count_code() -> String {
         if depth <= 0 {
             assert!(
                 !code.is_empty(),
-                "device_count was scanned as an empty body"
+                "device_inventory was scanned as an empty body"
             );
             return code;
         }
         code.extend(line.chars().filter(|c| !c.is_whitespace()));
     }
-    panic!("the device_count body is never closed")
+    panic!("the device_inventory body is never closed")
 }
 
 fn brace_delta(line: &str) -> i32 {
@@ -337,7 +338,7 @@ fn every_circuit_data_device_collection_is_counted_or_excused() {
                  `device_count()` neither sums nor excuses.\n\
                  `device_count()` is the whole inventory of devices in a circuit, so do one \
                  of two things:\n  \
-                 - add `self.{name}` to the sum in \
+                 - count `self.{name}` in `device_inventory()` in \
                  crates/rspice-core/src/circuit/introspection.rs, if it holds authored device \
                  instances; or\n  \
                  - add (\"{name}\", \"<why it is not a device of its own>\") to \

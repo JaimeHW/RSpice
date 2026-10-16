@@ -11,7 +11,8 @@
 
 use std::any::Any;
 use std::cell::RefCell;
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 /// What a host keeps on the thread executing one run, and the point of the
 /// run that thread is solving, when that is one of several.
@@ -19,11 +20,18 @@ use std::sync::Arc;
 pub struct LogScope {
     owner: Arc<dyn Any + Send + Sync>,
     point: Option<Arc<str>>,
+    /// Lines the run states once however often it reaches them, shared by
+    /// every thread the run hands work to.
+    said_once: Arc<Mutex<HashSet<String>>>,
 }
 
 impl LogScope {
     pub fn new(owner: Arc<dyn Any + Send + Sync>) -> Self {
-        Self { owner, point: None }
+        Self {
+            owner,
+            point: None,
+            said_once: Arc::default(),
+        }
     }
 
     /// The host's own state for the run, to downcast to what it stored.
@@ -99,9 +107,45 @@ pub(crate) fn enter_point(point: impl FnOnce() -> String) -> Option<LogScopeGuar
     capture().map(|scope| enter(Some(scope.at_point(point()))))
 }
 
+/// Whether this thread's run has yet to say `line`, which it then has.
+///
+/// For a fact the engine reaches once per elaboration that a run may well
+/// elaborate several times over — before its operating point, per sweep point,
+/// per Monte Carlo sample — and that is worth reading once. A thread outside
+/// any run remembers nothing, so there every call is the first.
+pub(crate) fn first_saying(line: &str) -> bool {
+    let Some(scope) = capture() else {
+        return true;
+    };
+    scope
+        .said_once
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(line.to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_run_says_a_line_once_on_every_thread_it_hands_work_to() {
+        assert!(first_saying("outside"));
+        assert!(first_saying("outside"), "outside a run nothing is remembered");
+        let _run = enter(Some(LogScope::new(Arc::new("run"))));
+        assert!(first_saying("Circuit: 2 nodes"));
+        let captured = capture();
+        std::thread::scope(|threads| {
+            threads.spawn(|| {
+                let _scope = enter(captured.clone().map(|run| run.at_point("sample 2")));
+                assert!(!first_saying("Circuit: 2 nodes"));
+                assert!(first_saying("Circuit: 3 nodes"));
+            });
+        });
+        assert!(!first_saying("Circuit: 3 nodes"));
+        let _next = enter(Some(LogScope::new(Arc::new("next run"))));
+        assert!(first_saying("Circuit: 2 nodes"), "the next run starts with nothing said");
+    }
 
     fn owner_name(scope: &LogScope) -> Option<&'static str> {
         scope.owner().downcast_ref::<&'static str>().copied()

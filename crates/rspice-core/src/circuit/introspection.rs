@@ -1299,63 +1299,120 @@ impl CircuitData {
     /// per-step residual scratch, and node/topology metadata are the second.
     ///
     /// `tests/device_count_inventory.rs` fails if a `CircuitData` collection
-    /// is neither summed here nor named in that test's exclusion list, so this
-    /// stays a whole inventory as new device families arrive.
+    /// is neither counted by [`Self::device_inventory`] nor named in that
+    /// test's exclusion list, so this stays a whole inventory as new device
+    /// families arrive.
     pub fn device_count(&self) -> usize {
-        // Simulator-generated capacitors integrate another device's private
-        // state variable, so the capacitor pipeline counts at authored length.
-        let passive = self.resistors.len()
-            + self.resistor_branches.len()
-            + self.capacitors.authored_len()
-            + self.inductors.len();
-        let sources = self.voltage_sources.len()
-            + self.current_sources.len()
-            + self.vcvs.len()
-            + self.vccs.len()
-            + self.cccs.len()
-            + self.ccvs.len()
-            + self.behavioral_sources.len();
-        let junction = self.diodes.len()
-            + self.bjts.len()
-            + self.mosfets.len()
-            + self.bsim3v3.len()
-            + self.bsim4v8.len()
-            + self.b3soi.len()
-            + self.b3soi_fd.len()
-            + self.b3soi_pd.len()
-            + self.ekv26s.len()
-            + self.ekv3s.len()
-            + self.vdmoses.len()
-            + self.jfets.len()
-            + self.xyce_memristors.len();
-        let switches = self.vswitches.len() + self.iswitches.len() + self.generic_switches.len();
-        let distributed = self.tlines.len() + self.coupled_tlines.len();
+        self.device_inventory().iter().map(|(_, count)| count).sum()
+    }
+
+    /// [`Self::device_count`] by family, under the name a SPICE user knows the
+    /// family by, leaving out the families the circuit has none of.
+    pub(crate) fn device_inventory(&self) -> Vec<(&'static str, usize)> {
         // A K card is one device however the builder realizes it: `couplings`
         // retains the linear cards whose mutual terms live in
         // `coupled_inductor_pairs`, `xyce_core_groups` holds the multi-winding
         // Core cards, and a single-winding Core reaches the circuit only as
         // the overlay owning a `YMIN!` namespace on its winding's inductor.
-        let magnetic = self.couplings.len()
-            + self.xyce_core_groups.len()
+        let cores = self.xyce_core_groups.len()
             + self
                 .jiles_atherton_inductors
                 .iter()
                 .filter(|binding| binding.core_output_name.is_some())
                 .count();
-        let compiled = self.xspice_instances.len();
-        let count = passive + sources + junction + switches + distributed + magnetic + compiled;
+        let veriloga = 0;
         #[cfg(feature = "veriloga")]
-        let count = count + self.veriloga_devices.len();
+        let veriloga = veriloga + self.veriloga_devices.len();
+        #[cfg(feature = "veriloga-builtins-base")]
+        let veriloga = veriloga + self.generated_veriloga_devices.len();
         // A mixed Verilog-AMS module is one authored X-card, exactly as an
         // analog Verilog-A instance is, and it is in no other collection: the
         // route that builds one is the branch the device route does not take.
         // Its A/D and D/A bridges are part of the host rather than instances of
         // their own, so counting the hosts counts the cards.
         #[cfg(feature = "veriloga")]
-        let count = count + self.mixed_signal_hosts.len();
-        #[cfg(feature = "veriloga-builtins-base")]
-        let count = count + self.generated_veriloga_devices.len();
-        count
+        let mixed_signal_modules = self.mixed_signal_hosts.len();
+        #[cfg(not(feature = "veriloga"))]
+        let mixed_signal_modules = 0;
+        let mut inventory = vec![
+            (
+                "resistor",
+                self.resistors.len() + self.resistor_branches.len(),
+            ),
+            // Simulator-generated capacitors integrate another device's
+            // private state variable, so capacitors count at authored length.
+            ("capacitor", self.capacitors.authored_len()),
+            ("inductor", self.inductors.len()),
+            ("vsource", self.voltage_sources.len()),
+            ("isource", self.current_sources.len()),
+            ("vcvs", self.vcvs.len()),
+            ("vccs", self.vccs.len()),
+            ("cccs", self.cccs.len()),
+            ("ccvs", self.ccvs.len()),
+            ("bsource", self.behavioral_sources.len()),
+            ("diode", self.diodes.len()),
+            ("bjt", self.bjts.len()),
+            ("mosfet", self.mosfets.len()),
+            ("bsim3", self.bsim3v3.len()),
+            ("bsim4", self.bsim4v8.len()),
+            ("b3soidd", self.b3soi.len()),
+            ("b3soifd", self.b3soi_fd.len()),
+            ("b3soipd", self.b3soi_pd.len()),
+            ("ekv", self.ekv26s.len()),
+            ("ekv3", self.ekv3s.len()),
+            ("vdmos", self.vdmoses.len()),
+            ("jfet", self.jfets.len()),
+            ("memristor", self.xyce_memristors.len()),
+            ("vswitch", self.vswitches.len()),
+            ("iswitch", self.iswitches.len()),
+            ("switch", self.generic_switches.len()),
+            ("tline", self.tlines.len()),
+            ("coupled line", self.coupled_tlines.len()),
+            ("coupling", self.couplings.len()),
+            ("core", cores),
+            ("xspice", self.xspice_instances.len()),
+            ("veriloga", veriloga),
+            ("mixed-signal module", mixed_signal_modules),
+        ];
+        inventory.retain(|(_, count)| *count > 0);
+        inventory
+    }
+
+    /// What a run elaborated, in one line: `Circuit: 142 nodes, 318 devices
+    /// (120 resistor, 64 bsim4, 40 capacitor, 2 vsource)`.
+    ///
+    /// Families run largest first, eight at most, and the rest are summed as
+    /// `N others` so a mixed-signal deck's line stays one a person reads.
+    pub(crate) fn inventory_line(&self) -> String {
+        const LISTED_FAMILIES: usize = 8;
+        let mut inventory = self.device_inventory();
+        inventory.sort_by(|(left_name, left), (right_name, right)| {
+            right.cmp(left).then_with(|| left_name.cmp(right_name))
+        });
+        let devices: usize = inventory.iter().map(|(_, count)| count).sum();
+        let mut families: Vec<String> = inventory
+            .iter()
+            .take(LISTED_FAMILIES)
+            .map(|(name, count)| format!("{count} {name}"))
+            .collect();
+        let others: usize = inventory
+            .iter()
+            .skip(LISTED_FAMILIES)
+            .map(|(_, count)| count)
+            .sum();
+        if others > 0 {
+            families.push(format!("{others} others"));
+        }
+        let nodes = self.num_nodes();
+        let mut line = format!(
+            "Circuit: {nodes} {}, {devices} {}",
+            if nodes == 1 { "node" } else { "nodes" },
+            if devices == 1 { "device" } else { "devices" },
+        );
+        if !families.is_empty() {
+            line.push_str(&format!(" ({})", families.join(", ")));
+        }
+        line
     }
 
     /// Create a triplet matrix for this circuit
@@ -1447,5 +1504,38 @@ impl CircuitData {
                     .expect("validated CPL native branch ordinals resolve to matrix indices");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod inventory_tests {
+    fn built(deck: &str) -> crate::circuit::CircuitData {
+        crate::engine::Engine::default()
+            .build_circuit(&crate::Netlist::parse(deck).expect("the deck parses"))
+            .expect("the deck builds")
+    }
+
+    #[test]
+    fn the_inventory_lists_eight_families_largest_first_then_the_rest() {
+        let circuit = built(
+            "inventory\nV1 in 0 1\nI1 0 b 1m\nR1 in a 1k\nR2 a 0 1k\nR3 b 0 1k\nR4 f 0 1k\n\
+             C1 a 0 1p\nL1 a c 1n\nD1 c 0 dmod\nE1 e 0 a 0 2\nG1 0 f a 0 1m\n\
+             Q1 a b 0 qmod\n.model dmod d (is=1e-14)\n.model qmod npn (bf=100)\n.end\n",
+        );
+        assert_eq!(
+            circuit.inventory_line(),
+            "Circuit: 6 nodes, 12 devices (4 resistor, 1 bjt, 1 capacitor, 1 diode, \
+             1 inductor, 1 isource, 1 vccs, 1 vcvs, 1 others)"
+        );
+        assert_eq!(circuit.device_count(), 12);
+    }
+
+    #[test]
+    fn a_small_circuit_lists_every_family() {
+        let circuit = built("divider\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.end\n");
+        assert_eq!(
+            circuit.inventory_line(),
+            "Circuit: 2 nodes, 3 devices (2 resistor, 1 vsource)"
+        );
     }
 }
