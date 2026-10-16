@@ -110,14 +110,26 @@ pub fn split_wire(
     Some((id1, id2))
 }
 
-/// Simplify wire path by removing intermediate points on straight segments
-/// Does `points` contain any collinear interior vertex that
-/// `simplify_wire_path` would remove? Cheap pre-check so cleanup passes
-/// don't clone paths that are already minimal.
+/// Does `points` contain any interior vertex that `simplify_wire_path` would
+/// remove? Cheap pre-check so cleanup passes don't clone paths that are
+/// already minimal.
 fn has_collinear_vertices(points: &[Point]) -> bool {
     points
         .windows(3)
-        .any(|w| (w[0].x == w[1].x && w[1].x == w[2].x) || (w[0].y == w[1].y && w[1].y == w[2].y))
+        .any(|w| redundant_vertex(w[0], w[1], w[2]))
+}
+
+/// Whether `vertex` adds nothing to the run from `previous` to `next`: the
+/// three lie on one horizontal or vertical line and `vertex` is not past
+/// either end. A vertex the run folds back at is where the conductor
+/// reaches farthest, so it stays.
+fn redundant_vertex(previous: Point, vertex: Point, next: Point) -> bool {
+    let on_one_line = (previous.x == vertex.x && vertex.x == next.x)
+        || (previous.y == vertex.y && vertex.y == next.y);
+    let delta = |from: i32, to: i32| i64::from(to) - i64::from(from);
+    let onward = delta(previous.x, vertex.x) * delta(vertex.x, next.x)
+        + delta(previous.y, vertex.y) * delta(vertex.y, next.y);
+    on_one_line && onward >= 0
 }
 
 /// Remove intermediate points on horizontal or vertical straight runs.
@@ -126,19 +138,13 @@ pub fn simplify_wire_path(points: Vec<Point>) -> Vec<Point> {
         return points;
     }
 
-    let mut result = Vec::with_capacity(points.len());
+    let mut result: Vec<Point> = Vec::with_capacity(points.len());
     result.push(points[0]);
 
     for i in 1..points.len() - 1 {
-        let prev = &points[i - 1];
-        let curr = &points[i];
-        let next = &points[i + 1];
-
-        let all_same_x = prev.x == curr.x && curr.x == next.x;
-        let all_same_y = prev.y == curr.y && curr.y == next.y;
-
-        if !all_same_x && !all_same_y {
-            result.push(*curr);
+        let previous = *result.last().unwrap_or(&points[0]);
+        if !redundant_vertex(previous, points[i], points[i + 1]) {
+            result.push(points[i]);
         }
     }
 
@@ -299,5 +305,30 @@ mod tests {
             Point::new(400, 390)
         ));
         assert_eq!(document.junctions[0].pos, Point::new(100, 100));
+    }
+
+    /// A route that runs out to (40, 0) and folds back to (20, 0) still
+    /// reaches (40, 0); only a vertex strictly between its neighbours on one
+    /// line is redundant.
+    #[test]
+    fn simplification_keeps_a_folded_back_span() {
+        let folded = vec![Point::origin(), Point::new(40, 0), Point::new(20, 0)];
+        assert_eq!(simplify_wire_path(folded.clone()), folded);
+
+        assert_eq!(
+            simplify_wire_path(vec![Point::origin(), Point::new(20, 0), Point::new(40, 0)]),
+            vec![Point::origin(), Point::new(40, 0)]
+        );
+        assert_eq!(
+            simplify_wire_path(vec![Point::origin(), Point::origin(), Point::new(0, 40)]),
+            vec![Point::origin(), Point::new(0, 40)]
+        );
+
+        let mut document = SchematicDocument {
+            wires: vec![Wire::new(1, folded.clone())],
+            ..SchematicDocument::default()
+        };
+        optimize_all_wires(&mut document);
+        assert_eq!(document.wires[0].points, folded);
     }
 }

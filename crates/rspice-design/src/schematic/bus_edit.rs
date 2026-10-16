@@ -425,7 +425,10 @@ pub fn simplify_polyline(points: Vec<Point>) -> Vec<Point> {
             let collinear = (i128::from(b.x) - i128::from(a.x))
                 * (i128::from(point.y) - i128::from(b.y))
                 == (i128::from(b.y) - i128::from(a.y)) * (i128::from(point.x) - i128::from(b.x));
-            if !collinear {
+            // A vertex the bus folds back at is where it reaches farthest.
+            let onward = (i128::from(b.x) - i128::from(a.x)) * (i128::from(point.x) - i128::from(b.x))
+                + (i128::from(b.y) - i128::from(a.y)) * (i128::from(point.y) - i128::from(b.y));
+            if !collinear || onward < 0 {
                 break;
             }
             result.pop();
@@ -557,6 +560,17 @@ fn destination_matches_slice(destination_buses: &[&Bus], slice: &BusSlice) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A bus routed out to (40, 0) and back to (20, 0) still reaches (40, 0).
+    #[test]
+    fn simplification_keeps_a_folded_back_bus_span() {
+        let folded = vec![Point::origin(), Point::new(40, 0), Point::new(20, 0)];
+        assert_eq!(simplify_polyline(folded.clone()), folded);
+        assert_eq!(
+            simplify_polyline(vec![Point::origin(), Point::new(20, 20), Point::new(40, 40)]),
+            vec![Point::origin(), Point::new(40, 40)]
+        );
+    }
 
     #[test]
     fn discarded_preparations_preserve_document_and_identity() {
