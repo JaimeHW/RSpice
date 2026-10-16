@@ -170,12 +170,7 @@ fn semantic_status_marks_are_font_independent_vector_geometry() {
     let ctx = egui::Context::default();
     let output = ctx.run_ui(Default::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
-            for mark in [
-                StatusMark::Success,
-                StatusMark::Warning,
-                StatusMark::Failure,
-                StatusMark::Neutral,
-            ] {
+            for mark in [StatusMark::Warning, StatusMark::Failure] {
                 let (rect, _) = ui.allocate_exact_size(Vec2::splat(14.0), Sense::hover());
                 paint_status_mark(ui.painter(), rect, mark, Color32::WHITE);
             }
@@ -192,13 +187,15 @@ fn semantic_status_marks_are_font_independent_vector_geometry() {
             )
         })
         .collect::<Vec<_>>();
+    // The warning triangle.
     assert_eq!(
         status_shapes
             .iter()
             .filter(|shape| matches!(&shape.shape, Shape::Path(_)))
             .count(),
-        2
+        1
     );
+    // The failure cross, which is two strokes.
     assert_eq!(
         status_shapes
             .iter()
@@ -206,12 +203,13 @@ fn semantic_status_marks_are_font_independent_vector_geometry() {
             .count(),
         2
     );
+    // No mark is a dot: the kit has no neutral mark to paint one with.
     assert_eq!(
         status_shapes
             .iter()
             .filter(|shape| matches!(&shape.shape, Shape::Circle(_)))
             .count(),
-        1
+        0
     );
     assert!(
         output

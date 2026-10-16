@@ -30,7 +30,6 @@ pub mod notice;
 #[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
 pub mod painted_runs;
 mod pane;
-mod schematic_command;
 mod segmented;
 mod select;
 mod status_mark;
@@ -57,7 +56,6 @@ pub use form::{
 pub use pane::{
     PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W, PaneSide, pane_footer, pane_header, two_pane,
 };
-pub use schematic_command::{SchematicCommandPreview, schematic_command_workflow};
 pub use segmented::{SegmentedWidth, segmented};
 pub use select::{SelectOutput, select};
 pub use select::{select_mono_with_response, select_with_disabled, select_with_response};

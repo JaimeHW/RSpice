@@ -1849,22 +1849,6 @@ fn card_with_body_margin(ui: &mut Ui, title: &str, body_margin: i8, body: impl F
         });
 }
 
-pub fn status_dot(ui: &mut Ui, color: Color32, text: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.horizontal_top(|ui| {
-        let (rect, _) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
-        ui.painter().circle_filled(rect.center(), 3.0, color);
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(text)
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-            )
-            .wrap(),
-        );
-    });
-}
-
 /// A workspace page's heading: its title, and the sentence under it when the
 /// page needs one.
 ///

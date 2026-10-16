@@ -21,13 +21,14 @@ use crate::palette::Palette;
 use crate::theme::{self, FontWeight};
 use crate::tokens::{self, Tokens};
 
-/// What a status mark says.
+/// The vector shape a status mark is drawn as.
+///
+/// Only the two a [`Problem`] can be. There is no success mark and no neutral
+/// dot: success is the absence of a problem, so nothing is painted for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusMark {
-    Success,
     Warning,
     Failure,
-    Neutral,
 }
 
 /// A problem the reader has to notice.
@@ -94,16 +95,6 @@ pub fn paint_status_mark(painter: &egui::Painter, rect: Rect, mark: StatusMark, 
     let half = side * 0.42;
     let stroke = Stroke::new((side * 0.11).max(1.0), color);
     match mark {
-        StatusMark::Success => {
-            painter.add(Shape::line(
-                vec![
-                    Pos2::new(center.x - half, center.y),
-                    Pos2::new(center.x - half * 0.22, center.y + half * 0.72),
-                    Pos2::new(center.x + half, center.y - half * 0.78),
-                ],
-                stroke,
-            ));
-        }
         StatusMark::Warning => {
             painter.add(Shape::closed_line(
                 vec![
@@ -129,9 +120,6 @@ pub fn paint_status_mark(painter: &egui::Painter, rect: Rect, mark: StatusMark, 
                 ],
                 stroke,
             );
-        }
-        StatusMark::Neutral => {
-            painter.circle_filled(center, (side * 0.18).max(1.25), color);
         }
     }
 }
