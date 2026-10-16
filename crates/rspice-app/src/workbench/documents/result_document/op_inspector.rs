@@ -177,13 +177,12 @@ fn device_target(state: &AppState, name: &str) -> Option<u64> {
     if !result_mapping_is_current(state) {
         return None;
     }
-    state
-        .schematic
-        .document()
-        .components
-        .iter()
-        .find(|component| component.spice_instance_name().eq_ignore_ascii_case(name))
-        .map(|component| component.id)
+    rspice_design::schematic::component::component_for_engine_device(
+        &state.schematic.document().components,
+        &state.workspace.content.occurrence_path(),
+        name,
+    )
+    .map(|component| component.id)
 }
 fn apply_action(ui: &Ui, state: &mut AppState, action: OpAction) {
     match action {

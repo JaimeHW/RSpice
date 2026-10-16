@@ -1173,9 +1173,35 @@ fn probe_spelling_for(
         return Ok(OccurrenceProbeSpelling::verbatim(display));
     };
     let occurrence = state.workspace.content.occurrence_path();
-    OccurrenceProbeSpelling::for_leaf(&occurrence, quantity, name).ok_or_else(|| {
-        format!("instance path {occurrence} has no name the engine can be asked for")
-    })
+    OccurrenceProbeSpelling::for_leaf(&occurrence, quantity, name)
+        .ok_or_else(|| unspellable_occurrence(&occurrence))
+}
+
+fn unspellable_occurrence(occurrence: &crate::state::InstancePath) -> String {
+    format!("instance path {occurrence} has no name the engine can be asked for")
+}
+
+/// Commit a current probe on one element at the active occurrence. The reader
+/// is shown the element's drawn name; the engine is asked for the element the
+/// deck writes, which a prefix or a behavioural lowering can rename.
+fn commit_element_current(
+    state: &mut AppState,
+    drawn: &str,
+    written: &str,
+) -> (OccurrenceProbeSpelling, ProbeSignalOutcome) {
+    let occurrence = state.workspace.content.occurrence_path();
+    match OccurrenceProbeSpelling::for_element(&occurrence, 'I', drawn, written) {
+        Some(spelling) => {
+            let outcome = request_probe_signal(state, &spelling);
+            (spelling, outcome)
+        }
+        None => (
+            OccurrenceProbeSpelling::verbatim(format!("I({drawn})")),
+            ProbeSignalOutcome::Rejected {
+                reason: unspellable_occurrence(&occurrence),
+            },
+        ),
+    }
 }
 
 /// Resolve a probe at the active occurrence and commit it through `request`.
@@ -1556,6 +1582,16 @@ fn retained_probe_net_name(state: &AppState, position: Point) -> Option<String> 
         .cloned()
 }
 
+/// What a click on a component probes, unscoped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ComponentProbe {
+    /// The voltage of the net under an exact pin.
+    Voltage(String),
+    /// The current of the element itself, shown by the name the drawing
+    /// gives it and asked for by the name the deck writes it under.
+    Current { drawn: String, written: String },
+}
+
 /// The quantity and the local leaf a click on a component probes, unscoped.
 ///
 /// The occurrence is applied later, at the request boundary: what the drawing
@@ -1565,7 +1601,7 @@ fn component_probe_expression(
     component_id: u64,
     grid_pos: Point,
     symbol_context: &SchematicSymbolContext,
-) -> Option<(char, String)> {
+) -> Option<ComponentProbe> {
     let component = state
         .schematic
         .document()
@@ -1592,7 +1628,7 @@ fn component_probe_expression(
     {
         let net_name = live_terminal_probe_net_name(state, component.id, pin, terminal_position)
             .or_else(|| retained_probe_net_name(state, terminal_position))?;
-        return Some(('V', net_name));
+        return Some(ComponentProbe::Voltage(net_name));
     }
 
     // Structural objects and synthesized/multi-port blocks do not own one
@@ -1600,7 +1636,9 @@ fn component_probe_expression(
     // conductor or author an exact winding/lead expression. Ordinary emitted
     // SPICE devices use the conventional positive-reference I(instance)
     // quantity, including multi-terminal devices whose dialect defines that
-    // accessor (for example the drain/reference lead of a MOS device).
+    // accessor (for example the drain/reference lead of a MOS device). The
+    // engine knows the device by the element the deck writes: a resistor
+    // drawn `C4` is `RC4`, and a limited VCVS drawn `E1` is the `B1` card.
     if matches!(
         component.kind,
         ComponentType::Ground
@@ -1613,7 +1651,10 @@ fn component_probe_expression(
         return None;
     }
 
-    Some(('I', component.spice_instance_name()))
+    Some(ComponentProbe::Current {
+        drawn: component.spice_instance_name(),
+        written: component.written_element_name(),
+    })
 }
 
 fn handle_probe_click(
@@ -1738,8 +1779,7 @@ fn handle_component_probe(
             component.kind.display_name()
         );
 
-        let Some((quantity, leaf)) =
-            component_probe_expression(state, comp_id, grid_pos, symbol_context)
+        let Some(probe) = component_probe_expression(state, comp_id, grid_pos, symbol_context)
         else {
             let message = format!(
                 "{comp_name} has no unambiguous current at that body location; probe an exact terminal or conductor for voltage, or add an exact lead/winding current expression in Saved outputs"
@@ -1753,9 +1793,15 @@ fn handle_component_probe(
             return;
         };
 
-        let display = format!("{quantity}({leaf})");
-        let (spelling, outcome) =
-            commit_probe_request(state, &leaf, &display, request_probe_signal);
+        let (spelling, outcome) = match probe {
+            ComponentProbe::Voltage(net) => {
+                let display = format!("V({net})");
+                commit_probe_request(state, &net, &display, request_probe_signal)
+            }
+            ComponentProbe::Current { drawn, written } => {
+                commit_element_current(state, &drawn, &written)
+            }
+        };
         let retain_marker = !matches!(
             &outcome,
             ProbeSignalOutcome::Rejected { .. } | ProbeSignalOutcome::GroundReference

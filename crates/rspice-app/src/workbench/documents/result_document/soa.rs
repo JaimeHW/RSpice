@@ -291,16 +291,12 @@ fn soa_device_target(
     if !result_mapping_is_current(simulation, workspace, schematic, analysis_key) {
         return None;
     }
-    schematic
-        .document()
-        .components
-        .iter()
-        .find(|component| {
-            component
-                .spice_instance_name()
-                .eq_ignore_ascii_case(device_id)
-        })
-        .map(|component| (component.id, component.pos))
+    rspice_design::schematic::component::component_for_engine_device(
+        &schematic.document().components,
+        &workspace.content.occurrence_path(),
+        device_id,
+    )
+    .map(|component| (component.id, component.pos))
 }
 
 fn apply_schematic_cross_probe(ui: &Ui, state: &mut AppState, selection: &SoaRuleSelection) {
