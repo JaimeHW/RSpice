@@ -410,13 +410,29 @@ fn click_on(render: &Render, message: &str) -> egui::RawInput {
 }
 
 /// Every cell sits under its own heading, fits the column it is printed in,
-/// and is printed whole where the column has room for it.
+/// and is printed whole wherever the column has room for it: a cell is cut
+/// only when its whole text would not fit.
 ///
 /// This is the assertion the first version of this page could not have passed:
 /// it fixed two columns at 58 px and 62 px and painted the rest over them.
 #[test]
 fn every_cell_is_painted_under_its_own_heading_and_fits_its_column() {
     let mut state = state_with_design_findings();
+    let whole: Vec<String> = {
+        let listed = listing(&state);
+        let row = (0..listed.len())
+            .filter_map(|index| listed.row(index))
+            .find(|row| row.message == "R1 has no resistance")
+            .expect("the error finding is listed");
+        vec![
+            severity_cell(&row),
+            row.code.to_owned(),
+            row.subject.clone(),
+            row.producer.to_owned(),
+            row.location.clone(),
+            row.message.to_owned(),
+        ]
+    };
     let render = render(&mut state, sized(egui::RawInput::default()));
 
     let headings: Vec<egui::Pos2> = ProblemColumn::ALL
@@ -464,10 +480,24 @@ fn every_cell_is_painted_under_its_own_heading_and_fits_its_column() {
             cell.0,
             cell.1.right(),
         );
-        assert!(
-            !cell.0.contains('…'),
-            "{:?} fits its column at {WIDTH} px and is printed whole",
-            cell.0,
+        // The face is monospace, so the painted cell gives the advance, and
+        // the whole text's width follows from its length.
+        if cell.0 != whole[index] {
+            let advance = cell.1.width() / cell.0.chars().count() as f32;
+            let needed = whole[index].chars().count() as f32 * advance;
+            let room = column_end - heading.x;
+            assert!(
+                cell.0.contains('…') && needed > room + 0.5,
+                "{:?} is cut to {:?} though its {needed} fits the column's {room}",
+                whole[index],
+                cell.0,
+            );
+        }
+    }
+    for (cell, whole) in row.iter().zip(&whole).take(4) {
+        assert_eq!(
+            &cell.0, whole,
+            "the severity, rule, subject and producer fit whole at {WIDTH} px",
         );
     }
     assert_eq!(row[0].0, "Error", "the severity cell leads the row");
@@ -925,15 +955,13 @@ fn copying_what_is_listed_includes_collapsed_groups() {
 #[test]
 fn a_copied_row_keeps_tabs_and_line_breaks_inside_their_cell() {
     let mut state = open_state();
-    publish(
-        &mut state,
-        vec![record(
-            &state,
-            "T-1",
-            DiagnosticLevel::Error,
-            "two\tcolumns\nand \"two\" lines",
-        )],
+    let message = record(
+        &state,
+        "T-1",
+        DiagnosticLevel::Error,
+        "two\tcolumns\nand \"two\" lines",
     );
+    publish(&mut state, vec![message]);
     let listed = listing(&state);
     let row = listed.row(0).expect("listed");
     assert_eq!(
@@ -1396,15 +1424,13 @@ fn a_clicked_row_stays_in_view_when_the_detail_region_opens() {
 #[test]
 fn a_finding_with_nowhere_to_go_announces_as_text() {
     let mut state = open_state();
-    publish(
-        &mut state,
-        vec![record(
-            &state,
-            "TEST-NOWHERE",
-            DiagnosticLevel::Error,
-            "a finding with nowhere to go",
-        )],
+    let nowhere = record(
+        &state,
+        "TEST-NOWHERE",
+        DiagnosticLevel::Error,
+        "a finding with nowhere to go",
     );
+    publish(&mut state, vec![nowhere]);
 
     let render = render(&mut state, sized(egui::RawInput::default()));
     let row = render
@@ -1531,6 +1557,11 @@ fn the_detail_region_states_where_the_batch_stands_only_when_it_is_not_current()
     assert!(
         stale.has("Stale Error"),
         "and its row says so in the severity column",
+    );
+    assert!(
+        stale.has("Select one to see what moved") && !stale.has("Run the checks"),
+        "the note under the rows names no remedy that only some producers take: {:?}",
+        stale.texts,
     );
 }
 

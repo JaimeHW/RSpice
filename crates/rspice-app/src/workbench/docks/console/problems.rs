@@ -180,14 +180,7 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) {
         );
         strip::filter_strip(ui, &mut view, &arrangement.tally);
         if view.is_filtered() && strip::filtered_out(ui, arrangement.listed, total) {
-            view = ProblemsView {
-                sort: view.sort,
-                descending: view.descending,
-                grouping: view.grouping,
-                collapsed: view.collapsed.clone(),
-                explain: view.explain,
-                ..ProblemsView::default()
-            };
+            view.clear_filters();
         }
         if let Some(column) = grid::header(ui, &columns, &view) {
             view.order_by(column);
@@ -602,6 +595,12 @@ fn route_refusal(state: &AppState, route: &DiagnosticRoute) -> Option<String> {
 ///
 /// A check that cannot run says why in its producer's words: "some checks
 /// cannot run" alone leaves the reader nothing to repair.
+///
+/// Stale findings come from producers that are refreshed in different ways —
+/// a rule check is re-run, a failed run is run again, a dispatch is checked
+/// again at the next run, a netlist is validated as it is edited — so the
+/// note names no remedy. What moved under a finding, which is what says which
+/// of those it needs, is stated in the detail region of the finding itself.
 fn note(listed: &DiagnosticListing<'_>) -> Option<String> {
     if let Some(reason) = listed.unavailable() {
         return Some(format!(
@@ -609,7 +608,9 @@ fn note(listed: &DiagnosticListing<'_>) -> Option<String> {
         ));
     }
     listed.has_stale().then(|| {
-        "Faint findings describe the design before the last edit. Run the checks again.".to_owned()
+        "Faint findings were reported against inputs that have since changed. \
+         Select one to see what moved."
+            .to_owned()
     })
 }
 

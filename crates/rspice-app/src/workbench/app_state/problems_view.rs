@@ -173,6 +173,33 @@ impl ProblemsView {
         }
     }
 
+    /// Clear every filter, so every finding is listed — what the strip's
+    /// "List everything" does, and what a surface that sends the reader here
+    /// to read particular findings does first, so a filter left from earlier
+    /// cannot hide them. The order, the grouping and which groups are
+    /// collapsed are how the list is read rather than what it holds, and a
+    /// collapsed group still counts its findings in its header, so they stay.
+    ///
+    /// Destructured, so a filter added to the position has to be cleared here
+    /// or said not to be one.
+    pub(in crate::workbench) fn clear_filters(&mut self) {
+        let Self {
+            sort: _,
+            descending: _,
+            severities,
+            producer,
+            text,
+            waived,
+            grouping: _,
+            collapsed: _,
+            explain: _,
+        } = self;
+        *severities = SeverityFilter::default();
+        *producer = None;
+        text.clear();
+        *waived = true;
+    }
+
     /// Whether anything is narrowing the list.
     pub(in crate::workbench) fn is_filtered(&self) -> bool {
         !self.text.is_empty()
@@ -297,6 +324,35 @@ mod tests {
             "grouping shows the same rows in groups; it narrows nothing"
         );
         assert!(!grouped.lists_everything_as_reported());
+    }
+
+    /// Clearing the filters lists everything and keeps how it is read.
+    #[test]
+    fn clearing_the_filters_lists_everything_and_keeps_the_order_and_groups() {
+        let mut view = ProblemsView::default();
+        view.text = "ground".to_owned();
+        view.producer = Some("rspice.design.rules".to_owned());
+        view.waived = false;
+        view.severities.toggle(DiagnosticLevel::Hint);
+        view.order_by(ProblemColumn::Code);
+        view.order_by(ProblemColumn::Code);
+        view.grouping = ProblemGrouping::Code;
+        view.collapse("DRC-FLOATING-NODE", true);
+        view.explain = true;
+
+        view.clear_filters();
+        assert!(!view.is_filtered());
+        assert_eq!(
+            view,
+            ProblemsView {
+                sort: Some(ProblemColumn::Code),
+                descending: true,
+                grouping: ProblemGrouping::Code,
+                collapsed: ["DRC-FLOATING-NODE".to_owned()].into(),
+                explain: true,
+                ..ProblemsView::default()
+            },
+        );
     }
 
     fn read_narrowly(state: &mut crate::workbench::app_state::AppState) {
