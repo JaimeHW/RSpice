@@ -58,8 +58,13 @@ pub(super) enum SupplyDerivation {
     /// `.options auto_bridge_parm_d` renames, or a subcircuit-scoped value for
     /// this net. Authoritative and silent, as it has always been.
     Declared,
-    /// Exactly one rail reaches this net.
-    Derived { source: String, level: crate::Value },
+    /// Exactly one rail reaches this net. The boundary binds to the rail's
+    /// node live: see [`live_supply_net`].
+    Derived {
+        source: String,
+        level: crate::Value,
+        node: String,
+    },
     /// No rail reaches this net.
     Defaulted,
     /// More than one rail reaches this net, at different levels.
@@ -136,6 +141,7 @@ impl BoundarySupplies {
                 derivation: SupplyDerivation::Derived {
                     source: only.source.clone(),
                     level: only.level,
+                    node: only.node.clone(),
                 },
             },
             many => ResolvedSupply {
@@ -159,6 +165,7 @@ impl BoundarySupplies {
         &self,
         node_label: &str,
         derivation: &SupplyDerivation,
+        live: bool,
     ) -> Result<(), SimulationError> {
         if let SupplyDerivation::Ambiguous { rails } = derivation {
             let named = rails
@@ -186,7 +193,17 @@ impl BoundarySupplies {
 
         match derivation {
             SupplyDerivation::Declared | SupplyDerivation::Ambiguous { .. } => {}
-            SupplyDerivation::Derived { source, level } => log::warn!(
+            SupplyDerivation::Derived {
+                source,
+                level,
+                node,
+            } if live => log::warn!(
+                "supply for boundary net '{node_label}' derived from {source} = {level} V, bound \
+                 live to net '{node}' (inferred); set '.param {}={level}' to make it explicit \
+                 and static",
+                self.parameter
+            ),
+            SupplyDerivation::Derived { source, level, .. } => log::warn!(
                 "supply for boundary net '{node_label}' derived from {source} = {level} V; set \
                  '.param {}={level}' to make it explicit",
                 self.parameter
@@ -199,6 +216,107 @@ impl BoundarySupplies {
         }
         Ok(())
     }
+}
+
+/// The net a planned boundary's supply binds to live, if it binds to one.
+///
+/// A connect statement naming a net (`#(.vsup(vdd))`) binds to it, declared.
+/// A connect statement stating a level, or the deck's `.param`, is static, as
+/// Spectre's default connect rules are. A rail inferred from the netlist binds
+/// to the rail's node, because that inference is a statement about which net
+/// the boundary is powered from, and Spectre's supply-sensitive connect
+/// modules read that net's voltage rather than a snapshot of it.
+///
+/// Only the A/D and D/A converters track a supply; a bidirectional boundary
+/// converts against its static level.
+pub(super) fn live_supply_net(bridge: &super::PlannedXspiceAutoBridge) -> Option<&str> {
+    if !matches!(
+        bridge.kind,
+        super::XspiceAutoBridgeKind::Adc | super::XspiceAutoBridgeKind::Dac
+    ) {
+        return None;
+    }
+    #[cfg(feature = "veriloga")]
+    if let Some(selected) = &bridge.connect_module {
+        if let Some(net) = selected.supply_net() {
+            return Some(net);
+        }
+        if selected.states_supply() {
+            return None;
+        }
+    }
+    match bridge.supply.as_ref()? {
+        SupplyDerivation::Derived { node, .. } => Some(node),
+        SupplyDerivation::Declared
+        | SupplyDerivation::Defaulted
+        | SupplyDerivation::Ambiguous { .. } => None,
+    }
+}
+
+/// The circuit node a planned converter's live supply binds to.
+///
+/// A connect statement may name a net the deck does not have, which is a
+/// refusal naming both rather than a converter silently left static.
+pub(super) fn live_supply_node(
+    circuit: &crate::CircuitData,
+    bridge: &super::PlannedXspiceAutoBridge,
+) -> Result<Option<usize>, SimulationError> {
+    let Some(net) = live_supply_net(bridge) else {
+        return Ok(None);
+    };
+    match circuit.get_node_by_name(net) {
+        Some(node) if node > 0 => Ok(Some(node)),
+        _ => {
+            let names = circuit.node_names_sorted();
+            Err(SimulationError::Circuit(format!(
+                "boundary net '{}' converts against supply net '{net}', which is not a net of \
+                 this circuit (or is ground); name the net that powers the boundary",
+                super::xspice_auto_bridge_node_label(Some(&names), bridge.node)
+            )))
+        }
+    }
+}
+
+/// The supply-tracking form of a built-in converter: the model reads its
+/// supply through a `sup` port wired to `supply`. The Verilog-AMS route's
+/// converters choose their tracking form themselves; the XSPICE auto-bridge's
+/// stock `adc_bridge`/`dac_bridge` are swapped for their tracking twins, so a
+/// deck's explicit `adc_bridge` cards keep the stock model untouched.
+pub(super) fn with_live_supply(
+    bridge: &super::PlannedXspiceAutoBridge,
+    supply: Option<usize>,
+    code_model: std::sync::Arc<dyn crate::xspice::CodeModel>,
+    mut connections: Vec<crate::xspice::PortConnection>,
+) -> (
+    std::sync::Arc<dyn crate::xspice::CodeModel>,
+    Vec<crate::xspice::PortConnection>,
+) {
+    let Some(supply) = supply else {
+        return (code_model, connections);
+    };
+    connections.push(crate::xspice::PortConnection::Analog(supply));
+    if bridge.event_node.is_some() {
+        return (code_model, connections);
+    }
+    let code_model: std::sync::Arc<dyn crate::xspice::CodeModel> = match bridge.kind {
+        super::XspiceAutoBridgeKind::Adc => {
+            std::sync::Arc::new(crate::xspice::models::TrackingAdcBridge)
+        }
+        super::XspiceAutoBridgeKind::Dac => {
+            std::sync::Arc::new(crate::xspice::models::TrackingDacBridge)
+        }
+        _ => code_model,
+    };
+    (code_model, connections)
+}
+
+/// Say that a boundary converts against a net its connect statement named.
+#[cfg(feature = "veriloga")]
+pub(super) fn report_declared_live(node_label: &str, net: &str) {
+    log::info!(
+        "supply for boundary net '{node_label}' is net '{net}', bound live (declared by its \
+         connect statement)"
+    );
 }
 
 fn same_level(left: crate::Value, right: crate::Value) -> bool {

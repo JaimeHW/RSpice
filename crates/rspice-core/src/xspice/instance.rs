@@ -1467,7 +1467,7 @@ impl XspiceInstance {
             .port_indices
             .get(port)
             .and_then(|index| self.ports.get(*index))?;
-        if spec.is_vector {
+        let input = if spec.is_vector {
             self.context
                 .input_analog_vector_values(port)?
                 .get(element)
@@ -1476,7 +1476,11 @@ impl XspiceInstance {
             (element == 0)
                 .then(|| self.context.input_analog(port))
                 .flatten()
-        }
+        }?;
+        Some(
+            self.model
+                .analog_threshold_input(&self.context, port, element, input),
+        )
     }
 
     /// Whether this instance can be resumed from a transient checkpoint.

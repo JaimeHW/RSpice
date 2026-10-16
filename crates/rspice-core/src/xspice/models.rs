@@ -178,6 +178,7 @@ pub(crate) use bridges::OFFICIAL_BRIDGE_TIMING_MIN;
 pub use bridges::{AdcBridge, BidiBridge, DacBridge};
 #[cfg(feature = "veriloga")]
 pub(crate) use bridges::{MixedAdcBridge, MixedDacBridge};
+pub(crate) use bridges::{TrackingAdcBridge, TrackingDacBridge};
 
 pub use digital_output::{
     XyceDAdd, XyceDGate, XyceDLegacyDff, XyceDLegacyGate, XyceDSequential, XyceDTff,

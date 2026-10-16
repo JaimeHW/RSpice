@@ -818,6 +818,23 @@ pub trait CodeModel: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// The quantity a declared input threshold compares, from the input's
+    /// connected value `input`.
+    ///
+    /// The default is the input itself. A converter whose threshold follows a
+    /// supply net instead declares a threshold of zero on the crossing
+    /// function `input − ratio·V(supply)`, so that a crossing the supply's
+    /// movement causes is localized exactly as an input's own is.
+    fn analog_threshold_input(
+        &self,
+        _ctx: &super::CmContext,
+        _port: &str,
+        _element: usize,
+        input: Value,
+    ) -> Value {
+        input
+    }
+
     /// Initialize instance state
     ///
     /// Called once when the instance is created.

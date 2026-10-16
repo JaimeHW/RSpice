@@ -261,6 +261,10 @@ fn a_one_volt_rail_sets_the_auto_bridge_output_level() {
         warning.contains("derived from V1 = 1 V") && warning.to_lowercase().contains("'mix'"),
         "the warning must name the source, the level and the net, got: {warning}"
     );
+    assert!(
+        warning.contains("bound live to net 'VDD' (inferred)"),
+        "the auto-bridge route binds the inferred rail live, got: {warning}"
+    );
 }
 
 #[test]
@@ -318,6 +322,10 @@ fn a_five_volt_rail_sets_the_mixed_boundary_output_level() {
     assert!(
         warning.contains("derived from V1 = 5 V"),
         "the mixed route derives the same rail the auto-bridge route does, got: {warning}"
+    );
+    assert!(
+        warning.contains("bound live to net 'VDD' (inferred)"),
+        "the report names the supply net and says the binding is live, got: {warning}"
     );
 }
 
