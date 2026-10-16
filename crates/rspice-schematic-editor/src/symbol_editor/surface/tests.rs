@@ -1,6 +1,7 @@
 //! Rendered symbol controls respect host capabilities and return requests without app state.
 
 use super::*;
+use rspice_design_model::cell_view::CellViewRef;
 
 fn text_rect(shape: &egui::Shape, label: &str) -> Option<Rect> {
     match shape {
