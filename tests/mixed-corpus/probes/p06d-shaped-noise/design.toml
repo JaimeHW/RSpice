@@ -1,0 +1,18 @@
+schema = "rspice-mixed-design/1"
+id = "P06d"
+title = "P0.6d: module-shaped noise in transient noise"
+exit_phases = ["P1"]
+dialect = "best-available"
+features = []
+
+[[variant]]
+name = "base"
+families = ["va-runtime"]
+today = "runs"
+
+[[analysis]]
+id = "trnoise"
+variants = ["base"]
+oracles = ["O6"]
+timeout_s = 900
+phase = "P1"

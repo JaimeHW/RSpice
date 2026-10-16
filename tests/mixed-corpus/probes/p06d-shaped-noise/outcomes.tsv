@@ -1,0 +1,3 @@
+# variant	analysis	route	outcome	detail
+base	trnoise	interp	pass	sigma.shaped (O6) std over 100000 samples: 5.033054e-4 in [4.710000e-4, 5.290000e-4]
+base	trnoise	native	pass	sigma.shaped (O6) std over 100000 samples: 5.033054e-4 in [4.710000e-4, 5.290000e-4]

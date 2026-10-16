@@ -10,6 +10,9 @@
 //!   rise at 30 ns and `i(vp) = −(1 mA + 1/r_k)` per point and trial.
 //! - (c) `p06c-dd-mixed`: is a read-before-assign variable retained across
 //!   accepted points on both routes? `V(o)[k] = V(a)[k−1]`.
+//! - (d) `p06d-shaped-noise`: does transient noise render noise a module
+//!   shapes through `laplace_np` at `|H|²·S`? A sample standard deviation
+//!   against an interval from the shaped process's own correlation.
 //!
 //! Interval and per-trial assertions use the ordinary quantity kinds; the
 //! one-step delay is a probe assertion (`kind = "assert"`) evaluated here.

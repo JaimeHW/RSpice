@@ -1,0 +1,5 @@
+* P0.6d transient noise a Verilog-A module shapes through laplace_np
+.hdl "../net/shaped.va"
+x1 p 0 shaped
+.tran 10n 1m NOISEFMAX=50meg NOISEFMIN=10k NOISESEED=7
+.end
