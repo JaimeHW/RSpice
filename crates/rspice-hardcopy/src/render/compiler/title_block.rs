@@ -99,6 +99,7 @@ impl SemanticSceneCompiler<'_> {
                     field.value,
                     field.authority
                         == rspice_design_model::design_management::DrawingSheetTitleFieldValueAuthority::Automatic,
+                    field.id.emphasised(),
                 )
             })
             .collect::<Vec<_>>();
@@ -150,7 +151,7 @@ impl SemanticSceneCompiler<'_> {
         let lettering = rspice_design_model::design_management::DRAWING_SHEET_TITLE_BLOCK_LETTERING;
         let value_chars = capacity(lettering.data_um)?;
         let caption_chars = capacity(lettering.caption_um)?;
-        for (index, (label, value, automatic)) in fields.into_iter().enumerate() {
+        for (index, (label, value, automatic, emphasised)) in fields.into_iter().enumerate() {
             let row = index as u64 / columns;
             let column = index as u64 % columns;
             let label = if automatic {
@@ -194,7 +195,11 @@ impl SemanticSceneCompiler<'_> {
                         + drawing_sheet_mono_baseline_offset_um(lettering.data_um) as i64,
                 )?,
                 &truncate_title_block_text(&value, value_chars),
-                SceneFont::MonospaceMedium,
+                if emphasised {
+                    SceneFont::MonospaceMedium
+                } else {
+                    SceneFont::Monospace
+                },
                 drawing_sheet_mono_em_um(lettering.data_um),
                 stroke.color,
                 text_rotation,

@@ -7,8 +7,8 @@ use rspice_design_model::design_management::{
     drawing_sheet_zone_lettering_um,
 };
 
-/// Em of every caption and every value the title block plots.
-fn plotted_title_ems(format: &SchematicSheetFormat) -> (Vec<u64>, Vec<u64>) {
+/// Every line the title block plots, with the face and em it is set in.
+fn plotted_title_lines(format: &SchematicSheetFormat) -> Vec<(SceneFont, u64, String)> {
     let source = resolved_blank_schematic(format);
     // The title block alone, so every monospace line is one of its captions.
     let schematic = SchematicHardcopySetup::new(
@@ -28,19 +28,63 @@ fn plotted_title_ems(format: &SchematicSheetFormat) -> (Vec<u64>, Vec<u64>) {
         resolved_metadata(),
     )
     .unwrap();
-    let mut captions = Vec::new();
-    let mut values = Vec::new();
-    for primitive in scene.primitives() {
-        let ScenePrimitive::Text { font, size, .. } = primitive else {
-            continue;
-        };
-        match font {
-            SceneFont::Monospace => captions.push(size.micrometres()),
-            SceneFont::MonospaceMedium => values.push(size.micrometres()),
-            _ => {}
-        }
-    }
-    (captions, values)
+    scene
+        .primitives()
+        .iter()
+        .filter_map(|primitive| match primitive {
+            ScenePrimitive::Text {
+                font: font @ (SceneFont::Monospace | SceneFont::MonospaceMedium),
+                size,
+                text,
+                ..
+            } => Some((*font, size.micrometres(), text.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Em of every caption and every value the title block plots. The block
+/// letters each field's caption and then its value, so the two alternate.
+fn plotted_title_ems(format: &SchematicSheetFormat) -> (Vec<u64>, Vec<u64>) {
+    let lines = plotted_title_lines(format);
+    assert!(
+        lines.len().is_multiple_of(2),
+        "every caption is followed by its value"
+    );
+    lines
+        .chunks(2)
+        .map(|field| (field[0].1, field[1].1))
+        .unzip()
+}
+
+#[test]
+fn only_the_document_identifier_is_plotted_in_the_heavier_weight() {
+    // ISO 7200 emphasises the identification number alone; every other value
+    // stands out from its caption by its height.
+    let format = SchematicSheetFormat::default()
+        .try_update(|draft| {
+            draft
+                .title_block
+                .fields
+                .get_mut(&DrawingSheetTitleFieldId::DocumentId)
+                .unwrap()
+                .value = "PSAFE-SCH-001".to_owned();
+        })
+        .unwrap();
+    let heavier = plotted_title_lines(&format)
+        .into_iter()
+        .filter(|(font, _, _)| *font == SceneFont::MonospaceMedium)
+        .map(|(_, _, text)| text)
+        .collect::<Vec<_>>();
+    assert_eq!(heavier, ["PSAFE-SCH-001"]);
+    assert!(DrawingSheetTitleFieldId::DocumentId.emphasised());
+    assert_eq!(
+        DrawingSheetTitleFieldId::ALL
+            .into_iter()
+            .filter(|field| field.emphasised())
+            .count(),
+        1
+    );
 }
 
 #[test]

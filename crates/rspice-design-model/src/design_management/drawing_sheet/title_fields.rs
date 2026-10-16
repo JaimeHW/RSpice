@@ -115,6 +115,16 @@ impl DrawingSheetTitleFieldId {
         }
     }
 
+    /// Whether every renderer letters the field's value in the heavier
+    /// weight. ISO 7200's figures letter values at regular weight and
+    /// emphasise only the identification number, and a caption already stands
+    /// a step of the series below its value, so only the document identifier
+    /// is set apart.
+    #[must_use]
+    pub const fn emphasised(self) -> bool {
+        matches!(self, Self::DocumentId)
+    }
+
     /// What the field reads when neither the sheet nor the authority behind
     /// it supplies a value.
     #[must_use]

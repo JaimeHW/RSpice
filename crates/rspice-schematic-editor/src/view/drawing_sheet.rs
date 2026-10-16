@@ -1340,12 +1340,17 @@ fn draw_title_block(
             )),
             Align2::LEFT_CENTER,
             truncate_canvas_title_value(&field.value, value_chars),
-            // A value stands a step of the series above its caption and in a
-            // heavier weight, so it reads as the field's content at a glance;
-            // the plot letters it the same way.
+            // A value stands a step of the series above its caption, which is
+            // what makes it read as the field's content; only the document
+            // identifier is set in the heavier weight. The plot letters both
+            // the same way.
             theme::mono(
                 drawing_sheet_font_size(zoom, authored_lettering(lettering.data_um)),
-                theme::FontWeight::Medium,
+                if field.id.emphasised() {
+                    theme::FontWeight::Medium
+                } else {
+                    theme::FontWeight::Regular
+                },
             ),
             palette.block_ink,
             rotation,

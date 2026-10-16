@@ -431,11 +431,10 @@ pub enum SceneFont {
     Sans,
     SansSemibold,
     Monospace,
-    /// Monospace at the next stroke weight up, which a title-block value is
-    /// lettered in so that it outranks the caption naming it. The two are one
-    /// ISO 3098 height step apart, and that step reads as a hierarchy only on
-    /// a drawing lettered wholly in capitals; a sheet carrying case-bearing
-    /// identifiers has to carry the difference in stroke instead.
+    /// Monospace at the next stroke weight up, which the title block letters
+    /// its document identifier in: ISO 7200 emphasises the identification
+    /// number alone, and every other value stands out from its caption by
+    /// the height step between them.
     MonospaceMedium,
 }
 
