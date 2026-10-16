@@ -596,6 +596,31 @@ pub(crate) struct DiagnosticStore {
     /// and a run outcome superseded by the next run's outcome for the same
     /// analysis.
     current_key: Option<FindingKey>,
+    /// Moves on every publication and withdrawal, so a memo taken over the
+    /// store's batches can tell it is describing a different store.
+    generation: u64,
+    /// What the current rendering pass decided about the list.
+    pass_memo: PassMemoCell,
+}
+
+/// The list's standings and counts for one rendering pass.
+///
+/// Behind a lock because every surface that reads the list holds the session
+/// immutably while it draws. A clone starts empty: a memo describes the store
+/// it was taken from, not a copy of it.
+#[derive(Default)]
+struct PassMemoCell(std::sync::Mutex<Option<listing::PassMemo>>);
+
+impl Clone for PassMemoCell {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl std::fmt::Debug for PassMemoCell {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("PassMemoCell")
+    }
 }
 
 impl DiagnosticStore {
@@ -603,6 +628,31 @@ impl DiagnosticStore {
         &self,
     ) -> impl Iterator<Item = &DiagnosticBatch> + Clone + '_ {
         self.batches.values()
+    }
+
+    const fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// The memo the given pass took over this generation of the store, if
+    /// one was taken.
+    fn pass_memo(&self, pass: u64, generation: u64) -> Option<listing::PassMemo> {
+        let memo = self
+            .pass_memo
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        memo.as_ref()
+            .filter(|memo| memo.pass == pass && memo.generation == generation)
+            .cloned()
+    }
+
+    fn remember_pass(&self, memo: listing::PassMemo) {
+        *self
+            .pass_memo
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(memo);
     }
 
     pub(in crate::workbench) fn request_route(&mut self, route: DiagnosticRoute) {
@@ -683,6 +733,7 @@ impl DiagnosticStore {
         self.pending_route = None;
         self.current = None;
         self.current_key = None;
+        self.generation = self.generation.wrapping_add(1);
     }
 
     /// Replace a batch, and with it every identity the old one held.
@@ -737,6 +788,7 @@ impl DiagnosticStore {
                 records,
             },
         );
+        self.generation = self.generation.wrapping_add(1);
         self.reanchor_current();
         Ok(())
     }
@@ -744,6 +796,7 @@ impl DiagnosticStore {
     fn remove(&mut self, inputs: &DiagnosticInputs) {
         self.capture_current_key();
         if let Some(removed) = self.batches.remove(&inputs.key()) {
+            self.generation = self.generation.wrapping_add(1);
             for record in &removed.records {
                 self.owners.remove(&record.canonical.diagnostic_id);
             }
