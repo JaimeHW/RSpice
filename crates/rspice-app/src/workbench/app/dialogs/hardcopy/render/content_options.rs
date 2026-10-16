@@ -1166,16 +1166,27 @@ mod tests {
         /// The source resolves on a worker and the exact page raster lands a
         /// pass after the plan it belongs to, so a measurement is only
         /// meaningful once both have happened.
+        ///
+        /// The budget is wall-clock, not a count of passes. A count is not a
+        /// deadline: a loaded box starves the worker far harder than it slows
+        /// this thread, so a fixed number of passes buys less and less real
+        /// time exactly when the worker needs more of it. That is how this
+        /// test came to fail on a machine running three builds and pass in
+        /// 0.37 s on its own.
         fn settle(&mut self) -> egui::FullOutput {
-            for _ in 0..400 {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            loop {
                 let _ = self.pass(Vec::new());
                 if self.app.state.dialogs.hardcopy.preview.is_some() {
                     let _ = self.pass(Vec::new());
                     return self.pass(Vec::new());
                 }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the hardcopy studio never resolved a source and an exact page preview"
+                );
                 std::thread::sleep(std::time::Duration::from_millis(5));
             }
-            panic!("the hardcopy studio never resolved a source and an exact page preview");
         }
 
         fn control(&mut self, role: Role, label: &str) -> Rect {
