@@ -456,8 +456,8 @@ use faer.
 | [`rspice-design-model`](crates/rspice-design-model) | Design-management data and the signed drawing-sheet package |
 | [`rspice-schematic-editor`](crates/rspice-schematic-editor) | Schematic and symbol editor painting and interaction |
 | [`rspice-ui-kit`](crates/rspice-ui-kit) | Design tokens, widgets and the plot engine |
-| [`rspice-project`](crates/rspice-project) | Project persistence and workspace state |
-| [`rspice-project-contract`](crates/rspice-project-contract) | The persisted project format |
+| [`rspice-project`](crates/rspice-project) | The project file, its workspace and the save lifecycle |
+| [`rspice-project-contract`](crates/rspice-project-contract) | Project identity, technology binding and library catalog records |
 | [`rspice-simulation`](crates/rspice-simulation) | Source preparation, scheduling and engine adapters for the application |
 | [`rspice-simulation-contract`](crates/rspice-simulation-contract) | Simulation requests and the application's analysis vocabulary |
 | [`rspice-worker`](crates/rspice-worker) | The browser module worker that runs simulations off the UI thread |
@@ -465,8 +465,8 @@ use faer.
 | [`rspice-results-ui`](crates/rspice-results-ui) | The result viewers |
 | [`rspice-formats`](crates/rspice-formats) | Result file codecs and project result persistence |
 | [`rspice-model-library`](crates/rspice-model-library) | Model and PDK libraries, bindings and publisher trust |
-| [`rspice-hardcopy`](crates/rspice-hardcopy) | Printed and exported sheet rendering |
-| [`rspice-hardcopy-contract`](crates/rspice-hardcopy-contract) | The hardcopy request contract |
+| [`rspice-hardcopy`](crates/rspice-hardcopy) | Print and export rendering of schematics, plots and reports |
+| [`rspice-hardcopy-contract`](crates/rspice-hardcopy-contract) | Page setup, print plans and the receipts a project retains |
 
 **Automation, cloud and publication**
 
