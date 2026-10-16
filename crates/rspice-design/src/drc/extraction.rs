@@ -8,7 +8,7 @@ use super::checker::{
     DrcChecker, DrcConfig, append_case_collision_violations, append_off_sheet_connector_violations,
     append_vector_width_violations, component_identity, diagnostic_location,
 };
-use super::input::{ComponentInfo, ParameterRangeIssue, PinInfo};
+use super::input::{BrokenReference, ComponentInfo, ParameterRangeIssue, PinInfo};
 use super::types::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
 use crate::connectivity::{ConnectivityDiagnosticKind, ExtractedConnectivity};
 use crate::hierarchy::{ConfigurationExecutionBinding, HierarchySource};
@@ -16,6 +16,7 @@ use crate::properties::PropertyCatalog;
 use crate::properties::PropertyDefinition;
 use crate::properties::PropertyValue;
 use crate::schematic::component::{Component, LibraryCellInstance};
+use crate::schematic::component_references::{InstanceReference, resolve_instance_reference};
 use crate::schematic::component_type::ComponentType;
 use crate::schematic::document::SchematicDocument;
 use crate::schematic::port::{PortDirection, PortSpec};
@@ -510,10 +511,41 @@ fn extract_components(
             component_known: component_known(comp, hierarchy, context),
             missing_parameters: missing_parameters(comp, &property_registry),
             out_of_range_parameters: out_of_range_parameters(comp, &property_registry),
+            broken_references: broken_references(comp, &schematic.components),
         });
     }
 
     components
+}
+
+/// The references one instance makes to others by name that the deck cannot
+/// write as a single element.
+///
+/// A current-controlled source names its controlling element. The netlister
+/// resolves that reference with [`resolve_instance_reference`] and writes the
+/// emitted name it finds, so this asks the same question of the same function.
+fn broken_references(component: &Component, cellview: &[Component]) -> Vec<BrokenReference> {
+    if !matches!(component.kind, ComponentType::Ccvs | ComponentType::Cccs) {
+        return Vec::new();
+    }
+    let params = crate::parameters::parse_params_string(&component.params);
+    let Some(reference) = params
+        .get("vref")
+        .map(|reference| reference.trim())
+        .filter(|reference| !reference.is_empty())
+    else {
+        return Vec::new();
+    };
+    let ambiguous = match resolve_instance_reference(cellview, reference) {
+        InstanceReference::Names(_) => return Vec::new(),
+        InstanceReference::Ambiguous => true,
+        InstanceReference::Unresolved => false,
+    };
+    vec![BrokenReference {
+        parameter: "vref".to_owned(),
+        reference: reference.to_owned(),
+        ambiguous,
+    }]
 }
 
 /// The name the deck writes one instance under, or `None` when it cannot

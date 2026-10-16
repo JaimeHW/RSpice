@@ -117,6 +117,10 @@ pub enum DrcViolationType {
     ValueOutOfRange,
     /// Unknown component type
     UnknownComponent,
+    /// An instance names another instance — a current-controlled source its
+    /// controlling element — by a reference that names no single instance of
+    /// its cellview, so the deck has no element to write for it.
+    UnresolvedReference,
 
     //-------------------------------------------------------------------------
     // Symbol Contract Issues
@@ -155,6 +159,8 @@ impl DrcViolationType {
             Self::ShortedOutputs => DrcSeverity::Error,
             Self::SourceToSource => DrcSeverity::Error,
             Self::MissingParameter => DrcSeverity::Error,
+            // The engine refuses a card that names an element it does not have.
+            Self::UnresolvedReference => DrcSeverity::Error,
             Self::CaseCollidingNetNames => DrcSeverity::Error,
             Self::MalformedBus
             | Self::BusRangeConflict
@@ -243,6 +249,7 @@ impl DrcViolationType {
             Self::MissingParameter => "Required component parameter is missing",
             Self::ValueOutOfRange => "Component value is outside expected range",
             Self::UnknownComponent => "Component type is not recognized",
+            Self::UnresolvedReference => "Instance reference names no single instance",
             Self::SymbolUnplacedPin => "Symbol pin is not placed",
             Self::SymbolOrphanedPin => "Symbol pin is not in the schematic interface",
             Self::SymbolPinOffGrid => "Symbol pin is off the terminal grid",
@@ -287,6 +294,7 @@ impl DrcViolationType {
             Self::MissingParameter => "Set the required parameter value",
             Self::ValueOutOfRange => "Check the parameter value is within valid range",
             Self::UnknownComponent => "Check the component type or define the model",
+            Self::UnresolvedReference => "Name exactly one instance of this cellview",
             Self::SymbolUnplacedPin => "Place the symbol pin on the terminal grid",
             Self::SymbolOrphanedPin => "Delete the orphaned pin or add the schematic port back",
             Self::SymbolPinOffGrid => "Move the symbol pin onto the terminal grid",

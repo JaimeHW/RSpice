@@ -1485,3 +1485,48 @@ fn cross_cellview_shorted_outputs_count_instances_and_leave_ground_alone() {
         shorted[0].message
     );
 }
+
+/// A current-controlled source names its controlling element. The deck
+/// writes the element a drawn name means under its emitted name, so a drawn
+/// name is a reference that resolves; one that names nothing, or names two
+/// instances, leaves the deck an element the engine does not have.
+#[test]
+fn a_controlling_reference_must_name_one_instance() {
+    let check = |vref: &str, extra: Option<Component>| {
+        let mut sensed =
+            Component::new(1, ComponentType::Cccs, Point::new(0, 0)).with_name_value("F1", "2");
+        sensed.params = format!("vref={vref}");
+        let mut top = SchematicDocument::default();
+        top.components.push(sensed);
+        top.components
+            .push(part(2, ComponentType::VoltageSource, "sense"));
+        top.components.extend(extra);
+        let views = buffers([]);
+        let hierarchy = HierarchySource::from_buffers(&views);
+        let result = run_check_with_hierarchy(&top, &hierarchy, connectivity_only());
+        of_type(&result, DrcViolationType::UnresolvedReference)
+            .into_iter()
+            .map(|finding| (finding.severity, finding.message.clone()))
+            .collect::<Vec<_>>()
+    };
+
+    // Drawn `sense`, written `Vsense`: either spelling names it.
+    assert_eq!(check("sense", None), Vec::new());
+    assert_eq!(check("VSENSE", None), Vec::new());
+    assert_eq!(
+        check("vbias", None),
+        vec![(
+            DrcSeverity::Error,
+            "F1 vref='vbias' names no instance of this cellview".to_owned()
+        )]
+    );
+    // A resistor drawn `sense` is written `Rsense`; the drawn name now names
+    // two instances and neither written name.
+    assert_eq!(
+        check("sense", Some(part(3, ComponentType::Resistor, "sense"))),
+        vec![(
+            DrcSeverity::Error,
+            "F1 vref='sense' names more than one instance of this cellview".to_owned()
+        )]
+    );
+}

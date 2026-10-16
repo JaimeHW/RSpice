@@ -4,6 +4,9 @@
 //! its device type requires and its parameter overrides appended.
 
 use super::*;
+use rspice_design::schematic::component_references::{
+    InstanceReference, resolve_instance_reference,
+};
 
 /// The card one independent source emits, without a schematic around it.
 ///
@@ -335,9 +338,22 @@ impl<'a> NetlistGenerator<'a> {
                     .get("vref")
                     .map(|reference| reference.trim())
                     .filter(|reference| !reference.is_empty());
-                let sense_name = authored_reference
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| format!("VSENSE_{}", instance_name));
+                // The controlling element is named the way the deck writes
+                // it: a source drawn `sense` is the card `Vsense`. A reference
+                // nothing here answers to is written as authored, and the
+                // design check refuses it before a run.
+                let sense_name = authored_reference.map_or_else(
+                    || format!("VSENSE_{}", instance_name),
+                    |reference| match resolve_instance_reference(
+                        &self.schematic.components,
+                        reference,
+                    ) {
+                        InstanceReference::Names(target) => self.instance_name(target),
+                        InstanceReference::Ambiguous | InstanceReference::Unresolved => {
+                            reference.to_owned()
+                        }
+                    },
+                );
                 if authored_reference.is_none() {
                     self.lines.push(format!(
                         "{} {} {} 0",

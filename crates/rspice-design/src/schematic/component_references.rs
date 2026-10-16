@@ -235,6 +235,60 @@ fn prepare_component_edits<'a>(
     Ok(components)
 }
 
+/// What one authored instance reference names within its cellview.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum InstanceReference<'a> {
+    /// The one instance it names. The deck writes the reference as that
+    /// instance's emitted name, which is the name the engine knows it by.
+    Names(&'a Component),
+    /// More than one instance answers to it.
+    Ambiguous,
+    /// No instance in the cellview answers to it.
+    Unresolved,
+}
+
+/// Resolve a reference one instance makes to another — a current-controlled
+/// source's controlling element, for one — the way the deck must write it.
+///
+/// The engine resolves the reference against the names the deck writes, and
+/// those are emitted names: a source drawn `sense` is written `Vsense`. So a
+/// reference that already is an emitted name names that instance, and failing
+/// that, a reference that is an instance's drawn name names the instance the
+/// author drew. Both compare without case, as the engine does. Writing a drawn
+/// name through unresolved would point the engine at an element the deck does
+/// not have.
+pub fn resolve_instance_reference<'a>(
+    components: &'a [Component],
+    reference: &str,
+) -> InstanceReference<'a> {
+    let reference = reference.trim();
+    let emitting = || {
+        components
+            .iter()
+            .filter(|component| !component.kind.spice_prefix().is_empty())
+    };
+    let written = emitting()
+        .filter(|component| {
+            component
+                .emitted_instance_name()
+                .eq_ignore_ascii_case(reference)
+        })
+        .collect::<Vec<_>>();
+    let candidates = if written.is_empty() {
+        emitting()
+            .filter(|component| component.name.trim().eq_ignore_ascii_case(reference))
+            .collect()
+    } else {
+        written
+    };
+    match candidates.as_slice() {
+        _ if reference.is_empty() => InstanceReference::Unresolved,
+        [only] => InstanceReference::Names(only),
+        [] => InstanceReference::Unresolved,
+        _ => InstanceReference::Ambiguous,
+    }
+}
+
 fn insert_alias(aliases: &mut HashMap<String, Option<usize>>, name: &str, index: usize) {
     if !name.is_empty() {
         aliases

@@ -53,6 +53,22 @@ pub struct ComponentInfo {
     /// Definite numeric constants outside explicit canonical schema bounds.
     /// Symbolic expressions and values without a registered range are omitted.
     pub out_of_range_parameters: Vec<ParameterRangeIssue>,
+    /// References this instance makes to another instance by name that do
+    /// not name exactly one instance of its cellview, so the deck cannot
+    /// write them as an element the engine has.
+    pub broken_references: Vec<BrokenReference>,
+}
+
+/// One reference an instance makes to another by name — a current-controlled
+/// source's controlling element — that names no single instance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrokenReference {
+    /// The parameter that carries the reference.
+    pub parameter: String,
+    /// The reference as authored.
+    pub reference: String,
+    /// More than one instance answers to it, rather than none.
+    pub ambiguous: bool,
 }
 
 /// One exact parameter-range failure extracted from the canonical property

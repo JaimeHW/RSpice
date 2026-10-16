@@ -75,6 +75,7 @@ fn resistor(id: u64, name: &str, pins: Vec<PinInfo>) -> ComponentInfo {
         component_known: Some(true),
         missing_parameters: Vec::new(),
         out_of_range_parameters: Vec::new(),
+        broken_references: Vec::new(),
     }
 }
 
@@ -96,6 +97,7 @@ fn vsource(id: u64, name: &str, plus_net: &str, minus_net: &str) -> ComponentInf
         component_known: Some(true),
         missing_parameters: Vec::new(),
         out_of_range_parameters: Vec::new(),
+        broken_references: Vec::new(),
     }
 }
 
@@ -120,6 +122,7 @@ fn interface_port(id: u64, net: &str, attached: bool) -> ComponentInfo {
         component_known: Some(true),
         missing_parameters: Vec::new(),
         out_of_range_parameters: Vec::new(),
+        broken_references: Vec::new(),
     }
 }
 
@@ -149,6 +152,7 @@ fn ground_symbol(id: u64, point: Point, attached: bool) -> ComponentInfo {
         component_known: Some(true),
         missing_parameters: Vec::new(),
         out_of_range_parameters: Vec::new(),
+        broken_references: Vec::new(),
     }
 }
 

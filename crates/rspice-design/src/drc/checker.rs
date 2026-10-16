@@ -158,6 +158,7 @@ impl DrcChecker {
 
         if self.config.check_unknown_components {
             self.check_unknown_components(components, &mut result);
+            self.check_instance_references(components, &mut result);
         }
 
         if self.config.check_unconnected_pins {
@@ -342,6 +343,46 @@ impl DrcChecker {
                 .with_instance_severity(false)
                 .with_related(vec![component_name]),
             );
+        }
+    }
+
+    /// Report every reference to another instance that names no single one.
+    ///
+    /// The deck writes such a reference as the element it names, under that
+    /// element's emitted name; a reference that names none, or several, leaves
+    /// it an element the engine does not have, and the run fails at parse.
+    fn check_instance_references(&mut self, components: &[ComponentInfo], result: &mut DrcResult) {
+        let mut components = components
+            .iter()
+            .filter(|component| !component.broken_references.is_empty())
+            .collect::<Vec<_>>();
+        components.sort_by_key(|component| component.id);
+        for component in components {
+            let identity = component_identity(component);
+            for broken in &component.broken_references {
+                let names = if broken.ambiguous {
+                    "more than one instance"
+                } else {
+                    "no instance"
+                };
+                let id = self.next_id();
+                self.add_violation(
+                    result,
+                    DrcViolation::new(
+                        id,
+                        DrcViolationType::UnresolvedReference,
+                        format!(
+                            "{identity} {}='{}' names {names} of this cellview",
+                            broken.parameter, broken.reference
+                        ),
+                        DrcLocation::Component {
+                            id: component.id,
+                            name: component.name.clone(),
+                        },
+                    )
+                    .with_related(vec![identity.clone(), broken.reference.clone()]),
+                );
+            }
         }
     }
 
