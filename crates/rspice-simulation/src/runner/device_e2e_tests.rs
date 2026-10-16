@@ -315,6 +315,49 @@ fn ccvs_and_cccs_bench_solves_op() {
     solve_op(&bench.netlist());
 }
 
+/// A current-controlled source may name its controlling element by the name
+/// drawn on it. The deck writes a source drawn `sense` as `Vsense`, so the
+/// reference has to follow: in the plain card, and in the behavioural form a
+/// limit lowers it to, whose expression reads the current as `i(...)`.
+#[test]
+fn a_controlling_source_named_as_drawn_solves() {
+    let mut bench = Bench::new();
+    let sense = bench.place(ComponentType::VoltageSource, 0, 0, "sense", "1", "");
+    let rc = bench.place(ComponentType::Resistor, 200, 0, "RC", "1k", "");
+    bench.connect((sense, 0), (rc, 0));
+    bench.ground((rc, 1));
+    bench.ground((sense, 1));
+
+    let f = bench.place(ComponentType::Cccs, 400, 300, "F1", "2.5", "vref=sense");
+    let rf = bench.place(ComponentType::Resistor, 600, 300, "RF", "1k", "");
+    bench.connect((f, 0), (rf, 0));
+    bench.ground((f, 1));
+    bench.ground((rf, 1));
+
+    let h = bench.place(
+        ComponentType::Ccvs,
+        400,
+        600,
+        "H1",
+        "100",
+        "vref=sense vmax=10",
+    );
+    let rh = bench.place(ComponentType::Resistor, 600, 600, "RH", "1k", "");
+    bench.connect((h, 0), (rh, 0));
+    bench.ground((h, 1));
+    bench.ground((rh, 1));
+
+    let netlist = bench.netlist();
+    assert!(
+        netlist
+            .lines()
+            .any(|line| line.starts_with("F1 ") && line.contains(" Vsense ")),
+        "{netlist}"
+    );
+    assert!(netlist.contains("i(Vsense)"), "{netlist}");
+    solve_op(&netlist);
+}
+
 #[test]
 fn lossy_ltra_line_bench_solves_op() {
     let mut bench = Bench::new();

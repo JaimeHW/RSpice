@@ -122,3 +122,90 @@ fn hidden_identity_anchor_is_suppressed_but_unowned_point_remains_visible() {
     );
     assert_eq!(anchor(&view, &inside.location), None);
 }
+
+/// The checks read the projected document, which lays the second sheet a
+/// stride along. A terminal found there is badged where the second sheet
+/// draws it, not a million grid units off the canvas.
+#[test]
+fn a_terminal_on_a_later_sheet_is_anchored_where_that_sheet_draws_it() {
+    let mut catalog = catalog_with_hidden_object(30);
+    let second = catalog
+        .sheet_for_object(30)
+        .expect("assigned to the second sheet");
+    catalog.set_active(second).unwrap();
+    let mut document = SchematicDocument::default();
+    document.components.push(Component::new(
+        30,
+        ComponentType::Resistor,
+        Point::new(10, 10),
+    ));
+    let view = DesignView {
+        document: &document,
+        canvas_cache: None,
+        sheet_catalog: Some(&catalog),
+        review_markers: Default::default(),
+    };
+
+    let terminal = DrcLocation::Terminal {
+        component_id: 30,
+        component_name: "R1".to_owned(),
+        pin_name: "1".to_owned(),
+        point: Point::new(1_000_010, 20),
+    };
+
+    assert_eq!(anchor(&view, &terminal), Some(Point::new(10, 20)));
+    // One drawing with no sheet catalog is its own projection.
+    let unsheeted = DesignView {
+        sheet_catalog: None,
+        ..view
+    };
+    assert_eq!(
+        live_terminal_point(unsheeted.sheet_catalog, 30, Point::new(10, 20)),
+        Point::new(10, 20)
+    );
+}
+
+/// A finding located at a bare point — the missing-ground anchor, a bus
+/// diagnostic — has no object to ask for its sheet. The projection laid the
+/// point on the second sheet, so it is badged where that sheet draws it, and
+/// only while that sheet is in view.
+#[test]
+fn a_point_on_a_later_sheet_is_anchored_where_that_sheet_draws_it() {
+    let mut catalog = catalog_with_hidden_object(30);
+    let first = catalog
+        .active_sheet_id()
+        .expect("the first sheet is active");
+    let second = catalog
+        .sheet_for_object(30)
+        .expect("assigned to the second sheet");
+    let document = SchematicDocument::default();
+    let point = DrcLocation::Point {
+        x: 1_000_040.0,
+        y: 60.0,
+    };
+
+    fn view<'a>(document: &'a SchematicDocument, catalog: &'a SheetCatalog) -> DesignView<'a> {
+        DesignView {
+            document,
+            canvas_cache: None,
+            sheet_catalog: Some(catalog),
+            review_markers: Default::default(),
+        }
+    }
+
+    catalog.set_active(second).unwrap();
+    assert_eq!(
+        anchor(&view(&document, &catalog), &point),
+        Some(Point::new(40, 60))
+    );
+
+    catalog.set_active(first).unwrap();
+    assert_eq!(anchor(&view(&document, &catalog), &point), None);
+    assert_eq!(
+        anchor(
+            &view(&document, &catalog),
+            &DrcLocation::Point { x: 40.0, y: 60.0 }
+        ),
+        Some(Point::new(40, 60))
+    );
+}

@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use super::input::ComponentInfo;
 use super::net::{NetInfo, fold_nets};
+use super::source_loops;
 use super::types::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
 use crate::connectivity::{ConnectivityAnchor, ConnectivityDiagnosticKind, ExtractedConnectivity};
 use crate::schematic::port::PortDirection;
@@ -158,6 +159,7 @@ impl DrcChecker {
 
         if self.config.check_unknown_components {
             self.check_unknown_components(components, &mut result);
+            self.check_instance_references(components, &mut result);
         }
 
         if self.config.check_unconnected_pins {
@@ -178,7 +180,7 @@ impl DrcChecker {
 
         // Check mutually exclusive driver contracts on the resolved net map.
         if self.config.check_shorted_outputs {
-            self.check_source_to_source(&net_map, &mut result);
+            self.check_source_to_source(components, &mut result);
             self.check_shorted_outputs(&net_map, &mut result);
             self.check_duplicate_bus_member_drivers(&net_map, &mut result);
         }
@@ -188,6 +190,14 @@ impl DrcChecker {
         result
     }
 
+    /// Report every emitted instance whose reference the schema refuses.
+    ///
+    /// How bad that is depends on what the deck does with it. The netlister
+    /// names an unnamed primitive `<prefix><id>` and prefixes one that starts
+    /// with the wrong letter, so the run starts and the results carry the
+    /// name it chose — which is why the finding states that name. Only an
+    /// instance the deck cannot write at all is an error: a cell instance
+    /// whose reference is not a path segment, or a name the card cannot hold.
     fn check_component_references(&mut self, components: &[ComponentInfo], result: &mut DrcResult) {
         let mut components = components.iter().collect::<Vec<_>>();
         components.sort_by_key(|component| component.id);
@@ -195,6 +205,11 @@ impl DrcChecker {
             if !component.reference_required {
                 continue;
             }
+            let written = component.deck_name.is_some();
+            let consequence = match component.deck_name.as_deref() {
+                Some(deck_name) => format!("; the netlist writes it as {deck_name}"),
+                None => "; the netlist cannot write this instance".to_owned(),
+            };
             if component.name.trim().is_empty() {
                 let id = self.next_id();
                 self.add_violation(
@@ -203,7 +218,7 @@ impl DrcChecker {
                         id,
                         DrcViolationType::EmptyName,
                         format!(
-                            "{} component #{} has no reference designator",
+                            "{} component #{} has no reference designator{consequence}",
                             component.component_type, component.id
                         ),
                         DrcLocation::Component {
@@ -211,7 +226,7 @@ impl DrcChecker {
                             name: String::new(),
                         },
                     )
-                    .with_component_severity(component.reference_required),
+                    .with_instance_severity(written),
                 );
             } else if let Some(error) = component.reference_error.as_deref() {
                 let id = self.next_id();
@@ -220,13 +235,17 @@ impl DrcChecker {
                     DrcViolation::new(
                         id,
                         DrcViolationType::InvalidName,
-                        format!("Invalid reference '{}': {error}", component.name),
+                        format!(
+                            "Invalid reference '{}': {}{consequence}",
+                            component.name,
+                            error.trim_end_matches('.')
+                        ),
                         DrcLocation::Component {
                             id: component.id,
                             name: component.name.clone(),
                         },
                     )
-                    .with_component_severity(component.reference_required),
+                    .with_instance_severity(written),
                 );
             }
         }
@@ -292,10 +311,11 @@ impl DrcChecker {
     /// can write.
     ///
     /// Only an object that emits a SPICE instance is asked: a structural
-    /// object writes none, so nothing is lost when its type binds to nothing,
-    /// and promoting that to an error would fail a drawing the netlister is
-    /// content with. `component_known == None` means the extraction boundary
-    /// held no hierarchy authority, and stays silent either way.
+    /// object writes none. Extraction only ever answers `Some(false)` for a
+    /// cell instance whose master it could not resolve, and such an instance
+    /// cannot be written under any name, so the finding is an error.
+    /// `component_known == None` means the extraction boundary held no
+    /// hierarchy authority, and stays silent either way.
     fn check_unknown_components(&mut self, components: &[ComponentInfo], result: &mut DrcResult) {
         let mut components = components
             .iter()
@@ -321,9 +341,49 @@ impl DrcChecker {
                         name: component.name.clone(),
                     },
                 )
-                .with_component_severity(component.reference_required)
+                .with_instance_severity(false)
                 .with_related(vec![component_name]),
             );
+        }
+    }
+
+    /// Report every reference to another instance that names no single one.
+    ///
+    /// The deck writes such a reference as the element it names, under that
+    /// element's emitted name; a reference that names none, or several, leaves
+    /// it an element the engine does not have, and the run fails at parse.
+    fn check_instance_references(&mut self, components: &[ComponentInfo], result: &mut DrcResult) {
+        let mut components = components
+            .iter()
+            .filter(|component| !component.broken_references.is_empty())
+            .collect::<Vec<_>>();
+        components.sort_by_key(|component| component.id);
+        for component in components {
+            let identity = component_identity(component);
+            for broken in &component.broken_references {
+                let names = if broken.ambiguous {
+                    "more than one instance"
+                } else {
+                    "no instance"
+                };
+                let id = self.next_id();
+                self.add_violation(
+                    result,
+                    DrcViolation::new(
+                        id,
+                        DrcViolationType::UnresolvedReference,
+                        format!(
+                            "{identity} {}='{}' names {names} of this cellview",
+                            broken.parameter, broken.reference
+                        ),
+                        DrcLocation::Component {
+                            id: component.id,
+                            name: component.name.clone(),
+                        },
+                    )
+                    .with_related(vec![identity.clone(), broken.reference.clone()]),
+                );
+            }
         }
     }
 
@@ -331,16 +391,25 @@ impl DrcChecker {
     ///
     /// Three findings, because an unattached terminal is three different
     /// claims. A declared input nothing reaches is a pin the design said it
-    /// would feed and then did not, so it is an error. A declared output
-    /// nothing reaches still solves and merely loses the signal that was
-    /// drawn, so it is a warning. And a terminal no interface classified —
-    /// every passive leg and every primitive device terminal, which is most of
-    /// a real schematic — says nothing about direction at all, so it keeps the
-    /// unclassified finding: `InOut` and `Supply` are declarations that
-    /// deliberately decline to say, and are read the same way as no
-    /// declaration.
+    /// would feed and then did not, so it is an error — and so is a declared
+    /// supply pin, which states that the parent feeds this rail: left open,
+    /// the rail is fed by nothing. A declared output nothing reaches still
+    /// solves and merely loses the signal that was drawn, so it is a warning.
+    /// And a terminal no interface classified — every passive leg and every
+    /// primitive device terminal, which is most of a real schematic — says
+    /// nothing about direction at all, so it keeps the unclassified finding:
+    /// `InOut` is a declaration that deliberately declines to say, and is read
+    /// the same way as no declaration.
+    ///
+    /// Two terminals are not open pins at all. An input the netlister writes
+    /// `null` for when nothing meets it may legally stay open. And an
+    /// interface port's own terminal is where the node leaves for the parent,
+    /// so nothing inside the cellview has to meet it.
     fn check_unconnected_pins(&mut self, components: &[ComponentInfo], result: &mut DrcResult) {
-        let mut ordered_components = components.iter().collect::<Vec<_>>();
+        let mut ordered_components = components
+            .iter()
+            .filter(|component| !component.is_interface_port)
+            .collect::<Vec<_>>();
         ordered_components.sort_by_key(|component| component.id);
         for component in ordered_components {
             let mut pins = component.pins.iter().collect::<Vec<_>>();
@@ -351,7 +420,7 @@ impl DrcChecker {
                     .then_with(|| left.point.y.cmp(&right.point.y))
             });
             for pin in pins {
-                if pin.attached {
+                if pin.attached || pin.optional {
                     continue;
                 }
                 let id = self.next_id();
@@ -361,11 +430,18 @@ impl DrcChecker {
                         DrcViolationType::UndrivenInput,
                         format!("Input pin {}.{} has no driver", component_name, pin.name),
                     ),
+                    Some(PortDirection::Supply) => (
+                        DrcViolationType::UndrivenInput,
+                        format!(
+                            "Supply pin {}.{} is not connected; nothing feeds its rail",
+                            component_name, pin.name
+                        ),
+                    ),
                     Some(PortDirection::Out) => (
                         DrcViolationType::UnloadedOutput,
                         format!("Output pin {}.{} drives nothing", component_name, pin.name),
                     ),
-                    None | Some(PortDirection::InOut) | Some(PortDirection::Supply) => (
+                    None | Some(PortDirection::InOut) => (
                         DrcViolationType::UnconnectedPin,
                         format!("Pin {}.{} is not connected", component_name, pin.name),
                     ),
@@ -443,39 +519,81 @@ impl DrcChecker {
         }
     }
 
-    /// Check for duplicate component names
+    /// Report every set of instances the deck writes under one name.
+    ///
+    /// The engine refuses two elements whose names differ only in case within
+    /// one scope, and each cellview is a scope of its own: the top level, or
+    /// its own subcircuit. So it is the written names that are compared, and
+    /// compared folded, not the drawn ones: a resistor drawn `C4` is written
+    /// `RC4` beside a drawn `RC4`, an unnamed resistor #4 is written `R4`
+    /// beside a drawn `R4`, and `R1` beside `r1` is one name to the engine. An
+    /// instance the deck cannot write at all is the reference rule's error,
+    /// and collides with nothing.
     fn check_duplicate_names(&mut self, components: &[ComponentInfo], result: &mut DrcResult) {
-        let mut names: std::collections::BTreeMap<String, Vec<usize>> =
+        let mut written: std::collections::BTreeMap<String, Vec<&ComponentInfo>> =
             std::collections::BTreeMap::new();
-
-        for (idx, comp) in components.iter().enumerate() {
-            if !comp.name.trim().is_empty() {
-                names.entry(comp.name.clone()).or_default().push(idx);
+        for component in components {
+            if let Some(name) = component.deck_name.as_deref() {
+                written
+                    .entry(name.to_ascii_uppercase())
+                    .or_default()
+                    .push(component);
             }
         }
 
-        for (name, mut indices) in names {
-            if indices.len() > 1 {
-                indices.sort_by_key(|index| components[*index].id);
-                let id = self.next_id();
-                self.add_violation(
-                    result,
-                    DrcViolation::new(
-                        id,
-                        DrcViolationType::DuplicateName,
-                        format!(
-                            "Duplicate component name '{}' ({} instances)",
-                            name,
-                            indices.len()
-                        ),
-                        DrcLocation::Component {
-                            id: components[indices[0]].id,
-                            name: name.clone(),
-                        },
-                    )
-                    .with_related(vec![name]),
-                );
+        for mut sharing in written.into_values() {
+            if sharing.len() < 2 {
+                continue;
             }
+            sharing.sort_by_key(|component| component.id);
+            let drawn = sharing
+                .iter()
+                .copied()
+                .map(component_identity)
+                .collect::<Vec<_>>();
+            let mut spellings = sharing
+                .iter()
+                .filter_map(|component| component.deck_name.clone())
+                .collect::<Vec<_>>();
+            spellings.sort();
+            spellings.dedup();
+            let message = match spellings.as_slice() {
+                [spelling] if drawn.iter().all(|name| *name == drawn[0]) => {
+                    let written = if drawn[0] == *spelling {
+                        String::new()
+                    } else {
+                        format!(", written {spelling}")
+                    };
+                    format!(
+                        "Duplicate component name '{}' ({} instances){written}",
+                        drawn[0],
+                        drawn.len()
+                    )
+                }
+                [spelling] => {
+                    let quantity = if drawn.len() == 2 { "both" } else { "all" };
+                    format!("{} are {quantity} written {spelling}", listed(&drawn))
+                }
+                _ => format!(
+                    "{} are written {}, which the simulator reads as one name",
+                    listed(&drawn),
+                    listed(&spellings)
+                ),
+            };
+            let id = self.next_id();
+            self.add_violation(
+                result,
+                DrcViolation::new(
+                    id,
+                    DrcViolationType::DuplicateName,
+                    message,
+                    DrcLocation::Component {
+                        id: sharing[0].id,
+                        name: sharing[0].name.clone(),
+                    },
+                )
+                .with_related(drawn),
+            );
         }
     }
 
@@ -524,7 +642,21 @@ impl DrcChecker {
         );
     }
 
-    /// Check for floating nodes
+    /// Report every node with fewer connections than the configured minimum.
+    ///
+    /// A node that continues outside the cellview — through an interface port,
+    /// or as a global the deck declares — is connected to something no
+    /// terminal here represents, so that counts as one connection: an
+    /// interface port a cell does not use inside is the parent's net in the
+    /// deck, not a dangling node. Whether anything else in the design does
+    /// touch a global is a question about the whole design, which a
+    /// hierarchy check answers once over every cellview it walks.
+    ///
+    /// A node made only of terminals nothing meets is an open pin, and the
+    /// open-pin rule names the terminal itself; saying it a second time about
+    /// the node would report one slip twice. The node is still reported when
+    /// that rule is off, because then nothing else would say it — except for
+    /// a terminal that may legally stay open, whose node the deck never writes.
     fn check_floating_nodes(&mut self, net_map: &HashMap<String, NetInfo>, result: &mut DrcResult) {
         let mut names = net_map.keys().collect::<Vec<_>>();
         names.sort();
@@ -533,17 +665,22 @@ impl DrcChecker {
             if net.connection_count == 0 {
                 continue;
             }
-            if net.connection_count < self.config.min_connections && !net.is_ground {
+            let only_open_terminals = net.unattached_count == net.connection_count;
+            if only_open_terminals
+                && (self.config.check_unconnected_pins
+                    || net.optional_open_count == net.connection_count)
+            {
+                continue;
+            }
+            let connections = net.connection_count + usize::from(net.continues_outside);
+            if connections < self.config.min_connections && !net.is_ground {
                 let id = self.next_id();
                 self.add_violation(
                     result,
                     DrcViolation::new(
                         id,
                         DrcViolationType::FloatingNode,
-                        format!(
-                            "Node '{}' has only {} connection(s)",
-                            name, net.connection_count
-                        ),
+                        format!("Node '{}' has only {} connection(s)", name, connections),
                         DrcLocation::Node {
                             net_name: name.clone(),
                         },
@@ -554,42 +691,73 @@ impl DrcChecker {
         }
     }
 
-    /// Check for directly connected independent voltage-source outputs.
-    fn check_source_to_source(
-        &mut self,
-        net_map: &HashMap<String, NetInfo>,
-        result: &mut DrcResult,
-    ) {
-        let mut names = net_map.keys().collect::<Vec<_>>();
-        names.sort();
-        for net_name in names {
-            let net = &net_map[net_name];
-            let mut sources = net
-                .voltage_source_drivers
+    /// Report each loop the independent voltage sources close.
+    ///
+    /// Sources that share a node are an ordinary circuit. Only a loop made of
+    /// sources alone leaves its current undetermined, and that is exactly
+    /// what the engine refuses (see [`source_loops`]). Each source that
+    /// closes a loop is one finding, as it is one refusal there: it names the
+    /// sources the loop runs through and stands at the node the closing source
+    /// holds against the rest.
+    fn check_source_to_source(&mut self, components: &[ComponentInfo], result: &mut DrcResult) {
+        let mut sources = components
+            .iter()
+            .filter(|component| component.is_voltage_source)
+            .filter_map(|component| {
+                let terminal = |name: &str| {
+                    component
+                        .pins
+                        .iter()
+                        .find(|pin| pin.name == name)
+                        .map(|pin| pin.net_name.as_str())
+                };
+                Some((component, [terminal("+")?, terminal("-")?]))
+            })
+            .collect::<Vec<_>>();
+        sources.sort_by_key(|(component, _)| component.id);
+        let branches = sources
+            .iter()
+            .map(|(_, nodes)| nodes.map(source_loops::node_key))
+            .collect::<Vec<_>>();
+
+        for members in source_loops::closed_loops(&branches) {
+            let closing = *members
+                .last()
+                .expect("a loop has the source that closes it");
+            let (_, [plus, minus]) = sources[closing];
+            let node = if source_loops::node_key(plus) == source_loops::GROUND_KEY {
+                minus
+            } else {
+                plus
+            };
+            let names = members
                 .iter()
-                .cloned()
+                .map(|&member| component_identity(sources[member].0))
                 .collect::<Vec<_>>();
-            sources.sort();
-            if sources.len() > 1 {
-                let id = self.next_id();
-                self.add_violation(
-                    result,
-                    DrcViolation::new(
-                        id,
-                        DrcViolationType::SourceToSource,
-                        format!(
-                            "Net '{}' directly connects {} voltage-source outputs: {}",
-                            net_name,
-                            sources.len(),
-                            sources.join(", ")
-                        ),
-                        DrcLocation::Node {
-                            net_name: net_name.clone(),
-                        },
-                    )
-                    .with_related(sources),
-                );
-            }
+            let message = if names.len() == 1 {
+                format!(
+                    "Voltage source {} has both terminals on node '{node}'",
+                    names[0]
+                )
+            } else {
+                format!(
+                    "Voltage sources {} form a closed loop through node '{node}'",
+                    names.join(", ")
+                )
+            };
+            let id = self.next_id();
+            self.add_violation(
+                result,
+                DrcViolation::new(
+                    id,
+                    DrcViolationType::SourceToSource,
+                    message,
+                    DrcLocation::Node {
+                        net_name: node.to_owned(),
+                    },
+                )
+                .with_related(names),
+            );
         }
     }
 
@@ -842,6 +1010,16 @@ pub(super) fn component_identity(component: &ComponentInfo) -> String {
         format!("component #{}", component.id)
     } else {
         component.name.clone()
+    }
+}
+
+/// Two or more names as a sentence lists them: `a and b`, `a, b and c`.
+fn listed(names: &[String]) -> String {
+    match names.split_last() {
+        Some((last, leading)) if !leading.is_empty() => {
+            format!("{} and {last}", leading.join(", "))
+        }
+        _ => names.join(""),
     }
 }
 

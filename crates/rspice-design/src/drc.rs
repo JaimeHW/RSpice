@@ -4,9 +4,12 @@ mod checker;
 mod extraction;
 mod input;
 mod net;
+mod source_loops;
 mod types;
 
 pub use checker::{DrcChecker, DrcConfig};
-pub use extraction::{extract_checked_design, run_check_with_hierarchy};
-pub use input::{ComponentInfo, ParameterRangeIssue, PinInfo};
+pub use extraction::{
+    CheckReach, extract_checked_design, run_check_of_cellview, run_check_with_hierarchy,
+};
+pub use input::{BrokenReference, ComponentInfo, ParameterRangeIssue, PinInfo};
 pub use types::{DrcLocation, DrcResult, DrcSeverity, DrcSummary, DrcViolation, DrcViolationType};

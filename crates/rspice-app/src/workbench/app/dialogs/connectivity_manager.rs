@@ -25,8 +25,8 @@ use crate::ui::widgets::{
 use crate::workbench::design_system::section_header;
 use rspice_design::connectivity::summary::{DesignNet, NetClass, projection_nets};
 use rspice_design::drc::{
-    DrcConfig, DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
-    run_check_with_hierarchy,
+    CheckReach, DrcConfig, DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
+    run_check_of_cellview,
 };
 use rspice_design::hierarchy::HierarchySource;
 
@@ -288,13 +288,24 @@ fn preview_projection(
     state: &AppState,
     policy: &ConnectivityPolicy,
 ) -> Result<std::sync::Arc<DesignProjection>, String> {
+    projection_with_open_view(state, policy, &state.schematic)
+}
+
+/// The design as `policy` resolves it with `open_view` standing for the open
+/// view's buffer, which is how a repair candidate is projected exactly as the
+/// design it would replace.
+fn projection_with_open_view(
+    state: &AppState,
+    policy: &ConnectivityPolicy,
+    open_view: &SchematicState,
+) -> Result<std::sync::Arc<DesignProjection>, String> {
     if state.workspace.content.connectivity.policy == *policy {
         return state
             .workspace
             .design_projection(
                 &state.library_manager,
                 &state.workspace.content.active_view,
-                &state.schematic,
+                open_view,
             )
             .map_err(|error| error.to_string());
     }
@@ -304,9 +315,32 @@ fn preview_projection(
         .design_projection(
             &state.library_manager,
             &state.workspace.content.active_view,
-            &state.schematic,
+            open_view,
         )
         .map_err(|error| error.to_string())
+}
+
+/// The design check the manager states and validates repairs against: the
+/// open view as the projection materialized it, checked as the cellview it
+/// is.
+///
+/// The cellview is named rather than recognized from the buffer, so a
+/// configured root is walked as its configuration runs it whichever document
+/// holds the drawing — the projection's own buffer or a repair candidate's.
+fn check_projected_open_view(
+    state: &AppState,
+    projection: &DesignProjection,
+) -> Result<DrcResult, String> {
+    let subject = projected_open_view(state, projection)?;
+    let hierarchy =
+        HierarchySource::from_design_projection(state.library_manager.catalog(), projection);
+    Ok(run_check_of_cellview(
+        subject,
+        &state.workspace.content.active_view,
+        &hierarchy,
+        connectivity_drc_config(state),
+        CheckReach::Hierarchy,
+    ))
 }
 
 /// The open view exactly as the projection materialized it: multi-sheet pages
@@ -333,14 +367,12 @@ fn build_report(
 ) -> Result<ConnectivityReport, String> {
     let projection = preview_projection(state, policy)?;
     let subject = projected_open_view(state, &projection)?;
-    let hierarchy =
-        HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
     let design_nets = projection_nets(
         state.library_manager.catalog(),
         &projection,
         &state.workspace.content.active_view.key(),
     );
-    let drc = run_check_with_hierarchy(subject, &hierarchy, connectivity_drc_config(state));
+    let drc = check_projected_open_view(state, &projection)?;
     // Typed-bus geometry, the bus rows, and every reveal anchor below stay on
     // the document the canvas paints: a materialized page carries namespaced
     // coordinates that would scroll the editor off the design.
@@ -528,7 +560,24 @@ fn violation_targets_net(violation: &DrcViolation, net: &DesignNet) -> bool {
             .terminals
             .iter()
             .any(|terminal| terminal.component_id == *id),
-        _ => false,
+        // An open terminal stands alone on a node of its own, and that node
+        // is the row the finding belongs to: the component's other pins are
+        // on other nets the finding says nothing about.
+        DrcLocation::Terminal {
+            component_id,
+            pin_name,
+            ..
+        } => net.terminals.iter().any(|terminal| {
+            terminal.component_id == *component_id && terminal.pin.eq_ignore_ascii_case(pin_name)
+        }),
+        // A finding inside an instantiated cellview is about that cellview's
+        // nets, not this one's.
+        DrcLocation::InsideInstance { .. }
+        | DrcLocation::Point { .. }
+        | DrcLocation::Bus { .. }
+        | DrcLocation::BusTap { .. }
+        | DrcLocation::Global
+        | DrcLocation::SymbolPin { .. } => false,
     }
 }
 
@@ -744,6 +793,13 @@ fn build_manual_repairs(
 ) -> Vec<ConnectivityRepair> {
     let mut repairs = Vec::new();
     for violation in drc.violations() {
+        // A repair is a wire drawn in this view. A finding inside an
+        // instantiated cellview has no endpoint here to choose and nowhere
+        // here to reveal, and a row per occurrence of it would offer the same
+        // nothing several times; it is repaired in its own cellview.
+        if matches!(violation.location, DrcLocation::InsideInstance { .. }) {
+            continue;
+        }
         if !matches!(
             violation.violation_type,
             // Every unattached terminal belongs here, whatever the interface
@@ -1146,6 +1202,53 @@ impl RSpiceApp {
     }
 
     fn reveal_connectivity_target(&mut self, target: RevealTarget) {
+        // The checks locate a terminal or a bare point on the projected
+        // document, which lays later sheets a stride along; the canvas centres
+        // on it where its sheet draws it. A point read off the editor's own
+        // document is on no stride, and stays where it is.
+        let sheets = self
+            .state
+            .workspace
+            .content
+            .design_management
+            .sheet_catalog(
+                &self
+                    .state
+                    .workspace
+                    .content
+                    .active_schematic_reference()
+                    .key(),
+            );
+        let target = match target {
+            RevealTarget::Violation(DrcLocation::Terminal {
+                component_id,
+                component_name,
+                pin_name,
+                point,
+            }) => RevealTarget::Violation(DrcLocation::Terminal {
+                point: rspice_schematic_editor::view::violations::live_terminal_point(
+                    sheets,
+                    component_id,
+                    point,
+                ),
+                component_id,
+                component_name,
+                pin_name,
+            }),
+            RevealTarget::Violation(DrcLocation::Point { x, y }) => {
+                let projected = Point::new(x as i32, y as i32);
+                let point = sheets
+                    .and_then(|sheets| {
+                        rspice_design::schematic::owned::projected_point_sheet(sheets, projected)
+                    })
+                    .map_or(projected, |(_, point)| point);
+                RevealTarget::Violation(DrcLocation::Point {
+                    x: f64::from(point.x),
+                    y: f64::from(point.y),
+                })
+            }
+            other => other,
+        };
         self.state.dialogs.connectivity_manager.close();
         self.state.workbench.workspace = crate::workbench::state::Workspace::Design;
         if let RevealTarget::Label { view_key, .. } = &target
@@ -1245,7 +1348,7 @@ impl RSpiceApp {
         }
         if !selected.is_empty() {
             candidate.recalculate_runtime_state();
-            validate_repair_candidate(&self.state, &candidate, &dialog.report.drc)?;
+            validate_repair_candidate(&self.state, &candidate, &contract_candidate.policy)?;
             let after = SchematicSnapshot::capture(candidate.document());
             let changed = self.state.schematic.with_undo(
                 "apply reviewed connectivity repairs",
@@ -1417,25 +1520,25 @@ fn apply_repair_to_candidate(
     }
 }
 
+/// Refuse a candidate whose design check is worse than the design's.
+///
+/// The two are checked exactly alike: each projected under the policy the
+/// repairs are applied with, and each checked as the open view's cellview.
+/// Checking the candidate's editor buffer instead walked the placed bindings
+/// where the baseline walked the configuration, so on a configured root a
+/// master the configuration does not run was judged in one and not the other,
+/// and every repair was refused for that master's findings.
 fn validate_repair_candidate(
     state: &AppState,
     candidate: &SchematicState,
-    baseline_drc: &DrcResult,
+    policy: &ConnectivityPolicy,
 ) -> Result<(), String> {
-    let projection = state
-        .workspace
-        .design_projection(
-            &state.library_manager,
-            &state.workspace.content.active_view,
-            &state.schematic,
-        )
-        .map_err(|error| error.to_string())?;
-    let hierarchy =
-        HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
-    let candidate_drc =
-        run_check_with_hierarchy(candidate, &hierarchy, connectivity_drc_config(state));
-    let before = severe_drc_counts(baseline_drc);
-    let after = severe_drc_counts(&candidate_drc);
+    let check = |open_view: &SchematicState| -> Result<DrcResult, String> {
+        let projection = projection_with_open_view(state, policy, open_view)?;
+        check_projected_open_view(state, &projection)
+    };
+    let before = severe_drc_counts(&check(&state.schematic)?);
+    let after = severe_drc_counts(&check(candidate)?);
     for (kind, count) in after {
         if count > before.get(&kind).copied().unwrap_or_default() {
             return Err(format!(
@@ -2100,246 +2203,4 @@ fn policy_combo<T: Copy + PartialEq>(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::state::{NetLabel, NetNamingPolicy, Wire};
-
-    #[test]
-    fn global_alias_repairs_are_derived_from_real_label_ids() {
-        let mut state = AppState::default();
-        state
-            .schematic
-            .document_mut_for_test()
-            .net_labels
-            .push(NetLabel::new(10, Point::new(0, 0), "VDD!"));
-        state
-            .schematic
-            .document_mut_for_test()
-            .net_labels
-            .push(NetLabel::new(11, Point::new(1, 0), "VDD"));
-        state.sync_active_schematic_to_workspace();
-        let policy = ConnectivityPolicy::default();
-        let projection = preview_projection(&state, &policy).expect("a design projection");
-        let globals = build_global_rows(&state, &policy, &projection);
-        let repairs = build_global_repairs(&state, &policy, &globals);
-        assert_eq!(repairs.len(), 1);
-        match repairs[0].action.as_ref().expect("action") {
-            ConnectivityRepairAction::RenameLabels { canonical, labels } => {
-                assert_eq!(canonical, "VDD!");
-                assert_eq!(labels, &vec![(11, "VDD".to_owned())]);
-            }
-        }
-    }
-
-    #[test]
-    fn technology_catalog_promotes_exact_declared_aliases() {
-        let mut state = AppState::default();
-        state
-            .schematic
-            .document_mut_for_test()
-            .net_labels
-            .push(NetLabel::new(10, Point::new(0, 0), "VCC"));
-        state.workspace.content.connectivity.technology_global_nets =
-            Some(crate::state::TechnologyGlobalNetCatalog {
-                authority: "demo-pdk@1.0".to_owned(),
-                nets: vec![crate::state::ConnectivityAliasGroup {
-                    canonical_name: "VDD".to_owned(),
-                    aliases: vec!["VCC".to_owned()],
-                }],
-            });
-        state.sync_active_schematic_to_workspace();
-        let policy = ConnectivityPolicy {
-            global_promotion: GlobalNetPromotionPolicy::TechnologyDefinedOnly,
-            ..ConnectivityPolicy::default()
-        };
-        validate_policy_authority(&policy, &state.workspace.content.connectivity).unwrap();
-        let projection = preview_projection(&state, &policy).expect("a design projection");
-        let globals = build_global_rows(&state, &policy, &projection);
-        assert_eq!(globals.len(), 1);
-        assert_eq!(globals[0].canonical, "VDD");
-        assert_eq!(globals[0].state, "resolved");
-        assert!(globals[0].scope.contains("demo-pdk@1.0"));
-    }
-
-    #[test]
-    fn dialect_alias_policy_uses_the_project_owned_table() {
-        let mut contract = ConnectivityContract {
-            dialect_aliases: Some(crate::state::DialectAliasCatalog {
-                authority: "dialect-2026".to_owned(),
-                groups: vec![crate::state::ConnectivityAliasGroup {
-                    canonical_name: "0".to_owned(),
-                    aliases: vec!["GND".to_owned()],
-                }],
-            }),
-            ..ConnectivityContract::default()
-        };
-        contract.policy.alias_comparison = GlobalAliasComparisonPolicy::DialectCompatibility;
-        validate_policy_authority(&contract.policy, &contract).unwrap();
-        assert!(alias_matches(
-            "0",
-            "GND!",
-            GlobalAliasComparisonPolicy::DialectCompatibility,
-            &contract
-        ));
-    }
-
-    #[test]
-    fn alias_candidate_rejects_stale_label_identity() {
-        let mut state = SchematicState::default();
-        state.document_mut_for_test().document_policy.net_naming =
-            NetNamingPolicy::StrictCaseSensitive;
-        state
-            .document_mut_for_test()
-            .net_labels
-            .push(NetLabel::new(3, Point::origin(), "OLD"));
-        let repair = ConnectivityRepair {
-            id: "global-alias:1".to_owned(),
-            object: "VDD!".to_owned(),
-            before: "VDD".to_owned(),
-            proposed: String::new(),
-            identity_effect: String::new(),
-            validation: String::new(),
-            action: Some(ConnectivityRepairAction::RenameLabels {
-                canonical: "VDD!".to_owned(),
-                labels: vec![(3, "VDD".to_owned())],
-            }),
-            endpoint_choices: Vec::new(),
-            reveal: RevealTarget::Label {
-                view_key: "user/top/schematic".to_owned(),
-                id: 3,
-            },
-        };
-        assert!(apply_repair_to_candidate(&mut state, &repair).is_err());
-        assert_eq!(state.document().net_labels[0].name, "OLD");
-    }
-
-    #[test]
-    fn typed_bus_validation_preserves_declared_direction() {
-        let descending = BusDeclaration::parse("DATA[7:0]").expect("valid");
-        let ascending = BusDeclaration::parse("DATA[0:7]").expect("valid");
-        assert_eq!(descending.direction(), BusDirection::Descending);
-        assert_eq!(ascending.direction(), BusDirection::Ascending);
-        assert_eq!(descending.width(), 8);
-        assert_eq!(ascending.width(), 8);
-    }
-
-    #[test]
-    fn bus_draft_accepts_the_authored_declaration_and_rejects_a_malformed_one() {
-        let mut dialog = ConnectivityManagerDialogState::default();
-        dialog.bus_declaration = "DATA[0:7]".to_owned();
-        let declaration = validate_bus_draft(&dialog).expect("the authored declaration parses");
-        assert_eq!(declaration.direction(), BusDirection::Ascending);
-        assert_eq!(declaration.width(), 8);
-
-        dialog.bus_declaration = "DATA[7".to_owned();
-        assert!(validate_bus_draft(&dialog).is_err());
-    }
-
-    /// The buses tab reports the schematic's own vector geometry. Nothing in a
-    /// project-level catalog adds a row to it.
-    #[test]
-    fn the_bus_report_is_exactly_the_schematics_typed_buses() {
-        let mut state = AppState::default();
-        state
-            .schematic
-            .document_mut_for_test()
-            .net_labels
-            .push(NetLabel::new(10, Point::origin(), "SENSE_P"));
-        state
-            .schematic
-            .document_mut_for_test()
-            .wires
-            .push(Wire::segment(11, Point::origin(), Point::new(20, 0)));
-        state.sync_active_schematic_to_workspace();
-
-        let report =
-            build_report(&state, &ConnectivityPolicy::default()).expect("a resolved design");
-
-        assert_eq!(report.buses.len(), state.schematic.document().buses.len());
-    }
-
-    /// Give the workspace an active configuration that cannot resolve: its DUT
-    /// path names an instance the expanded hierarchy has not got. The design
-    /// projection refuses such a configuration, so a report produced
-    /// afterwards would be a report on the editor buffer.
-    fn unresolve_configuration(state: &mut AppState) {
-        let root = state.workspace.content.active_view.clone();
-        state
-            .workspace
-            .content
-            .configuration_sets
-            .create(crate::state::ConfigurationSetDefinition {
-                name: "Unresolvable DUT".to_owned(),
-                root,
-                dut_path: "/XABSENT".to_owned(),
-                executable_view_policy: vec!["schematic".to_owned()],
-                stop_views: Vec::new(),
-                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
-                black_box_policy:
-                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
-                overrides: Vec::new(),
-                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
-                owner: "projection consumer test".to_owned(),
-            })
-            .expect("the fixture configuration is well formed");
-    }
-
-    #[test]
-    fn the_report_states_an_unresolved_configuration_instead_of_buffer_connectivity() {
-        let mut state = AppState::default();
-        state
-            .schematic
-            .document_mut_for_test()
-            .wires
-            .push(Wire::segment(1, Point::origin(), Point::new(20, 0)));
-        state
-            .schematic
-            .document_mut_for_test()
-            .net_labels
-            .push(NetLabel::new(2, Point::origin(), "VOUT"));
-        state.sync_active_schematic_to_workspace();
-        let resolved = build_report(&state, &ConnectivityPolicy::default())
-            .expect("the fixture configuration resolves");
-        assert!(
-            resolved.nets.iter().any(|row| row.name == "VOUT"),
-            "the fixture sheet reports its net while the configuration resolves"
-        );
-
-        unresolve_configuration(&mut state);
-
-        let reason = build_report(&state, &ConnectivityPolicy::default())
-            .expect_err("an unresolvable configuration has no report");
-        assert!(
-            reason.contains("XABSENT"),
-            "the dialog must show the projection's own reason: {reason}"
-        );
-    }
-
-    /// All three panes are built from one projection, so the global-net pane
-    /// cannot name a document the connectivity pane never resolved.
-    #[test]
-    fn every_pane_reads_one_projection_of_the_design() {
-        let mut state = AppState::default();
-        state
-            .schematic
-            .document_mut_for_test()
-            .net_labels
-            .push(NetLabel::new(10, Point::origin(), "VDD!"));
-        state.sync_active_schematic_to_workspace();
-        let policy = ConnectivityPolicy::default();
-
-        let projection = preview_projection(&state, &policy).expect("a design projection");
-        let globals = build_global_rows(&state, &policy, &projection);
-
-        assert!(!globals.is_empty(), "the authored global declares itself");
-        for occurrence in globals.iter().flat_map(|row| &row.declarations) {
-            assert!(
-                projection
-                    .schematic_buffers()
-                    .contains_key(&occurrence.view_key),
-                "{} is not a document of the projection",
-                occurrence.view_key
-            );
-        }
-    }
-}
+mod tests;

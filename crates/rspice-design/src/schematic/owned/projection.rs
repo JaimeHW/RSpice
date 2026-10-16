@@ -12,7 +12,7 @@ use rspice_design_model::{
     Point,
     design_management::{
         CrossSheetPortAnchor, CrossSheetPortEndpoint, DesignManagementCatalog,
-        DesignManagementError, SchematicObjectKey, VariantObjectOverride,
+        DesignManagementError, SchematicObjectKey, SheetCatalog, SheetId, VariantObjectOverride,
     },
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -33,10 +33,7 @@ impl Schematic {
                 .sheets()
                 .iter()
                 .enumerate()
-                .map(|(index, sheet)| {
-                    let ordinal = i32::try_from(index).unwrap_or(i32::MAX);
-                    (sheet.id(), Point::new(ordinal.saturating_mul(1_000_000), 0))
-                })
+                .map(|(index, sheet)| (sheet.id(), sheet_origin(index)))
                 .collect::<HashMap<_, _>>();
             let offset_for = |object_id: u64| {
                 design_management
@@ -212,6 +209,52 @@ impl Schematic {
         let repaired = identity.repair_document(&mut projected);
         Ok((projected, repaired))
     }
+}
+
+/// How far apart the projection lays consecutive sheets along x.
+const SHEET_STRIDE: i32 = 1_000_000;
+
+/// Where the projection places the sheet at `ordinal`, its place in the
+/// catalog. Pages are laid side by side a fixed stride apart, so coordinates
+/// two pages share in the drawing never meet in the projected document.
+fn sheet_origin(ordinal: usize) -> Point {
+    let ordinal = i32::try_from(ordinal).unwrap_or(i32::MAX);
+    Point::new(ordinal.saturating_mul(SHEET_STRIDE), 0)
+}
+
+/// The sheet a point read off the projected document lies on, and where that
+/// sheet draws it, or `None` where it lies on no sheet the catalog has.
+///
+/// A finding located at a bare point — the missing-ground anchor, a bus
+/// diagnostic — names no object whose sheet could be asked, so the sheet is
+/// read off the coordinate: each sheet is laid a whole stride along, and no
+/// drawing reaches half a stride from its own origin.
+pub fn projected_point_sheet(catalog: &SheetCatalog, projected: Point) -> Option<(SheetId, Point)> {
+    let stride = i64::from(SHEET_STRIDE);
+    let ordinal = usize::try_from((i64::from(projected.x) + stride / 2).div_euclid(stride)).ok()?;
+    let sheet = catalog.sheets().get(ordinal)?;
+    let origin = sheet_origin(ordinal);
+    Some((
+        sheet.id(),
+        Point::new(
+            projected.x.saturating_sub(origin.x),
+            projected.y.saturating_sub(origin.y),
+        ),
+    ))
+}
+
+/// How far the projection moved one object from where its sheet draws it.
+///
+/// A coordinate read off the projected document — a terminal a check located,
+/// say — is on the canvas once this is taken back off it. An object no sheet
+/// claims belongs to the active sheet, as it does when the projection is made.
+pub fn projected_sheet_offset(catalog: &SheetCatalog, object_id: u64) -> Point {
+    catalog
+        .sheet_for_object(object_id)
+        .or(catalog.active_sheet_id())
+        .or_else(|| catalog.sheets().first().map(|sheet| sheet.id()))
+        .and_then(|id| catalog.sheets().iter().position(|sheet| sheet.id() == id))
+        .map_or_else(Point::origin, sheet_origin)
 }
 
 fn translated_point(point: Point, delta: Point) -> Result<Point, DesignManagementError> {

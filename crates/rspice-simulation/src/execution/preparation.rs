@@ -141,7 +141,8 @@ where
         &execution_projection,
     );
     let source_data = inputs.source_data;
-    let drc = crate::preparation::check_generated_design(root_schematic, &hierarchy)?;
+    let drc =
+        crate::preparation::check_generated_design(root_schematic, &root_reference, &hierarchy)?;
     validate_projected_model_binding_authority(
         inputs.technology.models,
         inputs.technology.resolutions,

@@ -19,6 +19,18 @@ use crate::connectivity::ExtractedConnectivity;
 pub(super) struct NetInfo {
     /// Placed terminals on this node.
     pub(super) connection_count: usize,
+    /// How many of those terminals nothing else in the drawing meets. Such a
+    /// terminal is alone on a node of its own, and the open-pin rule already
+    /// names it.
+    pub(super) unattached_count: usize,
+    /// How many of the unattached terminals may legally be left open. The
+    /// netlister writes `null` for such a terminal, so its node never exists.
+    pub(super) optional_open_count: usize,
+    /// The node continues outside this cellview: an interface port stands on
+    /// it, or it is a global the deck declares. That is a connection no
+    /// terminal here represents, so the node is not floating for want of it.
+    /// Whether a global is touched anywhere else is judged over the whole walk.
+    pub(super) continues_outside: bool,
     /// How many of those terminals belong to drawn ground symbols. A ground
     /// symbol that reaches nothing else grounds nothing.
     pub(super) ground_symbol_count: usize,
@@ -27,7 +39,6 @@ pub(super) struct NetInfo {
     pub(super) is_ground: bool,
     pub(super) connected_components: Vec<String>,
     pub(super) output_drivers: HashSet<String>,
-    pub(super) voltage_source_drivers: HashSet<String>,
     pub(super) declared_output_drivers: HashSet<String>,
     pub(super) wire_ids: Vec<u64>,
     /// A typed bus tap binds this node: a real electrical endpoint that no
@@ -67,6 +78,13 @@ pub(super) fn fold_nets(
             let entry = nets.entry(pin.net_name.clone()).or_default();
             entry.is_ground |= crate::schematic::ground_names::is_ground_reference(&pin.net_name);
             entry.connection_count += 1;
+            if !pin.attached {
+                entry.unattached_count += 1;
+                if pin.optional {
+                    entry.optional_open_count += 1;
+                }
+            }
+            entry.continues_outside |= component.is_interface_port || pin.on_global;
             if component.is_ground_symbol {
                 entry.ground_symbol_count += 1;
             }
@@ -77,9 +95,10 @@ pub(super) fn fold_nets(
             }
             if pin.drives() {
                 entry.output_drivers.insert(identity.clone());
-                if component.is_voltage_source {
-                    entry.voltage_source_drivers.insert(identity.clone());
-                } else {
+                // A source's drive terminal is not a declared output: what
+                // makes sources conflict is a loop among them, which the
+                // source rule finds over their branches rather than per node.
+                if !component.is_voltage_source {
                     entry.declared_output_drivers.insert(identity.clone());
                 }
             }

@@ -65,7 +65,9 @@ fn severity_color(
 /// only.
 pub fn anchor(view: &DesignView<'_>, location: &DrcLocation) -> Option<Point> {
     match location {
-        DrcLocation::Point { x, y } => Some(Point::new(*x as i32, *y as i32)),
+        DrcLocation::Point { x, y } => {
+            live_point(view.sheet_catalog, Point::new(*x as i32, *y as i32))
+        }
         DrcLocation::Component { id, .. } => view
             .document
             .components
@@ -103,6 +105,9 @@ pub fn anchor(view: &DesignView<'_>, location: &DrcLocation) -> Option<Point> {
             .iter()
             .find(|label| label.name == *name && view.object_is_visible(label.id))
             .map(|l| l.pos),
+        // The checks locate a terminal in the projected document, which lays
+        // each sheet a stride further along; the canvas draws the sheet where
+        // it is authored, so the projection's offset comes back off.
         DrcLocation::Terminal {
             component_id,
             point,
@@ -112,7 +117,7 @@ pub fn anchor(view: &DesignView<'_>, location: &DrcLocation) -> Option<Point> {
             .components
             .iter()
             .any(|component| component.id == *component_id && view.object_is_visible(*component_id))
-            .then_some(*point),
+            .then(|| live_terminal_point(view.sheet_catalog, *component_id, *point)),
         // A finding inside an instantiated cellview has no coordinate in this
         // one. Placing it on the instance symbol would point the author at a
         // drawing that does not contain the defect.
@@ -121,6 +126,45 @@ pub fn anchor(view: &DesignView<'_>, location: &DrcLocation) -> Option<Point> {
         | DrcLocation::Global
         | DrcLocation::SymbolPin { .. } => None,
     }
+}
+
+/// Where a terminal the checks located on the projected document is drawn.
+///
+/// A drawing with no sheets is its own projection, and so is the first sheet
+/// of one; every later sheet is offset, by its component's sheet.
+pub fn live_terminal_point(
+    sheets: Option<&rspice_design_model::design_management::SheetCatalog>,
+    component_id: u64,
+    projected: Point,
+) -> Point {
+    let Some(sheets) = sheets else {
+        return projected;
+    };
+    let offset = rspice_design::schematic::owned::projected_sheet_offset(sheets, component_id);
+    Point::new(
+        projected.x.saturating_sub(offset.x),
+        projected.y.saturating_sub(offset.y),
+    )
+}
+
+/// Where a point the checks located on the projected document is drawn, or
+/// `None` where it is on a sheet other than the one in view.
+///
+/// A bare point names no object to ask for its sheet, so the sheet is the one
+/// the projection laid the coordinate on. A drawing with no sheets is its own
+/// projection, and one with no active sheet shows every sheet.
+pub fn live_point(
+    sheets: Option<&rspice_design_model::design_management::SheetCatalog>,
+    projected: Point,
+) -> Option<Point> {
+    let Some(sheets) = sheets.filter(|sheets| !sheets.sheets().is_empty()) else {
+        return Some(projected);
+    };
+    let (sheet, point) = rspice_design::schematic::owned::projected_point_sheet(sheets, projected)?;
+    sheets
+        .active_sheet_id()
+        .is_none_or(|active| active == sheet)
+        .then_some(point)
 }
 
 /// The cursor in screen space, derived from the grid-unit hover the canvas

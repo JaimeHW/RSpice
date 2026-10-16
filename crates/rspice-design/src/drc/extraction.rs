@@ -6,51 +6,141 @@
 
 use super::checker::{
     DrcChecker, DrcConfig, append_case_collision_violations, append_off_sheet_connector_violations,
-    append_vector_width_violations, diagnostic_location,
+    append_vector_width_violations, component_identity, diagnostic_location,
 };
-use super::input::{ComponentInfo, ParameterRangeIssue, PinInfo};
+use super::input::{BrokenReference, ComponentInfo, ParameterRangeIssue, PinInfo};
+use super::source_loops::{self, GROUND_KEY};
 use super::types::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
-use crate::connectivity::{ConnectivityDiagnosticKind, ExtractedConnectivity, ExtractedTerminal};
-use crate::hierarchy::HierarchySource;
+use crate::connectivity::{ConnectivityDiagnosticKind, ExtractedConnectivity};
+use crate::hierarchy::{ConfigurationExecutionBinding, HierarchySource};
 use crate::properties::PropertyCatalog;
 use crate::properties::PropertyDefinition;
 use crate::properties::PropertyValue;
-use crate::schematic::component::Component;
+use crate::schematic::component::{Component, LibraryCellInstance};
+use crate::schematic::component_references::{InstanceReference, resolve_instance_reference};
 use crate::schematic::component_type::ComponentType;
 use crate::schematic::document::SchematicDocument;
-use crate::schematic::port::PortDirection;
+use crate::schematic::port::{PortDirection, PortSpec};
 use rspice_app_types::hierarchy_path::InstancePath;
 use rspice_design_model::cell_view::CellViewRef;
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+mod walk;
+use walk::{InstanceGraph, MAX_REPORTED_OCCURRENCE_PATHS, Occurrences, ReachedView, SUBJECT};
+
+/// How much of the instantiated hierarchy one check states.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckReach {
+    /// The subject and every cellview its instances reach. A finding below
+    /// the subject is stated at the occurrences that reach it.
+    Hierarchy,
+    /// The subject's own findings. The hierarchy below is still walked for
+    /// the two questions no single cellview can answer — whether the design
+    /// reaches ground, and whether a cycle runs through the subject — but
+    /// nothing found inside another cellview is restated. A caller that checks
+    /// every cellview of a project asks this of each, so each is checked once.
+    Cellview,
+}
 
 /// Resolve the design once, and bind every placed component to it.
+///
+/// The caller hands over a drawing rather than an occurrence, so a cell
+/// instance's master is judged from its placed binding — except where a
+/// configuration may bind it elsewhere, which this has no occurrence path to
+/// ask about and so does not judge.
 pub fn extract_checked_design(
     schematic: &impl AsRef<SchematicDocument>,
     hierarchy: &HierarchySource<'_>,
 ) -> (Vec<ComponentInfo>, ExtractedConnectivity) {
+    let globals = global_nodes(hierarchy);
+    extract_view(
+        schematic.as_ref(),
+        hierarchy,
+        &ViewContext {
+            plan_path: None,
+            globals: &globals,
+        },
+    )
+}
+
+/// What one cellview's extraction knows about where it stands.
+struct ViewContext<'g> {
+    /// The cellview's occurrence path in the plan's own terms, when the walk
+    /// follows the plan, which then decides what each instance binds.
+    plan_path: Option<&'g InstancePath>,
+    /// The deck's global node names, folded.
+    globals: &'g HashSet<String>,
+}
+
+impl ViewContext<'_> {
+    /// The plan's path of one instance placed in this cellview.
+    fn occurrence(&self, component: &Component) -> Option<InstancePath> {
+        self.plan_path?.child(&component.name).ok()
+    }
+}
+
+/// Every global node the deck declares, folded, so a rule can tell a node that
+/// continues into other cellviews from one that ends here.
+fn global_nodes(hierarchy: &HierarchySource<'_>) -> HashSet<String> {
+    hierarchy
+        .global_net_names()
+        .into_iter()
+        .map(|name| name.to_ascii_lowercase())
+        .collect()
+}
+
+fn extract_view(
+    schematic: &SchematicDocument,
+    hierarchy: &HierarchySource<'_>,
+    context: &ViewContext<'_>,
+) -> (Vec<ComponentInfo>, ExtractedConnectivity) {
     let connectivity = crate::connectivity::extract_with_hierarchy(schematic, Some(hierarchy));
-    let components = extract_components(schematic.as_ref(), &connectivity, |comp| {
-        if comp.kind != ComponentType::CellInstance {
-            return Some(true);
-        }
-        let Some(binding) = comp.library_cell.as_ref() else {
-            return Some(false);
-        };
-        if binding.source_path.is_some()
-            || binding.netlist_template.is_some()
-            || binding.is_executable_builtin()
-        {
-            return Some(true);
-        }
-        if hierarchy.has_execution_plan() {
-            // Top-level DRC extraction has no instance path with which to
-            // query an execution-plan rebind. Do not judge the placed
-            // binding when the executable authority may select another
-            // master.
-            return None;
-        }
-        Some(hierarchy.schematic_master_for_binding(binding).is_some())
-    });
+    let components = extract_components(schematic, &connectivity, hierarchy, context);
     (components, connectivity)
+}
+
+/// Whether a binding carries the text the deck writes for it — a source, a
+/// netlist template, or a compiled built-in — rather than naming a schematic
+/// whose contents the deck emits.
+fn writes_its_own_text(binding: &LibraryCellInstance) -> bool {
+    binding.source_path.is_some()
+        || binding.netlist_template.is_some()
+        || binding.is_executable_builtin()
+}
+
+/// Whether a cell instance resolves to something the deck can write.
+fn component_known(
+    component: &Component,
+    hierarchy: &HierarchySource<'_>,
+    context: &ViewContext<'_>,
+) -> Option<bool> {
+    if component.kind != ComponentType::CellInstance {
+        return Some(true);
+    }
+    let Some(binding) = component.library_cell.as_ref() else {
+        return Some(false);
+    };
+    if context.plan_path.is_some() {
+        // The plan decides what this occurrence binds, and it is asked: an
+        // occurrence it could not materialize is one the deck cannot write.
+        return context.occurrence(component).map(|path| {
+            hierarchy
+                .execution_binding(&path)
+                .and_then(ConfigurationExecutionBinding::materialized_binding)
+                .is_some()
+        });
+    }
+    if writes_its_own_text(binding) {
+        return Some(true);
+    }
+    if hierarchy.has_execution_plan() {
+        // A configuration may bind this instance to another master, and there
+        // is no occurrence path here to ask the plan with. Judging the placed
+        // binding instead would judge a master the configuration may have
+        // replaced.
+        return None;
+    }
+    Some(hierarchy.schematic_master_for_binding(binding).is_some())
 }
 
 /// Check the subject cellview and every cellview its instances reach.
@@ -63,35 +153,115 @@ pub fn extract_checked_design(
 /// Each distinct cellview is extracted and checked once, however many times it
 /// is placed, and its findings are then stated at the occurrence paths that
 /// reached it, so `X1/M3` and `X2/M3` read as the two terminals they are.
+///
+/// The subject's own cellview is recognized when the caller hands over one of
+/// the very buffers `hierarchy` indexes; a caller holding a copy should name
+/// it with [`run_check_of_cellview`]. Where the hierarchy's execution plan is
+/// rooted at the subject, the walk descends where the deck does.
 pub fn run_check_with_hierarchy(
     schematic: &impl AsRef<SchematicDocument>,
     hierarchy: &HierarchySource<'_>,
     config: DrcConfig,
 ) -> DrcResult {
-    let start = web_time::Instant::now();
     let subject = schematic.as_ref();
-    let graph = InstanceGraph::walk(subject, hierarchy);
+    check_subject(
+        subject,
+        hierarchy.cellview_of(subject),
+        hierarchy,
+        config,
+        CheckReach::Hierarchy,
+    )
+}
+
+/// Check one named cellview, stating as much of the hierarchy below it as
+/// `reach` asks for.
+///
+/// Naming the subject is what lets the walk close a cycle at it: an instance
+/// that binds the subject's own cellview is reported as the recursion it is,
+/// rather than reached as a second copy whose findings repeat the subject's.
+pub fn run_check_of_cellview(
+    schematic: &impl AsRef<SchematicDocument>,
+    reference: &CellViewRef,
+    hierarchy: &HierarchySource<'_>,
+    config: DrcConfig,
+    reach: CheckReach,
+) -> DrcResult {
+    check_subject(
+        schematic.as_ref(),
+        Some(reference.clone()),
+        hierarchy,
+        config,
+        reach,
+    )
+}
+
+fn check_subject(
+    subject: &SchematicDocument,
+    reference: Option<CellViewRef>,
+    hierarchy: &HierarchySource<'_>,
+    config: DrcConfig,
+    reach: CheckReach,
+) -> DrcResult {
+    let start = web_time::Instant::now();
+    let graph = InstanceGraph::walk(subject, reference, hierarchy);
+    let globals = global_nodes(hierarchy);
+    let occurrences = graph.occurrences();
 
     // The ground rule is the one question no single cellview can answer, so it
     // is held back until the whole walk has been extracted.
     let mut view_config = config.clone();
     view_config.check_missing_ground = false;
 
+    // A cellview below the subject is read only where something here asks
+    // about it: a hierarchy report states its findings, and the ground rule
+    // needs its evidence.
+    let read_below = reach == CheckReach::Hierarchy || config.check_missing_ground;
     let mut reports = Vec::with_capacity(graph.views.len());
+    let mut drives = GlobalDrives::default();
+    let mut touches = GlobalTouches::default();
     let mut design_reaches_ground = false;
     let mut subject_inputs = None;
     for (index, view) in graph.views.iter().enumerate() {
-        let (components, connectivity) = extract_checked_design(&view.document, hierarchy);
+        if index != SUBJECT && !read_below {
+            break;
+        }
+        if occurrences[index].paths.is_empty() {
+            // Every occurrence of it is past the hierarchy's limits, which the
+            // resolver reports at the parent: the deck writes none of it, and
+            // no finding inside it has a place to be stated.
+            if reach == CheckReach::Hierarchy {
+                reports.push(DrcResult::new());
+            }
+            continue;
+        }
+        let context = ViewContext {
+            plan_path: view.plan_path.as_ref(),
+            globals: &globals,
+        };
+        let (components, connectivity) = extract_view(view.document, hierarchy, &context);
         design_reaches_ground |= reaches_ground(&components);
-        let mut report = check_one_view(view.document, &view_config, &components, &connectivity);
-        graph.append_recursive_findings(index, &view_config.severity_overrides, &mut report);
+        if index == SUBJECT || reach == CheckReach::Hierarchy {
+            let mut report =
+                check_one_view(view.document, &view_config, &components, &connectivity);
+            graph.append_recursive_findings(
+                index,
+                reach,
+                &view_config.severity_overrides,
+                &mut report,
+            );
+            reports.push(report);
+        }
+        if reach == CheckReach::Hierarchy && config.check_shorted_outputs {
+            drives.collect(index, &components, &globals);
+        }
+        if reach == CheckReach::Hierarchy && config.check_floating_nodes {
+            touches.collect(index, &components);
+        }
         if index == SUBJECT {
             subject_inputs = Some((components, connectivity));
         }
-        reports.push(report);
     }
 
-    let occurrences = graph.occurrences();
     let mut result = DrcResult::new();
     let mut next_id = 0;
 
@@ -131,24 +301,47 @@ pub fn run_check_with_hierarchy(
         }
     }
 
-    for index in (SUBJECT + 1)..graph.views.len() {
-        let reference = graph.views[index]
-            .reference
-            .as_ref()
-            .expect("a reached cellview is named by the binding that reached it");
-        let occurrence = &occurrences[index];
-        let flooded = occurrence.count > MAX_REPORTED_OCCURRENCE_PATHS as u64;
-        let paths = if flooded {
-            &occurrence.paths[..1]
-        } else {
-            occurrence.paths.as_slice()
-        };
-        let count = flooded.then_some(occurrence.count);
-        for path in paths {
-            for finding in reports[index].violations() {
-                result.add_violation(restated(finding, next_id, Some((path, reference)), count));
-                next_id += 1;
+    if reach == CheckReach::Hierarchy {
+        for index in (SUBJECT + 1)..graph.views.len() {
+            if occurrences[index].paths.is_empty() {
+                continue;
             }
+            let reference = graph.views[index]
+                .reference
+                .as_ref()
+                .expect("a reached cellview is named by the binding that reached it");
+            let (paths, note) = statement(&occurrences[index]);
+            for path in paths {
+                for finding in reports[index].violations() {
+                    result.add_violation(restated(
+                        finding,
+                        next_id,
+                        Some((path, reference)),
+                        note.as_deref(),
+                    ));
+                    next_id += 1;
+                }
+            }
+        }
+        for mut finding in drives.findings(&occurrences, &graph.views) {
+            if let Some(severity) = config.severity_overrides.get(&finding.violation_type) {
+                finding.severity = *severity;
+            }
+            finding.id = next_id;
+            result.add_violation(finding);
+            next_id += 1;
+        }
+        // A global touched once has its one terminal in exactly one
+        // occurrence, and the finding is stated there.
+        for (view, mut finding) in touches.floating(&occurrences, config.min_connections) {
+            if let Some(severity) = config.severity_overrides.get(&finding.violation_type) {
+                finding.severity = *severity;
+            }
+            let occurrence = graph.views[view].reference.as_ref().and_then(|reference| {
+                (view != SUBJECT).then(|| (&occurrences[view].paths[0], reference))
+            });
+            result.add_violation(restated(&finding, next_id, occurrence, None));
+            next_id += 1;
         }
     }
 
@@ -157,26 +350,41 @@ pub fn run_check_with_hierarchy(
     result
 }
 
-/// How many occurrence paths one cellview's findings are repeated over.
+/// The occurrence paths a cellview's findings are stated at, and what the
+/// reader is told about the occurrences that are not listed.
 ///
-/// A cellview placed a few times is worth reporting at each place: the defect
-/// may be acceptable at one occurrence and not at another, and the terminal in
-/// `X1` is not the terminal in `X2`. Past that the repetition would bury every
-/// other finding in the report, so the finding is stated once with its exact
-/// occurrence count — which is a count the reader can act on, and not an
-/// occurrence quietly dropped.
-const MAX_REPORTED_OCCURRENCE_PATHS: usize = 8;
+/// Past [`MAX_REPORTED_OCCURRENCE_PATHS`] a finding is stated once, with the
+/// exact count. Below it, an occurrence whose path exceeds the hierarchy's
+/// limits has no path to be stated at; it is counted rather than dropped, so a
+/// report never lists fewer places than the design has without saying so.
+fn statement(occurrence: &Occurrences) -> (&[InstancePath], Option<String>) {
+    let count = occurrence.count_label();
+    if occurrence.saturated || occurrence.count > MAX_REPORTED_OCCURRENCE_PATHS as u64 {
+        let first = &occurrence.paths[..1];
+        let note = format!("{count} occurrences; reported once, at {}", first[0]);
+        return (first, Some(note));
+    }
+    let listed = occurrence.paths.len() as u64;
+    let note = (listed < occurrence.count).then(|| {
+        let unlisted = occurrence.count - listed;
+        format!(
+            "{count} occurrences; {unlisted} {} no instance path within the hierarchy limits",
+            if unlisted == 1 { "has" } else { "have" }
+        )
+    });
+    (&occurrence.paths, note)
+}
 
 /// Restate one cellview's finding in the merged report.
 ///
 /// `occurrence` is `None` for the subject and names the path and cellview
-/// otherwise. `occurrence_count` is set only where the finding stands for more
-/// occurrences than the report lists.
+/// otherwise. `note` is set only where the finding stands for occurrences the
+/// report does not list.
 fn restated(
     finding: &DrcViolation,
     id: usize,
     occurrence: Option<(&InstancePath, &CellViewRef)>,
-    occurrence_count: Option<u64>,
+    note: Option<&str>,
 ) -> DrcViolation {
     let DrcViolation {
         violation_type,
@@ -196,8 +404,8 @@ fn restated(
             related_items,
         };
     };
-    if let Some(count) = occurrence_count {
-        message = format!("{message} ({count} occurrences; reported once, at {path})");
+    if let Some(note) = note {
+        message = format!("{message} ({note})");
     }
     DrcViolation {
         id,
@@ -233,17 +441,17 @@ fn reaches_ground(components: &[ComponentInfo]) -> bool {
 }
 
 fn extract_components(
-    schematic: &crate::schematic::document::SchematicDocument,
+    schematic: &SchematicDocument,
     connectivity: &ExtractedConnectivity,
-    mut component_known_for: impl FnMut(&Component) -> Option<bool>,
+    hierarchy: &HierarchySource<'_>,
+    context: &ViewContext<'_>,
 ) -> Vec<ComponentInfo> {
     let mut components = Vec::with_capacity(schematic.components.len());
     let property_registry = PropertyCatalog::new();
 
     // Terminals arrive in placement order and, within a component, in the
     // order the symbol declares its pins. Grouping preserves both.
-    let mut bound: std::collections::HashMap<u64, Vec<&ExtractedTerminal>> =
-        std::collections::HashMap::new();
+    let mut bound: HashMap<u64, Vec<&crate::connectivity::ExtractedTerminal>> = HashMap::new();
     for terminal in &connectivity.terminals {
         bound
             .entry(terminal.component_id)
@@ -254,7 +462,8 @@ fn extract_components(
     for comp in &schematic.components {
         let terminals = bound.get(&comp.id).map(Vec::as_slice).unwrap_or_default();
         let mut pins = Vec::with_capacity(terminals.len());
-        let declared_directions = declared_port_directions(comp);
+        let declared_directions =
+            declared_port_directions(live_interface(comp, hierarchy, context));
 
         for terminal in terminals {
             let source_drive_terminal = is_voltage_source(comp.kind) && terminal.pin == "+";
@@ -266,7 +475,10 @@ fn extract_components(
                 // might say about a pin spelled `+`.
                 Some(PortDirection::Out)
             } else {
-                declared_directions.get(&terminal.pin).copied()
+                // A symbol pin matches its interface port whatever the case.
+                declared_directions
+                    .get(&terminal.pin.to_ascii_lowercase())
+                    .copied()
             };
 
             pins.push(PinInfo {
@@ -275,14 +487,21 @@ fn extract_components(
                 direction,
                 point: terminal.point,
                 attached: terminal.attached,
+                optional: false,
+                on_global: context
+                    .globals
+                    .contains(&terminal.net_name.to_ascii_lowercase()),
             });
         }
+        mark_optional_inputs(comp, &mut pins);
 
         let is_voltage_source = is_voltage_source(comp.kind);
         let is_current_source = is_current_source(comp.kind);
         let reference_required = !comp.kind.spice_prefix().is_empty();
+        // The reference is validated as written, surrounding blanks and all:
+        // the netlister writes it as written.
         let reference_error = (reference_required && !comp.name.trim().is_empty())
-            .then(|| comp.validate_reference_designator(comp.name.trim()).err())
+            .then(|| comp.validate_reference_designator(&comp.name).err())
             .flatten();
 
         components.push(ComponentInfo {
@@ -295,17 +514,137 @@ fn extract_components(
             is_ground_symbol: comp.kind == ComponentType::Ground,
             reference_required,
             reference_error,
-            component_known: component_known_for(comp),
+            deck_name: reference_required.then(|| deck_name(comp)).flatten(),
+            is_interface_port: comp.port_spec().is_some(),
+            component_known: component_known(comp, hierarchy, context),
             missing_parameters: missing_parameters(comp, &property_registry),
             out_of_range_parameters: out_of_range_parameters(comp, &property_registry),
+            broken_references: broken_references(comp, &schematic.components),
         });
     }
 
     components
 }
 
-/// Every direction the bound cell interface declares, keyed by the pin name the
-/// symbol places.
+/// The references one instance makes to others by name that the deck cannot
+/// write as a single element.
+///
+/// A current-controlled source names its controlling element. The netlister
+/// resolves that reference with [`resolve_instance_reference`] and writes the
+/// emitted name it finds, so this asks the same question of the same function.
+fn broken_references(component: &Component, cellview: &[Component]) -> Vec<BrokenReference> {
+    if !matches!(component.kind, ComponentType::Ccvs | ComponentType::Cccs) {
+        return Vec::new();
+    }
+    let params = crate::parameters::parse_params_string(&component.params);
+    let Some(reference) = params
+        .get("vref")
+        .map(|reference| reference.trim())
+        .filter(|reference| !reference.is_empty())
+    else {
+        return Vec::new();
+    };
+    let ambiguous = match resolve_instance_reference(cellview, reference) {
+        InstanceReference::Names(_) => return Vec::new(),
+        InstanceReference::Ambiguous => true,
+        InstanceReference::Unresolved => false,
+    };
+    vec![BrokenReference {
+        parameter: "vref".to_owned(),
+        reference: reference.to_owned(),
+        ambiguous,
+    }]
+}
+
+/// The name the deck writes one instance under, or `None` when it cannot
+/// write the instance at all.
+///
+/// This is the netlister's own naming, not a second account of it: an unnamed
+/// primitive is written `<prefix><id>`, and one whose name starts with the
+/// wrong letter is written with the prefix in front. A cell instance is also
+/// addressed by its occurrence path, so a reference that is not a path segment
+/// — an empty one among them — leaves the deck nothing to write it under. And
+/// the written name has to be one the engine's element-head parser reads as a
+/// name: a blank, a delimiter such as `(` `,` `=` `{`, a quote or a character
+/// outside ASCII would split or break the card it heads. That is judged by the
+/// parser's own rule, so the two cannot disagree about which names run.
+fn deck_name(component: &Component) -> Option<String> {
+    if component.kind == ComponentType::CellInstance
+        && InstancePath::root().child(&component.name).is_err()
+    {
+        return None;
+    }
+    let name = component.emitted_instance_name();
+    rspice_core::netlist::lexer::is_xyce_device_name(&name).then_some(name)
+}
+
+/// The interface the deck binds one instance to, read live.
+///
+/// The placed binding keeps a copy of its master's interface from when it was
+/// placed, and the master may have changed since. Where the plan can be asked,
+/// the binding it materialized at this occurrence carries the interface the
+/// deck uses; otherwise a schematic master's own ports are read. Only a binding
+/// that writes its own text — a source, a template, a compiled built-in, each
+/// validated against its definition when it is netlisted — answers with what
+/// it carries.
+fn live_interface(
+    component: &Component,
+    hierarchy: &HierarchySource<'_>,
+    context: &ViewContext<'_>,
+) -> Option<Vec<PortSpec>> {
+    let binding = component.library_cell.as_ref()?;
+    if let Some(path) = context.occurrence(component)
+        && let Some(materialized) = hierarchy
+            .execution_binding(&path)
+            .and_then(ConfigurationExecutionBinding::materialized_binding)
+    {
+        return materialized.interface();
+    }
+    if !writes_its_own_text(binding)
+        && let Some(master) = hierarchy.schematic_master_for_binding(binding)
+    {
+        return Some(master.interface_ports());
+    }
+    binding.interface()
+}
+
+/// Mark the inputs a compiled XSPICE built-in may leave open.
+///
+/// The authority is the frozen port contract the netlister itself emits from:
+/// a port that allows `null` and that nothing meets is written as `null`, so
+/// such a port is not an undriven input. A port with any one of its terminals
+/// attached is written as nodes, and its open terminals stay open pins.
+fn mark_optional_inputs(component: &Component, pins: &mut [PinInfo]) {
+    let Some(binding) = component.library_cell.as_ref() else {
+        return;
+    };
+    let Some(contract) = binding.builtin_xspice.as_ref() else {
+        return;
+    };
+    for port in contract.ports.iter().filter(|port| port.null_allowed) {
+        let names = port
+            .terminals
+            .iter()
+            .filter_map(|terminal| binding.terminal_order.get(*terminal))
+            .map(|name| name.to_ascii_lowercase())
+            .collect::<HashSet<_>>();
+        let open = pins
+            .iter()
+            .filter(|pin| names.contains(&pin.name.to_ascii_lowercase()))
+            .all(|pin| !pin.attached);
+        if !open {
+            continue;
+        }
+        for pin in pins
+            .iter_mut()
+            .filter(|pin| names.contains(&pin.name.to_ascii_lowercase()))
+        {
+            pin.optional = true;
+        }
+    }
+}
+
+/// Every direction an interface declares, keyed by folded pin name.
 ///
 /// A primitive binds no interface and therefore declares nothing: the map is
 /// empty, every one of its terminals reads as undeclared, and an open resistor
@@ -315,21 +654,13 @@ fn extract_components(
 /// declaration is written from the parent's side of the symbol, so inside the
 /// master an `out` port is where the cellview's own circuitry arrives — reading
 /// it here would make a port a driver within the very cellview that drives it.
-fn declared_port_directions(
-    component: &Component,
-) -> std::collections::HashMap<String, PortDirection> {
-    let mut declared = std::collections::HashMap::new();
-    for port in component
-        .library_cell
-        .as_ref()
-        .and_then(|binding| binding.interface())
-        .into_iter()
-        .flatten()
-    {
+fn declared_port_directions(interface: Option<Vec<PortSpec>>) -> HashMap<String, PortDirection> {
+    let mut declared = HashMap::new();
+    for port in interface.into_iter().flatten() {
         // One name declared twice keeps the `Out` claim rather than whichever
         // declaration was read last, which is the reading the driver rules
         // have always had.
-        match declared.entry(port.name) {
+        match declared.entry(port.name.to_ascii_lowercase()) {
             std::collections::hash_map::Entry::Vacant(slot) => {
                 slot.insert(port.direction);
             }
@@ -578,300 +909,420 @@ fn check_one_view(
     result
 }
 
-/// The subject's index in the walk. It is the only cellview whose findings are
-/// stated without an occurrence path.
-const SUBJECT: usize = 0;
-
-/// One cellview the walk reached.
-struct ReachedView<'a> {
-    /// The cellview the binding named, or `None` for the subject, which the
-    /// caller names rather than a binding.
-    reference: Option<CellViewRef>,
-    document: &'a SchematicDocument,
-    /// The first occurrence path that reached it, which is proof that at least
-    /// one path can name it. The subject's is the root.
-    first_path: InstancePath,
-}
-
-/// One placed instance, as an edge of the instantiated hierarchy.
-struct InstanceEdge {
-    parent: usize,
-    child: usize,
-    /// The instance reference as the drawing spells it: one path segment.
-    instance: String,
-}
-
-/// One instance whose master is already one of its own enclosing cellviews.
-struct RecursiveInstance {
-    parent: usize,
-    component_id: u64,
-    component_name: String,
-    repeated: CellViewRef,
-    /// The enclosing cellviews from the repeated one down to the instance, as
-    /// a reader can follow them.
-    chain: String,
-}
-
-/// Exactly how many times one cellview occurs, and the first few paths that
-/// reach it.
-struct Occurrences {
-    count: u64,
-    paths: Vec<InstancePath>,
-}
-
-/// The instantiated hierarchy below one checked cellview.
+/// Drivers on the deck's global nodes, gathered across the whole walk.
 ///
-/// The walk follows the drawing's placed bindings. It deliberately does not ask
-/// a configuration's execution plan which view an occurrence resolves to: the
-/// subject of a check is any cellview, not necessarily the design root, so a
-/// path here is relative to that subject and is not a path the plan can be
-/// queried with. Where a configuration may rebind a master, the per-cellview
-/// type check already declines to judge rather than inventing a finding.
-struct InstanceGraph<'a> {
-    views: Vec<ReachedView<'a>>,
-    edges: Vec<InstanceEdge>,
-    recursive: Vec<RecursiveInstance>,
-    /// View index by case-folded `library/cell/view`.
-    ///
-    /// The subject is absent from this map, because a caller hands over a
-    /// document rather than the cellview it belongs to. An instance that binds
-    /// the subject's own cellview therefore opens a second view of the same
-    /// document instead of closing the cycle at the subject — and the cycle is
-    /// then caught one level further down, where that view reaches itself. The
-    /// walk still terminates and still reports, which is what the guard is for.
-    index: std::collections::HashMap<String, usize>,
+/// A global is one node in the deck however many cellviews name it, and every
+/// occurrence of a cellview places its drivers on it again. Ideal sources that
+/// close a loop through global nodes, or two declared outputs on one global,
+/// conflict wherever they are drawn — and the per-cellview rules cannot see the
+/// conflict when its parts sit in different cellviews, or in two occurrences
+/// of one.
+///
+/// Ground is node 0 everywhere, but it is the reference, not a contested net:
+/// an output tied to ground in a cell placed twice is not two outputs fighting
+/// over one node. For sources it is a node like any other, as it is in the
+/// engine's graph: a source from a global to ground in a cell placed twice is
+/// a loop through the global and ground.
+#[derive(Default)]
+struct GlobalDrives {
+    /// Every independent voltage source in the walk, in walk order.
+    sources: Vec<SourceBranch>,
+    /// Declared outputs standing on a global node other than ground, by folded
+    /// node name.
+    outputs: BTreeMap<String, GlobalDriven>,
 }
 
-impl<'a> InstanceGraph<'a> {
-    fn walk(subject: &'a SchematicDocument, hierarchy: &HierarchySource<'a>) -> Self {
-        let mut graph = Self {
-            views: vec![ReachedView {
-                reference: None,
-                document: subject,
-                first_path: InstancePath::root(),
-            }],
-            edges: Vec::new(),
-            recursive: Vec::new(),
-            index: std::collections::HashMap::new(),
-        };
-        graph.descend(SUBJECT, hierarchy, &mut vec![SUBJECT]);
-        graph
-    }
+/// One independent voltage source, as a branch of the deck's source graph.
+struct SourceBranch {
+    view: usize,
+    identity: String,
+    /// Its `+` and `-` nodes as the cellview spells them.
+    nodes: [String; 2],
+    /// For each of the two, the folded name of the node every cellview shares
+    /// — a global, or ground — or `None` for a node of the cellview's own.
+    shared: [Option<String>; 2],
+}
 
-    /// Add every instance of one cellview, descending into each master the
-    /// first time it is reached.
-    ///
-    /// `enclosing` is the chain of views from the subject to this one. An
-    /// instance whose master is already on it closes a cycle: it is reported
-    /// and not followed, because there is no finite expansion to check.
-    fn descend(
-        &mut self,
-        parent: usize,
-        hierarchy: &HierarchySource<'a>,
-        enclosing: &mut Vec<usize>,
-    ) {
-        let document = self.views[parent].document;
-        let parent_path = self.views[parent].first_path.clone();
-        let mut instances = document
-            .components
-            .iter()
-            .filter(|component| component.kind == ComponentType::CellInstance)
-            .collect::<Vec<_>>();
-        instances.sort_by_key(|component| component.id);
+/// A node of the deck's source graph.
+#[derive(PartialEq, Eq, Hash)]
+enum SourceNode<'a> {
+    /// A global or ground: one node across the whole design.
+    Shared(&'a str),
+    /// A node of one copy of one cellview.
+    Own { view: usize, copy: u8, net: &'a str },
+}
 
-        for instance in instances {
-            let Some(binding) = instance.library_cell.as_ref() else {
-                continue;
-            };
-            // A binding that carries its own netlist text or source is a leaf:
-            // that text is what the deck writes, so there is no schematic below
-            // it for a rule to read.
-            if binding.source_path.is_some()
-                || binding.netlist_template.is_some()
-                || binding.is_executable_builtin()
-            {
-                continue;
+/// Terminals on each global node, counted across the whole walk.
+///
+/// A cellview's own floating-node rule takes a terminal on a global as
+/// connected, because the global continues into every other cellview that
+/// names it. Whether anything else does name it is a question about the whole
+/// design, so the walk counts every terminal on each global at every
+/// occurrence of the cellview that holds it. A global the design touches fewer
+/// times than a node needs is floating, wherever its one terminal is drawn.
+#[derive(Default)]
+struct GlobalTouches {
+    /// By folded node name.
+    nodes: BTreeMap<String, GlobalTouched>,
+}
+
+#[derive(Default)]
+struct GlobalTouched {
+    /// The terminals on the node in each cellview that touches it, with the
+    /// node as that cellview spells it.
+    touches: Vec<(usize, u64, String)>,
+    /// An interface port stands on the node somewhere, so it continues into a
+    /// parent the walk does not see.
+    continues: bool,
+}
+
+impl GlobalTouches {
+    fn collect(&mut self, view: usize, components: &[ComponentInfo]) {
+        let mut in_view = BTreeMap::<String, (u64, String)>::new();
+        for component in components {
+            for pin in component.pins.iter().filter(|pin| pin.on_global) {
+                let key = pin.net_name.to_ascii_lowercase();
+                if component.is_interface_port {
+                    self.nodes.entry(key.clone()).or_default().continues = true;
+                }
+                in_view
+                    .entry(key)
+                    .or_insert_with(|| (0, pin.net_name.clone()))
+                    .0 += 1;
             }
-            let Some(master) = hierarchy.schematic_master_for_binding(binding) else {
-                continue;
-            };
-            // A finding below this instance is named by its occurrence path, so
-            // the instance's own reference has to be a path segment. An empty
-            // or unusable reference is already an error on this very instance
-            // from the reference rules, and the depth and length limits here
-            // are the limits the hierarchy resolver stops at and reports; in
-            // every case the design surface states the boundary, so the walk
-            // does not invent a second finding for it.
-            let Ok(child_path) = parent_path.child(instance.name.trim()) else {
-                continue;
-            };
-            let reference = CellViewRef::new(&binding.library, &binding.cell, &binding.view);
-            let key = reference.key().to_ascii_lowercase();
-
-            match self.index.get(&key).copied() {
-                Some(child) if enclosing.contains(&child) => {
-                    let chain = self.enclosing_chain(enclosing, child, &reference);
-                    self.recursive.push(RecursiveInstance {
-                        parent,
-                        component_id: instance.id,
-                        component_name: instance.name.clone(),
-                        repeated: reference,
-                        chain,
-                    });
-                }
-                Some(child) => {
-                    self.edges.push(InstanceEdge {
-                        parent,
-                        child,
-                        instance: instance.name.trim().to_owned(),
-                    });
-                }
-                None => {
-                    let child = self.views.len();
-                    self.views.push(ReachedView {
-                        reference: Some(reference),
-                        document: master,
-                        first_path: child_path,
-                    });
-                    self.index.insert(key, child);
-                    self.edges.push(InstanceEdge {
-                        parent,
-                        child,
-                        instance: instance.name.trim().to_owned(),
-                    });
-                    enclosing.push(child);
-                    self.descend(child, hierarchy, enclosing);
-                    enclosing.pop();
-                }
-            }
+        }
+        for (key, (terminals, node)) in in_view {
+            self.nodes
+                .entry(key)
+                .or_default()
+                .touches
+                .push((view, terminals, node));
         }
     }
 
-    /// The cycle as a reader follows it: from the repeated cellview down to the
-    /// instance that reaches it again.
-    fn enclosing_chain(
+    /// Each global the design touches fewer than `min_connections` times, at
+    /// the cellview that touches it first.
+    fn floating(
         &self,
-        enclosing: &[usize],
-        repeated: usize,
-        reference: &CellViewRef,
-    ) -> String {
-        let from = enclosing
-            .iter()
-            .position(|view| *view == repeated)
-            .unwrap_or(0);
-        let mut chain = enclosing[from..]
-            .iter()
-            .filter_map(|view| self.views[*view].reference.as_ref())
-            .map(CellViewRef::display_path)
-            .collect::<Vec<_>>();
-        chain.push(reference.display_path());
-        chain.join(" -> ")
-    }
-
-    /// State every cycle found inside one cellview, in that cellview's own
-    /// report.
-    fn append_recursive_findings(
-        &self,
-        parent: usize,
-        severity_overrides: &std::collections::HashMap<DrcViolationType, DrcSeverity>,
-        result: &mut DrcResult,
-    ) {
-        for recursive in self
-            .recursive
-            .iter()
-            .filter(|recursive| recursive.parent == parent)
-        {
-            let instance = if recursive.component_name.trim().is_empty() {
-                format!("component #{}", recursive.component_id)
-            } else {
-                recursive.component_name.clone()
+        occurrences: &[Occurrences],
+        min_connections: usize,
+    ) -> Vec<(usize, DrcViolation)> {
+        let mut findings = Vec::new();
+        for touched in self.nodes.values() {
+            let Some((view, _, node)) = touched.touches.first() else {
+                continue;
             };
-            let mut violation = DrcViolation::new(
-                result.total_count(),
-                DrcViolationType::RecursiveInstantiation,
-                format!(
-                    "{instance} reaches {}, which already encloses it: {}",
-                    recursive.repeated.display_path(),
-                    recursive.chain
+            if touched.continues || crate::schematic::ground_names::is_ground_reference(node) {
+                continue;
+            }
+            let total = touched
+                .touches
+                .iter()
+                .map(|(view, terminals, _)| terminals.saturating_mul(occurrences[*view].count))
+                .fold(0u64, u64::saturating_add);
+            if total >= min_connections as u64 {
+                continue;
+            }
+            findings.push((
+                *view,
+                DrcViolation::new(
+                    0,
+                    DrcViolationType::FloatingNode,
+                    format!("Global node '{node}' has only {total} connection(s) in the design"),
+                    DrcLocation::Node {
+                        net_name: node.clone(),
+                    },
                 ),
-                DrcLocation::Component {
-                    id: recursive.component_id,
-                    name: recursive.component_name.clone(),
-                },
-            )
-            .with_related(vec![instance, recursive.repeated.display_path()]);
-            if let Some(severity) =
-                severity_overrides.get(&DrcViolationType::RecursiveInstantiation)
-            {
-                violation.severity = *severity;
+            ));
+        }
+        findings
+    }
+}
+
+/// What drives one global node, or one pair of them, across the walk.
+struct GlobalDriven {
+    /// The nodes as the drawing first spelled them, which is what a finding
+    /// quotes.
+    nodes: Vec<String>,
+    drivers: Vec<GlobalDriver>,
+}
+
+/// One driver on a global node: the cellview it is drawn in, and what it is
+/// called there.
+struct GlobalDriver {
+    view: usize,
+    identity: String,
+}
+
+impl GlobalDrives {
+    fn collect(&mut self, view: usize, components: &[ComponentInfo], globals: &HashSet<String>) {
+        let global = |net: &str| {
+            if source_loops::node_key(net) == GROUND_KEY {
+                Some(GROUND_KEY.to_owned())
+            } else {
+                let folded = net.to_ascii_lowercase();
+                globals.contains(&folded).then_some(folded)
             }
-            result.add_violation(violation);
+        };
+        for component in components {
+            let identity = component_identity(component);
+            if component.is_voltage_source {
+                let terminal = |name: &str| {
+                    component
+                        .pins
+                        .iter()
+                        .find(|pin| pin.name == name)
+                        .map(|pin| pin.net_name.as_str())
+                };
+                let (Some(plus), Some(minus)) = (terminal("+"), terminal("-")) else {
+                    continue;
+                };
+                self.sources.push(SourceBranch {
+                    view,
+                    identity,
+                    nodes: [plus.to_owned(), minus.to_owned()],
+                    shared: [global(plus), global(minus)],
+                });
+                continue;
+            }
+            // One driver per component and node, as the cellview's own rule
+            // counts: two output pins of one instance on one global are that
+            // instance's business, not two drivers fighting.
+            let mut driven = BTreeMap::new();
+            for pin in component.pins.iter().filter(|pin| pin.drives()) {
+                if let Some(key) = global(&pin.net_name).filter(|key| key != GROUND_KEY) {
+                    driven.entry(key).or_insert_with(|| pin.net_name.clone());
+                }
+            }
+            for (key, node) in driven {
+                self.outputs
+                    .entry(key)
+                    .or_insert_with(|| GlobalDriven {
+                        nodes: vec![node],
+                        drivers: Vec::new(),
+                    })
+                    .drivers
+                    .push(GlobalDriver {
+                        view,
+                        identity: identity.clone(),
+                    });
+            }
         }
     }
 
-    /// Exactly how often each cellview occurs, with the first few paths that
-    /// reach it.
+    /// The conflicts that span more than one occurrence.
     ///
-    /// The count is computed over the edges rather than by walking every
-    /// occurrence, so a wide hierarchy costs nothing to count exactly even
-    /// where enumerating its occurrences would be hopeless. Cycles were
-    /// excluded as they were found, so what remains is acyclic and one pass in
-    /// dependency order is enough.
-    fn occurrences(&self) -> Vec<Occurrences> {
-        let mut occurrences = self
-            .views
-            .iter()
-            .map(|_| Occurrences {
-                count: 0,
-                paths: Vec::new(),
-            })
-            .collect::<Vec<_>>();
-        occurrences[SUBJECT].count = 1;
-        occurrences[SUBJECT].paths = vec![InstancePath::root()];
-
-        let mut outgoing = vec![Vec::new(); self.views.len()];
-        let mut remaining = vec![0usize; self.views.len()];
-        for (index, edge) in self.edges.iter().enumerate() {
-            outgoing[edge.parent].push(index);
-            remaining[edge.child] += 1;
+    /// Drivers that all sit in one occurrence of one cellview are that
+    /// cellview's own rules' business, and are stated there.
+    fn findings(
+        &self,
+        occurrences: &[Occurrences],
+        views: &[ReachedView<'_>],
+    ) -> Vec<DrcViolation> {
+        let mut findings = self.source_loops(occurrences, views);
+        for driven in self.outputs.values() {
+            let Some((total, listed)) = conflict(&driven.drivers, occurrences) else {
+                continue;
+            };
+            findings.push(
+                DrcViolation::new(
+                    0,
+                    DrcViolationType::ShortedOutputs,
+                    format!(
+                        "Global node '{}' has {total} declared output drivers across the \
+                         hierarchy: {}",
+                        driven.nodes[0],
+                        listed.join(", ")
+                    ),
+                    driven.location(occurrences, views),
+                )
+                .with_related(listed),
+            );
         }
-
-        let mut ready = std::collections::VecDeque::from([SUBJECT]);
-        while let Some(parent) = ready.pop_front() {
-            for edge in &outgoing[parent] {
-                let edge = &self.edges[*edge];
-                occurrences[edge.child].count = occurrences[edge.child]
-                    .count
-                    .saturating_add(occurrences[parent].count);
-                let mut extended = Vec::new();
-                for path in &occurrences[parent].paths {
-                    if occurrences[edge.child].paths.len() + extended.len()
-                        >= MAX_REPORTED_OCCURRENCE_PATHS
-                    {
-                        break;
-                    }
-                    if let Ok(path) = path.child(&edge.instance) {
-                        extended.push(path);
-                    }
-                }
-                occurrences[edge.child].paths.extend(extended);
-                remaining[edge.child] -= 1;
-                if remaining[edge.child] == 0 {
-                    ready.push_back(edge.child);
-                }
-            }
-        }
-
-        // Every reached cellview was reached by a path that parsed, so it is
-        // named by at least that one however its later occurrences fare.
-        for (index, occurrence) in occurrences.iter_mut().enumerate() {
-            if occurrence.paths.is_empty() {
-                occurrence.paths.push(self.views[index].first_path.clone());
-            }
-            occurrence.count = occurrence.count.max(1);
-        }
-        occurrences
+        findings
     }
+
+    /// The loops the walk's sources close that no one cellview's rule sees.
+    ///
+    /// A cellview placed more than once puts its sources in the deck once per
+    /// occurrence, each copy on nodes of its own except the shared ones. Two
+    /// copies show every loop the repetition closes, because every further
+    /// copy joins the shared nodes exactly as the second does; `conflict`
+    /// then counts and lists all of them. A loop inside one copy of one
+    /// cellview is that cellview's own rule's, and is stated there.
+    fn source_loops(
+        &self,
+        occurrences: &[Occurrences],
+        views: &[ReachedView<'_>],
+    ) -> Vec<DrcViolation> {
+        let mut copies = Vec::new();
+        let mut branches = Vec::new();
+        for (index, source) in self.sources.iter().enumerate() {
+            let repeated = occurrences[source.view].count > 1;
+            for copy in 0..=u8::from(repeated) {
+                copies.push((index, copy));
+                branches.push([0, 1].map(|end| match &source.shared[end] {
+                    Some(key) => SourceNode::Shared(key),
+                    None => SourceNode::Own {
+                        view: source.view,
+                        copy,
+                        net: &source.nodes[end],
+                    },
+                }));
+            }
+        }
+
+        let mut findings = Vec::new();
+        let mut stated = HashSet::new();
+        for members in source_loops::closed_loops(&branches) {
+            let (first, first_copy) = copies[members[0]];
+            let first_view = self.sources[first].view;
+            if members.iter().all(|&member| {
+                let (source, copy) = copies[member];
+                self.sources[source].view == first_view && copy == first_copy
+            }) {
+                continue;
+            }
+            // Further copies close the same loop again through the same
+            // sources, and `conflict` already lists every occurrence of each.
+            let mut sources = members
+                .iter()
+                .map(|&member| copies[member].0)
+                .collect::<Vec<_>>();
+            sources.sort_by_key(|&source| (self.sources[source].view, source));
+            sources.dedup();
+            if !stated.insert(sources.clone()) {
+                continue;
+            }
+            let drivers = sources
+                .iter()
+                .map(|&source| GlobalDriver {
+                    view: self.sources[source].view,
+                    identity: self.sources[source].identity.clone(),
+                })
+                .collect::<Vec<_>>();
+            let Some((total, listed)) = conflict(&drivers, occurrences) else {
+                continue;
+            };
+            // The loop is stated at a global the stated cellview's sources
+            // stand on: it is a node that cellview draws, and the one the loop
+            // leaves the cellview through.
+            let global = sources
+                .iter()
+                .map(|&source| &self.sources[source])
+                .filter(|source| source.view == drivers[0].view)
+                .flat_map(|source| source.nodes.iter().zip(&source.shared))
+                .find_map(|(node, shared)| {
+                    shared
+                        .as_deref()
+                        .is_some_and(|key| key != GROUND_KEY)
+                        .then_some(node)
+                });
+            let (through, node) = match global {
+                Some(node) => ("global node", node.clone()),
+                None => ("node", self.sources[sources[0]].nodes[0].clone()),
+            };
+            let driven = GlobalDriven {
+                nodes: vec![node],
+                drivers,
+            };
+            findings.push(
+                DrcViolation::new(
+                    0,
+                    DrcViolationType::SourceToSource,
+                    format!(
+                        "{total} voltage sources form a closed loop through {through} '{}' \
+                         across the hierarchy: {}",
+                        driven.nodes[0],
+                        listed.join(", ")
+                    ),
+                    driven.location(occurrences, views),
+                )
+                .with_related(listed),
+            );
+        }
+        findings
+    }
+}
+
+impl GlobalDriven {
+    /// Where a conflict on this node is stated.
+    ///
+    /// Where the subject draws one of the drivers, the node is the subject's
+    /// own, and that driver is something the subject can change. Where every
+    /// driver is drawn below it, there is nothing in the subject's drawing to
+    /// rewire: the conflict is stated inside the first driver's occurrence,
+    /// which is where a reader goes to resolve it.
+    fn location(&self, occurrences: &[Occurrences], views: &[ReachedView<'_>]) -> DrcLocation {
+        let node = DrcLocation::Node {
+            net_name: self.nodes[0].clone(),
+        };
+        let first = &self.drivers[0];
+        if self.drivers.iter().any(|driver| driver.view == SUBJECT) {
+            return node;
+        }
+        let Some(reference) = views[first.view].reference.clone() else {
+            return node;
+        };
+        DrcLocation::InsideInstance {
+            path: occurrences[first.view].paths[0].clone(),
+            view: reference,
+            inner: Box::new(node),
+        }
+    }
+}
+
+/// How many drivers one global conflict has in the deck, and the occurrences a
+/// reader is shown, or `None` where there is no conflict this rule owns.
+fn conflict(
+    drivers: &[GlobalDriver],
+    occurrences: &[Occurrences],
+) -> Option<(String, Vec<String>)> {
+    let mut total = 0u64;
+    let mut saturated = false;
+    for driver in drivers {
+        let occurrence = &occurrences[driver.view];
+        let (sum, overflowed) = total.overflowing_add(occurrence.count);
+        total = if overflowed { u64::MAX } else { sum };
+        saturated |= overflowed || occurrence.saturated;
+    }
+    if total <= 1 {
+        return None;
+    }
+    let one_occurrence = drivers
+        .iter()
+        .all(|driver| driver.view == drivers[0].view && occurrences[driver.view].count == 1);
+    if one_occurrence {
+        return None;
+    }
+
+    let mut listed = Vec::new();
+    for driver in drivers {
+        for path in &occurrences[driver.view].paths {
+            if listed.len() == MAX_REPORTED_OCCURRENCE_PATHS {
+                break;
+            }
+            listed.push(if path.segments().is_empty() {
+                driver.identity.clone()
+            } else {
+                format!("{path}/{}", driver.identity)
+            });
+        }
+    }
+    let shown = listed.len() as u64;
+    if saturated || shown < total {
+        listed.push(if saturated {
+            "and more".to_owned()
+        } else {
+            format!("and {} more", total - shown)
+        });
+    }
+    let total = if saturated {
+        format!("at least {total}")
+    } else {
+        total.to_string()
+    };
+    Some((total, listed))
 }
 
 #[cfg(test)]

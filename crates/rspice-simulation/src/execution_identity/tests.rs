@@ -1222,9 +1222,14 @@ fn drc_receipt_retains_full_durable_bus_identity() {
 /// Which terminal of a device a finding sits on, and which occurrence of a
 /// cellview raised it, are part of that finding's identity. Two pins of one
 /// transistor and one cellview's finding under two instance paths are different
-/// evidence, so they must not share a cached run's digest.
+/// evidence, so they must not share a cached run's digest — and neither may two
+/// findings that differ in any other field the location carries.
 #[test]
 fn drc_receipt_separates_terminals_and_occurrence_paths() {
+    use rspice_app_types::hierarchy_path::InstancePath;
+    use rspice_design_model::Point;
+    use rspice_design_model::cell_view::CellViewRef;
+
     let digest_for = |location| {
         let mut result = DrcResult::new();
         result.add_violation(DrcViolation::new(
@@ -1236,22 +1241,417 @@ fn drc_receipt_separates_terminals_and_occurrence_paths() {
         result.completed = true;
         drc_receipt_digest(11, &result)
     };
-    let terminal = |pin: &str| DrcLocation::Terminal {
+    let terminal = || DrcLocation::Terminal {
         component_id: 4,
         component_name: "M3".to_owned(),
-        pin_name: pin.to_owned(),
-        point: rspice_design_model::Point::new(10, 20),
+        pin_name: "D".to_owned(),
+        point: Point::new(10, 20),
     };
-    let inside = |path: &str| DrcLocation::InsideInstance {
-        path: rspice_app_types::hierarchy_path::InstancePath::parse(path).expect("instance path"),
-        view: rspice_design_model::cell_view::CellViewRef::new("work", "amp", "schematic"),
-        inner: Box::new(terminal("D")),
+    let with_terminal = |change: &dyn Fn(&mut DrcLocation)| {
+        let mut location = terminal();
+        change(&mut location);
+        location
     };
+    let set = |field: &'static str| {
+        move |location: &mut DrcLocation| {
+            let DrcLocation::Terminal {
+                component_id,
+                component_name,
+                pin_name,
+                point,
+            } = location
+            else {
+                unreachable!("the fixture is a terminal");
+            };
+            match field {
+                "component_id" => *component_id = 5,
+                "component_name" => *component_name = "M4".to_owned(),
+                "pin_name" => *pin_name = "G".to_owned(),
+                "x" => point.x = 11,
+                "y" => point.y = 21,
+                _ => unreachable!("{field}"),
+            }
+        }
+    };
+    let baseline = digest_for(terminal());
+    for field in ["component_id", "component_name", "pin_name", "x", "y"] {
+        assert_ne!(
+            digest_for(with_terminal(&set(field))),
+            baseline,
+            "the terminal's {field} is part of the finding's identity"
+        );
+    }
 
-    assert_ne!(digest_for(terminal("D")), digest_for(terminal("G")));
-    assert_ne!(digest_for(inside("/X1")), digest_for(inside("/X2")));
-    assert_ne!(digest_for(inside("/X1")), digest_for(terminal("D")));
+    let inside = |path: &str, view: CellViewRef, inner: DrcLocation| DrcLocation::InsideInstance {
+        path: InstancePath::parse(path).expect("instance path"),
+        view,
+        inner: Box::new(inner),
+    };
+    let amp = || CellViewRef::new("work", "amp", "schematic");
+    let baseline = digest_for(inside("/X1", amp(), terminal()));
+    assert_ne!(
+        digest_for(inside("/X2", amp(), terminal())),
+        baseline,
+        "the occurrence path is part of the finding's identity"
+    );
+    for view in [
+        CellViewRef::new("lib", "amp", "schematic"),
+        CellViewRef::new("work", "buf", "schematic"),
+        CellViewRef::new("work", "amp", "schematic_v2"),
+    ] {
+        assert_ne!(
+            digest_for(inside("/X1", view.clone(), terminal())),
+            baseline,
+            "the cellview {} is part of the finding's identity",
+            view.display_path()
+        );
+    }
+    assert_ne!(
+        digest_for(inside("/X1", amp(), with_terminal(&set("pin_name")))),
+        baseline,
+        "the location inside the occurrence is part of the finding's identity"
+    );
+    assert_ne!(baseline, digest_for(terminal()));
 }
+
+/// The tag numbers are what make a cached run's identity comparable to a new
+/// one, so they are only ever added. This states each one a second time: a
+/// renumbered or reused tag fails here rather than silently re-keying every
+/// cached receipt. A new variant must be given the next free number in both
+/// places — the match below will not compile until it is.
+#[test]
+fn drc_identity_tags_are_never_renumbered() {
+    use rspice_design_model::Point;
+
+    let pinned_type = |violation_type: DrcViolationType| match violation_type {
+        DrcViolationType::FloatingNode => 0,
+        DrcViolationType::UnconnectedPin => 1,
+        DrcViolationType::OrphanNetLabel => 2,
+        DrcViolationType::DanglingWire => 3,
+        DrcViolationType::ShortedOutputs => 4,
+        DrcViolationType::MissingGround => 5,
+        DrcViolationType::SourceToSource => 7,
+        DrcViolationType::DuplicateName => 8,
+        DrcViolationType::EmptyName => 9,
+        DrcViolationType::InvalidName => 10,
+        DrcViolationType::MissingParameter => 11,
+        DrcViolationType::ValueOutOfRange => 12,
+        DrcViolationType::UnknownComponent => 13,
+        DrcViolationType::SymbolUnplacedPin => 14,
+        DrcViolationType::SymbolOrphanedPin => 15,
+        DrcViolationType::SymbolPinOffGrid => 16,
+        DrcViolationType::MalformedBus => 17,
+        DrcViolationType::UnnamedBus => 18,
+        DrcViolationType::BusRangeConflict => 19,
+        DrcViolationType::DanglingBusTap => 20,
+        DrcViolationType::MixedBusTap => 21,
+        DrcViolationType::DuplicateBusMemberDriver => 22,
+        DrcViolationType::OffSheetConnectorWithoutPartner => 23,
+        DrcViolationType::CaseCollidingNetNames => 24,
+        DrcViolationType::VectorWidthMismatch => 25,
+        DrcViolationType::UndrivenInput => 26,
+        DrcViolationType::UnloadedOutput => 27,
+        DrcViolationType::RecursiveInstantiation => 28,
+        DrcViolationType::UnresolvedReference => 29,
+    };
+    let types = [
+        DrcViolationType::FloatingNode,
+        DrcViolationType::UnconnectedPin,
+        DrcViolationType::OrphanNetLabel,
+        DrcViolationType::DanglingWire,
+        DrcViolationType::ShortedOutputs,
+        DrcViolationType::MissingGround,
+        DrcViolationType::SourceToSource,
+        DrcViolationType::DuplicateName,
+        DrcViolationType::EmptyName,
+        DrcViolationType::InvalidName,
+        DrcViolationType::MissingParameter,
+        DrcViolationType::ValueOutOfRange,
+        DrcViolationType::UnknownComponent,
+        DrcViolationType::SymbolUnplacedPin,
+        DrcViolationType::SymbolOrphanedPin,
+        DrcViolationType::SymbolPinOffGrid,
+        DrcViolationType::MalformedBus,
+        DrcViolationType::UnnamedBus,
+        DrcViolationType::BusRangeConflict,
+        DrcViolationType::DanglingBusTap,
+        DrcViolationType::MixedBusTap,
+        DrcViolationType::DuplicateBusMemberDriver,
+        DrcViolationType::OffSheetConnectorWithoutPartner,
+        DrcViolationType::CaseCollidingNetNames,
+        DrcViolationType::VectorWidthMismatch,
+        DrcViolationType::UndrivenInput,
+        DrcViolationType::UnloadedOutput,
+        DrcViolationType::RecursiveInstantiation,
+        DrcViolationType::UnresolvedReference,
+    ];
+    let mut seen = std::collections::BTreeSet::new();
+    for violation_type in types {
+        let tag = drc_violation_type_tag(violation_type);
+        assert_eq!(tag, pinned_type(violation_type), "{violation_type:?}");
+        assert!(seen.insert(tag), "tag {tag} names two kinds");
+    }
+
+    let terminal = DrcLocation::Terminal {
+        component_id: 1,
+        component_name: "R1".to_owned(),
+        pin_name: "1".to_owned(),
+        point: Point::origin(),
+    };
+    let locations = [
+        (DrcLocation::Point { x: 0.0, y: 0.0 }, 0),
+        (
+            DrcLocation::Component {
+                id: 1,
+                name: "R1".to_owned(),
+            },
+            1,
+        ),
+        (DrcLocation::Wire { id: 1 }, 2),
+        (
+            DrcLocation::NetLabel {
+                name: "a".to_owned(),
+            },
+            3,
+        ),
+        (
+            DrcLocation::Node {
+                net_name: "a".to_owned(),
+            },
+            4,
+        ),
+        (DrcLocation::Global, 5),
+        (
+            DrcLocation::SymbolPin {
+                reference: rspice_design_model::cell_view::CellViewRef::new(
+                    "work", "amp", "symbol",
+                ),
+                pin_name: "A".to_owned(),
+                point: None,
+            },
+            6,
+        ),
+        (DrcLocation::Bus { id: 1 }, 7),
+        (DrcLocation::BusTap { id: 1 }, 8),
+        (terminal.clone(), 9),
+        (
+            DrcLocation::InsideInstance {
+                path: rspice_app_types::hierarchy_path::InstancePath::parse("/X1")
+                    .expect("instance path"),
+                view: rspice_design_model::cell_view::CellViewRef::new("work", "amp", "schematic"),
+                inner: Box::new(terminal),
+            },
+            10,
+        ),
+    ];
+    for (location, pinned) in &locations {
+        // Every location kind is named here, so a new one does not compile
+        // until it is — beside the list it has to join with its own tag.
+        match location {
+            DrcLocation::Point { .. }
+            | DrcLocation::Component { .. }
+            | DrcLocation::Wire { .. }
+            | DrcLocation::NetLabel { .. }
+            | DrcLocation::Node { .. }
+            | DrcLocation::Global
+            | DrcLocation::SymbolPin { .. }
+            | DrcLocation::Bus { .. }
+            | DrcLocation::BusTap { .. }
+            | DrcLocation::Terminal { .. }
+            | DrcLocation::InsideInstance { .. } => {}
+        }
+        assert_eq!(drc_location_tag(location), *pinned, "{location:?}");
+    }
+}
+
+/// What one finding's identity hashes, spelled out byte by byte for a finding
+/// at each location kind. The test above keeps the tag numbers; this keeps the
+/// layout around them — the order of the fields, the marker before each, and
+/// how each value is written — so a reordered field or a changed width fails
+/// here rather than silently re-keying every cached receipt.
+#[test]
+fn drc_identity_bytes_are_pinned_for_every_location_kind() {
+    use rspice_design_model::Point;
+    use sha2::{Digest as _, Sha256};
+
+    // The canonical encoding's markers, written out independently of
+    // `CanonicalWriter`.
+    const DOMAIN: u8 = 0xd0;
+    const STRING: u8 = 0x07;
+    fn text(bytes: &mut Vec<u8>, marker: u8, value: &str) {
+        bytes.push(marker);
+        bytes.extend((value.len() as u64).to_be_bytes());
+        bytes.extend(value.as_bytes());
+    }
+    fn tag(bytes: &mut Vec<u8>, value: u8) {
+        bytes.extend([0x02, value]);
+    }
+    fn id(bytes: &mut Vec<u8>, value: u64) {
+        bytes.push(0x03);
+        bytes.extend(value.to_be_bytes());
+    }
+    fn int(bytes: &mut Vec<u8>, value: i32) {
+        bytes.push(0x04);
+        bytes.extend(value.to_be_bytes());
+    }
+    fn real(bytes: &mut Vec<u8>, value: f64) {
+        bytes.push(0x06);
+        bytes.extend(value.to_bits().to_be_bytes());
+    }
+    fn sequence(bytes: &mut Vec<u8>, len: u64) {
+        bytes.push(0x0a);
+        bytes.extend(len.to_be_bytes());
+    }
+    fn location(bytes: &mut Vec<u8>, kind: u8) {
+        text(bytes, DOMAIN, "drc-location");
+        tag(bytes, kind);
+    }
+    fn terminal(bytes: &mut Vec<u8>) {
+        location(bytes, 9);
+        id(bytes, 7);
+        text(bytes, STRING, "R1");
+        text(bytes, STRING, "2");
+        int(bytes, -3);
+        int(bytes, 40);
+    }
+
+    let at_terminal = DrcLocation::Terminal {
+        component_id: 7,
+        component_name: "R1".to_owned(),
+        pin_name: "2".to_owned(),
+        point: Point::new(-3, 40),
+    };
+    type Spelling = Box<dyn Fn(&mut Vec<u8>)>;
+    let cases: Vec<(DrcLocation, Spelling)> = vec![
+        (
+            DrcLocation::Point { x: 1.5, y: -2.0 },
+            Box::new(|bytes: &mut Vec<u8>| {
+                location(bytes, 0);
+                real(bytes, 1.5);
+                real(bytes, -2.0);
+            }),
+        ),
+        (
+            DrcLocation::Component {
+                id: 7,
+                name: "R1".to_owned(),
+            },
+            Box::new(|bytes: &mut Vec<u8>| {
+                location(bytes, 1);
+                id(bytes, 7);
+                text(bytes, STRING, "R1");
+            }),
+        ),
+        (
+            DrcLocation::Wire { id: 9 },
+            Box::new(|bytes: &mut Vec<u8>| {
+                location(bytes, 2);
+                id(bytes, 9);
+            }),
+        ),
+        (
+            DrcLocation::NetLabel {
+                name: "out".to_owned(),
+            },
+            Box::new(|bytes: &mut Vec<u8>| {
+                location(bytes, 3);
+                text(bytes, STRING, "out");
+            }),
+        ),
+        (
+            DrcLocation::Node {
+                net_name: "vdd!".to_owned(),
+            },
+            Box::new(|bytes: &mut Vec<u8>| {
+                location(bytes, 4);
+                text(bytes, STRING, "vdd!");
+            }),
+        ),
+        (
+            DrcLocation::Global,
+            Box::new(|bytes: &mut Vec<u8>| location(bytes, 5)),
+        ),
+        (
+            DrcLocation::SymbolPin {
+                reference: rspice_design_model::cell_view::CellViewRef::new(
+                    "work", "amp", "symbol",
+                ),
+                pin_name: "A".to_owned(),
+                point: Some(Point::new(5, -6)),
+            },
+            Box::new(|bytes: &mut Vec<u8>| {
+                location(bytes, 6);
+                text(bytes, STRING, "work");
+                text(bytes, STRING, "amp");
+                text(bytes, STRING, "symbol");
+                text(bytes, STRING, "A");
+                bytes.extend([0x0b, 1]);
+                int(bytes, 5);
+                int(bytes, -6);
+            }),
+        ),
+        (
+            DrcLocation::Bus { id: 11 },
+            Box::new(|bytes: &mut Vec<u8>| {
+                location(bytes, 7);
+                id(bytes, 11);
+            }),
+        ),
+        (
+            DrcLocation::BusTap { id: 12 },
+            Box::new(|bytes: &mut Vec<u8>| {
+                location(bytes, 8);
+                id(bytes, 12);
+            }),
+        ),
+        (at_terminal.clone(), Box::new(terminal)),
+        (
+            DrcLocation::InsideInstance {
+                path: rspice_app_types::hierarchy_path::InstancePath::parse("/X1/XA")
+                    .expect("instance path"),
+                view: rspice_design_model::cell_view::CellViewRef::new("work", "amp", "schematic"),
+                inner: Box::new(at_terminal),
+            },
+            Box::new(|bytes: &mut Vec<u8>| {
+                location(bytes, 10);
+                sequence(bytes, 2);
+                text(bytes, STRING, "X1");
+                text(bytes, STRING, "XA");
+                text(bytes, STRING, "work");
+                text(bytes, STRING, "amp");
+                text(bytes, STRING, "schematic");
+                terminal(bytes);
+            }),
+        ),
+    ];
+
+    for (at, spelled) in cases {
+        let mut violation = DrcViolation::new(3, DrcViolationType::FloatingNode, "Node 'a'", at)
+            .with_related(vec!["R2".to_owned(), "R1".to_owned()]);
+        violation.severity = DrcSeverity::Warning;
+
+        let mut bytes = b"RSPICE-CANONICAL".to_vec();
+        bytes.extend(1_u16.to_be_bytes());
+        text(&mut bytes, DOMAIN, "rspice.drc-violation/v1");
+        id(&mut bytes, 3);
+        tag(&mut bytes, 0);
+        tag(&mut bytes, 1);
+        text(&mut bytes, STRING, "Node 'a'");
+        spelled(&mut bytes);
+        // The related items, sorted.
+        sequence(&mut bytes, 2);
+        text(&mut bytes, STRING, "R1");
+        text(&mut bytes, STRING, "R2");
+
+        assert_eq!(
+            drc_violation_digest(&violation),
+            ContentDigest::from_bytes(Sha256::digest(&bytes).into()),
+            "{:?}",
+            violation.location
+        );
+    }
+}
+
 #[test]
 fn periodic_port_noise_options_have_distinct_execution_identities() {
     use rspice_core::analysis::s_param::PeriodicPortNoiseReference;

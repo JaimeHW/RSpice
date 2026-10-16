@@ -600,22 +600,96 @@ fn sheet_check_rows_report_real_unconnected_and_floating_counts() {
         "net OUT is floating",
         rspice_design::drc::DrcLocation::Point { x: 0.0, y: 0.0 },
     ));
+    // A placed cell's open pin and floating node, stated at each of eight
+    // occurrences, are that cell's findings and not this sheet's.
+    for occurrence in 1..=8 {
+        let path =
+            rspice_app_types::hierarchy_path::InstancePath::parse(&format!("/X{occurrence}"))
+                .expect("an occurrence path");
+        let view = crate::state::CellViewRef::new("work", "amp", "schematic");
+        for (id, violation_type, inner) in [
+            (
+                10 + occurrence,
+                rspice_design::drc::DrcViolationType::UnconnectedPin,
+                rspice_design::drc::DrcLocation::Terminal {
+                    component_id: 1,
+                    component_name: "R1".to_owned(),
+                    pin_name: "1".to_owned(),
+                    point: Point::new(0, 0),
+                },
+            ),
+            (
+                20 + occurrence,
+                rspice_design::drc::DrcViolationType::FloatingNode,
+                rspice_design::drc::DrcLocation::Node {
+                    net_name: "n1".to_owned(),
+                },
+            ),
+        ] {
+            result.add_violation(rspice_design::drc::DrcViolation::new(
+                id,
+                violation_type,
+                "inside amp",
+                rspice_design::drc::DrcLocation::InsideInstance {
+                    path: path.clone(),
+                    view: view.clone(),
+                    inner: Box::new(inner),
+                },
+            ));
+        }
+    }
     state.dialogs.drc_results = Some(result);
     state.dialogs.drc_checked_version = state.schematic.topology_version();
 
-    fn of_type(state: &AppState, violation_type: rspice_design::drc::DrcViolationType) -> usize {
-        current_findings(state, |violation| {
-            violation.violation_type == violation_type
-        })
-        .len()
-    }
-    use rspice_design::drc::DrcViolationType::{FloatingNode, UnconnectedPin};
-    assert_eq!(of_type(&state, UnconnectedPin), 1);
-    assert_eq!(of_type(&state, FloatingNode), 1);
+    assert_eq!(sheet_open_pin_findings(&state).len(), 1);
+    assert_eq!(sheet_floating_net_findings(&state).len(), 1);
 
     // A check of an earlier drawing reports nothing about this one.
     state.dialogs.drc_checked_version = state.schematic.topology_version() + 1;
-    assert_eq!(of_type(&state, UnconnectedPin), 0);
+    assert!(sheet_open_pin_findings(&state).is_empty());
+}
+
+/// A component's own findings are the ones located on it, or naming it on
+/// this drawing. A finding inside a placed cell names that cell's components:
+/// `amp`'s `R1` is not this sheet's `R1`.
+#[test]
+fn a_component_does_not_claim_a_placed_cells_finding_of_the_same_name() {
+    let state = state_with_two_components();
+    let resistor = state
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.kind == ComponentType::Resistor)
+        .expect("the fixture resistor")
+        .clone();
+    let named = |location| {
+        rspice_design::drc::DrcViolation::new(
+            1,
+            rspice_design::drc::DrcViolationType::FloatingNode,
+            "floating",
+            location,
+        )
+        .with_related(vec![resistor.name.clone()])
+    };
+
+    assert!(violation_targets_component(
+        &named(rspice_design::drc::DrcLocation::Node {
+            net_name: "n1".to_owned()
+        }),
+        &resistor
+    ));
+    assert!(!violation_targets_component(
+        &named(rspice_design::drc::DrcLocation::InsideInstance {
+            path: rspice_app_types::hierarchy_path::InstancePath::parse("/X1")
+                .expect("an occurrence path"),
+            view: crate::state::CellViewRef::new("work", "amp", "schematic"),
+            inner: Box::new(rspice_design::drc::DrcLocation::Node {
+                net_name: "n1".to_owned()
+            }),
+        }),
+        &resistor
+    ));
 }
 
 #[test]
