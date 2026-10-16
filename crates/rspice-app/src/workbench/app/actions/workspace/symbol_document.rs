@@ -843,7 +843,7 @@ fn symbol_pin_records(
             )
             .keyed(key)
             .with_details(violation.violation_type.suggested_fix())
-            .with_rule(violation.violation_type.description())
+            .with_rule(violation.violation_type.rule().explanation)
             .with_route(route)
         })
         .collect()

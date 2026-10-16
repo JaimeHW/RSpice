@@ -2019,8 +2019,12 @@ fn explain_is_offered_only_where_the_rule_has_words() {
     state.problems_view.explain = true;
     let explained = render(&mut state, sized(egui::RawInput::default()));
     assert!(
-        explained.has("Required component parameter is missing"),
-        "Explain states the rule in the rule's own words: {:?}",
+        explained.has(
+            rspice_design::drc::DrcViolationType::MissingParameter
+                .rule()
+                .explanation
+        ),
+        "Explain states the rule in the rule table's own words: {:?}",
         explained.texts,
     );
 
@@ -2079,7 +2083,8 @@ fn the_detail_region_states_where_the_batch_stands_only_when_it_is_not_current()
 
     let current = render(&mut state, sized(egui::RawInput::default()));
     assert!(
-        current.has("R1 has no resistance") && current.has("Rule DRC-MISSING"),
+        current.has("R1 has no resistance")
+            && current.has("Missing parameter \u{00b7} DRC-MISSING-PARAMETER"),
         "precondition: the detail region is drawn: {:?}",
         current.texts,
     );

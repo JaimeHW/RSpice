@@ -151,7 +151,7 @@ pub(super) fn detail(
             }
             line(
                 ui,
-                &format!("Rule {} · {}", row.code, row.producer),
+                &rule_reference(row),
                 tokens.color.text_faint,
                 FontWeight::Medium,
             );
@@ -186,6 +186,24 @@ pub(super) fn detail(
             }
         });
     actions
+}
+
+/// The rule the finding is an instance of, and who reported it.
+///
+/// A design rule is named the way the rule table names it — its title, then
+/// its code — so the reader has the name they look it up by and the code a
+/// deck and a waiver store it under. A finding whose code is not a design
+/// rule's, a parser's or a run's, is named by its code alone.
+fn rule_reference(row: &DiagnosticRow<'_>) -> String {
+    match rspice_design::drc::DrcViolationType::from_rule_code(row.code) {
+        Some(rule) => format!(
+            "{} \u{00b7} {} \u{00b7} {}",
+            rule.rule().title,
+            row.code,
+            row.producer
+        ),
+        None => format!("Rule {} \u{00b7} {}", row.code, row.producer),
+    }
 }
 
 /// Where the current finding's batch stands, where that is not simply current,
@@ -406,6 +424,23 @@ mod tests {
         assert!(
             applicable_fix(&source).is_none(),
             "no owner outside the netlist editor can apply these edits yet",
+        );
+    }
+
+    /// A design rule is referred to by the title and code the rule table
+    /// gives it; anything else by its code.
+    #[test]
+    fn a_design_rule_is_referred_to_by_its_title_and_code() {
+        let mut finding = row(None);
+        finding.code = "DRC-FLOATING-NODE";
+        finding.producer = "rspice.design.drc";
+        assert_eq!(
+            rule_reference(&finding),
+            "Floating node \u{00b7} DRC-FLOATING-NODE \u{00b7} rspice.design.drc"
+        );
+        assert_eq!(
+            rule_reference(&row(None)),
+            "Rule VA-REDECLARED \u{00b7} rspice.veriloga.compiler"
         );
     }
 }
