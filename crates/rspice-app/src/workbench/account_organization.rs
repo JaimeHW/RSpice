@@ -951,16 +951,18 @@ fn features_section(ui: &mut Ui, features: &[FeatureRow]) {
         );
         ui.add_space(4.0);
         for feature in features {
-            let (term_color, mark_color) = if feature.licensed {
-                (tokens.color.text_dim, tokens.color.ok)
+            // No dot: the row already says this twice, in the weight of the
+            // name and in the term on the right. A green one for "yes" was a
+            // third copy, and the only one a reader has to learn.
+            let term_color = if feature.licensed {
+                tokens.color.text_dim
             } else {
-                (tokens.color.text_faint, tokens.color.text_faint)
+                tokens.color.text_faint
             };
             list_row(
                 ui,
                 width,
                 ListRow {
-                    mark: Some((mark_color, feature.licensed)),
                     name: &feature.name,
                     name_color: if feature.licensed {
                         tokens.color.text
@@ -998,7 +1000,6 @@ fn devices_section(ui: &mut Ui, devices: &[DeviceRow], requested: &mut Option<Ac
                 ui,
                 width,
                 ListRow {
-                    mark: None,
                     name: &device.name,
                     name_color: tokens.color.text,
                     detail: &device.detail,
@@ -1088,8 +1089,6 @@ enum Trailing<'a> {
 }
 
 struct ListRow<'a> {
-    /// A dot before the name: its colour, and whether it is filled.
-    mark: Option<(Color32, bool)>,
     name: &'a str,
     name_color: Color32,
     detail: &'a str,
@@ -1130,14 +1129,12 @@ fn list_row(ui: &mut Ui, width: f32, row: ListRow<'_>) -> bool {
     } else {
         0.0
     };
-    let mark_width = if row.mark.is_some() { 16.0 } else { 0.0 };
-    let text_left = mark_width;
     let text_right = if stacked {
         width
     } else {
         width - trailing_width - 16.0
     };
-    let text_width = (text_right - text_left).max(1.0);
+    let text_width = text_right.max(1.0);
     let has_detail = !row.detail.is_empty();
     let text_height = if has_detail { 34.0 } else { 18.0 };
     let height = if stacked {
@@ -1151,17 +1148,8 @@ fn list_row(ui: &mut Ui, width: f32, row: ListRow<'_>) -> bool {
     } else {
         rect.center().y - text_height * 0.5
     };
-    if let Some((color, filled)) = row.mark {
-        let center = pos2(rect.left() + 4.0, text_top + 9.0);
-        if filled {
-            ui.painter().circle_filled(center, 3.5, color);
-        } else {
-            ui.painter()
-                .circle_stroke(center, 3.0, Stroke::new(1.0, color));
-        }
-    }
     ui.painter().text(
-        pos2(rect.left() + text_left, text_top),
+        pos2(rect.left(), text_top),
         Align2::LEFT_TOP,
         elide_text(ui, row.name, &name_font, text_width),
         name_font,
@@ -1169,7 +1157,7 @@ fn list_row(ui: &mut Ui, width: f32, row: ListRow<'_>) -> bool {
     );
     if has_detail {
         ui.painter().text(
-            pos2(rect.left() + text_left, text_top + 18.0),
+            pos2(rect.left(), text_top + 18.0),
             Align2::LEFT_TOP,
             elide_text(ui, row.detail, &detail_font, text_width),
             detail_font,
@@ -1178,10 +1166,7 @@ fn list_row(ui: &mut Ui, width: f32, row: ListRow<'_>) -> bool {
     }
     let trailing_rect = if stacked {
         Rect::from_min_size(
-            pos2(
-                rect.left() + text_left,
-                rect.bottom() - 8.0 - control_height.max(18.0),
-            ),
+            pos2(rect.left(), rect.bottom() - 8.0 - control_height.max(18.0)),
             vec2(trailing_width, control_height.max(18.0)),
         )
     } else {
