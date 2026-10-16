@@ -23,6 +23,7 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
 
     for owner in [
         DiagnosticOwner::DesignRules,
+        DiagnosticOwner::SymbolPins,
         DiagnosticOwner::Dispatch,
         DiagnosticOwner::Run,
     ] {
@@ -51,6 +52,49 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
                 app.state
                     .publish_active_design_check_result(result)
                     .expect("the checks publish against the live design");
+            }
+            DiagnosticOwner::SymbolPins => {
+                use crate::state::{
+                    Cell, CellViewRef, ComponentType, Library, PortDirection, SchematicState,
+                    SymbolDocument, SymbolPin, View, ViewType,
+                };
+                use crate::workbench::state::Workspace;
+
+                // A symbol whose pin contract genuinely fails: its cell's
+                // schematic declares a port that the symbol never places.
+                let mut library = Library::new("work");
+                let mut amp = Cell::new("amp");
+                amp.add_view(View::new("schematic", ViewType::Schematic));
+                amp.add_view(View::new("symbol", ViewType::Symbol));
+                library.add_cell(amp);
+                app.state.library_manager.add_library(library);
+
+                let mut schematic = SchematicState::default();
+                let port = schematic.add_component(ComponentType::Port, Point::new(0, 0));
+                schematic
+                    .document_mut_for_test()
+                    .components
+                    .iter_mut()
+                    .find(|component| component.id == port)
+                    .expect("the fixture just placed this port")
+                    .value = "IN".to_owned();
+                app.state.workspace.insert_schematic_editor(
+                    CellViewRef::new("work", "amp", "schematic").key(),
+                    schematic,
+                );
+                app.state
+                    .open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
+                app.state
+                    .store_active_symbol_document(&SymbolDocument {
+                        pins: vec![SymbolPin::new("IN", PortDirection::In, None)],
+                        ..SymbolDocument::default()
+                    })
+                    .expect("the fixture stores the symbol it is about to check");
+                app.state.workbench.activate(Workspace::Design);
+
+                // The real command the symbol editor runs, which routes to the
+                // pin checks because a symbol view is active.
+                Command::RunChecks.execute(&mut app);
             }
             DiagnosticOwner::Dispatch => {
                 // The real command, on an empty design: a schematic with no

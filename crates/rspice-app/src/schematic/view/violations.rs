@@ -26,6 +26,18 @@ use rspice_schematic_editor::view::violations as markers;
 /// sorts for itself, which no other surface could read and which a
 /// republished batch silently repointed.
 pub(crate) fn cycle_violation(state: &mut AppState, step: isize) {
+    // A symbol view's findings are the pin checks', which address a pin on a
+    // symbol rather than a spot in a drawing — and they are published as
+    // records, so the tour reads them from the store and names each one by
+    // the identity the grid names it by.
+    if state.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
+        if !state.cycle_active_symbol_pin_finding(step) {
+            state.push_user_message(ConsoleMessage::info(
+                "No symbol pin findings — run the pin checks first",
+            ));
+        }
+        return;
+    }
     let Some(result) = &state.dialogs.drc_results else {
         state.push_user_message(ConsoleMessage::info(
             "No check results — run design checks first",
@@ -86,8 +98,7 @@ pub(crate) fn cycle_violation(state: &mut AppState, step: isize) {
     };
 
     let found = anchored.swap_remove(index);
-    // A finding with no published record — the symbol pin checks keep theirs
-    // in the canvas projection alone — leaves nothing current rather than
+    // A finding with no published record leaves nothing current rather than
     // leaving the previous finding standing, which the tour has just left.
     state.diagnostics.set_current_finding(found.identity);
     state.jump_to_log_anchor(found.anchor);

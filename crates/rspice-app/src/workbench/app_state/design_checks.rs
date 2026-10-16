@@ -189,9 +189,9 @@ impl AppState {
     /// would name a finding the store does not hold as soon as anything moved
     /// the project revision the batch was published at.
     ///
-    /// Empty where the checks published no records: the symbol pin checks keep
-    /// their findings in the canvas projection alone, so a surface walking
-    /// them has nothing to name them by.
+    /// Empty where these checks published no records for `subject`. A symbol
+    /// view's findings are never among them: they are the pin checks', owned
+    /// by [`DiagnosticInputs::SymbolPins`] and named there.
     pub(crate) fn design_rule_finding_identities(&self, subject: &CellViewRef) -> Vec<uuid::Uuid> {
         let published = DiagnosticInputs::DesignCheck {
             subject: subject.clone(),
