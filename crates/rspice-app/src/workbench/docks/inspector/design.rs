@@ -661,6 +661,44 @@ fn current_findings(
         .unwrap_or_default()
 }
 
+/// Whether a finding is about this drawing rather than about a cellview it
+/// places.
+fn in_this_drawing(violation: &DrcViolation) -> bool {
+    !matches!(
+        violation.location,
+        rspice_design::drc::DrcLocation::InsideInstance { .. }
+    )
+}
+
+/// The open terminals the sheet's Connectivity row counts.
+///
+/// All three findings are counted: an undriven input and an unloaded output
+/// are unconnected pins too, and a row that quietly omitted them would
+/// understate the sheet. Only this drawing's own are: a finding inside a
+/// placed cell is stated once per occurrence, so counting those would make a
+/// clean sheet that places one cell eight times report eight times that
+/// cell's open pins as its own.
+fn sheet_open_pin_findings(state: &AppState) -> Vec<&DrcViolation> {
+    current_findings(state, |violation| {
+        in_this_drawing(violation)
+            && matches!(
+                violation.violation_type,
+                rspice_design::drc::DrcViolationType::UnconnectedPin
+                    | rspice_design::drc::DrcViolationType::UndrivenInput
+                    | rspice_design::drc::DrcViolationType::UnloadedOutput
+            )
+    })
+}
+
+/// The floating nodes the sheet's row counts: this drawing's own, for the
+/// reason [`sheet_open_pin_findings`] gives.
+fn sheet_floating_net_findings(state: &AppState) -> Vec<&DrcViolation> {
+    current_findings(state, |violation| {
+        in_this_drawing(violation)
+            && violation.violation_type == rspice_design::drc::DrcViolationType::FloatingNode
+    })
+}
+
 /// The problem a set of findings amounts to: a failure when any of them is
 /// an error, else a warning.
 fn findings_problem(findings: &[&DrcViolation]) -> Problem {
@@ -713,20 +751,8 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp) {
     // The header says whether the check is current and how many errors it
     // found; a row appears only for a finding to act on.
     section_header(ui, "Checks", checks_status(&app.state).as_deref());
-    // The row counts open terminals, so it counts all three of them: an
-    // undriven input and an unloaded output are unconnected pins too, and a
-    // row that quietly omitted them would understate the sheet.
-    let open_pins = current_findings(&app.state, |violation| {
-        matches!(
-            violation.violation_type,
-            rspice_design::drc::DrcViolationType::UnconnectedPin
-                | rspice_design::drc::DrcViolationType::UndrivenInput
-                | rspice_design::drc::DrcViolationType::UnloadedOutput
-        )
-    });
-    let floating_nets = current_findings(&app.state, |violation| {
-        violation.violation_type == rspice_design::drc::DrcViolationType::FloatingNode
-    });
+    let open_pins = sheet_open_pin_findings(&app.state);
+    let floating_nets = sheet_floating_net_findings(&app.state);
     if !open_pins.is_empty() {
         property_row_problem(
             ui,

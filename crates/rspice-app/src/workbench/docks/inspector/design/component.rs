@@ -1234,6 +1234,12 @@ pub(super) fn component_checks(ui: &mut Ui, app: &RSpiceApp, component: &Compone
 }
 
 pub(super) fn violation_targets_component(violation: &DrcViolation, component: &Component) -> bool {
+    // A finding inside an instantiated cellview names that cellview's
+    // components, and `amp`'s `R1` is not this sheet's `R1` however alike the
+    // two references read.
+    if matches!(violation.location, DrcLocation::InsideInstance { .. }) {
+        return false;
+    }
     // A terminal finding belongs to the component that owns the terminal. The
     // identity has to be read off the location rather than left to the related
     // items, because an instance with no authored reference is named by its id
