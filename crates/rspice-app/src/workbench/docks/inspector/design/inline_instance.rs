@@ -1235,8 +1235,12 @@ pub(super) fn violation_targets_net(violation: &DrcViolation, net: &DesignNet) -
 
     if !matches!(
         violation.violation_type,
+        // Every unattached-terminal finding is listed, so the family stays
+        // complete when one of them is located somewhere a net can claim.
         DrcViolationType::FloatingNode
             | DrcViolationType::UnconnectedPin
+            | DrcViolationType::UndrivenInput
+            | DrcViolationType::UnloadedOutput
             | DrcViolationType::OrphanNetLabel
             | DrcViolationType::DanglingWire
             | DrcViolationType::ShortedOutputs
@@ -1251,11 +1255,9 @@ pub(super) fn violation_targets_net(violation: &DrcViolation, net: &DesignNet) -
         }
         DrcLocation::Wire { id } => net.wire_ids.contains(id),
         DrcLocation::Component { id, .. } => {
-            violation.violation_type != DrcViolationType::UnconnectedPin
-                && net
-                    .terminals
-                    .iter()
-                    .any(|terminal| terminal.component_id == *id)
+            net.terminals
+                .iter()
+                .any(|terminal| terminal.component_id == *id)
                 && violation.related_items.iter().any(|item| {
                     item.eq_ignore_ascii_case(&net.name)
                         || net
@@ -1264,6 +1266,15 @@ pub(super) fn violation_targets_net(violation: &DrcViolation, net: &DesignNet) -
                             .any(|terminal| item.eq_ignore_ascii_case(&terminal.reference))
                 })
         }
+        // An unattached terminal is, by definition, on no net: the component
+        // that owns it may well stand on this one through its other pins, and
+        // that is not what the finding is about. This arm is why the component
+        // arm above no longer has to exclude an open-pin finding — such a
+        // finding is never located on a component any more.
+        DrcLocation::Terminal { .. } => false,
+        // A finding inside an instantiated cellview belongs to that cellview's
+        // nets, not to this one's.
+        DrcLocation::InsideInstance { .. } => false,
         DrcLocation::Point { .. }
         | DrcLocation::Bus { .. }
         | DrcLocation::BusTap { .. }

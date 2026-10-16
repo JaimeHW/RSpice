@@ -40,6 +40,11 @@ fn hidden_identity_anchor_is_suppressed_but_unowned_point_remains_visible() {
         ComponentType::Resistor,
         Point::new(10, 10),
     ));
+    document.components.push(Component::new(
+        21,
+        ComponentType::Resistor,
+        Point::new(40, 40),
+    ));
     document
         .wires
         .push(Wire::segment(20, Point::origin(), Point::new(20, 0)));
@@ -72,7 +77,48 @@ fn hidden_identity_anchor_is_suppressed_but_unowned_point_remains_visible() {
         DrcLocation::Point { x: 4.0, y: 8.0 },
     );
 
+    // A terminal is anchored at the pin rather than at the symbol origin, and
+    // it is suppressed with the component that owns it.
+    let hidden_terminal = DrcViolation::new(
+        4,
+        DrcViolationType::UnconnectedPin,
+        "hidden terminal",
+        DrcLocation::Terminal {
+            component_id: 20,
+            component_name: "R1".to_owned(),
+            pin_name: "1".to_owned(),
+            point: Point::new(10, 20),
+        },
+    );
+    let visible_terminal = DrcViolation::new(
+        5,
+        DrcViolationType::UndrivenInput,
+        "visible terminal",
+        DrcLocation::Terminal {
+            component_id: 21,
+            component_name: "R2".to_owned(),
+            pin_name: "1".to_owned(),
+            point: Point::new(44, 48),
+        },
+    );
+    let inside = DrcViolation::new(
+        6,
+        DrcViolationType::UnconnectedPin,
+        "a finding in another cellview",
+        DrcLocation::InsideInstance {
+            path: rspice_app_types::hierarchy_path::InstancePath::parse("/X1").expect("path"),
+            view: rspice_design_model::cell_view::CellViewRef::new("work", "amp", "schematic"),
+            inner: Box::new(DrcLocation::Point { x: 4.0, y: 8.0 }),
+        },
+    );
+
     assert_eq!(anchor(&view, &component.location), None);
     assert_eq!(anchor(&view, &wire.location), None);
     assert_eq!(anchor(&view, &point.location), Some(Point::new(4, 8)));
+    assert_eq!(anchor(&view, &hidden_terminal.location), None);
+    assert_eq!(
+        anchor(&view, &visible_terminal.location),
+        Some(Point::new(44, 48))
+    );
+    assert_eq!(anchor(&view, &inside.location), None);
 }

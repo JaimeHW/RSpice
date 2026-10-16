@@ -75,7 +75,7 @@ pub(super) fn fold_nets(
             if !entry.connected_components.contains(&identity) {
                 entry.connected_components.push(identity.clone());
             }
-            if pin.is_output {
+            if pin.drives() {
                 entry.output_drivers.insert(identity.clone());
                 if component.is_voltage_source {
                     entry.voltage_source_drivers.insert(identity.clone());

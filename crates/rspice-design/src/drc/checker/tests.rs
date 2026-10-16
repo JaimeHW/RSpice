@@ -10,27 +10,38 @@
 use super::*;
 use crate::drc::input::{ParameterRangeIssue, PinInfo};
 use crate::schematic::document::SchematicDocument;
+use crate::schematic::port::PortDirection;
 use rspice_design_model::Point;
 
-/// A terminal that something else in the drawing meets.
+/// A terminal that something else in the drawing meets, declared by nothing —
+/// which is what a passive leg or a primitive device terminal is.
 fn pin(name: &str, net: &str) -> PinInfo {
     PinInfo {
         name: name.to_string(),
         net_name: net.to_string(),
-        is_output: false,
+        direction: None,
         point: Point::origin(),
         attached: true,
     }
 }
 
-/// A terminal the extraction found nothing meeting.
+/// A terminal the extraction found nothing meeting, declared by nothing.
 fn open_pin(name: &str, net: &str, point: Point) -> PinInfo {
     PinInfo {
         name: name.to_string(),
         net_name: net.to_string(),
-        is_output: false,
+        direction: None,
         point,
         attached: false,
+    }
+}
+
+/// The same open terminal, carrying what a bound cell interface declares it to
+/// be.
+fn declared_open_pin(name: &str, net: &str, direction: PortDirection) -> PinInfo {
+    PinInfo {
+        direction: Some(direction),
+        ..open_pin(name, net, Point::origin())
     }
 }
 
@@ -53,7 +64,7 @@ fn resistor(id: u64, name: &str, pins: Vec<PinInfo>) -> ComponentInfo {
 
 fn vsource(id: u64, name: &str, plus_net: &str, minus_net: &str) -> ComponentInfo {
     let mut plus = pin("+", plus_net);
-    plus.is_output = true;
+    plus.direction = Some(PortDirection::Out);
     ComponentInfo {
         id,
         name: name.to_string(),
@@ -80,7 +91,7 @@ fn ground_symbol(id: u64, point: Point, attached: bool) -> ComponentInfo {
         pins: vec![PinInfo {
             name: "GND".to_owned(),
             net_name: "0".to_owned(),
-            is_output: false,
+            direction: None,
             point,
             attached,
         }],
@@ -347,9 +358,9 @@ fn sources_on_distinct_nets_are_not_shorted() {
 #[test]
 fn declared_outputs_on_one_node_are_shorted_outputs() {
     let mut first = resistor(1, "X1", vec![pin("OUT", "n1")]);
-    first.pins[0].is_output = true;
+    first.pins[0].direction = Some(PortDirection::Out);
     let mut second = resistor(2, "X2", vec![pin("OUT", "n1")]);
-    second.pins[0].is_output = true;
+    second.pins[0].direction = Some(PortDirection::Out);
     let result = check(
         &[second, first],
         DrcConfig {
@@ -401,9 +412,11 @@ fn an_unattached_terminal_is_reported_and_the_gate_silences_it() {
     assert_eq!(unconnected.len(), 1);
     assert_eq!(
         unconnected[0].location,
-        DrcLocation::Component {
-            id: 7,
-            name: "R7".to_owned()
+        DrcLocation::Terminal {
+            component_id: 7,
+            component_name: "R7".to_owned(),
+            pin_name: "1".to_owned(),
+            point: Point::new(10, 20),
         }
     );
 
@@ -411,6 +424,102 @@ fn an_unattached_terminal_is_reported_and_the_gate_silences_it() {
     disabled.check_unconnected_pins = false;
     let result = check(&components, disabled);
     assert!(of_type(&result, DrcViolationType::UnconnectedPin).is_empty());
+}
+
+/// An unattached terminal is three findings, not one at three severities: the
+/// declaration decides which, and the absence of a declaration is not a
+/// direction.
+#[test]
+fn an_unattached_terminal_is_classified_by_what_declares_it() {
+    let base = DrcConfig {
+        check_missing_ground: false,
+        check_floating_nodes: false,
+        ..DrcConfig::default()
+    };
+    let classify = |pin: PinInfo| {
+        let result = check(&[resistor(1, "X1", vec![pin])], base.clone());
+        let findings = result.violations();
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        (findings[0].violation_type, findings[0].severity)
+    };
+
+    assert_eq!(
+        classify(declared_open_pin("A", "n1", PortDirection::In)),
+        (DrcViolationType::UndrivenInput, DrcSeverity::Error)
+    );
+    assert_eq!(
+        classify(declared_open_pin("Y", "n1", PortDirection::Out)),
+        (DrcViolationType::UnloadedOutput, DrcSeverity::Warning)
+    );
+    for undeclared in [
+        declared_open_pin("B", "n1", PortDirection::InOut),
+        declared_open_pin("VDD", "n1", PortDirection::Supply),
+        open_pin("1", "n1", Point::origin()),
+    ] {
+        assert_eq!(
+            classify(undeclared),
+            (DrcViolationType::UnconnectedPin, DrcSeverity::Warning)
+        );
+    }
+}
+
+/// Every leg of a passive is undeclared, so a drawing made of passives raises
+/// no undriven-input error however many terminals it leaves open. This is the
+/// regression the split exists to avoid.
+#[test]
+fn open_passive_legs_raise_no_input_error() {
+    let result = check(
+        &[
+            resistor(
+                1,
+                "R1",
+                vec![
+                    open_pin("1", "a", Point::origin()),
+                    open_pin("2", "b", Point::new(10, 0)),
+                ],
+            ),
+            resistor(
+                2,
+                "C1",
+                vec![
+                    open_pin("1", "c", Point::new(20, 0)),
+                    open_pin("2", "d", Point::new(30, 0)),
+                ],
+            ),
+        ],
+        DrcConfig {
+            check_missing_ground: false,
+            check_floating_nodes: false,
+            ..DrcConfig::default()
+        },
+    );
+    assert_eq!(of_type(&result, DrcViolationType::UnconnectedPin).len(), 4);
+    assert!(of_type(&result, DrcViolationType::UndrivenInput).is_empty());
+    assert!(of_type(&result, DrcViolationType::UnloadedOutput).is_empty());
+    assert!(result.passed(), "{:?}", result.violations());
+}
+
+/// A voltage source has no interface to declare its drive terminal, so the `+`
+/// terminal is the declaration. An open one loads nothing; the return terminal
+/// is still unclassified.
+#[test]
+fn an_open_voltage_source_drive_terminal_is_an_unloaded_output() {
+    let mut source = vsource(1, "V1", "vin", "0");
+    source.pins[0].attached = false;
+    source.pins[1].attached = false;
+    let result = check(
+        &[source],
+        DrcConfig {
+            check_missing_ground: false,
+            check_floating_nodes: false,
+            ..DrcConfig::default()
+        },
+    );
+    let outputs = of_type(&result, DrcViolationType::UnloadedOutput);
+    assert_eq!(outputs.len(), 1);
+    assert!(outputs[0].message.contains("V1.+"));
+    assert_eq!(of_type(&result, DrcViolationType::UnconnectedPin).len(), 1);
+    assert!(of_type(&result, DrcViolationType::UndrivenInput).is_empty());
 }
 
 #[test]

@@ -684,6 +684,31 @@ fn encode_drc_location(writer: &mut CanonicalWriter, location: &DrcLocation) {
             writer.u8(8);
             writer.u64(*id);
         }
+        DrcLocation::Terminal {
+            component_id,
+            component_name,
+            pin_name,
+            point,
+        } => {
+            writer.u8(9);
+            writer.u64(*component_id);
+            writer.string(component_name);
+            writer.string(pin_name);
+            writer.i32(point.x);
+            writer.i32(point.y);
+        }
+        DrcLocation::InsideInstance { path, view, inner } => {
+            writer.u8(10);
+            let segments = path.segments();
+            writer.sequence(segments.len());
+            for segment in segments {
+                writer.string(segment);
+            }
+            writer.string(&view.library);
+            writer.string(&view.cell);
+            writer.string(&view.view);
+            encode_drc_location(writer, inner);
+        }
     }
 }
 
@@ -1172,6 +1197,12 @@ fn drc_severity_tag(severity: DrcSeverity) -> u8 {
     }
 }
 
+/// The identity tag for one finding kind.
+///
+/// A tag's meaning is what makes a cached run's identity comparable to a new
+/// one, so a tag is only ever added. Renumbering or reusing one would make two
+/// different reports digest the same, which is a cache hit on the wrong
+/// evidence.
 fn drc_violation_type_tag(violation_type: DrcViolationType) -> u8 {
     match violation_type {
         DrcViolationType::FloatingNode => 0,
@@ -1199,6 +1230,9 @@ fn drc_violation_type_tag(violation_type: DrcViolationType) -> u8 {
         DrcViolationType::OffSheetConnectorWithoutPartner => 23,
         DrcViolationType::CaseCollidingNetNames => 24,
         DrcViolationType::VectorWidthMismatch => 25,
+        DrcViolationType::UndrivenInput => 26,
+        DrcViolationType::UnloadedOutput => 27,
+        DrcViolationType::RecursiveInstantiation => 28,
     }
 }
 
