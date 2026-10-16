@@ -501,12 +501,12 @@ impl Instance {
 	pub const DDT_STATE_COUNT: usize = 13;
 	pub const IDT_STATE_COUNT: usize = 0;
 	pub const IDTMOD_STATE_COUNT: usize = 0;
-	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([198, 232, 103, 247, 7, 146, 174, 74, 175, 1, 177, 46, 153, 204, 153, 94, 127, 21, 57, 209, 125, 206, 236, 224, 205, 250, 251, 148, 107, 68, 179, 176]);
+	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([245, 121, 79, 17, 243, 78, 95, 176, 44, 205, 99, 228, 18, 124, 102, 41, 66, 4, 152, 121, 44, 179, 34, 28, 91, 33, 90, 93, 53, 55, 216, 61]);
 	pub const EVENT_STATE_COUNT: usize = 5;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "59500047bc34a973a298e332c1149cd6ad028f070d3caf2e64bda67df2e41d52";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "21d8324f46f97e4b053c7741bc9b8ef65d3c96594b342d8953625fb6d3f47c7f";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {

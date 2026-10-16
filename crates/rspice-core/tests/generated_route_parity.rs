@@ -1126,9 +1126,11 @@ fn bsimbulk_reaches_an_operating_point_with_its_thermal_terminal_omitted() {
 /// The `.va` route matches ngspice-46 running `asmhemt.osdi` on the same N
 /// card to 1e-12: `i(Vd)` -0.273940199358580 A with self-heating off, and
 /// -0.273673402940843 A at a 1.368367014699217 K rise with it on. The
-/// generated cards agree with each other bit for bit, but the generated
-/// lowering of ASM-HEMT sits 3e-8 relative from both, with `dt` connected
-/// as much as without it, so they are held to that against the `.va` route.
+/// generated cards reach the `.va` route's operating point bit for bit.
+///
+/// They once sat 3e-8 relative off it: the generator put the model root on
+/// the include path, so `constants.vams` resolved to the root's CODATA 2018
+/// copy, while the `.va` route and OpenVAF took the LRM's `P_Q` and `P_K`.
 #[cfg(feature = "veriloga-model-asmhemt")]
 #[test]
 fn asmhemt_reaches_an_operating_point_with_its_thermal_terminal_omitted() {
@@ -1185,15 +1187,8 @@ fn asmhemt_reaches_an_operating_point_with_its_thermal_terminal_omitted() {
                 ),
             ));
         }
+        generated.insert(0, (".va X", va));
         assert_operating_points_identical(&label, &generated);
-        for (left, right) in generated[0].1.iter().zip(&va) {
-            assert!(
-                left.key == right.key
-                    && left.text == right.text
-                    && close(left.value, right.value, 1.0e-7),
-                "{label}: generated {left:?} against .va {right:?}"
-            );
-        }
     }
 }
 

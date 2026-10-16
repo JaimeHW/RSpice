@@ -1695,10 +1695,17 @@ fn generate_device_work_item(
         );
     }
     let started = Instant::now();
-    let mut options = CompilerOptions::default();
-    options.include_paths.push(model_root.to_path_buf());
-    options.defines = item.compile_profile.defines;
-    options.undefines = item.compile_profile.undefines;
+    // A source resolves its includes as a deck's `.va` does: beside the
+    // including file, then the built-in standard headers. The model root is
+    // not an include path. Its own `constants.vams` carries the CODATA 2018
+    // constants, so a generated model compiled through it took a different
+    // `P_Q` and `P_K` from the same source on the `.va` route and from
+    // OpenVAF, which both use the LRM's.
+    let options = CompilerOptions {
+        defines: item.compile_profile.defines,
+        undefines: item.compile_profile.undefines,
+        ..CompilerOptions::default()
+    };
     let compiler = VerilogACompiler::new(options);
     let compiled = compiler
         .compile_file_canonical_ir_with_metadata(&item.path, Some(&item.module))

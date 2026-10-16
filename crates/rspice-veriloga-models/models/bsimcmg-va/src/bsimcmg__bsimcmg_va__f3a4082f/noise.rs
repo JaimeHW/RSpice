@@ -5814,7 +5814,7 @@ impl Instance {
 		}else{
 		CQZ
 		};
-		let CRB=(((((((CRA* (CCH+ X))/ (AA* CCJ))* (4.112739300563051e-57f64* FR))* COV)* COV)* CQT)* CQV)/ ((((((1e14f64* BQ)* BQ)* BR)* BR)* CPF)* AX);
+		let CRB=(((((((CRA* (CCH+ X))/ (AA* CCJ))* (4.112737976006692e-57f64* FR))* COV)* COV)* CQT)* CQV)/ ((((((1e14f64* BQ)* BQ)* BR)* BR)* CPF)* AX);
 		CTT=CRB;
 		}else{
 		CTT=A;
@@ -13218,7 +13218,7 @@ impl Instance {
 		}else{
 		EIS
 		};
-		let EIU=(((((((EIT* (DLU+ X))/ (AH* DLW))* (4.112739300563051e-57f64* ANV))* EGO)* EGO)* EIM)* EIO)/ ((((((1e14f64* HM)* HM)* HN)* HN)* EGY)* BR);
+		let EIU=(((((((EIT* (DLU+ X))/ (AH* DLW))* (4.112737976006692e-57f64* ANV))* EGO)* EGO)* EIM)* EIO)/ ((((((1e14f64* HM)* HM)* HN)* HN)* EGY)* BR);
 		EQV=EIU;
 		}else{
 		EQV=A;

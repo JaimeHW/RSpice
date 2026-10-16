@@ -175,11 +175,11 @@ impl Instance {
 		let ME=parameters[24];
 		let MN=parameters[3];
 		let MO=parameters[4];
-		let MQ=1.602176634e-19f64;
+		let MQ=1.602176462e-19f64;
 		let MR=3.24e17f64;
 		let MW=parameters[30];
 		let NC=1e-4f64;
-		let NF=0.0519105229416f64;
+		let NF=0.0519105173688f64;
 		let NI=2.718281828459045f64;
 		let NZ=parameters[28];
 		let OC=0.6666666666666666f64;
@@ -283,7 +283,7 @@ impl Instance {
 		let AVO=parameters[160];
 		let AVQ=parameters[161];
 		let AVU=parameters[158];
-		let AWC=0.0519105229416f64;
+		let AWC=0.0519105173688f64;
 		let AWV=parameters[169];
 		let AYF=-0.3333333333333333f64;
 		let AYI=parameters[170];
@@ -300,7 +300,7 @@ impl Instance {
 		let BHZ=0.008333333333333333f64;
 		let BIH=0f64;
 		let BII=0f64;
-		let BJA=0.0519105229416f64;
+		let BJA=0.0519105173688f64;
 		let BLC=-0.3333333333333333f64;
 		let BMQ=-0.3333333333333333f64;
 		let BQG=-0.3333333333333333f64;
@@ -311,7 +311,7 @@ impl Instance {
 		let BUE=parameters[151];
 		let BUG=node_potentials[19];
 		let BUN=-1f64;
-		let BVK=0.0519105229416f64;
+		let BVK=0.0519105173688f64;
 		let BXM=-0.3333333333333333f64;
 		let BZA=-0.3333333333333333f64;
 		let CCS=-0.3333333333333333f64;
@@ -321,7 +321,7 @@ impl Instance {
 		let CHA=0.008333333333333333f64;
 		let CHI=0f64;
 		let CHJ=0f64;
-		let CHY=0.0519105229416f64;
+		let CHY=0.0519105173688f64;
 		let CKA=-0.3333333333333333f64;
 		let CLO=-0.3333333333333333f64;
 		let CPE=-0.3333333333333333f64;
@@ -342,7 +342,7 @@ impl Instance {
 		let CUH=parameters[173];
 		let CUJ=parameters[174];
 		let CUN=parameters[171];
-		let CUV=0.0519105229416f64;
+		let CUV=0.0519105173688f64;
 		let CVO=parameters[182];
 		let CWY=-0.3333333333333333f64;
 		let CXB=parameters[183];
@@ -359,7 +359,7 @@ impl Instance {
 		let DGS=0.008333333333333333f64;
 		let DHA=0f64;
 		let DHB=0f64;
-		let DHT=0.0519105229416f64;
+		let DHT=0.0519105173688f64;
 		let DJV=-0.3333333333333333f64;
 		let DLJ=-0.3333333333333333f64;
 		let DOZ=-0.3333333333333333f64;
@@ -370,7 +370,7 @@ impl Instance {
 		let DSX=parameters[153];
 		let DSZ=node_potentials[20];
 		let DTH=-1f64;
-		let DUE=0.0519105229416f64;
+		let DUE=0.0519105173688f64;
 		let DWG=-0.3333333333333333f64;
 		let DXU=-0.3333333333333333f64;
 		let EBM=-0.3333333333333333f64;
@@ -380,7 +380,7 @@ impl Instance {
 		let EFU=0.008333333333333333f64;
 		let EGC=0f64;
 		let EGD=0f64;
-		let EGV=0.0519105229416f64;
+		let EGV=0.0519105173688f64;
 		let EIX=-0.3333333333333333f64;
 		let EKL=-0.3333333333333333f64;
 		let EOB=-0.3333333333333333f64;
@@ -401,7 +401,7 @@ impl Instance {
 		let ETE=parameters[186];
 		let ETG=parameters[187];
 		let ETK=parameters[184];
-		let ETS=0.0519105229416f64;
+		let ETS=0.0519105173688f64;
 		let EUL=parameters[195];
 		let EVV=-0.3333333333333333f64;
 		let EVY=parameters[196];
@@ -418,7 +418,7 @@ impl Instance {
 		let FFP=0.008333333333333333f64;
 		let FFX=0f64;
 		let FFY=0f64;
-		let FGQ=0.0519105229416f64;
+		let FGQ=0.0519105173688f64;
 		let FIS=-0.3333333333333333f64;
 		let FKG=-0.3333333333333333f64;
 		let FNW=-0.3333333333333333f64;
@@ -429,7 +429,7 @@ impl Instance {
 		let FRU=parameters[155];
 		let FRW=node_potentials[21];
 		let FSE=-1f64;
-		let FTB=0.0519105229416f64;
+		let FTB=0.0519105173688f64;
 		let FVD=-0.3333333333333333f64;
 		let FWR=-0.3333333333333333f64;
 		let GAJ=-0.3333333333333333f64;
@@ -439,7 +439,7 @@ impl Instance {
 		let GER=0.008333333333333333f64;
 		let GEZ=0f64;
 		let GFA=0f64;
-		let GFS=0.0519105229416f64;
+		let GFS=0.0519105173688f64;
 		let GHU=-0.3333333333333333f64;
 		let GJI=-0.3333333333333333f64;
 		let GMY=-0.3333333333333333f64;
@@ -459,7 +459,7 @@ impl Instance {
 		let GSA=parameters[199];
 		let GSC=parameters[200];
 		let GSG=parameters[197];
-		let GSO=0.0519105229416f64;
+		let GSO=0.0519105173688f64;
 		let GTH=parameters[208];
 		let GUR=-0.3333333333333333f64;
 		let GUU=parameters[209];
@@ -476,7 +476,7 @@ impl Instance {
 		let HEL=0.008333333333333333f64;
 		let HET=0f64;
 		let HEU=0f64;
-		let HFM=0.0519105229416f64;
+		let HFM=0.0519105173688f64;
 		let HHO=-0.3333333333333333f64;
 		let HJC=-0.3333333333333333f64;
 		let HMS=-0.3333333333333333f64;
@@ -486,7 +486,7 @@ impl Instance {
 		let HQK=0.008333333333333333f64;
 		let HQQ=parameters[157];
 		let HQZ=-1f64;
-		let HRW=0.0519105229416f64;
+		let HRW=0.0519105173688f64;
 		let HTY=-0.3333333333333333f64;
 		let HVM=-0.3333333333333333f64;
 		let HZE=-0.3333333333333333f64;
@@ -496,7 +496,7 @@ impl Instance {
 		let IDM=0.008333333333333333f64;
 		let IDU=0f64;
 		let IDV=0f64;
-		let IEN=0.0519105229416f64;
+		let IEN=0.0519105173688f64;
 		let IGP=-0.3333333333333333f64;
 		let IID=-0.3333333333333333f64;
 		let ILT=-0.3333333333333333f64;

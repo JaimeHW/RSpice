@@ -1930,7 +1930,7 @@ impl Instance {
 		ASJ=ASE;
 		}
 		let ASK=((ASI+ ASJ)+ (parameters[231]* (AU* ((ASH+ A)+ (((ASH* ASH)+ 0.0025000000000000005f64).sqrt())))))/ parameters[230];
-		let ASL=staged[327]* (3.453133246992e-11f64/ (staged[324]+ ((staged[322]/ (B+ ((AU* (ASK+ (((ASK* ASK)+ 4e-6f64).sqrt()))).powf(staged[321]))))/ staged[323])));
+		let ASL=staged[327]* (3.453133290338238e-11f64/ (staged[324]+ ((staged[322]/ (B+ ((AU* (ASK+ (((ASK* ASK)+ 4e-6f64).sqrt()))).powf(staged[321]))))/ staged[323])));
 		let ASM=ARS> A;
 		let AST;
 		let ASU;
@@ -4851,7 +4851,7 @@ impl Instance {
 		let E=parameters[30];
 		let G=-1f64;
 		let H=parameters[109];
-		let I=8.8541878128e-12f64;
+		let I=8.8541879239442e-12f64;
 		let K=parameters[110];
 		let M=parameters[76];
 		let R=parameters[77];
@@ -9915,7 +9915,7 @@ impl Instance {
 		}
 		let CSV=((CST+ CSU)+ (parameters[231]* (LK* ((CSS+ A)+ (((CSS* CSS)+ 0.0025000000000000005f64).sqrt())))))/ parameters[230];
 		let CSX=L/ CSW;
-		let CSY=(((W* BE)* BD)+ parameters[1379])* (3.453133246992e-11f64/ (((CSW* 3.9f64)/ K)+ (((parameters[228]* 1.9e-9f64)/ (B+ ((LK* (CSV+ (((CSV* CSV)+ 4e-6f64).sqrt()))).powf((0.7f64* parameters[229])))))/ O)));
+		let CSY=(((W* BE)* BD)+ parameters[1379])* (3.453133290338238e-11f64/ (((CSW* 3.9f64)/ K)+ (((parameters[228]* 1.9e-9f64)/ (B+ ((LK* (CSV+ (((CSV* CSV)+ 4e-6f64).sqrt()))).powf((0.7f64* parameters[229])))))/ O)));
 		let CSZ=CSD> A;
 		let CTG;
 		let CTH;

@@ -55,7 +55,7 @@ impl Instance {
 		let CP=parameters[23];
 		let CZ=parameters[3];
 		let DA=parameters[4];
-		let DB=1.602176634e-19f64;
+		let DB=1.602176462e-19f64;
 		let DC=3.24e17f64;
 		let DR=parameters[28];
 		let DT=0.6666666666666666f64;
@@ -312,7 +312,7 @@ impl Instance {
 		let DD=CY+ (BX* (((CZ/ (((((AL* DA)* DB)* DC)* BX)* BX))* parameters[30]).ln()));
 		let DF=DE- DD;
 		let DG=((AF* (DF+ (((DF* DF)+ 1e-4f64).sqrt())))+ DD)- CY;
-		let DH=BS/ (0.0519105229416f64* BX);
+		let DH=BS/ (0.0519105173688f64* BX);
 		let DI=2.718281828459045f64/ DH;
 		let DJ=B/ DH;
 		let DK=BS/ DB;
@@ -822,7 +822,7 @@ impl Instance {
 		let VR;
 		if PX{
 		let PY=JI/ JL;
-		let PZ=((parameters[265]/ (((if !(JM).is_nan()&&(JM>=1e-10f64||(1e-10f64).is_nan()){JM}else{1e-10f64})* CZ)* CZ))* (((((((((5.522438177818063e-23f64* X)* DB)* DA)* JJ)* BS)* DB)* DA)* JJ)* BS))* (PY* PY);
+		let PZ=((parameters[265]/ (((if !(JM).is_nan()&&(JM>=1e-10f64||(1e-10f64).is_nan()){JM}else{1e-10f64})* CZ)* CZ))* (((((((((5.522437584962478e-23f64* X)* DB)* DA)* JJ)* BS)* DB)* DA)* JJ)* BS))* (PY* PY);
 		let QA=JD* JD;
 		let QB=GO* GO;
 		let QC=(PZ* (((DM* JF)+ (((QA* JD)- (QB* GO))/ AR))- (DG* (QA- QB))))* JO;
@@ -838,8 +838,8 @@ impl Instance {
 		let VU;
 		let VV;
 		if QD{
-		let QE=(3.204353268e-19f64* (PJ.abs()))* JO;
-		let QF=(3.204353268e-19f64* (PQ.abs()))* JO;
+		let QE=(3.204352924e-19f64* (PJ.abs()))* JO;
+		let QF=(3.204352924e-19f64* (PQ.abs()))* JO;
 		VS=B;
 		VT=QE;
 		VU=B;
@@ -1321,7 +1321,7 @@ impl Instance {
 		let HV=parameters[23];
 		let IG=parameters[3];
 		let IH=parameters[4];
-		let IJ=1.602176634e-19f64;
+		let IJ=1.602176462e-19f64;
 		let IK=3.24e17f64;
 		let IP=1e-4f64;
 		let IS=2.718281828459045f64;
@@ -2311,7 +2311,7 @@ impl Instance {
 		let IM=IF+ (HD* (((IG/ ((IL* HD)* HD))* parameters[30]).ln()));
 		let IO=IN- IM;
 		let IQ=((BG* (IO+ (((IO* IO)+ IP).sqrt())))+ IM)- IF;
-		let IR=GY/ (0.0519105229416f64* HD);
+		let IR=GY/ (0.0519105173688f64* HD);
 		let IT=IS/ IR;
 		let IU=B/ IR;
 		let IV=GY/ IJ;
@@ -3061,7 +3061,7 @@ impl Instance {
 		let FTT;
 		if AAS{
 		let AAT=OZ/ PE;
-		let AAU=((parameters[265]/ (((if !(PF).is_nan()&&(PF>=1e-10f64||(1e-10f64).is_nan()){PF}else{1e-10f64})* IG)* IG))* (((((((((5.522438177818063e-23f64* AK)* IJ)* IH)* PA)* GY)* IJ)* IH)* PA)* GY))* (AAT* AAT);
+		let AAU=((parameters[265]/ (((if !(PF).is_nan()&&(PF>=1e-10f64||(1e-10f64).is_nan()){PF}else{1e-10f64})* IG)* IG))* (((((((((5.522437584962478e-23f64* AK)* IJ)* IH)* PA)* GY)* IJ)* IH)* PA)* GY))* (AAT* AAT);
 		let AAV=OU* OU;
 		let AAW=MD* MD;
 		let AAX=(AAU* (((IX* OW)+ (((AAV* OU)- (AAW* MD))/ CU))- (IQ* (AAV- AAW))))* PZ;
@@ -3289,9 +3289,9 @@ impl Instance {
 		let FUC;
 		let FUD;
 		if ACT{
-		let ACU=(3.204353268e-19f64* (WD.abs()))* PZ;
+		let ACU=(3.204352924e-19f64* (WD.abs()))* PZ;
 		let ACW=A+ ACV;
-		let ACX=(3.204353268e-19f64* (WL.abs()))* PZ;
+		let ACX=(3.204352924e-19f64* (WL.abs()))* PZ;
 		let ACZ=A+ ACY;
 		FKC=ACW;
 		FKD=ACZ;
@@ -3364,7 +3364,7 @@ impl Instance {
 		let AEC=ADX+ (ADS* (((AEA/ ((IL* ADS)* ADS))* AEB).ln()));
 		let AEE=AED- AEC;
 		let AEF=((BG* (AEE+ (((AEE* AEE)+ IP).sqrt())))+ AEC)- ADX;
-		let AEG=ADZ/ (0.0519105229416f64* ADS);
+		let AEG=ADZ/ (0.0519105173688f64* ADS);
 		let AEH=IS/ AEG;
 		let AEI=B/ AEG;
 		let AEJ=ADZ/ IJ;
@@ -3650,7 +3650,7 @@ impl Instance {
 		let AKQ=AKO+ (AKN* (((AEA/ ((IL* AKN)* AKN))* AEB).ln()));
 		let AKR=AKM- AKQ;
 		let AKS=((BG* (AKR+ (((AKR* AKR)+ IP).sqrt())))+ AKQ)- AKO;
-		let AKT=AKP/ (0.0519105229416f64* AKN);
+		let AKT=AKP/ (0.0519105173688f64* AKN);
 		let AKU=IS/ AKT;
 		let AKV=B/ AKT;
 		let AKW=AKP/ IJ;
@@ -3944,7 +3944,7 @@ impl Instance {
 		let AQV=AQT+ (AQS* (((AEA/ ((IL* AQS)* AQS))* AEB).ln()));
 		let AQX=AQW- AQV;
 		let AQY=((BG* (AQX+ (((AQX* AQX)+ IP).sqrt())))+ AQV)- AQT;
-		let AQZ=AQU/ (0.0519105229416f64* AQS);
+		let AQZ=AQU/ (0.0519105173688f64* AQS);
 		let ARA=IS/ AQZ;
 		let ARB=B/ AQZ;
 		let ARC=AQU/ IJ;
@@ -4218,7 +4218,7 @@ impl Instance {
 		let AWZ=AWX+ (AWW* (((AEA/ ((IL* AWW)* AWW))* AEB).ln()));
 		let AXA=A- AWZ;
 		let AXB=((BG* (AXA+ (((AXA* AXA)+ IP).sqrt())))+ AWZ)- AWX;
-		let AXC=AWY/ (0.0519105229416f64* AWW);
+		let AXC=AWY/ (0.0519105173688f64* AWW);
 		let AXD=IS/ AXC;
 		let AXE=B/ AXC;
 		let AXF=AWY/ IJ;
@@ -4524,7 +4524,7 @@ impl Instance {
 		let BDR=BDM+ (BDH* (((BDP/ ((IL* BDH)* BDH))* BDQ).ln()));
 		let BDT=BDS- BDR;
 		let BDU=((BG* (BDT+ (((BDT* BDT)+ IP).sqrt())))+ BDR)- BDM;
-		let BDV=BDO/ (0.0519105229416f64* BDH);
+		let BDV=BDO/ (0.0519105173688f64* BDH);
 		let BDW=IS/ BDV;
 		let BDX=B/ BDV;
 		let BDY=BDO/ IJ;
@@ -4811,7 +4811,7 @@ impl Instance {
 		let BKF=BKD+ (BKC* (((BDP/ ((IL* BKC)* BKC))* BDQ).ln()));
 		let BKG=BKB- BKF;
 		let BKH=((BG* (BKG+ (((BKG* BKG)+ IP).sqrt())))+ BKF)- BKD;
-		let BKI=BKE/ (0.0519105229416f64* BKC);
+		let BKI=BKE/ (0.0519105173688f64* BKC);
 		let BKJ=IS/ BKI;
 		let BKK=B/ BKI;
 		let BKL=BKE/ IJ;
@@ -5109,7 +5109,7 @@ impl Instance {
 		let BQL=BQJ+ (BQI* (((BDP/ ((IL* BQI)* BQI))* BDQ).ln()));
 		let BQN=BQM- BQL;
 		let BQO=((BG* (BQN+ (((BQN* BQN)+ IP).sqrt())))+ BQL)- BQJ;
-		let BQP=BQK/ (0.0519105229416f64* BQI);
+		let BQP=BQK/ (0.0519105173688f64* BQI);
 		let BQQ=IS/ BQP;
 		let BQR=B/ BQP;
 		let BQS=BQK/ IJ;
@@ -5392,7 +5392,7 @@ impl Instance {
 		let BWS=BWQ+ (BWP* (((BDP/ ((IL* BWP)* BWP))* BDQ).ln()));
 		let BWT=BWO- BWS;
 		let BWU=((BG* (BWT+ (((BWT* BWT)+ IP).sqrt())))+ BWS)- BWQ;
-		let BWV=BWR/ (0.0519105229416f64* BWP);
+		let BWV=BWR/ (0.0519105173688f64* BWP);
 		let BWW=IS/ BWV;
 		let BWX=B/ BWV;
 		let BWY=BWR/ IJ;
@@ -5700,7 +5700,7 @@ impl Instance {
 		let CDK=CDF+ (CDA* (((CDI/ ((IL* CDA)* CDA))* CDJ).ln()));
 		let CDM=CDL- CDK;
 		let CDN=((BG* (CDM+ (((CDM* CDM)+ IP).sqrt())))+ CDK)- CDF;
-		let CDO=CDH/ (0.0519105229416f64* CDA);
+		let CDO=CDH/ (0.0519105173688f64* CDA);
 		let CDP=IS/ CDO;
 		let CDQ=B/ CDO;
 		let CDR=CDH/ IJ;
@@ -5987,7 +5987,7 @@ impl Instance {
 		let CJY=CJW+ (CJV* (((CDI/ ((IL* CJV)* CJV))* CDJ).ln()));
 		let CJZ=CJU- CJY;
 		let CKA=((BG* (CJZ+ (((CJZ* CJZ)+ IP).sqrt())))+ CJY)- CJW;
-		let CKB=CJX/ (0.0519105229416f64* CJV);
+		let CKB=CJX/ (0.0519105173688f64* CJV);
 		let CKC=IS/ CKB;
 		let CKD=B/ CKB;
 		let CKE=CJX/ IJ;
@@ -6285,7 +6285,7 @@ impl Instance {
 		let CQE=CQC+ (CQB* (((CDI/ ((IL* CQB)* CQB))* CDJ).ln()));
 		let CQG=CQF- CQE;
 		let CQH=((BG* (CQG+ (((CQG* CQG)+ IP).sqrt())))+ CQE)- CQC;
-		let CQI=CQD/ (0.0519105229416f64* CQB);
+		let CQI=CQD/ (0.0519105173688f64* CQB);
 		let CQJ=IS/ CQI;
 		let CQK=B/ CQI;
 		let CQL=CQD/ IJ;
@@ -6568,7 +6568,7 @@ impl Instance {
 		let CWL=CWJ+ (CWI* (((CDI/ ((IL* CWI)* CWI))* CDJ).ln()));
 		let CWM=CWH- CWL;
 		let CWN=((BG* (CWM+ (((CWM* CWM)+ IP).sqrt())))+ CWL)- CWJ;
-		let CWO=CWK/ (0.0519105229416f64* CWI);
+		let CWO=CWK/ (0.0519105173688f64* CWI);
 		let CWP=IS/ CWO;
 		let CWQ=B/ CWO;
 		let CWR=CWK/ IJ;
@@ -6876,7 +6876,7 @@ impl Instance {
 		let DDC=DCX+ (DCS* (((DDA/ ((IL* DCS)* DCS))* DDB).ln()));
 		let DDE=DDD- DDC;
 		let DDF=((BG* (DDE+ (((DDE* DDE)+ IP).sqrt())))+ DDC)- DCX;
-		let DDG=DCZ/ (0.0519105229416f64* DCS);
+		let DDG=DCZ/ (0.0519105173688f64* DCS);
 		let DDH=IS/ DDG;
 		let DDI=B/ DDG;
 		let DDJ=DCZ/ IJ;
@@ -7163,7 +7163,7 @@ impl Instance {
 		let DJQ=DJO+ (DJN* (((DDA/ ((IL* DJN)* DJN))* DDB).ln()));
 		let DJR=DJM- DJQ;
 		let DJS=((BG* (DJR+ (((DJR* DJR)+ IP).sqrt())))+ DJQ)- DJO;
-		let DJT=DJP/ (0.0519105229416f64* DJN);
+		let DJT=DJP/ (0.0519105173688f64* DJN);
 		let DJU=IS/ DJT;
 		let DJV=B/ DJT;
 		let DJW=DJP/ IJ;
@@ -7461,7 +7461,7 @@ impl Instance {
 		let DPV=DPT+ (DPS* (((DDA/ ((IL* DPS)* DPS))* DDB).ln()));
 		let DPX=DPW- DPV;
 		let DPY=((BG* (DPX+ (((DPX* DPX)+ IP).sqrt())))+ DPV)- DPT;
-		let DPZ=DPU/ (0.0519105229416f64* DPS);
+		let DPZ=DPU/ (0.0519105173688f64* DPS);
 		let DQA=IS/ DPZ;
 		let DQB=B/ DPZ;
 		let DQC=DPU/ IJ;
@@ -7744,7 +7744,7 @@ impl Instance {
 		let DWC=DWA+ (DVZ* (((DDA/ ((IL* DVZ)* DVZ))* DDB).ln()));
 		let DWD=DVY- DWC;
 		let DWE=((BG* (DWD+ (((DWD* DWD)+ IP).sqrt())))+ DWC)- DWA;
-		let DWF=DWB/ (0.0519105229416f64* DVZ);
+		let DWF=DWB/ (0.0519105173688f64* DVZ);
 		let DWG=IS/ DWF;
 		let DWH=B/ DWF;
 		let DWI=DWB/ IJ;

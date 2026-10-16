@@ -204,10 +204,14 @@ impl Iterator for ShippedCensusModels {
             });
         }
 
-        let mut options = CompilerOptions::default();
-        options.include_paths.push(self.root.clone());
-        options.defines = pending.defines.clone();
-        options.undefines = pending.undefines.clone();
+        // The generator's front end: includes resolve beside the including
+        // file, then to the built-in standard headers, never through the
+        // model root (`rust_backend::builtins`).
+        let options = CompilerOptions {
+            defines: pending.defines.clone(),
+            undefines: pending.undefines.clone(),
+            ..CompilerOptions::default()
+        };
         let compiler = VerilogACompiler::new(options);
         let runtime = compiler
             .compile_file_runtime_with_metadata(&pending.path, Some(&pending.module))
