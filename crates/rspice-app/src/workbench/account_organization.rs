@@ -20,7 +20,10 @@ use crate::services::license::LicenseInfo;
 use crate::ui::{
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::{Button, Dialog, DialogChoice, DialogSize},
+    widgets::{
+        Button, Dialog, DialogChoice, DialogSize, PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE, Problem,
+        paint_problem_mark,
+    },
 };
 use crate::workbench::{AppState, RSpiceApp};
 
@@ -42,32 +45,17 @@ const LIST_STACK_WIDTH: f32 = 420.0;
 // Model
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Tone {
-    Neutral,
-    Info,
-    Ok,
-    Warn,
-}
-
-impl Tone {
-    fn color(self, tokens: &Tokens) -> Color32 {
-        match self {
-            Self::Neutral => tokens.color.text_dim,
-            Self::Info => tokens.color.info,
-            Self::Ok => tokens.color.ok,
-            Self::Warn => tokens.color.warn,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct IdentityModel {
     title: String,
     detail: String,
     note: String,
     initials: Option<String>,
-    status: (&'static str, Tone),
+    /// The session state, and whether it is one the reader should act on.
+    ///
+    /// Signed in and signing in are where the reader expects to be, so they
+    /// are words alone. Only a state that wants attention carries a mark.
+    status: (&'static str, Option<Problem>),
     error: Option<String>,
     actions: Vec<AccountAction>,
 }
@@ -92,7 +80,7 @@ struct DeviceRow {
 struct AccountConsoleModel {
     identity: IdentityModel,
     license_rows: Vec<(String, String)>,
-    license_status: (String, Tone),
+    license_status: String,
     license_action: AccountAction,
     features: Vec<FeatureRow>,
     devices: Vec<DeviceRow>,
@@ -140,7 +128,7 @@ fn identity_model(
         detail: detail.to_owned(),
         note: note.to_owned(),
         initials: None,
-        status: ("Local only", Tone::Neutral),
+        status: ("Local only", None),
         error,
         actions,
     };
@@ -165,7 +153,7 @@ fn identity_model(
                     note: "Nothing changes here until the browser hands the sign-in back."
                         .to_owned(),
                     initials: None,
-                    status: ("Signing in", Tone::Info),
+                    status: ("Signing in", None),
                     error: None,
                     actions: vec![AccountAction::ReopenSignInPage, AccountAction::CancelSignIn],
                 },
@@ -175,7 +163,7 @@ fn identity_model(
                         detail: "Setting up your account session.".to_owned(),
                         note: String::new(),
                         initials: None,
-                        status: ("Signing in", Tone::Info),
+                        status: ("Signing in", None),
                         error: None,
                         actions: Vec::new(),
                     }
@@ -191,7 +179,7 @@ fn identity_model(
                             .unwrap_or_default(),
                         title,
                         detail,
-                        status: ("Signed in", Tone::Ok),
+                        status: ("Signed in", None),
                         error: None,
                         actions: vec![AccountAction::RefreshSession, AccountAction::SignOut],
                     }
@@ -213,7 +201,7 @@ fn identity_model(
                         title,
                         detail,
                         note,
-                        status: ("Offline", Tone::Warn),
+                        status: ("Offline", Some(Problem::Warning)),
                         error: None,
                         actions: vec![AccountAction::RefreshSession, AccountAction::SignOut],
                     }
@@ -235,13 +223,15 @@ fn identity_lines(cloud: &CloudSessionSnapshot) -> (String, String) {
     }
 }
 
-fn license_status(license: Option<&LicenseInfo>) -> (String, Tone) {
+/// What the License heading trails with.
+///
+/// No tone travels with it: the one state worth acting on says so in words,
+/// and "updates ended" is not clearer for being amber.
+fn license_status(license: Option<&LicenseInfo>) -> String {
     match license {
-        Some(info) if info.updates_expired => {
-            ("Active \u{b7} updates ended".to_owned(), Tone::Warn)
-        }
-        Some(_) => ("Active".to_owned(), Tone::Ok),
-        None => ("Not activated".to_owned(), Tone::Neutral),
+        Some(info) if info.updates_expired => "Active \u{b7} updates ended".to_owned(),
+        Some(_) => "Active".to_owned(),
+        None => "Not activated".to_owned(),
     }
 }
 
@@ -754,17 +744,21 @@ fn identity_section(ui: &mut Ui, identity: &IdentityModel, requested: &mut Optio
     let tokens = Tokens::get(ui.ctx());
     section(ui, |ui, width| {
         let status_font = theme::sans(tokens::FS_1, FontWeight::Medium);
-        let status_color = identity.status.1.color(&tokens);
+        let status_mark = identity.status.1;
         let status_width = ui
             .painter()
             .layout_no_wrap(
                 identity.status.0.to_owned(),
                 status_font.clone(),
-                status_color,
+                tokens.color.text_dim,
             )
             .size()
             .x
-            + 14.0;
+            + if status_mark.is_some() {
+                PROBLEM_MARK_ADVANCE
+            } else {
+                0.0
+            };
         let text_left = AVATAR_SIZE + 14.0;
         // Narrow, the state takes its own line under the name rather than
         // squeezing the name and its sentences into a column beside it.
@@ -828,31 +822,44 @@ fn identity_section(ui: &mut Ui, identity: &IdentityModel, requested: &mut Optio
             ui.painter()
                 .galley(pos2(text_x, y), note, tokens.color.text_faint);
         }
-        // The session state, as a dot and a word: top-right, or under the
-        // name when narrow.
-        let (dot, label_anchor, align) = if narrow {
+        // The session state, in words: top-right, or under the name when
+        // narrow. A mark leads it only when the state wants acting on —
+        // signed in is where the reader expects to be, and a dot that is
+        // green for it says nothing the word does not.
+        let (mark_left, label_anchor, align) = if narrow {
             let center_y = rect.top() + 24.0 + 8.0;
-            (
-                pos2(text_x + 3.5, center_y),
-                pos2(text_x + 12.0, center_y),
-                Align2::LEFT_CENTER,
-            )
+            let mark_left = text_x;
+            let text_left = if status_mark.is_some() {
+                text_x + PROBLEM_MARK_ADVANCE
+            } else {
+                text_x
+            };
+            (mark_left, pos2(text_left, center_y), Align2::LEFT_CENTER)
         } else {
             let center_y = rect.top() + 11.0;
             (
-                pos2(rect.right() - status_width + 3.5, center_y),
+                rect.right() - status_width,
                 pos2(rect.right(), center_y),
                 Align2::RIGHT_CENTER,
             )
         };
-        ui.painter().text(
+        let label = ui.painter().text(
             label_anchor,
             align,
             identity.status.0,
             status_font,
-            status_color,
+            tokens.color.text_dim,
         );
-        ui.painter().circle_filled(dot, 3.5, status_color);
+        if let Some(problem) = status_mark {
+            paint_problem_mark(
+                ui.painter(),
+                Rect::from_min_size(
+                    pos2(mark_left, label.center().y - PROBLEM_MARK_SIDE * 0.5),
+                    Vec2::splat(PROBLEM_MARK_SIDE),
+                ),
+                problem,
+            );
+        }
         let announced = [
             identity.title.as_str(),
             identity.detail.as_str(),
@@ -910,10 +917,7 @@ fn license_section(
         section_heading(
             ui,
             "License",
-            Some((
-                model.license_status.0.as_str(),
-                model.license_status.1.color(&tokens),
-            )),
+            Some((model.license_status.as_str(), tokens.color.text_faint)),
             Some(&model.license_action),
             requested,
         );
@@ -1425,7 +1429,7 @@ mod tests {
             CloudAccountAvailability::Native,
         );
         assert_eq!(model.identity.actions, vec![AccountAction::SignIn]);
-        assert_eq!(model.identity.status, ("Local only", Tone::Neutral));
+        assert_eq!(model.identity.status, ("Local only", None));
     }
 
     #[test]
@@ -1435,7 +1439,7 @@ mod tests {
         assert_eq!(model.identity.title, "Example Engineer");
         assert_eq!(model.identity.detail, "engineer@example.com");
         assert_eq!(model.identity.initials.as_deref(), Some("EE"));
-        assert_eq!(model.identity.status, ("Signed in", Tone::Ok));
+        assert_eq!(model.identity.status, ("Signed in", None));
         assert!(model.features.iter().any(|row| row.name == "Web publishing"
             && row.licensed
             && row.term == "Through 2027-07-01"));
