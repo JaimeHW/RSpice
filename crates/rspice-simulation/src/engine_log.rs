@@ -30,6 +30,23 @@ const MAX_ENGINE_LOG_LINES: usize = 2_000;
 pub struct EngineLogLine {
     pub severity: LogSeverity,
     pub message: String,
+    /// Who in the run said it. A line that crosses the worker boundary
+    /// without one is the engine's, which is all a line ever was before.
+    #[serde(default)]
+    pub origin: EngineLogOrigin,
+}
+
+/// The part of a run a line came from, so the Console can say whose words
+/// they are without parsing them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum EngineLogOrigin {
+    /// The analysis itself: the engine, the solver and the device models.
+    #[default]
+    Engine,
+    /// A digital testbench's own output: `$display`, `$finish` and the like.
+    Hdl,
+    /// The Verilog-A compiler, on the models this run elaborated.
+    VerilogA,
 }
 
 /// One run's captured engine lines, waiting for the controller's next frame.
@@ -81,6 +98,7 @@ impl EngineLogQueue {
                  {MAX_ENGINE_LOG_LINES} of a run)",
                 self.withheld
             ),
+            origin: EngineLogOrigin::Engine,
         });
     }
 
@@ -300,6 +318,7 @@ pub fn offer(record: &log::Record<'_>) {
         sink.deliver(EngineLogLine {
             severity,
             message: record.args().to_string(),
+            origin: EngineLogOrigin::Engine,
         });
     });
 }
@@ -363,7 +382,25 @@ mod tests {
         EngineLogLine {
             severity,
             message: message.to_owned(),
+            origin: EngineLogOrigin::Engine,
         }
+    }
+
+    /// A line posted without an origin is read as the engine's.
+    #[test]
+    fn a_line_without_an_origin_is_the_engines() {
+        let line: EngineLogLine =
+            serde_json::from_str(r#"{"severity":"Warning","message":"clamped"}"#)
+                .expect("a line without an origin still reads");
+        assert_eq!(line.origin, EngineLogOrigin::Engine);
+        let hdl = EngineLogLine {
+            origin: EngineLogOrigin::Hdl,
+            ..line
+        };
+        let round_trip: EngineLogLine =
+            serde_json::from_str(&serde_json::to_string(&hdl).expect("serializes"))
+                .expect("reads back");
+        assert_eq!(round_trip, hdl);
     }
 
     fn offer_core(level: log::Level, message: &str) {
