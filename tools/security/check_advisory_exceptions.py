@@ -12,6 +12,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 ID_PATTERN = re.compile(r"^RUSTSEC-\d{4}-\d{4}$")
+# A yanked release is named the way cargo-deny's ignore list takes it: one
+# package spec, `name@version`, so an exception can never cover a later yank.
+CRATE_PATTERN = re.compile(r"^[A-Za-z0-9_-]+@\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]+)?$")
 REQUIRED_TEXT_FIELDS = (
     "dependency",
     "owner",
@@ -26,13 +29,19 @@ def load_toml(path: Path) -> dict:
         return tomllib.load(handle)
 
 
-def deny_exception_ids(document: dict) -> set[str]:
+def deny_exceptions(document: dict) -> tuple[set[str], set[str]]:
+    """Split cargo-deny's ignore list into advisory ids and yanked releases."""
     identifiers: set[str] = set()
+    crates: set[str] = set()
     for entry in document.get("advisories", {}).get("ignore", []):
-        identifier = entry.get("id") if isinstance(entry, dict) else entry
-        if isinstance(identifier, str):
-            identifiers.add(identifier)
-    return identifiers
+        if isinstance(entry, dict):
+            if isinstance(entry.get("crate"), str):
+                crates.add(entry["crate"])
+                continue
+            entry = entry.get("id")
+        if isinstance(entry, str):
+            (crates if "@" in entry else identifiers).add(entry)
+    return identifiers, crates
 
 
 def audit_exception_ids(document: dict) -> set[str]:
@@ -55,19 +64,36 @@ def main() -> int:
         records = []
 
     registry_ids: set[str] = set()
+    registry_crates: set[str] = set()
     today = date.today()
     for index, record in enumerate(records, start=1):
         if not isinstance(record, dict):
             errors.append(f"exception record {index} must be a TOML table")
             continue
         identifier = record.get("id")
-        label = identifier if isinstance(identifier, str) else f"record {index}"
-        if not isinstance(identifier, str) or not ID_PATTERN.fullmatch(identifier):
-            errors.append(f"{label}: id must match RUSTSEC-YYYY-NNNN")
-        elif identifier in registry_ids:
-            errors.append(f"{identifier}: duplicate exception record")
+        crate = record.get("crate")
+        label = next(
+            (value for value in (identifier, crate) if isinstance(value, str)),
+            f"record {index}",
+        )
+        if (identifier is None) == (crate is None):
+            errors.append(
+                f"{label}: give exactly one of id (an advisory) "
+                "or crate (a yanked release)"
+            )
+        elif identifier is not None:
+            if not isinstance(identifier, str) or not ID_PATTERN.fullmatch(identifier):
+                errors.append(f"{label}: id must match RUSTSEC-YYYY-NNNN")
+            elif identifier in registry_ids:
+                errors.append(f"{identifier}: duplicate exception record")
+            else:
+                registry_ids.add(identifier)
+        elif not isinstance(crate, str) or not CRATE_PATTERN.fullmatch(crate):
+            errors.append(f"{label}: crate must name one yanked release as name@version")
+        elif crate in registry_crates:
+            errors.append(f"{crate}: duplicate exception record")
         else:
-            registry_ids.add(identifier)
+            registry_crates.add(crate)
 
         for field in REQUIRED_TEXT_FIELDS:
             value = record.get(field)
@@ -86,14 +112,17 @@ def main() -> int:
                     f"(today is {today.isoformat()})"
                 )
 
-    deny_ids = deny_exception_ids(load_toml(ROOT / "deny.toml"))
-    audit_ids = audit_exception_ids(load_toml(ROOT / ".cargo" / "audit.toml"))
-    for policy_name, policy_ids in (
-        ("deny.toml", deny_ids),
-        (".cargo/audit.toml", audit_ids),
+    deny = load_toml(ROOT / "deny.toml")
+    audit = load_toml(ROOT / ".cargo" / "audit.toml")
+    deny_ids, deny_crates = deny_exceptions(deny)
+    audit_ids = audit_exception_ids(audit)
+    for policy_name, policy_ids, documented in (
+        ("deny.toml", deny_ids, registry_ids),
+        ("deny.toml", deny_crates, registry_crates),
+        (".cargo/audit.toml", audit_ids, registry_ids),
     ):
-        missing = sorted(policy_ids - registry_ids)
-        stale = sorted(registry_ids - policy_ids)
+        missing = sorted(policy_ids - documented)
+        stale = sorted(documented - policy_ids)
         if missing:
             errors.append(
                 f"{policy_name}: undocumented exceptions: {', '.join(missing)}"
@@ -104,13 +133,34 @@ def main() -> int:
                 f"{', '.join(stale)}"
             )
 
+    # cargo audit cannot scope a yanked exception to one release, so while one
+    # exists its yanked check is off and cargo-deny is the only gate on yanked
+    # releases. That is sound only while cargo-deny fails on every yanked
+    # release it was not told about, and the check must come back with the
+    # last exception.
+    audit_checks_yanked = audit.get("yanked", {}).get("enabled", True)
+    if not audit_checks_yanked and deny.get("advisories", {}).get("yanked") != "deny":
+        errors.append(
+            '.cargo/audit.toml disables yanked checks, so deny.toml must keep yanked = "deny"'
+        )
+    if registry_crates and audit_checks_yanked:
+        errors.append(
+            ".cargo/audit.toml must set [yanked] enabled = false while a yanked "
+            "release is accepted; cargo audit cannot scope the exception"
+        )
+    if not registry_crates and not audit_checks_yanked:
+        errors.append(
+            ".cargo/audit.toml disables yanked checks with no accepted yanked release"
+        )
+
     if errors:
         for error in errors:
             print(f"error: {error}", file=sys.stderr)
         return 1
 
     print(
-        f"validated {len(registry_ids)} advisory exception(s); "
+        f"validated {len(registry_ids)} advisory and "
+        f"{len(registry_crates)} yanked-release exception(s); "
         f"next review no later than "
         f"{min(record['review_after'] for record in records)}"
     )
