@@ -108,11 +108,21 @@ def offenders(output: str) -> list[str]:
 
 
 def metadata() -> dict:
+    """Describe the workspace, keeping cargo's own words when it refuses.
+
+    `--locked` is deliberate: a gate checks the workspace the lockfile pins
+    rather than quietly resolving a new one. It also means a tree whose
+    `Cargo.lock` is out of step with its manifests fails here, which is the
+    ordinary state of a landing tree that merged two branches each adding a
+    dependency. Capturing stderr is what lets the caller say the tree is
+    stale instead of raising a traceback that reads as a broken gate.
+    """
     return json.loads(
         subprocess.check_output(
             ("cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"),
             cwd=ROOT,
             text=True,
+            stderr=subprocess.PIPE,
         )
     )
 
@@ -126,7 +136,16 @@ def main() -> int:
     )
     arguments = parser.parse_args()
 
-    grouped = entry_points(metadata())
+    try:
+        grouped = entry_points(metadata())
+    except subprocess.CalledProcessError as refusal:
+        print(f"cargo could not describe the workspace:\n{(refusal.stderr or '').strip()}")
+        print(
+            "This gate reads the workspace under --locked, so Cargo.lock must "
+            "match the manifests. Run a cargo command without --locked to "
+            "update it and commit the lockfile with the manifest that moved."
+        )
+        return 1
     members = {member for member, _ in grouped}
     if len(members) < MINIMUM_MEMBERS:
         print(
