@@ -21,8 +21,8 @@ wasm32 application image. Internal layering is checked by
 | `analysis/` | Calculator adaptation over retained application results |
 | `results/` | Result-document exports and application integration fixtures |
 | `properties/` | Project-bound property editing workflows |
-| `product/` | Shared product identity and outcome vocabulary |
-| `quantity/` | Unit-safe presentation and quantity-input policy; values crossing this boundary are always in documented SI base units |
+| `product/` | `CommandId`, plus the product identities `rspice-app-types` defines |
+| `quantity/` | Platform number-locale discovery, plus the quantity presentation and input policy `rspice-app-types` defines; values crossing this boundary are always in documented SI base units |
 | `diagnostics/` | What the application reports about itself: the console message model and the structured, filterable application log |
 | `services/` | Service and platform adapters: license keys, cloud account, live-session protocol, Model Hub transport, model qualification |
 | `io/` | File workflows and platform I/O adapters: project load/save, file exchange, netlist and waveform export, project execution |
@@ -58,8 +58,12 @@ editor with completion and a parameter tuner).
 - Browser execution runs in the independent `rspice-worker` package, which owns
   the module worker and the Verilog-A secondary-module emitter; the application
   image deliberately does not link them.
-- Shared egui controls, editor interaction and plotting belong to
-  `rspice-ui-kit` and `rspice-schematic-editor`.
+- Design tokens, shared egui controls and the plot engine belong to
+  `rspice-ui-kit`; schematic and symbol painting, editor interaction and SVG
+  export belong to `rspice-schematic-editor`.
+- Portable value types — product identities, the instance-path grammar,
+  diagnostics records, property values and quantity policy — belong to
+  `rspice-app-types`; this crate re-exports the ones its callers use.
 - Qualified desktop architectures take `rspice-core` with its default parallel
   and SIMD solver paths plus the native Verilog-A JIT; every other target takes
   the portable Verilog-A, and `wasm32` drops rayon and SIMD as well.
@@ -76,9 +80,6 @@ editor with completion and a parameter tuner).
 - `ModelHub` with `ModelHubStore` and `ModelHubTransport` — the
   model-distribution client: signed catalog, verified installation and the
   part shelf over foundation, installed, catalog and retained parts.
-- `InstancePath`, `InstancePathPattern` and `ProbeTarget` — the one
-  hierarchical path grammar, bounded by `MAX_INSTANCE_PATH_BYTES` and
-  `MAX_INSTANCE_PATH_DEPTH`.
 - `RSpiceApp::install_project_library_lock_snapshot` with
   `ProjectLibraryLockSnapshot` — the trusted in-process collaboration boundary
   for revision-bound project-library edit locks.
