@@ -1,14 +1,16 @@
 //! Project-owned hardcopy source-set records and their shared validation.
 //!
 //! A source set is the persisted, digest-authenticated answer to "which exact
-//! document revisions does this print job cover". `ProjectWorkspace` owns these
-//! records directly, so they live here rather than beside the adapters that
-//! resolve live documents: the adapters need the schematic symbol library and
-//! the analysis viewers, and `state` must not reach up through those to
-//! describe its own saved data.
+//! document revisions does this print job cover". `rspice-project`'s
+//! `ProjectWorkspace` owns these records directly, so they live here rather
+//! than beside the adapters that resolve live documents: the adapters are in
+//! `rspice-hardcopy`, which carries the PDF, SVG and raster backends, and the
+//! app-crate dependency check does not allow `rspice-project` to depend on it.
 //!
-//! The document adapters in `workbench::hardcopy_adapters::sources` import these types
-//! and the shared validation helpers back down from here.
+//! The document adapters in `rspice-hardcopy`'s `sources` module import these
+//! types and the shared validation helpers back down from here, and
+//! `rspice-app`'s `workbench::hardcopy_adapters::sources` re-exports those
+//! adapters beside its application-side pieces.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
