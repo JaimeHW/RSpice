@@ -1218,6 +1218,40 @@ fn drc_receipt_retains_full_durable_bus_identity() {
         })
     );
 }
+
+/// Which terminal of a device a finding sits on, and which occurrence of a
+/// cellview raised it, are part of that finding's identity. Two pins of one
+/// transistor and one cellview's finding under two instance paths are different
+/// evidence, so they must not share a cached run's digest.
+#[test]
+fn drc_receipt_separates_terminals_and_occurrence_paths() {
+    let digest_for = |location| {
+        let mut result = DrcResult::new();
+        result.add_violation(DrcViolation::new(
+            1,
+            DrcViolationType::UnconnectedPin,
+            "pin",
+            location,
+        ));
+        result.completed = true;
+        drc_receipt_digest(11, &result)
+    };
+    let terminal = |pin: &str| DrcLocation::Terminal {
+        component_id: 4,
+        component_name: "M3".to_owned(),
+        pin_name: pin.to_owned(),
+        point: rspice_design_model::Point::new(10, 20),
+    };
+    let inside = |path: &str| DrcLocation::InsideInstance {
+        path: rspice_app_types::hierarchy_path::InstancePath::parse(path).expect("instance path"),
+        view: rspice_design_model::cell_view::CellViewRef::new("work", "amp", "schematic"),
+        inner: Box::new(terminal("D")),
+    };
+
+    assert_ne!(digest_for(terminal("D")), digest_for(terminal("G")));
+    assert_ne!(digest_for(inside("/X1")), digest_for(inside("/X2")));
+    assert_ne!(digest_for(inside("/X1")), digest_for(terminal("D")));
+}
 #[test]
 fn periodic_port_noise_options_have_distinct_execution_identities() {
     use rspice_core::analysis::s_param::PeriodicPortNoiseReference;

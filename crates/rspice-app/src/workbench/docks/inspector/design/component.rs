@@ -1234,9 +1234,14 @@ pub(super) fn component_checks(ui: &mut Ui, app: &RSpiceApp, component: &Compone
 }
 
 pub(super) fn violation_targets_component(violation: &DrcViolation, component: &Component) -> bool {
+    // A terminal finding belongs to the component that owns the terminal. The
+    // identity has to be read off the location rather than left to the related
+    // items, because an instance with no authored reference is named by its id
+    // in those and matches nothing.
     matches!(
         &violation.location,
-        DrcLocation::Component { id, .. } if *id == component.id
+        DrcLocation::Component { id, .. } | DrcLocation::Terminal { component_id: id, .. }
+            if *id == component.id
     ) || violation
         .related_items
         .iter()

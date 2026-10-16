@@ -18,6 +18,7 @@ use crate::properties::PropertyValue;
 use crate::schematic::component::Component;
 use crate::schematic::component_type::ComponentType;
 use crate::schematic::document::SchematicDocument;
+use crate::schematic::port::PortDirection;
 
 /// Resolve the design once, and bind every placed component to it.
 pub fn extract_checked_design(
@@ -83,38 +84,25 @@ fn extract_components(
     for comp in &schematic.components {
         let terminals = bound.get(&comp.id).map(Vec::as_slice).unwrap_or_default();
         let mut pins = Vec::with_capacity(terminals.len());
-        let declared_output_pins: std::collections::HashSet<String> = comp
-            .library_cell
-            .as_ref()
-            .and_then(|binding| binding.interface())
-            .into_iter()
-            .flatten()
-            .filter(|port| port.direction == crate::schematic::port::PortDirection::Out)
-            .map(|port| port.name)
-            .collect();
+        let declared_directions = declared_port_directions(comp);
 
         for terminal in terminals {
-            let is_output = matches!(
-                comp.kind,
-                ComponentType::VoltageSource
-                    | ComponentType::VoltageSourceAc
-                    | ComponentType::VoltageSourcePulse
-                    | ComponentType::VoltageSourceSin
-                    | ComponentType::VoltageSourceExp
-                    | ComponentType::VoltageSourceSffm
-                    | ComponentType::VoltageSourceAm
-                    | ComponentType::VoltageSourcePat
-                    | ComponentType::VoltageSourceNoise
-                    | ComponentType::VoltageSourceRandom
-                    | ComponentType::VoltageSourcePwl
-                    | ComponentType::VoltageSourcePwlFile
-            ) && terminal.pin == "+"
-                || declared_output_pins.contains(&terminal.pin);
+            let source_drive_terminal = is_voltage_source(comp.kind) && terminal.pin == "+";
+            let direction = if source_drive_terminal {
+                // An independent voltage source binds no cell interface, and
+                // its `+` terminal is the whole declaration it has: that
+                // terminal is what drives the node. This case is checked first
+                // so a source keeps its drive terminal whatever else a binding
+                // might say about a pin spelled `+`.
+                Some(PortDirection::Out)
+            } else {
+                declared_directions.get(&terminal.pin).copied()
+            };
 
             pins.push(PinInfo {
                 name: terminal.pin.clone(),
                 net_name: terminal.net_name.clone(),
-                is_output,
+                direction,
                 point: terminal.point,
                 attached: terminal.attached,
             });
@@ -144,6 +132,46 @@ fn extract_components(
     }
 
     components
+}
+
+/// Every direction the bound cell interface declares, keyed by the pin name the
+/// symbol places.
+///
+/// A primitive binds no interface and therefore declares nothing: the map is
+/// empty, every one of its terminals reads as undeclared, and an open resistor
+/// leg is never judged as an input nothing drives.
+///
+/// A drawn interface port's own `dir=` is deliberately not read here. That
+/// declaration is written from the parent's side of the symbol, so inside the
+/// master an `out` port is where the cellview's own circuitry arrives — reading
+/// it here would make a port a driver within the very cellview that drives it.
+fn declared_port_directions(
+    component: &Component,
+) -> std::collections::HashMap<String, PortDirection> {
+    let mut declared = std::collections::HashMap::new();
+    for port in component
+        .library_cell
+        .as_ref()
+        .and_then(|binding| binding.interface())
+        .into_iter()
+        .flatten()
+    {
+        // One name declared twice keeps the `Out` claim rather than whichever
+        // declaration was read last, which is the reading the driver rules
+        // have always had.
+        match declared.entry(port.name) {
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                slot.insert(port.direction);
+            }
+            std::collections::hash_map::Entry::Occupied(mut slot)
+                if port.direction == PortDirection::Out =>
+            {
+                slot.insert(port.direction);
+            }
+            std::collections::hash_map::Entry::Occupied(_) => {}
+        }
+    }
+    declared
 }
 
 fn effective_component_properties<'a>(

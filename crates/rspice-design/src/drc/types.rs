@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use rspice_app_types::hierarchy_path::InstancePath;
 use rspice_design_model::Point;
 use rspice_design_model::cell_view::CellViewRef;
 
@@ -38,8 +39,21 @@ pub enum DrcViolationType {
     //-------------------------------------------------------------------------
     /// Node with only one connection (floating)
     FloatingNode,
-    /// Component pin not connected to any wire
+    /// An unattached terminal no interface classified: a passive leg, a
+    /// primitive device terminal, or a pin declared `inout` or `supply`.
+    ///
+    /// Three findings cover an unattached terminal, and this is the one that
+    /// claims nothing about direction. It keeps its name because that is what
+    /// every surface already asks for when it means "an open terminal nobody
+    /// declared anything about".
     UnconnectedPin,
+    /// A pin the bound cell interface declares an input, which no conductor
+    /// reaches: nothing drives it.
+    UndrivenInput,
+    /// A pin the bound cell interface declares an output — or an independent
+    /// voltage source's `+` terminal — which no conductor reaches: it drives
+    /// nothing.
+    UnloadedOutput,
     /// Net label with no matching connections
     OrphanNetLabel,
     /// Wire segment not connected to anything
@@ -71,6 +85,13 @@ pub enum DrcViolationType {
     MissingGround,
     /// Voltage source directly connected to another voltage source
     SourceToSource,
+
+    //-------------------------------------------------------------------------
+    // Hierarchy Issues
+    //-------------------------------------------------------------------------
+    /// A cellview reaches itself through its own instances. The design has no
+    /// finite expansion, so nothing below the repeated occurrence is checked.
+    RecursiveInstantiation,
 
     //-------------------------------------------------------------------------
     // Naming Issues
@@ -121,9 +142,16 @@ impl DrcViolationType {
             // Critical - simulation cannot run
             Self::MissingGround => DrcSeverity::Critical,
             Self::DuplicateName => DrcSeverity::Critical,
+            // A cellview that reaches itself has no finite expansion, so there
+            // is no deck to run.
+            Self::RecursiveInstantiation => DrcSeverity::Critical,
 
             // Error - likely to cause simulation failure
             Self::FloatingNode => DrcSeverity::Error,
+            // An input nothing drives is a terminal the solver has no source
+            // for. It is a stronger claim than an open passive leg because the
+            // interface said what the pin is for.
+            Self::UndrivenInput => DrcSeverity::Error,
             Self::ShortedOutputs => DrcSeverity::Error,
             Self::SourceToSource => DrcSeverity::Error,
             Self::MissingParameter => DrcSeverity::Error,
@@ -140,6 +168,9 @@ impl DrcViolationType {
 
             // Warning - may affect results
             Self::UnconnectedPin => DrcSeverity::Warning,
+            // An output nothing loads still solves; the design just loses the
+            // signal it drew.
+            Self::UnloadedOutput => DrcSeverity::Warning,
             Self::DanglingWire => DrcSeverity::Warning,
             Self::OrphanNetLabel => DrcSeverity::Warning,
             Self::ValueOutOfRange => DrcSeverity::Warning,
@@ -179,6 +210,8 @@ impl DrcViolationType {
         match self {
             Self::FloatingNode => "Node has only one connection",
             Self::UnconnectedPin => "Component pin is not connected",
+            Self::UndrivenInput => "Declared input pin has no driver",
+            Self::UnloadedOutput => "Declared output pin drives nothing",
             Self::OrphanNetLabel => "Net label has no connections",
             Self::DanglingWire => "Wire segment is not connected to anything",
             Self::MalformedBus => "Bus geometry or declaration is malformed",
@@ -192,6 +225,7 @@ impl DrcViolationType {
                 "Off-sheet connector has no partner on another sheet"
             }
             Self::ShortedOutputs => "Multiple declared outputs connected to the same net",
+            Self::RecursiveInstantiation => "Cellview instantiates itself",
             Self::MissingGround => "Circuit has no ground reference (node 0)",
             Self::SourceToSource => "Voltage source outputs directly connected",
             Self::DuplicateName => "Multiple components have the same name",
@@ -212,6 +246,10 @@ impl DrcViolationType {
         match self {
             Self::FloatingNode => "Connect the node to another component or remove it",
             Self::UnconnectedPin => "Connect this pin or verify that it is intentionally open",
+            Self::UndrivenInput => {
+                "Connect a driver to this input, or declare the pin bidirectional"
+            }
+            Self::UnloadedOutput => "Connect this output or verify that it is intentionally open",
             Self::OrphanNetLabel => "Connect wires to both ends of the net or remove the label",
             Self::DanglingWire => "Complete the wire connection or delete the segment",
             Self::MalformedBus => "Repair or redraw the invalid bus geometry and declaration",
@@ -227,6 +265,9 @@ impl DrcViolationType {
                 "Place the matching connector on the other sheet, or make this an ordinary net label"
             }
             Self::ShortedOutputs => "Leave only one declared output driver on the net",
+            Self::RecursiveInstantiation => {
+                "Remove the instance that reaches its own cellview, or bind it to another view"
+            }
             Self::MissingGround => "Add a ground symbol (GND) to the circuit",
             Self::SourceToSource => "Add a resistor between voltage sources",
             Self::DuplicateName => "Rename components to have unique identifiers",
@@ -313,6 +354,31 @@ pub enum DrcLocation {
     Point { x: f64, y: f64 },
     /// On a component
     Component { id: u64, name: String },
+    /// On one terminal of a placed component.
+    ///
+    /// A four-terminal device raises its own per-terminal findings, and a
+    /// component-level location cannot say which terminal a finding is about.
+    /// The point is the terminal position the extraction placed, so a reader
+    /// and the canvas are sent to the pin rather than to the symbol's origin.
+    Terminal {
+        component_id: u64,
+        /// The authored reference, which may legitimately be empty. The
+        /// display falls back to the component's identity, exactly as a
+        /// message does.
+        component_name: String,
+        pin_name: String,
+        point: Point,
+    },
+    /// Inside an instantiated cellview, at `inner` within that cellview.
+    ///
+    /// `path` is the chain of instance references from the checked subject down
+    /// to the cellview `inner` belongs to, which is the only thing that tells
+    /// `X1/M3` from `X2/M3`. The subject's own findings are never wrapped.
+    InsideInstance {
+        path: InstancePath,
+        view: CellViewRef,
+        inner: Box<DrcLocation>,
+    },
     /// On a wire
     Wire { id: u64 },
     /// On a bus.
@@ -339,6 +405,21 @@ impl DrcLocation {
         match self {
             Self::Point { x, y } => format!("({:.1}, {:.1})", x, y),
             Self::Component { name, .. } => format!("Component {}", name),
+            Self::Terminal {
+                component_id,
+                component_name,
+                pin_name,
+                ..
+            } => {
+                if component_name.trim().is_empty() {
+                    format!("Pin component #{component_id}.{pin_name}")
+                } else {
+                    format!("Pin {component_name}.{pin_name}")
+                }
+            }
+            Self::InsideInstance { path, inner, .. } => {
+                format!("{path} \u{00b7} {}", inner.display())
+            }
             Self::Wire { id } => format!("Wire #{}", id),
             Self::Bus { id } => format!("Bus #{}", id),
             Self::BusTap { id } => format!("Bus tap #{}", id),

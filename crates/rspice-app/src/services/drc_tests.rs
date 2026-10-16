@@ -187,17 +187,52 @@ fn hierarchy_resolved_unconnected_pin_check_uses_authored_terminal_geometry() {
             ..DrcConfig::default()
         },
     );
-    let unconnected = of_type(&result, DrcViolationType::UnconnectedPin);
+    let unconnected = of_type(&result, DrcViolationType::UnloadedOutput);
 
     assert_eq!(unconnected.len(), 1);
     assert!(unconnected[0].message.contains("X1.OUT"));
     assert_eq!(
         unconnected[0].location,
-        DrcLocation::Component {
-            id: 1,
-            name: "X1".to_owned()
+        DrcLocation::Terminal {
+            component_id: 1,
+            component_name: "X1".to_owned(),
+            pin_name: "OUT".to_owned(),
+            point: Point::new(170, 70),
         }
     );
+}
+
+/// The declared direction a finding is classified by comes off the bound cell
+/// interface, through the real extraction. An input the drawing leaves open is
+/// an error; the output beside it is a warning.
+#[test]
+fn an_open_instance_terminal_is_classified_by_its_bound_interface() {
+    let (libraries, buffers) = library_with_authored_amp_symbol();
+    let hierarchy = HierarchySource::from_workspace(libraries.catalog(), &buffers);
+    let mut instance = authored_amp_instance();
+    instance.name = "X1".to_owned();
+    let mut schematic = SchematicState::default();
+    schematic.document_mut_for_test().components.push(instance);
+
+    let result = run_check_with_hierarchy(
+        &schematic,
+        &hierarchy,
+        DrcConfig {
+            check_missing_ground: false,
+            check_floating_nodes: false,
+            ..DrcConfig::default()
+        },
+    );
+
+    let undriven = of_type(&result, DrcViolationType::UndrivenInput);
+    assert_eq!(undriven.len(), 1, "{:?}", result.violations());
+    assert!(undriven[0].message.contains("X1.IN"));
+    assert_eq!(undriven[0].severity, DrcSeverity::Error);
+
+    let unloaded = of_type(&result, DrcViolationType::UnloadedOutput);
+    assert_eq!(unloaded.len(), 1);
+    assert!(unloaded[0].message.contains("X1.OUT"));
+    assert_eq!(unloaded[0].severity, DrcSeverity::Warning);
 }
 
 #[test]

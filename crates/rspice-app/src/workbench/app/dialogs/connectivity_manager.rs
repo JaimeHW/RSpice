@@ -746,8 +746,12 @@ fn build_manual_repairs(
     for violation in drc.violations() {
         if !matches!(
             violation.violation_type,
+            // Every unattached terminal belongs here, whatever the interface
+            // declared it to be: the repair is the same wire either way.
             DrcViolationType::FloatingNode
                 | DrcViolationType::UnconnectedPin
+                | DrcViolationType::UndrivenInput
+                | DrcViolationType::UnloadedOutput
                 | DrcViolationType::DanglingWire
                 | DrcViolationType::MalformedBus
                 | DrcViolationType::UnnamedBus
@@ -820,13 +824,23 @@ fn endpoint_choices_for_violation(
     state: &AppState,
     violation: &DrcViolation,
 ) -> Vec<EndpointChoice> {
-    if violation.violation_type != DrcViolationType::UnconnectedPin {
+    if !matches!(
+        violation.violation_type,
+        DrcViolationType::UnconnectedPin
+            | DrcViolationType::UndrivenInput
+            | DrcViolationType::UnloadedOutput
+    ) {
         return Vec::new();
     }
-    let DrcLocation::Component { id, .. } = &violation.location else {
-        return Vec::new();
-    };
-    let Some(pin_name) = violation.related_items.get(1) else {
+    // The finding names the terminal, so the pin is read off the location.
+    // Reading it out of a related-items position would keep working after the
+    // location changed shape and quietly offer endpoints for the wrong pin.
+    let DrcLocation::Terminal {
+        component_id: id,
+        pin_name,
+        ..
+    } = &violation.location
+    else {
         return Vec::new();
     };
     let Some(component) = state
@@ -1530,7 +1544,25 @@ fn reveal_drc_location(schematic: &mut SchematicState, location: &DrcLocation) {
                 schematic.session.editor.center_request = Some(point);
             }
         }
-        DrcLocation::Global | DrcLocation::SymbolPin { .. } => {}
+        DrcLocation::Terminal {
+            component_id,
+            point,
+            ..
+        } => {
+            schematic
+                .session
+                .editor
+                .selection
+                .select_only_component(*component_id);
+            // The terminal, not the symbol origin: on a four-terminal device
+            // they are different places.
+            schematic.session.editor.center_request = Some(*point);
+        }
+        // A finding inside an instantiated cellview is not in this drawing.
+        // Centring on the instance would claim it is.
+        DrcLocation::InsideInstance { .. }
+        | DrcLocation::Global
+        | DrcLocation::SymbolPin { .. } => {}
     }
 }
 

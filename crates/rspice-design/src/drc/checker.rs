@@ -11,6 +11,7 @@ use super::input::ComponentInfo;
 use super::net::{NetInfo, fold_nets};
 use super::types::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
 use crate::connectivity::{ConnectivityAnchor, ConnectivityDiagnosticKind, ExtractedConnectivity};
+use crate::schematic::port::PortDirection;
 
 /// Where one connectivity diagnostic points, in the vocabulary a finding uses.
 pub(super) fn diagnostic_location(anchor: &ConnectivityAnchor) -> DrcLocation {
@@ -327,6 +328,17 @@ impl DrcChecker {
     }
 
     /// Report every terminal the extraction found nothing else meeting.
+    ///
+    /// Three findings, because an unattached terminal is three different
+    /// claims. A declared input nothing reaches is a pin the design said it
+    /// would feed and then did not, so it is an error. A declared output
+    /// nothing reaches still solves and merely loses the signal that was
+    /// drawn, so it is a warning. And a terminal no interface classified —
+    /// every passive leg and every primitive device terminal, which is most of
+    /// a real schematic — says nothing about direction at all, so it keeps the
+    /// unclassified finding: `InOut` and `Supply` are declarations that
+    /// deliberately decline to say, and are read the same way as no
+    /// declaration.
     fn check_unconnected_pins(&mut self, components: &[ComponentInfo], result: &mut DrcResult) {
         let mut ordered_components = components.iter().collect::<Vec<_>>();
         ordered_components.sort_by_key(|component| component.id);
@@ -344,15 +356,31 @@ impl DrcChecker {
                 }
                 let id = self.next_id();
                 let component_name = component_identity(component);
+                let (violation_type, message) = match pin.direction {
+                    Some(PortDirection::In) => (
+                        DrcViolationType::UndrivenInput,
+                        format!("Input pin {}.{} has no driver", component_name, pin.name),
+                    ),
+                    Some(PortDirection::Out) => (
+                        DrcViolationType::UnloadedOutput,
+                        format!("Output pin {}.{} drives nothing", component_name, pin.name),
+                    ),
+                    None | Some(PortDirection::InOut) | Some(PortDirection::Supply) => (
+                        DrcViolationType::UnconnectedPin,
+                        format!("Pin {}.{} is not connected", component_name, pin.name),
+                    ),
+                };
                 self.add_violation(
                     result,
                     DrcViolation::new(
                         id,
-                        DrcViolationType::UnconnectedPin,
-                        format!("Pin {}.{} is not connected", component_name, pin.name),
-                        DrcLocation::Component {
-                            id: component.id,
-                            name: component.name.clone(),
+                        violation_type,
+                        message,
+                        DrcLocation::Terminal {
+                            component_id: component.id,
+                            component_name: component.name.clone(),
+                            pin_name: pin.name.clone(),
+                            point: pin.point,
                         },
                     )
                     .with_related(vec![component_name, pin.name.clone()]),

@@ -4,6 +4,7 @@
 //! rules never see wires, junctions, or label positions, because judging those
 //! again would be a second extraction and two extractions disagree.
 
+use crate::schematic::port::PortDirection;
 use rspice_design_model::Point;
 
 /// Simplified component info for DRC checking.
@@ -60,10 +61,28 @@ pub struct PinInfo {
     /// The node name the deck writes for this terminal. It comes from the one
     /// extraction, so a rule that quotes it quotes what the engine will see.
     pub net_name: String,
-    pub is_output: bool,
+    /// What a declaration says this terminal is, where anything declares it.
+    ///
+    /// `None` is the primitive case, and it is the honest answer rather than a
+    /// missing one: a resistor leg, a capacitor plate and a MOSFET terminal
+    /// have no interface to read a direction off, so nothing may conclude that
+    /// such a terminal is an input. `InOut` is the interface's own
+    /// "bidirectional or unclassified" and claims no more than `None` does.
+    pub direction: Option<PortDirection>,
     /// Terminal position in schematic space.
     pub point: Point,
     /// Whether anything else in the drawing meets this terminal. Decided by
     /// the extraction, which is the only thing that knows the geometry.
     pub attached: bool,
+}
+
+impl PinInfo {
+    /// Whether this terminal drives the node it stands on.
+    ///
+    /// Only a declared output does. A terminal nothing classified is not a
+    /// driver and is not a load either — it is simply unclassified, which is
+    /// why no rule may read the absence of a declaration as a direction.
+    pub fn drives(&self) -> bool {
+        self.direction == Some(PortDirection::Out)
+    }
 }

@@ -713,8 +713,16 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp) {
     // The header says whether the check is current and how many errors it
     // found; a row appears only for a finding to act on.
     section_header(ui, "Checks", checks_status(&app.state).as_deref());
+    // The row counts open terminals, so it counts all three of them: an
+    // undriven input and an unloaded output are unconnected pins too, and a
+    // row that quietly omitted them would understate the sheet.
     let open_pins = current_findings(&app.state, |violation| {
-        violation.violation_type == rspice_design::drc::DrcViolationType::UnconnectedPin
+        matches!(
+            violation.violation_type,
+            rspice_design::drc::DrcViolationType::UnconnectedPin
+                | rspice_design::drc::DrcViolationType::UndrivenInput
+                | rspice_design::drc::DrcViolationType::UnloadedOutput
+        )
     });
     let floating_nets = current_findings(&app.state, |violation| {
         violation.violation_type == rspice_design::drc::DrcViolationType::FloatingNode

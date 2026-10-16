@@ -60,8 +60,9 @@ fn severity_color(
 }
 
 /// Resolve a violation to a schematic-space anchor, when it has one.
-/// `Node` and `Global` violations have no single spot — they live in the
-/// console summary and the ERC pill only.
+/// `Node`, `Global` and findings inside an instantiated cellview have no single
+/// spot in this drawing — they live in the console summary and the ERC pill
+/// only.
 pub fn anchor(view: &DesignView<'_>, location: &DrcLocation) -> Option<Point> {
     match location {
         DrcLocation::Point { x, y } => Some(Point::new(*x as i32, *y as i32)),
@@ -102,7 +103,23 @@ pub fn anchor(view: &DesignView<'_>, location: &DrcLocation) -> Option<Point> {
             .iter()
             .find(|label| label.name == *name && view.object_is_visible(label.id))
             .map(|l| l.pos),
-        DrcLocation::Node { .. } | DrcLocation::Global | DrcLocation::SymbolPin { .. } => None,
+        DrcLocation::Terminal {
+            component_id,
+            point,
+            ..
+        } => view
+            .document
+            .components
+            .iter()
+            .any(|component| component.id == *component_id && view.object_is_visible(*component_id))
+            .then_some(*point),
+        // A finding inside an instantiated cellview has no coordinate in this
+        // one. Placing it on the instance symbol would point the author at a
+        // drawing that does not contain the defect.
+        DrcLocation::InsideInstance { .. }
+        | DrcLocation::Node { .. }
+        | DrcLocation::Global
+        | DrcLocation::SymbolPin { .. } => None,
     }
 }
 

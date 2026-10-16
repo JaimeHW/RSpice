@@ -690,9 +690,11 @@ fn an_instance_has_a_checks_section_only_for_its_own_findings() {
         1,
         rspice_design::drc::DrcViolationType::UnconnectedPin,
         "XU1.1 is open",
-        rspice_design::drc::DrcLocation::Component {
-            id,
-            name: "XU1".to_owned(),
+        rspice_design::drc::DrcLocation::Terminal {
+            component_id: id,
+            component_name: "XU1".to_owned(),
+            pin_name: "1".to_owned(),
+            point: crate::state::Point::new(10, 20),
         },
     ));
     app.state.dialogs.drc_results = Some(result);
