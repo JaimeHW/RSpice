@@ -215,9 +215,32 @@ pub(super) fn card_title(ui: &mut Ui, title: &str, meta: Option<&str>) {
     ui.separator();
 }
 
+/// One property of a card: its name, its value, and where the value came
+/// from, on one 22 pt line.
+///
+/// All three columns are painter text, which publishes no accessibility node
+/// of its own, and the row threw its response away — so every property of
+/// every card in this workspace was invisible to a screen reader while
+/// rendering correctly. The row keeps its response now and publishes the
+/// three columns whole: `widget_info` first, for the role and the bounds
+/// without which the node is dropped before any reader sees it, then the
+/// pair. What is announced is the text as given, not the elided text, so a
+/// value shortened to its column is still reachable in full.
 pub(super) fn property(ui: &mut Ui, name: &str, value: &str, origin: &str) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 22.0), Sense::hover());
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 22.0), Sense::hover());
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), name));
+    let announced_value = if origin.is_empty() {
+        value.to_owned()
+    } else {
+        format!("{value} ({origin})")
+    };
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label(name);
+        node.set_value(announced_value.as_str());
+    });
     let name_width = rect.width() * 0.30;
     let value_width = rect.width() * 0.34;
     let origin_width = (rect.width() - name_width - value_width).max(1.0);
