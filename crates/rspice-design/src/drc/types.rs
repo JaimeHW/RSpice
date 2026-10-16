@@ -175,8 +175,9 @@ impl DrcViolationType {
     ///
     /// Declaration order groups the rules by [`Self::category`], so a surface
     /// walking this list in order can band each run without sorting it.
-    /// Exhaustive by construction: the compiler rejects a variant added to the
-    /// enum and not to this array, because the array's length is fixed.
+    /// The array's fixed length does not make it exhaustive — a variant added
+    /// to the enum and not here still compiles — so a test in `rules` holds it
+    /// to the variants serde's derive declares.
     pub const ALL: [Self; 29] = [
         Self::FloatingNode,
         Self::UnconnectedPin,
@@ -280,33 +281,6 @@ impl DrcViolationType {
             Self::SymbolOrphanedPin => "Orphaned symbol pin",
             Self::SymbolPinOffGrid => "Symbol pin off grid",
         }
-    }
-
-    /// The stable identity this rule is named by outside the program: on a
-    /// published finding, and as the key a stored rule deck sets a severity
-    /// against.
-    ///
-    /// Derived from the variant rather than written out, so a rule cannot be
-    /// added with a code that belongs to another one.
-    pub fn rule_code(&self) -> String {
-        let variant = format!("{self:?}");
-        let mut code = String::with_capacity(variant.len() + 8);
-        code.push_str("DRC-");
-        for (index, character) in variant.char_indices() {
-            if character.is_ascii_uppercase() && index > 0 {
-                code.push('-');
-            }
-            code.push(character.to_ascii_uppercase());
-        }
-        code
-    }
-
-    /// The rule `code` names, or `None` where this build has no such rule.
-    ///
-    /// A linear scan of [`Self::ALL`] rather than a second table of codes: the
-    /// only caller is a stored deck being read back, once per load.
-    pub fn from_rule_code(code: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|rule| rule.rule_code() == code)
     }
 
     /// Get the default severity for this violation type.

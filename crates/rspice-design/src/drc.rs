@@ -5,6 +5,7 @@ mod extraction;
 mod input;
 mod net;
 mod rule_deck;
+mod rules;
 mod source_loops;
 mod types;
 
