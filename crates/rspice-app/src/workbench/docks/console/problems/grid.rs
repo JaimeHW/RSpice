@@ -21,9 +21,16 @@ use crate::workbench::app_state::problems_view::{ProblemColumn, ProblemsView};
 
 use super::arrange::Group;
 
-/// The longest severity cell the page can print. The severity column is
-/// measured against this, so no severity word is ever cut.
+/// The longest severity cell the page prints while every producer can be
+/// evaluated. The severity column is measured against this, so no severity
+/// word is ever cut.
 pub(super) const WIDEST_SEVERITY_CELL: &str = "Waived Critical";
+
+/// The longest severity cell once some producer cannot be evaluated, whose
+/// findings say so in front of their severity. The column is measured against
+/// it only then, so the rule column does not give up five characters on every
+/// page for a state most pages are never in.
+pub(super) const WIDEST_UNAVAILABLE_SEVERITY_CELL: &str = "Unavailable Critical";
 
 /// Shares of the room left after the mark gutter, the severity column and the
 /// gaps. The rule and producer columns take what their content needs up to
@@ -55,11 +62,25 @@ pub(super) struct Columns {
 
 impl Columns {
     /// Measure the columns against the font, the room, and the widest code and
-    /// producer identity the listed rows carry.
-    pub(super) fn measure(ui: &Ui, widest_code: usize, widest_producer: usize) -> Self {
+    /// producer identity the listed rows carry. `unavailable` is whether some
+    /// producer cannot be evaluated, which widens the severity cells.
+    pub(super) fn measure(
+        ui: &Ui,
+        widest_code: usize,
+        widest_producer: usize,
+        unavailable: bool,
+    ) -> Self {
         let advance = text_width(ui, "M", FontWeight::Regular).max(1.0);
         let ellipsis = text_width(ui, "…", FontWeight::Regular);
-        let severity = text_width(ui, WIDEST_SEVERITY_CELL, FontWeight::Regular);
+        let severity = text_width(
+            ui,
+            if unavailable {
+                WIDEST_UNAVAILABLE_SEVERITY_CELL
+            } else {
+                WIDEST_SEVERITY_CELL
+            },
+            FontWeight::Regular,
+        );
         // The body's scrollbar is allowed for whether or not it is showing.
         // A scroll area's own width includes its bar and changes the frame it
         // appears, so columns measured against it would shift under the reader
@@ -680,7 +701,7 @@ mod tests {
                 let scrollbar =
                     ui.spacing().scroll.bar_width + ui.spacing().scroll.bar_inner_margin;
                 measured = Some(Measured {
-                    columns: Columns::measure(ui, widest_code, widest_producer),
+                    columns: Columns::measure(ui, widest_code, widest_producer, false),
                     room: ui.available_width() - scrollbar,
                     advance: text_width(ui, "M", FontWeight::Regular),
                     code_heading: text_width(ui, ProblemColumn::Code.label(), FontWeight::SemiBold),

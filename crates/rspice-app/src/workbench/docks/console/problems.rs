@@ -49,7 +49,7 @@ use super::{AppState, CONSOLE_FONT_SIZE, CONSOLE_ROW_MIN_HEIGHT, muted};
 use crate::diagnostics::LogAnchor;
 use crate::ui::theme::{self, FontWeight};
 use crate::workbench::app_state::diagnostic_store::listing::{
-    DiagnosticListing, DiagnosticRow, EmptyReason, listing,
+    DiagnosticListing, DiagnosticRow, EmptyReason, RowStanding, listing,
 };
 use crate::workbench::app_state::diagnostic_store::{DiagnosticLevel, DiagnosticRoute};
 use crate::workbench::app_state::problems_view::ProblemsView;
@@ -182,6 +182,7 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) {
             ui,
             arrangement.tally.widest_code,
             arrangement.tally.widest_producer,
+            listed.unavailable().is_some(),
         );
         strip::filter_strip(ui, &mut view, &arrangement.tally);
         if view.is_filtered() && strip::filtered_out(ui, arrangement.listed, total) {
@@ -674,12 +675,16 @@ fn empty_state(reason: &EmptyReason) -> String {
 /// One severity word, with its state said in front of it when the finding is
 /// not about the design as it stands, and with a waiver said where one is
 /// recorded — a waived finding is a decision, and the page says so.
+///
+/// A finding whose inputs moved is stale; one whose inputs cannot be read at
+/// all is not known to be stale, and says that instead.
 fn severity_cell(row: &DiagnosticRow<'_>) -> String {
     let severity = row.level.display_name();
-    match (row.current(), row.waived()) {
-        (true, false) => severity.to_owned(),
-        (true, true) => format!("Waived {severity}"),
-        (false, _) => format!("Stale {severity}"),
+    match (&row.standing, row.waived()) {
+        (RowStanding::Current, false) => severity.to_owned(),
+        (RowStanding::Current, true) => format!("Waived {severity}"),
+        (RowStanding::Stale(_), _) => format!("Stale {severity}"),
+        (RowStanding::Unavailable(_), _) => format!("Unavailable {severity}"),
     }
 }
 

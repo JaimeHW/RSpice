@@ -1815,17 +1815,61 @@ fn counts_name_their_severities_separately() {
     assert_eq!(count.announcement(), "1 error, 12 advisories");
 }
 
+/// A row that says nothing but its severity, standing and waiver.
+fn bare_row(
+    level: DiagnosticLevel,
+    standing: RowStanding,
+    suppression: Option<&rspice_app_types::diagnostics::DiagnosticSuppression>,
+) -> DiagnosticRow<'_> {
+    DiagnosticRow {
+        id: uuid::Uuid::nil(),
+        code: "T-1",
+        producer: "rspice.test",
+        level,
+        standing,
+        subject: String::new(),
+        location: String::new(),
+        message: "",
+        details: "",
+        rule: "",
+        related: &[],
+        quick_fixes: &[],
+        suppression,
+        route: None,
+    }
+}
+
+/// A finding whose inputs moved says it is stale. One whose inputs cannot be
+/// read at all is not known to be stale, and says it cannot be evaluated.
+#[test]
+fn the_severity_cell_tells_an_unreadable_finding_from_a_stale_one() {
+    let cell = |standing| severity_cell(&bare_row(DiagnosticLevel::Error, standing, None));
+    assert_eq!(cell(RowStanding::Current), "Error");
+    assert_eq!(
+        cell(RowStanding::Stale("the drawing changed".to_owned())),
+        "Stale Error",
+    );
+    assert_eq!(
+        cell(RowStanding::Unavailable(
+            "the receipt cannot be read".to_owned()
+        )),
+        "Unavailable Error",
+    );
+}
+
 /// Every severity cell the page can print fits the cell the column is
-/// measured against.
+/// measured against: the evaluable cells the narrower one, and a finding that
+/// cannot be evaluated the wider one the column takes while such a finding is
+/// listed.
 #[test]
 fn every_severity_cell_fits_the_widest_measured_cell() {
-    use crate::workbench::app_state::diagnostic_store::listing::{DiagnosticRow, RowStanding};
-
     let mut widest = String::new();
+    let mut widest_unavailable = String::new();
     for level in DiagnosticLevel::ALL {
         for standing in [
             RowStanding::Current,
             RowStanding::Stale("inputs".to_owned()),
+            RowStanding::Unavailable("unreadable".to_owned()),
         ] {
             for waiver in [
                 None,
@@ -1835,28 +1879,21 @@ fn every_severity_cell_fits_the_widest_measured_cell() {
                     justification_required: false,
                 }),
             ] {
-                let cell = severity_cell(&DiagnosticRow {
-                    id: uuid::Uuid::nil(),
-                    code: "T-1",
-                    producer: "rspice.test",
-                    level,
-                    standing: standing.clone(),
-                    subject: String::new(),
-                    location: String::new(),
-                    message: "",
-                    details: "",
-                    rule: "",
-                    related: &[],
-                    quick_fixes: &[],
-                    suppression: waiver.as_ref(),
-                    route: None,
-                });
+                let cell = severity_cell(&bare_row(level, standing.clone(), waiver.as_ref()));
+                let (bound, longest) = if matches!(standing, RowStanding::Unavailable(_)) {
+                    (
+                        grid::WIDEST_UNAVAILABLE_SEVERITY_CELL,
+                        &mut widest_unavailable,
+                    )
+                } else {
+                    (grid::WIDEST_SEVERITY_CELL, &mut widest)
+                };
                 assert!(
-                    cell.chars().count() <= grid::WIDEST_SEVERITY_CELL.chars().count(),
+                    cell.chars().count() <= bound.chars().count(),
                     "{cell} is wider than the cell the column is measured against",
                 );
-                if cell.chars().count() > widest.chars().count() {
-                    widest = cell;
+                if cell.chars().count() > longest.chars().count() {
+                    *longest = cell;
                 }
             }
         }
@@ -1865,6 +1902,11 @@ fn every_severity_cell_fits_the_widest_measured_cell() {
         widest.chars().count(),
         grid::WIDEST_SEVERITY_CELL.chars().count(),
         "the measured cell must be the longest one the page can print",
+    );
+    assert_eq!(
+        widest_unavailable.chars().count(),
+        grid::WIDEST_UNAVAILABLE_SEVERITY_CELL.chars().count(),
+        "and the wider one the longest a finding that cannot be evaluated prints",
     );
 }
 
