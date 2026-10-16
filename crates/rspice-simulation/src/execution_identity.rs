@@ -632,6 +632,17 @@ fn drc_violation_digest(violation: &DrcViolation) -> ContentDigest {
     for item in related {
         writer.string(&item);
     }
+    // A waived finding let the run through, so the receipt says who accepted
+    // it and why. Written only where there is one, so the receipt of a pass
+    // that waived nothing is the one it always was.
+    if let Some(waiver) = &violation.waiver {
+        writer.domain("waiver");
+        writer.string(&waiver.rule);
+        writer.string(&waiver.object);
+        writer.string(&waiver.reason);
+        writer.string(&waiver.author);
+        writer.u64(waiver.waived_at_ms);
+    }
     writer.finish()
 }
 

@@ -17,6 +17,7 @@ use crate::state::{
 use rspice_design::drc::{DrcConfig, DrcLocation, DrcResult};
 
 use super::AppState;
+use super::waivers;
 use super::diagnostic_store::{
     DiagnosticInputs, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject, FindingKey,
     mint_canonical,
@@ -221,7 +222,9 @@ impl AppState {
     ///
     /// Empty where these checks published no records for `subject`. A symbol
     /// view's findings are never among them: they are the pin checks', owned
-    /// by [`DiagnosticInputs::SymbolPins`] and named there.
+    /// by [`DiagnosticInputs::SymbolPins`] and named there. The records about
+    /// the subject's stored waivers follow the findings, so an ordinal below
+    /// the result's length still names its finding.
     pub(crate) fn design_rule_finding_identities(&self, subject: &CellViewRef) -> Vec<uuid::Uuid> {
         let published = DiagnosticInputs::DesignCheck {
             subject: subject.clone(),
@@ -307,6 +310,35 @@ impl AppState {
         self.withdraw_diagnostics(&DiagnosticInputs::DesignCheck { subject });
     }
 
+    /// State every current design-rule finding again against the waivers as
+    /// they now stand: after a waiver is recorded or removed, and after an
+    /// undo or redo that may have done either.
+    ///
+    /// Only a current pass is re-stated. Its findings still describe the
+    /// design, and a waiver changes whether each counts, not what was found,
+    /// so the pass keeps its digest and stays current. A stale pass is left
+    /// as it is: re-stating it would publish findings about a design that has
+    /// moved under the digest of the one in front of the reader.
+    pub(in crate::workbench) fn refresh_waived_findings(&mut self) {
+        let subjects = self
+            .design_checks
+            .receipts
+            .values()
+            .map(|receipt| receipt.subject.clone())
+            .collect::<Vec<_>>();
+        for subject in subjects {
+            let DesignCheckStatus::Current(receipt) = self.design_check_status(&subject) else {
+                continue;
+            };
+            let mut result = receipt.result.clone();
+            let config = self.design_check_config(&subject);
+            config.waivers.apply(&mut result);
+            if let Err(error) = self.publish_design_check_result(subject, config, result) {
+                debug_assert!(false, "a current pass was refused on re-statement: {error}");
+            }
+        }
+    }
+
     pub(crate) fn clear_all_design_checks(&mut self) {
         let subjects: Vec<CellViewRef> = self
             .design_checks
@@ -376,18 +408,19 @@ fn design_rule_records(
         })
         .collect();
     let canonicals = mint_canonical(&keys, revision, &format!("design-check:{document_id}"));
-    result
+    let mut records = result
         .violations()
         .iter()
         .zip(keys)
         .zip(canonicals)
-        .map(|((violation, key), canonical)| {
+        .map(|((violation, key), mut canonical)| {
             let route = crate::schematic::view::violations::location_anchor_in(
                 state,
                 subject,
                 &violation.location,
             )
             .map(DiagnosticRoute::Anchor);
+            canonical.suppression = violation.waiver.as_ref().map(waivers::suppression_of);
             DiagnosticRecord::new(
                 canonical,
                 violation.severity.into(),
@@ -399,54 +432,22 @@ fn design_rule_records(
             .with_details(violation.violation_type.suggested_fix())
             .with_rule(violation.violation_type.rule().explanation)
             .with_route(route)
+            .with_waiver_action(waivers::finding_waiver_action(subject, violation))
         })
-        .collect()
+        .collect::<Vec<_>>();
+    // The subject's own waivers that do not do what they say are stated with
+    // the pass that found that out.
+    if let Some(stored) = state.schematic_waivers(subject) {
+        records.extend(waivers::stored_waiver_records(
+            state, subject, stored, result,
+        ));
+    }
+    records
 }
 
-/// A stable key of the object a rule finding is located at.
-///
-/// What survives an unrelated edit is the object's own identity, so that is
-/// what the key is: a component or wire by its id, a terminal by its
-/// component and pin, a net or a label by its name. Where the object is drawn
-/// and what the message says about it are not part of it. A finding inside an
-/// instantiated cell view is keyed by the occurrence path down to that view
-/// and its own key inside it, which is what tells `X1/M3` from `X2/M3`. A
-/// point is the last resort, for a finding that names no object at all.
-pub(in crate::workbench) fn location_key(location: &DrcLocation) -> String {
-    match location {
-        DrcLocation::Terminal {
-            component_id,
-            pin_name,
-            ..
-        } => format!("terminal:{component_id}:{pin_name}"),
-        DrcLocation::Component { id, .. } => format!("component:{id}"),
-        DrcLocation::Node { net_name } => format!("net:{net_name}"),
-        DrcLocation::Wire { id } => format!("wire:{id}"),
-        DrcLocation::NetLabel { name } => format!("label:{name}"),
-        DrcLocation::Bus { id } => format!("bus:{id}"),
-        DrcLocation::BusTap { id } => format!("bus-tap:{id}"),
-        DrcLocation::InsideInstance { path, view, inner } => {
-            // Length-prefixed, because an instance name or a net name inside
-            // may contain any separator chosen here.
-            let path = path.to_string();
-            let view = view.key();
-            let inner = location_key(inner);
-            format!(
-                "instance:{}:{path}{}:{view}{}:{inner}",
-                path.len(),
-                view.len(),
-                inner.len()
-            )
-        }
-        DrcLocation::Global => "global".to_owned(),
-        DrcLocation::SymbolPin {
-            reference,
-            pin_name,
-            ..
-        } => format!("symbol-pin:{}:{pin_name}", reference.key()),
-        DrcLocation::Point { x, y } => format!("point:{x}:{y}"),
-    }
-}
+/// A stable key of the object a rule finding is located at: the design
+/// crate's, which a waiver is keyed by too.
+pub(in crate::workbench) use rspice_design::drc::location_key;
 
 fn owner_key(subject: &CellViewRef) -> CanonicalCellViewOwnerKey {
     canonical_cell_view_owner_key(&subject.library, &subject.cell, &subject.view)
@@ -473,13 +474,16 @@ impl AppState {
     ///
     /// It carries the project's rule deck and its connectivity policy — the
     /// width-mismatch rule reads the policy from here, and was reading the
-    /// default — and asks for a ground where the subject is a design of its
-    /// own.
+    /// default — the waivers stored with the subject and every schematic it
+    /// may instantiate, so a waived error is waived for the run gate as it is
+    /// on the page, and asks for a ground where the subject is a design of
+    /// its own.
     pub(crate) fn design_check_config(&self, subject: &CellViewRef) -> DrcConfig {
         DrcConfig {
             check_missing_ground: asks_for_ground(self, subject),
             severity_overrides: self.workspace.content.design_rules.severity_overrides(),
             connectivity: self.workspace.content.connectivity.policy.clone(),
+            waivers: self.check_waivers(subject),
             ..DrcConfig::default()
         }
     }

@@ -289,6 +289,10 @@ pub(in crate::workbench) struct DiagnosticRecord {
     /// is empty rather than restate the message under a different heading.
     pub(in crate::workbench) rule: String,
     pub(in crate::workbench) route: Option<DiagnosticRoute>,
+    /// What the reader may do about this finding's waiver: waive it, remove
+    /// the waiver covering it, or — `None` — nothing, because it is not a
+    /// design-rule finding or its rule may not be waived.
+    pub(in crate::workbench) waiver_action: Option<super::waivers::WaiverAction>,
 }
 
 impl DiagnosticRecord {
@@ -315,7 +319,16 @@ impl DiagnosticRecord {
             details: String::new(),
             rule: String::new(),
             route: None,
+            waiver_action: None,
         }
+    }
+
+    pub(in crate::workbench) fn with_waiver_action(
+        mut self,
+        action: Option<super::waivers::WaiverAction>,
+    ) -> Self {
+        self.waiver_action = action;
+        self
     }
 
     /// State the key the record's identity was minted from.
@@ -346,8 +359,8 @@ impl DiagnosticRecord {
     /// went away, so it stays in the store and stays on the page — it just
     /// stops counting against the design. The decision itself rides on the
     /// canonical record's suppression, so there is exactly one place a waiver
-    /// can be stated. Nothing records a waiver yet; this is the field one is
-    /// recorded in when something does.
+    /// can be stated: the design-rule producers state there the waiver stored
+    /// with the cellview that covers the finding.
     pub(in crate::workbench) const fn waived(&self) -> bool {
         self.canonical.suppression.is_some()
     }

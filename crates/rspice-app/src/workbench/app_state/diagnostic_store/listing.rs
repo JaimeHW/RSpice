@@ -86,6 +86,8 @@ pub(in crate::workbench) struct DiagnosticRow<'a> {
     pub(in crate::workbench) suppression: Option<&'a DiagnosticSuppression>,
     /// Where it is repaired, when it names somewhere.
     pub(in crate::workbench) route: Option<DiagnosticRoute>,
+    /// What the reader may do about its waiver, where anything.
+    pub(in crate::workbench) waiver_action: Option<&'a super::super::waivers::WaiverAction>,
 }
 
 impl DiagnosticRow<'_> {
@@ -407,6 +409,9 @@ fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<DiagnosticRow<
                 // object that may have gone since. Offering it from a stale
                 // batch would be offering a jump the finding cannot honour.
                 route: current.then(|| record.route.clone()).flatten(),
+                // Likewise a waiver: one recorded against a stale finding
+                // would name an object the design may no longer have.
+                waiver_action: current.then_some(record.waiver_action.as_ref()).flatten(),
             })
         }
         Segment::Netlist {
@@ -433,6 +438,9 @@ fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<DiagnosticRow<
                 route: current.then_some(DiagnosticRoute::NetlistDiagnostic(
                     diagnostic.canonical.diagnostic_id,
                 )),
+                // A netlist finding is about the source text, and is repaired
+                // there; it is not a design rule a team can accept.
+                waiver_action: None,
             })
         }
         Segment::Code {
@@ -471,6 +479,7 @@ fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<DiagnosticRow<
                         logical_path: Arc::clone(path),
                         line: diagnostic.line,
                     }),
+                waiver_action: None,
             })
         }
     }
@@ -994,8 +1003,9 @@ mod tests {
         let mut waived = record(&state, "T-ERROR", DiagnosticLevel::Error);
         waived.canonical.suppression = Some(rspice_app_types::diagnostics::DiagnosticSuppression {
             rule: "T-ERROR".to_owned(),
-            scope: "cell".to_owned(),
-            justification_required: false,
+            reason: "accepted at review".to_owned(),
+            author: "ana".to_owned(),
+            waived_at_ms: 1,
         });
         state
             .publish_diagnostics(DiagnosticInputs::Dispatch, vec![waived])
@@ -1087,8 +1097,9 @@ mod tests {
     fn waiver() -> rspice_app_types::diagnostics::DiagnosticSuppression {
         rspice_app_types::diagnostics::DiagnosticSuppression {
             rule: "TEST".to_owned(),
-            scope: "project".to_owned(),
-            justification_required: false,
+            reason: "accepted at review".to_owned(),
+            author: "ana".to_owned(),
+            waived_at_ms: 1,
         }
     }
 

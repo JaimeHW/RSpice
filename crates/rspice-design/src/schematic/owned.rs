@@ -27,6 +27,7 @@ pub mod sheet_topology;
 mod stimuli;
 mod symbols;
 mod validated_revisions;
+mod waivers;
 mod wires;
 
 use std::collections::BTreeMap;

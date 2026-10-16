@@ -8,6 +8,7 @@ mod rule_deck;
 mod rules;
 mod source_loops;
 mod types;
+mod waivers;
 
 pub use checker::{DrcChecker, DrcConfig};
 pub use extraction::{
@@ -15,7 +16,11 @@ pub use extraction::{
 };
 pub use input::{BrokenReference, ComponentInfo, ParameterRangeIssue, PinInfo};
 pub use rule_deck::{DESIGN_RULE_DECK_SCHEMA_VERSION, DeckEditRefusal, DeckIssue, DesignRuleDeck};
-pub use rules::DrcRule;
+pub use rules::{DrcFloor, DrcRule};
+pub use waivers::{
+    CheckWaivers, DRC_WAIVER_SCHEMA_VERSION, DrcWaiver, DrcWaivers, WaiverEditRefusal,
+    location_key, waiver_site,
+};
 pub use types::{
     DrcLocation, DrcResult, DrcRuleCategory, DrcSeverity, DrcSummary, DrcViolation,
     DrcViolationType,

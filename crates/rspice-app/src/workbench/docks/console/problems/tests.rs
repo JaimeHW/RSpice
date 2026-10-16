@@ -31,6 +31,16 @@ fn open_state() -> AppState {
     state
 }
 
+/// A waiver of a finding of `rule`, recorded at review.
+fn waiver(rule: &str) -> rspice_app_types::diagnostics::DiagnosticSuppression {
+    rspice_app_types::diagnostics::DiagnosticSuppression {
+        rule: rule.to_owned(),
+        reason: "accepted at review".to_owned(),
+        author: "ana".to_owned(),
+        waived_at_ms: 1_760_000_000_000,
+    }
+}
+
 /// One finding from the test producer, about one node, saying `message`.
 fn record(state: &AppState, code: &str, level: DiagnosticLevel, message: &str) -> DiagnosticRecord {
     DiagnosticRecord::new(
@@ -859,11 +869,7 @@ fn the_waiver_toggle_counts_what_it_would_list() {
         DiagnosticLevel::Error,
         "a waived finding",
     );
-    waived.canonical.suppression = Some(rspice_app_types::diagnostics::DiagnosticSuppression {
-        rule: "T-WAIVED".to_owned(),
-        scope: "cell".to_owned(),
-        justification_required: false,
-    });
+    waived.canonical.suppression = Some(waiver("T-WAIVED"));
     let open = record(
         &state,
         "T-OPEN",
@@ -902,11 +908,7 @@ fn the_waiver_toggle_counts_what_it_would_list() {
 fn a_waived_error_is_marked_without_the_failure_colour() {
     let mut state = open_state();
     let mut waived = record(&state, "T-WAIVED", DiagnosticLevel::Error, "a waived error");
-    waived.canonical.suppression = Some(rspice_app_types::diagnostics::DiagnosticSuppression {
-        rule: "T-WAIVED".to_owned(),
-        scope: "cell".to_owned(),
-        justification_required: false,
-    });
+    waived.canonical.suppression = Some(waiver("T-WAIVED"));
     publish(&mut state, vec![waived]);
     let palette = crate::ui::tokens::Tokens::default().color;
 
@@ -2255,6 +2257,7 @@ fn bare_row(
         quick_fixes: &[],
         suppression,
         route: None,
+        waiver_action: None,
     }
 }
 
@@ -2290,14 +2293,7 @@ fn every_severity_cell_fits_the_widest_measured_cell() {
             RowStanding::Stale("inputs".to_owned()),
             RowStanding::Unavailable("unreadable".to_owned()),
         ] {
-            for waiver in [
-                None,
-                Some(rspice_app_types::diagnostics::DiagnosticSuppression {
-                    rule: "T-1".to_owned(),
-                    scope: "cell".to_owned(),
-                    justification_required: false,
-                }),
-            ] {
+            for waiver in [None, Some(waiver("T-1"))] {
                 let cell = severity_cell(&bare_row(level, standing.clone(), waiver.as_ref()));
                 let (bound, longest) = if matches!(standing, RowStanding::Unavailable(_)) {
                     (
@@ -2410,11 +2406,7 @@ fn the_arrangement_is_rebuilt_when_a_row_changes_in_place() {
     );
 
     republish(&mut state, &|record| {
-        record.canonical.suppression = Some(rspice_app_types::diagnostics::DiagnosticSuppression {
-            rule: "T-00".to_owned(),
-            scope: "cell".to_owned(),
-            justification_required: false,
-        });
+        record.canonical.suppression = Some(waiver("T-00"));
     });
     let waived = arranged(&state);
     assert!(!Arc::ptr_eq(&built, &waived), "a new waiver rebuilds it");

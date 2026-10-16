@@ -78,6 +78,14 @@ pub struct DrcConfig {
     /// contract is the only authority that may set it.
     #[serde(skip_deserializing)]
     pub connectivity: crate::connectivity_contract::ConnectivityPolicy,
+    /// The waivers the check states on the findings they cover, from the
+    /// documents of the subject and of every cellview it instantiates.
+    ///
+    /// Not part of what a check finds — a waiver changes whether a finding
+    /// counts, not whether it is there — so it is neither serialized into an
+    /// input digest nor read back.
+    #[serde(skip)]
+    pub waivers: super::CheckWaivers,
 }
 
 impl Default for DrcConfig {
@@ -93,6 +101,7 @@ impl Default for DrcConfig {
             min_connections: 2,
             severity_overrides: HashMap::new(),
             connectivity: crate::connectivity_contract::ConnectivityPolicy::default(),
+            waivers: super::CheckWaivers::default(),
         }
     }
 }

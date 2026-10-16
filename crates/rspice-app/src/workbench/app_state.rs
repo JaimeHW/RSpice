@@ -31,6 +31,7 @@ mod stack_budget;
 #[cfg(test)]
 mod technology_demand_tests;
 pub(in crate::workbench) mod viewer_capabilities;
+pub(in crate::workbench) mod waivers;
 
 use crate::diagnostics::{ConsoleLevel, ConsoleMessage};
 use crate::product::{AnalysisInstanceId, DatasetId};

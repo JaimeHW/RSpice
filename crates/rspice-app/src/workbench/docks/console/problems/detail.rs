@@ -345,6 +345,7 @@ mod tests {
             quick_fixes: &[],
             suppression: None,
             route,
+            waiver_action: None,
         }
     }
 

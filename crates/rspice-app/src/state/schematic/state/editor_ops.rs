@@ -24,5 +24,6 @@ mod sheet_topology;
 mod stretch_ops;
 mod symbol_ops;
 mod tool_ops;
+mod waiver_ops;
 mod wire_management;
 mod wire_operations;

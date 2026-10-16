@@ -392,6 +392,12 @@ pub struct DrcViolation {
     pub location: DrcLocation,
     /// Related component names (for cross-referencing)
     pub related_items: Vec<String>,
+    /// The waiver that covers this finding, where one does. A waived finding
+    /// is still reported, at its own severity; it does not count against the
+    /// design. Stated by the check from the waivers its configuration
+    /// carries — see [`super::CheckWaivers::apply`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiver: Option<super::DrcWaiver>,
 }
 
 impl DrcViolation {
@@ -409,7 +415,13 @@ impl DrcViolation {
             message: message.into(),
             location,
             related_items: Vec::new(),
+            waiver: None,
         }
+    }
+
+    /// Whether this finding counts against the design: it is not waived.
+    pub const fn counts(&self) -> bool {
+        self.waiver.is_none()
     }
 
     /// Add related items
@@ -550,32 +562,38 @@ impl DrcResult {
         self.violations.push(violation);
     }
 
-    /// Get all violations
+    /// Get all violations, waived ones included.
     pub fn violations(&self) -> &[DrcViolation] {
         &self.violations
     }
 
-    /// Get only errors (Error and Critical)
+    pub(super) fn violations_mut(&mut self) -> &mut [DrcViolation] {
+        &mut self.violations
+    }
+
+    /// The errors (Error and Critical) that count against the design: a
+    /// waived finding is listed, and is not one of them.
     pub fn errors(&self) -> Vec<&DrcViolation> {
         self.violations
             .iter()
-            .filter(|v| v.severity >= DrcSeverity::Error)
+            .filter(|v| v.counts() && v.severity >= DrcSeverity::Error)
             .collect()
     }
 
-    /// Get only warnings
+    /// The warnings that count against the design.
     pub fn warnings(&self) -> Vec<&DrcViolation> {
         self.violations
             .iter()
-            .filter(|v| v.severity == DrcSeverity::Warning)
+            .filter(|v| v.counts() && v.severity == DrcSeverity::Warning)
             .collect()
     }
 
-    /// Check if there are any errors
+    /// Whether any error counts against the design. A waived error does not:
+    /// this is what the run gate refuses on.
     pub fn has_errors(&self) -> bool {
         self.violations
             .iter()
-            .any(|v| v.severity >= DrcSeverity::Error)
+            .any(|v| v.counts() && v.severity >= DrcSeverity::Error)
     }
 
     /// Check if the design passed (no errors or critical)
@@ -583,17 +601,22 @@ impl DrcResult {
         !self.has_errors()
     }
 
-    /// Get total violation count
+    /// Get total violation count, waived findings included.
     pub fn total_count(&self) -> usize {
         self.violations.len()
     }
 
-    /// Get count by severity
+    /// How many findings at `severity` count against the design.
     pub fn count_by_severity(&self, severity: DrcSeverity) -> usize {
         self.violations
             .iter()
-            .filter(|v| v.severity == severity)
+            .filter(|v| v.counts() && v.severity == severity)
             .count()
+    }
+
+    /// How many findings a waiver covers.
+    pub fn waived_count(&self) -> usize {
+        self.violations.iter().filter(|v| !v.counts()).count()
     }
 
     /// Get summary statistics

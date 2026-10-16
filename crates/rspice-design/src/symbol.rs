@@ -715,6 +715,14 @@ pub struct SymbolDocument {
     pub origin: Point,
     pub name_anchor: Point,
     pub value_anchor: Point,
+    /// The pin-contract findings this symbol's team has accepted as they
+    /// stand, stored with the symbol so they travel with its library.
+    ///
+    /// Not written while empty: a build that predates waivers refuses an
+    /// unknown field here, so a symbol nobody waived anything in must stay
+    /// one it can open.
+    #[serde(default, skip_serializing_if = "crate::drc::DrcWaivers::is_empty")]
+    pub waivers: crate::drc::DrcWaivers,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -746,6 +754,7 @@ impl Default for SymbolDocument {
             origin: Point::origin(),
             name_anchor: Point::new(-20, -40),
             value_anchor: Point::new(-20, 40),
+            waivers: crate::drc::DrcWaivers::default(),
         }
     }
 }
