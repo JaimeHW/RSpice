@@ -212,10 +212,10 @@ br_gh1225b	vlg	ce	L1	refused:for	Parse error: Unsupported module item: for
 br_gh1225c	vlg	ce	L1	refused:for	Parse error: Unsupported module item: for
 br_gh1237	vlg	passed	L1	pass	PASSED
 br_gh127a	vlg	gold	L1	pass	matches the gold file
-br_gh127b	vlg	gold	L1	refused:port-width-conversion	Semantic error: Unsupported feature: port width conversion: port `in` of instance `copy1` is 2 bits and `i1` is 1 bits; IEEE 1364-2005 section 12.3.9 connects a...
+br_gh127b	vlg	gold	L1	pass	matches the gold file
 br_gh127c	vlg	gold	L1	fail	compile error: Semantic error: Invalid contribution: cannot contribute to `out`, which module `copy` declares an `input` port; IEEE 1364-2005 section 12.3.9.1 drives an input ...
-br_gh127d	vlg	gold	L1	refused:port-width-conversion	Semantic error: Unsupported feature: port width conversion: port `out` of instance `copy1` is 2 bits and `o1` is 1 bits; IEEE 1364-2005 section 12.3.9 connects ...
-br_gh127e	vlg	gold	L1	refused:port-width-conversion	Semantic error: Unsupported feature: port width conversion: port `out` of instance `copy1` is 2 bits and `o1` is 1 bits; IEEE 1364-2005 section 12.3.9 connects ...
+br_gh127d	vlg	gold	L1	pass	matches the gold file
+br_gh127e	vlg	gold	L1	pass	matches the gold file
 br_gh127f	vlg	gold	L1	fail	compile error: Semantic error: Invalid contribution: cannot contribute to `out`, which module `copy` declares an `input` port; IEEE 1364-2005 section 12.3.9.1 drives an input ...
 br_gh13	vlg	passed	L1	pass	PASSED
 br_gh14	vlg	passed	L1	pass	PASSED
@@ -552,7 +552,7 @@ include1	vlg	passed	L1	fail	nothing to run: module `ivltests/include1.v` declare
 include2	vlg	passed	L1	fail	nothing to run: module `ivltests/include2.v` declares no digital nets, processes or drivers
 include3	vlg	passed	L1	fail	nothing to run: module `ivltests/include3.v` declares no digital nets, processes or drivers
 indef_width_concat	vlg	ce	L1	fail	compiled without error; ran to quiescence
-initmod	vlg	gold	L4	refused:feature	Semantic error: Unsupported feature: port `oB` of instance `M1` is connected to an expression; IEEE 1364-2005 section 12.3.9 permits one, and this compiler conn...
+initmod	vlg	gold	L4	pass	matches the gold file
 initmod2	vlg	gold	L1	pass	matches the gold file
 inout	vlg	passed	L1	fail	compile error: Semantic error: Duplicate symbol: 'a' already defined
 inout2	vlg	passed	L1	pass	PASSED
@@ -872,7 +872,7 @@ pr1742910	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS_UNSIZED__); PAS
 pr1745005	vlg	passed	-	excluded:systemverilog:ref	
 pr1746401	vlg	passed	L1	pass	PASSED
 pr1746848	vlg	gold	L1	pass	matches the gold file
-pr1752353	vlg	passed	L1	refused:port-width-conversion	Semantic error: Unsupported feature: port width conversion: port `out` of instance `U1` is 32 bits and `tmp` is 8 bits; IEEE 1364-2005 section 12.3.9 connects a...
+pr1752353	vlg	passed	L1	pass	PASSED
 pr1752823a	vlg	gold	L1	pass	matches the gold file
 pr1752823b	vlg	gold	L1	refused:statement	Parse error: Verilog-AMS digital construct not yet supported: `inf`
 pr1755593	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
@@ -1034,8 +1034,8 @@ pr2109179	vlg	passed	L1	pass	PASSED
 pr2117473	vlg	passed	L1	pass	PASSED
 pr2117488	vlg	passed	L1	pass	PASSED
 pr2119622	vlg	gold	L1	pass	matches the gold file
-pr2121536	vlg	passed	L4	refused:port-width-conversion	Semantic error: Unsupported feature: port width conversion: port `lrtn` of instance `lwr` is 32 bits and `res` is 64 bits; IEEE 1364-2005 section 12.3.9 connect...
-pr2121536b	vlg	passed	L4	refused:port-width-conversion	Semantic error: Unsupported feature: port width conversion: port `lrtn` of instance `lwr` is 32 bits and `res` is 64 bits; IEEE 1364-2005 section 12.3.9 connect...
+pr2121536	vlg	passed	L4	pass	PASSED
+pr2121536b	vlg	passed	L4	pass	PASSED
 pr2123190	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
 pr2132552	vlg	gold	L3	refused:task	Parse error: Unsupported task: a parameter declared inside a task or function; declare it in the module
 pr2136787	vlg	gold	L1	pass	matches the gold file
@@ -1072,7 +1072,7 @@ pr2215342	vlg	passed	-	excluded:flag-grelative-include
 pr2219441	vlg	passed	L4	refused:module-instance	Parse error: Unsupported module instance `child`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler el...
 pr2219441b	vlg	passed	L4	refused:module-instance	Parse error: Unsupported module instance `child`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler el...
 pr2224845	vlg	passed	L1	pass	PASSED
-pr2224949	vlg	passed	L1	refused:port-width-conversion	Semantic error: Unsupported feature: port width conversion: port `b` of instance `dut` is 16 bits and `b` is 64 bits; IEEE 1364-2005 section 12.3.9 connects a p...
+pr2224949	vlg	passed	L1	pass	PASSED
 pr2233180	vlg	passed	L1	pass	PASSED
 pr2233180b	vlg	passed	L1	pass	PASSED
 pr2233180c	vlg	passed	L1	pass	PASSED
