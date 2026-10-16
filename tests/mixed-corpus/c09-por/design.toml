@@ -17,8 +17,8 @@ name = "p3"
 families = ["spice", "xspice", "vams-digital", "vams-analog"]
 today = "refused:P3.2"
 
-# live: no .param vcc and no connect-rule vsup; the supply is inferred from
-# vdd and binds live (A4b, plan D-C).
+# live: no .param vcc; the supply is the vdd net, bound live (A4b, plan D-C):
+# its connect rules (net/por_ctrl_live.vams) name vdd as vsup.
 [[variant]]
 name = "live"
 families = ["spice", "xspice", "vams-digital"]
