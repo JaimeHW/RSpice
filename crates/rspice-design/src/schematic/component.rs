@@ -2,8 +2,13 @@
 //!
 //! A placed component on the schematic with position, rotation, and properties.
 
+mod card_names;
 mod variant;
 mod written_name;
+pub use card_names::{
+    CardRole, CouplingCard, CouplingCards, CouplingRefusal, CouplingSource, TransformerCards,
+    WrittenCard, coupling_cards, written_cards,
+};
 pub use variant::PreparedVariantReplacement;
 pub use written_name::{BehavioralLowering, component_for_engine_device};
 
