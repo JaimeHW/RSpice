@@ -226,8 +226,7 @@ impl AppState {
             subject: subject.clone(),
         };
         self.diagnostics
-            .batches()
-            .find(|batch| batch.inputs == published)
+            .batch(&published)
             .map(|batch| {
                 batch
                     .records
@@ -248,8 +247,7 @@ impl AppState {
             subject: subject.clone(),
         };
         self.diagnostics
-            .batches()
-            .find(|batch| batch.inputs == published)?
+            .batch(&published)?
             .records
             .iter()
             .fold(

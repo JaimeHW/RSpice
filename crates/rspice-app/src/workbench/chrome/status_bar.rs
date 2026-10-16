@@ -327,13 +327,12 @@ fn status_group_allocation(
     }
 }
 
-/// The checks segment, or nothing.
+/// What the checks segment states, from the same list the Problems page
+/// lists and the tab badge counts, or nothing.
 ///
 /// With nothing open, any retained result describes the bootstrap placeholder
 /// rather than the reader's work, and the coordinate segment already says no
 /// project is loaded. Checks that have never run are not a finding either.
-/// What the checks segment states, from the same list the Problems page
-/// lists and the tab badge counts.
 ///
 /// Three surfaces used to derive this independently — the status bar from
 /// `dialogs.drc_results` or the netlist summary depending on which workspace
@@ -365,12 +364,13 @@ fn check_summary(counts: DiagnosticCounts) -> Option<String> {
 }
 
 /// The mark in front of the checks segment: a failure while anything errors,
-/// a warning while anything advises, is stale or cannot be evaluated, and
-/// nothing at zero and zero, the way a compiler's problem count reads.
+/// a warning while anything warns, is stale or cannot be evaluated, and
+/// nothing otherwise, the way a compiler's problem count reads. A note or a
+/// hint is counted among the advisories but raises no mark.
 fn check_problem(counts: DiagnosticCounts) -> Option<Problem> {
     if counts.errors > 0 {
         Some(Problem::Failure)
-    } else if counts.advisories > 0 || counts.stale > 0 || counts.unavailable > 0 {
+    } else if counts.warnings > 0 || counts.stale > 0 || counts.unavailable > 0 {
         Some(Problem::Warning)
     } else {
         None
@@ -976,7 +976,7 @@ mod tests {
 
     /// The checks segment is a problem count. A closed project, or checks
     /// that have never run, put nothing on the bar; zero and zero is a count
-    /// with no mark; advisories and staleness earn a warning, errors a failure.
+    /// with no mark; warnings and staleness earn a warning, errors a failure.
     #[test]
     fn the_checks_segment_marks_only_a_problem_and_is_absent_until_checks_run() {
         use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
@@ -1072,6 +1072,27 @@ mod tests {
             Some("Problems · 0 errors · 0 advisories · 2 unavailable")
         );
         assert_eq!(check_problem(counts), Some(Problem::Warning));
+    }
+
+    /// A note or a hint is counted, but it is not a warning and raises no
+    /// warning mark; it used to, because every advisory did.
+    #[test]
+    fn only_a_warning_raises_the_warning_mark() {
+        let notes = DiagnosticCounts {
+            advisories: 2,
+            ..DiagnosticCounts::default()
+        };
+        assert_eq!(
+            check_summary(notes).as_deref(),
+            Some("Problems · 0 errors · 2 advisories")
+        );
+        assert_eq!(check_problem(notes), None);
+
+        let warned = DiagnosticCounts {
+            warnings: 1,
+            ..notes
+        };
+        assert_eq!(check_problem(warned), Some(Problem::Warning));
     }
 
     /// The coordinate and selection segments sit side by side. They answer

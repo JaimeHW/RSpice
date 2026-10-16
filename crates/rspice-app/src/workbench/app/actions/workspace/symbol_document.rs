@@ -679,8 +679,7 @@ impl AppState {
             subject: self.workspace.content.active_view.clone(),
         };
         self.diagnostics
-            .batches()
-            .find(|batch| batch.inputs == published)
+            .batch(&published)
             .map(|batch| batch.records.as_slice())
     }
 

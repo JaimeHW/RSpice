@@ -382,8 +382,8 @@ impl SimulationController {
         Ok(metadata)
     }
 
-    /// Produce and retain the exact run-set tuple rendered by the mockup's
-    /// preflight surface. The caller runs DRC immediately before this method.
+    /// Produce and retain the exact run-set tuple the preflight report
+    /// authorizes. The caller runs DRC immediately before this method.
     pub(crate) fn prepare_run_set_for_preflight(
         &mut self,
         state: &AppState,

@@ -164,6 +164,8 @@ impl Segment<'_> {
 pub(in crate::workbench) struct DiagnosticCounts {
     pub(in crate::workbench) errors: usize,
     pub(in crate::workbench) advisories: usize,
+    /// The advisories that are warnings, rather than notes or hints.
+    pub(in crate::workbench) warnings: usize,
     /// Findings about a design that has since been edited. Counted on their
     /// own: a stale finding is neither an error nor an advisory about the
     /// design in front of the reader.
@@ -180,7 +182,12 @@ impl DiagnosticCounts {
             (Tally::Unavailable, _) => self.unavailable += 1,
             (Tally::Current, true) => {}
             (Tally::Current, false) if level.is_error() => self.errors += 1,
-            (Tally::Current, false) => self.advisories += 1,
+            (Tally::Current, false) => {
+                self.advisories += 1;
+                if level == DiagnosticLevel::Warning {
+                    self.warnings += 1;
+                }
+            }
         }
     }
 }
@@ -370,7 +377,11 @@ fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<DiagnosticRow<
                 related: diagnostic.canonical.related_locations.as_slice(),
                 quick_fixes: diagnostic.canonical.quick_fixes.as_slice(),
                 suppression: diagnostic.canonical.suppression.as_ref(),
+                // A finding about source that has since moved names a line
+                // the source may no longer have, so it offers no jump, like a
+                // stale finding in every other segment.
                 route: bundle
+                    .filter(|_| diagnostic.canonical.is_current())
                     .zip(diagnostic.source_path.as_ref())
                     .map(|(bundle, path)| DiagnosticRoute::CodeDocument {
                         bundle,
@@ -935,6 +946,7 @@ mod tests {
             DiagnosticCounts {
                 errors: 1,
                 advisories: 1,
+                warnings: 1,
                 stale: 2,
                 unavailable: 0,
             }
@@ -945,6 +957,48 @@ mod tests {
             from_rows.tally(Tally::of_record(facet.current), facet.waived, facet.level);
         }
         assert_eq!(listed.counts(), from_rows, "the counts are the rows' own");
+    }
+
+    /// A code finding about source that has moved since offers no jump to
+    /// the line it named, as no stale finding in another segment does.
+    #[test]
+    fn a_stale_code_finding_offers_no_route() {
+        use rspice_app_types::diagnostics::{
+            DiagnosticCurrentness, DiagnosticSeverity, SourceDiagnostic,
+        };
+
+        let finding = |code: &str| {
+            SourceDiagnostic::current(
+                "rspice.test",
+                code,
+                DiagnosticSeverity::Error,
+                code,
+                "",
+                Some("flow.py".to_owned()),
+                None,
+                None,
+                Some(3),
+                None,
+            )
+        };
+        let mut moved = finding("T-MOVED");
+        moved
+            .canonical
+            .mark_currentness(DiagnosticCurrentness::StaleSource);
+        let collection = CodeDiagnosticCollection::try_new(vec![finding("T-CURRENT"), moved])
+            .expect("the fixture collection is well formed");
+        let segment = Segment::Code {
+            bundle: Some(crate::state::ProjectSourceId::new()),
+            collection: &collection,
+        };
+
+        let current = segment_row(&segment, 0).expect("the current finding is a row");
+        assert!(matches!(
+            current.route,
+            Some(DiagnosticRoute::CodeDocument { line: Some(3), .. })
+        ));
+        let stale = segment_row(&segment, 1).expect("the stale finding is a row");
+        assert_eq!(stale.route, None);
     }
 
     /// A batch whose inputs cannot be read is counted as that, not as stale:

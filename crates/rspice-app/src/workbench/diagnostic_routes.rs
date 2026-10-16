@@ -6,12 +6,17 @@
 //! be a page that could do anything, and the route is the whole of what a
 //! finding is allowed to ask for.
 //!
-//! Every destination lands on an object. A model-binding finding opens
-//! Corners & sections with its library selected and its corner inspected; a
-//! netlist finding opens the deck with the cursor on the line the parser
-//! named. Opening the workspace and leaving the reader to find the object
-//! again is what these used to do, and it is why a finding's prose used to
-//! end in an instruction to go somewhere.
+//! A destination is as close to the object as the finding can name. A
+//! model-binding finding that names a library opens Corners & sections with
+//! that library selected and its corner inspected; a netlist finding opens the
+//! deck with the cursor on the line the parser named; a finding the design
+//! checks are answerable for opens the configured root with the worst of its
+//! findings current. A finding that names no object — a plan that will not
+//! validate, a model page with no library — opens the page where that object
+//! is chosen, which is as far as its own words reach. Opening the workspace
+//! and leaving the reader to find the object again is what these used to do,
+//! and it is why a finding's prose used to end in an instruction to go
+//! somewhere.
 
 use egui::Context;
 
@@ -99,6 +104,18 @@ fn open_code_document(
             *language
         }
     };
+    // Opening the owner can be refused — an inspector edit that will not
+    // commit keeps the view it is editing — and the selection below is made
+    // in whichever bundle is active, so it is made only once the bundle that
+    // reported the finding is the one in front of the reader.
+    let active = code_workspace::active_source_bundle(&app.state.workspace, language)
+        .map(crate::state::ProjectSourceBundle::id);
+    if active != Some(bundle) {
+        app.state.push_user_message(ConsoleMessage::warning(format!(
+            "{logical_path} was not opened: the editor that owns it could not be brought forward."
+        )));
+        return;
+    }
     if code_workspace::select_source_document(
         &app.state.workspace,
         &mut app.state.ui.code_workspace,

@@ -84,6 +84,56 @@ fn a_source_route_to_a_departed_bundle_states_its_refusal() {
     );
 }
 
+/// A source route opens the editor that owns the bundle and selects the
+/// document in it. The automation bundle is the project's, so the route lands
+/// on the Netlist workspace's Automation page with the reported file chosen.
+#[test]
+fn a_source_route_opens_its_document_in_the_editor_that_owns_it() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.authority.open_session();
+    app.state.workbench.activate(Workspace::Results);
+    let owner = crate::state::ProjectSourceOwner::code_workspace(
+        crate::state::ProjectSourceLanguage::RSpiceAutomation,
+    );
+    let bundle = app
+        .state
+        .workspace
+        .content
+        .project_sources
+        .bundle_for_owner(&owner)
+        .expect("a project holds its automation bundle");
+    let bundle_id = bundle.id();
+    let logical_path = bundle
+        .paths_for_role(crate::state::ProjectSourceRole::AutomationPermissionManifest)
+        .next()
+        .expect("the automation bundle has a permission manifest")
+        .to_owned();
+    app.state
+        .diagnostics
+        .request_route(DiagnosticRoute::CodeDocument {
+            bundle: bundle_id,
+            logical_path: std::sync::Arc::from(logical_path.as_str()),
+            line: Some(2),
+        });
+
+    apply_pending(&context(), &mut app);
+
+    assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
+    assert_eq!(
+        app.state.ui.code_workspace.page,
+        crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation
+    );
+    assert_eq!(
+        app.state
+            .ui
+            .code_workspace
+            .automation
+            .selected_file
+            .as_deref(),
+        Some(logical_path.as_str())
+    );
+}
+
 /// A netlist record is opened by its canonical identity, and an identity the
 /// collection no longer holds is refused in the editor's own words.
 #[test]
@@ -96,11 +146,14 @@ fn a_netlist_route_to_a_retired_record_states_its_refusal() {
 
     apply_pending(&context(), &mut app);
 
+    // The editor's own refusal, not any warning that happened to be logged:
+    // the session logs warnings of its own, and a test that accepted one of
+    // those would pass with the route deleted.
     assert!(
-        app.state
-            .log_buffer
-            .entries()
-            .any(|entry| entry.severity == crate::diagnostics::LogSeverity::Warning),
+        app.state.log_buffer.entries().any(|entry| {
+            entry.severity == crate::diagnostics::LogSeverity::Warning
+                && entry.message == "The selected diagnostic is no longer available."
+        }),
         "an unresolvable record must say so rather than opening nothing silently"
     );
 }
