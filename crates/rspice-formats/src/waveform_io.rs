@@ -5,10 +5,9 @@
 //! # Supported Formats
 //!
 //! - CSV and TSV export
-//! - Touchstone v1/v2 S-parameter import and export
+//! - Touchstone v1/v2 S-parameter (`.sNp`) import and export
 
 #![allow(clippy::needless_range_loop, clippy::type_complexity)]
-//! - Touchstone S-parameter format (`.sNp`) for import/export
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
