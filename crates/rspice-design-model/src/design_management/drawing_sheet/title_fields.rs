@@ -34,13 +34,22 @@ pub enum DrawingSheetTitleFieldId {
     Organization,
     DocumentId,
     Classification,
+    /// ISO 7200's *Document type*: what kind of document the sheet is. It
+    /// reads [`DRAWING_SHEET_DEFAULT_DOCUMENT_TYPE`] until a sheet says
+    /// otherwise.
+    DocumentType,
 }
 
+/// What a schematic sheet is, in the name IEC 61082 gives it: the Document
+/// type a sheet letters until it is given another.
+pub const DRAWING_SHEET_DEFAULT_DOCUMENT_TYPE: &str = "Circuit diagram";
+
 impl DrawingSheetTitleFieldId {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Project,
         Self::CellView,
         Self::SheetTitle,
+        Self::DocumentType,
         Self::Page,
         Self::Revision,
         Self::PaperSize,
@@ -95,6 +104,17 @@ impl DrawingSheetTitleFieldId {
             Self::Organization => "Organization",
             Self::DocumentId => "Document ID",
             Self::Classification => "Classification",
+            Self::DocumentType => "Document type",
+        }
+    }
+
+    /// What the field reads when neither the sheet nor the authority behind
+    /// it supplies a value.
+    #[must_use]
+    pub const fn default_value(self) -> &'static str {
+        match self {
+            Self::DocumentType => DRAWING_SHEET_DEFAULT_DOCUMENT_TYPE,
+            _ => "",
         }
     }
 
@@ -123,7 +143,8 @@ impl DrawingSheetTitleFieldId {
             | Self::ApprovedBy
             | Self::Organization
             | Self::DocumentId
-            | Self::Classification => DrawingSheetTitleFieldPolicy {
+            | Self::Classification
+            | Self::DocumentType => DrawingSheetTitleFieldPolicy {
                 required_visible: false,
                 value_authority: DrawingSheetTitleFieldValueAuthority::Authored,
             },
@@ -187,7 +208,8 @@ pub fn resolve_drawing_sheet_title_fields(
                 let governed = authority_values
                     .get(&id)
                     .map(String::as_str)
-                    .unwrap_or_default();
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or(id.default_value());
                 let value = match authority {
                     DrawingSheetTitleFieldValueAuthority::Automatic => governed,
                     DrawingSheetTitleFieldValueAuthority::Authored if id.is_project_owned() => {

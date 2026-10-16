@@ -56,6 +56,38 @@ fn paper_size_names_the_sheet_as_iso_7200_writes_it() {
 }
 
 #[test]
+fn document_type_says_what_kind_of_document_a_sheet_is() {
+    let field = DrawingSheetTitleFieldId::DocumentType;
+    assert!(DrawingSheetTitleFieldId::ALL.contains(&field));
+    assert_eq!(field.display_label(), "Document type");
+    assert_eq!(
+        field.policy().value_authority,
+        DrawingSheetTitleFieldValueAuthority::Authored
+    );
+    assert!(!field.policy().required_visible);
+    assert!(
+        field.visible_by_default(),
+        "ISO 7200 makes the document type mandatory"
+    );
+
+    let value = |format: &SchematicSheetFormat| {
+        resolve_drawing_sheet_title_fields(format, &BTreeMap::new())
+            .into_iter()
+            .find(|resolved| resolved.id == field)
+            .map(|resolved| resolved.value)
+    };
+    let format = SchematicSheetFormat::default();
+    assert_eq!(value(&format).as_deref(), Some("Circuit diagram"));
+    // A sheet that is some other kind of document says so.
+    let wiring = format
+        .try_update(|draft| {
+            draft.title_block.fields.get_mut(&field).unwrap().value = "Wiring diagram".to_owned();
+        })
+        .unwrap();
+    assert_eq!(value(&wiring).as_deref(), Some("Wiring diagram"));
+}
+
+#[test]
 fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
     let format = SchematicSheetFormat::default();
     assert_eq!(
@@ -159,13 +191,17 @@ fn an_organization_template_sealed_while_paper_size_was_withdrawn_still_loads() 
         sealed_digest,
         "loading must not re-seal what was released"
     );
-    // Every field the seal names keeps its sealed place, and the one it never
-    // named follows them.
+    // Every field the seal names keeps its sealed place, and the ones it never
+    // named follow them in the product's order.
+    let gained = [
+        DrawingSheetTitleFieldId::DocumentType,
+        DrawingSheetTitleFieldId::PaperSize,
+    ];
     let mut expected = DrawingSheetTitleFieldId::ALL
         .into_iter()
-        .filter(|field| *field != DrawingSheetTitleFieldId::PaperSize)
+        .filter(|field| !gained.contains(field))
         .collect::<Vec<_>>();
-    expected.push(DrawingSheetTitleFieldId::PaperSize);
+    expected.extend(gained);
     assert_eq!(restored.title_block_field_order(), expected);
     assert!(!restored.title_block.fields[&DrawingSheetTitleFieldId::PaperSize].visible);
 

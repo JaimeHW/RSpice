@@ -116,7 +116,8 @@ fn default_title_field_value(
             .unwrap_or_default(),
         DrawingSheetTitleFieldId::DrawnBy
         | DrawingSheetTitleFieldId::CheckedBy
-        | DrawingSheetTitleFieldId::ApprovedBy => String::new(),
+        | DrawingSheetTitleFieldId::ApprovedBy
+        | DrawingSheetTitleFieldId::DocumentType => String::new(),
     }
 }
 

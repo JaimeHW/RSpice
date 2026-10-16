@@ -1069,6 +1069,7 @@ fn title_field_table(
                                             TextEdit::singleline(
                                                 &mut state.draft.entry(id).or_default().value,
                                             )
+                                            .hint_text(id.default_value())
                                             .char_limit(256),
                                         );
                                     }
@@ -1557,6 +1558,7 @@ fn title_field_owner(id: DrawingSheetTitleFieldId) -> &'static str {
         DrawingSheetTitleFieldId::Project => "project",
         DrawingSheetTitleFieldId::CellView => "design identity",
         DrawingSheetTitleFieldId::SheetTitle
+        | DrawingSheetTitleFieldId::DocumentType
         | DrawingSheetTitleFieldId::DrawnBy
         | DrawingSheetTitleFieldId::CheckedBy
         | DrawingSheetTitleFieldId::ApprovedBy => "sheet",

@@ -2648,11 +2648,15 @@ fn an_organization_template_sealed_before_a_field_retired_still_loads() {
         sealed_digest,
         "the seal is the record of what was released, so loading must not re-seal it"
     );
-    assert_eq!(
-        restored.title_block_field_order(),
-        DrawingSheetTitleFieldId::ALL,
-        "the retired field keeps its place in the seal and nowhere else"
-    );
+    // The retired field keeps its place in the seal and nowhere else, and a
+    // field the seal predates follows every field it names.
+    let gained = [DrawingSheetTitleFieldId::DocumentType];
+    let mut expected = DrawingSheetTitleFieldId::ALL
+        .into_iter()
+        .filter(|field| !gained.contains(field))
+        .collect::<Vec<_>>();
+    expected.extend(gained);
+    assert_eq!(restored.title_block_field_order(), expected);
     assert!(
         !resolve_drawing_sheet_title_fields(&restored, &BTreeMap::new())
             .iter()
