@@ -713,8 +713,7 @@ mod tests {
         let (key, message) = waived(&state).expect("the waived identity still resolves");
         assert_eq!(key, waiver_key, "what a waiver names is unchanged");
         assert_eq!(
-            message,
-            "Terminal B of R2 has no connection (2 nets within 10 grid units)",
+            message, "Terminal B of R2 has no connection (2 nets within 10 grid units)",
             "the finding states its new words under its old identity",
         );
     }
