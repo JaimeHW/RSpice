@@ -72,6 +72,10 @@ impl AppState {
         // as documents and results so a replacement can never render one
         // frame containing two projects' evidence.
         self.diagnostics.clear();
+        // The reading position goes with the findings it was read over: a
+        // filter carried into another design hides conditions nobody there
+        // chose to hide.
+        self.problems_view = Default::default();
         self.log_buffer.clear();
         self.clear_specialized_viewer_data();
     }
