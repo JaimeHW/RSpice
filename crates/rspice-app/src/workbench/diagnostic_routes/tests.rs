@@ -25,7 +25,7 @@ fn a_requested_route_is_applied_once() {
         .workbench
         .activate(crate::workbench::state::Workspace::Results);
     app.state.diagnostics.request_route(DiagnosticRoute::Repair(
-        PreflightRemediation::SimulationPlan,
+        PreflightRemediation::SimulationPlan { analysis: None },
     ));
 
     apply_pending(&context(), &mut app);

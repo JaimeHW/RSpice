@@ -236,11 +236,17 @@ fn run_scope(state: &AppState, run_sequence: u64) -> String {
 /// A stable key of the destination a dispatch finding names.
 ///
 /// A deck line is left out: it is a position in a generated deck, which moves
-/// with every edit upstream of it, and the finding is about the deck.
+/// with every edit upstream of it, and the finding is about the deck. An
+/// analysis is kept: its instance identity survives every edit to it, and two
+/// analyses that fail the same check are two findings, not one told apart by
+/// the order they were reported in.
 fn remediation_key(remediation: &PreflightRemediation) -> String {
     match remediation {
         PreflightRemediation::DesignChecks => "design-checks".to_owned(),
-        PreflightRemediation::SimulationPlan => "simulation-plan".to_owned(),
+        PreflightRemediation::SimulationPlan { analysis: None } => "simulation-plan".to_owned(),
+        PreflightRemediation::SimulationPlan {
+            analysis: Some(analysis),
+        } => format!("simulation-plan:{analysis}"),
         PreflightRemediation::ProjectTechnology => "project-technology".to_owned(),
         PreflightRemediation::Models {
             page,
@@ -307,7 +313,7 @@ const fn remediation_producer(remediation: &PreflightRemediation) -> (&'static s
         PreflightRemediation::Models { .. } => (MODEL_BINDING_PRODUCER, "MODEL"),
         PreflightRemediation::ProjectTechnology => (MODEL_BINDING_PRODUCER, "TECH"),
         PreflightRemediation::NetlistSource { .. } => (NETLIST_PRODUCER, "NETLIST"),
-        PreflightRemediation::DesignChecks | PreflightRemediation::SimulationPlan => {
+        PreflightRemediation::DesignChecks | PreflightRemediation::SimulationPlan { .. } => {
             (PREFLIGHT_PRODUCER, "RUN")
         }
     }
@@ -318,7 +324,7 @@ const fn remediation_producer(remediation: &PreflightRemediation) -> (&'static s
 fn remediation_subject(remediation: &PreflightRemediation) -> String {
     match remediation {
         PreflightRemediation::DesignChecks => "Design checks".to_owned(),
-        PreflightRemediation::SimulationPlan => "Simulation plan".to_owned(),
+        PreflightRemediation::SimulationPlan { .. } => "Simulation plan".to_owned(),
         PreflightRemediation::ProjectTechnology => "Project technology".to_owned(),
         PreflightRemediation::Models {
             library: Some(library),

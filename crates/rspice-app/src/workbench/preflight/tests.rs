@@ -200,7 +200,7 @@ fn report_collects_all_independent_blocker_classes() {
     assert!(report.blockers.iter().any(|issue| {
         issue.check == "Analysis-instance graph"
             && issue.observed == "Enable at least one analysis instance."
-            && issue.remediation == PreflightRemediation::SimulationPlan
+            && issue.remediation == PreflightRemediation::SimulationPlan { analysis: None }
     }));
     assert!(
         !report
@@ -695,7 +695,7 @@ fn a_preparation_failure_names_the_destination_that_repairs_it() {
     ] {
         assert_eq!(
             preparation_remediation(stage, None),
-            PreflightRemediation::SimulationPlan
+            PreflightRemediation::SimulationPlan { analysis: None }
         );
     }
 }
@@ -1093,6 +1093,114 @@ fn a_named_line_survives_the_parser_to_buffer_conversion() {
 
     assert_eq!(app.state.ui.netlist.cursor_line, 0);
     assert_eq!(app.state.ui.netlist.requested_line, Some(1));
+}
+
+/// A plan of two analyses, the first of which will not run, with the other
+/// one selected: the failing one and the one in front of the reader.
+fn app_with_an_unfinished_transient_beside_a_selected_operating_point() -> (
+    RSpiceApp,
+    crate::product::AnalysisInstanceId,
+    crate::product::AnalysisInstanceId,
+) {
+    use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.authority.open_session();
+    let plan = app
+        .state
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .expect("a default state owns a stable plan");
+    let transient = plan.instances()[0].id();
+    let position = plan.instances().len();
+    let (operating_point, _) = plan
+        .insert_draft_with_id(
+            crate::product::AnalysisInstanceId::new(),
+            AnalysisDraft::for_kind(AnalysisKind::OperatingPoint),
+            true,
+            position,
+        )
+        .expect("an operating point has no prerequisites");
+    plan.edit(transient, |draft| {
+        if let AnalysisDraft::Transient(setup) = draft {
+            setup.stop = "unfinished(".to_owned();
+        }
+    })
+    .expect("the transient analysis takes the edit");
+    app.state.workbench.active_analysis_instance = Some(operating_point);
+    (app, transient, operating_point)
+}
+
+/// A finding about one analysis's configuration opens the Analyses page on
+/// that analysis. It used to open the page on whichever analysis was already
+/// selected, and the reader had to find the failing one in the list.
+#[test]
+fn an_analysis_configuration_finding_opens_the_analysis_it_is_about() {
+    let (mut app, transient, _) =
+        app_with_an_unfinished_transient_beside_a_selected_operating_point();
+
+    let report = collect_report(&app.state);
+    let blocker = report
+        .blockers
+        .iter()
+        .find(|issue| {
+            issue.check.ends_with(" configuration")
+                && issue.observed.starts_with(&transient.to_string())
+        })
+        .expect("the unfinished stop time blocks the run");
+    assert_eq!(
+        blocker.remediation,
+        PreflightRemediation::SimulationPlan {
+            analysis: Some(transient)
+        }
+    );
+
+    app.state.workbench.activate(Workspace::Verify);
+    apply_remediation(&mut app, blocker.remediation.clone());
+
+    assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
+    assert_eq!(
+        app.state.workbench.simulation_page,
+        crate::workbench::state::SimulationPage::Analyses
+    );
+    assert_eq!(
+        app.state.workbench.active_analysis_instance,
+        Some(transient),
+        "the page must arrive on the analysis that failed, not the one that was selected"
+    );
+}
+
+/// An analysis removed since the pass is said to be gone. The page would
+/// otherwise settle on its first analysis, which the finding is not about.
+#[test]
+fn a_plan_route_to_a_departed_analysis_states_its_refusal() {
+    let (mut app, _, operating_point) =
+        app_with_an_unfinished_transient_beside_a_selected_operating_point();
+
+    apply_remediation(
+        &mut app,
+        PreflightRemediation::SimulationPlan {
+            analysis: Some(crate::product::AnalysisInstanceId::new()),
+        },
+    );
+
+    assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
+    assert_eq!(
+        app.state.workbench.active_analysis_instance,
+        Some(operating_point),
+        "a departed analysis leaves the selection where it was"
+    );
+    let refusal = &app
+        .state
+        .log_buffer
+        .entries()
+        .last()
+        .expect("the refusal is stated")
+        .message;
+    assert!(
+        refusal.contains("no longer in the simulation plan"),
+        "{refusal}"
+    );
 }
 
 /// A configured root that breaks the design rules, beside an open view the

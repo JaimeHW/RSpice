@@ -9,7 +9,8 @@
 //! A destination is as close to the object as the finding can name. A
 //! model-binding finding that names a library opens Corners & sections with
 //! that library selected and its corner inspected; a netlist finding opens the
-//! deck with the cursor on the line the parser named; a finding the design
+//! deck with the cursor on the line the parser named; a plan finding opens
+//! the Analyses page on the analysis it is about; a finding the design
 //! checks are answerable for opens the configured root with the worst of its
 //! findings current. A finding that names no object — a plan that will not
 //! validate, a model page with no library — opens the page where that object
@@ -159,10 +160,26 @@ pub(in crate::workbench) fn apply_remediation(
             }
             Command::OpenProblems.execute(app);
         }
-        // The plan's analyses, which is what every plan finding is about. The
-        // finding does not carry which analysis failed, so the page opens on
-        // the list of them rather than on one.
-        PreflightRemediation::SimulationPlan => {
+        // The analysis the finding is about, selected before the page opens
+        // so its first frame shows it. One the plan no longer holds is said
+        // rather than skipped: the page would otherwise settle on its first
+        // analysis, which the finding is not about. A finding about the plan
+        // as a whole leaves the selection where it was.
+        PreflightRemediation::SimulationPlan { analysis } => {
+            if let Some(analysis) = analysis {
+                let held = app
+                    .state
+                    .sim_setup
+                    .stable_analysis_plan()
+                    .is_ok_and(|plan| plan.instance(analysis).is_some());
+                if held {
+                    app.state.workbench.active_analysis_instance = Some(analysis);
+                } else {
+                    app.state.push_user_message(ConsoleMessage::warning(
+                        "The analysis this finding names is no longer in the simulation plan.",
+                    ));
+                }
+            }
             Command::SimulationPage(SimulationPage::Analyses).execute(app);
         }
         PreflightRemediation::ProjectTechnology => {

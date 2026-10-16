@@ -451,7 +451,7 @@ mod tests {
             check: "Run set".to_owned(),
             observed: "No analysis is enabled".to_owned(),
             required: "One enabled analysis".to_owned(),
-            remediation: PreflightRemediation::SimulationPlan,
+            remediation: PreflightRemediation::SimulationPlan { analysis: None },
         }
     }
 

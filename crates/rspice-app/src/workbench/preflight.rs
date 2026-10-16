@@ -376,7 +376,7 @@ fn collect(state: &AppState) -> Collected {
             check: "Analysis-instance plan".to_owned(),
             observed: error,
             required: "A migrated, structurally valid simulation plan".to_owned(),
-            remediation: PreflightRemediation::SimulationPlan,
+            remediation: PreflightRemediation::SimulationPlan { analysis: None },
         }),
         Ok(plan) => {
             for issue in plan.validation_issues() {
@@ -385,7 +385,9 @@ fn collect(state: &AppState) -> Collected {
                     observed: issue.to_string(),
                     required: "Stable enabled identities with resolved, ordered prerequisites"
                         .to_owned(),
-                    remediation: PreflightRemediation::SimulationPlan,
+                    remediation: PreflightRemediation::SimulationPlan {
+                        analysis: issue_analysis(&issue),
+                    },
                 });
             }
             for instance in plan
@@ -401,7 +403,9 @@ fn collect(state: &AppState) -> Collected {
                         check: format!("{} configuration", instance.kind().label()),
                         observed: format!("{}: {error}", instance.id()),
                         required: "A complete, numerically valid analysis configuration".to_owned(),
-                        remediation: PreflightRemediation::SimulationPlan,
+                        remediation: PreflightRemediation::SimulationPlan {
+                            analysis: Some(instance.id()),
+                        },
                     });
                 }
             }
@@ -614,8 +618,10 @@ fn preparation_remediation(
 ) -> PreflightRemediation {
     use crate::simulation::execution::PreparationStage;
     match stage {
+        // A preparation failure names a stage, not an analysis, so the page
+        // opens without moving the selection.
         PreparationStage::AnalysisPlan | PreparationStage::Authorization => {
-            PreflightRemediation::SimulationPlan
+            PreflightRemediation::SimulationPlan { analysis: None }
         }
         // A model-binding failure is repaired where the bindings live, not by
         // re-running the source checks that reported it.
@@ -628,6 +634,49 @@ fn preparation_remediation(
         PreparationStage::DesignChecks | PreparationStage::SourceChecks => {
             PreflightRemediation::DesignChecks
         }
+    }
+}
+
+/// The analysis a plan finding is about, where it is about one the page can
+/// show.
+///
+/// The same reading of each finding the Analyses page uses to decide which
+/// analysis a finding is shown against. A cycle is shown on each of its
+/// members, so it opens on the first. A finding about the plan as a whole, a
+/// tombstone or a run receipt names no analysis the page lists.
+fn issue_analysis(
+    issue: &crate::simulation::plan::AnalysisPlanIssue,
+) -> Option<crate::product::AnalysisInstanceId> {
+    use crate::simulation::plan::AnalysisPlanIssue;
+    match issue {
+        AnalysisPlanIssue::DuplicateInstanceId { id }
+        | AnalysisPlanIssue::ReusedTombstonedId { id }
+        | AnalysisPlanIssue::KindDraftMismatch { id, .. }
+        | AnalysisPlanIssue::InvalidInstanceRevision { id }
+        | AnalysisPlanIssue::InvalidInstanceName { id }
+        | AnalysisPlanIssue::DuplicateInstanceName { id, .. }
+        | AnalysisPlanIssue::InvalidLifecycle { id, .. } => Some(*id),
+        AnalysisPlanIssue::MissingPrerequisite { dependent, .. }
+        | AnalysisPlanIssue::UnexpectedDependencyRole { dependent, .. }
+        | AnalysisPlanIssue::DuplicateDependencyRole { dependent, .. }
+        | AnalysisPlanIssue::SelfDependency { dependent }
+        | AnalysisPlanIssue::DanglingDependency { dependent, .. }
+        | AnalysisPlanIssue::WrongDependencyKind { dependent, .. }
+        | AnalysisPlanIssue::DisabledDependency { dependent, .. }
+        | AnalysisPlanIssue::DependencyNotEarlier { dependent, .. }
+        | AnalysisPlanIssue::IncompatibleDependencyConfiguration { dependent, .. } => {
+            Some(*dependent)
+        }
+        AnalysisPlanIssue::DependencyCycle { members } => members.first().copied(),
+        AnalysisPlanIssue::NoEnabledInstances
+        | AnalysisPlanIssue::DuplicateTombstoneId { .. }
+        | AnalysisPlanIssue::InvalidTombstoneRevision { .. }
+        | AnalysisPlanIssue::InvalidReceiptSequence { .. }
+        | AnalysisPlanIssue::InvalidReceiptRevision { .. }
+        | AnalysisPlanIssue::DanglingReceiptInstance { .. }
+        | AnalysisPlanIssue::ReceiptKindMismatch { .. }
+        | AnalysisPlanIssue::EmptyReceiptDetail { .. }
+        | AnalysisPlanIssue::InvalidNextReceiptSequence { .. } => None,
     }
 }
 

@@ -1104,7 +1104,15 @@ pub enum ModelsWorkbenchDialog {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PreflightRemediation {
     DesignChecks,
-    SimulationPlan,
+    /// The Analyses page, open on the analysis the finding is about.
+    SimulationPlan {
+        /// The plan instance the finding names, taken from the instance the
+        /// check was reading. `None` for a finding about the plan as a whole
+        /// — no analysis enabled, a plan that will not load, a stage of run
+        /// preparation that names no analysis — and the page then opens as
+        /// the reader left it.
+        analysis: Option<crate::product::AnalysisInstanceId>,
+    },
     ProjectTechnology,
     /// One page of the Models workspace, and the object it opens on. A
     /// model-binding finding is repaired where the bindings live — Corners &
