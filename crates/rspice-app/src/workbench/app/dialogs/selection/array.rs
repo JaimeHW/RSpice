@@ -1,38 +1,47 @@
-//! Mockup-owned Create object array transaction.
+//! Create array: three questions, then the canvas takes the pitch.
 //!
-//! The three visible controls are the complete design contract. Placement is
-//! acquired from the canvas after the retained draft has been parsed and the
-//! immutable schematic authority has been revalidated.
+//! The three controls are the whole design decision. Placement is acquired
+//! from the canvas after the draft has been parsed and the immutable
+//! schematic authority has been revalidated.
+//!
+//! The model prints a count as `8 × 1` and a naming range as
+//! `U4…U11 · DATA[0]…DATA[7]`. None of `×`, `…` or `·` is on a keyboard, so
+//! the two fields take `x`, `...` and `,` and rewrite them as they are typed:
+//! the reader types what they can reach and reads back what the design calls
+//! it.
 
-use egui::{Align, Context, Frame, Layout, Margin, Ui, vec2};
+use egui::{Context, Id};
 
 use crate::diagnostics::ConsoleMessage;
 use crate::state::{
     Point, SchematicArrayCount, SchematicArrayKind, SchematicArrayNaming, SchematicArrayPlacement,
     SchematicArrayPlan, Tool,
 };
-use crate::ui::tokens::Tokens;
-use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
-    select_mono_with_response,
-};
+use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine, FormRows};
 
-use crate::workbench::app::dialogs::review_primitives::{
-    BODY_HEIGHT as MOCKUP_BODY_HEIGHT, CONTEXT_WIDTH as MOCKUP_CONTEXT_WIDTH,
-    SURFACE_HEIGHT as MOCKUP_SURFACE_HEIGHT, TRANSACTION_HEIGHT as MOCKUP_TRANSACTION_HEIGHT,
-    configure_field_validation, field_label, input_field, paint_body_dividers, purpose_line,
-    resolved_context,
-};
-use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
 use crate::workbench::app::{ArraySelectionDialogState, RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
-const TITLE: &str = "Create object array";
-const PRIMARY: &str = "Create array";
-const DESCRIPTION: &str =
-    "Create a named linear or rectangular array with reference-designator and bus-index policies.";
+const TITLE: &str = "Create array";
+const PRIMARY: &str = "Create";
 const DEFAULT_COUNT: &str = "8 \u{00d7} 1";
-const INVALID_DETAIL: &str = "Correct the highlighted values before this operation can continue. No project, result, or governed record has changed.";
+const COUNT_HINT: &str = "8 x 1";
+const NAMING_HINT: &str = "U4...U11, DATA[0]...DATA[7]";
+
+/// `×` is the only separator the count has, and it is not on a keyboard.
+pub(crate) fn canonical_count(typed: &str) -> String {
+    typed.replace(['x', 'X', '*'], "\u{00d7}")
+}
+
+/// `…` separates a naming range's endpoints and `·` separates two ranges.
+/// A reference endpoint can itself contain `x`, so the count's rewrite does
+/// not apply here.
+pub(crate) fn canonical_naming(typed: &str) -> String {
+    typed
+        .replace("...", "\u{2026}")
+        .replace(", ", " \u{00b7} ")
+        .replace(',', " \u{00b7} ")
+}
 
 #[derive(Debug)]
 enum DraftValidation {
@@ -80,20 +89,6 @@ impl DraftValidation {
         matches!(self, Self::Valid)
     }
 
-    fn transaction_title(&self) -> Option<String> {
-        let Self::Invalid(errors) = self else {
-            return None;
-        };
-        let fields = usize::from(errors.array.is_some())
-            .saturating_add(usize::from(errors.count.is_some()))
-            .saturating_add(usize::from(errors.naming.is_some()));
-        Some(match fields {
-            0 => "Create array cannot continue".to_owned(),
-            1 => "1 field requires attention".to_owned(),
-            fields => format!("{fields} fields require attention"),
-        })
-    }
-
     fn field_errors(&self) -> (bool, bool, bool) {
         match self {
             Self::Invalid(errors) => (
@@ -116,14 +111,25 @@ impl DraftValidation {
         }
     }
 
-    fn field_mask(&self) -> u8 {
-        let (array, count, naming) = self.field_errors();
-        u8::from(array) | (u8::from(count) << 1) | (u8::from(naming) << 2)
+    /// A refusal that belongs to no field — a stale baseline, a plan the
+    /// three fields are each legal for but that cannot be built.
+    fn form_refusal(&self) -> Option<String> {
+        let Self::Invalid(errors) = self else {
+            return None;
+        };
+        let unattributed = errors
+            .messages
+            .iter()
+            .filter(|message| {
+                ![&errors.array, &errors.count, &errors.naming]
+                    .into_iter()
+                    .flatten()
+                    .any(|field| field.contains(message.as_str()))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        (!unattributed.is_empty()).then(|| unattributed.join(" "))
     }
-}
-
-const fn should_focus_first_invalid(previous: u8, current: u8) -> bool {
-    previous == 0 && current != 0
 }
 
 pub(crate) fn open_array_selection_dialog(state: &mut AppState) {
@@ -163,84 +169,28 @@ pub(crate) fn open_array_selection_dialog(state: &mut AppState) {
     );
 }
 
+fn field_id(stable: &str) -> Id {
+    Id::new(("array-selection", stable))
+}
+
 impl RSpiceApp {
     pub(in crate::workbench) fn render_array_selection_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.array_selection.open {
             return;
         }
         let validation = validate_draft(&self.state);
-        let validation_title = validation.transaction_title();
-        let project_name = self
-            .state
-            .workspace
-            .content
-            .project
-            .display_name()
-            .to_owned();
-        let project_revision = self
-            .state
-            .workspace
-            .content
-            .project
-            .revision()
-            .get()
-            .to_string();
-        let validation_field_mask = validation.field_mask();
-        let request_first_invalid_focus = should_focus_first_invalid(
-            self.state.dialogs.array_selection.validation_field_mask,
-            validation_field_mask,
-        );
-        self.state.dialogs.array_selection.validation_field_mask = validation_field_mask;
-        let discard_confirm = self.state.dialogs.array_selection.discard_confirm;
-        let has_transaction = discard_confirm || validation_title.is_some();
-        let mut dialog = Dialog::new(TITLE, PRIMARY)
-            .description(DESCRIPTION)
-            .size(DialogSize::Transaction)
-            .initial_height(
-                MOCKUP_SURFACE_HEIGHT
-                    + if has_transaction {
-                        MOCKUP_TRANSACTION_HEIGHT
-                    } else {
-                        0.0
-                    },
-            )
-            .flush_body()
-            .ghost(if discard_confirm {
-                "Discard changes"
-            } else {
-                "Cancel"
-            })
+        let form_refusal = validation.form_refusal();
+        let choice = CommandForm::new(TITLE, PRIMARY)
             .primary_enabled(validation.can_commit())
-            .primary_on_enter(false)
-            .initial_focus(DialogInitialFocus::BodyControl);
-        if discard_confirm {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                DISCARD_TITLE,
-                DISCARD_DETAIL,
-            );
-        } else if let Some(title) = validation_title.as_deref() {
-            dialog = dialog.transaction_state(DialogTransactionTone::Error, title, INVALID_DETAIL);
-        }
-        let mut first_invalid_focus = None;
-        let mut response = dialog.show_transaction(ctx, |ui| {
-            let workflow = array_dialog_body(
-                ui,
-                &validation,
-                &mut self.state.dialogs.array_selection,
-                &project_name,
-                &project_revision,
-            );
-            first_invalid_focus = workflow.first_invalid;
-            Some(workflow.initial)
-        });
-        if request_first_invalid_focus
-            && response.choice == DialogChoice::None
-            && let Some(field) = first_invalid_focus
-        {
-            ctx.memory_mut(|memory| memory.request_focus(field));
-        }
-        match response.choice {
+            .status(match form_refusal.as_deref() {
+                Some(message) => Err(message),
+                None => Ok(None),
+            })
+            .status_lines(2)
+            .show(ctx, |rows| {
+                array_form(rows, &validation, &mut self.state.dialogs.array_selection)
+            });
+        match choice {
             DialogChoice::Primary => {
                 if validate_draft(&self.state).can_commit() {
                     let radial_center = if self.state.dialogs.array_selection.kind
@@ -254,17 +204,10 @@ impl RSpiceApp {
                     self.state.dialogs.array_selection.canvas.anchor = radial_center;
                     self.state.schematic.arm_tool(Tool::ArraySelection);
                     rspice_schematic_editor::view::canvas::request_focus(ctx);
-                    self.state.push_user_message(ConsoleMessage::info(
-                        "Create array armed; choose the exact pitch or center on the schematic canvas."
-                            .to_owned(),
-                    ));
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.array_selection.attempt_close();
-                if self.state.dialogs.array_selection.open {
-                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
-                }
+                self.state.dialogs.array_selection.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -379,120 +322,60 @@ pub(crate) fn cancel_armed_array_selection(state: &mut AppState) {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct WorkflowFocus {
-    initial: egui::Id,
-    first_invalid: Option<egui::Id>,
-}
-
-fn array_dialog_body(
-    ui: &mut Ui,
+/// The three rows, each with the refusal that names it underneath. Returns
+/// the field that takes focus: the first one with something wrong with it,
+/// else the one at the top.
+fn array_form(
+    rows: &mut FormRows<'_>,
     validation: &DraftValidation,
     draft: &mut ArraySelectionDialogState,
-    project_name: &str,
-    project_revision: &str,
-) -> WorkflowFocus {
-    purpose_line(ui, DESCRIPTION);
+) -> Option<Id> {
     let (array_invalid, count_invalid, naming_invalid) = validation.field_errors();
     let (array_error, count_error, naming_error) = validation.field_error_details();
-    let mut initial = None;
-    let mut first_invalid = None;
-    let width = ui.available_width();
-    let context_width = MOCKUP_CONTEXT_WIDTH.min((width * 0.42).max(220.0));
-    let form_width = (width - context_width).max(1.0);
-    let body = ui.allocate_ui_with_layout(
-        vec2(width, MOCKUP_BODY_HEIGHT),
-        Layout::left_to_right(Align::Min),
-        |ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-            ui.allocate_ui_with_layout(
-                vec2(form_width, MOCKUP_BODY_HEIGHT),
-                Layout::top_down(Align::Min),
-                |ui| {
-                    ui.set_min_size(vec2(form_width, MOCKUP_BODY_HEIGHT));
-                    Frame::NONE
-                        .fill(Tokens::get(ui.ctx()).color.bg_app)
-                        .inner_margin(Margin::symmetric(12, 10))
-                        .show(ui, |ui| {
-                            ui.set_width((form_width - 24.0).max(1.0));
-                            let labels =
-                                SchematicArrayKind::ALL.map(|kind| kind.label().to_owned());
-                            let array = field_label(ui, "Array", |ui| {
-                                select_mono_with_response(
-                                    ui,
-                                    "array-selection-kind",
-                                    "Array",
-                                    draft.kind.label(),
-                                    &labels,
-                                    ui.available_width(),
-                                )
-                            });
-                            if let Some(index) = array.picked {
-                                let next = SchematicArrayKind::ALL[index];
-                                if next != draft.kind {
-                                    draft.kind = next;
-                                    draft.mark_edited();
-                                }
-                            }
-                            configure_field_validation(
-                                ui,
-                                &array.response,
-                                "Array",
-                                array_error,
-                                "Array kind is incompatible with the retained selection",
-                            );
-                            ui.add_space(9.0);
-                            let count = input_field(
-                                ui,
-                                "Count",
-                                &mut draft.count,
-                                "8 \u{00d7} 1",
-                                count_error,
-                                "Array columns and rows, including the retained source member",
-                            );
-                            if count.changed() {
-                                draft.mark_edited();
-                            }
-                            ui.add_space(9.0);
-                            let naming = input_field(
-                                ui,
-                                "Naming",
-                                &mut draft.naming,
-                                "U4\u{2026}U11 \u{00b7} DATA[0]\u{2026}DATA[7]",
-                                naming_error,
-                                "Reference-designator and bus-index range policy",
-                            );
-                            if naming.changed() {
-                                draft.mark_edited();
-                            }
-                            first_invalid = if array_invalid {
-                                Some(array.response.id)
-                            } else if count_invalid {
-                                Some(count.id)
-                            } else if naming_invalid {
-                                Some(naming.id)
-                            } else {
-                                None
-                            };
-                            initial = Some(first_invalid.unwrap_or(array.response.id));
-                        });
-                },
-            );
-            ui.allocate_ui_with_layout(
-                vec2(context_width, MOCKUP_BODY_HEIGHT),
-                Layout::top_down(Align::Min),
-                |ui| {
-                    ui.set_min_size(vec2(context_width, MOCKUP_BODY_HEIGHT));
-                    resolved_context(ui, project_name, project_revision);
-                },
-            );
-        },
-    );
-    paint_body_dividers(ui, body.response.rect, form_width);
-    WorkflowFocus {
-        initial: initial.unwrap_or_else(|| ui.id().with("array-selection-kind")),
-        first_invalid,
+
+    let labels = SchematicArrayKind::ALL.map(|kind| kind.label().to_owned());
+    if let Some(index) = rows.select("Array", "array-selection-kind", draft.kind.label(), &labels) {
+        let next = SchematicArrayKind::ALL[index];
+        if next != draft.kind {
+            draft.kind = next;
+            draft.mark_edited();
+        }
     }
+    rows.field_line(None, error_or_blank(array_error));
+
+    let count_id = field_id("count");
+    if rows
+        .text("Count", count_id, &mut draft.count, COUNT_HINT)
+        .changed()
+    {
+        draft.count = canonical_count(&draft.count);
+        draft.mark_edited();
+    }
+    rows.field_line(Some(count_id), error_or_blank(count_error));
+
+    let naming_id = field_id("naming");
+    if rows
+        .text("Naming", naming_id, &mut draft.naming, NAMING_HINT)
+        .changed()
+    {
+        draft.naming = canonical_naming(&draft.naming);
+        draft.mark_edited();
+    }
+    rows.field_line(Some(naming_id), error_or_blank(naming_error));
+
+    if array_invalid {
+        None
+    } else if count_invalid {
+        Some(count_id)
+    } else if naming_invalid {
+        Some(naming_id)
+    } else {
+        Some(count_id)
+    }
+}
+
+fn error_or_blank(error: Option<&str>) -> FieldLine<'_> {
+    error.map_or(FieldLine::Blank, FieldLine::Error)
 }
 
 fn radial_documentation_center(state: &AppState) -> Option<Point> {
@@ -532,21 +415,28 @@ mod tests {
     use crate::state::{Component, ComponentType, DesignNote, DesignNoteKind};
 
     #[test]
-    fn restored_mockup_shell_contract_is_exact() {
-        assert_eq!(TITLE, "Create object array");
-        assert_eq!(PRIMARY, "Create array");
+    fn the_form_offers_every_array_kind_under_its_own_name() {
         assert_eq!(DEFAULT_COUNT, "8 \u{00d7} 1");
-        assert_eq!(MOCKUP_SURFACE_HEIGHT, 370.0);
-        assert_eq!(
-            crate::workbench::app::dialogs::review_primitives::PURPOSE_HEIGHT,
-            35.0
-        );
-        assert_eq!(MOCKUP_BODY_HEIGHT, 230.0);
-        assert_eq!(MOCKUP_CONTEXT_WIDTH, 260.0);
         assert_eq!(
             SchematicArrayKind::ALL.map(SchematicArrayKind::label),
             ["Linear", "Rectangular", "Radial documentation"]
         );
+    }
+
+    /// `×`, `…` and `·` are not on a keyboard. What a reader can type has to
+    /// reach the model, and what it reaches has to be what the model prints.
+    #[test]
+    fn the_two_separators_are_typed_in_ascii_and_read_back_canonical() {
+        assert_eq!(canonical_count("8x1"), "8\u{00d7}1");
+        assert_eq!(canonical_count("2 X 4"), "2 \u{00d7} 4");
+        assert_eq!(canonical_count("3*3"), "3\u{00d7}3");
+        assert!(SchematicArrayCount::parse(&canonical_count("8 x 1")).is_ok());
+
+        let typed = canonical_naming("U4...U11, DATA[0]...DATA[7]");
+        assert_eq!(typed, "U4\u{2026}U11 \u{00b7} DATA[0]\u{2026}DATA[7]");
+        assert!(SchematicArrayNaming::parse(&typed).is_ok());
+        // A reference endpoint may contain `x`; only the count rewrites it.
+        assert_eq!(canonical_naming("Mx1...Mx8"), "Mx1\u{2026}Mx8");
     }
 
     #[test]
@@ -571,18 +461,6 @@ mod tests {
     }
 
     #[test]
-    fn dirty_array_draft_requires_two_close_attempts() {
-        let mut draft = ArraySelectionDialogState::default();
-        draft.open = true;
-        draft.count = "8 \u{00d7} 1".to_owned();
-        draft.mark_edited();
-        assert!(!draft.attempt_close());
-        assert!(draft.discard_confirm);
-        assert!(draft.attempt_close());
-        assert!(!draft.open);
-    }
-
-    #[test]
     fn reverting_array_fields_to_the_opened_baseline_clears_dirty_state() {
         let mut draft = ArraySelectionDialogState {
             open: true,
@@ -600,7 +478,6 @@ mod tests {
         draft.count = "8\u{00d7}1".to_owned();
         draft.mark_edited();
         assert!(!draft.dirty, "canonical-equivalent text is not a change");
-        assert!(draft.attempt_close());
     }
 
     #[test]
@@ -649,10 +526,9 @@ mod tests {
 
         let validation = validate_draft(&state);
         assert_eq!(validation.field_errors(), (false, true, false));
-        assert_eq!(
-            validation.transaction_title().as_deref(),
-            Some("1 field requires attention")
-        );
+        // The refusal is the count row's, so nothing is said twice at the
+        // foot of the form.
+        assert_eq!(validation.form_refusal(), None);
     }
 
     #[test]
@@ -682,15 +558,6 @@ mod tests {
     }
 
     #[test]
-    fn first_invalid_focus_is_requested_once_per_valid_to_invalid_transition() {
-        assert!(!should_focus_first_invalid(0, 0));
-        assert!(should_focus_first_invalid(0, 0b010));
-        assert!(!should_focus_first_invalid(0b010, 0b010));
-        assert!(!should_focus_first_invalid(0b010, 0b110));
-        assert!(should_focus_first_invalid(0, 0b100));
-    }
-
-    #[test]
     fn stale_operation_is_not_misrepresented_as_a_field_error() {
         let mut state = AppState::default();
         state.schematic.document_mut_for_test().components.push(
@@ -705,11 +572,10 @@ mod tests {
         open_array_selection_dialog(&mut state);
         state.dialogs.array_selection.authority = None;
 
+        // No field is at fault, so the refusal stands at the foot of the form
+        // rather than being pinned on a value the reader typed correctly.
         let validation = validate_draft(&state);
         assert_eq!(validation.field_errors(), (false, false, false));
-        assert_eq!(
-            validation.transaction_title().as_deref(),
-            Some("Create array cannot continue")
-        );
+        assert!(validation.form_refusal().is_some());
     }
 }

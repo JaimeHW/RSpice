@@ -71,20 +71,6 @@ pub(crate) fn purpose_line(ui: &mut Ui, description: &str) {
     );
 }
 
-pub(crate) fn resolved_context(ui: &mut Ui, project_name: &str, project_revision: &str) {
-    let t = Tokens::get(ui.ctx());
-    Frame::NONE.fill(t.color.bg_panel).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.set_min_height(BODY_HEIGHT);
-        ui.spacing_mut().item_spacing.y = 0.0;
-        // The boundary row and the paragraph under it said the same thing for
-        // every dialog that shows this panel, whatever it was about to do.
-        context_heading(ui, "Context");
-        context_row(ui, "Project", project_name);
-        context_row(ui, "Revision", project_revision);
-    });
-}
-
 /// A problem stated on its own line inside a dialog body: the mark that owns
 /// the severity, then neutral text.
 ///
@@ -225,72 +211,6 @@ pub(crate) fn configure_field_validation(
             egui::StrokeKind::Inside,
         );
     }
-}
-
-pub(crate) fn paint_body_dividers(ui: &Ui, body_rect: egui::Rect, form_width: f32) {
-    let t = Tokens::get(ui.ctx());
-    ui.painter().vline(
-        body_rect.left() + form_width,
-        body_rect.y_range(),
-        Stroke::new(1.0, t.color.border_strong),
-    );
-    ui.painter().hline(
-        body_rect.x_range(),
-        body_rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-}
-
-fn context_heading(ui: &mut Ui, label: &str) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 29.0), Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, t.color.bg_elevated);
-    ui.painter().text(
-        rect.left_center() + vec2(10.0, 0.0),
-        Align2::LEFT_CENTER,
-        label.to_uppercase(),
-        theme::sans(tokens::FS_0, FontWeight::SemiBold),
-        t.color.text_dim,
-    );
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(egui::accesskit::Role::Heading);
-        node.set_label(label);
-    });
-}
-
-fn context_row(ui: &mut Ui, label: &str, value: &str) {
-    let t = Tokens::get(ui.ctx());
-    let width = ui.available_width();
-    let (rect, response) = ui.allocate_exact_size(vec2(width, 28.0), Sense::hover());
-    let content = rect.shrink2(vec2(10.0, 0.0));
-    let value_x = content.left() + (content.width() * 0.37).max(76.0);
-    ui.painter().text(
-        content.left_center(),
-        Align2::LEFT_CENTER,
-        label,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_faint,
-    );
-    let value_rect = egui::Rect::from_min_max(
-        egui::pos2(value_x + 8.0, content.top()),
-        content.right_bottom(),
-    );
-    ui.painter().with_clip_rect(value_rect).text(
-        value_rect.left_center(),
-        Align2::LEFT_CENTER,
-        value,
-        theme::mono(tokens::FS_0, FontWeight::Medium),
-        t.color.text,
-    );
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_label(label);
-        node.set_value(value);
-    });
 }
 
 fn paint_dashed_hline(ui: &Ui, range: egui::Rangef, y: f32, stroke: Stroke) {
