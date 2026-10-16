@@ -514,13 +514,19 @@ impl SimulationController {
             ) {
                 Ok(membership) => membership,
                 Err(error) => {
-                    campaign.completed_count = campaign.completed_count.saturating_add(1);
-                    campaign.failed_count = campaign.failed_count.saturating_add(1);
+                    let member_index = campaign.dispatched_count;
                     self.active_campaign = Some(campaign);
                     state.push_sim_message(ConsoleMessage::error(format!(
                         "Campaign member '{}' has invalid membership metadata: {error}",
                         member.plan_name
                     )));
+                    self.refuse_campaign_member(
+                        state,
+                        member_index,
+                        &member.plan_name,
+                        super::CampaignMemberRefusal::Start,
+                        &error,
+                    );
                     continue;
                 }
             };
@@ -532,15 +538,16 @@ impl SimulationController {
             let dispatch = match dispatch {
                 Ok(dispatch) => dispatch,
                 Err(error) => {
-                    let campaign = self
-                        .active_campaign
-                        .as_mut()
-                        .expect("campaign is reinstalled before authorization is handled");
-                    campaign.completed_count = campaign.completed_count.saturating_add(1);
-                    campaign.failed_count = campaign.failed_count.saturating_add(1);
                     state.push_sim_message(ConsoleMessage::error(format!(
                         "Campaign member '{member_name}' could not be authorized: {error}"
                     )));
+                    self.refuse_campaign_member(
+                        state,
+                        membership.member_index(),
+                        &member_name,
+                        super::CampaignMemberRefusal::Authorization,
+                        &error,
+                    );
                     continue;
                 }
             };
@@ -549,21 +556,53 @@ impl SimulationController {
                 membership.member_index(),
                 membership.member_count()
             )));
+            let member_index = membership.member_index();
             match self.start_authorized_dispatch(state, dispatch, Some(membership)) {
                 Ok(()) => return Ok(()),
                 Err(error) => {
-                    let campaign = self
-                        .active_campaign
-                        .as_mut()
-                        .expect("campaign remains installed during member dispatch");
-                    campaign.completed_count = campaign.completed_count.saturating_add(1);
-                    campaign.failed_count = campaign.failed_count.saturating_add(1);
                     state.push_sim_message(ConsoleMessage::error(format!(
                         "Campaign member '{member_name}' could not start: {error}"
                     )));
+                    self.refuse_campaign_member(
+                        state,
+                        member_index,
+                        &member_name,
+                        super::CampaignMemberRefusal::Start,
+                        &error.to_string(),
+                    );
                 }
             }
         }
+    }
+
+    /// Count a member that never became a run among the campaign's failures,
+    /// and file it where its failures would have been filed had it run.
+    ///
+    /// The Console line is the caller's, which knows what refused it, and it
+    /// is the event. This is the condition the event leaves: the campaign's
+    /// outcome is short one member, and the Problems page names that member
+    /// beside the ones that ran until a later run supersedes them all.
+    fn refuse_campaign_member(
+        &mut self,
+        state: &mut AppState,
+        member_index: u32,
+        member_name: &str,
+        refusal: super::CampaignMemberRefusal,
+        error: &str,
+    ) {
+        let campaign = self
+            .active_campaign
+            .as_mut()
+            .expect("a member is refused while its campaign is installed");
+        campaign.completed_count = campaign.completed_count.saturating_add(1);
+        campaign.failed_count = campaign.failed_count.saturating_add(1);
+        state.publish_campaign_member_refusal(
+            campaign.id,
+            member_index,
+            member_name,
+            refusal,
+            error,
+        );
     }
 
     pub(super) fn complete_campaign_member(&mut self, state: &mut AppState, succeeded: bool) {

@@ -442,6 +442,14 @@ pub(in crate::workbench) enum DiagnosticInputs {
     /// One retained run, and the configured design and solver setup it was
     /// dispatched against.
     Run { run_sequence: u64 },
+    /// One member of a campaign that never became a run — refused when it
+    /// was authorized or when it was started — and the configured design and
+    /// solver setup it was to run against. There is no run to retain, so the
+    /// member is named by its campaign and its place in it.
+    CampaignMember {
+        campaign: crate::product::SimulationCampaignId,
+        member_index: u32,
+    },
 }
 
 impl DiagnosticInputs {
@@ -450,7 +458,7 @@ impl DiagnosticInputs {
             Self::DesignCheck { .. } => DiagnosticOwner::DesignRules,
             Self::SymbolPins { .. } => DiagnosticOwner::SymbolPins,
             Self::Dispatch => DiagnosticOwner::Dispatch,
-            Self::Run { .. } => DiagnosticOwner::Run,
+            Self::Run { .. } | Self::CampaignMember { .. } => DiagnosticOwner::Run,
         }
     }
 
@@ -478,6 +486,10 @@ impl DiagnosticInputs {
                 "the design or solver setup run {run_sequence} was dispatched against has changed \
                  since this was reported"
             ),
+            Self::CampaignMember { member_index, .. } => format!(
+                "the design or solver setup campaign member {member_index} was to run against has \
+                 changed since this was reported"
+            ),
         }
     }
 
@@ -500,6 +512,11 @@ impl DiagnosticInputs {
             }
             Self::Dispatch => owner.to_owned(),
             Self::Run { run_sequence } => format!("{owner}\u{1f}{run_sequence:020}"),
+            // After every run, and in the order the campaign dispatched them.
+            Self::CampaignMember {
+                campaign,
+                member_index,
+            } => format!("{owner}\u{1f}member\u{1f}{campaign}\u{1f}{member_index:010}"),
         }
     }
 
@@ -547,29 +564,44 @@ impl DiagnosticInputs {
                     .runs
                     .iter()
                     .any(|run| run.id == *run_sequence);
-                // A failure names conductors and devices; an edited design is
-                // no longer the one those names were read off. The design is
-                // the configured one — not whichever view the reader happens
-                // to have open, which staled a failure on opening another view
-                // and un-staled it on coming back — and it is its content: a
-                // value edit is the commonest repair for a run that would not
-                // converge, and the topology counter ignores it. The solver
-                // setup is the run's other input, and the other repair.
-                digest_of(&(
-                    state.workspace.content.project.id(),
-                    run_sequence,
-                    retained,
-                    state.workspace.content.simulation_root_reference().key(),
-                    scope.configured_content()?,
-                    state.active_plan_revision(),
-                    state.sim_setup.options.to_spice_options(),
-                    format!("{:?}", state.sim_setup.reference_pvt.process),
-                    state.sim_setup.reference_pvt.temperature_celsius.to_bits(),
-                    state.model_library_manager.design_inspection_catalog_key(),
-                ))
+                dispatched_setup_digest(scope, &(run_sequence, retained))
             }
+            // A refused member is decided as a member that ran is: against
+            // the design and setup it was to solve.
+            Self::CampaignMember {
+                campaign,
+                member_index,
+            } => dispatched_setup_digest(scope, &(campaign, member_index)),
         }
     }
+}
+
+/// The configured design and solver setup a run is solved against, for the
+/// run or campaign member `identity` names.
+///
+/// A failure names conductors and devices; an edited design is no longer the
+/// one those names were read off. The design is the configured one — not
+/// whichever view the reader happens to have open, which staled a failure on
+/// opening another view and un-staled it on coming back — and it is its
+/// content: a value edit is the commonest repair for a run that would not
+/// converge, and the topology counter ignores it. The solver setup is the
+/// run's other input, and the other repair.
+fn dispatched_setup_digest(
+    scope: &DigestScope<'_>,
+    identity: &impl serde::Serialize,
+) -> Result<ContentDigest, String> {
+    let state = scope.state;
+    digest_of(&(
+        state.workspace.content.project.id(),
+        identity,
+        state.workspace.content.simulation_root_reference().key(),
+        scope.configured_content()?,
+        state.active_plan_revision(),
+        state.sim_setup.options.to_spice_options(),
+        format!("{:?}", state.sim_setup.reference_pvt.process),
+        state.sim_setup.reference_pvt.temperature_celsius.to_bits(),
+        state.model_library_manager.design_inspection_catalog_key(),
+    ))
 }
 
 /// The configured root, its revision, and the topology version of every cell
@@ -788,6 +820,24 @@ impl DiagnosticStore {
             .collect()
     }
 
+    /// The campaign members the store holds as refused, as (the place each
+    /// stands in, subject, message), for the controller's tests.
+    #[cfg(test)]
+    pub(crate) fn published_member_refusals(&self) -> Vec<(String, String, String)> {
+        self.batches
+            .values()
+            .filter(|batch| matches!(batch.inputs, DiagnosticInputs::CampaignMember { .. }))
+            .flat_map(|batch| batch.records.iter())
+            .map(|record| {
+                (
+                    record.key.document.to_string(),
+                    record.subject.object.clone(),
+                    record.message.clone(),
+                )
+            })
+            .collect()
+    }
+
     pub(in crate::workbench) fn request_route(&mut self, route: DiagnosticRoute) {
         self.pending_route = Some(route);
     }
@@ -979,17 +1029,38 @@ impl AppState {
     ///
     /// Members of one campaign do not supersede each other. They are
     /// dispatched one after another, but each measures its own configuration,
-    /// and a campaign's outcome is all of them.
+    /// and a campaign's outcome is all of them — the members that were
+    /// refused before they became runs included.
     pub(crate) fn supersede_run_diagnostics(&mut self, dispatched: u64) {
         let campaign = self.run_campaign(dispatched);
+        self.supersede_run_outcomes(Some(dispatched), campaign);
+    }
+
+    /// Withdraw every run outcome except the dispatched run's own and, inside
+    /// a campaign, the outcomes of that campaign's other members.
+    ///
+    /// A campaign member refused before it became a run is an attempt to
+    /// measure the design all the same, so it supersedes what earlier runs
+    /// reported exactly as a dispatched member does — and a campaign whose
+    /// every member is refused still replaces the last campaign's refusals
+    /// rather than standing beside them under the same identities.
+    fn supersede_run_outcomes(
+        &mut self,
+        dispatched: Option<u64>,
+        campaign: Option<crate::product::SimulationCampaignId>,
+    ) {
         let superseded: Vec<DiagnosticInputs> = self
             .diagnostics
             .batches()
             .filter(|batch| match batch.inputs {
                 DiagnosticInputs::Run { run_sequence } => {
-                    run_sequence != dispatched
+                    Some(run_sequence) != dispatched
                         && (campaign.is_none() || self.run_campaign(run_sequence) != campaign)
                 }
+                DiagnosticInputs::CampaignMember {
+                    campaign: member_campaign,
+                    ..
+                } => campaign != Some(member_campaign),
                 DiagnosticInputs::DesignCheck { .. }
                 | DiagnosticInputs::SymbolPins { .. }
                 | DiagnosticInputs::Dispatch => false,
@@ -1007,7 +1078,9 @@ impl AppState {
     /// A pruned, deleted or cleared run has no outcome left to state: its
     /// dataset is gone and its failure cannot be opened. Removing a run is
     /// spread over the simulation state, so this is asked at the frame
-    /// boundary as well as wherever the shell itself retires a run.
+    /// boundary as well as wherever the shell itself retires a run. A refused
+    /// campaign member never had a run to retire; it stands until a later
+    /// measurement supersedes it.
     pub(crate) fn withdraw_retired_run_diagnostics(&mut self) {
         let retired: Vec<DiagnosticInputs> = self
             .diagnostics
@@ -1021,7 +1094,8 @@ impl AppState {
                     .all(|run| run.id != run_sequence),
                 DiagnosticInputs::DesignCheck { .. }
                 | DiagnosticInputs::SymbolPins { .. }
-                | DiagnosticInputs::Dispatch => false,
+                | DiagnosticInputs::Dispatch
+                | DiagnosticInputs::CampaignMember { .. } => false,
             })
             .map(|batch| batch.inputs.clone())
             .collect();
@@ -1278,7 +1352,8 @@ mod tests {
                 DiagnosticInputs::Run { run_sequence } => Some(run_sequence),
                 DiagnosticInputs::DesignCheck { .. }
                 | DiagnosticInputs::SymbolPins { .. }
-                | DiagnosticInputs::Dispatch => None,
+                | DiagnosticInputs::Dispatch
+                | DiagnosticInputs::CampaignMember { .. } => None,
             })
             .collect()
     }
@@ -1337,6 +1412,125 @@ mod tests {
         state.simulation.clear_runs();
         state.withdraw_retired_run_diagnostics();
         assert!(run_batches(&state).is_empty());
+    }
+
+    /// A campaign member refused at authorization is a finding about that
+    /// member, filed where its failures would have been had it run. It
+    /// supersedes what an earlier run reported, stands beside the members of
+    /// its own campaign, goes stale with the design, and gives way to the
+    /// next run outside the campaign. It used to reach only the Console.
+    #[test]
+    fn a_member_refused_at_authorization_stands_until_a_later_run_supersedes_it() {
+        use crate::simulation::controller::CampaignMemberRefusal;
+
+        let mut state = AppState::default();
+        let campaign = crate::product::SimulationCampaignId::new();
+        let mut sibling = crate::state::SimulationRun::new(5);
+        sibling
+            .set_campaign_membership(
+                crate::state::SimulationCampaignMembership::new(campaign, "Nightly", 2, 2)
+                    .expect("the fixture membership is valid"),
+            )
+            .expect("a fresh run joins its campaign");
+        state.simulation.retained.runs = vec![
+            crate::state::SimulationRun::new(4),
+            sibling,
+            crate::state::SimulationRun::new(6),
+        ]
+        .into();
+        state.publish_run_failure("Transient", "Analysis failed: tran", None, 4);
+
+        state.publish_campaign_member_refusal(
+            campaign,
+            1,
+            "Slow corner",
+            CampaignMemberRefusal::Authorization,
+            "could not authorize member: permit generation exhausted",
+        );
+        assert_eq!(
+            state.diagnostics.published_member_refusals(),
+            [(
+                "simulation-run/member-1".to_owned(),
+                "Slow corner · campaign member 1".to_owned(),
+                "The member could not be authorized: could not authorize member: permit \
+                 generation exhausted"
+                    .to_owned(),
+            )],
+        );
+        assert!(
+            run_batches(&state).is_empty(),
+            "the campaign supersedes the outcome an earlier run reported"
+        );
+        let refusal = state
+            .diagnostics
+            .batches()
+            .find(|batch| matches!(batch.inputs, DiagnosticInputs::CampaignMember { .. }))
+            .expect("the refusal is filed")
+            .clone();
+        assert_eq!(refusal.records[0].level, DiagnosticLevel::Error);
+        assert_eq!(&*refusal.records[0].key.code, "RUN-MEMBER-UNAUTHORIZED");
+        assert!(state.diagnostic_batch_standing(&refusal).is_current());
+
+        // The campaign's next member is dispatched beside it.
+        state.supersede_run_diagnostics(5);
+        assert_eq!(
+            state.diagnostics.published_member_refusals().len(),
+            1,
+            "members of one campaign do not supersede each other"
+        );
+
+        // An edit to the configured design stales it, as it stales a run.
+        state.schematic.add_component(
+            crate::state::ComponentType::Resistor,
+            crate::state::Point::new(0, 0),
+        );
+        assert_eq!(
+            state.diagnostic_batch_standing(&refusal),
+            BatchStanding::Stale
+        );
+
+        // The next run outside the campaign is a new measurement.
+        state.supersede_run_diagnostics(6);
+        assert!(state.diagnostics.published_member_refusals().is_empty());
+    }
+
+    /// A campaign run again whose member is refused again replaces the last
+    /// refusal of that member, under the same identity, rather than being
+    /// refused as a second finding with it.
+    #[test]
+    fn a_rerun_campaign_replaces_the_refusal_of_the_same_member() {
+        use crate::simulation::controller::CampaignMemberRefusal;
+
+        let mut state = AppState::default();
+        let refuse = |state: &mut AppState, campaign| {
+            state.publish_campaign_member_refusal(
+                campaign,
+                2,
+                "Slow corner",
+                CampaignMemberRefusal::Start,
+                "run sequence is exhausted",
+            );
+        };
+        refuse(&mut state, crate::product::SimulationCampaignId::new());
+        let first = state
+            .diagnostics
+            .batches()
+            .flat_map(|batch| batch.records.iter())
+            .map(|record| record.canonical.diagnostic_id)
+            .next()
+            .expect("the refusal is filed");
+        state.diagnostics.set_current_finding(Some(first));
+        let entries_before = state.log_buffer.entries().count();
+
+        refuse(&mut state, crate::product::SimulationCampaignId::new());
+
+        assert_eq!(state.diagnostics.batches().count(), 1);
+        assert_eq!(state.diagnostics.current_finding(), Some(first));
+        assert_eq!(
+            state.log_buffer.entries().count(),
+            entries_before,
+            "the store refused nothing"
+        );
     }
 
     /// A run failure names conductors in the configured design. Opening

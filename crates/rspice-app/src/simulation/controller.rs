@@ -112,6 +112,16 @@ pub(crate) struct SimulationCampaignDispatchReceipt {
     pub task_count: usize,
 }
 
+/// Why a campaign member never became a run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CampaignMemberRefusal {
+    /// Its frozen snapshot could not be authorized for dispatch.
+    Authorization,
+    /// It could not be started: its place in the campaign could not be
+    /// recorded, or the run it was authorized for could not be opened.
+    Start,
+}
+
 //=============================================================================
 // Simulation Controller
 //=============================================================================

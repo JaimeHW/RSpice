@@ -118,6 +118,68 @@ impl AppState {
         self.state_refusal(published);
     }
 
+    /// One record for a campaign member that never became a run.
+    ///
+    /// Filed as the members that ran file their failures — scoped to the
+    /// member's place in the campaign and named by the plan it was to run —
+    /// so the Problems page lists it beside them, and a later run supersedes
+    /// it as it supersedes theirs. It used to reach only the Console, which
+    /// left a campaign with a refused member reading as clean on the page.
+    ///
+    /// A refusal is an attempt to measure the design all the same, so it
+    /// supersedes what earlier runs and campaigns reported before it is
+    /// filed: a re-run whose member is refused again replaces the last
+    /// refusal rather than colliding with its identity.
+    pub(crate) fn publish_campaign_member_refusal(
+        &mut self,
+        campaign: crate::product::SimulationCampaignId,
+        member_index: u32,
+        member: &str,
+        refusal: crate::simulation::controller::CampaignMemberRefusal,
+        error: &str,
+    ) {
+        use crate::simulation::controller::CampaignMemberRefusal;
+
+        let (code, message) = match refusal {
+            CampaignMemberRefusal::Authorization => (
+                "RUN-MEMBER-UNAUTHORIZED",
+                format!("The member could not be authorized: {error}"),
+            ),
+            CampaignMemberRefusal::Start => (
+                "RUN-MEMBER-NOT-STARTED",
+                format!("The member could not be started: {error}"),
+            ),
+        };
+        let key = FindingKey::new(RUN_PRODUCER, code, member_scope(member_index), member);
+        let revision = self.workspace.content.project.revision().get();
+        let Some(canonical) = mint_canonical(
+            std::slice::from_ref(&key),
+            revision,
+            &format!("campaign:{campaign}:member:{member_index}"),
+        )
+        .pop() else {
+            return;
+        };
+        let record = DiagnosticRecord::new(
+            canonical,
+            DiagnosticLevel::Error,
+            DiagnosticSubject::new(
+                self.workspace.content.project.id(),
+                format!("{member} · campaign member {member_index}"),
+            ),
+            message,
+        )
+        .keyed(key);
+        self.supersede_run_outcomes(None, Some(campaign));
+        self.publish_or_state_refusal(
+            DiagnosticInputs::CampaignMember {
+                campaign,
+                member_index,
+            },
+            vec![record],
+        );
+    }
+
     /// Take the digest a dispatched run's failures will be decided against.
     ///
     /// Taken here because this is the design and setup the run solves. Taken
@@ -229,8 +291,13 @@ fn run_scope(state: &AppState, run_sequence: u64) -> String {
         .and_then(|run| run.campaign_membership())
         .map_or_else(
             || RUN_DOCUMENT.to_owned(),
-            |membership| format!("{RUN_DOCUMENT}/member-{}", membership.member_index()),
+            |membership| member_scope(membership.member_index()),
         )
+}
+
+/// The place one campaign member stands in, whether it ran or was refused.
+fn member_scope(member_index: u32) -> String {
+    format!("{RUN_DOCUMENT}/member-{member_index}")
 }
 
 /// A stable key of the destination a dispatch finding names.
