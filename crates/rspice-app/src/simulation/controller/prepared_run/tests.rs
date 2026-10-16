@@ -1751,11 +1751,71 @@ fn a_generated_run_set_names_its_unresolved_device_models() {
     assert!(named.contains("diode"), "{error}");
 }
 
+/// A design whose root is sound and whose instantiated cell is not cannot be
+/// prepared, because the source checks read the whole hierarchy.
+///
+/// Before they did, an open one level down was invisible to the run gate: the
+/// deck emitted, the design checks passed on the root alone, and the solver
+/// met a floating node nobody had been told about. The deck still emits here —
+/// generation reports no error — so this refusal is the checks' judgement
+/// about the circuit, not the generator's about the deck.
+#[test]
+fn an_error_inside_an_instantiated_cellview_refuses_the_run() {
+    use crate::state::{
+        CellViewRef, ComponentType, Library, LibraryCellInstance, Point, SchematicState, View,
+        ViewType,
+    };
+
+    let mut state = runnable_state();
+
+    // One resistor, both legs unwired: each of its nodes carries a single
+    // connection, which is an open circuit wherever it is drawn.
+    let mut master = SchematicState::default();
+    master.add_component(ComponentType::Resistor, Point::new(30, 0));
+
+    if state.library_manager.get_library("user").is_none() {
+        state.library_manager.add_library(Library::new("user"));
+    }
+    let cell = state
+        .library_manager
+        .get_library_mut("user")
+        .expect("the project library")
+        .get_or_create_cell("dangling");
+    if cell.get_view("schematic").is_none() {
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+    }
+    state
+        .workspace
+        .insert_schematic_editor(CellViewRef::new("user", "dangling", "schematic").key(), master);
+
+    let mut binding = LibraryCellInstance::new("user", "dangling", "schematic");
+    binding.bind_interface(&[]);
+    state
+        .schematic
+        .add_library_cell_component(Point::new(400, 400), binding);
+    state.dialogs.drc_checked_version = state.schematic.topology_version();
+
+    let error = SimulationController::build_prepared_snapshot(
+        &state,
+        SimulationRunIntent::SimulateRunSet,
+    )
+    .expect_err("a cellview with an open node cannot be prepared");
+    assert_eq!(error.stage(), PreparationStage::DesignChecks);
+    assert!(
+        error.message().contains("error"),
+        "the refusal must say findings stand against the design: {error}"
+    );
+}
+
 /// One cell instantiated twice by the active schematic: the smallest design
 /// whose deck declares one master and instantiates two occurrences.
 ///
 /// The cell declares no interface, so the two placements add no node to the
-/// root and the divider fixture's own design checks still pass.
+/// root. Its contents still have to stand on their own: the design checks
+/// walk into every cellview the design instantiates, so a single unwired
+/// resistor left each of its two nodes with one connection — a `FloatingNode`
+/// error at every occurrence, which refuses the run. Two resistors across one
+/// pair of nodes is the smallest closed circuit a port-less cell can hold.
 fn author_two_occurrences_of_one_cell(state: &mut AppState) {
     use crate::state::{
         CellViewRef, ComponentType, Library, LibraryCellInstance, Point, SchematicState, View,
@@ -1764,6 +1824,9 @@ fn author_two_occurrences_of_one_cell(state: &mut AppState) {
 
     let mut master = SchematicState::default();
     master.add_component(ComponentType::Resistor, Point::new(30, 0));
+    master.add_component(ComponentType::Resistor, Point::new(30, 40));
+    master.add_wire(vec![Point::new(10, 0), Point::new(10, 40)]);
+    master.add_wire(vec![Point::new(50, 0), Point::new(50, 40)]);
 
     if state.library_manager.get_library("user").is_none() {
         state.library_manager.add_library(Library::new("user"));
