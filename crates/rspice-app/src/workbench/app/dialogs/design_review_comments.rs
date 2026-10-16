@@ -1181,8 +1181,14 @@ mod tests {
         }
     }
 
+    /// New comment opens the note form with the caret already in its field,
+    /// so the reader types rather than hunting for where to.
+    ///
+    /// The caret lands on the frame after the click, not the frame of it: a
+    /// command form asks for focus once its rows exist, and the click is what
+    /// builds them. One frame is nothing to a reader and everything to a test.
     #[test]
-    fn opening_input_follows_new_comment_click_in_the_same_frame() {
+    fn opening_input_follows_a_new_comment_click_onto_the_next_frame() {
         fn render(
             app: &mut RSpiceApp,
             ctx: &Context,
@@ -1239,16 +1245,23 @@ mod tests {
                 },
             ],
         );
+        // The release opens the note form and builds its rows. A command form
+        // asks for the caret once its rows exist, so this is the frame before
+        // the one that can be typed into.
+        let _ = render(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
         let _ = render(
             &mut app,
             &ctx,
             vec![
-                egui::Event::PointerButton {
-                    pos,
-                    button: egui::PointerButton::Primary,
-                    pressed: false,
-                    modifiers: egui::Modifiers::NONE,
-                },
                 egui::Event::Key {
                     key: egui::Key::A,
                     physical_key: Some(egui::Key::A),
