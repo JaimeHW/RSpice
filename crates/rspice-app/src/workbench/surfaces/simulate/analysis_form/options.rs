@@ -217,6 +217,7 @@ fn option_meaning(option: NumericOverrideOption) -> &'static str {
         O::Vntol => "Absolute voltage tolerance for Newton convergence",
         O::ResidualReltol => "Relative tolerance on the KCL residual for Newton convergence",
         O::Gmin => "Conductance added across every junction; 0 adds none",
+        O::Rshunt => "Resistance from every node to ground, in ohms",
         O::Itl1 => "Maximum Newton iterations for the DC operating point",
         O::Itl4 => "Maximum Newton iterations per transient step",
         O::GminStepping => "Retry a failed operating point by stepping Gmin down",

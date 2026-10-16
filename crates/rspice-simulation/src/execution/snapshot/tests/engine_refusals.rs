@@ -68,6 +68,45 @@ fn rshunt_in_the_deck_clears_the_forced_island() {
     assert!(refusals.is_empty(), "{refusals:?}");
 }
 
+/// The shunt stated for one analysis, as the solver catalogue authors it,
+/// rides that analysis's own deck and clears the refusal for it alone.
+#[test]
+fn a_node_shunt_stated_for_one_analysis_clears_that_analysis_alone() {
+    use rspice_simulation_contract::analysis_kind::AnalysisKind;
+    use rspice_simulation_contract::numeric_override::{
+        AnalysisNumericOverride, NumericOverrideOption, SolverOwnership,
+    };
+
+    let mut record = AnalysisNumericOverride::default();
+    record
+        .set_for_instance(
+            AnalysisKind::OperatingPoint,
+            SolverOwnership::NONE,
+            NumericOverrideOption::Rshunt,
+            "1e9",
+        )
+        .expect("an operating point carries a node shunt");
+    let mut shunted = task();
+    shunted.numeric_override = Some(record);
+
+    let refusals = refusals_of(
+        FORCED_ISLAND,
+        vec![
+            prepared("op", "DC Operating Point", task()),
+            prepared("shunted", "Shunted Operating Point", shunted),
+        ],
+    );
+
+    assert_eq!(refusals.len(), 1, "{refusals:?}");
+    assert_eq!(
+        refusals[0].tasks,
+        [RefusedTask {
+            analysis: instance_id("op"),
+            label: "DC Operating Point".to_owned(),
+        }]
+    );
+}
+
 /// A source across a winding is a loop of fixed branch voltages in the DC
 /// solve, which every operating point refuses. A transient steps the winding
 /// as an impedance; its startup is left to the engine and is not claimed.

@@ -9,7 +9,7 @@ use super::{
     OverrideValueKind,
 };
 
-pub(super) const GLOBAL: [OptionSpec; 21] = [
+pub(super) const GLOBAL: [OptionSpec; 22] = [
     // ---------------------------------------------------------- convergence
     OptionSpec {
         option: NumericOverrideOption::Reltol,
@@ -77,6 +77,21 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         value_hint: "conductance, 0 for none",
         config_field: "convergence_config.junction_gmin_target",
         consumer: "engine/convergence/stamping.rs:8 · effective_device_junction_gmin",
+        reach: OptionReach::EverySolve,
+    },
+    // A resistor from every node to ground, not a floor: it is in the circuit
+    // the build makes, so it is also what gives a forced floating node the DC
+    // path the shared DC-bias boundary checks for.
+    OptionSpec {
+        option: NumericOverrideOption::Rshunt,
+        key: "RSHUNT",
+        package: OptionPackage::Global,
+        section: OverrideSection::Convergence,
+        label: "Node shunt to ground · RSHUNT",
+        value_kind: OverrideValueKind::PositiveReal,
+        value_hint: "resistance, ohms",
+        config_field: "rshunt",
+        consumer: "engine/stamping.rs:430 · nodal_shunt_conductance",
         reach: OptionReach::EverySolve,
     },
     OptionSpec {

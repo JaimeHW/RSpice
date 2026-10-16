@@ -57,6 +57,16 @@ pub struct SimulationOptions {
     pub pseudo_transient: bool,
     pub arc_length: bool,
     pub gmin: f64,
+    /// `.OPTIONS RSHUNT`: a resistance, in ohms, from every node to ground.
+    /// `None` places none.
+    ///
+    /// Unlike GMIN it is part of the circuit, not of the numerical policy: it
+    /// conducts in every analysis, is a noise source, and gives a node that a
+    /// source forces current into a DC path the engine accepts. A preset
+    /// therefore neither sets nor clears it. Not serialized while unset, so a
+    /// plan that never states one keeps the bytes it had before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rshunt: Option<f64>,
     pub damping: DampingStrategy,
     pub method: IntegrationMethod,
     pub solver: MatrixSolver,
@@ -118,6 +128,8 @@ struct PersistedSimulationOptions {
     pseudo_transient: bool,
     arc_length: bool,
     gmin: f64,
+    #[serde(default)]
+    rshunt: Option<f64>,
     damping: DampingStrategy,
     method: IntegrationMethod,
     solver: MatrixSolver,
@@ -153,6 +165,7 @@ impl From<PersistedSimulationOptions> for SimulationOptions {
             pseudo_transient: fields.pseudo_transient,
             arc_length: fields.arc_length,
             gmin: fields.gmin,
+            rshunt: fields.rshunt,
             damping: fields.damping,
             method: fields.method,
             solver: fields.solver,
@@ -190,6 +203,7 @@ impl Default for SimulationOptions {
             pseudo_transient: true,
             arc_length: false,
             gmin: 1e-12,
+            rshunt: None,
             damping: DampingStrategy::VoltageLimiting,
             method: IntegrationMethod::TrapGear,
             solver: MatrixSolver::Lu,
@@ -271,14 +285,15 @@ impl SimulationOptions {
     ///
     /// Compared by serialized value rather than by a remembered "last preset
     /// pressed": editing a numerical field leaves the preset. Compatibility
-    /// is selected independently and is preserved when applying a preset.
-    /// Returns `None` for options that match no preset.
+    /// and the node shunt are selected independently and are preserved when
+    /// applying a preset. Returns `None` for options that match no preset.
     #[must_use]
     pub fn preset_name(&self) -> Option<&'static str> {
         let current = serde_json::to_vec(self).ok()?;
         Self::PRESETS.iter().find_map(|(label, build)| {
             let mut preset = build();
             preset.compatibility = self.compatibility;
+            preset.rshunt = self.rshunt;
             serde_json::to_vec(&preset)
                 .ok()
                 .filter(|preset| *preset == current)
@@ -423,6 +438,9 @@ impl SimulationOptions {
         for (name, value) in [
             ("transient_lte_reltol", self.transient_lte_reltol),
             ("transient_lte_abstol", self.transient_lte_abstol),
+            // The parser refuses `RSHUNT=0` and below: a zero-ohm shunt would
+            // short every node to ground.
+            ("rshunt", self.rshunt),
         ] {
             if let Some(value) = value
                 && (!value.is_finite() || value <= 0.0)
@@ -523,6 +541,11 @@ impl SimulationOptions {
         }
         if self.gmin != default.gmin {
             lines.push(format!("+ GMIN={:e}", self.gmin));
+        }
+        // Stated only when asked for: with none, the deck holds no resistor
+        // nobody drew.
+        if let Some(rshunt) = self.rshunt {
+            lines.push(format!("+ RSHUNT={rshunt:e}"));
         }
         if self.gmin_stepping != default.gmin_stepping {
             lines.push(format!("+ GMINSTEPPING={}", u8::from(self.gmin_stepping)));

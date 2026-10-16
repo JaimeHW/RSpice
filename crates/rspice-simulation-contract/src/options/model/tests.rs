@@ -139,6 +139,54 @@ fn a_stated_statistical_seed_reaches_the_deck() {
     );
 }
 
+/// The node shunt reaches the engine on the deck's own card, the parser reads
+/// it back as the resistance that was set, and a plan that sets none writes no
+/// key at all and serializes as it did before the field existed.
+#[test]
+fn a_stated_node_shunt_is_on_the_deck_and_an_unset_one_is_nowhere() {
+    let options = SimulationOptions {
+        rshunt: Some(1.0e9),
+        ..SimulationOptions::default()
+    };
+    let card = options.to_spice_options();
+    assert!(card.contains("+ RSHUNT=1e9"), "{card}");
+    let deck = format!("node shunt\nR1 a 0 1k\n{card}\n.end\n");
+    let parsed = rspice_core::Netlist::parse(&deck).expect("the options card parses");
+    assert_eq!(parsed.options.rshunt, Some(1.0e9));
+
+    let unset = SimulationOptions::default();
+    assert!(!unset.to_spice_options().contains("RSHUNT"));
+    let persisted = serde_json::to_value(&unset).expect("options encode");
+    assert!(
+        persisted.get("rshunt").is_none(),
+        "an unset shunt adds no key to the project"
+    );
+    let restored: SimulationOptions =
+        serde_json::from_value(serde_json::to_value(&options).expect("options encode"))
+            .expect("options decode");
+    assert_eq!(restored.rshunt, Some(1.0e9));
+}
+
+/// A preset is a numerical policy. Applying one, or reading which one is in
+/// force, neither places nor removes the resistor the plan put in the circuit.
+#[test]
+fn a_node_shunt_is_not_part_of_any_preset() {
+    let shunted = SimulationOptions {
+        rshunt: Some(1.0e9),
+        ..SimulationOptions::default()
+    };
+    assert_eq!(shunted.preset_name(), Some("Balanced"));
+    assert!(
+        SimulationOptions {
+            rshunt: Some(0.0),
+            ..SimulationOptions::default()
+        }
+        .validate()
+        .is_err(),
+        "a zero-ohm shunt would short every node to ground"
+    );
+}
+
 #[test]
 fn no_seed_emits_no_seed_line() {
     assert!(
