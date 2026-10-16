@@ -158,7 +158,7 @@ const LAYERS: &[(&str, u32)] = &[
     // `.lib` model-library and Verilog-A pack discovery. Above `netlist`
     // because resolving a library produces deck content.
     ("library", 7),
-    // Device model evaluation, plus the Verilog-A and FFI extension points.
+    // Device model evaluation, including the Verilog-A device integration.
     ("device", 8),
     // The XSPICE code-model subsystem: a device extension with its own event
     // queue, so it sits just above `device`.
