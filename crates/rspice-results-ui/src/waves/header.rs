@@ -1,6 +1,7 @@
 //! Waveform pane legend, unit tag, visibility controls and Y-axis actions.
 
 use super::{ReadoutPolicy, StripModel, StripTrace, UnitPane, cursor_interpolation};
+use crate::strip::HEADER_PADDING_X;
 use egui::Ui;
 use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_ui_kit::{
@@ -69,6 +70,52 @@ pub struct UnitPaneHeaderResponse {
     pub toggle_log_y: bool,
 }
 
+/// The three regions of a pane header, across its row.
+struct PaneHeaderRegions {
+    unit: egui::Rect,
+    legend: egui::Rect,
+    actions: egui::Rect,
+}
+
+/// Where those regions sit.
+///
+/// Arithmetic rather than inline layout because the trailing edge is the
+/// whole point: this row and the strip header above it are two rows of chrome
+/// in one card, and this row used to run its log toggle into the pane edge
+/// while the row above it stopped [`HEADER_PADDING_X`] short. A function can
+/// be asserted about without standing up a strip, a host and a projection.
+fn header_regions(rect: egui::Rect, unit_width: f32, action_width: f32) -> PaneHeaderRegions {
+    // The unit tag's own inset is its floor as well as its start: a pane
+    // narrower than the inset handed the tag a rectangle whose right edge was
+    // left of its left one, which clips to nothing and reads as a widget that
+    // vanished rather than one that had no room.
+    let unit_left = rect.left() + 5.0;
+    let unit = egui::Rect::from_min_max(
+        egui::pos2(unit_left, rect.top() + 1.5),
+        egui::pos2(
+            (rect.left() + unit_width).min(rect.right()).max(unit_left),
+            rect.bottom() - 1.5,
+        ),
+    );
+    let actions_right = (rect.right() - HEADER_PADDING_X).max(unit.right());
+    let actions = egui::Rect::from_min_max(
+        egui::pos2((actions_right - action_width).max(unit.right()), rect.top()),
+        egui::pos2(actions_right, rect.bottom()),
+    );
+    let legend = egui::Rect::from_min_max(
+        egui::pos2(unit.right() + 3.0, rect.top()),
+        egui::pos2(
+            (actions.left() - 3.0).max(unit.right() + 3.0),
+            rect.bottom(),
+        ),
+    );
+    PaneHeaderRegions {
+        unit,
+        legend,
+        actions,
+    }
+}
+
 /// Draw the legend using design-aware names while keeping source identities intact.
 pub fn show_header(
     ui: &mut Ui,
@@ -117,27 +164,11 @@ pub fn show_header(
             .x
     });
     let unit_width = (unit_label_width + 28.0).max(46.0);
-    let unit_rect = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + 5.0, rect.top() + 1.5),
-        egui::pos2(
-            (rect.left() + unit_width).min(rect.right()),
-            rect.bottom() - 1.5,
-        ),
-    );
-    let actions_rect = egui::Rect::from_min_max(
-        egui::pos2(
-            (rect.right() - action_width).max(unit_rect.right()),
-            rect.top(),
-        ),
-        rect.right_bottom(),
-    );
-    let legend_rect = egui::Rect::from_min_max(
-        egui::pos2(unit_rect.right() + 3.0, rect.top()),
-        egui::pos2(
-            (actions_rect.left() - 3.0).max(unit_rect.right() + 3.0),
-            rect.bottom(),
-        ),
-    );
+    let PaneHeaderRegions {
+        unit: unit_rect,
+        legend: legend_rect,
+        actions: actions_rect,
+    } = header_regions(rect, unit_width, action_width);
 
     ui.scope_builder(
         egui::UiBuilder::new()
@@ -304,4 +335,46 @@ pub fn show_header(
         },
     );
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Both rows of a strip's chrome stop on one rule.
+    ///
+    /// The pane header's actions used to be laid out against `rect.right()`,
+    /// so the log toggle sat flush with the pane edge under a strip header
+    /// whose own controls stopped 10 px short — two rows of one card trailing
+    /// at 10 px and 0 px.
+    #[test]
+    fn the_pane_header_trails_on_the_strip_header_s_own_inset() {
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 28.0), egui::vec2(900.0, 25.0));
+        let regions = header_regions(rect, 46.0, 58.0);
+        assert!(
+            (rect.right() - regions.actions.right() - HEADER_PADDING_X).abs() < f32::EPSILON,
+            "actions end at {}, not {} from the pane edge",
+            regions.actions.right(),
+            HEADER_PADDING_X
+        );
+        assert!(regions.actions.width() >= 58.0, "the actions lost room");
+        assert!(
+            regions.legend.right() <= regions.actions.left(),
+            "the legend runs into the actions"
+        );
+    }
+
+    /// A pane too narrow for all three regions gives up the legend, never the
+    /// unit tag, and never hands anything a negative rectangle.
+    #[test]
+    fn a_narrow_pane_header_collapses_without_inverting_a_region() {
+        for width in [0.0_f32, 12.0, 46.0, 60.0, 120.0] {
+            let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(width, 25.0));
+            let regions = header_regions(rect, 46.0, 58.0);
+            for region in [regions.unit, regions.legend, regions.actions] {
+                assert!(region.width() >= 0.0, "{width}: inverted {region:?}");
+            }
+            assert!(regions.actions.left() >= regions.unit.right());
+        }
+    }
 }
