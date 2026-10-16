@@ -478,6 +478,13 @@ impl DiagnosticInputs {
                     revision,
                     closure,
                     state.active_plan_revision(),
+                    // The report these findings were published from. Every
+                    // edit to a simulation input — plan, models, technology,
+                    // bindings, solver options — invalidates it at its own
+                    // commit boundary, and so does dispatching the run it
+                    // authorized. Once it is gone its findings describe a
+                    // pass nobody can act on, so they read stale with it.
+                    state.workbench.preflight.report.is_some(),
                 ))
             }
             Self::Run { run_sequence } => {

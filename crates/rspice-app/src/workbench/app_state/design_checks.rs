@@ -144,6 +144,30 @@ impl AppState {
         self.publish_design_check_result(subject, config, result)
     }
 
+    /// The configuration the design rules are checked under for the
+    /// configured simulation root — the profile the Check command uses for
+    /// that cell view, so a pass run by either is the same evidence.
+    pub(in crate::workbench) fn configured_root_design_check_config(&self) -> DrcConfig {
+        design_check_config(self, &self.workspace.content.simulation_root_reference())
+    }
+
+    /// Publish the design-rule findings of the configured simulation root, as
+    /// the dispatch checks found them.
+    ///
+    /// Through the one producer the Check command publishes through, with the
+    /// root as the subject: the same records, the same identities, the same
+    /// digest and the same receipt. The dispatch checks used to re-file every
+    /// error as a blocker and every warning as an advisory beside the Check
+    /// command's own findings, so the page listed each one twice.
+    pub(in crate::workbench) fn publish_configured_root_design_check_result(
+        &mut self,
+        result: DrcResult,
+    ) -> Result<(), String> {
+        let subject = self.workspace.content.simulation_root_reference();
+        let config = design_check_config(self, &subject);
+        self.publish_design_check_result(subject, config, result)
+    }
+
     fn publish_design_check_result(
         &mut self,
         subject: CellViewRef,
@@ -158,22 +182,26 @@ impl AppState {
         let is_active_subject =
             owner_key(&subject) == owner_key(&self.workspace.content.active_schematic_reference());
         let input_digest = design_check_input_digest(self, &subject, &config)?;
-        // Canonical records are derived before the receipt is stored, because
+        // Canonical records are derived before anything is stored, because
         // one of them needs to ask the live drawing where its object is and
-        // the receipt's own insertion takes the state mutably.
+        // both insertions take the state mutably.
         let records = design_rule_records(self, &subject, &result, is_active_subject);
-        self.design_checks.insert(CellViewCheckReceipt {
-            project_id: self.workspace.content.project.id(),
-            subject: subject.clone(),
-            input_digest,
-            result,
-        });
+        // Published before the receipt is stored, because the store can
+        // refuse a batch and the receipt cannot: a receipt stored first would
+        // put findings on the canvas and the check pill that the Problems
+        // page, refusing them, does not list.
         self.publish_diagnostics(
             DiagnosticInputs::DesignCheck {
                 subject: subject.clone(),
             },
             records,
         )?;
+        self.design_checks.insert(CellViewCheckReceipt {
+            project_id: self.workspace.content.project.id(),
+            subject,
+            input_digest,
+            result,
+        });
         if is_active_subject {
             self.refresh_active_design_check_projection();
         }
@@ -208,6 +236,27 @@ impl AppState {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// The worst rule finding published for `subject`, first among equals in
+    /// the order the checks reported them — where a worst-first tour starts.
+    pub(in crate::workbench) fn worst_design_rule_finding(
+        &self,
+        subject: &CellViewRef,
+    ) -> Option<uuid::Uuid> {
+        let published = DiagnosticInputs::DesignCheck {
+            subject: subject.clone(),
+        };
+        self.diagnostics
+            .batches()
+            .find(|batch| batch.inputs == published)?
+            .records
+            .iter()
+            .fold(None, |worst: Option<&DiagnosticRecord>, record| match worst {
+                Some(worst) if worst.level >= record.level => Some(worst),
+                _ => Some(record),
+            })
+            .map(|record| record.canonical.diagnostic_id)
     }
 
     pub(crate) fn design_check_status(&self, subject: &CellViewRef) -> DesignCheckStatus<'_> {
@@ -409,9 +458,17 @@ fn project_root_reference(state: &AppState) -> CellViewRef {
     )
 }
 
+/// The profile one cell view is checked under.
+///
+/// A missing ground is a defect only where the design is simulated from: the
+/// project's top cell, and the configured simulation root, which is often a
+/// testbench beside it. Anywhere else a cell is a subcircuit, and its ground
+/// arrives through its ports.
 fn design_check_config(state: &AppState, subject: &CellViewRef) -> DrcConfig {
+    let subject = owner_key(subject);
     DrcConfig {
-        check_missing_ground: owner_key(subject) == owner_key(&project_root_reference(state)),
+        check_missing_ground: subject == owner_key(&project_root_reference(state))
+            || subject == owner_key(&state.workspace.content.simulation_root_reference()),
         ..DrcConfig::default()
     }
 }
@@ -658,6 +715,54 @@ mod tests {
         let remaining = state.design_rule_finding_identities(&subject);
         assert_eq!(remaining, vec![identities[0]]);
         assert_eq!(state.diagnostics.current_finding(), Some(remaining[0]));
+    }
+
+    /// The store can refuse a batch, so a receipt is stored only once the
+    /// store has taken the findings it describes. Stored first, it put
+    /// findings on the canvas and the check pill that the page did not list.
+    #[test]
+    fn a_refused_publication_stores_no_receipt() {
+        let mut state = AppState::default();
+        let subject = state.workspace.content.active_schematic_reference();
+        let location = open_pin(4, "R1", "A");
+        // A record that already holds the identity this pass will mint.
+        let key = FindingKey::new(
+            DESIGN_RULE_PRODUCER,
+            design_rule_code(rspice_design::drc::DrcViolationType::UnconnectedPin),
+            subject.key(),
+            location_key(&location),
+        );
+        let squatter = DiagnosticRecord::new(
+            mint_canonical(&[key], 0, "elsewhere").remove(0),
+            crate::workbench::app_state::diagnostic_store::DiagnosticLevel::Error,
+            DiagnosticSubject::new(state.workspace.content.project.id(), "elsewhere"),
+            "elsewhere",
+        );
+        state
+            .publish_diagnostics(DiagnosticInputs::Dispatch, vec![squatter])
+            .expect("the squatting record publishes");
+
+        let mut result = DrcResult::new();
+        result.add_violation(rspice_design::drc::DrcViolation::new(
+            1,
+            rspice_design::drc::DrcViolationType::UnconnectedPin,
+            "Pin R1.A is not connected",
+            location,
+        ));
+        result.completed = true;
+        let error = state
+            .publish_active_design_check_result(result)
+            .expect_err("the store refuses a second holder of one identity");
+
+        assert!(error.contains("duplicate canonical ID"), "{error}");
+        assert!(
+            matches!(
+                state.active_design_check_status(),
+                DesignCheckStatus::NotRun
+            ),
+            "a refused publication leaves no receipt behind"
+        );
+        assert!(state.dialogs.drc_results.is_none());
     }
 
     #[test]

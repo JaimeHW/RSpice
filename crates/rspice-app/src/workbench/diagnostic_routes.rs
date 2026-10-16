@@ -19,7 +19,7 @@ use crate::diagnostics::ConsoleMessage;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::state::{PreflightRemediation, ProjectPage, VerificationPage, Workspace};
+use crate::workbench::state::{PreflightRemediation, ProjectPage, SimulationPage, Workspace};
 
 /// Apply the route a consumer asked for, if one is outstanding.
 ///
@@ -125,12 +125,26 @@ pub(in crate::workbench) fn apply_remediation(
     remediation: PreflightRemediation,
 ) {
     match remediation {
+        // What the design checks found about the configured design, where it
+        // is drawn: the configured root opens, the Problems page lists its
+        // findings, and the worst of them is the current one. Nothing is
+        // re-run. Following a finding used to run the checks again and open
+        // the PVT & Monte Carlo page, which replaced the evidence the reader
+        // was following and then left them somewhere it was not.
         PreflightRemediation::DesignChecks => {
-            Command::RunChecks.execute(app);
-            Command::VerificationPage(VerificationPage::Yield).execute(app);
+            let root = app.state.workspace.content.simulation_root_reference();
+            app.state.open_workspace_view(root.clone());
+            Command::OpenWorkspace(Workspace::Design).execute(app);
+            if let Some(worst) = app.state.worst_design_rule_finding(&root) {
+                app.state.diagnostics.set_current_finding(Some(worst));
+            }
+            Command::OpenProblems.execute(app);
         }
+        // The plan's analyses, which is what every plan finding is about. The
+        // finding does not carry which analysis failed, so the page opens on
+        // the list of them rather than on one.
         PreflightRemediation::SimulationPlan => {
-            Command::OpenWorkspace(Workspace::Simulate).execute(app);
+            Command::SimulationPage(SimulationPage::Analyses).execute(app);
         }
         PreflightRemediation::ProjectTechnology => {
             Command::ProjectPage(ProjectPage::Dependencies).execute(app);

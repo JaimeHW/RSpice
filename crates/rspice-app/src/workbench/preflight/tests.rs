@@ -161,11 +161,11 @@ fn report_collects_all_independent_blocker_classes() {
         report.blockers
     );
     assert!(
-        report
+        !report
             .advisories
             .iter()
-            .any(|advisory| advisory.message == TECHNOLOGY_NOT_REQUIRED_ADVISORY),
-        "{:?}",
+            .any(|advisory| advisory.message.starts_with("Technology")),
+        "a technology nothing requires is not a finding: {:?}",
         report.advisories
     );
 }
@@ -394,7 +394,7 @@ fn a_valid_attached_technology_reports_no_technology_row_at_all() {
         !report
             .advisories
             .iter()
-            .any(|advisory| advisory.message == TECHNOLOGY_NOT_REQUIRED_ADVISORY),
+            .any(|advisory| advisory.message.starts_with("Technology")),
         "{:?}",
         report.advisories
     );
@@ -1043,4 +1043,188 @@ fn a_named_line_survives_the_parser_to_buffer_conversion() {
 
     assert_eq!(app.state.ui.netlist.cursor_line, 0);
     assert_eq!(app.state.ui.netlist.requested_line, Some(1));
+}
+
+/// A configured root that breaks the design rules, beside an open view the
+/// run does not execute.
+///
+/// The root holds a resistor and no ground, so its checks find an error and
+/// warnings. The reader is looking at another schematic.
+fn app_with_a_failing_root_and_an_unrelated_open_view() -> (RSpiceApp, crate::state::CellViewRef)
+{
+    use crate::state::{CellViewRef, ComponentType, Point, SchematicState};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.authority.open_session();
+    let root = app.state.workspace.content.simulation_root_reference();
+    app.state
+        .workspace
+        .schematic_editor_mut(&root.key())
+        .expect("default configured root buffer")
+        .editor
+        .add_component(ComponentType::Resistor, Point::new(40, 40));
+    app.state.workspace.content.active_view =
+        CellViewRef::new("user", "unrelated_editor", "schematic");
+    app.state.schematic = SchematicState::default();
+    app.state
+        .schematic
+        .add_component(ComponentType::Capacitor, Point::new(80, 80));
+    (app, root)
+}
+
+/// Preflight checks the configured root once and publishes what the rules
+/// found through the design-rule producer, under the identities the Check
+/// command gives them. The report carries one blocker that stands for the
+/// errors and re-files none of the findings, and the open view — which the
+/// run does not execute — is not checked as a side effect.
+#[test]
+fn preflight_lists_each_design_rule_finding_once_under_the_configured_root() {
+    use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
+
+    let (mut app, root) = app_with_a_failing_root_and_an_unrelated_open_view();
+    let open_view = app.state.workspace.content.active_view.clone();
+
+    run(&mut app);
+
+    let rules = app
+        .state
+        .diagnostics
+        .batches()
+        .find(|batch| {
+            batch.inputs
+                == DiagnosticInputs::DesignCheck {
+                    subject: root.clone(),
+                }
+        })
+        .expect("the configured root's findings are published by the design-rule producer")
+        .clone();
+    let errors = rules
+        .records
+        .iter()
+        .filter(|record| record.level.is_error())
+        .count();
+    assert!(errors > 0, "an ungrounded root is an error: {rules:?}");
+    assert!(
+        !app.state.diagnostics.batches().any(|batch| {
+            batch.inputs
+                == DiagnosticInputs::DesignCheck {
+                    subject: open_view.clone(),
+                }
+        }),
+        "preflight does not check the view that happens to be open"
+    );
+
+    let report = app
+        .state
+        .workbench
+        .preflight
+        .report
+        .as_ref()
+        .expect("the pass retains its report");
+    let validation: Vec<&PreflightIssue> = report
+        .blockers
+        .iter()
+        .filter(|issue| issue.check == "Schematic validation")
+        .collect();
+    assert_eq!(validation.len(), 1, "one blocker stands for the rule errors");
+    assert_eq!(validation[0].remediation, PreflightRemediation::DesignChecks);
+    assert!(
+        validation[0]
+            .observed
+            .starts_with(&format!("{errors} design-rule error")),
+        "{:?}",
+        validation[0]
+    );
+    for record in &rules.records {
+        assert!(
+            !report
+                .advisories
+                .iter()
+                .any(|advisory| advisory.message.contains(&record.message)),
+            "a rule warning is not re-filed as an advisory: {}",
+            record.message
+        );
+    }
+
+    let listed = crate::workbench::app_state::diagnostic_store::listing::listing(&app.state);
+    let rows: Vec<_> = (0..listed.len())
+        .filter_map(|index| listed.row(index))
+        .collect();
+    for record in &rules.records {
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.message == record.message)
+                .count(),
+            1,
+            "{} is listed exactly once",
+            record.message
+        );
+    }
+}
+
+/// A dispatch finding stands as long as the report it came from. Dropping the
+/// report used to leave its findings current, describing a pass nobody could
+/// act on any more.
+#[test]
+fn invalidating_the_report_stales_the_findings_it_published() {
+    use crate::workbench::app_state::diagnostic_store::{BatchStanding, DiagnosticOwner};
+
+    let (mut app, _) = app_with_a_failing_root_and_an_unrelated_open_view();
+    run(&mut app);
+    let dispatch = app
+        .state
+        .diagnostics
+        .batches()
+        .find(|batch| batch.inputs.owner() == DiagnosticOwner::Dispatch)
+        .expect("the pass publishes its findings")
+        .clone();
+    assert_eq!(
+        app.state.diagnostic_batch_standing(&dispatch),
+        BatchStanding::Current,
+        "a pass's findings are current while its report stands"
+    );
+
+    app.invalidate_simulation_preflight();
+
+    assert_eq!(
+        app.state.diagnostic_batch_standing(&dispatch),
+        BatchStanding::Stale,
+        "an invalidated report's findings read stale, not deleted and not current"
+    );
+}
+
+/// Following the blocker that stands for the rule errors leads to them: the
+/// configured root opens, the page lists them, and the worst is current.
+/// Nothing is re-run on the way.
+#[test]
+fn the_design_rule_blocker_opens_the_findings_without_re_running_them() {
+    let (mut app, root) = app_with_a_failing_root_and_an_unrelated_open_view();
+    run(&mut app);
+    let worst = app
+        .state
+        .worst_design_rule_finding(&root)
+        .expect("the root's findings are published");
+    let published = app.state.design_rule_finding_identities(&root);
+    let entries_before = app.state.log_buffer.entries().count();
+
+    apply_remediation(&mut app, PreflightRemediation::DesignChecks);
+
+    assert_eq!(app.state.workspace.content.active_view, root);
+    assert_eq!(app.state.workbench.workspace, Workspace::Design);
+    assert!(app.state.workbench.console_visible);
+    assert_eq!(app.state.workbench.console_page, ConsolePage::Problems);
+    assert_eq!(app.state.diagnostics.current_finding(), Some(worst));
+    assert_eq!(
+        app.state.design_rule_finding_identities(&root),
+        published,
+        "following a finding leaves the evidence it was following in place"
+    );
+    assert!(
+        !app.state
+            .log_buffer
+            .entries()
+            .skip(entries_before)
+            .any(|entry| entry.message.starts_with("Schematic checks")),
+        "following a finding does not run the checks"
+    );
 }
