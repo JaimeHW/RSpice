@@ -242,6 +242,13 @@ fn dialog_controls(output: &egui::FullOutput) -> Vec<(String, Rect)> {
         // The modal container spans the whole viewport by design: it is the
         // scrim, not the surface.
         .filter(|(_, node)| node.role() != egui::accesskit::Role::Dialog)
+        // A scroll bar is the scroll area's own furniture, laid against the
+        // surface edge by egui rather than laid out by the studio, and it
+        // overhangs that edge by a point. Excluding it does not soften what
+        // this probe measures: content a scroll area is hiding still reports
+        // its true rect outside the surface, which is the condition being
+        // caught. The bar is the symptom's frame, not the symptom.
+        .filter(|(_, node)| node.role() != egui::accesskit::Role::ScrollBar)
         .filter_map(|(_, node)| {
             let bounds = node.bounds()?;
             let rect = Rect::from_min_max(
@@ -254,6 +261,28 @@ fn dialog_controls(output: &egui::FullOutput) -> Vec<(String, Rect)> {
             rect.is_finite().then(|| (text.to_owned(), rect))
         })
         .collect()
+}
+
+/// The accessibility role of whatever the tree published at `rect`.
+///
+/// A control that does not fit is reported by its label, and the ones worth
+/// knowing about are often the ones with no label to report. The role is what
+/// names them.
+#[cfg(not(target_arch = "wasm32"))]
+fn role_at(output: &egui::FullOutput, rect: Rect) -> String {
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .and_then(|update| {
+            update.nodes.iter().find_map(|(_, node)| {
+                let bounds = node.bounds()?;
+                ((bounds.x0 as f32 - rect.left()).abs() < 0.5
+                    && (bounds.y0 as f32 - rect.top()).abs() < 0.5)
+                    .then(|| format!("{:?}", node.role()))
+            })
+        })
+        .unwrap_or_else(|| "unknown".to_owned())
 }
 
 /// How far outside the surface a control reaches, in points.
@@ -374,11 +403,26 @@ fn the_studio_fits_every_viewport_and_section_without_scrolling() {
                     .max_by(|left, right| left.1.total_cmp(&right.1))
                     .filter(|(_, overflow)| *overflow > 0.5)
                 {
+                    let rect = controls
+                        .iter()
+                        .find(|(name, _)| name == label)
+                        .map(|(_, rect)| *rect)
+                        .unwrap_or(Rect::NOTHING);
                     failures.push(format!(
-                        "{case}: {label:?} is {overflow:.0} pt outside the {:.0}x{:.0} pt \
-                             surface",
+                        "{case}: {label:?} ({}) is {overflow:.1} pt outside the {:.0}x{:.0} pt \
+                             surface — it sits at x {:.1}..{:.1}, y {:.1}..{:.1} inside \
+                             x {:.1}..{:.1}, y {:.1}..{:.1}",
+                        role_at(&output, rect),
                         surface.width(),
-                        surface.height()
+                        surface.height(),
+                        rect.left(),
+                        rect.right(),
+                        rect.top(),
+                        rect.bottom(),
+                        surface.left(),
+                        surface.right(),
+                        surface.top(),
+                        surface.bottom()
                     ));
                 }
             }
