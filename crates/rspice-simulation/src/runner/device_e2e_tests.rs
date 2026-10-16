@@ -315,6 +315,69 @@ fn ccvs_and_cccs_bench_solves_op() {
     solve_op(&bench.netlist());
 }
 
+/// A current-controlled source with no controlling element of its own is
+/// written beside a 0 V sense source, `VSENSE_H1` for `H1`. A source drawn
+/// `SENSE_H1` is written under that name too, so the deck holds two cards of
+/// one name and the engine refuses it. The design check reads the same names
+/// and refuses the run first.
+#[test]
+fn a_source_written_as_a_sense_source_is_refused_before_the_run() {
+    let mut bench = Bench::new();
+    let v = bench.place(ComponentType::VoltageSource, 0, 0, "SENSE_H1", "1", "");
+    let rc = bench.place(ComponentType::Resistor, 200, 0, "RC", "1k", "");
+    let h = bench.place(ComponentType::Ccvs, 400, 0, "H1", "100", "");
+    let rl = bench.place(ComponentType::Resistor, 600, 0, "RL", "1k", "");
+    bench.connect((v, 0), (rc, 0));
+    bench.connect((rc, 1), (h, 2));
+    bench.ground((h, 3));
+    bench.ground((v, 1));
+    bench.connect((h, 0), (rl, 0));
+    bench.ground((h, 1));
+    bench.ground((rl, 1));
+
+    let netlist = bench.netlist();
+    let cards = netlist
+        .lines()
+        .filter(|line| line.split_whitespace().next() == Some("VSENSE_H1"))
+        .count();
+    assert_eq!(cards, 2, "{netlist}");
+    assert!(
+        matches!(
+            rspice_core::netlist::Netlist::parse(&netlist),
+            Err(rspice_core::netlist::ParseError::DuplicateName { .. })
+        ),
+        "{netlist}"
+    );
+
+    let views = std::collections::HashMap::<
+        String,
+        rspice_design::schematic::document::SchematicDocument,
+    >::new();
+    let hierarchy = rspice_design::hierarchy::HierarchySource::from_buffers(&views);
+    let root = rspice_design_model::cell_view::CellViewRef::new("work", "top", "schematic");
+    assert!(
+        crate::preparation::check_generated_design(&bench.state, &root, &hierarchy).is_err(),
+        "the design check passes a deck the engine refuses:\n{netlist}"
+    );
+    let findings = rspice_design::drc::run_check_with_hierarchy(
+        &bench.state,
+        &hierarchy,
+        rspice_design::drc::DrcConfig::default(),
+    );
+    let duplicates = findings
+        .violations()
+        .iter()
+        .filter(|finding| {
+            finding.violation_type == rspice_design::drc::DrcViolationType::DuplicateName
+        })
+        .map(|finding| finding.message.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        duplicates,
+        ["SENSE_H1 and H1's sense source are both written VSENSE_H1"]
+    );
+}
+
 /// A current-controlled source may name its controlling element by the name
 /// drawn on it. The deck writes a source drawn `sense` as `Vsense`, so the
 /// reference has to follow: in the plain card, and in the behavioural form a
