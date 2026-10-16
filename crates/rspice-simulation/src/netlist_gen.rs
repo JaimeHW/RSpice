@@ -1383,6 +1383,26 @@ mod tests {
         assert_eq!(h_line.split_whitespace().count(), 5, "{netlist}");
     }
 
+    /// A current-controlled source may name another source's sense source as
+    /// its controlling element. The deck writes that card beside the source it
+    /// senses for, so the reference is written as the card is spelled.
+    #[test]
+    fn a_reference_to_a_synthesized_sense_source_names_that_card() {
+        let mut follower =
+            Component::new(2, ComponentType::Cccs, Point::new(200, 0)).with_name_value("F1", "2");
+        follower.params = "vref=vsense_h1".to_owned();
+        let netlist = netlist_for(vec![
+            Component::new(1, ComponentType::Ccvs, Point::origin()).with_name_value("H1", "100"),
+            follower,
+        ]);
+        let f_line = netlist
+            .lines()
+            .find(|l| l.starts_with("F1 "))
+            .expect("cccs line");
+        assert!(f_line.ends_with(" VSENSE_H1 2"), "{netlist}");
+        assert!(!netlist.contains("VSENSE_F1"), "{netlist}");
+    }
+
     /// The deck heads every card with the name the design authority gives
     /// it, and those names are the ones decks have always been written with:
     /// sense sources, a transformer's windings and coupling, the coupling an

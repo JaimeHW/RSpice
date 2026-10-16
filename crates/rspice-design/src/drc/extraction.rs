@@ -548,7 +548,7 @@ fn broken_references(component: &Component, cellview: &[Component]) -> Vec<Broke
         return Vec::new();
     };
     let ambiguous = match resolve_instance_reference(cellview, reference) {
-        InstanceReference::Names(_) => return Vec::new(),
+        InstanceReference::Names { .. } => return Vec::new(),
         InstanceReference::Ambiguous => true,
         InstanceReference::Unresolved => false,
     };

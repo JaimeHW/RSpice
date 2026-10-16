@@ -344,13 +344,15 @@ impl<'a> NetlistGenerator<'a> {
                         sense_name
                     }
                     // The controlling element is named the way the deck
-                    // writes it: a source drawn `sense` is the card `Vsense`.
-                    // A reference nothing here answers to is written as
-                    // authored, and the design check refuses it before a run.
+                    // writes it: a source drawn `sense` is the card `Vsense`,
+                    // and another source's sense source is the card the deck
+                    // writes for it. A reference nothing here answers to is
+                    // written as authored, and the design check refuses it
+                    // before a run.
                     None => {
                         let reference = params.get("vref").map_or("", |reference| reference.trim());
                         match resolve_instance_reference(&self.schematic.components, reference) {
-                            InstanceReference::Names(target) => target.written_element_name(),
+                            InstanceReference::Names { card, .. } => card,
                             InstanceReference::Ambiguous | InstanceReference::Unresolved => {
                                 reference.to_owned()
                             }

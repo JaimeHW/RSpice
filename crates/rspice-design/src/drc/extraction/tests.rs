@@ -1976,4 +1976,23 @@ fn a_controlling_reference_must_name_one_instance() {
             "F1 vref='sense' names more than one instance of this cellview".to_owned()
         )]
     );
+    // A source that names no controlling element of its own is written beside
+    // the sense source the deck makes for it, and that card is an element the
+    // engine has, whichever case names it.
+    for vref in ["VSENSE_H1", "vsense_h1"] {
+        assert_eq!(
+            check(vref, Some(part(3, ComponentType::Ccvs, "H1"))),
+            Vec::new(),
+            "{vref}"
+        );
+    }
+    // A transformer is written as its windings and their coupling, so its
+    // drawn name is no element of the deck.
+    assert_eq!(
+        check("T1", Some(part(3, ComponentType::Transformer, "T1"))),
+        vec![(
+            DrcSeverity::Error,
+            "F1 vref='T1' names no instance of this cellview".to_owned()
+        )]
+    );
 }

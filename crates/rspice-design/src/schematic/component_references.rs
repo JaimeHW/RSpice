@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use super::{
-    component::Component,
+    component::{CardRole, Component, WrittenCard, written_cards},
     component_type::ComponentType,
     document::SchematicDocument,
     replacement::{format_replacement_parameters, parse_replacement_parameters_strict},
@@ -229,15 +229,18 @@ fn prepare_component_edits<'a>(
 }
 
 /// What one authored instance reference names within its cellview.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum InstanceReference<'a> {
-    /// The one instance it names. The deck writes the reference as that
-    /// instance's written element name, which is the name the engine knows
-    /// it by.
-    Names(&'a Component),
-    /// More than one instance answers to it.
+    /// The one card it names, and the instance that makes the deck write it.
+    /// The deck writes the reference as `card`, which is the name the engine
+    /// knows the element by.
+    Names {
+        instance: &'a Component,
+        card: String,
+    },
+    /// More than one card answers to it.
     Ambiguous,
-    /// No instance in the cellview answers to it.
+    /// No card the cellview writes answers to it.
     Unresolved,
 }
 
@@ -245,42 +248,49 @@ pub enum InstanceReference<'a> {
 /// source's controlling element, for one — the way the deck must write it.
 ///
 /// The engine resolves the reference against the names the deck writes, and
-/// those are written element names: a source drawn `sense` is written
-/// `Vsense`, and a limited VCVS drawn `E1` is written `B1`. So a reference that
-/// already is a written name names that instance, and failing that, a
-/// reference that is an instance's drawn name names the instance the author
-/// drew. Both compare without case, as the engine does. Writing a drawn name
-/// through unresolved would point the engine at an element the deck does not
-/// have.
+/// those are the cards [`written_cards`] lists: a source drawn `sense` is
+/// written `Vsense`, a limited VCVS drawn `E1` is written `B1`, and a
+/// current-controlled source that names no controlling element of its own is
+/// written beside a sense source `VSENSE_H1`, which another source may name.
+/// So a reference that already is a written name names that card, and failing
+/// that, a reference that is an instance's drawn name names the element the
+/// deck writes for the instance the author drew. Both compare without case,
+/// as the engine does. Writing a drawn name through unresolved would point the
+/// engine at an element the deck does not have — which is also why an
+/// instance the deck writes no element for, such as a transformer, is not
+/// named by its drawn name.
 pub fn resolve_instance_reference<'a>(
     components: &'a [Component],
     reference: &str,
 ) -> InstanceReference<'a> {
     let reference = reference.trim();
-    let emitting = || {
-        components
-            .iter()
-            .filter(|component| !component.kind.spice_prefix().is_empty())
+    if reference.is_empty() {
+        return InstanceReference::Unresolved;
+    }
+    let cards = written_cards(components);
+    let written = |matches: &dyn Fn(&Component, &WrittenCard) -> bool| {
+        let mut found = Vec::new();
+        for component in components {
+            for card in cards.get(&component.id).into_iter().flatten() {
+                if matches(component, card) {
+                    found.push((component, card.name.clone()));
+                }
+            }
+        }
+        found
     };
-    let written = emitting()
-        .filter(|component| {
-            component
-                .written_element_name()
-                .eq_ignore_ascii_case(reference)
-        })
-        .collect::<Vec<_>>();
-    let candidates = if written.is_empty() {
-        emitting()
-            .filter(|component| component.name.trim().eq_ignore_ascii_case(reference))
-            .collect()
-    } else {
-        written
-    };
-    match candidates.as_slice() {
-        _ if reference.is_empty() => InstanceReference::Unresolved,
-        [only] => InstanceReference::Names(only),
-        [] => InstanceReference::Unresolved,
-        _ => InstanceReference::Ambiguous,
+    let mut candidates = written(&|_, card| card.name.eq_ignore_ascii_case(reference));
+    if candidates.is_empty() {
+        candidates = written(&|component, card| {
+            card.role == CardRole::Element && component.name.trim().eq_ignore_ascii_case(reference)
+        });
+    }
+    if candidates.len() > 1 {
+        return InstanceReference::Ambiguous;
+    }
+    match candidates.pop() {
+        Some((instance, card)) => InstanceReference::Names { instance, card },
+        None => InstanceReference::Unresolved,
     }
 }
 
