@@ -1205,14 +1205,23 @@ impl Engine {
                 junction_gmin,
             );
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
+            // The residual check evaluates the devices at the new iterate; a
+            // non-finite evaluation there fails the stage, as one at this
+            // corrector's own stamp above does.
             let nonlinear_residual_converged = voltage_converged
                 && device_converged
-                && self.try_nonlinear_residual_converged_with_gmin(
+                && match self.try_nonlinear_residual_converged_with_gmin(
                     circuit,
                     matrix,
                     &new_solution,
                     gmin,
-                )?;
+                ) {
+                    Ok(converged) => converged,
+                    Err(error) if error.nonfinite_trial_detail().is_some() => {
+                        return Ok((solution, false, used_iterations));
+                    }
+                    Err(error) => return Err(error),
+                };
             solution = new_solution;
 
             if voltage_converged && device_converged && nonlinear_residual_converged {
