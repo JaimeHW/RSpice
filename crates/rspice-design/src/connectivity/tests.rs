@@ -3,10 +3,131 @@
 
 use super::*;
 use crate::schematic::bus::{Bus, BusDeclaration};
+use crate::schematic::net_label::Junction;
 use crate::schematic::wire::Wire;
 
 fn extracted(document: &SchematicDocument) -> ExtractedConnectivity {
     extract(document, |_| None, |_| None)
+}
+
+fn resistor(id: u64, position: Point) -> Component {
+    Component::new(id, ComponentType::Resistor, position)
+}
+
+fn ambiguous_crossings(extracted: &ExtractedConnectivity) -> Vec<&ConnectivityDiagnostic> {
+    extracted
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.kind == ConnectivityDiagnosticKind::AmbiguousCrossing)
+        .collect()
+}
+
+/// Two wires crossing with no junction stay two nets even when a label or a
+/// pin sits exactly on the crossing; the drawing is ambiguous and says so.
+#[test]
+fn a_label_or_pin_on_an_unmarked_crossing_joins_neither_wire_and_blocks() {
+    let crossing = || SchematicDocument {
+        wires: vec![
+            Wire::segment(1, Point::new(-100, 0), Point::new(100, 0)),
+            Wire::segment(2, Point::new(0, -100), Point::new(0, 100)),
+        ],
+        ..SchematicDocument::default()
+    };
+    let mut labelled = crossing();
+    labelled
+        .net_labels
+        .push(NetLabel::new(3, Point::origin(), "OUT"));
+    let mut pinned = crossing();
+    // A resistor at (20, 0) has a pin at the origin.
+    pinned.components.push(resistor(3, Point::new(20, 0)));
+
+    for (name, document) in [("label", labelled), ("pin", pinned)] {
+        let extracted = extracted(&document);
+        let first = extracted.net_of_wire(1).map(|net| net.id);
+        let second = extracted.net_of_wire(2).map(|net| net.id);
+        assert!(first.is_some() && second.is_some(), "{name}");
+        assert_ne!(first, second, "{name}: the crossing was merged");
+        let ambiguous = ambiguous_crossings(&extracted);
+        assert_eq!(ambiguous.len(), 1, "{name}: one finding per crossing");
+        assert!(ambiguous[0].blocking, "{name}");
+        assert_eq!(
+            ambiguous[0].anchor,
+            ConnectivityAnchor::Point(Point::origin()),
+            "{name}"
+        );
+        assert!(
+            !extracted
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.kind == ConnectivityDiagnosticKind::OrphanNetLabel),
+            "{name}: the crossing finding says it all"
+        );
+    }
+}
+
+/// The same crossing on a 45-degree wire.
+#[test]
+fn a_label_on_an_unmarked_diagonal_crossing_joins_neither_wire() {
+    let document = SchematicDocument {
+        wires: vec![
+            Wire::segment(1, Point::new(-100, 0), Point::new(100, 0)),
+            Wire::segment(2, Point::new(-40, -40), Point::new(40, 40)),
+        ],
+        net_labels: vec![NetLabel::new(3, Point::origin(), "OUT")],
+        ..SchematicDocument::default()
+    };
+
+    let extracted = extracted(&document);
+
+    assert_ne!(
+        extracted.net_of_wire(1).map(|net| net.id),
+        extracted.net_of_wire(2).map(|net| net.id)
+    );
+    assert_eq!(ambiguous_crossings(&extracted).len(), 1);
+}
+
+/// A junction resolves the ambiguity: everything at the crossing is one net.
+#[test]
+fn a_junction_makes_a_labelled_crossing_one_net() {
+    let document = SchematicDocument {
+        wires: vec![
+            Wire::segment(1, Point::new(-100, 0), Point::new(100, 0)),
+            Wire::segment(2, Point::new(0, -100), Point::new(0, 100)),
+        ],
+        junctions: vec![Junction::new(3, Point::origin())],
+        net_labels: vec![NetLabel::new(4, Point::origin(), "OUT")],
+        ..SchematicDocument::default()
+    };
+
+    let extracted = extracted(&document);
+
+    assert_eq!(
+        extracted.net_of_wire(1).map(|net| net.id),
+        extracted.net_of_wire(2).map(|net| net.id)
+    );
+    assert!(ambiguous_crossings(&extracted).is_empty());
+}
+
+/// Two wires overlapping along one line share their interiors without
+/// crossing; a pin there is no ambiguity.
+#[test]
+fn a_pin_on_overlapping_collinear_wires_is_not_a_crossing() {
+    let document = SchematicDocument {
+        wires: vec![
+            Wire::segment(1, Point::new(-40, 0), Point::new(20, 0)),
+            Wire::segment(2, Point::new(-20, 0), Point::new(40, 0)),
+        ],
+        components: vec![resistor(3, Point::new(20, 0))],
+        ..SchematicDocument::default()
+    };
+
+    let extracted = extracted(&document);
+
+    assert!(ambiguous_crossings(&extracted).is_empty());
+    assert_eq!(
+        extracted.net_of_wire(1).map(|net| net.id),
+        extracted.net_of_wire(2).map(|net| net.id)
+    );
 }
 
 /// A label spelled as a bus member names that member's bit, whether or not

@@ -190,7 +190,11 @@ pub(super) fn handle_tool_interactions(
             // The armed tool determines whether the naming transaction makes
             // a local label or an off-sheet connector at this shared anchor.
             ToolPointerAction::NetLabel(anchor) => {
-                crate::workbench::app::open_net_label_placement(state, anchor);
+                if label_anchor_on_unmarked_crossing(state, anchor) {
+                    refuse_label_on_unmarked_crossing(ui, state, anchor);
+                } else {
+                    crate::workbench::app::open_net_label_placement(state, anchor);
+                }
             }
         }
     }
@@ -456,6 +460,29 @@ fn report_unrepresentable_conductor_attachment(ui: &Ui, state: &mut AppState) {
         .ui
         .toasts
         .warn_with_title(ui.ctx(), "Wire attachment unavailable", message.clone());
+    state.push_user_message(ConsoleMessage::warning(message));
+}
+
+/// Whether a label dropped at `anchor` would sit exactly where two of this
+/// sheet's wires cross with no junction, naming neither of them.
+fn label_anchor_on_unmarked_crossing(state: &AppState, anchor: Point) -> bool {
+    let document = state.schematic.document();
+    let wires = objects_on_active_sheet(state, &document.wires, |wire| wire.id);
+    let junctions = objects_on_active_sheet(state, &document.junctions, |junction| junction.id);
+    rspice_design::schematic::junction_edit::CrossingIndex::new(&wires, &junctions)
+        .is_unmarked_crossing(anchor)
+}
+
+fn refuse_label_on_unmarked_crossing(ui: &Ui, state: &mut AppState, anchor: Point) {
+    let message = format!(
+        "A label at ({}, {}) would sit where two wires cross with no junction, and would join \
+         neither. Place a junction there to join the wires, or drop the label onto one wire.",
+        anchor.x, anchor.y
+    );
+    state
+        .ui
+        .toasts
+        .warn_with_title(ui.ctx(), "Label not placed", message.clone());
     state.push_user_message(ConsoleMessage::warning(message));
 }
 

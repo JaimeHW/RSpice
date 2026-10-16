@@ -84,6 +84,88 @@ impl SegmentIndex {
         out.sort_unstable();
         out.dedup();
     }
+
+    /// How many different directions the segments whose interior holds `v`
+    /// run in — a segment that ends at `v` does not count. Two or more is a
+    /// crossing; any number of segments along one line is not.
+    fn interior_directions(&self, v: Point) -> usize {
+        let mut directions: Vec<(i64, i64)> = Vec::new();
+        let mut add = |direction| {
+            if !directions.contains(&direction) {
+                directions.push(direction);
+            }
+        };
+        if self
+            .rows
+            .get(&v.y)
+            .is_some_and(|row| row.iter().any(|&(x0, x1, _)| x0 < v.x && v.x < x1))
+        {
+            add((1, 0));
+        }
+        if self
+            .cols
+            .get(&v.x)
+            .is_some_and(|col| col.iter().any(|&(y0, y1, _)| y0 < v.y && v.y < y1))
+        {
+            add((0, 1));
+        }
+        for (segment, _) in &self.diagonals {
+            if segment.start != v && segment.end != v && segment.contains_point(v) {
+                add(line_direction(segment.start, segment.end));
+            }
+        }
+        directions.len()
+    }
+}
+
+/// The direction of the line through `a` and `b`, the same for either order
+/// and for any two points on the line.
+fn line_direction(a: Point, b: Point) -> (i64, i64) {
+    fn gcd(a: i64, b: i64) -> i64 {
+        if b == 0 { a } else { gcd(b, a % b) }
+    }
+    let (dx, dy) = (
+        i64::from(b.x) - i64::from(a.x),
+        i64::from(b.y) - i64::from(a.y),
+    );
+    let divisor = gcd(dx.abs(), dy.abs()).max(1);
+    let (dx, dy) = (dx / divisor, dy / divisor);
+    if dx < 0 || (dx == 0 && dy < 0) {
+        (-dx, -dy)
+    } else {
+        (dx, dy)
+    }
+}
+
+/// Where wire interiors cross with no vertex and no dot. Nothing joins the
+/// wires there, so a net label, a pin or a bus-tap end placed exactly there
+/// does not say which wire it means.
+pub struct CrossingIndex {
+    index: SegmentIndex,
+    vertices: HashSet<Point>,
+    junctions: HashSet<Point>,
+}
+
+impl CrossingIndex {
+    /// The crossings among `wires`, given the dots in `junctions`.
+    pub fn new(wires: &[Wire], junctions: &[Junction]) -> Self {
+        Self {
+            index: SegmentIndex::build(wires),
+            vertices: wires
+                .iter()
+                .flat_map(|wire| wire.points.iter().copied())
+                .collect(),
+            junctions: junctions.iter().map(|junction| junction.pos).collect(),
+        }
+    }
+
+    /// Whether two wires cross at `point` with neither having a vertex there
+    /// and no junction marking it.
+    pub fn is_unmarked_crossing(&self, point: Point) -> bool {
+        !self.junctions.contains(&point)
+            && !self.vertices.contains(&point)
+            && self.index.interior_directions(point) >= 2
+    }
 }
 
 /// Where a junction dot belongs: the one rule automatic placement adds dots
@@ -144,7 +226,7 @@ impl JunctionRule {
             .iter()
             .filter(|&&wire| !self.index.vertices.contains(&(wire, point)))
             .count();
-        if vertex_ends == 0 && interiors >= 2 && !marked {
+        if vertex_ends == 0 && !marked && self.index.interior_directions(point) >= 2 {
             return false;
         }
         let pins = self.pins.get(&point).copied().unwrap_or(0);

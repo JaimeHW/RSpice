@@ -21,6 +21,7 @@ use crate::schematic::component_type::ComponentType;
 use crate::schematic::document::SchematicDocument;
 use crate::schematic::document_policy::NetNamingPolicy;
 use crate::schematic::ground_names::is_ground_reference;
+use crate::schematic::junction_edit::CrossingIndex;
 use crate::schematic::net_label::NetLabel;
 use crate::schematic::wire::WireSegment;
 use rspice_design_model::Point;
@@ -121,6 +122,9 @@ pub enum ConnectivityDiagnosticKind {
     /// A name the deck cannot carry: an anonymous interface port, an invalid
     /// label, or two labels claiming one net.
     NetNaming,
+    /// A net label, pin or bus-tap end on a crossing of two wire interiors
+    /// with no junction: the drawing does not say which wire it means.
+    AmbiguousCrossing,
 }
 
 /// Where a connectivity diagnostic points.
@@ -292,6 +296,9 @@ struct Pass<'a, S, G> {
     ground_net: Option<usize>,
     vector_nets: VectorConnectivity,
     diagnostics: Vec<ConnectivityDiagnostic>,
+    /// Labels, pins and tap ends on an unmarked crossing: they join neither
+    /// wire, and one blocking finding already says so.
+    ambiguous_points: HashSet<Point>,
 }
 
 impl<'a, S, G> Pass<'a, S, G>
@@ -312,6 +319,55 @@ where
             ground_net: None,
             vector_nets: VectorConnectivity::default(),
             diagnostics: Vec::new(),
+            ambiguous_points: HashSet::new(),
+        }
+    }
+
+    /// Find every label, pin and tap end that sits exactly on a crossing of
+    /// two wire interiors with no junction, and report each crossing once.
+    ///
+    /// Joining it to both wires would short them with no dot; joining it to
+    /// one would be a guess. It joins neither, and the finding blocks until
+    /// the user marks the crossing or moves the object onto one wire.
+    fn find_ambiguous_crossings(&mut self) {
+        let schematic = self.schematic;
+        let crossings = CrossingIndex::new(&schematic.wires, &schematic.junctions);
+        let mut found: Vec<(Point, String)> = Vec::new();
+        for component in &schematic.components {
+            for (pin, point) in terminal_positions(component, self.resolve_symbol) {
+                if crossings.is_unmarked_crossing(point) {
+                    found.push((point, format!("Pin {pin} of {}", component.name)));
+                }
+            }
+        }
+        for label in &schematic.net_labels {
+            if crossings.is_unmarked_crossing(label.pos) {
+                found.push((label.pos, format!("Net label \"{}\"", label.name.trim())));
+            }
+        }
+        for binding in &self.buses.scalar_taps {
+            if crossings.is_unmarked_crossing(binding.point) {
+                found.push((
+                    binding.point,
+                    format!("The bus tap for \"{}\"", binding.member_name),
+                ));
+            }
+        }
+        found.sort_by_key(|(point, _)| (point.x, point.y));
+        for (point, what) in found {
+            if self.ambiguous_points.insert(point) {
+                self.report(
+                    ConnectivityDiagnosticKind::AmbiguousCrossing,
+                    true,
+                    format!(
+                        "{what} at ({}, {}) sits where two wires cross with no junction, so it \
+                         joins neither: place a junction to join the wires, or move it onto one \
+                         wire",
+                        point.x, point.y
+                    ),
+                    ConnectivityAnchor::Point(point),
+                );
+            }
         }
     }
 
@@ -369,6 +425,9 @@ where
             self.report(kind, blocking, diagnostic.message, anchor);
         }
 
+        self.find_ambiguous_crossings();
+        let ambiguous = &self.ambiguous_points;
+
         // Seeded nodes: always nets, even when isolated (a floating terminal
         // must still get its own SPICE node).
         let mut point_graph: HashMap<Point, HashSet<Point>> = HashMap::new();
@@ -390,7 +449,12 @@ where
         let mut by_col: HashMap<i32, Vec<i32>> = HashMap::new();
         let mut candidate_points: HashSet<Point> = HashSet::new();
         {
+            // An ambiguous point is not on any segment's chain; a pin there
+            // keeps its own node.
             let mut add_candidate = |p: Point| {
+                if ambiguous.contains(&p) {
+                    return;
+                }
                 by_row.entry(p.y).or_default().push(p.x);
                 by_col.entry(p.x).or_default().push(p.y);
                 candidate_points.insert(p);
@@ -677,6 +741,9 @@ where
             }
             let bound = self.point_to_net.get(&binding.point).copied();
             let Some(net_id) = bound else {
+                if self.ambiguous_points.contains(&binding.point) {
+                    continue;
+                }
                 self.naming_error(
                     format!(
                         "Typed bus member \"{name}\" at ({}, {}) is not on a scalar net",
@@ -742,6 +809,9 @@ where
             let name = promoted_name.as_deref().unwrap_or(authored_name);
             let bound = self.point_to_net.get(&label.pos).copied();
             let Some(net_id) = bound else {
+                if self.ambiguous_points.contains(&label.pos) {
+                    continue;
+                }
                 self.report(
                     ConnectivityDiagnosticKind::OrphanNetLabel,
                     false,
