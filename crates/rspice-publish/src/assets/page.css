@@ -6,14 +6,14 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("fonts/IBMPlexMono-Regular.ttf") format("truetype");
+  src: url("fonts/ibm-plex-mono-regular.ttf") format("truetype");
 }
 @font-face {
   font-family: "RSpice Plex Mono";
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url("fonts/IBMPlexMono-Medium.ttf") format("truetype");
+  src: url("fonts/ibm-plex-mono-medium.ttf") format("truetype");
 }
 
 :root {

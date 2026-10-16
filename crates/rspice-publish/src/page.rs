@@ -29,18 +29,19 @@ pub const PAGE_STYLES: &str = include_str!("assets/page.css");
 pub(crate) const PAGE_SCRIPT: &str = include_str!("assets/page.js");
 /// The IBM Plex Mono cuts the stylesheet declares for figure lettering, at
 /// the bundle paths it names, with the licence they are distributed under.
-/// A bundle with figures carries all three; one without carries none.
+/// A bundle with figures carries all three; one without carries none. Bundle
+/// paths are lowercase because the cloud render worker refuses any other.
 pub(crate) const PAGE_FONTS: [(&str, &[u8]); 3] = [
     (
-        "assets/fonts/IBMPlexMono-Regular.ttf",
+        "assets/fonts/ibm-plex-mono-regular.ttf",
         include_bytes!("../../../assets/fonts/IBMPlexMono-Regular.ttf"),
     ),
     (
-        "assets/fonts/IBMPlexMono-Medium.ttf",
+        "assets/fonts/ibm-plex-mono-medium.ttf",
         include_bytes!("../../../assets/fonts/IBMPlexMono-Medium.ttf"),
     ),
     (
-        "assets/fonts/OFL-IBMPlex.txt",
+        "assets/fonts/ofl-ibm-plex.txt",
         include_bytes!("../../../assets/fonts/OFL-IBMPlex.txt"),
     ),
 ];
