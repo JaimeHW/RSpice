@@ -9,7 +9,7 @@ use super::checker::{
     append_vector_width_violations, diagnostic_location,
 };
 use super::input::{ComponentInfo, ParameterRangeIssue, PinInfo};
-use super::types::{DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
+use super::types::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
 use crate::connectivity::{ConnectivityDiagnosticKind, ExtractedConnectivity, ExtractedTerminal};
 use crate::hierarchy::HierarchySource;
 use crate::properties::PropertyCatalog;
@@ -19,6 +19,8 @@ use crate::schematic::component::Component;
 use crate::schematic::component_type::ComponentType;
 use crate::schematic::document::SchematicDocument;
 use crate::schematic::port::PortDirection;
+use rspice_app_types::hierarchy_path::InstancePath;
+use rspice_design_model::cell_view::CellViewRef;
 
 /// Resolve the design once, and bind every placed component to it.
 pub fn extract_checked_design(
@@ -51,15 +53,183 @@ pub fn extract_checked_design(
     (components, connectivity)
 }
 
-/// Run DRC using the active hierarchy's symbol and binding authority.
+/// Check the subject cellview and every cellview its instances reach.
+///
+/// The hierarchy is walked, not merely consulted. Checking the subject alone
+/// let a hierarchical design pass with a short, an open input or a missing
+/// parameter one level down, which is the one failure a checker must not have:
+/// a report that says the circuit is sound when it is not.
+///
+/// Each distinct cellview is extracted and checked once, however many times it
+/// is placed, and its findings are then stated at the occurrence paths that
+/// reached it, so `X1/M3` and `X2/M3` read as the two terminals they are.
 pub fn run_check_with_hierarchy(
     schematic: &impl AsRef<SchematicDocument>,
     hierarchy: &HierarchySource<'_>,
     config: DrcConfig,
 ) -> DrcResult {
-    run_check(schematic.as_ref(), config, || {
-        extract_checked_design(schematic, hierarchy)
-    })
+    let start = web_time::Instant::now();
+    let subject = schematic.as_ref();
+    let graph = InstanceGraph::walk(subject, hierarchy);
+
+    // The ground rule is the one question no single cellview can answer, so it
+    // is held back until the whole walk has been extracted.
+    let mut view_config = config.clone();
+    view_config.check_missing_ground = false;
+
+    let mut reports = Vec::with_capacity(graph.views.len());
+    let mut design_reaches_ground = false;
+    let mut subject_inputs = None;
+    for (index, view) in graph.views.iter().enumerate() {
+        let (components, connectivity) = extract_checked_design(&view.document, hierarchy);
+        design_reaches_ground |= reaches_ground(&components);
+        let mut report = check_one_view(view.document, &view_config, &components, &connectivity);
+        graph.append_recursive_findings(index, &view_config.severity_overrides, &mut report);
+        if index == SUBJECT {
+            subject_inputs = Some((components, connectivity));
+        }
+        reports.push(report);
+    }
+
+    let occurrences = graph.occurrences();
+    let mut result = DrcResult::new();
+    let mut next_id = 0;
+
+    // The subject's own findings are stated as they always were: they are in
+    // the drawing the caller named, and wrapping them in an empty path would
+    // say they are somewhere else.
+    for finding in reports[SUBJECT].violations() {
+        result.add_violation(restated(finding, next_id, None, None));
+        next_id += 1;
+    }
+
+    // Node 0 is global, so a ground symbol anywhere in the walked hierarchy
+    // grounds the design above it: the rule is asked once, over the union of
+    // what every reached cellview binds, and answered on the subject. Asking
+    // it per cellview instead would fail nearly every correct subcircuit,
+    // because a reusable cell takes its reference from the parent through a
+    // port or a global and owns no node-0 symbol of its own — while a
+    // top-level design that reaches no reference anywhere cannot solve at all.
+    if config.check_missing_ground && !design_reaches_ground {
+        let (components, connectivity) = subject_inputs
+            .as_ref()
+            .expect("the subject is always the first cellview checked");
+        let ground_only = DrcConfig {
+            check_floating_nodes: false,
+            check_unconnected_pins: false,
+            check_missing_ground: true,
+            check_duplicate_names: false,
+            check_component_parameters: false,
+            check_unknown_components: false,
+            check_shorted_outputs: false,
+            ..config.clone()
+        };
+        let ground = DrcChecker::with_config(ground_only).check(components, connectivity);
+        for finding in ground.violations() {
+            result.add_violation(restated(finding, next_id, None, None));
+            next_id += 1;
+        }
+    }
+
+    for index in (SUBJECT + 1)..graph.views.len() {
+        let reference = graph.views[index]
+            .reference
+            .as_ref()
+            .expect("a reached cellview is named by the binding that reached it");
+        let occurrence = &occurrences[index];
+        let flooded = occurrence.count > MAX_REPORTED_OCCURRENCE_PATHS as u64;
+        let paths = if flooded {
+            &occurrence.paths[..1]
+        } else {
+            occurrence.paths.as_slice()
+        };
+        let count = flooded.then_some(occurrence.count);
+        for path in paths {
+            for finding in reports[index].violations() {
+                result.add_violation(restated(finding, next_id, Some((path, reference)), count));
+                next_id += 1;
+            }
+        }
+    }
+
+    result.completed = true;
+    result.duration_ms = start.elapsed().as_millis() as u64;
+    result
+}
+
+/// How many occurrence paths one cellview's findings are repeated over.
+///
+/// A cellview placed a few times is worth reporting at each place: the defect
+/// may be acceptable at one occurrence and not at another, and the terminal in
+/// `X1` is not the terminal in `X2`. Past that the repetition would bury every
+/// other finding in the report, so the finding is stated once with its exact
+/// occurrence count — which is a count the reader can act on, and not an
+/// occurrence quietly dropped.
+const MAX_REPORTED_OCCURRENCE_PATHS: usize = 8;
+
+/// Restate one cellview's finding in the merged report.
+///
+/// `occurrence` is `None` for the subject and names the path and cellview
+/// otherwise. `occurrence_count` is set only where the finding stands for more
+/// occurrences than the report lists.
+fn restated(
+    finding: &DrcViolation,
+    id: usize,
+    occurrence: Option<(&InstancePath, &CellViewRef)>,
+    occurrence_count: Option<u64>,
+) -> DrcViolation {
+    let DrcViolation {
+        violation_type,
+        severity,
+        mut message,
+        location,
+        related_items,
+        ..
+    } = finding.clone();
+    let Some((path, reference)) = occurrence else {
+        return DrcViolation {
+            id,
+            violation_type,
+            severity,
+            message,
+            location,
+            related_items,
+        };
+    };
+    if let Some(count) = occurrence_count {
+        message = format!("{message} ({count} occurrences; reported once, at {path})");
+    }
+    DrcViolation {
+        id,
+        violation_type,
+        severity,
+        message,
+        location: DrcLocation::InsideInstance {
+            path: path.clone(),
+            view: reference.clone(),
+            inner: Box::new(location),
+        },
+        related_items,
+    }
+}
+
+/// Whether this cellview binds the design's reference node to anything other
+/// than a ground symbol's own terminal.
+///
+/// This is exactly the predicate [`DrcChecker::check`]'s ground rule applies to
+/// its own net map: a ground-named node is evidence only once some terminal
+/// that is not a drawn ground symbol's stands on it. Node 0 is global, so the
+/// evidence is about the whole design wherever in the hierarchy it is found.
+fn reaches_ground(components: &[ComponentInfo]) -> bool {
+    components
+        .iter()
+        .filter(|component| !component.is_ground_symbol)
+        .any(|component| {
+            component
+                .pins
+                .iter()
+                .any(|pin| crate::schematic::ground_names::is_ground_reference(&pin.net_name))
+        })
 }
 
 fn extract_components(
@@ -384,32 +554,324 @@ const fn is_current_source(kind: ComponentType) -> bool {
     )
 }
 
-/// Check one design with its authoritative connectivity and component facts.
-/// The extractor runs once inside the measured operation; both returned inputs
-/// must describe the same document and connectivity pass.
-fn run_check(
-    schematic: &crate::schematic::document::SchematicDocument,
-    config: DrcConfig,
-    extract: impl FnOnce() -> (Vec<ComponentInfo>, ExtractedConnectivity),
+/// Check one cellview with its authoritative connectivity and component facts.
+/// Both inputs come from the same extraction pass and must describe the same
+/// document.
+fn check_one_view(
+    schematic: &SchematicDocument,
+    config: &DrcConfig,
+    components: &[ComponentInfo],
+    connectivity: &ExtractedConnectivity,
 ) -> DrcResult {
-    let start = web_time::Instant::now();
-    let (components, connectivity) = extract();
-    let severity_overrides = config.severity_overrides.clone();
-    let connectivity_policy = config.connectivity.clone();
-    let mut checker = DrcChecker::with_config(config);
-    let mut result = checker.check(&components, &connectivity);
-    append_connectivity_diagnostics(&connectivity, &mut result, &severity_overrides);
+    let severity_overrides = &config.severity_overrides;
+    let mut checker = DrcChecker::with_config(config.clone());
+    let mut result = checker.check(components, connectivity);
+    append_connectivity_diagnostics(connectivity, &mut result, severity_overrides);
     append_vector_width_violations(
-        &connectivity,
-        &connectivity_policy,
+        connectivity,
+        &config.connectivity,
         &mut result,
-        &severity_overrides,
+        severity_overrides,
     );
-    append_case_collision_violations(schematic, &mut result, &severity_overrides);
-    append_off_sheet_connector_violations(schematic, &mut result, &severity_overrides);
-    result.completed = true;
-    result.duration_ms = start.elapsed().as_millis() as u64;
+    append_case_collision_violations(schematic, &mut result, severity_overrides);
+    append_off_sheet_connector_violations(schematic, &mut result, severity_overrides);
     result
+}
+
+/// The subject's index in the walk. It is the only cellview whose findings are
+/// stated without an occurrence path.
+const SUBJECT: usize = 0;
+
+/// One cellview the walk reached.
+struct ReachedView<'a> {
+    /// The cellview the binding named, or `None` for the subject, which the
+    /// caller names rather than a binding.
+    reference: Option<CellViewRef>,
+    document: &'a SchematicDocument,
+    /// The first occurrence path that reached it, which is proof that at least
+    /// one path can name it. The subject's is the root.
+    first_path: InstancePath,
+}
+
+/// One placed instance, as an edge of the instantiated hierarchy.
+struct InstanceEdge {
+    parent: usize,
+    child: usize,
+    /// The instance reference as the drawing spells it: one path segment.
+    instance: String,
+}
+
+/// One instance whose master is already one of its own enclosing cellviews.
+struct RecursiveInstance {
+    parent: usize,
+    component_id: u64,
+    component_name: String,
+    repeated: CellViewRef,
+    /// The enclosing cellviews from the repeated one down to the instance, as
+    /// a reader can follow them.
+    chain: String,
+}
+
+/// Exactly how many times one cellview occurs, and the first few paths that
+/// reach it.
+struct Occurrences {
+    count: u64,
+    paths: Vec<InstancePath>,
+}
+
+/// The instantiated hierarchy below one checked cellview.
+///
+/// The walk follows the drawing's placed bindings. It deliberately does not ask
+/// a configuration's execution plan which view an occurrence resolves to: the
+/// subject of a check is any cellview, not necessarily the design root, so a
+/// path here is relative to that subject and is not a path the plan can be
+/// queried with. Where a configuration may rebind a master, the per-cellview
+/// type check already declines to judge rather than inventing a finding.
+struct InstanceGraph<'a> {
+    views: Vec<ReachedView<'a>>,
+    edges: Vec<InstanceEdge>,
+    recursive: Vec<RecursiveInstance>,
+    /// View index by case-folded `library/cell/view`.
+    ///
+    /// The subject is absent from this map, because a caller hands over a
+    /// document rather than the cellview it belongs to. An instance that binds
+    /// the subject's own cellview therefore opens a second view of the same
+    /// document instead of closing the cycle at the subject — and the cycle is
+    /// then caught one level further down, where that view reaches itself. The
+    /// walk still terminates and still reports, which is what the guard is for.
+    index: std::collections::HashMap<String, usize>,
+}
+
+impl<'a> InstanceGraph<'a> {
+    fn walk(subject: &'a SchematicDocument, hierarchy: &HierarchySource<'a>) -> Self {
+        let mut graph = Self {
+            views: vec![ReachedView {
+                reference: None,
+                document: subject,
+                first_path: InstancePath::root(),
+            }],
+            edges: Vec::new(),
+            recursive: Vec::new(),
+            index: std::collections::HashMap::new(),
+        };
+        graph.descend(SUBJECT, hierarchy, &mut vec![SUBJECT]);
+        graph
+    }
+
+    /// Add every instance of one cellview, descending into each master the
+    /// first time it is reached.
+    ///
+    /// `enclosing` is the chain of views from the subject to this one. An
+    /// instance whose master is already on it closes a cycle: it is reported
+    /// and not followed, because there is no finite expansion to check.
+    fn descend(
+        &mut self,
+        parent: usize,
+        hierarchy: &HierarchySource<'a>,
+        enclosing: &mut Vec<usize>,
+    ) {
+        let document = self.views[parent].document;
+        let parent_path = self.views[parent].first_path.clone();
+        let mut instances = document
+            .components
+            .iter()
+            .filter(|component| component.kind == ComponentType::CellInstance)
+            .collect::<Vec<_>>();
+        instances.sort_by_key(|component| component.id);
+
+        for instance in instances {
+            let Some(binding) = instance.library_cell.as_ref() else {
+                continue;
+            };
+            // A binding that carries its own netlist text or source is a leaf:
+            // that text is what the deck writes, so there is no schematic below
+            // it for a rule to read.
+            if binding.source_path.is_some()
+                || binding.netlist_template.is_some()
+                || binding.is_executable_builtin()
+            {
+                continue;
+            }
+            let Some(master) = hierarchy.schematic_master_for_binding(binding) else {
+                continue;
+            };
+            // A finding below this instance is named by its occurrence path, so
+            // the instance's own reference has to be a path segment. An empty
+            // or unusable reference is already an error on this very instance
+            // from the reference rules, and the depth and length limits here
+            // are the limits the hierarchy resolver stops at and reports; in
+            // every case the design surface states the boundary, so the walk
+            // does not invent a second finding for it.
+            let Ok(child_path) = parent_path.child(instance.name.trim()) else {
+                continue;
+            };
+            let reference = CellViewRef::new(&binding.library, &binding.cell, &binding.view);
+            let key = reference.key().to_ascii_lowercase();
+
+            match self.index.get(&key).copied() {
+                Some(child) if enclosing.contains(&child) => {
+                    let chain = self.enclosing_chain(enclosing, child, &reference);
+                    self.recursive.push(RecursiveInstance {
+                        parent,
+                        component_id: instance.id,
+                        component_name: instance.name.clone(),
+                        repeated: reference,
+                        chain,
+                    });
+                }
+                Some(child) => {
+                    self.edges.push(InstanceEdge {
+                        parent,
+                        child,
+                        instance: instance.name.trim().to_owned(),
+                    });
+                }
+                None => {
+                    let child = self.views.len();
+                    self.views.push(ReachedView {
+                        reference: Some(reference),
+                        document: master,
+                        first_path: child_path,
+                    });
+                    self.index.insert(key, child);
+                    self.edges.push(InstanceEdge {
+                        parent,
+                        child,
+                        instance: instance.name.trim().to_owned(),
+                    });
+                    enclosing.push(child);
+                    self.descend(child, hierarchy, enclosing);
+                    enclosing.pop();
+                }
+            }
+        }
+    }
+
+    /// The cycle as a reader follows it: from the repeated cellview down to the
+    /// instance that reaches it again.
+    fn enclosing_chain(
+        &self,
+        enclosing: &[usize],
+        repeated: usize,
+        reference: &CellViewRef,
+    ) -> String {
+        let from = enclosing
+            .iter()
+            .position(|view| *view == repeated)
+            .unwrap_or(0);
+        let mut chain = enclosing[from..]
+            .iter()
+            .filter_map(|view| self.views[*view].reference.as_ref())
+            .map(CellViewRef::display_path)
+            .collect::<Vec<_>>();
+        chain.push(reference.display_path());
+        chain.join(" -> ")
+    }
+
+    /// State every cycle found inside one cellview, in that cellview's own
+    /// report.
+    fn append_recursive_findings(
+        &self,
+        parent: usize,
+        severity_overrides: &std::collections::HashMap<DrcViolationType, DrcSeverity>,
+        result: &mut DrcResult,
+    ) {
+        for recursive in self
+            .recursive
+            .iter()
+            .filter(|recursive| recursive.parent == parent)
+        {
+            let instance = if recursive.component_name.trim().is_empty() {
+                format!("component #{}", recursive.component_id)
+            } else {
+                recursive.component_name.clone()
+            };
+            let mut violation = DrcViolation::new(
+                result.total_count(),
+                DrcViolationType::RecursiveInstantiation,
+                format!(
+                    "{instance} reaches {}, which already encloses it: {}",
+                    recursive.repeated.display_path(),
+                    recursive.chain
+                ),
+                DrcLocation::Component {
+                    id: recursive.component_id,
+                    name: recursive.component_name.clone(),
+                },
+            )
+            .with_related(vec![instance, recursive.repeated.display_path()]);
+            if let Some(severity) =
+                severity_overrides.get(&DrcViolationType::RecursiveInstantiation)
+            {
+                violation.severity = *severity;
+            }
+            result.add_violation(violation);
+        }
+    }
+
+    /// Exactly how often each cellview occurs, with the first few paths that
+    /// reach it.
+    ///
+    /// The count is computed over the edges rather than by walking every
+    /// occurrence, so a wide hierarchy costs nothing to count exactly even
+    /// where enumerating its occurrences would be hopeless. Cycles were
+    /// excluded as they were found, so what remains is acyclic and one pass in
+    /// dependency order is enough.
+    fn occurrences(&self) -> Vec<Occurrences> {
+        let mut occurrences = self
+            .views
+            .iter()
+            .map(|_| Occurrences {
+                count: 0,
+                paths: Vec::new(),
+            })
+            .collect::<Vec<_>>();
+        occurrences[SUBJECT].count = 1;
+        occurrences[SUBJECT].paths = vec![InstancePath::root()];
+
+        let mut outgoing = vec![Vec::new(); self.views.len()];
+        let mut remaining = vec![0usize; self.views.len()];
+        for (index, edge) in self.edges.iter().enumerate() {
+            outgoing[edge.parent].push(index);
+            remaining[edge.child] += 1;
+        }
+
+        let mut ready = std::collections::VecDeque::from([SUBJECT]);
+        while let Some(parent) = ready.pop_front() {
+            for edge in &outgoing[parent] {
+                let edge = &self.edges[*edge];
+                occurrences[edge.child].count = occurrences[edge.child]
+                    .count
+                    .saturating_add(occurrences[parent].count);
+                let mut extended = Vec::new();
+                for path in &occurrences[parent].paths {
+                    if occurrences[edge.child].paths.len() + extended.len()
+                        >= MAX_REPORTED_OCCURRENCE_PATHS
+                    {
+                        break;
+                    }
+                    if let Ok(path) = path.child(&edge.instance) {
+                        extended.push(path);
+                    }
+                }
+                occurrences[edge.child].paths.extend(extended);
+                remaining[edge.child] -= 1;
+                if remaining[edge.child] == 0 {
+                    ready.push_back(edge.child);
+                }
+            }
+        }
+
+        // Every reached cellview was reached by a path that parsed, so it is
+        // named by at least that one however its later occurrences fare.
+        for (index, occurrence) in occurrences.iter_mut().enumerate() {
+            if occurrence.paths.is_empty() {
+                occurrence.paths.push(self.views[index].first_path.clone());
+            }
+            occurrence.count = occurrence.count.max(1);
+        }
+        occurrences
+    }
 }
 
 #[cfg(test)]

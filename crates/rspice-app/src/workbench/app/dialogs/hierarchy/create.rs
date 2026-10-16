@@ -725,7 +725,6 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
     validate_candidate_drc(
         &state.schematic,
         &candidate.parent,
-        &candidate.child,
         &state.workspace.content.schematic_buffers,
         &next_workspace.content.schematic_buffers,
         &state.library_manager,
@@ -882,7 +881,6 @@ fn canonical_hierarchy_diagnostic(diagnostic: &str) -> String {
 fn validate_candidate_drc(
     baseline: &crate::state::SchematicState,
     parent: &crate::state::SchematicState,
-    child: &crate::state::SchematicState,
     baseline_buffers: &std::collections::HashMap<
         String,
         rspice_design::schematic::owned::Schematic,
@@ -905,17 +903,22 @@ fn validate_candidate_drc(
     let candidate_hierarchy =
         HierarchySource::from_workspace(candidate_libraries.catalog(), candidate_buffers);
     let baseline_result = run_check_with_hierarchy(baseline, &baseline_hierarchy, config.clone());
-    let parent_result = run_check_with_hierarchy(parent, &candidate_hierarchy, config.clone());
-    let child_result = run_check_with_hierarchy(child, &candidate_hierarchy, config);
+    // The parent's check walks into the extracted cell through the instance it
+    // now places, so the child's findings are already in this one report.
+    // Checking the child a second time and chaining the two would count every
+    // finding below the instance twice and reject an extraction that added
+    // nothing. If the instance failed to bind at all, the parent's own report
+    // says so as a finding the baseline does not have, which is the comparison
+    // this guard makes.
+    let candidate_result = run_check_with_hierarchy(parent, &candidate_hierarchy, config);
     let baseline = baseline_result
         .violations()
         .iter()
         .map(drc_diagnostic_key)
         .collect::<Vec<_>>();
-    let candidate = parent_result
+    let candidate = candidate_result
         .violations()
         .iter()
-        .chain(child_result.violations())
         .map(drc_diagnostic_key)
         .collect::<Vec<_>>();
     reject_new_diagnostics("design-rule findings", &baseline, &candidate)
