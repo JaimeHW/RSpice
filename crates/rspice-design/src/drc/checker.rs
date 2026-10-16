@@ -477,39 +477,81 @@ impl DrcChecker {
         }
     }
 
-    /// Check for duplicate component names
+    /// Report every set of instances the deck writes under one name.
+    ///
+    /// The engine refuses two elements whose names differ only in case within
+    /// one scope, and each cellview is a scope of its own: the top level, or
+    /// its own subcircuit. So it is the written names that are compared, and
+    /// compared folded, not the drawn ones: a resistor drawn `C4` is written
+    /// `RC4` beside a drawn `RC4`, an unnamed resistor #4 is written `R4`
+    /// beside a drawn `R4`, and `R1` beside `r1` is one name to the engine. An
+    /// instance the deck cannot write at all is the reference rule's error,
+    /// and collides with nothing.
     fn check_duplicate_names(&mut self, components: &[ComponentInfo], result: &mut DrcResult) {
-        let mut names: std::collections::BTreeMap<String, Vec<usize>> =
+        let mut written: std::collections::BTreeMap<String, Vec<&ComponentInfo>> =
             std::collections::BTreeMap::new();
-
-        for (idx, comp) in components.iter().enumerate() {
-            if !comp.name.trim().is_empty() {
-                names.entry(comp.name.clone()).or_default().push(idx);
+        for component in components {
+            if let Some(name) = component.deck_name.as_deref() {
+                written
+                    .entry(name.to_ascii_uppercase())
+                    .or_default()
+                    .push(component);
             }
         }
 
-        for (name, mut indices) in names {
-            if indices.len() > 1 {
-                indices.sort_by_key(|index| components[*index].id);
-                let id = self.next_id();
-                self.add_violation(
-                    result,
-                    DrcViolation::new(
-                        id,
-                        DrcViolationType::DuplicateName,
-                        format!(
-                            "Duplicate component name '{}' ({} instances)",
-                            name,
-                            indices.len()
-                        ),
-                        DrcLocation::Component {
-                            id: components[indices[0]].id,
-                            name: name.clone(),
-                        },
-                    )
-                    .with_related(vec![name]),
-                );
+        for mut sharing in written.into_values() {
+            if sharing.len() < 2 {
+                continue;
             }
+            sharing.sort_by_key(|component| component.id);
+            let drawn = sharing
+                .iter()
+                .copied()
+                .map(component_identity)
+                .collect::<Vec<_>>();
+            let mut spellings = sharing
+                .iter()
+                .filter_map(|component| component.deck_name.clone())
+                .collect::<Vec<_>>();
+            spellings.sort();
+            spellings.dedup();
+            let message = match spellings.as_slice() {
+                [spelling] if drawn.iter().all(|name| *name == drawn[0]) => {
+                    let written = if drawn[0] == *spelling {
+                        String::new()
+                    } else {
+                        format!(", written {spelling}")
+                    };
+                    format!(
+                        "Duplicate component name '{}' ({} instances){written}",
+                        drawn[0],
+                        drawn.len()
+                    )
+                }
+                [spelling] => {
+                    let quantity = if drawn.len() == 2 { "both" } else { "all" };
+                    format!("{} are {quantity} written {spelling}", listed(&drawn))
+                }
+                _ => format!(
+                    "{} are written {}, which the simulator reads as one name",
+                    listed(&drawn),
+                    listed(&spellings)
+                ),
+            };
+            let id = self.next_id();
+            self.add_violation(
+                result,
+                DrcViolation::new(
+                    id,
+                    DrcViolationType::DuplicateName,
+                    message,
+                    DrcLocation::Component {
+                        id: sharing[0].id,
+                        name: sharing[0].name.clone(),
+                    },
+                )
+                .with_related(drawn),
+            );
         }
     }
 
@@ -893,6 +935,16 @@ pub(super) fn component_identity(component: &ComponentInfo) -> String {
         format!("component #{}", component.id)
     } else {
         component.name.clone()
+    }
+}
+
+/// Two or more names as a sentence lists them: `a and b`, `a, b and c`.
+fn listed(names: &[String]) -> String {
+    match names.split_last() {
+        Some((last, leading)) if !leading.is_empty() => {
+            format!("{} and {last}", leading.join(", "))
+        }
+        _ => names.join(""),
     }
 }
 

@@ -948,6 +948,48 @@ fn a_reference_the_engine_cannot_parse_is_an_error() {
     );
 }
 
+/// The engine refuses two element names that fold together in one scope, and
+/// what it reads are the written names. Each pair here is drawn under two
+/// different names that the deck writes as one.
+#[test]
+fn instances_written_under_one_name_are_duplicates() {
+    let resistor = |id: u64, name: &str| {
+        Component::new(id, ComponentType::Resistor, Point::new(200 * id as i32, 0))
+            .with_name_value(name, "1k")
+    };
+    let cases = [
+        (
+            vec![resistor(1, "C4"), resistor(2, "RC4")],
+            "C4 and RC4 are both written RC4",
+        ),
+        (
+            vec![resistor(4, ""), resistor(5, "R4")],
+            "component #4 and R4 are both written R4",
+        ),
+        (
+            vec![instance(1, "amp", "amp"), instance(2, "Xamp", "amp")],
+            "amp and Xamp are both written Xamp",
+        ),
+        (
+            vec![resistor(1, "R1"), resistor(2, "r1")],
+            "R1 and r1 are written R1 and r1, which the simulator reads as one name",
+        ),
+    ];
+    let views = buffers([("amp", SchematicDocument::default())]);
+    let hierarchy = HierarchySource::from_buffers(&views);
+    for (components, message) in cases {
+        let top = SchematicDocument {
+            components,
+            ..SchematicDocument::default()
+        };
+        let result = run_check_with_hierarchy(&top, &hierarchy, connectivity_only());
+        let duplicates = of_type(&result, DrcViolationType::DuplicateName);
+        assert_eq!(duplicates.len(), 1, "{message}: {:?}", result.violations());
+        assert_eq!(duplicates[0].message, message);
+        assert!(duplicates[0].severity >= DrcSeverity::Error);
+    }
+}
+
 /// Every leg of a passive is undeclared, so a drawing made of passives raises
 /// no undriven-input error however many terminals it leaves open — and each
 /// open leg is one finding, not an open pin and a floating node besides.

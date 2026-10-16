@@ -890,7 +890,9 @@ fn fixed_violation_disappears_on_recheck() {
     let result = check(&components, DrcConfig::default());
     assert_eq!(of_type(&result, DrcViolationType::DuplicateName).len(), 1);
 
+    // A rename changes the name the deck writes, which is what collided.
     components[2].name = "R2".to_string();
+    components[2].deck_name = Some("R2".to_string());
     let result = check(&components, DrcConfig::default());
     assert!(of_type(&result, DrcViolationType::DuplicateName).is_empty());
     assert_eq!(result.total_count(), 0);
