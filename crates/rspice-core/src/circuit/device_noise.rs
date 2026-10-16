@@ -112,6 +112,191 @@ pub(crate) struct InjectedNoiseSource {
     pub(crate) amplitude: Value,
     /// Where the scaled process is injected, each with its own gain.
     pub(crate) injections: Vec<NoiseInjection>,
+    /// The filter a module shapes the scaled process through before it
+    /// reaches the circuit, or `None` when every injection is a plain gain.
+    /// A shaped source's injections carry unit gain: injection `i` carries
+    /// the filter's output `i`.
+    pub(crate) shaping: Option<ShapedNoise>,
+}
+
+/// One output of a [`ShapedNoise`] filter, as the circuit injection it
+/// drives sees it:
+///
+/// ```text
+/// y_n = state·z_n + prior_state·z_{n-1} + input·u_n + prior_input·u_{n-1}
+/// ```
+///
+/// where `u` is the scaled input train and `z` the filter state.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ShapedOutput {
+    pub(crate) state: Vec<Value>,
+    pub(crate) prior_state: Vec<Value>,
+    pub(crate) input: Value,
+    pub(crate) prior_input: Value,
+}
+
+/// The state step of a [`ShapedNoise`] filter:
+///
+/// ```text
+/// z_n = transition·z_{n-1} + drive·u_n + carry·u_{n-1}
+/// ```
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ShapedStep {
+    /// Row-major `order × order`.
+    pub(crate) transition: Vec<Value>,
+    pub(crate) drive: Vec<Value>,
+    pub(crate) carry: Vec<Value>,
+}
+
+impl ShapedStep {
+    fn order(&self) -> usize {
+        self.drive.len()
+    }
+}
+
+/// The filter state after a number of absorbed samples.
+#[derive(Clone, Debug, PartialEq)]
+struct ShapedState {
+    /// How many train samples the state has absorbed: the next train index.
+    absorbed: usize,
+    z: Vec<Value>,
+    prior_z: Vec<Value>,
+    u: Value,
+    prior_u: Value,
+}
+
+/// A process the module shapes through `ddt`, `idt` or `laplace_*`: its
+/// scaled unit train is the input of a finite-state linear filter, already
+/// discretized on the sample grid, and each injection carries one output.
+///
+/// The state is *accepted* state. It advances only when the engine commits
+/// an accepted point, and a stamp at any later time computes forward from it
+/// without changing it, so a rejected step restamps exactly the samples the
+/// next attempt will see and nothing needs restoring. The filter starts from
+/// rest `warmup` train samples before the run's first sample, so the record
+/// opens stationary down to the lowest represented frequency instead of with
+/// the filter's own start-up transient.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ShapedNoise {
+    step: ShapedStep,
+    outputs: Vec<ShapedOutput>,
+    /// Train index of the run's first sample.
+    warmup: usize,
+    committed: ShapedState,
+}
+
+impl ShapedNoise {
+    /// A filter at rest, advanced through its warm-up at `amplitude`.
+    pub(crate) fn warmed(
+        step: ShapedStep,
+        outputs: Vec<ShapedOutput>,
+        warmup: usize,
+        train: &NoiseTrain,
+        amplitude: Value,
+    ) -> Self {
+        let order = step.order();
+        let mut shaped = Self {
+            step,
+            outputs,
+            warmup,
+            committed: ShapedState {
+                absorbed: 0,
+                z: vec![0.0; order],
+                prior_z: vec![0.0; order],
+                u: 0.0,
+                prior_u: 0.0,
+            },
+        };
+        shaped.committed = shaped.advanced(&shaped.committed, warmup, train, amplitude);
+        shaped
+    }
+
+    /// Replace the outputs: the gains a refresh re-derived from the bias.
+    pub(crate) fn set_outputs(&mut self, outputs: Vec<ShapedOutput>) {
+        self.outputs = outputs;
+    }
+
+    /// `state` advanced until it has absorbed `absorbed` train samples.
+    fn advanced(
+        &self,
+        state: &ShapedState,
+        absorbed: usize,
+        train: &NoiseTrain,
+        amplitude: Value,
+    ) -> ShapedState {
+        let mut state = state.clone();
+        let order = self.step.order();
+        let mut next = vec![0.0; order];
+        while state.absorbed < absorbed {
+            let u = amplitude * train_sample(train, state.absorbed);
+            for (row, slot) in next.iter_mut().enumerate() {
+                let transition = &self.step.transition[row * order..(row + 1) * order];
+                *slot = transition
+                    .iter()
+                    .zip(&state.z)
+                    .map(|(a, z)| a * z)
+                    .sum::<Value>()
+                    + self.step.drive[row] * u
+                    + self.step.carry[row] * state.u;
+            }
+            std::mem::swap(&mut state.prior_z, &mut state.z);
+            state.z.copy_from_slice(&next);
+            state.prior_u = state.u;
+            state.u = u;
+            state.absorbed += 1;
+        }
+        state
+    }
+
+    /// Commit the samples through run sample `sample`: called at accepted
+    /// points only.
+    fn commit_through(&mut self, sample: usize, train: &NoiseTrain, amplitude: Value) {
+        let absorbed = self.warmup.saturating_add(sample).saturating_add(1);
+        if absorbed > self.committed.absorbed {
+            self.committed = self.advanced(&self.committed, absorbed, train, amplitude);
+        }
+    }
+
+    /// Every output's value over run sample `sample`, without changing the
+    /// committed state.
+    fn outputs_at(
+        &self,
+        sample: usize,
+        train: &NoiseTrain,
+        amplitude: Value,
+        mut visit: impl FnMut(usize, Value),
+    ) {
+        let absorbed = self.warmup.saturating_add(sample).saturating_add(1);
+        // A time before the committed point is never stamped by the run; it
+        // reads the committed sample rather than recomputing the past.
+        let ahead;
+        let state = if absorbed > self.committed.absorbed {
+            ahead = self.advanced(&self.committed, absorbed, train, amplitude);
+            &ahead
+        } else {
+            &self.committed
+        };
+        for (index, output) in self.outputs.iter().enumerate() {
+            let value = output
+                .state
+                .iter()
+                .zip(&state.z)
+                .chain(output.prior_state.iter().zip(&state.prior_z))
+                .map(|(coefficient, z)| coefficient * z)
+                .sum::<Value>()
+                + output.input * state.u
+                + output.prior_input * state.prior_u;
+            visit(index, value);
+        }
+    }
+}
+
+/// The unit-density draw of a train at a train index.
+fn train_sample(train: &NoiseTrain, index: usize) -> Value {
+    match train {
+        NoiseTrain::Flat { stream_seed } => standard_normal_at(*stream_seed, index as u64),
+        NoiseTrain::Materialized { samples } => samples.get(index).copied().unwrap_or(0.0),
+    }
 }
 
 /// The injection plan for one transient run.
@@ -233,14 +418,12 @@ impl TransientDeviceNoise {
 
     /// The unit-density draw of one source at a sample index.
     fn unit_sample(source: &InjectedNoiseSource, index: usize) -> Value {
-        match &source.train {
-            NoiseTrain::Flat { stream_seed } => standard_normal_at(*stream_seed, index as u64),
-            NoiseTrain::Materialized { samples } => samples.get(index).copied().unwrap_or(0.0),
-        }
+        train_sample(&source.train, index)
     }
 
     /// The scaled current of one source at `time`, in amperes, before any
-    /// injection gain. Zero outside the run's noise window.
+    /// injection gain — for a shaped source, its first output. Zero outside
+    /// the run's noise window.
     ///
     /// The run itself never needs one source in isolation — it stamps them all
     /// together — so this exists for the oracle tests, which read one
@@ -253,7 +436,38 @@ impl TransientDeviceNoise {
         let Some(sample) = self.sample_index(time) else {
             return 0.0;
         };
+        if let Some(shaping) = &source.shaping {
+            let mut first = 0.0;
+            shaping.outputs_at(sample, &source.train, source.amplitude, |output, value| {
+                if output == 0 {
+                    first = value;
+                }
+            });
+            return first;
+        }
         source.amplitude * Self::unit_sample(source, sample)
+    }
+
+    /// Advance every shaped source's filter through the sample covering an
+    /// accepted `time`, at the amplitude its stamps used.
+    ///
+    /// Called at accepted points only, before the refresh re-derives the
+    /// amplitudes from that point's bias.
+    pub(crate) fn commit_accepted(&mut self, time: Value) {
+        let Some(sample) = self.sample_index(time) else {
+            return;
+        };
+        for source in &mut self.sources {
+            let InjectedNoiseSource {
+                train,
+                amplitude,
+                shaping,
+                ..
+            } = source;
+            if let Some(shaping) = shaping {
+                shaping.commit_through(sample, train, *amplitude);
+            }
+        }
     }
 
     /// Every source's amplitude, in plan order, for the oracle tests.
@@ -272,29 +486,42 @@ impl TransientDeviceNoise {
             return;
         };
         for source in &self.sources {
+            if let Some(shaping) = &source.shaping {
+                shaping.outputs_at(sample, &source.train, source.amplitude, |output, value| {
+                    if let Some(injection) = source.injections.get(output) {
+                        Self::stamp_injection(rhs, injection, value);
+                    }
+                });
+                continue;
+            }
             let value = source.amplitude * Self::unit_sample(source, sample);
             if value == 0.0 {
                 continue;
             }
             for injection in &source.injections {
-                if injection.node_pos == injection.node_neg {
-                    continue;
-                }
-                let current = value * injection.gain;
-                if current == 0.0 {
-                    continue;
-                }
-                if injection.node_pos > 0
-                    && let Some(slot) = rhs.get_mut(injection.node_pos - 1)
-                {
-                    *slot -= current;
-                }
-                if injection.node_neg > 0
-                    && let Some(slot) = rhs.get_mut(injection.node_neg - 1)
-                {
-                    *slot += current;
-                }
+                Self::stamp_injection(rhs, injection, value);
             }
+        }
+    }
+
+    /// Stamp one injection carrying `value` before its gain.
+    fn stamp_injection(rhs: &mut [Value], injection: &NoiseInjection, value: Value) {
+        if injection.node_pos == injection.node_neg {
+            return;
+        }
+        let current = value * injection.gain;
+        if current == 0.0 {
+            return;
+        }
+        if injection.node_pos > 0
+            && let Some(slot) = rhs.get_mut(injection.node_pos - 1)
+        {
+            *slot -= current;
+        }
+        if injection.node_neg > 0
+            && let Some(slot) = rhs.get_mut(injection.node_neg - 1)
+        {
+            *slot += current;
         }
     }
 }
@@ -375,6 +602,7 @@ mod tests {
                 train: NoiseTrain::Flat { stream_seed: 7 },
                 amplitude,
                 injections: vec![NoiseInjection::unit(1, 0)],
+                shaping: None,
             }],
         )
     }
@@ -425,6 +653,7 @@ mod tests {
                 train: NoiseTrain::Flat { stream_seed: 3 },
                 amplitude: 1.0,
                 injections: vec![NoiseInjection::unit(1, 1)],
+                shaping: None,
             }],
         );
         let mut rhs = vec![0.0; 2];
@@ -443,6 +672,7 @@ mod tests {
                 },
                 amplitude: 3.0,
                 injections: vec![NoiseInjection::unit(1, 2)],
+                shaping: None,
             }],
         );
         let mut rhs = vec![0.0; 2];
@@ -474,6 +704,7 @@ mod tests {
                         gain: -2.0,
                     },
                 ],
+                shaping: None,
             }],
         );
         let mut rhs = vec![0.0; 3];
@@ -493,9 +724,88 @@ mod tests {
             train: NoiseTrain::Flat { stream_seed: 1 },
             amplitude: 1.0,
             injections: vec![NoiseInjection::unit(1, 0)],
+            shaping: None,
         });
         assert_eq!(position, 0);
         assert_eq!(dormant.amplitudes(), vec![1.0]);
+    }
+
+    /// A backward-difference integrator `z_n = z_{n−1} + NT·u_n` driving
+    /// one injection, fed by a known train.
+    fn integrating_plan(train: Vec<Value>, warmup: usize) -> TransientDeviceNoise {
+        let nt = 0.5;
+        let train = NoiseTrain::Materialized {
+            samples: Arc::new(train),
+        };
+        let shaping = ShapedNoise::warmed(
+            ShapedStep {
+                transition: vec![1.0],
+                drive: vec![nt],
+                carry: vec![0.0],
+            },
+            vec![ShapedOutput {
+                state: vec![1.0],
+                prior_state: vec![0.0],
+                input: 0.0,
+                prior_input: 0.0,
+            }],
+            warmup,
+            &train,
+            2.0,
+        );
+        TransientDeviceNoise::new(
+            nt,
+            4,
+            vec![InjectedNoiseSource {
+                train,
+                amplitude: 2.0,
+                injections: vec![NoiseInjection::unit(1, 0)],
+                shaping: Some(shaping),
+            }],
+        )
+    }
+
+    fn stamped(plan: &TransientDeviceNoise, time: Value) -> Value {
+        let mut rhs = vec![0.0];
+        plan.stamp_transient_rhs(&mut rhs, time);
+        -rhs[0]
+    }
+
+    /// A shaped source's filter output over each sample is the recurrence
+    /// applied to the scaled train, after the warm-up samples.
+    #[test]
+    fn a_shaped_source_injects_its_filter_output() {
+        // Warm-up absorbs 1.0; the run then sees 2.0, 3.0, 4.0, 5.0.
+        let plan = integrating_plan(vec![1.0, 2.0, 3.0, 4.0, 5.0], 1);
+        // u = 2·train, z_n = z_{n−1} + 0.5·u_n = the running sum of the
+        // train; the hold interval of sample k is (k·NT, (k+1)·NT].
+        assert_eq!(stamped(&plan, 0.25), 1.0 + 2.0);
+        assert_eq!(stamped(&plan, 0.5), 1.0 + 2.0);
+        assert_eq!(stamped(&plan, 1.0), 1.0 + 2.0 + 3.0);
+        assert_eq!(stamped(&plan, 1.25), 1.0 + 2.0 + 3.0 + 4.0);
+        assert_eq!(stamped(&plan, 2.0), 1.0 + 2.0 + 3.0 + 4.0 + 5.0);
+    }
+
+    /// Stamping never moves the state: a rejected step restamps the same
+    /// value, and committing an accepted point leaves every later stamp
+    /// unchanged.
+    #[test]
+    fn a_shaped_source_moves_only_at_committed_points() {
+        let mut plan = integrating_plan(vec![1.0, -2.0, 0.5, 4.0, 3.0], 0);
+        let ahead: Vec<Value> = [0.25, 0.75, 1.5, 2.0]
+            .iter()
+            .map(|time| stamped(&plan, *time))
+            .collect();
+        assert_eq!(stamped(&plan, 1.5), ahead[2], "a restamp is identical");
+        plan.commit_accepted(0.75);
+        plan.commit_accepted(0.6);
+        let after: Vec<Value> = [0.75, 1.5, 2.0]
+            .iter()
+            .map(|time| stamped(&plan, *time))
+            .collect();
+        assert_eq!(after, ahead[1..].to_vec());
+        plan.commit_accepted(2.0);
+        assert_eq!(stamped(&plan, 2.0), ahead[3]);
     }
 
     #[test]
