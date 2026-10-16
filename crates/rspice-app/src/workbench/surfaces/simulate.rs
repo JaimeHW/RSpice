@@ -71,9 +71,10 @@ const TITLE_ACTION_SPACING: f32 = 6.0;
 /// gives up on holding the actions beside it.
 const TITLE_HEADING_MIN_WIDTH: f32 = 220.0;
 /// Side of a problem mark painted into a row's line, and the advance from its
-/// left edge to the words after it: the kit's own row metrics.
-const ROW_MARK_SIDE: f32 = 11.0;
-const ROW_MARK_ADVANCE: f32 = 17.0;
+/// left edge to the words after it: read from the kit's own row metrics.
+use crate::ui::widgets::{
+    PROBLEM_MARK_ADVANCE as ROW_MARK_ADVANCE, PROBLEM_MARK_SIDE as ROW_MARK_SIDE,
+};
 const ANALYSIS_ROW_HEIGHT: f32 = 53.0;
 const ANALYSIS_GROUP_HEADER_HEIGHT: f32 = 26.0;
 const ANALYSIS_INDEX_DIAMETER: f32 = 22.0;

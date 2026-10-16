@@ -32,9 +32,11 @@ pub(super) const CODE_TOOLBAR_FULL_STATUS_MIN_WIDTH: f32 = 320.0;
 pub(super) const PHONE_BREAKPOINT: f32 = 560.0;
 pub(super) const PHONE_PRIMARY_WIDTH: f32 = 154.0;
 pub(super) const CODE_TOOLBAR_ICON_WIDTH: f32 = 28.0;
-/// Side of a status line's problem mark, sized to the status text.
-const CODE_STATUS_MARK_SIDE: f32 = 11.0;
-const CODE_STATUS_MARK_GAP: f32 = 6.0;
+/// Side of a status line's problem mark and the air after it: the kit's own,
+/// so a marked status matches every other marked line in the product.
+use crate::ui::widgets::{
+    PROBLEM_MARK_GAP as CODE_STATUS_MARK_GAP, PROBLEM_MARK_SIDE as CODE_STATUS_MARK_SIDE,
+};
 /// Width that mark takes out of a status line, gap included.
 const CODE_STATUS_MARK_COLUMN: f32 = CODE_STATUS_MARK_SIDE + CODE_STATUS_MARK_GAP;
 

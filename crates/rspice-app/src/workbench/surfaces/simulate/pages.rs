@@ -250,9 +250,8 @@ fn chip_text(currency: PreflightCurrency) -> String {
 }
 
 /// Side of the chip's problem mark, and the advance from its left edge to the
-/// words after it: the kit's own row metrics.
-const MARK_SIDE: f32 = 11.0;
-const MARK_ADVANCE: f32 = 17.0;
+/// words after it: read from the kit's own row metrics.
+use crate::ui::widgets::{PROBLEM_MARK_ADVANCE as MARK_ADVANCE, PROBLEM_MARK_SIDE as MARK_SIDE};
 
 /// How much room a standing's mark takes before its words. Only a blocked
 /// report has one: an expired report is not a finding, it is a report that

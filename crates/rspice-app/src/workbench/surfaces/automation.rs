@@ -1693,8 +1693,9 @@ fn execution_preview(app: &RSpiceApp) -> ExecutionPreview {
 
 /// An artifact row's file icon, on the panel inset, and the gap before its
 /// name.
-/// Side of the toolbar status's failure mark, sized to the status text.
-const TOOLBAR_MARK_SIDE: f32 = 11.0;
+/// Side of the toolbar status's failure mark: the kit's own, so it matches
+/// every other marked line in the product.
+use crate::ui::widgets::PROBLEM_MARK_SIDE as TOOLBAR_MARK_SIDE;
 
 const ARTIFACT_ICON_W: f32 = 14.0;
 const ARTIFACT_ICON_GAP: f32 = 6.0;

@@ -58,10 +58,9 @@ impl Tone {
 }
 
 /// Side of a mark painted into one of this page's rows, and the advance from
-/// its left edge to where the text after it begins. The kit's own values: a
+/// its left edge to where the text after it begins. Read from the kit: a
 /// marked line and an unmarked one beside it differ by exactly the advance.
-const MARK_SIDE: f32 = 11.0;
-const MARK_ADVANCE: f32 = 17.0;
+use crate::ui::widgets::{PROBLEM_MARK_ADVANCE as MARK_ADVANCE, PROBLEM_MARK_SIDE as MARK_SIDE};
 
 /// Paint `tone`'s mark with its left edge at `left`, centred on `center_y`,
 /// and return how far the text after it is pushed. A neutral tone paints

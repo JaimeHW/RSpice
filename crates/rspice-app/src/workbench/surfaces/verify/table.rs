@@ -27,9 +27,9 @@ pub(super) const TABLE_ROW_H: f32 = 24.0;
 pub(super) const TABLE_EDGE_INSET: f32 = crate::workbench::design_system::PANEL_INSET;
 /// Space between a cell's words and the rule on either side of it.
 const CELL_PAD: f32 = 8.0;
-/// A problem mark in a cell, and the advance from its left edge to the words.
-const MARK_SIDE: f32 = 11.0;
-const MARK_ADVANCE: f32 = 17.0;
+/// A problem mark in a cell, and the advance from its left edge to the words:
+/// the kit's own, so a marked cell matches every other marked line.
+use crate::ui::widgets::{PROBLEM_MARK_ADVANCE as MARK_ADVANCE, PROBLEM_MARK_SIDE as MARK_SIDE};
 
 /// Which edge of its cell a column's words sit on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

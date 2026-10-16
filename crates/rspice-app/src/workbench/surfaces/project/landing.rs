@@ -33,9 +33,9 @@ const TABLE_HEADER_HEIGHT: f32 = 27.0;
 const TABLE_ROW_HEIGHT: f32 = 32.0;
 const TABLE_TOOLBAR_HEIGHT: f32 = 34.0;
 const SECTION_HEADER_HEIGHT: f32 = 24.0;
-/// Side of a problem mark set in front of a card head's fact: the kit's own
-/// value, so a marked head and an unmarked one keep the same rhythm.
-const MARK_SIDE: f32 = 11.0;
+/// Side of a problem mark set in front of a card head's fact: read from the
+/// kit, so a marked head and an unmarked one keep the same rhythm.
+use crate::ui::widgets::PROBLEM_MARK_SIDE as MARK_SIDE;
 
 #[derive(Debug, Clone)]
 struct RecentProjectRow {

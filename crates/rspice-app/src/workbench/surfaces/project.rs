@@ -531,10 +531,11 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 /// Side of a problem mark painted inside a chip, and the advance from the
-/// mark's left edge to the text after it: the kit's own values, so a marked
-/// chip and an unmarked one beside it keep the same text rhythm.
-const CHIP_MARK_SIDE: f32 = 11.0;
-const CHIP_MARK_ADVANCE: f32 = 17.0;
+/// mark's left edge to the text after it: read from the kit, so a marked chip
+/// and an unmarked one beside it keep the same text rhythm.
+use crate::ui::widgets::{
+    PROBLEM_MARK_ADVANCE as CHIP_MARK_ADVANCE, PROBLEM_MARK_SIDE as CHIP_MARK_SIDE,
+};
 
 /// One of the title row's health chips: a link to the page that owns the
 /// fact, so its words stay neutral. A failure the reader has to act on puts

@@ -23,9 +23,8 @@ pub(super) const CHECKPOINT_ROW_HEIGHT: f32 = 52.0;
 const CHECKPOINT_ROW_STACK_WIDTH: f32 = 460.0;
 const ROW_INSET: f32 = 12.0;
 /// Side of a problem mark set in front of a line on this page, and the
-/// advance from its left edge to the text after it: the kit's own values.
-const MARK_SIDE: f32 = 11.0;
-const MARK_ADVANCE: f32 = 17.0;
+/// advance from its left edge to the text after it: read from the kit.
+use crate::ui::widgets::{PROBLEM_MARK_ADVANCE as MARK_ADVANCE, PROBLEM_MARK_SIDE as MARK_SIDE};
 
 #[cfg(target_arch = "wasm32")]
 struct BrowserManualCheckpointCompletion {

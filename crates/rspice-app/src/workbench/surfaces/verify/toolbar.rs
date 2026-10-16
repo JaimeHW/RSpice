@@ -28,9 +28,9 @@ const ACTION_GAP: f32 = 6.0;
 const RUN_SELECT_W: f32 = 190.0;
 /// Least width a summary keeps on the toolbar's own line.
 const SUMMARY_MIN_W: f32 = 140.0;
-/// A problem mark before the summary, and the advance from it to the words.
-const MARK_SIDE: f32 = 11.0;
-const MARK_ADVANCE: f32 = 17.0;
+/// A problem mark before the summary, and the advance from it to the words:
+/// the kit's own, so the summary matches every other marked line.
+use crate::ui::widgets::{PROBLEM_MARK_ADVANCE as MARK_ADVANCE, PROBLEM_MARK_SIDE as MARK_SIDE};
 /// Height of a page's empty-state line.
 pub(super) const EMPTY_LINE_H: f32 = 40.0;
 

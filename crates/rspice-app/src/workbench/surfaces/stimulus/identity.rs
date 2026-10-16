@@ -26,8 +26,12 @@ const NAME_WIDTH: f32 = 168.0;
 const COMBO_WIDTH: f32 = 96.0;
 const KIND_WIDTH: f32 = 56.0;
 const BUTTON: Vec2 = Vec2::new(28.0, 26.0);
-/// Side of the lifecycle chip's problem mark, and the air after it.
-const CHIP_MARK_SIDE: f32 = 11.0;
+/// Side of the lifecycle chip's problem mark: the kit's own, so it matches
+/// every other marked line in the product.
+use crate::ui::widgets::PROBLEM_MARK_SIDE as CHIP_MARK_SIDE;
+/// The air after it. Not the kit's `PROBLEM_MARK_GAP`: a chip sets its mark
+/// inside its own padding, and 5 pt is what keeps the mark off the chip edge
+/// without the words drifting out of the chip.
 const CHIP_MARK_GAP: f32 = 5.0;
 /// Room the five verbs keep at the right of the identity row: Apply plus four
 /// icon buttons and the spacing between them.
