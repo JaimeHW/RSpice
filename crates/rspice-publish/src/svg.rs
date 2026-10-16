@@ -236,6 +236,9 @@ fn text_markup(text: &TextPrimitive) -> String {
         TextFont::Monospace => {
             " font-family=\"Consolas, 'Cascadia Code', 'DejaVu Sans Mono', monospace\""
         }
+        TextFont::MonospaceMedium => {
+            " font-family=\"Consolas, 'Cascadia Code', 'DejaVu Sans Mono', monospace\" font-weight=\"500\""
+        }
     };
     let rotation = if text.rotation_millideg == 0 {
         String::new()

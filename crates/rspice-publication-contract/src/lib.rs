@@ -39,9 +39,14 @@ pub const PUBLICATION_SNAPSHOT_V2_SCHEMA_VERSION: u32 = 2;
 /// component/net identity, explicit signal bindings, and simulation
 /// provenance while preserving strict v2 decoding.
 pub const PUBLICATION_SNAPSHOT_V3_SCHEMA_VERSION: u32 = 3;
-/// Current snapshot schema. Version 4 adds immutable, typed FAILVALUE
-/// measurement evidence while preserving strict v2 and v3 decoding.
-pub const PUBLICATION_SNAPSHOT_SCHEMA_VERSION: u32 = 4;
+/// Legacy snapshot schema that added immutable, typed FAILVALUE measurement
+/// evidence while preserving strict v2 and v3 decoding.
+pub const PUBLICATION_SNAPSHOT_V4_SCHEMA_VERSION: u32 = 4;
+/// Current snapshot schema. Version 5 adds the monospace medium typeface
+/// class, which a drawing sheet letters a title-block value in so that the
+/// value outranks the caption naming it, while preserving strict v2, v3, and
+/// v4 decoding.
+pub const PUBLICATION_SNAPSHOT_SCHEMA_VERSION: u32 = 5;
 /// Exact schema version a conforming figure manifest must declare.
 pub const FIGURE_MANIFEST_SCHEMA_VERSION: u32 = 1;
 /// Hard upper bound on canonical snapshot bytes, matching the hardcopy
@@ -183,6 +188,8 @@ pub enum ContractError {
     V3FieldInLegacySnapshot { field: &'static str },
     #[error("legacy snapshot cannot carry the v4 field {field}")]
     V4FieldInLegacySnapshot { field: &'static str },
+    #[error("legacy snapshot cannot carry the v5 {field}")]
+    V5FieldInLegacySnapshot { field: &'static str },
     #[error("publication section {section} is duplicated")]
     DuplicateSection { section: &'static str },
     #[error("publication section {section} is missing for disclosed content")]
@@ -266,7 +273,8 @@ fn validate_required_multiline(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PublicationSnapshot {
-    /// Versions 2, 3, and [`PUBLICATION_SNAPSHOT_SCHEMA_VERSION`] are accepted.
+    /// Versions 2, 3, 4, and [`PUBLICATION_SNAPSHOT_SCHEMA_VERSION`] are
+    /// accepted.
     pub schema_version: u32,
     pub metadata: PublicationMetadata,
     pub disclosure: Disclosure,
@@ -618,6 +626,12 @@ pub enum TextFont {
     Sans,
     SansSemibold,
     Monospace,
+    /// Monospace at the next stroke weight up. A drawing sheet letters a
+    /// title-block value in it so the value outranks the caption naming it:
+    /// the two are one ISO 3098 height step apart, and that step only reads
+    /// as a hierarchy on a drawing lettered wholly in capitals, which a sheet
+    /// carrying case-bearing identifiers cannot be. Schema v5 and later only.
+    MonospaceMedium,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1620,6 +1634,7 @@ impl Validate for PublicationSnapshot {
         if ![
             PUBLICATION_SNAPSHOT_V2_SCHEMA_VERSION,
             PUBLICATION_SNAPSHOT_V3_SCHEMA_VERSION,
+            PUBLICATION_SNAPSHOT_V4_SCHEMA_VERSION,
             PUBLICATION_SNAPSHOT_SCHEMA_VERSION,
         ]
         .contains(&self.schema_version)
@@ -1641,7 +1656,7 @@ impl Validate for PublicationSnapshot {
                 });
             }
         }
-        if self.schema_version != PUBLICATION_SNAPSHOT_SCHEMA_VERSION
+        if self.schema_version < PUBLICATION_SNAPSHOT_V4_SCHEMA_VERSION
             && self.results.as_ref().is_some_and(|results| {
                 results
                     .measurements
@@ -1651,6 +1666,13 @@ impl Validate for PublicationSnapshot {
         {
             return Err(ContractError::V4FieldInLegacySnapshot {
                 field: "results.measurements[].fail_value",
+            });
+        }
+        if self.schema_version < PUBLICATION_SNAPSHOT_SCHEMA_VERSION
+            && self.scenes().any(scene_letters_monospace_medium)
+        {
+            return Err(ContractError::V5FieldInLegacySnapshot {
+                field: "scene text font monospace-medium",
             });
         }
 
@@ -1942,7 +1964,33 @@ fn from_canonical_bytes_of<T: serde::de::DeserializeOwned + Validate>(
     Ok(value)
 }
 
+/// Whether a scene letters anything in the typeface class schema v5 added.
+fn scene_letters_monospace_medium(scene: &Scene) -> bool {
+    scene.groups.iter().any(|group| {
+        group.primitives.iter().any(|primitive| {
+            matches!(primitive, Primitive::Text(text) if text.font == TextFont::MonospaceMedium)
+        })
+    })
+}
+
 impl PublicationSnapshot {
+    /// Every scene the snapshot carries in its own body. A schematic-sheet
+    /// figure indexes a sheet rather than repeating its scene, so following
+    /// one would count the same scene twice.
+    fn scenes(&self) -> impl Iterator<Item = &Scene> {
+        self.schematic
+            .iter()
+            .flat_map(|section| section.sheets.iter().map(|sheet| &sheet.scene))
+            .chain(
+                self.figures
+                    .iter()
+                    .filter_map(|figure| match &figure.content {
+                        FigureContent::Plot(plot) => Some(&plot.scene),
+                        FigureContent::SchematicSheet { .. } => None,
+                    }),
+            )
+    }
+
     /// Validate, then serialize to the canonical interchange encoding.
     /// Equal values always produce identical bytes.
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, ContractError> {
@@ -2272,6 +2320,80 @@ mod tests {
                 field: "results.measurements[].fail_value"
             })
         );
+    }
+
+    #[test]
+    fn legacy_v4_snapshots_remain_compatible_but_cannot_claim_v5_lettering() {
+        let mut snapshot = minimal_snapshot();
+        snapshot.schema_version = PUBLICATION_SNAPSHOT_V4_SCHEMA_VERSION;
+        add_v3_metadata(&mut snapshot);
+        snapshot.validate().expect("plain v4 remains supported");
+        let bytes = snapshot.canonical_bytes().expect("v4 canonical bytes");
+        let reparsed = PublicationSnapshot::from_canonical_bytes(&bytes).expect("parse v4");
+        assert_eq!(snapshot, reparsed);
+
+        // v4 introduced FAILVALUE evidence, so a v4 snapshot must still be
+        // allowed to carry it now that it is no longer the current version.
+        snapshot
+            .results
+            .as_mut()
+            .expect("results")
+            .measurements
+            .push(Measurement {
+                analysis_id: 1,
+                name: "settling".to_string(),
+                value_bits: Some(1.0_f64.to_bits()),
+                display: "1 s".to_string(),
+                spec_display: None,
+                passed: Some(true),
+                fail_value: Some(MeasurementFailValueEvidence {
+                    raw_value_bits: Some(1.0_f64.to_bits()),
+                    failure_limit_bits: 4.0_f64.to_bits(),
+                    exceeded: false,
+                }),
+            });
+        snapshot
+            .validate()
+            .expect("v4 keeps the evidence v4 introduced");
+
+        letter_title_value_in_monospace_medium(&mut snapshot);
+        assert_eq!(
+            snapshot.validate(),
+            Err(ContractError::V5FieldInLegacySnapshot {
+                field: "scene text font monospace-medium"
+            })
+        );
+
+        snapshot.schema_version = PUBLICATION_SNAPSHOT_SCHEMA_VERSION;
+        snapshot.validate().expect("v5 carries the weight");
+    }
+
+    /// Letter the sheet's title value the way a drawing sheet does.
+    fn letter_title_value_in_monospace_medium(snapshot: &mut PublicationSnapshot) {
+        snapshot
+            .schematic
+            .as_mut()
+            .expect("schematic")
+            .sheets
+            .first_mut()
+            .expect("sheet")
+            .scene
+            .groups
+            .first_mut()
+            .expect("group")
+            .primitives
+            .push(Primitive::Text(TextPrimitive {
+                origin: Point {
+                    x_um: 1_000,
+                    y_um: 1_000,
+                },
+                text: "mycircuit/top".to_string(),
+                height_um: 2_500,
+                font: TextFont::MonospaceMedium,
+                anchor: TextAnchor::Start,
+                rotation_millideg: 0,
+                paint: Paint::Role(PaintRole::Foreground),
+            }));
     }
 
     #[test]
