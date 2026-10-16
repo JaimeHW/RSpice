@@ -78,11 +78,12 @@ fn a_committed_plan_command_leaves_one_plan_receipt_in_the_console() {
     );
 }
 
-/// A refused command leaves exactly one record, at `Warning`, and no toast.
+/// A refused command leaves exactly one record, at `Warning`, one prompt and
+/// no toast.
 ///
-/// The Analyses lifecycle line states the refusal where the reader is, and
-/// the Console keeps the record; a toast would be a third statement of one
-/// refusal, at a severity the record does not have.
+/// The prompt answers the gesture wherever the user is, the Analyses
+/// lifecycle line states the refusal on that route, and the Console keeps the
+/// record; a toast would be one more statement of one refusal.
 #[test]
 fn a_refused_plan_command_is_recorded_once_and_raises_no_toast() {
     let mut app = RSpiceApp::test_instance();
@@ -99,6 +100,15 @@ fn a_refused_plan_command_is_recorded_once_and_raises_no_toast() {
     assert_eq!(
         entries[0].1,
         app.state.workbench.analysis_lifecycle_status.message()
+    );
+    assert_eq!(
+        app.state
+            .workbench
+            .prompt
+            .as_ref()
+            .map(|prompt| prompt.text.as_str()),
+        Some(entries[0].1.as_str()),
+        "the refusal answers the gesture on the status bar, wherever the user is"
     );
     assert!(
         app.state.ui.toasts.activity().is_empty(),

@@ -1132,9 +1132,13 @@ impl AppState {
     }
 
     /// Announce a refused plan command, as [`Self::record_plan_receipt`] does,
-    /// at warning severity. The notice a refusal also raises is the plan
-    /// drain's titled toast, which is a separate reporter: this is the record,
-    /// and that is the notice.
+    /// at warning severity, and answer the gesture on the status bar.
+    ///
+    /// The lifecycle status line is drawn only on the Analyses route, and a
+    /// plan command can be refused from the plan manager in any workspace, so
+    /// the prompt is what answers the user wherever they are. It is issued
+    /// with the record, when the outcome changes, because a standing refusal
+    /// restated every frame would otherwise hold the prompt up forever.
     pub(crate) fn record_plan_refusal(&mut self, message: impl Into<String>) {
         let message = message.into();
         if self
@@ -1142,6 +1146,7 @@ impl AppState {
             .analysis_lifecycle_status
             .record_refusal(message.as_str())
         {
+            self.prompt(message.clone());
             self.log_buffer.log(
                 crate::diagnostics::LogSeverity::Warning,
                 crate::diagnostics::LogSource::Plan,
