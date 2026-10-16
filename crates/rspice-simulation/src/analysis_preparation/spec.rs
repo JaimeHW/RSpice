@@ -673,12 +673,17 @@ where
             .to_string();
     }
     let mut config = op.to_config()?;
+    // The report names each device as the engine does, by the element the
+    // deck writes; a selected symbol that writes no card names no device.
     config.selected_devices = state
         .schematic
         .components
         .iter()
-        .filter(|component| state.selected_components.contains(&component.id))
-        .map(|component| component.name.clone())
+        .filter(|component| {
+            state.selected_components.contains(&component.id)
+                && !component.kind.spice_prefix().is_empty()
+        })
+        .map(|component| component.written_element_name())
         .collect();
     config.selected_devices.sort();
     config.selected_devices.dedup();
