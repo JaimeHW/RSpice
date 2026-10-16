@@ -139,17 +139,17 @@ pub(crate) fn run(app: &mut RSpiceApp) {
     });
 
     if blocked {
-        show_blockers(app);
+        show_blockers(&mut app.state);
     }
 }
 
 /// Bring the reader to the blockers a pass just filed: the Problems page,
 /// listing them. A filter left from earlier reading could hide the very
 /// findings that stopped the run, so the filters are cleared.
-fn show_blockers(app: &mut RSpiceApp) {
-    app.state.workbench.console_visible = true;
-    app.state.workbench.console_page = ConsolePage::Problems;
-    app.state.problems_view.clear_filters();
+fn show_blockers(state: &mut AppState) {
+    state.workbench.console_visible = true;
+    state.workbench.console_page = ConsolePage::Problems;
+    state.problems_view.clear_filters();
 }
 
 /// Run the same governed preflight used by the explicit Preflight command and
