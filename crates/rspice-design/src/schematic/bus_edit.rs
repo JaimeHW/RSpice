@@ -163,12 +163,17 @@ pub struct BusPropertyEdit<'a> {
 }
 
 impl<'a> BusPropertyEdit<'a> {
+    /// `on_sheet` admits the objects drawn on the edited bus's sheet. A cell
+    /// view's sheets share one coordinate space, so another sheet's bus can
+    /// pass exactly where a tap here ends without being connected to it.
     pub fn prepare(
         document: &'a mut SchematicDocument,
         expected: &Bus,
         declaration: Option<&BusDeclaration>,
+        on_sheet: &dyn Fn(u64) -> bool,
     ) -> Result<Option<Self>, BusParseError> {
-        let (buses, taps, impact) = build_bus_property_candidates(document, expected, declaration)?;
+        let (buses, taps, impact) =
+            build_bus_property_candidates(document, expected, declaration, on_sheet)?;
         if !impact.has_changes() {
             return Ok(None);
         }
@@ -235,8 +240,9 @@ pub fn validate_bus_properties(
     document: &SchematicDocument,
     expected: &Bus,
     declaration: Option<&BusDeclaration>,
+    on_sheet: &dyn Fn(u64) -> bool,
 ) -> Result<BusPropertyImpact, BusParseError> {
-    let (_, _, impact) = build_bus_property_candidates(document, expected, declaration)?;
+    let (_, _, impact) = build_bus_property_candidates(document, expected, declaration, on_sheet)?;
     Ok(impact)
 }
 
@@ -255,6 +261,7 @@ fn build_bus_property_candidates(
     document: &SchematicDocument,
     expected: &Bus,
     declaration: Option<&BusDeclaration>,
+    on_sheet: &dyn Fn(u64) -> bool,
 ) -> Result<(Vec<Bus>, Vec<BusTap>, BusPropertyImpact), BusParseError> {
     let current = document
         .buses
@@ -277,7 +284,7 @@ fn build_bus_property_candidates(
     candidate.declaration = declaration.cloned();
     candidate.validate()?;
 
-    let connectivity = bus_connectivity(document, expected.id);
+    let connectivity = bus_connectivity(document, expected.id, on_sheet);
     let connected = &connectivity.connected;
     let mut candidate_taps = document.bus_taps.clone();
     let Some(selected_declaration) = declaration else {
@@ -320,6 +327,18 @@ fn build_bus_property_candidates(
         .iter()
         .enumerate()
         .map(|(index, bus)| (bus.id, index))
+        .collect();
+    // A tap's destination is judged against what its own sheet draws.
+    let sheet_wires: Vec<Wire> = document
+        .wires
+        .iter()
+        .filter(|wire| on_sheet(wire.id))
+        .cloned()
+        .collect();
+    let sheet_buses: Vec<Bus> = candidate_buses
+        .iter()
+        .filter(|bus| on_sheet(bus.id))
+        .cloned()
         .collect();
     for tap in &mut candidate_taps {
         if !connected.contains(&tap.bus_id) {
@@ -376,7 +395,7 @@ fn build_bus_property_candidates(
             tap.slice.notation = source_declaration.notation;
         }
         tap.validate_against_bus(source)?;
-        validate_tap_destination(&document.wires, &candidate_buses, tap)?;
+        validate_tap_destination(&sheet_wires, &sheet_buses, tap)?;
     }
     let impact = property_impact(document, &candidate_buses, &candidate_taps, connected.len());
     Ok((candidate_buses, candidate_taps, impact))
@@ -445,19 +464,26 @@ struct BusConnectivity {
     targets_by_tap: std::collections::HashMap<u64, Vec<u64>>,
 }
 
-fn bus_connectivity(document: &SchematicDocument, seed: u64) -> BusConnectivity {
-    let mut adjacency: std::collections::HashMap<u64, Vec<u64>> = document
+/// The buses joined to `seed` on its sheet, and where each multi-bit tap there
+/// lands. Another sheet's buses and taps are not part of the network.
+fn bus_connectivity(
+    document: &SchematicDocument,
+    seed: u64,
+    on_sheet: &dyn Fn(u64) -> bool,
+) -> BusConnectivity {
+    let buses: Vec<&Bus> = document
         .buses
         .iter()
-        .map(|bus| (bus.id, Vec::new()))
+        .filter(|bus| on_sheet(bus.id))
         .collect();
+    let mut adjacency: std::collections::HashMap<u64, Vec<u64>> =
+        buses.iter().map(|bus| (bus.id, Vec::new())).collect();
     let mut targets_by_tap = std::collections::HashMap::new();
-    for tap in &document.bus_taps {
+    for tap in document.bus_taps.iter().filter(|tap| on_sheet(tap.id)) {
         if tap.target_kind() != BusTargetKind::Bus {
             continue;
         }
-        let targets: Vec<u64> = document
-            .buses
+        let targets: Vec<u64> = buses
             .iter()
             .filter(|bus| bus.id != tap.bus_id && bus.contains_point(tap.connection_point))
             .map(|bus| bus.id)
@@ -614,9 +640,11 @@ mod tests {
         assert_eq!(identity.cursor(), 42);
 
         drop(
-            BusPropertyEdit::prepare(&mut document, &before_buses[0], Some(&declaration))
-                .unwrap()
-                .unwrap(),
+            BusPropertyEdit::prepare(&mut document, &before_buses[0], Some(&declaration), &|_| {
+                true
+            })
+            .unwrap()
+            .unwrap(),
         );
         assert_eq!(document.buses, before_buses);
         assert!(document.bus_taps.is_empty());

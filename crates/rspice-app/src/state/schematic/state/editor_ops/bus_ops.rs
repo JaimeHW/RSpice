@@ -128,15 +128,22 @@ impl SchematicState {
     /// intentional base-name or notation rename and reverse their endpoints
     /// when declaration direction reverses; the transaction is rejected if
     /// any selected member would fall outside the new range.
+    ///
+    /// `on_sheet` admits the objects on the active sheet: another sheet's
+    /// bus under a tap end here is neither a destination nor renamed.
     pub fn edit_bus_properties(
         &mut self,
         expected: &Bus,
         declaration: Option<BusDeclaration>,
+        on_sheet: &dyn Fn(u64) -> bool,
     ) -> Result<bool, BusParseError> {
         if self.session.read_only {
             return Err(BusParseError::ReadOnly);
         }
-        let Some(edit) = self.design.edit_bus_properties(expected, declaration)? else {
+        let Some(edit) = self
+            .design
+            .edit_bus_properties(expected, declaration, on_sheet)?
+        else {
             return Ok(false);
         };
         self.finish_document_edit(edit.committed);
@@ -149,11 +156,12 @@ impl SchematicState {
         &self,
         expected: &Bus,
         declaration: Option<&BusDeclaration>,
+        on_sheet: &dyn Fn(u64) -> bool,
     ) -> Result<BusPropertyImpact, BusParseError> {
         if self.session.read_only {
             return Err(BusParseError::ReadOnly);
         }
-        bus_edit::validate_bus_properties(self.design.document(), expected, declaration)
+        bus_edit::validate_bus_properties(self.design.document(), expected, declaration, on_sheet)
     }
 
     /// Apply a complete bus-tap property contract atomically. The guarded
@@ -334,6 +342,7 @@ mod tests {
                 .edit_bus_properties(
                     &expected,
                     Some(BusDeclaration::parse("DATA[15:0]").unwrap()),
+                    &|_| true,
                 )
                 .unwrap()
         );
@@ -376,8 +385,11 @@ mod tests {
         let expected = state.design.document().buses[0].clone();
 
         assert_eq!(
-            state
-                .edit_bus_properties(&expected, Some(BusDeclaration::parse("DATA[3:0]").unwrap()),),
+            state.edit_bus_properties(
+                &expected,
+                Some(BusDeclaration::parse("DATA[3:0]").unwrap()),
+                &|_| true,
+            ),
             Err(BusParseError::SelectorOutOfRange)
         );
         assert_eq!(state.design.document().buses[0], expected);
@@ -411,6 +423,7 @@ mod tests {
                 .edit_bus_properties(
                     &expected,
                     Some(BusDeclaration::parse("ADDR<0:15>").unwrap()),
+                    &|_| true,
                 )
                 .unwrap()
         );
@@ -467,7 +480,11 @@ mod tests {
 
         assert!(
             state
-                .edit_bus_properties(&expected, Some(BusDeclaration::parse("ADDR[7:0]").unwrap()),)
+                .edit_bus_properties(
+                    &expected,
+                    Some(BusDeclaration::parse("ADDR[7:0]").unwrap()),
+                    &|_| true,
+                )
                 .unwrap()
         );
         assert_eq!(
@@ -623,7 +640,11 @@ mod tests {
 
         assert!(
             state
-                .edit_bus_properties(&expected, Some(BusDeclaration::parse("ADDR<0:7>").unwrap()),)
+                .edit_bus_properties(
+                    &expected,
+                    Some(BusDeclaration::parse("ADDR<0:7>").unwrap()),
+                    &|_| true,
+                )
                 .unwrap()
         );
         assert_eq!(
@@ -964,6 +985,7 @@ mod tests {
                 .edit_bus_properties(
                     &expected,
                     Some(BusDeclaration::parse("RENAMED[3:0]").unwrap()),
+                    &|_| true,
                 )
                 .unwrap()
         );
@@ -1034,13 +1056,13 @@ mod tests {
         let declaration = expected.declaration.clone().expect("declared bus");
 
         let impact = state
-            .validate_bus_properties(&expected, Some(&declaration))
+            .validate_bus_properties(&expected, Some(&declaration), &|_| true)
             .unwrap();
         assert_eq!(impact.connected_buses, 1);
         assert!(!impact.has_changes());
         assert!(
             !state
-                .edit_bus_properties(&expected, Some(declaration))
+                .edit_bus_properties(&expected, Some(declaration), &|_| true)
                 .unwrap()
         );
         assert_eq!(state.topology_version(), version);
