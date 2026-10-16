@@ -76,6 +76,36 @@ fn raster_at(
     })
 }
 
+/// Write a set of renders out and say where each one landed.
+///
+/// Shared by both render tests so a new one costs a fixture and a line rather
+/// than a copy of the plumbing — the reason the drift banner went two lanes
+/// without a render at all was that adding one looked like work.
+fn write_renders(renders: Vec<(&str, Canvas)>) {
+    use std::io::Write as _;
+
+    let directory = std::env::var("RSPICE_RASTER_DIR")
+        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+    std::fs::create_dir_all(&directory).expect("raster output directory");
+    let stderr = std::io::stderr();
+    let mut report_output = stderr.lock();
+    for (name, canvas) in renders {
+        let height = canvas.content_height().max(1);
+        let bytes = canvas.png(height);
+        let path = directory.join(format!("models-{name}.png"));
+        std::fs::write(&path, &bytes).expect("write hub render");
+        writeln!(
+            report_output,
+            "{} {}x{} {} bytes",
+            path.display(),
+            canvas.width(),
+            height,
+            bytes.len()
+        )
+        .expect("write raster qualification report");
+    }
+}
+
 /// Render one dialog on its own, with no page behind it.
 ///
 /// The rasterizer fills triangles in the order the tessellator emits them and
@@ -90,8 +120,21 @@ fn raster_at(
 /// ships — and the elision the extra width exists to prevent would appear in
 /// the render and nowhere else.
 fn raster_dialog(hub: hub::HubCatalog, dialog: ModelsWorkbenchDialog) -> Canvas {
+    raster_dialog_over(hub, dialog, |_| {})
+}
+
+/// The same, over a project a seed has stood up.
+///
+/// A dialog that lists findings has nothing to list over a default workspace,
+/// so the states worth looking at are exactly the ones a seed reaches.
+fn raster_dialog_over(
+    hub: hub::HubCatalog,
+    dialog: ModelsWorkbenchDialog,
+    seed: impl FnOnce(&mut AppState),
+) -> Canvas {
     let mut state = AppState::default();
     state.workbench.models_view.dialog = Some(dialog);
+    seed(&mut state);
     let mut pending = Vec::new();
     crate::ui::raster::render(egui::vec2(1060.0, 900.0), |ui, background| {
         egui::CentralPanel::default()
@@ -304,6 +347,92 @@ fn retained_fixture() -> crate::state::model_library::ModelLibrary {
     library
 }
 
+/// One pinned source of a [`drifted_library`]: its file name, the bytes the
+/// project accepted, and the bytes it still holds — `None` for a source the
+/// project no longer has, which is the finding that can name only one digest.
+type DriftedSource<'a> = (&'a str, &'a [u8], Option<&'a [u8]>);
+
+/// A library whose pinned sources and retained bytes disagree.
+///
+/// Built from [`DriftedSource`] entries rather than by writing findings
+/// straight into the view state, so the render is of the path an edited PDK
+/// really takes through [`drift::scan`].
+fn drifted_library(
+    name: &str,
+    sources: &[DriftedSource<'_>],
+) -> crate::state::model_library::ModelLibrary {
+    use crate::product::{ContentDigest, ModelSourceId};
+    use crate::state::model_library::{DeviceModel, ModelSourceContent, ModelSourcePin, ModelType};
+    use sha2::{Digest as _, Sha256};
+
+    let digest = |bytes: &[u8]| ContentDigest::from_bytes(Sha256::digest(bytes).into());
+    let mut library = crate::state::model_library::ModelLibrary::new(name);
+    library.pdk_name = "Foundry 180 nm".to_owned();
+    library.root_path = Some(PathBuf::from(format!("/pdk/{name}/{}", sources[0].0)));
+    library.source_authority = ModelSourceAuthority::RetainedImport {
+        source_id: ModelSourceId::new(),
+        digest: digest(sources[0].1),
+    };
+    for (file, accepted, held) in sources {
+        let path = PathBuf::from(format!("/pdk/{name}/{file}"));
+        library.source_closure.push(ModelSourcePin {
+            path: path.clone(),
+            digest: digest(accepted),
+        });
+        if let Some(held) = held {
+            library.source_contents.push(ModelSourceContent {
+                path,
+                bytes: (*held).to_vec(),
+            });
+        }
+    }
+    for (model, kind) in [
+        ("NCH_18_LVT", ModelType::Nmos),
+        ("PCH_18_LVT", ModelType::Pmos),
+    ] {
+        let mut device = DeviceModel::new(model, kind);
+        device.spice_type = Some("M".to_owned());
+        library.add_model(device);
+    }
+    library
+}
+
+/// A library whose every pinned source still hashes to its pin.
+///
+/// Rendered beside the drifted one on purpose: an exception-only mark is only
+/// legible next to the rows that do not carry it.
+fn pinned_library(name: &str) -> crate::state::model_library::ModelLibrary {
+    drifted_library(
+        name,
+        &[(
+            "models.lib",
+            b".model NCH nmos level=54\n",
+            Some(b".model NCH nmos level=54\n"),
+        )],
+    )
+}
+
+/// Seed one project whose catalog carries a drifted library and a clean one.
+fn drifted_project(state: &mut AppState, drifted: crate::state::model_library::ModelLibrary) {
+    let name = drifted.name.clone();
+    state.model_library_manager.clear();
+    state.model_library_manager.add_library(drifted);
+    state
+        .model_library_manager
+        .add_library(pinned_library("tsmc18_rf"));
+    state
+        .model_library_manager
+        .select_library(&name)
+        .expect("the drifted fixture library is loaded");
+    state.workbench.selected_model = Some("NCH_18_LVT".to_owned());
+    // The instant is part of what the banner says, so it is fixed rather than
+    // left to the wall clock: a render whose text moves every run cannot be
+    // compared against the one taken before a change.
+    crate::time_compat::with_unix_epoch(Ok(std::time::Duration::from_secs(1_786_786_200)), || {
+        drift::scan(state);
+    });
+}
+
 /// One pack with an update on offer, three parts pinned to what is held, and
 /// the projection the inspector would have computed for that pair of releases.
 ///
@@ -401,13 +530,6 @@ fn offered() -> (hub::HubCatalog, crate::state::model_hub::ReleaseDiff) {
 #[ignore = "writes PNGs for a human to look at; run with --ignored"]
 fn render_every_model_hub_state() {
     use crate::workbench::state::{ModelsAttemptedOperation, ModelsOperationalState};
-    use std::io::Write as _;
-
-    let directory = std::env::var("RSPICE_RASTER_DIR")
-        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-    std::fs::create_dir_all(&directory).expect("raster output directory");
-    let stderr = std::io::stderr();
-    let mut report_output = stderr.lock();
 
     let renders: Vec<(&str, Canvas)> = vec![
         (
@@ -687,19 +809,113 @@ fn render_every_model_hub_state() {
         ),
     ];
 
-    for (name, canvas) in renders {
-        let height = canvas.content_height().max(1);
-        let bytes = canvas.png(height);
-        let path = directory.join(format!("models-{name}.png"));
-        std::fs::write(&path, &bytes).expect("write hub render");
-        writeln!(
-            report_output,
-            "{} {}x{} {} bytes",
-            path.display(),
-            canvas.width(),
-            height,
-            bytes.len()
+    write_renders(renders);
+}
+
+/// Write every source-drift state to a PNG so its design can be reviewed.
+///
+/// The banner and the catalog row's mark had unit tests and no render: two
+/// lanes changed their colour, their stroke and their wording without anyone
+/// being able to look at the result. The states below are the ones the code
+/// actually distinguishes — one finding against several, a source whose
+/// present bytes can be hashed against one that is gone, and the mark beside
+/// the rows that do not carry it.
+#[test]
+#[ignore = "writes PNGs for a human to look at; run with --ignored"]
+fn render_every_source_drift_state() {
+    // A source name of a length a foundry really ships, because the mark the
+    // row sets lives at the right edge of the column this name is drawn in:
+    // at `models.lib` the two cannot collide whatever the code does.
+    let edited = || {
+        drifted_library(
+            "foundry18",
+            &[
+                (
+                    "tsmc18_rf_lvt_corners_2024.lib",
+                    b".model NCH nmos level=54 vth0=0.42\n",
+                    Some(b".model NCH nmos level=54 vth0=0.45\n"),
+                ),
+                (
+                    "corners.lib",
+                    b".lib ff\n.param mc=1\n.endl\n",
+                    Some(b".lib ff\n.param mc=1\n.endl\n"),
+                ),
+            ],
         )
-        .expect("write raster qualification report");
-    }
+    };
+    let renders: Vec<(&str, Canvas)> = vec![
+        // The whole page: the mark on the drifted row beside a clean one, and
+        // the banner under the detail band the mark sends a reader to.
+        (
+            "drift-catalog-and-banner",
+            raster(ModelsCatalogScope::Project, catalog(false), |state| {
+                drifted_project(state, edited());
+            }),
+        ),
+        // Several findings at once, so the headline's count and the one
+        // finding it names can be read together.
+        (
+            "drift-banner-several-findings",
+            raster(ModelsCatalogScope::Project, catalog(false), |state| {
+                drifted_project(
+                    state,
+                    drifted_library(
+                        "foundry18",
+                        &[
+                            (
+                                "models.lib",
+                                b".model NCH nmos level=54 vth0=0.42\n",
+                                Some(b".model NCH nmos level=54 vth0=0.45\n"),
+                            ),
+                            (
+                                "corners.lib",
+                                b".lib ff\n.param mc=1\n.endl\n",
+                                Some(b".lib ff\n.param mc=2\n.endl\n"),
+                            ),
+                            ("rf.lib", b".model RFN nmos\n", None),
+                        ],
+                    ),
+                );
+            }),
+        ),
+        // The source the project no longer holds: half the digest pair is
+        // missing, and the banner has to say so without pretending otherwise.
+        (
+            "drift-banner-unreadable-source",
+            raster(ModelsCatalogScope::Project, catalog(false), |state| {
+                drifted_project(
+                    state,
+                    drifted_library("foundry18", &[("models.lib", b".model NCH nmos\n", None)]),
+                );
+            }),
+        ),
+        // The flow the banner's button opens, over the findings that opened it.
+        (
+            "drift-resolve-dialog",
+            raster_dialog_over(
+                catalog(false),
+                ModelsWorkbenchDialog::ResolveDrift {
+                    library: "foundry18".to_owned(),
+                },
+                |state| {
+                    drifted_project(
+                        state,
+                        drifted_library(
+                            "foundry18",
+                            &[
+                                (
+                                    "models.lib",
+                                    b".model NCH nmos level=54 vth0=0.42\n",
+                                    Some(b".model NCH nmos level=54 vth0=0.45\n"),
+                                ),
+                                ("rf.lib", b".model RFN nmos\n", None),
+                            ],
+                        ),
+                    );
+                },
+            ),
+        ),
+    ];
+
+    write_renders(renders);
 }

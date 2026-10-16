@@ -391,9 +391,8 @@ fn activation_error(ui: &mut Ui) {
 }
 
 /// Side of a problem mark set in front of a line on this page, and the
-/// advance from its left edge to the text after it: the kit's own values.
-const MARK_SIDE: f32 = 11.0;
-const MARK_ADVANCE: f32 = 17.0;
+/// advance from its left edge to the text after it: read from the kit.
+use crate::ui::widgets::{PROBLEM_MARK_ADVANCE as MARK_ADVANCE, PROBLEM_MARK_SIDE as MARK_SIDE};
 
 /// A mark and then neutral words, laid out inside whatever frame the caller
 /// has already opened.

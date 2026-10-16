@@ -209,8 +209,9 @@ const RUN_STRIP_DOT_DIAMETER: f32 = 5.0;
 const RUN_STRIP_DOT_GAP: f32 = 6.0;
 /// Width a live-state dot takes out of the chip, gap included.
 const RUN_STRIP_DOT_COLUMN: f32 = RUN_STRIP_DOT_DIAMETER + RUN_STRIP_DOT_GAP;
-/// Side of the badge's problem mark, sized to the strip's own text.
-const RUN_STRIP_MARK_SIDE: f32 = 11.0;
+/// Side of the badge's problem mark: the kit's own, so it matches every other
+/// marked line in the product.
+use crate::ui::widgets::PROBLEM_MARK_SIDE as RUN_STRIP_MARK_SIDE;
 /// Width that mark takes out of the badge, gap included.
 const RUN_STRIP_MARK_COLUMN: f32 = RUN_STRIP_MARK_SIDE + RUN_STRIP_DOT_GAP;
 

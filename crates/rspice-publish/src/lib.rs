@@ -328,6 +328,11 @@ pub fn render_bundle(
             viewer.js_glue.clone(),
         );
         bundle.insert(hydration::VIEWER_WASM_PATH.to_string(), viewer.wasm.clone());
+        // The faces the figures' monospace lettering names, so a reader
+        // without them installed still sees each figure as it was authored.
+        for (path, bytes) in page::PAGE_FONTS {
+            bundle.insert(path.to_string(), bytes.to_vec());
+        }
         Some(hydration::HydrationEmission::new(
             &manifest.figures,
             viewer,

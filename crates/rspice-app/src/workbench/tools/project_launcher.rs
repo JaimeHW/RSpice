@@ -1539,12 +1539,20 @@ fn project_row(ui: &mut Ui, entry: &ProjectEntry, layout: LauncherLayout) -> egu
             theme::mono(tokens::FS_0, FontWeight::Regular),
             t.color.text_dim,
         );
-        let mark_advance = if problem.is_some() { 17.0 } else { 0.0 };
+        use crate::ui::widgets::{PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE};
+        let mark_advance = if problem.is_some() {
+            PROBLEM_MARK_ADVANCE
+        } else {
+            0.0
+        };
         let left = state_cell.center().x - (mark_advance + galley.size().x) * 0.5;
         if let Some(problem) = problem {
             paint_problem_mark(
                 row.painter(),
-                Rect::from_center_size(pos2(left + 5.5, state_cell.center().y), Vec2::splat(11.0)),
+                Rect::from_center_size(
+                    pos2(left + PROBLEM_MARK_SIDE * 0.5, state_cell.center().y),
+                    Vec2::splat(PROBLEM_MARK_SIDE),
+                ),
                 problem,
             );
         }

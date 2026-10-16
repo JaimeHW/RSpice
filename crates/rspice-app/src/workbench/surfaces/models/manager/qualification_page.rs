@@ -83,9 +83,11 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         .map(|summary| summary.vectors)
         .sum::<usize>();
     let subtitle = format!(
-        "{} model families · {} vectors",
+        "{} model famil{} · {} vector{}",
         summaries.len(),
-        total_vectors
+        if summaries.len() == 1 { "y" } else { "ies" },
+        total_vectors,
+        plural_suffix(total_vectors)
     );
     let mut requested_action = None;
     let compare_blocker = qualification_action_block_reason(
@@ -295,7 +297,7 @@ fn closure_inputs(summaries: &[QualificationModelSummary]) -> [ClosureInput; 4] 
             detail: if exempt == 0 {
                 "source-owned release gates".to_owned()
             } else {
-                format!("{exempt} engine-owned exempt")
+                format!("{exempt} engine-owned")
             },
         },
         ClosureInput {
@@ -673,22 +675,28 @@ fn matrix_row(ui: &mut Ui, summary: &QualificationModelSummary, selected: bool) 
         },
     );
 
-    let (gate_x, gate_w) = column(GATE_COLUMN);
-    ui.painter().text(
-        egui::pos2(gate_x, rect.top() + 12.0),
-        egui::Align2::LEFT_CENTER,
-        elide(ui, summary.gate.label(), gate_w.max(1.0), true),
-        theme::mono(tokens::FS_0, FontWeight::SemiBold),
-        gate_color(summary.gate, &t),
-    );
-    let detail = gate_detail(summary);
-    ui.painter().text(
-        egui::pos2(gate_x, rect.bottom() - 9.0),
-        egui::Align2::LEFT_CENTER,
-        elide(ui, &detail, gate_w.max(1.0), false),
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_faint,
-    );
+    // The gate column, for the rows that have one. Every row under the
+    // engine-owned band would read "engine-owned · compiled in" here — the
+    // band's own sentence, once per row — so those rows leave the column to
+    // what differs between them, which in this column is nothing.
+    if summary.gate.is_gate_subject() {
+        let (gate_x, gate_w) = column(GATE_COLUMN);
+        ui.painter().text(
+            egui::pos2(gate_x, rect.top() + 12.0),
+            egui::Align2::LEFT_CENTER,
+            elide(ui, summary.gate.label(), gate_w.max(1.0), true),
+            theme::mono(tokens::FS_0, FontWeight::SemiBold),
+            gate_color(summary.gate, &t),
+        );
+        let detail = gate_detail(summary);
+        ui.painter().text(
+            egui::pos2(gate_x, rect.bottom() - 9.0),
+            egui::Align2::LEFT_CENTER,
+            elide(ui, &detail, gate_w.max(1.0), false),
+            theme::sans(tokens::FS_0, FontWeight::Regular),
+            t.color.text_faint,
+        );
+    }
 
     // Painted glyphs publish no accessibility node, so the row states its
     // whole line — every domain included. A reader who cannot see the matrix
@@ -769,10 +777,11 @@ fn gate_detail(summary: &QualificationModelSummary) -> String {
         );
     }
     format!(
-        "{} suite{} · {} vectors",
+        "{} suite{} · {} vector{}",
         summary.suites,
-        if summary.suites == 1 { "" } else { "s" },
-        summary.vectors
+        plural_suffix(summary.suites),
+        summary.vectors,
+        plural_suffix(summary.vectors)
     )
 }
 
@@ -939,7 +948,7 @@ fn tolerance_pane(ui: &mut Ui, selected: &QualificationModelSummary, height: f32
                     ui,
                     domain.domain.label(),
                     &domain.tolerance,
-                    &format!("{} vectors", domain.vectors),
+                    &format!("{} vector{}", domain.vectors, plural_suffix(domain.vectors)),
                 );
             }
         },
@@ -958,18 +967,19 @@ fn contract_pane(ui: &mut Ui, selected: &QualificationModelSummary, height: f32)
                 // Every row below reads a retained artefact that an
                 // engine-owned card has none of. Four "not retained" lines are
                 // four findings; the exemption is one fact.
-                property(
-                    ui,
-                    "Model revision",
-                    "engine-owned",
-                    "compiled into the simulator",
-                );
+                //
+                // The card's own meta beside the title is the gate word, so
+                // the rows answer their own questions instead of repeating
+                // it — and they answer in what this pane's value column has
+                // room for, which a render is how anyone finds out: at this
+                // width it held "compiled into the sim…".
+                property(ui, "Model revision", "simulator build", "");
                 property(ui, "Release gate", "exempt", "not source-owned by design");
                 property(
                     ui,
                     "Qualification",
-                    "engine equation defaults",
-                    "author a project copy to gate one",
+                    "engine defaults",
+                    "author a project copy to gate it",
                 );
                 return;
             }
@@ -1023,13 +1033,13 @@ fn contract_pane(ui: &mut Ui, selected: &QualificationModelSummary, height: f32)
 /// behind the two that are not. Only a finding is toned.
 fn gate_color(gate: QualificationGate, t: &Tokens) -> Color32 {
     match gate {
-        QualificationGate::Qualified => t.color.text,
         QualificationGate::Review | QualificationGate::Unqualified => t.color.warn,
         QualificationGate::Blocked => t.color.err,
-        // Neither a pass nor a finding: an engine-owned card is outside the
-        // gate, so it takes the page's plain text tone rather than borrowing
-        // either verdict's colour.
-        QualificationGate::EngineOwned => t.color.text_dim,
+        // Neither of these is a finding. A pass is the state every row is
+        // supposed to reach, and an engine-owned card is outside the gate
+        // altogether — and paints no cell in this column at all, because the
+        // band it is listed under has already said so.
+        QualificationGate::Qualified | QualificationGate::EngineOwned => t.color.text,
     }
 }
 

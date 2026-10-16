@@ -34,7 +34,7 @@ pub use projection::{ProjectionOptions, build_models, family_color};
 use units::signal_unit;
 pub use units::{
     NOISE_DENSITY_UNIT, analysis_default_unit, browser_signal_is_current, browser_signal_unit,
-    fmt_in_unit, unit_carries_its_decade,
+    fmt_in_unit, fmt_in_unit_readout, unit_carries_its_decade,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -247,7 +247,21 @@ impl StripModel {
         &self.x_label
     }
 
+    /// An X value as a cursor column, a marker or a legend reads it: the
+    /// number a reader would write down, without the zeros that only pad it
+    /// out to the digit preference.
     pub fn format_x(
+        &self,
+        x: f64,
+        significant_digits: usize,
+        quantity_policy: rspice_app_types::quantity::QuantityPresentationPolicy,
+    ) -> String {
+        units::as_readout(&self.format_x_exact(x, significant_digits, quantity_policy))
+    }
+
+    /// The same X value as a table column: every row padded to the same
+    /// digits, so the decimal points of a scrolling grid line up.
+    fn format_x_exact(
         &self,
         x: f64,
         significant_digits: usize,
@@ -267,7 +281,29 @@ impl StripModel {
         )
     }
 
+    /// One trace's value as a reader meets it in the chrome: the legend chip
+    /// beside its name, a cursor column, a measurement row, a marker.
+    ///
+    /// These are readouts, so they state the number and not the reader's
+    /// digit preference: `1.5 V`, never `1.500000 V`.
     pub fn format_trace_value(
+        &self,
+        trace: &StripTrace,
+        value: f64,
+        significant_digits: usize,
+        quantity_policy: rspice_app_types::quantity::QuantityPresentationPolicy,
+    ) -> String {
+        units::as_readout(&self.format_trace_sample(
+            trace,
+            value,
+            significant_digits,
+            quantity_policy,
+        ))
+    }
+
+    /// The same value as a table cell: padded to the reader's digits, which
+    /// is what keeps a column of right-aligned numbers readable.
+    fn format_trace_sample(
         &self,
         trace: &StripTrace,
         value: f64,
@@ -410,7 +446,7 @@ impl StripModel {
             .and_then(|grid| grid.get(index).copied())
             .map_or_else(
                 || "—".to_owned(),
-                |x| self.format_x(x, significant_digits, quantity_policy),
+                |x| self.format_x_exact(x, significant_digits, quantity_policy),
             )
     }
 
@@ -428,7 +464,7 @@ impl StripModel {
     ) -> Option<String> {
         let trace = self.traces.get(trace_index)?;
         let value = trace.y.as_slice().get(sample).copied()?;
-        Some(self.format_trace_value(trace, value, significant_digits, quantity_policy))
+        Some(self.format_trace_sample(trace, value, significant_digits, quantity_policy))
     }
 
     /// Display name of one trace, for a column heading.

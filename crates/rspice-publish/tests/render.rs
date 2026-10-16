@@ -46,6 +46,54 @@ fn bundles_are_deterministic() {
     }
 }
 
+/// The `usWeightClass` an sfnt face's `OS/2` table records.
+fn weight_class(face: &[u8]) -> u16 {
+    let read_u16 = |at: usize| u16::from_be_bytes([face[at], face[at + 1]]);
+    let read_u32 =
+        |at: usize| u32::from_be_bytes([face[at], face[at + 1], face[at + 2], face[at + 3]]);
+    let tables = usize::from(read_u16(4));
+    let os2 = (0..tables)
+        .map(|index| 12 + index * 16)
+        .find(|&record| &face[record..record + 4] == b"OS/2")
+        .expect("an sfnt face carries an OS/2 table");
+    read_u16(read_u32(os2 + 8) as usize + 4)
+}
+
+#[test]
+fn a_figure_bundle_ships_the_faces_its_stylesheet_declares() {
+    let bundle =
+        render_bundle(&snapshot(RC_LOWPASS), "0".repeat(64).as_str(), &viewer()).expect("render");
+    // A Windows checkout may carry the stylesheet with CRLF line endings.
+    let styles = utf8(&bundle["assets/page.css"]).replace("\r\n", "\n");
+    assert!(styles.contains("font-family: \"RSpice Plex Mono\";"));
+    for (file, weight) in [
+        ("IBMPlexMono-Regular.ttf", 400),
+        ("IBMPlexMono-Medium.ttf", 500),
+    ] {
+        // The stylesheet names each cut relative to itself, at the weight
+        // the face records, so a 500 line can never resolve to the 400 cut.
+        assert!(
+            styles.contains(&format!(
+                "font-weight: {weight};\n  font-display: swap;\n  src: url(\"fonts/{file}\")"
+            )),
+            "page.css must declare {file} at weight {weight}"
+        );
+        assert_eq!(
+            weight_class(&bundle[&format!("assets/fonts/{file}")]),
+            weight,
+            "{file} must be the {weight} cut"
+        );
+    }
+    assert!(
+        bundle.contains_key("assets/fonts/OFL-IBMPlex.txt"),
+        "the faces travel with their licence"
+    );
+    assert!(
+        utf8(&bundle["index.html"]).contains("font-family=\"'RSpice Plex Mono', "),
+        "the figures letter in the face the page ships"
+    );
+}
+
 #[test]
 fn rc_bundle_carries_every_disclosed_surface() {
     let value = snapshot(RC_LOWPASS);

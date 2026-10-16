@@ -71,11 +71,9 @@ const RELEASE_FACT_ROW_H: f32 = 35.0;
 /// Side of a problem mark painted in front of one of this surface's values,
 /// and the advance from its left edge to where the text after it begins.
 ///
-/// The kit keeps both values to itself, so they are restated here once. They
-/// are the kit's own, which is what makes a marked line and an unmarked one
+/// Read from the kit, which is what makes a marked line and an unmarked one
 /// beside it differ by exactly the advance.
-const MARK_SIDE: f32 = 11.0;
-const MARK_ADVANCE: f32 = 17.0;
+use crate::ui::widgets::{PROBLEM_MARK_ADVANCE as MARK_ADVANCE, PROBLEM_MARK_SIDE as MARK_SIDE};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SurfaceAction {

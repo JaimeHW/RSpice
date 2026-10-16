@@ -1609,10 +1609,10 @@ impl Command {
                     .open(source, expected_shapes);
             }
             Self::MoveSelection => {
-                crate::workbench::app::open_move_selection_dialog(&mut app.state);
+                crate::workbench::app::arm_move_selection(&mut app.state);
             }
             Self::StretchSelection => {
-                crate::workbench::app::open_stretch_selection_dialog(&mut app.state);
+                crate::workbench::app::arm_stretch_selection(&mut app.state);
             }
             Self::ArraySelection => {
                 crate::workbench::app::open_array_selection_dialog(&mut app.state);
@@ -1818,7 +1818,7 @@ impl Command {
                 } else if app.state.workbench.drawer.is_some() {
                     app.state.workbench.close_drawer();
                 } else if app.state.dialogs.object_properties.open {
-                    app.state.dialogs.object_properties.attempt_close();
+                    app.state.dialogs.object_properties.close();
                 } else if app.state.tabbed_property_dialog.open {
                     app.state.tabbed_property_dialog.attempt_close();
                 } else if app.state.workbench.workspace == Workspace::Results

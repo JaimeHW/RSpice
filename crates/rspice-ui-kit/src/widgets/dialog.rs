@@ -63,17 +63,25 @@ pub enum DialogSize {
     /// content-height, with the full-viewport workflow shell applied at the
     /// shared 820 pt dialog breakpoint; individual fields stack by local width.
     ///
-    /// The shell stays rather than becoming a content-height card because the
-    /// tallest route on it — the plan manager's Create form — measures 890 pt
-    /// of content in a 900 pt portrait viewport. Held to this size's own
-    /// 760 pt ceiling it scrolls its last section away, and the plan manager
-    /// is gated on no route scrolling at any supported shape.
+    /// Below the breakpoint it gives up both side gutters and keeps its
+    /// content's height. It took the whole viewport until the ceiling at a
+    /// narrow width became the viewport rather than this size's own 760 pt:
+    /// the tallest route on it, the plan manager's Create form, measures
+    /// 890 pt of content, which the old ceiling would have scrolled the last
+    /// section of and the viewport holds whole.
     SimulationWorkflow,
     /// Mockup-owned specialist workspace discovery manager: 760 pt wide on
     /// desktop and full-viewport at the 820 pt one-column breakpoint.
     SpecialistToolBrowser,
-    /// Browsers and settings managers: 760 × 530 pt, with the mockup's
-    /// 28/34 pt viewport gutters and 8 pt phone inset.
+    /// Browsers and settings managers: 760 pt wide and content-height,
+    /// capped at 530 pt, with the mockup's 28/34 pt viewport gutters and
+    /// 8 pt phone inset.
+    ///
+    /// It used to be pinned at its cap at every size, and at a narrow
+    /// viewport at the viewport. A window manager listing one window then
+    /// left 527 points of bare surface above its footer in a 900 pt
+    /// portrait and 196 on the desktop. A manager is as tall as what it is
+    /// managing.
     Manager,
     /// Simulation Studio's mockup-owned analysis/workflow catalog: 1180 ×
     /// 780 pt, anchored 12 pt below the viewport top, and reduced to a 4 pt
@@ -116,11 +124,23 @@ pub enum DialogSize {
     /// plan manager's split minimum, which stacks its records table over its
     /// aside, and stacked does not fit the 640 pt that shape has.
     CapabilityReview,
-    /// Execution queue, target, and retained-run manager: 1120 × 680 pt with
-    /// the mockup's 12 pt desktop perimeter and 4 pt phone perimeter.
+    /// Execution queue, target, and retained-run manager: 1120 pt wide and
+    /// content-height, capped at 680 pt, with the mockup's 12 pt desktop
+    /// perimeter and 4 pt phone perimeter.
+    ///
+    /// Content-height for the reason [`Self::Manager`] is: a queue holding
+    /// two runs left 171 points of bare surface above the footer at the
+    /// desktop width, and a queue is as tall as the queue.
     JobsManager,
-    /// Permanent authored drawing-sheet studio: 1280 x 760 pt with a fixed
-    /// section navigator, editable sheet form, and live effect preview.
+    /// Permanent authored drawing-sheet studio: 1280 pt wide and
+    /// content-height, capped at 760 pt, with a fixed section navigator,
+    /// editable sheet form, and live effect preview.
+    ///
+    /// The studio's own callsite states a fixed 760 pt height, which is
+    /// what holds its two columns to one measure; this purpose no longer
+    /// adds a second pin on top of it. Below the breakpoint that pin took
+    /// the whole viewport and left 298 points of bare surface in a 900 pt
+    /// portrait, where the surface is now as tall as the studio.
     SchematicPageSetup,
     /// Schematic instance editor: the mockup's fixed 880 x 680 pt two-pane
     /// surface with 24/32 pt desktop viewport gutters.
@@ -206,7 +226,7 @@ impl DialogSize {
                 narrow_vertical_inset: 0.0,
                 cap_narrow_height: false,
                 edge_to_edge_narrow: true,
-                fill_narrow_viewport: true,
+                fill_narrow_viewport: false,
                 fill_height: false,
                 app_background: true,
                 radius: 4.0,
@@ -238,8 +258,8 @@ impl DialogSize {
                 narrow_vertical_inset: 8.0,
                 cap_narrow_height: false,
                 edge_to_edge_narrow: false,
-                fill_narrow_viewport: true,
-                fill_height: true,
+                fill_narrow_viewport: false,
+                fill_height: false,
                 app_background: false,
                 radius: 8.0,
                 top_anchored: false,
@@ -334,8 +354,8 @@ impl DialogSize {
                 narrow_vertical_inset: 8.0,
                 cap_narrow_height: false,
                 edge_to_edge_narrow: false,
-                fill_narrow_viewport: true,
-                fill_height: true,
+                fill_narrow_viewport: false,
+                fill_height: false,
                 app_background: true,
                 radius: 4.0,
                 top_anchored: false,
@@ -374,8 +394,8 @@ impl DialogSize {
                 narrow_vertical_inset: 0.0,
                 cap_narrow_height: false,
                 edge_to_edge_narrow: true,
-                fill_narrow_viewport: true,
-                fill_height: true,
+                fill_narrow_viewport: false,
+                fill_height: false,
                 app_background: true,
                 radius: 4.0,
                 top_anchored: false,
@@ -457,7 +477,20 @@ impl DialogLayout {
         }
         let narrow = screen.width() <= spec.narrow_max_width;
         let surface_rect = if narrow && spec.edge_to_edge_narrow {
-            screen
+            if spec.fill_narrow_viewport {
+                screen
+            } else {
+                // Edge to edge is a statement about the side gutters: this
+                // surface spends none of a narrow viewport's width on one.
+                // It used to carry the height with it, so a purpose that
+                // reached both side edges also reached the top and the
+                // bottom whatever its content held. The two are separate
+                // here, and the height is the content's as it is everywhere
+                // else, held to the viewport.
+                let viewport = screen.height().max(1.0);
+                let height = measured_height.unwrap_or(viewport).min(viewport);
+                Rect::from_center_size(screen.center(), vec2(screen.width(), height))
+            }
         } else {
             let horizontal_inset = if narrow {
                 spec.narrow_inset
@@ -1418,7 +1451,18 @@ impl<'a> Dialog<'a> {
             && !layout.fill_height
             && let Some(height) = rendered_surface_height
         {
-            let maximum = self.size.spec().max_height.min(screen.height().max(1.0));
+            // The same ceiling `resolve_with_width` applies, for the same
+            // reason: `max_height` is how tall this surface may grow inside a
+            // desktop window, and at narrow the viewport is the only ceiling
+            // that means anything. Clamping the measurement to the desktop
+            // number instead made a 680 point help centre scroll inside a
+            // 900 point portrait that had room for all of it.
+            let viewport = screen.height().max(1.0);
+            let maximum = if layout.narrow {
+                viewport
+            } else {
+                self.size.spec().max_height.min(viewport)
+            };
             let height = height.clamp(1.0, maximum);
             if measured_height.is_none_or(|previous| (previous - height).abs() > 0.5) {
                 ctx.data_mut(|data| data.insert_temp(measured_height_id, height));

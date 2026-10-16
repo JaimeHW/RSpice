@@ -656,7 +656,11 @@ fn status_padding_x(ui: &egui::Ui) -> f32 {
 fn status_mark_size(mark: StatusMark) -> f32 {
     match mark {
         StatusMark::None => 0.0,
-        StatusMark::Problem(_) => 11.0,
+        // The kit's own, so the bar's refusal is the mark the panel above it
+        // sets. Only the gap differs: `STATUS_MARK_GAP` is tighter than the
+        // kit's, because the bar is one 22 pt strip rather than a row of body
+        // text.
+        StatusMark::Problem(_) => crate::ui::widgets::PROBLEM_MARK_SIDE,
         StatusMark::Live => 6.0,
         StatusMark::Processor => 16.0,
     }

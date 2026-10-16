@@ -64,8 +64,21 @@ pub(crate) fn operation_steps(ui: &mut Ui) {
         rect.bottom(),
         Stroke::new(1.0, t.color.border_strong),
     );
+    // `widget_info` is what gives the node its role and its bounds. The
+    // builder alone creates a default node, and a node with no bounds is
+    // dropped before it reaches assistive technology.
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Label,
+            ui.is_enabled(),
+            "Operation progress",
+        )
+    });
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_label("Operation progress");
+        // A `Role::Label`'s text is filed under `value`, so without this the
+        // strip carries its own name twice and is announced twice.
+        node.clear_value();
         node.set_description("Scope complete; Options active; Difference and Commit follow.");
     });
 }
@@ -110,9 +123,17 @@ fn heading(ui: &mut Ui, label: &str) {
         theme::sans(tokens::FS_0, FontWeight::SemiBold),
         t.color.text,
     );
+    // Without this the heading was a roleless, bounds-less node that no
+    // assistive technology could reach: `widget_info` supplies the role and
+    // the bounds, and the builder then raises it to a heading.
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Heading);
         node.set_label(label);
+        // A `Role::Label`'s text is filed under `value`, so without this the
+        // heading carries its own title twice and is announced twice.
+        node.clear_value();
     });
 }
 
@@ -147,6 +168,13 @@ fn fact_row(ui: &mut Ui, label: &str, value: &str) {
         value_font,
         t.color.text,
     );
+    // The builder alone would leave a roleless, bounds-less node, which is how
+    // every fact of the context pane went missing. `widget_info` supplies the
+    // role and the bounds, and the builder then states the pair the row paints
+    // — in that order, because `widget_info` would otherwise overwrite the
+    // value with the label.
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_label(label);
         node.set_value(value);

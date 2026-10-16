@@ -1,4 +1,4 @@
-//! Mockup-owned Object properties transaction for typed schematic objects.
+//! Object properties for the typed schematic objects that are not components.
 //!
 //! Components use the schema-driven property editor. Buses and bus taps use
 //! this host because their editable values participate in cross-object
@@ -14,9 +14,7 @@ use crate::state::{
     DesignNoteKind, DesignReviewState, DocumentationShape, DocumentationShapeGeometry, NetLabel,
     Point, SchematicState,
 };
-use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
-};
+use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::app::RSpiceApp;
 use rspice_schematic_editor::object_properties::{
     self, BUS_DECLARATION_FIELD, BusObjectPropertiesDraft, BusTapObjectPropertiesDraft,
@@ -26,13 +24,7 @@ use rspice_schematic_editor::object_properties::{
     TAP_SLICE_FIELD, TAP_SOURCE_FIELD,
 };
 
-const TITLE: &str = "Object properties";
-const PRIMARY: &str = "Apply object properties";
-const BODY: &str = "Edit identity, model, parameters, orientation, connectivity, display, constraints, and review metadata.";
-const DISCARD_TITLE: &str = "Unsaved dialog changes";
-const DISCARD_DETAIL: &str = "Choose Discard changes again to close, or continue editing. No project or result data has been changed.";
-const FAILURE_TITLE: &str = "Properties were not applied";
-const DIALOG_SIZE: DialogSize = DialogSize::SimulationWorkflow;
+const PRIMARY: &str = "Apply";
 
 #[derive(Debug, Clone)]
 enum PropertyCommit {
@@ -192,66 +184,57 @@ impl RSpiceApp {
                 )
             },
         );
-        let validation_message = validation.message().map(str::to_owned);
-        let invalid_field = validation.field();
-        let retained_error = self
+        // A refusal that names a field is stated under that field. One that
+        // names none — a stale document, a rejected commit — belongs to the
+        // form, so it goes in the status slot.
+        let refusal = self
             .state
             .dialogs
             .object_properties
             .validation_error
-            .clone();
-        let discard_confirm = self.state.dialogs.object_properties.discard_confirm;
+            .clone()
+            .or_else(|| validation.message().map(str::to_owned));
+        let invalid_field = validation.field();
+        let form_refusal = refusal.clone().filter(|_| invalid_field.is_none());
         let can_commit = self.state.dialogs.object_properties.dirty
             && !self.state.schematic_edit_read_only()
             && validation.can_commit();
-        let primary_on_enter = !matches!(draft, ObjectPropertiesDraft::DesignNote(_));
-
-        let mut dialog = Dialog::new(TITLE, PRIMARY)
-            .description(BODY)
-            .size(DIALOG_SIZE)
-            .ghost(if discard_confirm {
-                "Discard changes"
-            } else {
-                "Cancel"
-            })
-            .primary_enabled(can_commit)
-            .primary_on_enter(primary_on_enter)
-            .initial_focus(DialogInitialFocus::BodyControl);
-        if discard_confirm {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                DISCARD_TITLE,
-                DISCARD_DETAIL,
-            );
-        } else if let Some(error) = retained_error.as_deref() {
-            dialog = dialog.transaction_state(DialogTransactionTone::Error, FAILURE_TITLE, error);
-        }
+        let multiline_body = matches!(draft, ObjectPropertiesDraft::DesignNote(_));
+        let title = object_properties::title(draft);
 
         let mut edited = false;
-        let mut response = dialog.show_transaction(ctx, |ui| {
-            let draft = self
-                .state
-                .dialogs
-                .object_properties
-                .draft
-                .as_mut()
-                .expect("open object-properties workflow retains a typed draft");
-            let (focus, changed) = object_properties::show(
-                ui,
-                draft,
-                validation.bus_impact(),
-                &bus_choices,
-                validation_message.as_deref(),
-                invalid_field,
-            );
-            edited = changed;
-            focus
-        });
+        let choice = CommandForm::new(&title, PRIMARY)
+            .primary_enabled(can_commit)
+            .primary_on_enter(!multiline_body)
+            .status(match form_refusal.as_deref() {
+                Some(message) => Err(message),
+                None => Ok(None),
+            })
+            .status_lines(2)
+            .show(ctx, |rows| {
+                let draft = self
+                    .state
+                    .dialogs
+                    .object_properties
+                    .draft
+                    .as_mut()
+                    .expect("an open object-properties form retains a typed draft");
+                let (focus, changed) = object_properties::show(
+                    rows,
+                    draft,
+                    validation.bus_impact(),
+                    &bus_choices,
+                    invalid_field,
+                    refusal.as_deref(),
+                );
+                edited = changed;
+                focus
+            });
         if edited {
             self.state.dialogs.object_properties.mark_edited();
         }
 
-        match response.choice {
+        match choice {
             DialogChoice::Primary => {
                 let Some(draft) = self.state.dialogs.object_properties.draft.as_ref() else {
                     return;
@@ -266,23 +249,10 @@ impl RSpiceApp {
                 match validation {
                     DraftValidation::Valid(commit, _) => {
                         match apply_commit(&mut self.state.schematic, *commit) {
-                            Ok(changed) => {
-                                let message = if changed {
-                                    "Object properties were applied as one undoable transaction."
-                                } else {
-                                    "Object properties already matched the stored object."
-                                };
-                                self.state
-                                    .push_user_message(ConsoleMessage::info(message.to_owned()));
-                                self.state.ui.toasts.success(
-                                    ctx,
-                                    if changed {
-                                        "Properties applied"
-                                    } else {
-                                        "No changes"
-                                    },
-                                    message,
-                                );
+                            // Closing is the report. A line saying the edit
+                            // landed, next to the canvas that now shows it,
+                            // is one more thing to read and nothing to act on.
+                            Ok(_) => {
                                 self.state.dialogs.object_properties.close();
                             }
                             Err(error) => {
@@ -298,10 +268,7 @@ impl RSpiceApp {
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.object_properties.attempt_close();
-                if self.state.dialogs.object_properties.open {
-                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
-                }
+                self.state.dialogs.object_properties.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -891,10 +858,13 @@ fn bus_choices(
         .buses
         .iter()
         .filter(|bus| bus.contains_point(retained_anchor))
+        // Named by its declaration. Two buses through one anchor cannot
+        // share a declaration, so the internal ID told the reader nothing
+        // they could not already see.
         .filter_map(|bus| {
             bus.declaration
                 .as_ref()
-                .map(|declaration| (bus.id, format!("{} \u{00b7} BUS-{}", declaration, bus.id)))
+                .map(|declaration| (bus.id, declaration.to_string()))
         })
         .collect();
     choices.sort_by_key(|(id, _)| *id);
@@ -1546,8 +1516,10 @@ mod tests {
         assert!(object_property_session_error(&app.state).is_none());
     }
 
+    /// A property draft owns nothing until Apply, so Escape leaves at once
+    /// rather than asking a question about a document it never touched.
     #[test]
-    fn rendered_escape_requires_explicit_second_discard() {
+    fn rendered_escape_leaves_without_a_second_question() {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
@@ -1572,13 +1544,32 @@ mod tests {
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
             app.render_object_properties_dialog(ctx)
         });
-        assert!(app.state.dialogs.object_properties.open);
-        assert!(app.state.dialogs.object_properties.discard_confirm);
 
-        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
-            app.render_object_properties_dialog(ctx)
-        });
         assert!(!app.state.dialogs.object_properties.open);
+        assert_eq!(app.state.schematic.document().buses[0], bus);
+    }
+
+    /// The dialog is named for the object it was opened on, and says nothing
+    /// about models or parameters, which none of these objects has.
+    #[test]
+    fn the_title_names_the_selected_object_kind() {
+        use rspice_schematic_editor::object_properties::title;
+        let bus = declared_bus(1, 0, "DATA[7:0]");
+        let mut app = RSpiceApp::test_instance();
+        app.state
+            .schematic
+            .document_mut_for_test()
+            .buses
+            .push(bus.clone());
+        open_bus_dialog(&mut app, &bus);
+        let draft = app
+            .state
+            .dialogs
+            .object_properties
+            .draft
+            .as_ref()
+            .expect("bus draft");
+        assert_eq!(title(draft), "Bus properties");
     }
 
     #[test]
@@ -1604,7 +1595,7 @@ mod tests {
             .expect("object properties access tree")
             .nodes;
         assert!(nodes.iter().any(|(_, node)| {
-            node.role() == egui::accesskit::Role::Dialog && node.label() == Some(TITLE)
+            node.role() == egui::accesskit::Role::Dialog && node.label() == Some("Bus properties")
         }));
         assert!(nodes.iter().any(|(_, node)| {
             node.role() == egui::accesskit::Role::TextInput

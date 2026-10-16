@@ -776,8 +776,9 @@ struct ProjectModelRow {
     vectors: usize,
 }
 
-/// Where the source column ends, as a fraction of the catalog row.
-const SOURCE_COLUMN_END: f32 = 0.20 + 0.17 + 0.22;
+/// How much of the catalog row the source column takes, and where it ends.
+const SOURCE_COLUMN_FRACTION: f32 = 0.22;
+const SOURCE_COLUMN_END: f32 = 0.20 + 0.17 + SOURCE_COLUMN_FRACTION;
 
 /// Where the status column begins, as a fraction of the catalog row: the sum
 /// of the five fractions the header above declares before it.
@@ -992,13 +993,27 @@ fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &Proj
         app.state.workbench.selected_model = Some(row.model.clone());
     }
     let used_by = used_by_cell(row);
+    // A drifted row sets its mark at the source column's own right edge, so
+    // the value in that column is elided against what the mark leaves. A
+    // fixture library is called `models.lib` and fits either way; a foundry's
+    // is called `tsmc18_rf_lvt_corners_2024.lib` and ran under the mark.
+    let source = if row.drifted {
+        elide(
+            ui,
+            &row.source,
+            (rect.width() * SOURCE_COLUMN_FRACTION - 9.0 - drift::source_chip_width(ui)).max(1.0),
+            false,
+        )
+    } else {
+        row.source.clone()
+    };
     paint_columns(
         ui,
         rect,
         &[
             (&row.model, 0.20, true),
             (row.family, 0.17, false),
-            (&row.source, 0.22, false),
+            (&source, SOURCE_COLUMN_FRACTION, false),
             (&used_by, 0.16, true),
             (&row.vectors.to_string(), 0.10, true),
             // The status cell is painted below, in its own tone.

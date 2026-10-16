@@ -54,11 +54,12 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
     assert_blocks_shortcuts(|dialogs| dialogs.unpublish_web.open = true);
     assert_blocks_shortcuts(|dialogs| dialogs.command_palette.open = true);
     assert_blocks_shortcuts(|dialogs| {
-        dialogs
-            .bus_tap
-            .open(crate::workbench::app::schematic_editor_request_source(
+        dialogs.bus_tap.open(
+            crate::workbench::app::schematic_editor_request_source(
                 &crate::workbench::app_state::AppState::default(),
-            ));
+            ),
+            String::new(),
+        );
     });
     assert_blocks_shortcuts(|dialogs| dialogs.builtin_xspice_placement.open = true);
     assert_blocks_shortcuts(|dialogs| dialogs.net_label_placement.open = true);
@@ -89,18 +90,6 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
                 &crate::workbench::app_state::AppState::default(),
             ),
             Vec::new(),
-        );
-    });
-    assert_blocks_shortcuts(|dialogs| {
-        dialogs.move_selection.open(edit_authority());
-    });
-    assert_blocks_shortcuts(|dialogs| {
-        dialogs.stretch_selection.open(
-            edit_authority(),
-            crate::state::StretchTarget::WireSegment {
-                wire_id: 1,
-                segment_index: 0,
-            },
         );
     });
     assert_blocks_shortcuts(|dialogs| {
@@ -201,5 +190,4 @@ fn generic_property_dirty_state_clears_after_semantic_revert() {
     draft.declaration = " DATA[7:0] ".to_owned();
     dialog.mark_edited();
     assert!(!dialog.dirty);
-    assert!(!dialog.discard_confirm);
 }

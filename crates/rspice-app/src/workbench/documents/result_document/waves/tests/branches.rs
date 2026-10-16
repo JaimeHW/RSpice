@@ -276,12 +276,14 @@ fn window_statistics_measure_each_branch_between_the_cursors() {
     // x ≤ 0.5 selects indices {0, 1} on the way out and {3, 4} on the way
     // back: y ∈ {0, 1, 3, 4}. A contiguous slice stops at the turnaround and
     // never sees the 4 V the return leg ends on.
+    // Stated as a readout states them: the preference is a ceiling on the
+    // digits, not a claim that six of them were measured.
     assert!(
-        painted.iter().any(|text| text == "4.000000 V"),
+        painted.iter().any(|text| text == "4 V"),
         "the window missed the branch the cursors also enclose: {painted:?}"
     );
     assert!(
-        painted.iter().any(|text| text == "0.000000 V"),
+        painted.iter().any(|text| text == "0 V"),
         "the window lost its minimum: {painted:?}"
     );
     // Forward y=2x has RMS sqrt(1/3); return y=4-2x has RMS sqrt(37/3).

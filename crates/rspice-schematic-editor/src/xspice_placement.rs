@@ -1,79 +1,63 @@
-//! Built-in XSPICE vector-width form over canonical port metadata and a local draft.
+//! Built-in XSPICE vector widths over canonical port metadata and a local draft.
+//!
+//! One row per port the reader can size. A port whose width is fixed by the
+//! model is not a decision, so it is not a row.
 
-use egui::{DragValue, Grid, RichText, Ui};
 use rspice_design::schematic::device_catalog::CatalogXspiceVectorPort;
-use rspice_ui_kit::theme::{self, FontWeight};
-use rspice_ui_kit::tokens::{self, Tokens};
+use rspice_ui_kit::widgets::FormRows;
 use std::collections::BTreeMap;
 
-/// Current validation takes priority; an edit dismisses a retained submission error.
+/// Whether this port is one the reader chooses a width for.
+pub fn is_sizable(port: &CatalogXspiceVectorPort) -> bool {
+    port.maximum.is_none_or(|maximum| maximum != port.minimum)
+}
+
+/// The rows of the vector-width form: whether any width changed, and the
+/// control that takes the caret.
 pub fn show(
-    ui: &mut Ui,
+    rows: &mut FormRows<'_>,
     ports: &[CatalogXspiceVectorPort],
     widths: &mut BTreeMap<String, usize>,
-    validation_error: Option<&str>,
-    retained_error: Option<&str>,
-) -> (Option<egui::Id>, bool) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        RichText::new("Vector interface")
-            .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
-            .color(t.color.text),
-    );
-    ui.add_space(6.0);
-
-    let mut first = None;
+) -> (bool, Option<egui::Id>) {
     let mut edited = false;
-    Grid::new("builtin-xspice-vector-widths")
-        .num_columns(3)
-        .spacing(egui::vec2(12.0, 8.0))
-        .show(ui, |ui| {
-            ui.strong("Port");
-            ui.strong("Width");
-            ui.strong("Executable range");
-            ui.end_row();
-            for port in ports {
-                ui.label(&port.name);
-                let width = widths
-                    .entry(port.name.clone())
-                    .or_insert(port.default_width);
-                let maximum = port.maximum.unwrap_or(usize::MAX);
-                let fixed = port.minimum == maximum;
-                let response = ui.add_enabled(
-                    !fixed,
-                    DragValue::new(width)
-                        .range(port.minimum..=maximum)
-                        .speed(1.0),
-                );
-                first.get_or_insert(response.id);
-                edited |= response.changed();
-                let range = if fixed {
-                    format!("fixed at {}", port.minimum)
-                } else if port.null_allowed && port.minimum == 0 {
-                    format!("0–{maximum} · 0 omits/nulls the port")
-                } else {
-                    format!("{}–{maximum}", port.minimum)
-                };
-                ui.label(RichText::new(range).color(t.color.text_dim));
-                ui.end_row();
-            }
-        });
-
-    ui.add_space(10.0);
-    ui.label(
-        RichText::new(
-            "Every materialized vector element (and each side of a differential element) remains a distinct connectable schematic terminal.",
-        )
-        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-        .color(t.color.text_dim),
-    );
-    if let Some(error) = validation_error.or(if edited { None } else { retained_error }) {
-        ui.add_space(6.0);
-        ui.label(
-            RichText::new(error)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.err),
-        );
+    let mut first = None;
+    for port in ports.iter().filter(|port| is_sizable(port)) {
+        let maximum = port.maximum.unwrap_or(usize::MAX);
+        let width = widths
+            .entry(port.name.clone())
+            .or_insert(port.default_width);
+        let allowed = if port.null_allowed && port.minimum == 0 {
+            format!("0\u{2013}{maximum} (0 leaves it out)")
+        } else {
+            format!("{}\u{2013}{maximum}", port.minimum)
+        };
+        let response = rows.number(&port.name, width, port.minimum..=maximum, &allowed);
+        first.get_or_insert(response.id);
+        edited |= response.changed();
     }
-    (first, edited)
+    (edited, first)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn port(name: &str, minimum: usize, maximum: Option<usize>) -> CatalogXspiceVectorPort {
+        CatalogXspiceVectorPort {
+            name: name.to_owned(),
+            minimum,
+            maximum,
+            default_width: minimum.max(1),
+            null_allowed: minimum == 0,
+        }
+    }
+
+    /// A port the model pins to one width is not a choice, so the form does
+    /// not offer it as a disabled one.
+    #[test]
+    fn only_a_port_whose_width_can_change_is_a_row() {
+        assert!(!is_sizable(&port("clk", 1, Some(1))));
+        assert!(is_sizable(&port("in", 2, Some(8))));
+        assert!(is_sizable(&port("out", 0, None)));
+    }
 }

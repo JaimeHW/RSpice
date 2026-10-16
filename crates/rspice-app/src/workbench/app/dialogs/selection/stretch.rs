@@ -1,64 +1,49 @@
-//! Mockup-owned Stretch selection transaction.
+//! Stretch: an armed canvas tool, not a dialog.
 //!
-//! The dialog freezes document authority and configures the orthogonality
-//! contract. Arming transfers exclusive intent to the schematic canvas, where
-//! a candidate is previewed and committed as one undoable mutation.
-
-use egui::Context;
-use rspice_schematic_editor::selection_forms;
-use rspice_schematic_editor::view::grid::snap_label;
+//! `S` arms the tool on the selected conductor segment or control point, as
+//! Virtuoso's `S` does, and the canvas previews the candidate and commits it
+//! as one undoable mutation. Arming mutates nothing.
+//!
+//! The one choice it keeps — whether the segments either side stay
+//! orthogonal — is a check box on the tool's options strip. It starts from the
+//! sheet's wire-routing style, so a sheet drawn at 45 degrees does not have to
+//! turn it off on every stretch.
 
 use crate::diagnostics::ConsoleMessage;
-use crate::state::{StretchTarget, Tool};
-use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
-};
+use crate::state::{StretchOrthogonalPolicy, Tool};
 
-use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
-use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app::SchematicEditAuthority;
 use crate::workbench::app_state::AppState;
+use rspice_schematic_editor::session::visibility::SchematicWireRoutingStyle;
 
-const TITLE: &str = "Stretch selection";
-const PRIMARY: &str = "Arm stretch tool";
-const DESCRIPTION: &str = "Stretch wires, buses, shapes, and parameterized geometry while keeping unaffected anchors fixed.";
+const COMMAND: &str = "Stretch";
 
-#[derive(Debug)]
-enum DraftValidation {
-    Invalid(String),
-    Valid,
-}
-
-impl DraftValidation {
-    fn can_commit(&self) -> bool {
-        matches!(self, Self::Valid)
-    }
-
-    fn message(&self) -> Option<&str> {
-        match self {
-            Self::Invalid(message) => Some(message),
-            Self::Valid => None,
+/// What the sheet's own routing style says about diagonals. A stretch that
+/// defaulted to orthogonal on a 45-degree sheet would refuse the first drag
+/// the reader tried.
+fn policy_for_sheet(state: &AppState) -> StretchOrthogonalPolicy {
+    match state.ui.schematic_visibility.wire_routing {
+        SchematicWireRoutingStyle::Orthogonal => StretchOrthogonalPolicy::PreserveOrthogonal,
+        SchematicWireRoutingStyle::FortyFiveDegree | SchematicWireRoutingStyle::FreeAngle => {
+            StretchOrthogonalPolicy::AllowDiagonal
         }
     }
 }
 
-pub(crate) fn open_stretch_selection_dialog(state: &mut AppState) {
+pub(crate) fn arm_stretch_selection(state: &mut AppState) {
     if state.schematic_edit_read_only() {
-        state.push_user_message(ConsoleMessage::warning(
-            "Stretch selection is unavailable because the active schematic is read-only."
-                .to_owned(),
-        ));
+        state.push_user_message(ConsoleMessage::warning("The schematic is read-only."));
         return;
     }
     if !state.schematic.session.editor.selection.probes.is_empty() {
         state.push_user_message(ConsoleMessage::warning(
-            "Probe markers cannot be stretched; move the retained probe marker instead.".to_owned(),
+            "A probe marker cannot be stretched. Move it instead.",
         ));
         return;
     }
     let Some(target) = state.schematic.default_stretch_target() else {
         state.push_user_message(ConsoleMessage::warning(
-            "Select one stretchable wire, bus, or documentation shape before opening Stretch selection."
-                .to_owned(),
+            "Select one wire, bus or documentation shape to stretch first.",
         ));
         return;
     };
@@ -68,114 +53,40 @@ pub(crate) fn open_stretch_selection_dialog(state: &mut AppState) {
     if state.dialogs.array_selection.armed {
         crate::workbench::app::cancel_armed_array_selection(state);
     }
+    let policy = policy_for_sheet(state);
     state
         .dialogs
         .stretch_selection
-        .open(SchematicEditAuthority::capture(state), target);
+        .arm(SchematicEditAuthority::capture(state), target, policy);
+    state.schematic.arm_tool(Tool::StretchSelection);
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_stretch_selection_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.stretch_selection.open {
-            return;
-        }
-        let validation = validate_draft(&self.state);
-        let validation_message = validation.message().map(str::to_owned);
-        let selection = target_summary(&self.state);
-        let snap = snap_label(self.state.schematic.document().document_policy.grid_pitch);
-        let discard_confirm = self.state.dialogs.stretch_selection.discard_confirm;
-        let mut dialog = Dialog::new(TITLE, PRIMARY)
-            .description(DESCRIPTION)
-            .size(DialogSize::Transaction)
-            .ghost(if discard_confirm {
-                "Discard changes"
-            } else {
-                "Cancel"
-            })
-            .primary_enabled(validation.can_commit())
-            .primary_on_enter(false)
-            .initial_focus(DialogInitialFocus::BodyControl);
-        if discard_confirm {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                DISCARD_TITLE,
-                DISCARD_DETAIL,
-            );
-        }
-        let mut response = dialog.show_transaction(ctx, |ui| {
-            let draft = &mut self.state.dialogs.stretch_selection;
-            let (focus, edited) = selection_forms::show_stretch(
-                ui,
-                &selection,
-                snap,
-                validation_message.as_deref(),
-                &mut draft.policy,
-            );
-            if edited {
-                draft.mark_edited();
-            }
-            focus
-        });
-        match response.choice {
-            DialogChoice::Primary => {
-                if validate_draft(&self.state).can_commit() {
-                    self.state.dialogs.stretch_selection.arm();
-                    self.state.schematic.arm_tool(Tool::StretchSelection);
-                    rspice_schematic_editor::view::canvas::request_focus(ctx);
-                    self.state.push_user_message(ConsoleMessage::info(format!(
-                        "Stretch selection armed with {}; choose an anchor and destination on the {snap} grid.",
-                        self.state.dialogs.stretch_selection.policy.label()
-                    )));
-                }
-            }
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.stretch_selection.attempt_close();
-                if self.state.dialogs.stretch_selection.open {
-                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
-                }
-            }
-            DialogChoice::None | DialogChoice::Secondary => {}
-        }
-    }
-}
-
-fn validate_draft(state: &AppState) -> DraftValidation {
+fn validate_draft(state: &AppState) -> Result<(), String> {
     if state.schematic_edit_read_only() {
-        return DraftValidation::Invalid("The active schematic is read-only.".to_owned());
+        return Err("The active schematic is read-only.".to_owned());
     }
     let draft = &state.dialogs.stretch_selection;
     let Some(authority) = draft.authority.as_ref() else {
-        return DraftValidation::Invalid(
-            "The retained design baseline is unavailable. Close and reopen Stretch selection."
-                .to_owned(),
-        );
+        return Err("Stretch is not armed.".to_owned());
     };
-    if let Err(message) = authority.validate(state, TITLE) {
-        return DraftValidation::Invalid(message);
-    }
+    authority.validate(state, COMMAND)?;
     let Some(target) = draft.canvas.target else {
-        return DraftValidation::Invalid(
-            "No stretch target is retained. Close and reopen Stretch selection.".to_owned(),
-        );
+        return Err("Stretch is not armed.".to_owned());
     };
     if !state.schematic.is_stretch_target_eligible(target) {
-        return DraftValidation::Invalid(
-            "The retained stretch target is no longer eligible. Close and reopen Stretch selection."
-                .to_owned(),
+        return Err(
+            "What this stretch was armed on is no longer there. Select it again.".to_owned(),
         );
     }
-    DraftValidation::Valid
+    Ok(())
 }
 
 pub(crate) fn armed_stretch_selection_authority(state: &AppState) -> Result<(), String> {
     let draft = &state.dialogs.stretch_selection;
     if !draft.armed || state.schematic.session.editor.tool != Tool::StretchSelection {
-        return Err("Stretch selection is not armed.".to_owned());
+        return Err("Stretch is not armed.".to_owned());
     }
-    match validate_draft(state) {
-        DraftValidation::Valid => Ok(()),
-        DraftValidation::Invalid(message) => Err(message),
-    }
+    validate_draft(state)
 }
 
 pub(crate) fn cancel_armed_stretch_selection(state: &mut AppState) {
@@ -185,53 +96,28 @@ pub(crate) fn cancel_armed_stretch_selection(state: &mut AppState) {
     }
 }
 
-fn target_summary(state: &AppState) -> String {
-    match state.dialogs.stretch_selection.canvas.target {
-        Some(StretchTarget::WireSegment {
-            wire_id,
-            segment_index,
-        }) => format!("wire {wire_id} \u{00b7} segment {}", segment_index + 1),
-        Some(StretchTarget::BusSegment {
-            bus_id,
-            segment_index,
-        }) => format!("bus {bus_id} \u{00b7} segment {}", segment_index + 1),
-        Some(StretchTarget::DocumentationShapePoint {
-            shape_id,
-            point_index,
-        }) => {
-            let kind = state
-                .schematic
-                .document()
-                .documentation_shapes
-                .iter()
-                .find(|shape| shape.id == shape_id)
-                .map_or("documentation shape", |shape| shape.geometry.kind().label());
-            format!(
-                "{kind} {shape_id} \u{00b7} control point {}",
-                point_index + 1
-            )
-        }
-        None => "No stretch target".to_owned(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{Point, StretchOrthogonalPolicy, Wire};
-    use crate::workbench::app::dialogs::state::StretchSelectionDialogState;
+    use crate::state::{Point, StretchTarget, Wire};
 
-    #[test]
-    fn open_freezes_authority_and_exact_default_policy() {
+    fn selected_wire_segment() -> AppState {
         let mut state = AppState::default();
         let wire = Wire::new(7, vec![Point::new(0, 0), Point::new(20, 0)]);
         state.schematic.document_mut_for_test().wires.push(wire);
         state.schematic.session.editor.selection.select_wire(7);
+        state
+    }
 
-        open_stretch_selection_dialog(&mut state);
+    #[test]
+    fn arming_opens_no_dialog_and_resolves_the_target_at_once() {
+        let mut state = selected_wire_segment();
+
+        arm_stretch_selection(&mut state);
 
         let draft = &state.dialogs.stretch_selection;
-        assert!(draft.open);
+        assert!(draft.armed);
+        assert!(!state.dialogs.application_modal_open());
         assert_eq!(draft.policy, StretchOrthogonalPolicy::PreserveOrthogonal);
         assert_eq!(
             draft.canvas.target,
@@ -241,17 +127,29 @@ mod tests {
             })
         );
         assert!(draft.authority.is_some());
+        assert_eq!(state.schematic.session.editor.tool, Tool::StretchSelection);
+    }
+
+    /// The check box starts where the sheet is drawn: a 45-degree sheet does
+    /// not have to clear it on every stretch.
+    #[test]
+    fn the_orthogonal_rule_starts_from_the_sheets_routing_style() {
+        let mut state = selected_wire_segment();
+        state.ui.schematic_visibility.wire_routing = SchematicWireRoutingStyle::FortyFiveDegree;
+
+        arm_stretch_selection(&mut state);
+
+        assert_eq!(
+            state.dialogs.stretch_selection.policy,
+            StretchOrthogonalPolicy::AllowDiagonal
+        );
     }
 
     #[test]
-    fn edited_policy_requires_two_close_attempts() {
-        let mut draft = StretchSelectionDialogState::default();
-        draft.open = true;
-        draft.mark_edited();
-        assert!(!draft.attempt_close());
-        assert!(draft.open);
-        assert!(draft.discard_confirm);
-        assert!(draft.attempt_close());
-        assert!(!draft.open);
+    fn nothing_stretchable_refuses_instead_of_arming() {
+        let mut state = AppState::default();
+        arm_stretch_selection(&mut state);
+        assert!(!state.dialogs.stretch_selection.armed);
+        assert_ne!(state.schematic.session.editor.tool, Tool::StretchSelection);
     }
 }

@@ -456,17 +456,20 @@ fn footer(ui: &mut Ui, report: &(String, Problem)) {
     );
     response
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
-    const MARK_SIDE: f32 = 11.0;
+    use crate::ui::widgets::{PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE};
     crate::ui::widgets::paint_problem_mark(
         ui.painter(),
         egui::Rect::from_center_size(
-            egui::pos2(rect.left() + INSET + MARK_SIDE * 0.5, rect.center().y),
-            egui::Vec2::splat(MARK_SIDE),
+            egui::pos2(
+                rect.left() + INSET + PROBLEM_MARK_SIDE * 0.5,
+                rect.center().y,
+            ),
+            egui::Vec2::splat(PROBLEM_MARK_SIDE),
         ),
         *problem,
     );
     ui.painter().text(
-        egui::pos2(rect.left() + INSET + MARK_SIDE + 6.0, rect.center().y),
+        egui::pos2(rect.left() + INSET + PROBLEM_MARK_ADVANCE, rect.center().y),
         egui::Align2::LEFT_CENTER,
         text,
         theme::sans(tokens::FS_0, FontWeight::Regular),

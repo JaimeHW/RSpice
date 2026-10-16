@@ -33,9 +33,11 @@ use crate::workbench::documents::code_workspace::{self, CodeSourceFileAction};
 use crate::workbench::{MessageCatalog, MessageId};
 
 /// Side of a leading problem mark on an include row, and the advance from its
-/// left edge to the text behind it. Both match the kit's own problem line.
-const INCLUDE_MARK_SIDE: f32 = 11.0;
-const INCLUDE_MARK_ADVANCE: f32 = 17.0;
+/// left edge to the text behind it. Read from the kit rather than restated
+/// here, so an include row's mark is the mark every other panel sets.
+use crate::ui::widgets::{
+    PROBLEM_MARK_ADVANCE as INCLUDE_MARK_ADVANCE, PROBLEM_MARK_SIDE as INCLUDE_MARK_SIDE,
+};
 
 /// Bring the lifecycle dialog up for the page that is showing.
 ///

@@ -10,7 +10,7 @@ use rspice_ui_kit::{
     tokens::{self, Tokens},
     widgets::{
         Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
-        Problem, paint_problem_mark,
+        PROBLEM_MARK_SIDE, Problem, paint_problem_mark,
     },
 };
 
@@ -136,7 +136,10 @@ pub fn canvas_check_note(
         .interactable(false)
         .show(ctx, |ui| {
             overlay_frame(ui, &t, t.color.border, |ui| {
-                let (mark, _) = ui.allocate_exact_size(vec2(11.0, 11.0), egui::Sense::hover());
+                let (mark, _) = ui.allocate_exact_size(
+                    vec2(PROBLEM_MARK_SIDE, PROBLEM_MARK_SIDE),
+                    egui::Sense::hover(),
+                );
                 paint_problem_mark(ui.painter(), mark, problem);
                 ui.add_space(4.0);
                 ui.label(
@@ -314,7 +317,10 @@ pub fn unpublished_changes_strip(ui: &mut Ui, dirty: bool) {
                 Stroke::new(1.0, c.border),
             );
             ui.add_space(12.0);
-            let (mark, _) = ui.allocate_exact_size(vec2(11.0, 11.0), egui::Sense::hover());
+            let (mark, _) = ui.allocate_exact_size(
+                vec2(PROBLEM_MARK_SIDE, PROBLEM_MARK_SIDE),
+                egui::Sense::hover(),
+            );
             paint_problem_mark(ui.painter(), mark, Problem::Warning);
             ui.add_space(4.0);
             ui.label(

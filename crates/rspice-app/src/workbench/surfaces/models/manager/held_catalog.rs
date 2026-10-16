@@ -30,11 +30,10 @@ pub(super) fn dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &hub:
             "Who signed the catalog snapshot this client holds, the contract it is accepted \
              under, and the last hub operation this session attempted.",
         )
-        // `Manager` is a fixed 760 x 530 surface — `fill_height`, so it is 530
-        // tall whatever it holds — and this card holds an identity table, two
-        // paragraphs of acceptance contract and one attempt. The contract is
-        // the half a reader came for, and at 530 it began below the fold every
-        // time.
+        // `Manager` is 760 wide and capped at 530 tall, and this card holds an
+        // identity table, two paragraphs of acceptance contract and one
+        // attempt. The contract is the half a reader came for, and against a
+        // 530 point ceiling it began below the fold every time.
         //
         // `WideWorkflow` is the widest content-height surface the design system
         // offers, and this dialog family already reads its two release-diff

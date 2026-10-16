@@ -99,13 +99,19 @@ const BODY_BOTTOM_INSET: f32 = 6.0;
 /// longest value is known, so they hold their width and stay readable by
 /// position down the rows.
 ///
-/// The set totals eight points less than the browse table's, which is the
-/// budget that decides whether this fits the portrait viewport — the narrowest
-/// the dialog is gated at. A wider column here can push the table past it.
+/// The whole set has to fit the body this route's own dialog gives it at the
+/// narrowest viewport it is gated at, which is 497 points at 560. When the
+/// purpose stopped padding itself to a narrow viewport the surface gave up
+/// the 24 points a side gutter costs, the set no longer fitted, and the
+/// dialog grew a horizontal scrollbar with the Storage column under it. Each
+/// fixed column is now its own heading plus its longest value and no more —
+/// a count, `12 PVT`, a duration, a binary-scaled byte count — and
+/// `the_member_table_fits_the_body_at_every_gated_viewport` is what stops a
+/// wider one being added without the room for it.
 const MEMBER_COLUMNS: [TableColumn; 7] = [
     TableColumn {
         heading: "Order",
-        track: ColumnTrack::Fixed(42.0),
+        track: ColumnTrack::Fixed(36.0),
     },
     TableColumn {
         heading: "Plan",
@@ -113,15 +119,15 @@ const MEMBER_COLUMNS: [TableColumn; 7] = [
     },
     TableColumn {
         heading: "Analyses",
-        track: ColumnTrack::Fixed(56.0),
+        track: ColumnTrack::Fixed(52.0),
     },
     TableColumn {
         heading: "Run set",
-        track: ColumnTrack::Fixed(62.0),
+        track: ColumnTrack::Fixed(56.0),
     },
     TableColumn {
         heading: "Tasks",
-        track: ColumnTrack::Fixed(48.0),
+        track: ColumnTrack::Fixed(42.0),
     },
     TableColumn {
         heading: "Est. time",
@@ -129,7 +135,7 @@ const MEMBER_COLUMNS: [TableColumn; 7] = [
     },
     TableColumn {
         heading: "Storage",
-        track: ColumnTrack::Fixed(58.0),
+        track: ColumnTrack::Fixed(64.0),
     },
 ];
 
@@ -526,6 +532,62 @@ mod tests {
         // `create_plan` activates what it creates, so the last one made leads
         // the projection and the other two are the retained entries.
         (app, [third, root, second])
+    }
+
+    /// The width this route's own dialog hands its body at one viewport.
+    ///
+    /// The route is a child dialog over the manager, so the manager's body
+    /// size is not its: it has its own surface width, its own scrollbar
+    /// gutter and its own body margin, and the member table has to fit
+    /// inside that. Three passes, because the first builds fonts and the
+    /// second settles the surface.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn measured_campaign_body_width(screen: egui::Vec2) -> f32 {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut width = 0.0;
+        let mut run = || {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, screen)),
+                    ..Default::default()
+                },
+                |root| {
+                    Dialog::new("Queue simulation campaign", "Queue reviewed campaign")
+                        .description(CAMPAIGN_PURPOSE)
+                        .size(DialogSize::WideWorkflow)
+                        .ghost("Cancel")
+                        .show(root.ctx(), |ui| {
+                            width = ui.available_width();
+                        });
+                },
+            )
+        };
+        let _ = run();
+        let _ = run();
+        let _ = run();
+        assert!(width > 0.0, "the dialog painted no body at {screen:?}");
+        width
+    }
+
+    /// The member table fits the surface the route actually gets.
+    ///
+    /// Nothing measured this until the purpose stopped padding itself to a
+    /// narrow viewport: at 560 the surface gave up the 24 points a gutter
+    /// costs, the column set no longer fitted the body, and the dialog grew
+    /// a horizontal scrollbar with the Storage column under it.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_member_table_fits_the_body_at_every_gated_viewport() {
+        for (arrangement, screen) in super::super::tests::GATED_VIEWPORTS {
+            let body = measured_campaign_body_width(screen);
+            let minimum = kit::table_minimum_width(&MEMBER_COLUMNS);
+            assert!(
+                minimum <= body,
+                "{arrangement} at {screen:?}: the member table needs {minimum} \
+                 points of a {body} point body, so the route scrolls sideways"
+            );
+        }
     }
 
     fn record_of(records: &[PlanCatalogRecord], id: SimulationPlanId) -> &PlanCatalogRecord {

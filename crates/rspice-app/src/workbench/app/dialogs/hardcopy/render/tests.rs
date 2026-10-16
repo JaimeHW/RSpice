@@ -156,6 +156,11 @@ const PREVIEW_TAIL_CONTROLS: [&str; 2] = ["Fit page", "COLOR"];
 /// inside a 12 pt viewport gutter, edge to edge at or below the 820 pt
 /// manager breakpoint. Anything the studio lays out beyond this rectangle
 /// is off the dialog.
+///
+/// At narrow this is the viewport, which is the bound the studio may not
+/// cross — not the surface, which is its content's height centred inside
+/// that. The caller asks the centring question there instead; see the guard
+/// in `the_studio_fits_every_viewport_and_section_without_scrolling`.
 #[cfg(not(target_arch = "wasm32"))]
 fn studio_surface(viewport: Vec2) -> Rect {
     let screen = Rect::from_min_size(egui::Pos2::ZERO, viewport);
@@ -237,6 +242,13 @@ fn dialog_controls(output: &egui::FullOutput) -> Vec<(String, Rect)> {
         // The modal container spans the whole viewport by design: it is the
         // scrim, not the surface.
         .filter(|(_, node)| node.role() != egui::accesskit::Role::Dialog)
+        // A scroll bar is the scroll area's own furniture, laid against the
+        // surface edge by egui rather than laid out by the studio, and it
+        // overhangs that edge by a point. Excluding it does not soften what
+        // this probe measures: content a scroll area is hiding still reports
+        // its true rect outside the surface, which is the condition being
+        // caught. The bar is the symptom's frame, not the symptom.
+        .filter(|(_, node)| node.role() != egui::accesskit::Role::ScrollBar)
         .filter_map(|(_, node)| {
             let bounds = node.bounds()?;
             let rect = Rect::from_min_max(
@@ -249,6 +261,28 @@ fn dialog_controls(output: &egui::FullOutput) -> Vec<(String, Rect)> {
             rect.is_finite().then(|| (text.to_owned(), rect))
         })
         .collect()
+}
+
+/// The accessibility role of whatever the tree published at `rect`.
+///
+/// A control that does not fit is reported by its label, and the ones worth
+/// knowing about are often the ones with no label to report. The role is what
+/// names them.
+#[cfg(not(target_arch = "wasm32"))]
+fn role_at(output: &egui::FullOutput, rect: Rect) -> String {
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .and_then(|update| {
+            update.nodes.iter().find_map(|(_, node)| {
+                let bounds = node.bounds()?;
+                ((bounds.x0 as f32 - rect.left()).abs() < 0.5
+                    && (bounds.y0 as f32 - rect.top()).abs() < 0.5)
+                    .then(|| format!("{:?}", node.role()))
+            })
+        })
+        .unwrap_or_else(|| "unknown".to_owned())
 }
 
 /// How far outside the surface a control reaches, in points.
@@ -314,20 +348,47 @@ fn the_studio_fits_every_viewport_and_section_without_scrolling() {
                 // Without this the probe would be measuring against a
                 // rectangle larger than the dialog, and would pass on
                 // anything.
+                //
+                // That holds only where the probe knows the surface's height.
+                // At narrow, edge to edge is a statement about the side
+                // gutters alone: the surface spends none of the width on one
+                // and takes its height from its content, centred in the
+                // viewport. There is no fixed rectangle to reach there, so
+                // the same question is asked of what the dialog drew — the
+                // span stayed inside the viewport, and sits centred in it.
                 let reach = controls
                     .iter()
                     .fold((f32::MAX, f32::MIN), |acc, (_, rect)| {
                         (acc.0.min(rect.top()), acc.1.max(rect.bottom()))
                     });
-                assert!(
-                    reach.0 - surface.top() <= 16.0 && surface.bottom() - reach.1 <= 16.0,
-                    "{case}: the surface this probe measures against is not the one the \
-                         dialog drew — its controls span {:.0}..{:.0} inside {:.0}..{:.0}",
-                    reach.0,
-                    reach.1,
-                    surface.top(),
-                    surface.bottom()
-                );
+                let top_gap = reach.0 - surface.top();
+                let bottom_gap = surface.bottom() - reach.1;
+                if width <= 820.0 {
+                    assert!(
+                        top_gap >= 0.0 && bottom_gap >= 0.0,
+                        "{case}: the studio drew outside the viewport — its controls \
+                             span {:.0}..{:.0} inside {:.0}..{:.0}",
+                        reach.0,
+                        reach.1,
+                        surface.top(),
+                        surface.bottom()
+                    );
+                    assert!(
+                        (top_gap - bottom_gap).abs() <= 24.0,
+                        "{case}: the content-height surface is not centred in the \
+                             viewport — {top_gap:.0} above its controls, {bottom_gap:.0} below"
+                    );
+                } else {
+                    assert!(
+                        top_gap <= 16.0 && bottom_gap <= 16.0,
+                        "{case}: the surface this probe measures against is not the one the \
+                             dialog drew — its controls span {:.0}..{:.0} inside {:.0}..{:.0}",
+                        reach.0,
+                        reach.1,
+                        surface.top(),
+                        surface.bottom()
+                    );
+                }
                 if previewing {
                     for missing in PREVIEW_TAIL_CONTROLS
                         .into_iter()
@@ -342,11 +403,26 @@ fn the_studio_fits_every_viewport_and_section_without_scrolling() {
                     .max_by(|left, right| left.1.total_cmp(&right.1))
                     .filter(|(_, overflow)| *overflow > 0.5)
                 {
+                    let rect = controls
+                        .iter()
+                        .find(|(name, _)| name == label)
+                        .map(|(_, rect)| *rect)
+                        .unwrap_or(Rect::NOTHING);
                     failures.push(format!(
-                        "{case}: {label:?} is {overflow:.0} pt outside the {:.0}x{:.0} pt \
-                             surface",
+                        "{case}: {label:?} ({}) is {overflow:.1} pt outside the {:.0}x{:.0} pt \
+                             surface — it sits at x {:.1}..{:.1}, y {:.1}..{:.1} inside \
+                             x {:.1}..{:.1}, y {:.1}..{:.1}",
+                        role_at(&output, rect),
                         surface.width(),
-                        surface.height()
+                        surface.height(),
+                        rect.left(),
+                        rect.right(),
+                        rect.top(),
+                        rect.bottom(),
+                        surface.left(),
+                        surface.right(),
+                        surface.top(),
+                        surface.bottom()
                     ));
                 }
             }

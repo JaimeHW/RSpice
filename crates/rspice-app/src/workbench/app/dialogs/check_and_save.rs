@@ -39,13 +39,20 @@ const DESCRIPTION: &str =
 const SAVING_TITLE: &str = "Saving";
 const SAVING_DETAIL: &str = "Keep this dialog open until the save completes.";
 const NEWER_CHANGES_HINT: &str = "Edits made after validation are still unsaved.";
-const CHECK_AND_SAVE_BODY_HEIGHT: f32 = 291.0;
+/// The form column: its 10 pt frame margins over three 47 pt fields with
+/// 9 pt between them. It was 291 while the change preview sat under the
+/// fields — a 29 pt heading over three 28 pt rows of constants — and holding
+/// that number once the preview went would have left the band as bare
+/// surface instead of as a table.
+const CHECK_AND_SAVE_BODY_HEIGHT: f32 = 179.0;
 /// Side of a leading problem mark, and the advance from its left edge to the
-/// text behind it. Both match the kit's own problem line, so a marked line
-/// here sits where a marked line sits anywhere else.
-const MARK_SIDE: f32 = 11.0;
-const MARK_ADVANCE: f32 = 17.0;
-const CHECK_AND_SAVE_SURFACE_HEIGHT: f32 = SURFACE_HEIGHT + 61.0;
+/// text behind it. Read from the kit rather than restated here, so a marked
+/// line in this dialog sits where a marked line sits anywhere else, now and
+/// after the kit moves it.
+use crate::ui::widgets::{PROBLEM_MARK_ADVANCE as MARK_ADVANCE, PROBLEM_MARK_SIDE as MARK_SIDE};
+/// The first frame's height hint: the shared operation surface less the
+/// 112 pt the change preview used to add to the body under it.
+const CHECK_AND_SAVE_SURFACE_HEIGHT: f32 = SURFACE_HEIGHT - 51.0;
 
 #[derive(Clone, Copy)]
 struct CheckAndSavePreconditions<'a> {
@@ -733,7 +740,11 @@ fn check_and_save_body(
             form.response.rect.bottom(),
             Stroke::new(1.0, Tokens::get(ui.ctx()).color.border_strong),
         );
-        preconditions_panel(ui, CHECK_AND_SAVE_BODY_HEIGHT, preconditions);
+        // Stacked, the panel sits under the form rather than beside it, so
+        // the form's height is not a measure it has to match: holding it to
+        // one left the two facts of the snapshot over 94 points of bare
+        // panel at 560.
+        preconditions_panel(ui, 0.0, preconditions);
         return form.inner;
     }
     let body = ui.allocate_ui_with_layout(
@@ -831,8 +842,6 @@ fn check_and_save_form(
                 );
             });
         });
-    section_heading(ui, "Exact change preview");
-    preview_table(ui, report);
     note_response.unwrap_or_else(|| ui.allocate_response(egui::Vec2::ZERO, Sense::hover()))
 }
 
@@ -972,101 +981,6 @@ fn section_heading(ui: &mut Ui, label: &str) {
     });
 }
 
-fn preview_table(ui: &mut Ui, report: &CheckAndSaveValidationReport) {
-    let headers = [
-        "Owned object",
-        "Reviewed operation",
-        "Dependent effect",
-        "Recovery",
-    ];
-    let rows = [
-        [
-            "active schematic working document".to_owned(),
-            "validate then save explicit revision".to_owned(),
-            "prior saved revision and results remain retained".to_owned(),
-            "revert new working revision".to_owned(),
-        ],
-        [
-            "Source revision".to_owned(),
-            format!(
-                "revision {} \u{2192} new operation identity",
-                report.project_revision()
-            ),
-            "stable IDs and provenance retained".to_owned(),
-            "prior state remains addressable".to_owned(),
-        ],
-    ];
-    table_row(ui, &headers, true);
-    for row in rows {
-        let values = row.iter().map(String::as_str).collect::<Vec<_>>();
-        table_row(ui, &values, false);
-    }
-}
-
-fn table_row(ui: &mut Ui, values: &[&str], header: bool) {
-    let t = Tokens::get(ui.ctx());
-    let height = if header { 27.0 } else { 28.0 };
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
-    ui.painter().rect_filled(
-        rect,
-        0.0,
-        if header {
-            t.color.bg_elevated
-        } else {
-            t.color.bg_app
-        },
-    );
-    let width = rect.width() / values.len().max(1) as f32;
-    let mut truncated = false;
-    for (index, value) in values.iter().enumerate() {
-        let left = rect.left() + index as f32 * width;
-        let clip = egui::Rect::from_min_max(
-            egui::pos2(left + 8.0, rect.top()),
-            egui::pos2((left + width - 6.0).min(rect.right()), rect.bottom()),
-        );
-        let font = theme::sans(
-            tokens::FS_0,
-            if header {
-                FontWeight::SemiBold
-            } else {
-                FontWeight::Regular
-            },
-        );
-        let (display_value, was_truncated) =
-            ellipsized_text(ui, value, clip.width(), &font, t.color.text_dim);
-        truncated |= was_truncated;
-        ui.painter().with_clip_rect(clip).text(
-            clip.left_center(),
-            Align2::LEFT_CENTER,
-            display_value,
-            font,
-            t.color.text_dim,
-        );
-    }
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-    // Same publication trap as the fact rows: without `widget_info` the row
-    // has no role and no bounds, so every row of the change preview was
-    // dropped and the table read as empty.
-    let announcement = values.join("; ");
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announcement)
-    });
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_label(announcement.as_str());
-        // The row is one announcement, not a label/value pair; `Role::Label`
-        // would otherwise repeat it as the value as well.
-        node.clear_value();
-    });
-    if truncated {
-        response.on_hover_text(values.join(" · "));
-    }
-}
-
 fn checks_review_description(report: &CheckAndSaveValidationReport) -> String {
     let mut detail = String::from(
         "Blocking and advisory findings from the frozen validation receipt. Saving records the revision note as the explicit disposition for each advisory.",
@@ -1149,6 +1063,34 @@ mod tests {
         );
     }
 
+    /// Check and save states no status in colour.
+    ///
+    /// Colour here is for data identity, a failing verdict, an error
+    /// attached to the input it rejects, and the selected item. A status
+    /// dot, a success tone and an informational tone are none of those, and
+    /// the kit's `Success` and `Neutral` marks are being withdrawn — a
+    /// caller added here after they go would not compile, but one added
+    /// before them is exactly how they survive.
+    #[test]
+    fn this_dialog_states_no_status_in_colour() {
+        let source = crate::source_guard::production_source(include_str!("check_and_save.rs"));
+        let found = [
+            "colored_label",
+            "status_dot(",
+            "StatusMark::Success",
+            "StatusMark::Neutral",
+            ".color(t.color.ok",
+            ".color(t.color.info",
+        ]
+        .into_iter()
+        .filter(|pattern| source.contains(pattern))
+        .collect::<Vec<_>>();
+        assert!(
+            found.is_empty(),
+            "Check and save paints status in colour again: {found:?}"
+        );
+    }
+
     #[test]
     fn revision_note_is_required_and_bounded() {
         assert!(revision_note_error(" ").is_some());
@@ -1225,16 +1167,14 @@ mod tests {
             }
         };
 
-        // Both section headings, named once each: a `Role::Label`'s text is
-        // filed under `value`, so a heading that still carries one is being
+        // The section heading, named once: a `Role::Label`'s text is filed
+        // under `value`, so a heading that still carries one is being
         // announced twice over.
-        for heading in ["Exact change preview", "Validated snapshot"] {
-            published(heading, &|node| {
-                node.role() == egui::accesskit::Role::Heading
-                    && node.label() == Some(heading)
-                    && node.value().is_none()
-            });
-        }
+        published("Validated snapshot", &|node| {
+            node.role() == egui::accesskit::Role::Heading
+                && node.label() == Some("Validated snapshot")
+                && node.value().is_none()
+        });
 
         // The two facts of the snapshot, each as the pair it paints.
         for fact in ["Project", "Revision"] {
@@ -1243,18 +1183,27 @@ mod tests {
             });
         }
 
-        // Every row of the change preview, its header row included.
-        for row in [
-            "Owned object; Reviewed operation; Dependent effect; Recovery",
-            "active schematic working document; validate then save explicit revision; prior saved revision and results remain retained; revert new working revision",
-        ] {
-            published(row, &|node| node.label() == Some(row));
-        }
-
         assert!(
             unpublished.is_empty(),
             "Check and save paints rows that never reach the accessibility tree:\n  {}",
             unpublished.join("\n  ")
+        );
+
+        // The change preview is gone: four columns of the same two sentences
+        // about what the save retains, at every width and for every design.
+        // It said nothing a reader could act on and every cell ellipsized.
+        let still_painted = nodes
+            .iter()
+            .filter_map(|(_, node)| node.label())
+            .filter(|label| {
+                label.contains("Exact change preview")
+                    || label.contains("Owned object")
+                    || label.contains("remain retained")
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            still_painted.is_empty(),
+            "the change preview is back: {still_painted:?}"
         );
     }
 

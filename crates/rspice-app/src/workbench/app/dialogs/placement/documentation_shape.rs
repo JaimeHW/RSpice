@@ -4,20 +4,14 @@ use egui::Context;
 use rspice_schematic_editor::annotations::shape_placement;
 
 use crate::state::{PendingDocumentationShapePlacement, Tool};
-use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
-};
+use crate::ui::widgets::{CommandForm, DialogChoice};
 
 use crate::workbench::app::{RSpiceApp, schematic_editor_request_source};
 use crate::workbench::app_state::AppState;
 
 const TITLE: &str = "Draw documentation shape";
-const PRIMARY: &str = "Arm shape tool";
-const DESCRIPTION: &str =
-    "Draw lines, rectangles, polygons, arcs, or callouts on non-electrical documentation layers.";
-const DIALOG_SIZE: DialogSize = DialogSize::Transaction;
-const DISCARD_TITLE: &str = "Unsaved dialog changes";
-const DISCARD_DETAIL: &str = "Choose Discard changes again to close, or continue editing. No schematic graphics have been changed.";
+const PRIMARY: &str = "Draw";
+const DESCRIPTION: &str = "Pick the shape, then drag it on the sheet.";
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_documentation_shape_dialog(&mut self, ctx: &Context) {
@@ -25,36 +19,20 @@ impl RSpiceApp {
             return;
         }
         let validation = validate_draft(&self.state);
-        let validation_message = validation.as_ref().err().cloned();
-        let discard_confirm = self.state.dialogs.documentation_shape.discard_confirm;
-        let mut dialog = Dialog::new(TITLE, PRIMARY)
-            .description(DESCRIPTION)
-            .size(DIALOG_SIZE)
-            .ghost(if discard_confirm {
-                "Discard changes"
-            } else {
-                "Cancel"
-            })
+        let refusal = validation.as_ref().err().cloned();
+
+        let draft = &mut self.state.dialogs.documentation_shape;
+        let choice = CommandForm::new(TITLE, PRIMARY)
+            .describe(DESCRIPTION)
             .primary_enabled(validation.is_ok())
-            .primary_on_enter(false)
-            .initial_focus(DialogInitialFocus::BodyControl);
-        if discard_confirm {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                DISCARD_TITLE,
-                DISCARD_DETAIL,
-            );
-        }
-        let mut response = dialog.show_transaction(ctx, |ui| {
-            let draft = &mut self.state.dialogs.documentation_shape;
-            let response =
-                shape_placement::show(ui, validation_message.as_deref(), &mut draft.kind);
-            if response.edited {
-                draft.mark_edited();
-            }
-            response.focus
-        });
-        match response.choice {
+            .status(match refusal.as_deref() {
+                Some(message) => Err(message),
+                None => Ok(None),
+            })
+            .status_fixed_at_open()
+            .status_lines(2)
+            .show(ctx, |rows| shape_placement::show(rows, &mut draft.kind));
+        match choice {
             DialogChoice::Primary => {
                 if let Ok(pending) = validate_draft(&self.state) {
                     self.state
@@ -73,10 +51,7 @@ impl RSpiceApp {
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.documentation_shape.attempt_close();
-                if self.state.dialogs.documentation_shape.open {
-                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
-                }
+                self.state.dialogs.documentation_shape.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
