@@ -1416,6 +1416,10 @@ mod tests {
     }
 
     /// The store lists runs in the order they were made.
+    ///
+    /// Two runs' outcomes stand together only where neither supersedes the
+    /// other, and a failure of one analysis in two plain runs is one condition
+    /// under one identity — so the two runs here fail different analyses.
     #[test]
     fn run_ten_is_filed_after_run_nine() {
         let mut state = AppState::default();
@@ -1425,8 +1429,27 @@ mod tests {
         ]
         .into();
         state.publish_run_failure("Transient", "Analysis failed: tran", None, 10);
-        state.publish_run_failure("Transient", "Analysis failed: tran", None, 9);
+        state.publish_run_failure("Operating point", "Analysis failed: op", None, 9);
         assert_eq!(run_batches(&state), [9, 10]);
+    }
+
+    /// A failure of one analysis in two plain runs is one condition, and the
+    /// later run's outcome supersedes the earlier one's at dispatch. Were the
+    /// earlier batch still standing, the second would be refused rather than
+    /// listed twice.
+    #[test]
+    fn one_analysis_failing_in_two_plain_runs_is_one_condition() {
+        let mut state = AppState::default();
+        state.simulation.retained.runs = vec![
+            crate::state::SimulationRun::new(9),
+            crate::state::SimulationRun::new(10),
+        ]
+        .into();
+        state.publish_run_failure("Transient", "Analysis failed: tran", None, 9);
+        state.supersede_run_diagnostics(10);
+        state.open_run_outcome(10);
+        state.publish_run_failure("Transient", "Analysis failed: tran", None, 10);
+        assert_eq!(run_batches(&state), [10]);
     }
 
     /// Receipts are filed under a cell view's canonical key; the batches they

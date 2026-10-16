@@ -622,7 +622,9 @@ mod tests {
                 Some(prepared_contract(3)),
             ));
         });
-        for expected in ["Authorized for dispatch", "1 stable instance", TARGET] {
+        // The card's rows, by name and value. Its title is painted, not a
+        // widget, so it is not among what the route announces.
+        for expected in ["Analysis identities", "1 stable instance", TARGET] {
             assert!(
                 authorized.iter().any(|text| text.contains(expected)),
                 "an authorized report states {expected:?}: {authorized:?}"
@@ -650,7 +652,7 @@ mod tests {
             assert!(
                 !text
                     .iter()
-                    .any(|text| text.contains("Authorized for dispatch") || text.contains(TARGET)),
+                    .any(|text| text.contains("Analysis identities") || text.contains(TARGET)),
                 "a {standing} report authorizes no dispatch and states none: {text:?}"
             );
         }
