@@ -258,6 +258,7 @@ fn prepare_boundaries(
             child_source,
             child,
             &constants,
+            Some(source),
             source.time_scale,
             &child_path,
         )?;

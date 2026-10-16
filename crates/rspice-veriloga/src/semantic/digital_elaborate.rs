@@ -527,6 +527,10 @@ impl DigitalElaborator<'_> {
             child_source,
             child,
             &parent_scope.constants,
+            ancestors
+                .last()
+                .and_then(|parent| self.source_modules.get(&parent.key.module))
+                .copied(),
             parent_scope.time_scale,
             path,
         )?;
@@ -991,6 +995,7 @@ pub(super) fn specialize_module(
     source: &Module,
     child: &AnalyzedModule,
     constants: &super::DigitalConstants,
+    parent: Option<&Module>,
     time_scale: crate::time_scale::ModuleTimeScale,
     path: &str,
 ) -> CompileResult<(SpecializationKey, Option<std::sync::Arc<SpecializedModule>>)> {
@@ -1018,18 +1023,24 @@ pub(super) fn specialize_module(
         let span = expression.span();
         let value = super::instance_parameters::close_override(
             declaration,
-            expression,
+            expression.clone(),
             constants,
             time_scale,
         )
         .map_err(|message| {
-            semantic_error(
-                SemanticErrorKind::UnsupportedFeature(format!(
-                    "parameter `{}` of instance `{path}`: {message}",
-                    declaration.name
-                )),
-                span,
-            )
+            parent
+                .and_then(|parent| {
+                    super::instance_parameters::override_operand_error(&expression, parent)
+                })
+                .unwrap_or_else(|| {
+                    semantic_error(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "parameter `{}` of instance `{path}`: {message}",
+                            declaration.name
+                        )),
+                        span,
+                    )
+                })
         })?;
         let identity =
             super::instance_parameters::override_identity(&value).map_err(internal_error)?;

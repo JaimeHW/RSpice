@@ -2049,6 +2049,33 @@ fn defparam_targets_outside_its_reach_are_refused_by_name() {
     assert!(message.contains("which is instantiated"), "{message}");
 }
 
+/// An instance value names an operand its scope never declares, or one it
+/// declares as a variable: both are the author's error (IEEE 1364-2005
+/// section 12.2 makes the value a constant expression), not a missing form.
+#[test]
+fn an_override_naming_an_undeclared_or_variable_operand_is_a_language_error() {
+    for (section, expected) in [
+        (
+            "    wire y;\n     leaf #(NOPE) u1(y);",
+            "Undeclared symbol: 'NOPE'",
+        ),
+        (
+            "    wire y;\n     integer v;\n     leaf #(v + 1) u1(y);",
+            "`v` is not a constant",
+        ),
+        (
+            "    wire y;\n     integer v;\n     leaf u1(y);\n     defparam u1.P = v;",
+            "`v` is not a constant",
+        ),
+    ] {
+        let message = hierarchy_error(&hierarchy(PARAMETERIZED, section));
+        assert!(
+            message.contains(expected) && !message.contains("Unsupported feature"),
+            "{section}: {message}"
+        );
+    }
+}
+
 /// A `defparam` on a digital root's own parameter takes precedence over the
 /// instance value an X card gives it, with a warning (design P2 section 4.2).
 #[test]
