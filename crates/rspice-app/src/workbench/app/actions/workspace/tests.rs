@@ -18,7 +18,6 @@ use crate::state::{
 use crate::workbench::ChoicePreference;
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::Workspace;
-use rspice_design::drc::{DrcLocation, DrcViolationType};
 use rspice_design::resolved_symbol::ResolvedSymbolSource;
 
 #[test]
@@ -977,27 +976,53 @@ fn storing_symbol_document_remaps_all_open_parent_buffers() {
     assert_eq!(tb.document().wires[0].points[0], Point::new(-30, 30));
 }
 
+/// A pin finding is a canonical record routed to the pin it is about.
+///
+/// The check used to stop at `dialogs.drc_results`, so its findings reached
+/// no count, no listing and no selection: the Problems page claimed to be the
+/// one list of every standing condition and had nothing of theirs on it.
 #[test]
-fn symbol_pin_checks_store_structured_drc_results_with_symbol_anchors() {
+fn symbol_pin_checks_publish_records_routed_to_the_failing_pin() {
+    use crate::workbench::app_state::diagnostic_store::{DiagnosticInputs, DiagnosticRoute};
+
     let mut state = state_with_amp_symbol_pin("IN", None);
+    state.project_lifecycle.authority.open_session();
 
     state.run_active_symbol_pin_checks();
 
-    let result = state.dialogs.drc_results.as_ref().expect("result stored");
-    // Reachable because its location resolves through the one resolver every
-    // "go to this finding" surface shares, not because the check also wrote an
-    // anchored log row that put the finding on the Problems page twice.
-    assert!(result.violations().iter().any(|violation| {
-        violation.violation_type == DrcViolationType::SymbolUnplacedPin
-            && matches!(
-                &violation.location,
-                DrcLocation::SymbolPin { pin_name, .. } if pin_name == "IN"
-            )
-            && matches!(
-                crate::schematic::view::violations::location_anchor(&state, &violation.location),
-                Some(LogAnchor::Symbol { ref pin_name, .. }) if pin_name == "IN"
-            )
-    }));
+    let subject = CellViewRef::new("work", "amp", "symbol");
+    let batch = state
+        .diagnostics
+        .batches()
+        .find(|batch| {
+            batch.inputs
+                == DiagnosticInputs::SymbolPins {
+                    subject: subject.clone(),
+                }
+        })
+        .expect("the pin checks publish their own batch");
+    let unplaced = batch
+        .records
+        .iter()
+        .find(|record| record.canonical.code.as_ref() == "SYMBOL-UNPLACED-PIN")
+        .expect("the unplaced pin is one of the findings");
+    assert_eq!(unplaced.subject.cell_view.as_ref(), Some(&subject));
+    // Routed through the one resolver every "go to this finding" surface
+    // shares, so following the row lands on the pin rather than on the
+    // document that holds it.
+    assert!(matches!(
+        &unplaced.route,
+        Some(DiagnosticRoute::Anchor(LogAnchor::Symbol { pin_name, .. })) if pin_name == "IN"
+    ));
+
+    let listed = crate::workbench::app_state::diagnostic_store::listing::listing(&state);
+    assert_eq!(listed.counts().errors, batch.records.len());
+    let row = (0..listed.len())
+        .filter_map(|index| listed.row(index))
+        .find(|row| row.id == unplaced.canonical.diagnostic_id)
+        .expect("the finding is on the page");
+    assert_eq!(row.subject, "pin IN");
+    assert_eq!(row.location, subject.display_path());
 }
 
 // The bulk-findings case, and the fixture only it uses, live next to the
