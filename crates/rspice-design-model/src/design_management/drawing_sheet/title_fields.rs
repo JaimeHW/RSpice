@@ -12,19 +12,20 @@ pub enum DrawingSheetTitleFieldId {
     SheetTitle,
     Page,
     Revision,
-    /// Retired. The sheet format restated the paper the reader is holding,
-    /// in prose, in a cell narrow enough that it rarely fitted; Page Setup
-    /// owns that fact and the border itself shows it. The variant remains
-    /// only so sheets authored before it was withdrawn still load — it is
-    /// absent from [`Self::ALL`], so nothing offers, resolves, or renders
-    /// it, deserialization drops it from the field set, and a sealed
-    /// organization template keeps it in an order nothing reads it from.
-    Format,
+    /// ISO 7200's *Paper size*: the sheet's designation, such as `A4`.
+    ///
+    /// Stored as `format`, the name it was saved under before it was briefly
+    /// withdrawn, so the sheets and sealed templates that name it keep
+    /// loading.
+    #[serde(rename = "format")]
+    PaperSize,
     /// Retired. ISO 7200 places a drawing's scale outside its title block,
     /// and a schematic is not drawn to one, so the cell only ever said 1:1
-    /// about a circuit that has no size. The variant remains, as
-    /// [`Self::Format`] did, so a sheet or sealed template that names it
-    /// still loads.
+    /// about a circuit that has no size. The variant remains only so sheets
+    /// authored before it was withdrawn still load — it is absent from
+    /// [`Self::ALL`], so nothing offers, resolves, or renders it,
+    /// deserialization drops it from the field set, and a sealed organization
+    /// template keeps it in an order nothing reads it from.
     Scale,
     DrawnBy,
     CheckedBy,
@@ -36,12 +37,13 @@ pub enum DrawingSheetTitleFieldId {
 }
 
 impl DrawingSheetTitleFieldId {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Project,
         Self::CellView,
         Self::SheetTitle,
         Self::Page,
         Self::Revision,
+        Self::PaperSize,
         Self::DrawnBy,
         Self::CheckedBy,
         Self::ApprovedBy,
@@ -56,7 +58,7 @@ impl DrawingSheetTitleFieldId {
     /// Deserialization drops these from the field set rather than refusing
     /// the sheet, so retiring a field costs no saved work. They are never
     /// written back.
-    pub const RETIRED: [Self; 2] = [Self::Format, Self::Scale];
+    pub const RETIRED: [Self; 1] = [Self::Scale];
 
     /// Editable title-block values whose authority is the project rather than
     /// one sheet. Visibility remains sheet-owned, but the value is resolved
@@ -84,7 +86,7 @@ impl DrawingSheetTitleFieldId {
             Self::SheetTitle => "Sheet title",
             Self::Page => "Page",
             Self::Revision => "Revision",
-            Self::Format => "Format",
+            Self::PaperSize => "Paper size",
             Self::Scale => "Scale",
             Self::DrawnBy => "Drawn by",
             Self::CheckedBy => "Checked by",
@@ -110,7 +112,7 @@ impl DrawingSheetTitleFieldId {
             // The project name is the leading segment of `Cell / view` in a
             // single-library workspace, so the sheet must be free to carry
             // one or the other rather than always both.
-            Self::Project | Self::Date | Self::Scale | Self::Format => {
+            Self::Project | Self::Date | Self::Scale | Self::PaperSize => {
                 DrawingSheetTitleFieldPolicy {
                     required_visible: false,
                     value_authority: DrawingSheetTitleFieldValueAuthority::Automatic,
@@ -135,11 +137,17 @@ impl DrawingSheetTitleFieldId {
     /// released would spend them on em dashes. They stay one click away in
     /// Page Setup, and every field a sheet does show is one the engineer can
     /// read: fewer columns means wider cells and more characters in each.
+    /// Paper size is optional in ISO 7200 and restates the sheet the reader
+    /// is holding, so it waits until a sheet asks for it too.
     #[must_use]
     pub const fn visible_by_default(self) -> bool {
         !matches!(
             self,
-            Self::DrawnBy | Self::CheckedBy | Self::ApprovedBy | Self::Classification
+            Self::DrawnBy
+                | Self::CheckedBy
+                | Self::ApprovedBy
+                | Self::Classification
+                | Self::PaperSize
         )
     }
 }

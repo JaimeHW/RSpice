@@ -6,6 +6,7 @@ mod annotation_allocation;
 mod drawing_sheet_release;
 mod manual_annotation;
 mod sheet_lifecycle;
+mod title_fields;
 
 fn sheet(name: &str, page: u32) -> SheetDefinition {
     SheetDefinition {
@@ -2570,13 +2571,13 @@ fn a_sheet_authored_before_a_field_retired_still_loads_without_it() {
     let format = SchematicSheetFormat::default();
     let mut wire = serde_json::to_value(&format).unwrap();
     // Reintroduce the withdrawn field exactly as an older build wrote it.
-    wire["title_block"]["fields"]["format"] = serde_json::json!({ "value": "", "visible": true });
+    wire["title_block"]["fields"]["scale"] = serde_json::json!({ "value": "", "visible": true });
     let restored: SchematicSheetFormat = serde_json::from_value(wire).unwrap();
     assert!(
         !restored
             .title_block
             .fields
-            .contains_key(&DrawingSheetTitleFieldId::Format),
+            .contains_key(&DrawingSheetTitleFieldId::Scale),
         "a retired field must be dropped rather than refused or rendered"
     );
     assert_eq!(
@@ -2587,7 +2588,7 @@ fn a_sheet_authored_before_a_field_retired_still_loads_without_it() {
     assert!(
         !resolve_drawing_sheet_title_fields(&restored, &BTreeMap::new())
             .iter()
-            .any(|field| field.id == DrawingSheetTitleFieldId::Format)
+            .any(|field| field.id == DrawingSheetTitleFieldId::Scale)
     );
 
     // A sheet missing a field the product has gained is filled in, so the
@@ -2614,8 +2615,8 @@ fn an_organization_template_sealed_before_a_field_retired_still_loads() {
             draft.title_block.template = DrawingSheetTitleBlockTemplate::OrganizationManaged;
         })
         .unwrap();
-    // The built-in template exactly as a build that still offered the sheet
-    // format sealed it: fourteen fields, and a digest over all fourteen.
+    // The built-in template exactly as a build that still offered a Scale
+    // cell sealed it: fourteen fields, and a digest over all fourteen.
     let sealed_order = [
         "project",
         "cell-view",
@@ -2634,7 +2635,7 @@ fn an_organization_template_sealed_before_a_field_retired_still_loads() {
     ];
     let sealed_digest = "51714aad10ff2f84fb2bb451212d0e39659310c069b00ff49f40afdde92b300d";
     let mut wire = serde_json::to_value(&managed).unwrap();
-    wire["title_block"]["fields"]["format"] = serde_json::json!({ "value": "", "visible": true });
+    wire["title_block"]["fields"]["scale"] = serde_json::json!({ "value": "", "visible": true });
     wire["title_block"]["managed_template"]["field_order"] = serde_json::json!(sealed_order);
     wire["title_block"]["managed_template"]["content_digest"] = serde_json::json!(sealed_digest);
 
@@ -2653,7 +2654,7 @@ fn an_organization_template_sealed_before_a_field_retired_still_loads() {
     assert!(
         !resolve_drawing_sheet_title_fields(&restored, &BTreeMap::new())
             .iter()
-            .any(|field| field.id == DrawingSheetTitleFieldId::Format)
+            .any(|field| field.id == DrawingSheetTitleFieldId::Scale)
     );
     let rewritten = serde_json::to_value(&restored).unwrap();
     assert_eq!(
@@ -2666,7 +2667,7 @@ fn an_organization_template_sealed_before_a_field_retired_still_loads() {
     );
 
     let mut with_retired = DrawingSheetTitleFieldId::ALL.to_vec();
-    with_retired.push(DrawingSheetTitleFieldId::Format);
+    with_retired.push(DrawingSheetTitleFieldId::Scale);
     assert!(
         DrawingSheetManagedTemplateSnapshot::try_new(
             "example.release-title-block",
@@ -2717,9 +2718,15 @@ fn a_new_sheet_shows_only_the_fields_an_unreleased_drawing_can_fill() {
             "{field:?} must remain optional so it can default to hidden"
         );
     }
+    // Paper size is optional and restates the sheet in hand, so it waits too.
+    assert!(
+        !visible
+            .iter()
+            .any(|resolved| resolved.id == DrawingSheetTitleFieldId::PaperSize)
+    );
     assert_eq!(
         visible.len(),
-        DrawingSheetTitleFieldId::ALL.len() - hidden.len()
+        DrawingSheetTitleFieldId::ALL.len() - hidden.len() - 1
     );
 
     // Fewer fields is the point: the cells that remain are wider, so more of

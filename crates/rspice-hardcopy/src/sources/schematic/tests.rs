@@ -213,11 +213,7 @@ fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
         } else {
             stored_format.clone()
         };
-        let expected_format_label = format!(
-            "{} · {}",
-            effective_format.authored_size.label(),
-            effective_format.orientation.label().to_lowercase()
-        );
+        let expected_paper_size = effective_format.authored_size.paper_size().to_owned();
         assert_eq!(sheet.drawing_sheet.as_ref(), Some(&effective_format));
         assert_eq!(
             sheet
@@ -233,9 +229,9 @@ fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
         assert_eq!(
             sheet
                 .drawing_sheet_title_values
-                .get(&DrawingSheetTitleFieldId::Format)
+                .get(&DrawingSheetTitleFieldId::PaperSize)
                 .map(String::as_str),
-            Some(expected_format_label.as_str())
+            Some(expected_paper_size.as_str())
         );
         assert_eq!(
             sheet

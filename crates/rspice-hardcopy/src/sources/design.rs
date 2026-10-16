@@ -47,12 +47,8 @@ pub fn drawing_sheet_title_values(
             .unwrap_or_else(|| identity.revision.get().to_string()),
     );
     values.insert(
-        DrawingSheetTitleFieldId::Format,
-        format!(
-            "{} · {}",
-            format.authored_size.label(),
-            format.orientation.label().to_lowercase()
-        ),
+        DrawingSheetTitleFieldId::PaperSize,
+        format.authored_size.paper_size().to_owned(),
     );
     values.insert(
         DrawingSheetTitleFieldId::Date,

@@ -92,8 +92,9 @@ fn default_title_field_value(
             .document_control
             .revision
             .clone(),
+        DrawingSheetTitleFieldId::PaperSize => sheet.format.authored_size.paper_size().to_owned(),
         // Retired: never present in a normalized field set, so never resolved.
-        DrawingSheetTitleFieldId::Format | DrawingSheetTitleFieldId::Scale => String::new(),
+        DrawingSheetTitleFieldId::Scale => String::new(),
         DrawingSheetTitleFieldId::Date => state
             .workspace
             .content

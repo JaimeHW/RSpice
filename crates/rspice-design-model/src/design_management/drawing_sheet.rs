@@ -124,6 +124,23 @@ impl DrawingSheetStandard {
         }
     }
 
+    /// What a title block's Paper size field calls this sheet. ISO 7200
+    /// writes the A series by its bare designation, `A4`; every other series
+    /// keeps its prefix, since `B4` alone would not say whether it is the ISO
+    /// or the JIS size.
+    #[must_use]
+    pub const fn paper_size(self) -> &'static str {
+        match self {
+            Self::IsoA5 => "A5",
+            Self::IsoA4 => "A4",
+            Self::IsoA3 => "A3",
+            Self::IsoA2 => "A2",
+            Self::IsoA1 => "A1",
+            Self::IsoA0 => "A0",
+            other => other.label(),
+        }
+    }
+
     #[must_use]
     pub const fn series(self) -> DrawingSheetStandardSeries {
         match self {
@@ -264,6 +281,16 @@ impl AuthoredDrawingSheetSize {
     pub fn label(&self) -> &str {
         match self {
             Self::Standard { standard } => standard.label(),
+            Self::Custom { snapshot } => &snapshot.name,
+        }
+    }
+
+    /// What a title block's Paper size field calls this sheet: a standard
+    /// size by its designation, a custom one by the name it was given.
+    #[must_use]
+    pub fn paper_size(&self) -> &str {
+        match self {
+            Self::Standard { standard } => standard.paper_size(),
             Self::Custom { snapshot } => &snapshot.name,
         }
     }
@@ -884,9 +911,15 @@ impl DrawingSheetManagedTemplateSnapshot {
             content_digest: ContentDigest::from_bytes([0; 32]),
         };
         snapshot.validate_shape()?;
-        // A stored snapshot may name a retired field, because it was sealed
-        // before the field was withdrawn; a new one is sealed without it.
-        if snapshot.field_order.len() != DrawingSheetTitleFieldId::ALL.len() {
+        // A stored snapshot may name a retired field, or lack one the product
+        // has gained since it was sealed; a new one is sealed with exactly the
+        // current fields.
+        if snapshot.field_order.len() != DrawingSheetTitleFieldId::ALL.len()
+            || snapshot
+                .field_order
+                .iter()
+                .any(|field| !DrawingSheetTitleFieldId::ALL.contains(field))
+        {
             return Err(DesignManagementError::NumericRange(
                 "drawing sheet managed template field order",
             ));
@@ -927,15 +960,11 @@ impl DrawingSheetManagedTemplateSnapshot {
             ));
         }
         // The order is sealed by the digest, so one captured before a field
-        // was retired still names it. It must name every current field and
-        // no field twice; a retired one is skipped wherever it is read.
-        let expected = DrawingSheetTitleFieldId::ALL
-            .into_iter()
-            .collect::<BTreeSet<_>>();
+        // was retired still names it, and one captured before a field was
+        // added lacks it. It must name no field twice; wherever it is read, a
+        // retired field is skipped and a missing one placed after the rest.
         let distinct = self.field_order.iter().copied().collect::<BTreeSet<_>>();
-        if distinct.len() != self.field_order.len()
-            || self.field_order().collect::<BTreeSet<_>>() != expected
-        {
+        if distinct.len() != self.field_order.len() {
             return Err(DesignManagementError::NumericRange(
                 "drawing sheet managed template field order",
             ));
@@ -999,12 +1028,20 @@ impl DrawingSheetManagedTemplateSnapshot {
     }
 
     /// The template's field order, less any field the product has since
-    /// retired.
+    /// retired, followed by any field it has gained since the template was
+    /// sealed, in the product's order. The seal is the record of what was
+    /// released, so a field it never named goes after every field it did
+    /// rather than moving them.
     pub fn field_order(&self) -> impl Iterator<Item = DrawingSheetTitleFieldId> + '_ {
-        self.field_order
+        let sealed = self
+            .field_order
             .iter()
             .copied()
-            .filter(|field| !DrawingSheetTitleFieldId::RETIRED.contains(field))
+            .filter(|field| !DrawingSheetTitleFieldId::RETIRED.contains(field));
+        let gained = DrawingSheetTitleFieldId::ALL
+            .into_iter()
+            .filter(|field| !self.field_order.contains(field));
+        sealed.chain(gained)
     }
 
     #[must_use]
