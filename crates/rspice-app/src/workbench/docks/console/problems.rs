@@ -53,7 +53,9 @@ use crate::workbench::app_state::diagnostic_store::listing::{
 };
 use crate::workbench::app_state::diagnostic_store::{DiagnosticLevel, DiagnosticRoute};
 use crate::workbench::app_state::problems_view::ProblemsView;
-use crate::workbench::app_state::session::shortcuts::request_engineering_canvas_focus;
+use crate::workbench::app_state::session::shortcuts::{
+    report_escape_owner, request_engineering_canvas_focus,
+};
 
 use crate::ui::widgets::Problem;
 use arrange::{Arrangement, Line};
@@ -385,6 +387,9 @@ fn table(
         Some(Press::Stayed) if !response.has_focus() => response.request_focus(),
         Some(Press::Stayed) | None => {}
     }
+    // After the press, so the frame a click gave the table focus records it:
+    // an Escape on the very next frame is still the table's.
+    report_escape_owner(&response);
     BodyMemory {
         finding: selection.finding,
         height: table.height,

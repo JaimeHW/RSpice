@@ -10,6 +10,7 @@ use crate::workbench::state::Workspace;
 
 const CANVAS_FOCUS_RECORD_ID: &str = "rspice-engineering-canvas-focus-owner";
 const CANVAS_FOCUS_REQUEST_ID: &str = "rspice-engineering-canvas-focus-request";
+const ESCAPE_OWNER_RECORD_ID: &str = "rspice-escape-owner";
 
 /// How many passes a request for canvas focus waits for a canvas to be drawn.
 ///
@@ -69,6 +70,35 @@ pub(crate) fn report_engineering_canvas_focus(response: &Response, view_type: Vi
             },
         );
     });
+}
+
+/// Record a widget that takes Escape itself while it holds keyboard focus.
+///
+/// egui lets go of a focused widget on Escape at the start of the pass unless
+/// the widget's lock filter claims the key, and a filter is in force only from
+/// the second pass the widget holds focus. An Escape on the first pass would
+/// then reach the shortcut resolver with nothing focused and resolve to
+/// Cancel, although it was meant for the widget; the record is what lets the
+/// resolver tell.
+pub(crate) fn report_escape_owner(response: &Response) {
+    if response.has_focus() {
+        response.ctx.data_mut(|data| {
+            data.insert_temp(Id::new(ESCAPE_OWNER_RECORD_ID), response.id);
+        });
+    }
+}
+
+/// Whether this pass's Escape let go of a widget that takes Escape itself, so
+/// the key is that widget's to act on when it is drawn, not a shortcut's.
+///
+/// Asked before any widget is drawn. Focus held at the end of the last pass
+/// and gone at the start of this one was taken by the Escape itself.
+pub(crate) fn escape_owner_was_let_go(ctx: &egui::Context) -> bool {
+    let Some(owner) = ctx.data(|data| data.get_temp::<Id>(Id::new(ESCAPE_OWNER_RECORD_ID))) else {
+        return false;
+    };
+    ctx.input(|input| input.key_pressed(egui::Key::Escape))
+        && ctx.memory(|memory| memory.had_focus_last_frame(owner) && memory.focused().is_none())
 }
 
 pub(crate) fn engineering_canvas_has_focus(

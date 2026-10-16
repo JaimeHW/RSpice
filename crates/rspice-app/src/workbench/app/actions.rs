@@ -30,7 +30,7 @@ use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::session::shortcuts::{
     ShortcutEnvironment, ShortcutInputSnapshot, engineering_canvas_has_focus,
-    runtime_command_platform,
+    escape_owner_was_let_go, runtime_command_platform,
 };
 
 fn shortcut_dispatch_blocked(state: &AppState, ctx: &Context) -> bool {
@@ -55,7 +55,11 @@ impl RSpiceApp {
             self.state.shortcut_resolver.reset();
             return;
         }
-        let non_canvas_focus = ctx.memory(|memory| memory.focused().is_some()) && !canvas_focus;
+        // An Escape that let go of a widget which takes Escape itself is that
+        // widget's key, as it would be had egui not dropped the focus first.
+        let non_canvas_focus = (ctx.memory(|memory| memory.focused().is_some())
+            || escape_owner_was_let_go(ctx))
+            && !canvas_focus;
         let snapshot =
             ctx.input(|input| ShortcutInputSnapshot::from_input_state(input, non_canvas_focus));
         let injected_now =

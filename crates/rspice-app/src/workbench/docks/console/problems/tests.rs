@@ -1200,6 +1200,43 @@ fn following_a_finding_to_the_drawing_gives_the_canvas_the_keyboard() {
     );
 }
 
+/// Escape on the first frame the table holds focus clears the row in the
+/// application too. The frame loop resolves shortcuts before any dock is
+/// drawn, and on that frame egui has already let go of the table, so without
+/// the table's claim the Escape would be taken as Cancel and never reach it.
+#[test]
+fn escape_on_the_first_focused_frame_is_the_tables_and_not_cancel() {
+    let mut app = design_app();
+    publish_findings(&mut app.state, 3);
+    let order = reported(&app.state);
+    let harness = Harness::new();
+
+    let mut taken = false;
+    let _ = harness.ctx.run_ui(keyed(egui::Key::Escape), |ui| {
+        app.handle_shortcuts(ui.ctx());
+        taken = !ui.input(|input| input.key_pressed(egui::Key::Escape));
+    });
+    assert!(
+        taken,
+        "precondition: with nothing focused, Escape is a shortcut's"
+    );
+
+    let _ = app_frame(&harness.ctx, &mut app, sized(egui::RawInput::default()));
+    let render = app_frame(&harness.ctx, &mut app, sized(egui::RawInput::default()));
+    // A row with nowhere to go gives the table focus on the frame it is
+    // clicked, which leaves the next frame its first focused one.
+    let _ = app_frame(&harness.ctx, &mut app, click_on(&render, "finding 01"));
+    assert_eq!(app.state.diagnostics.current_finding(), Some(order[1]));
+    assert_eq!(harness.focused(), Some(grid::body_id()));
+
+    let _ = app_frame(&harness.ctx, &mut app, keyed(egui::Key::Escape));
+    assert_eq!(
+        app.state.diagnostics.current_finding(),
+        None,
+        "the Escape cleared the row",
+    );
+}
+
 /// A row with nowhere to go keeps the reader in the table: the click makes it
 /// current and gives the table the keyboard, so the arrows go on from it.
 #[test]
