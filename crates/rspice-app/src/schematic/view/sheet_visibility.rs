@@ -627,6 +627,28 @@ mod tests {
         assert_eq!(state.schematic.document().wires, vec![hidden]);
     }
 
+    /// Two wires meeting at a pin get a dot, but only a pin on the same
+    /// sheet: Sheet 2's resistor under Sheet 1's route corner joins nothing.
+    #[test]
+    fn another_sheets_pin_under_a_route_corner_adds_no_dot() {
+        let mut state = two_sheet_state(&[], &[20]);
+        state
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(Component::new(20, ComponentType::Resistor, Point::new(20, 0)));
+        let pin = state.schematic.document().components[0].terminal_positions()[0].1;
+        state.schematic.init_undo_history();
+
+        state.schematic.start_wire(Point::new(pin.x - 40, pin.y));
+        state.schematic.extend_wire(pin);
+        state.schematic.extend_wire(Point::new(pin.x, pin.y + 40));
+        finish_wire_on_active_sheet(&mut state).expect("the route is drawn");
+
+        assert!(state.schematic.document().junctions.is_empty());
+        assert_eq!(state.schematic.document().components.len(), 1);
+    }
+
     #[test]
     fn self_undoing_edit_preserves_hidden_objects_and_complete_undo_snapshot() {
         let mut state = two_sheet_state(&[10], &[21]);

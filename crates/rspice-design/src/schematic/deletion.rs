@@ -172,6 +172,47 @@ mod tests {
     };
     use super::*;
 
+    /// The T's stem goes and the run it branched from is straight again: the
+    /// dot marked a branch that no longer exists.
+    #[test]
+    fn deleting_a_tees_stem_removes_its_dot() {
+        use super::super::wire::Wire;
+        let tee = Point::new(20, 0);
+        let mut document = SchematicDocument {
+            wires: vec![
+                Wire::segment(1, Point::origin(), tee),
+                Wire::segment(2, tee, Point::new(40, 0)),
+                Wire::segment(3, tee, Point::new(20, 20)),
+            ],
+            junctions: vec![Junction::new(4, tee)],
+            ..SchematicDocument::default()
+        };
+        let empty = HashSet::new();
+        let stem = HashSet::from([3]);
+
+        assert!(
+            ObjectDeletion::prepare(
+                &mut document,
+                DeletionSelection {
+                    components: &empty,
+                    wires: &stem,
+                    junctions: std::iter::empty(),
+                    net_labels: &empty,
+                    buses: &empty,
+                    bus_taps: &empty,
+                    design_notes: &empty,
+                    documentation_shapes: &empty,
+                    probes: &empty,
+                },
+            )
+            .expect("the stem is live")
+            .commit()
+        );
+
+        assert_eq!(document.wires.len(), 2);
+        assert!(document.junctions.is_empty());
+    }
+
     #[test]
     fn discarded_deletion_preserves_document_and_stale_targets_do_not_prepare() {
         let mut document = SchematicDocument {
