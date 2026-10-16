@@ -20,6 +20,7 @@ pub fn mark_response_disabled(response: &mut egui::Response) {
 }
 
 mod button;
+mod canvas_entry;
 mod chip;
 mod command_form;
 mod dialog;
@@ -40,6 +41,7 @@ mod tree;
 mod view_switch;
 
 pub use button::{Button, IconButton};
+pub use canvas_entry::{CanvasEntry, CanvasEntryChoice, CanvasEntryRows};
 pub use chip::chip;
 pub(crate) use command_form::middle_elided;
 pub use command_form::{CommandForm, FieldLine, FormRows, ListEdit, ListWords};

@@ -290,6 +290,19 @@ pub fn render_with_pointer(
     render_at_pointer(super::Theme::default(), size, Some(pointer), pass)
 }
 
+/// [`render_with_pointer`] under an explicit theme, for a surface that is
+/// placed by the pointer rather than merely hovered by it: an in-canvas entry
+/// sits where the click was, so a render of one needs both the pointer and
+/// the mode it is reviewed in.
+pub fn render_with_pointer_themed(
+    theme: super::Theme,
+    size: Vec2,
+    pointer: egui::Pos2,
+    pass: impl FnMut(&mut egui::Ui, Color32),
+) -> Canvas {
+    render_at_pointer(theme, size, Some(pointer), pass)
+}
+
 fn render_at_pointer(
     theme: super::Theme,
     size: Vec2,
