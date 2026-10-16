@@ -334,32 +334,28 @@ impl<'a> NetlistGenerator<'a> {
                     return None;
                 }
                 let params = rspice_design::parameters::parse_params_string(&component.params);
-                let authored_reference = params
-                    .get("vref")
-                    .map(|reference| reference.trim())
-                    .filter(|reference| !reference.is_empty());
-                // The controlling element is named the way the deck writes
-                // it: a source drawn `sense` is the card `Vsense`. A reference
-                // nothing here answers to is written as authored, and the
-                // design check refuses it before a run.
-                let sense_name = authored_reference.map_or_else(
-                    || format!("VSENSE_{}", instance_name),
-                    |reference| match resolve_instance_reference(
-                        &self.schematic.components,
-                        reference,
-                    ) {
-                        InstanceReference::Names(target) => target.written_element_name(),
-                        InstanceReference::Ambiguous | InstanceReference::Unresolved => {
-                            reference.to_owned()
+                let sense_name = match component.sense_source_name() {
+                    Some(sense_name) => {
+                        self.lines.push(format!(
+                            "{} {} {} 0",
+                            sense_name, node_names[2], node_names[3]
+                        ));
+                        sense_name
+                    }
+                    // The controlling element is named the way the deck
+                    // writes it: a source drawn `sense` is the card `Vsense`.
+                    // A reference nothing here answers to is written as
+                    // authored, and the design check refuses it before a run.
+                    None => {
+                        let reference = params.get("vref").map_or("", |reference| reference.trim());
+                        match resolve_instance_reference(&self.schematic.components, reference) {
+                            InstanceReference::Names(target) => target.written_element_name(),
+                            InstanceReference::Ambiguous | InstanceReference::Unresolved => {
+                                reference.to_owned()
+                            }
                         }
-                    },
-                );
-                if authored_reference.is_none() {
-                    self.lines.push(format!(
-                        "{} {} {} 0",
-                        sense_name, node_names[2], node_names[3]
-                    ));
-                }
+                    }
+                };
                 let gain = self.format_value(&component.value);
                 let multiplier = params
                     .get("m")
@@ -456,7 +452,7 @@ impl<'a> NetlistGenerator<'a> {
                     ));
                     return None;
                 }
-                let sense_name = format!("VSENSE_{}", instance_name);
+                let sense_name = component.sense_source_name()?;
                 self.lines.push(format!(
                     "{} {} {} 0",
                     sense_name, node_names[2], node_names[3]
