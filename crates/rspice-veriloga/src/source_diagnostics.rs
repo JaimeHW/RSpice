@@ -34,20 +34,41 @@ impl std::fmt::Display for SourceCompileDiagnostic {
             CompileDiagnosticSeverity::Error => "Error",
             CompileDiagnosticSeverity::Warning => "Warning",
         };
-        write!(formatter, "{severity}: ")?;
-        if let Some(path) = &self.path {
+        write!(formatter, "{severity}: {}", self.located())
+    }
+}
+
+impl SourceCompileDiagnostic {
+    /// The finding without its severity word, `path:line:column: [code]
+    /// message`, for a host that marks the severity itself.
+    pub fn located(&self) -> impl std::fmt::Display + '_ {
+        Located(self)
+    }
+}
+
+struct Located<'a>(&'a SourceCompileDiagnostic);
+
+impl std::fmt::Display for Located<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let diagnostic = self.0;
+        if let Some(path) = &diagnostic.path {
             formatter.write_str(path)?;
         }
-        if let Some(line) = self.line {
+        if let Some(line) = diagnostic.line {
             write!(formatter, ":{line}")?;
-            if let Some(column) = self.column {
+            if let Some(column) = diagnostic.column {
                 write!(formatter, ":{column}")?;
             }
         }
-        if self.path.as_ref().is_some_and(|path| !path.is_empty()) || self.line.is_some() {
+        if diagnostic
+            .path
+            .as_ref()
+            .is_some_and(|path| !path.is_empty())
+            || diagnostic.line.is_some()
+        {
             formatter.write_str(": ")?;
         }
-        write!(formatter, "[{}] {}", self.code, self.message)
+        write!(formatter, "[{}] {}", diagnostic.code, diagnostic.message)
     }
 }
 

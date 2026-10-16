@@ -116,14 +116,15 @@ fn hdl_line(record: &HdlOutputRecord) -> Option<EngineLogLine> {
 }
 
 /// The run log line for one compiler finding: the command line's own text,
-/// which is the finding's `Display`, so the two never word it apart.
+/// less the severity word the Console marks the row with, so the two never
+/// word it apart.
 fn compiler_line(diagnostic: &SourceCompileDiagnostic) -> EngineLogLine {
     EngineLogLine {
         severity: match diagnostic.severity {
             CompileDiagnosticSeverity::Error => LogSeverity::Error,
             CompileDiagnosticSeverity::Warning => LogSeverity::Warning,
         },
-        message: diagnostic.to_string(),
+        message: diagnostic.located().to_string(),
         origin: EngineLogOrigin::VerilogA,
     }
 }
@@ -251,8 +252,7 @@ mod tests {
         assert_eq!(lines[7].severity, LogSeverity::Warning);
         assert_eq!(
             lines[7].message,
-            "Warning: model.va:4:5: [VA-SEM-NO-EFFECT-SYSTEM-TASK] $strobe has no effect in \
-             analog blocks"
+            "model.va:4:5: [VA-SEM-NO-EFFECT-SYSTEM-TASK] $strobe has no effect in analog blocks"
         );
         assert_eq!(lock_queue(&queue).suppressed_warnings(), 0);
     }
