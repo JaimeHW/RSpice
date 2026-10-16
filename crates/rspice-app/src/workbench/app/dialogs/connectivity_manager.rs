@@ -10,7 +10,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use egui::{Context, Grid, RichText, ScrollArea, Ui, Vec2};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::workspace::DesignProjection;
 use crate::state::{
     BundleWidthMismatchPolicy, BusDeclaration, BusDirection, BusTargetKind, CellViewRef,
@@ -244,19 +243,15 @@ enum ConnectivityBodyAction {
 }
 
 pub(crate) fn open_connectivity_manager(state: &mut AppState) {
+    // The command is greyed with no project open.
     if !state.project_lifecycle.is_open() {
-        state.push_user_message(ConsoleMessage::warning(
-            "Connectivity and bus manager requires an open project.",
-        ));
         return;
     }
     if !matches!(
         state.workspace.content.active_view_type(),
         crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
     ) {
-        state.push_user_message(ConsoleMessage::warning(
-            "Connectivity and bus manager requires a schematic or testbench view.",
-        ));
+        state.prompt("Connectivity and bus manager needs a schematic or testbench view.");
         return;
     }
     crate::schematic::view::retain_selection_on_active_sheet(state);
@@ -1416,9 +1411,8 @@ impl RSpiceApp {
         self.state.schematic.session.editor.bus_drawing.declaration = Some(declaration);
         self.state.schematic.session.editor.tool = Tool::Bus;
         self.state.dialogs.connectivity_manager.close();
-        self.state.push_user_message(ConsoleMessage::info(
-            "Typed bus placement armed. Click the first point, route the vector, then finish the bus.",
-        ));
+        self.state
+            .prompt("Bus placement armed. Click the first point, route the bus, then finish it.");
         Ok(())
     }
 
@@ -1461,10 +1455,11 @@ impl RSpiceApp {
         self.state.schematic.arm_tool(Tool::Wire);
         self.state.start_canvas_wire(ctx, choice.start);
         self.state.schematic.session.editor.center_request = Some(choice.destination);
-        self.state.push_user_message(ConsoleMessage::info(format!(
-            "Wire routing armed from {}, {} to {}. The destination is centered; route deliberately and finish on that exact endpoint.",
+        self.state.prompt(format!(
+            "Wire routing armed from {}, {} to {}. The destination is centred; finish the wire on \
+             its endpoint.",
             choice.start.x, choice.start.y, choice.label
-        )));
+        ));
         Ok(())
     }
 }

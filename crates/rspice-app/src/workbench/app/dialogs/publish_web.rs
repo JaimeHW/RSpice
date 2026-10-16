@@ -9,7 +9,7 @@
 
 use egui::Context;
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::services::cloud_account::{
     CLOUD_PUBLISHING_FEATURE, CloudAccountAvailability, PublishRequest, PublishState, PublishTarget,
 };
@@ -358,23 +358,32 @@ impl RSpiceApp {
         ) {
             Ok(binding) => {
                 if let Err(error) = self.state.workspace.content.bind_cloud_publication(binding) {
-                    self.state
-                        .push_user_message(ConsoleMessage::warning(format!(
-                            "Published, but the project could not record its page lineage: {error}"
-                        )));
+                    self.state.record(
+                        LogSeverity::Warning,
+                        LogSource::Studio,
+                        format!(
+                            "Published, but the project could not record which page it was \
+                             published to: {error}"
+                        ),
+                    );
                 }
             }
             Err(error) => {
-                self.state
-                    .push_user_message(ConsoleMessage::warning(format!(
-                        "Published, but the returned identifiers were not usable: {error}"
-                    )));
+                self.state.record(
+                    LogSeverity::Warning,
+                    LogSource::Studio,
+                    format!("Published, but the page the service returned is unusable: {error}"),
+                );
             }
         }
-        self.state.push_user_message(ConsoleMessage::info(format!(
-            "Published {} — the page is being prepared.",
-            receipt.url_path
-        )));
+        self.state.record(
+            LogSeverity::Info,
+            LogSource::Studio,
+            format!(
+                "Published {}; the page is being prepared.",
+                receipt.url_path
+            ),
+        );
     }
 
     /// Rebuild the snapshot with the confirmed page fields and hand the
@@ -389,9 +398,9 @@ impl RSpiceApp {
             self.state.dialogs.publish_web.imported_models_acknowledged;
         let imported_model_sources = imported_model_source_count(&self.state, include_netlist);
         if imported_model_sources > 0 && !imported_models_acknowledged {
-            self.state.push_user_message(ConsoleMessage::warning(
-                "Publish stopped: confirm that retained imported model source text may be uploaded.",
-            ));
+            self.state.prompt(
+                "Publish stopped: confirm that imported model source text may be uploaded.",
+            );
             return;
         }
         let dialog = &self.state.dialogs.publish_web;
@@ -427,10 +436,11 @@ impl RSpiceApp {
             }
             Err(message) => {
                 self.state.dialogs.publish_web.scope = Some(Err(message));
-                self.state.push_user_message(ConsoleMessage::error(
-                    "Publish stopped: the snapshot no longer builds from the current project \
-                     state.",
-                ));
+                self.state.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    "Publish stopped: the project could not be packaged for the page.",
+                );
             }
         }
     }

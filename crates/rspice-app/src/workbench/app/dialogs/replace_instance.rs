@@ -4,7 +4,6 @@ use std::collections::HashSet;
 
 use egui::{Align, Context, Frame, Layout, Margin, Popup, ScrollArea, Ui, vec2};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{
     Component, ComponentType, Point, Rotation, SchematicReplacementAuthority,
     SchematicReplacementPreview, SchematicReplacementSourceSpec, SchematicReplacementTargetSpec,
@@ -199,24 +198,19 @@ pub(crate) fn replace_instance_available(state: &AppState) -> bool {
 }
 
 pub(crate) fn open_replace_instance_dialog(state: &mut AppState) {
+    // Replace instance is greyed on a read-only schematic.
     if state.schematic_edit_read_only() {
-        state.push_user_message(ConsoleMessage::warning(
-            "Replace instance is unavailable because the active schematic is read-only.".to_owned(),
-        ));
         return;
     }
     let replacement_authority = match replacement_authority(state) {
         Ok(authority) => authority,
         Err(message) => {
-            state.push_user_message(ConsoleMessage::warning(message));
+            state.prompt(message);
             return;
         }
     };
     let Some(resolved) = best_replacement(state, &replacement_authority) else {
-        state.push_user_message(ConsoleMessage::warning(
-            "No different, ready replacement master can preserve the selected instance's connected terminal contract."
-                .to_owned(),
-        ));
+        state.prompt("No other ready master keeps every connection of the selected instance.");
         return;
     };
     let current = current_display(replacement_authority.source_component());
@@ -316,7 +310,7 @@ impl RSpiceApp {
             self.state.dialogs.replace_instance.mark_edited();
         }
         match response.choice {
-            DialogChoice::Primary => self.commit_instance_replacement(ctx),
+            DialogChoice::Primary => self.commit_instance_replacement(),
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.state.dialogs.replace_instance.attempt_close();
                 if self.state.dialogs.replace_instance.open {
@@ -327,7 +321,7 @@ impl RSpiceApp {
         }
     }
 
-    fn commit_instance_replacement(&mut self, ctx: &Context) {
+    fn commit_instance_replacement(&mut self) {
         let validation = validate_draft(&self.state);
         let ReplacementValidation::Valid(resolved) = validation else {
             return;
@@ -348,20 +342,21 @@ impl RSpiceApp {
         {
             Ok(impact) => {
                 self.state.sync_active_schematic_to_workspace();
-                let message = format!(
-                    "Replaced component {} with {} as one undoable transaction; {} connections and {} parameter values were preserved.",
-                    impact.component_id,
-                    resolved.identity,
-                    impact.preserved_connections,
-                    impact.preserved_parameters,
-                );
-                self.state
-                    .push_user_message(ConsoleMessage::info(message.clone()));
-                self.state.ui.toasts.success(
-                    ctx,
-                    "Instance replaced",
-                    "Pin mapping, parameter transfer, hierarchy, and generated netlist were validated before commit.",
-                );
+                let replaced = self
+                    .state
+                    .schematic
+                    .document()
+                    .components
+                    .iter()
+                    .find(|component| component.id == impact.component_id)
+                    .map_or_else(
+                        || "the instance".to_owned(),
+                        |component| component.name.clone(),
+                    );
+                self.state.prompt(format!(
+                    "Replaced {replaced} with {}; {} connections and {} parameter values kept.",
+                    resolved.identity, impact.preserved_connections, impact.preserved_parameters,
+                ));
                 self.state.dialogs.replace_instance.close();
             }
             Err(error) => {

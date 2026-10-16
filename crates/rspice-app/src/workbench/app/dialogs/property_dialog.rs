@@ -6,7 +6,6 @@
 
 use std::collections::HashMap;
 
-use crate::diagnostics::ConsoleMessage;
 use crate::properties::{ComponentPropertyContext, render_tabbed_property_dialog};
 use crate::state::{Component, ComponentType, PropertySheet, PropertyValue};
 use crate::workbench::app::dialogs::stimulus_link::{
@@ -194,7 +193,7 @@ pub fn render_property_dialog(
             if let Some(component_id) = state.tabbed_property_dialog.component_id {
                 state.tabbed_property_dialog.close();
                 if let Err(refusal) = open_stimulus_link(state, component_id, mode) {
-                    state.push_user_message(ConsoleMessage::warning(refusal));
+                    state.prompt(refusal);
                 }
             }
         }
@@ -220,7 +219,7 @@ pub fn render_property_dialog(
             {
                 match commit_readoption(state, component_id, &definition) {
                     Ok(line) => {
-                        state.push_user_message(ConsoleMessage::info(line));
+                        state.prompt(line);
                         // Reopened rather than patched in place: the copy is a
                         // whole new card, and the draft the reader was typing
                         // into describes the one it replaced.

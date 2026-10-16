@@ -7,7 +7,6 @@
 
 use egui::{Context, Frame, Margin, Stroke, Ui, vec2};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::WireRoutingMode;
 use crate::state::{
     SchematicAnnotationVisibility, SchematicBackAnnotationContent, SchematicHierarchyVisibility,
@@ -70,10 +69,9 @@ impl RSpiceApp {
                 }
                 publish_visibility_policy(&mut self.state, policy);
                 self.state.dialogs.schematic_visibility.close();
-                self.state.push_user_message(ConsoleMessage::info(
-                    "Schematic visibility was applied to this device session; design data was unchanged."
-                        .to_owned(),
-                ));
+                self.state.prompt(
+                    "Schematic visibility applied on this device; the design is unchanged.",
+                );
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.state.dialogs.schematic_visibility.close();
@@ -81,12 +79,11 @@ impl RSpiceApp {
             DialogChoice::Secondary => match restore_visibility_recovery(&mut self.state) {
                 Ok(()) => {
                     self.state.dialogs.schematic_visibility.close();
-                    self.state.push_user_message(ConsoleMessage::info(
-                        "Restored the prior device-local schematic visibility state.".to_owned(),
-                    ));
+                    self.state
+                        .prompt("Restored the previous schematic visibility on this device.");
                 }
                 Err(error) => {
-                    self.state.push_user_message(ConsoleMessage::warning(error));
+                    self.state.prompt(error);
                 }
             },
             DialogChoice::None => {}

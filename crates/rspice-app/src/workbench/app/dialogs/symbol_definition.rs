@@ -14,7 +14,6 @@ mod state;
 
 pub(crate) use state::{SymbolImportDialogState, SymbolParameterFormDialogState};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{CellViewRef, ViewType};
 use crate::workbench::app_state::AppState;
 
@@ -31,9 +30,7 @@ pub(crate) fn open_symbol_import_dialog_for(
     preferred_binding_source: Option<&CellViewRef>,
 ) {
     let Some(target_library) = writable_library_name(state) else {
-        state.push_user_message(ConsoleMessage::warning(
-            "Import symbol requires an open project with a writable design library.",
-        ));
+        state.prompt("Import symbol needs an open project with a writable design library.");
         return;
     };
     let binding_source = preferred_binding_source
@@ -55,9 +52,7 @@ pub(crate) fn open_symbol_import_dialog_for(
 pub(crate) fn open_symbol_parameter_form_dialog(state: &mut AppState) {
     let Some(target) = selected_symbol_reference(state).or_else(|| first_symbol_reference(state))
     else {
-        state.push_user_message(ConsoleMessage::warning(
-            "Open form designer requires a symbol definition in the project library.",
-        ));
+        state.prompt("Open form designer needs a symbol in the project library.");
         return;
     };
     open_symbol_parameter_form_dialog_for(state, target);
@@ -77,9 +72,7 @@ pub(crate) fn open_symbol_parameter_form_dialog_for(state: &mut AppState, target
         || state.workbench.safe_mode.project_read_only()
         || !writable
     {
-        state.push_user_message(ConsoleMessage::warning(
-            "The selected symbol parameter form is unavailable because its project library is read-only.",
-        ));
+        state.prompt("The symbol's parameter form cannot be edited: its library is read-only.");
         return;
     }
     let Some(view) = state
@@ -88,29 +81,26 @@ pub(crate) fn open_symbol_parameter_form_dialog_for(state: &mut AppState, target
         .and_then(|library| library.get_cell(&target.cell))
         .and_then(|cell| cell.get_view(&target.view))
     else {
-        state.push_user_message(ConsoleMessage::warning(
-            "The selected symbol view is no longer available.",
-        ));
+        state.prompt("The selected symbol view is no longer available.");
         return;
     };
     if view.view_type != ViewType::Symbol {
-        state.push_user_message(ConsoleMessage::warning(
-            "The selected cellview is not a symbol and has no component-form contract.",
-        ));
+        state.prompt("The selected cellview is not a symbol, so it has no parameter form.");
         return;
     }
     let definition = match crate::state::load_model_bound_symbol(view) {
         Ok(Some(definition)) => definition,
         Ok(None) => {
-            state.push_user_message(ConsoleMessage::warning(
-                "The selected legacy symbol has no typed component-form contract. Create or import a model-bound symbol first.",
-            ));
+            state.prompt(
+                "The selected symbol has no parameter form. Create or import a model-bound \
+                 symbol first.",
+            );
             return;
         }
         Err(error) => {
-            state.push_user_message(ConsoleMessage::warning(format!(
+            state.prompt(format!(
                 "The selected symbol definition is invalid: {error}"
-            )));
+            ));
             return;
         }
     };

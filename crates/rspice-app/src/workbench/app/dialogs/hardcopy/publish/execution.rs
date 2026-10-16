@@ -199,16 +199,13 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
     app.state.dialogs.hardcopy.busy = false;
     match completion {
         Ok(message) => {
-            let message = app.state.dialogs.hardcopy.last_receipt.as_ref().map_or(
-                message.clone(),
-                |receipt| {
-                    format!(
-                        "{message} Receipt {} recorded in project history.",
-                        receipt.id()
-                    )
-                },
-            );
-            app.state.push_user_message(ConsoleMessage::info(message));
+            let message = if app.state.dialogs.hardcopy.last_receipt.is_some() {
+                format!("{message} It is recorded in the project history.")
+            } else {
+                message
+            };
+            app.state
+                .record(LogSeverity::Info, LogSource::Studio, message);
             app.state.dialogs.hardcopy.close();
         }
         Err(error) => {
