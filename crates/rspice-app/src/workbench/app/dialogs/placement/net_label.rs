@@ -281,6 +281,12 @@ mod tests {
             } else {
                 open_at(&mut app, Point::origin());
             }
+            // The entry asks for the caret once its field exists, so the
+            // frame that builds it is the frame before the one that can be
+            // typed into.
+            let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
+                app.render_net_label_dialog(ctx);
+            });
             let _ = ctx.run_ui(
                 dialog_input(vec![egui::Event::Paste("BUSY".into())]),
                 |ctx| {

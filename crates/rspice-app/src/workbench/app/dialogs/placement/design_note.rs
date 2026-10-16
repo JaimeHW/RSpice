@@ -114,6 +114,18 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let source = schematic_editor_request_source(&app.state);
         app.state.dialogs.design_note.open(source);
+        // The form asks for the caret once its rows exist, so the frame that
+        // builds them is the frame before the one that can be typed into.
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280.0, 800.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| app.render_design_note_dialog(ctx),
+        );
         let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(

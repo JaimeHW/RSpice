@@ -54,11 +54,12 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
     assert_blocks_shortcuts(|dialogs| dialogs.unpublish_web.open = true);
     assert_blocks_shortcuts(|dialogs| dialogs.command_palette.open = true);
     assert_blocks_shortcuts(|dialogs| {
-        dialogs
-            .bus_tap
-            .open(crate::workbench::app::schematic_editor_request_source(
+        dialogs.bus_tap.open(
+            crate::workbench::app::schematic_editor_request_source(
                 &crate::workbench::app_state::AppState::default(),
-            ));
+            ),
+            String::new(),
+        );
     });
     assert_blocks_shortcuts(|dialogs| dialogs.builtin_xspice_placement.open = true);
     assert_blocks_shortcuts(|dialogs| dialogs.net_label_placement.open = true);

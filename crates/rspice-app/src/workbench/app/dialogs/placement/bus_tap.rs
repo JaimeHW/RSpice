@@ -177,6 +177,11 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         open_bus_tap(&mut app.state);
 
+        // The form asks for the caret once its rows exist, so the frame that
+        // builds them is the frame before the one that can be typed into.
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
+            app.render_bus_tap_dialog(ctx)
+        });
         let _ = ctx.run_ui(dialog_input(replace_text("DATA[31:0]")), |ctx| {
             app.render_bus_tap_dialog(ctx)
         });
