@@ -4714,8 +4714,10 @@ fn add_template_xspice_auto_bridge(
     })?;
     if device_is_subcircuit {
         add_generated_xspice_auto_bridge_subcircuit(circuit, &generated, template, context, abort)?;
-        log::debug!(
-            "Generated XSPICE subcircuit auto-bridge on nodes {} from template {}",
+        log::info!(
+            "Inserted {} bridge subcircuit for {} {} from bridge template '{}'",
+            xspice_auto_bridge_kind_label(first_bridge.kind),
+            if bridges.len() == 1 { "node" } else { "nodes" },
             node_list,
             template.key
         );
@@ -4741,9 +4743,11 @@ fn add_template_xspice_auto_bridge(
         context,
     )?;
 
-    log::debug!(
-        "Generated XSPICE auto-bridge {} on nodes {} from template {}",
+    log::info!(
+        "Inserted {} bridge {} for {} {} from bridge template '{}'",
+        xspice_auto_bridge_kind_label(first_bridge.kind),
         element.name,
+        if bridges.len() == 1 { "node" } else { "nodes" },
         node_list,
         template.key
     );
@@ -5096,10 +5100,13 @@ fn add_planned_xspice_auto_bridge(
         ))
     })?;
 
-    log::debug!(
-        "Generated XSPICE auto-bridge {} on node {}",
+    log::info!(
+        "Inserted {} bridge {} for node {}",
+        xspice_auto_bridge_kind_label(bridge.kind),
         instance_name,
-        bridge.node
+        circuit
+            .node_name_by_id(bridge.node)
+            .map_or_else(|| bridge.node.to_string(), str::to_owned)
     );
     if node_names.is_some() {
         let node_label = xspice_auto_bridge_node_label(node_names, bridge.node);
@@ -6667,10 +6674,11 @@ impl Engine {
                             .any(|name| params_map.contains_key(*name));
                         diode = diode.with_model_params(params_map);
                         model_params = params_map.clone();
-                        log::debug!(
-                            "Applied embedded diode fallback model '{}' to {}",
-                            model,
-                            element.name
+                        log::warn!(
+                            "{} uses the built-in diode model '{}': the deck defines no .MODEL \
+                             of that name",
+                            element.name,
+                            model
                         );
                     } else {
                         return Err(SimulationError::Circuit(format!(
@@ -7033,10 +7041,11 @@ impl Engine {
                         // Fallback to embedded transistor library models when no
                         // explicit .MODEL card is present in the parsed netlist.
                         bjt = bjt.with_params(&effective_params);
-                        log::debug!(
-                            "Applied embedded BJT fallback model '{}' to {}",
-                            model,
-                            element.name
+                        log::warn!(
+                            "{} uses the built-in transistor model '{}': the deck defines no \
+                             .MODEL of that name",
+                            element.name,
+                            model
                         );
                     } else {
                         return Err(SimulationError::Circuit(format!(

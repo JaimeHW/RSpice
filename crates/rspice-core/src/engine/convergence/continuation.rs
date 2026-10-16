@@ -1064,7 +1064,7 @@ impl Engine {
         }
 
         // Log the actual GMIN stepping result for debugging
-        log::info!(
+        log::debug!(
             "DC operating point candidate after GMIN stepping ({} nodes): {:?}",
             solution.len(),
             solution
