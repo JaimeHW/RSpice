@@ -27,6 +27,8 @@ use rspice_design_model::Point;
 pub mod bus;
 mod net;
 pub mod summary;
+#[cfg(test)]
+mod tests;
 mod vector_names;
 use bus::{BusConnectivityAnalysis, BusDiagnosticKind, analyze_bus_connectivity};
 pub use net::Net;
@@ -645,15 +647,20 @@ where
         // Seed with names already assigned (interface ports run first), so a
         // label matching a port name connects to the port's net instead of
         // minting a same-named twin.
-        let mut name_to_net: HashMap<String, usize> = self
-            .nets
-            .iter()
-            .filter_map(|net| {
-                net.label
-                    .as_ref()
-                    .map(|label| (net_name_key(label), net.id))
-            })
-            .collect();
+        let mut name_to_net: HashMap<String, usize> = HashMap::new();
+        for net in &self.nets {
+            let Some(label) = net.label.as_ref() else {
+                continue;
+            };
+            name_to_net.insert(net_name_key(label), net.id);
+            // A projected bit is named in the deck spelling, which no one can
+            // author; a label reaches it by the spelling its declaration
+            // shows, with or without a tap anywhere selecting it.
+            let authored = display_net_name(schematic, label);
+            if authored != *label {
+                name_to_net.entry(net_name_key(&authored)).or_insert(net.id);
+            }
+        }
         // The authored spelling is what a user could have written, so it is
         // what gets validated, keyed and reported; the deck spelling is what
         // the net is actually named, because `<3>` does not survive a probe.
