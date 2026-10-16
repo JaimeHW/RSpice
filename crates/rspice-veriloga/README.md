@@ -206,11 +206,13 @@ grants only Apple's narrow `MAP_JIT` and JIT write-callback permissions.
 
 `rspice-veriloga-gen` walks a tree of Verilog-A sources, compiles each module
 to canonical IR, and emits one Cargo package per model into
-`crates/rspice-veriloga-models/models/` alongside the catalog's `registry.rs`
-and `manifest.txt`.
+`crates/rspice-veriloga-models/models/` alongside the catalog's `registry.rs`,
+`README.md` and `manifest.txt`. The catalog README is generated too: its model
+table comes from the same package list as the catalog's features, and the
+manifest authenticates it like every other file there.
 
 ```bash
-# Full regeneration; rewrites every device, registry.rs and manifest.txt
+# Full regeneration; rewrites every device, registry.rs, README.md and manifest.txt
 cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- \
     regenerate-builtins [--models PATH] [--out PATH] [--jobs N]
 
@@ -228,8 +230,8 @@ parallelism capped at 4, or to `RSPICE_VERILOGA_GENERATOR_JOBS` when that is
 set, and is clamped to the number of modules generated. `--filter` belongs to
 the subset command alone: full regeneration rejects it, because a partial
 rewrite would leave the registry and manifest describing devices that are no
-longer there. The subset command rewrites neither `registry.rs` nor
-`manifest.txt`, so its output is for inspection, not for committing. The
+longer there. The subset command rewrites none of `registry.rs`, `README.md`
+or `manifest.txt`, so its output is for inspection, not for committing. The
 `generator` profile is release-optimized; the full corpus under the dev profile
 is impractically slow.
 
