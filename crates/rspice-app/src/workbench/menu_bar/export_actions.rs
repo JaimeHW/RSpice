@@ -114,10 +114,20 @@ pub(crate) fn action_export_netlist_with_io(
                 ));
                 return;
             }
-            let Some(content) = build_menu_netlist(state, format) else {
-                return;
-            };
-            content
+            match build_menu_netlist(state, format) {
+                Ok(generated) => {
+                    record_netlist_warnings(state, generated.warnings);
+                    generated.source
+                }
+                Err(reasons) => {
+                    state.record(
+                        crate::diagnostics::LogSeverity::Error,
+                        crate::diagnostics::LogSource::Studio,
+                        netlist_failure_text("Netlist export", &reasons),
+                    );
+                    return;
+                }
+            }
         };
 
     let default_name = state
@@ -369,8 +379,19 @@ pub(crate) fn action_view_netlist(state: &mut AppState) {
         return;
     }
 
-    let Some(netlist_content) = build_menu_netlist(state, crate::io::NetlistFormat::Spice) else {
-        return;
+    let netlist_content = match build_menu_netlist(state, crate::io::NetlistFormat::Spice) {
+        Ok(generated) => {
+            record_netlist_warnings(state, generated.warnings);
+            generated.source
+        }
+        Err(reasons) => {
+            state.record(
+                crate::diagnostics::LogSeverity::Error,
+                crate::diagnostics::LogSource::Studio,
+                netlist_failure_text("Netlist generation", &reasons),
+            );
+            return;
+        }
     };
 
     state.simulation.source.netlist_content = netlist_content.clone();
@@ -387,21 +408,29 @@ pub(crate) fn action_view_netlist(state: &mut AppState) {
     )));
 }
 
+/// A deck the generator wrote, and the warnings it raised beside it.
+pub(crate) struct GeneratedNetlist {
+    pub(crate) source: String,
+    pub(crate) warnings: Vec<String>,
+}
+
+/// Generate the design's deck.
+///
+/// Nothing here writes the Console. A command that asked for the deck records
+/// the outcome; the Netlist page states it where the deck would be. The error
+/// is every reason the generator refused, in its order.
 pub(crate) fn build_menu_netlist(
-    state: &mut AppState,
+    state: &AppState,
     format: crate::io::NetlistFormat,
-) -> Option<String> {
-    let execution_projection = match state.workspace.configuration_execution_projection(
-        &state.library_manager,
-        &state.workspace.content.active_view,
-        &state.schematic,
-    ) {
-        Ok(projection) => projection,
-        Err(error) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(error.to_string()));
-            return None;
-        }
-    };
+) -> Result<GeneratedNetlist, Vec<String>> {
+    let execution_projection = state
+        .workspace
+        .configuration_execution_projection(
+            &state.library_manager,
+            &state.workspace.content.active_view,
+            &state.schematic,
+        )
+        .map_err(|error| vec![error.to_string()])?;
     let root_reference = execution_projection.root().clone();
     let root_schematic = execution_projection
         .root_schematic()
@@ -425,16 +454,14 @@ pub(crate) fn build_menu_netlist(
         .as_ref()
         .map(crate::simulation::plan::SimulationPlan::id)
     else {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::error(
-            "Netlist export requires a stable active simulation plan.",
-        ));
-        return None;
+        return Err(vec![
+            "the design has no active simulation plan to write the deck from".to_owned(),
+        ]);
     };
     let Some(plan_payload) = state.workspace.content.plan_data(plan_id) else {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-            "Simulation plan {plan_id} has no plan-owned configuration payload."
-        )));
-        return None;
+        return Err(vec![format!(
+            "simulation plan {plan_id} has no configuration of its own"
+        )]);
     };
     let generation = rspice_simulation::netlist_gen::generate_netlist_hierarchical_with_variables(
         root_schematic,
@@ -451,50 +478,55 @@ pub(crate) fn build_menu_netlist(
     );
 
     if !generation.errors.is_empty() {
-        // A typed defect is reported by its kind, which is what a repair action
-        // is attached to. The generator also renders each one into `errors` so
-        // string-only consumers keep working, so that rendering is skipped here
-        // rather than printed a second time.
-        let rendered = generation
+        // The generator renders each typed defect into `errors` as well, so
+        // the defects come first, in their own words, and an error that is
+        // only a defect's rendering is not stated a second time.
+        let mut reasons = generation
             .defects
             .iter()
             .map(ToString::to_string)
-            .collect::<std::collections::HashSet<_>>();
-        for defect in &generation.defects {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "[{}] {defect}",
-                defect.kind()
-            )));
-        }
+            .collect::<Vec<_>>();
         for error in generation.errors {
-            if !rendered.contains(&error) {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::error(error));
+            if !reasons.contains(&error) {
+                reasons.push(error);
             }
         }
-        return None;
-    }
-
-    for warning in generation.warnings {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(warning));
+        return Err(reasons);
     }
 
     let spice_netlist = state
         .workspace
         .content
         .bind_generated_netlist_provenance(generation.netlist);
-    let spice_netlist = match crate::simulation::controller::SimulationController::append_plan_measurements_to_generated_netlist(state, &spice_netlist) {
-        Ok(source) => source,
-        Err(error) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(error.to_string()));
-            return None;
-        }
-    };
-    Some(match format {
-        crate::io::NetlistFormat::Spectre => {
-            super::netlist_compat::spice_to_ahdl_compatible_netlist(&spice_netlist)
-        }
-        _ => spice_netlist,
+    let spice_netlist = crate::simulation::controller::SimulationController::append_plan_measurements_to_generated_netlist(state, &spice_netlist)
+        .map_err(|error| vec![error.to_string()])?;
+    Ok(GeneratedNetlist {
+        source: match format {
+            crate::io::NetlistFormat::Spectre => {
+                super::netlist_compat::spice_to_ahdl_compatible_netlist(&spice_netlist)
+            }
+            _ => spice_netlist,
+        },
+        warnings: generation.warnings,
     })
+}
+
+/// One Console line for a deck the reader asked for that could not be written:
+/// what was asked, and every reason the generator gave.
+pub(crate) fn netlist_failure_text(action: &str, reasons: &[String]) -> String {
+    format!("{action} failed: {}", reasons.join("; "))
+}
+
+/// Record a generated deck's warnings, once each, as the Console's account of
+/// what the generator substituted or ignored.
+pub(crate) fn record_netlist_warnings(state: &mut AppState, warnings: Vec<String>) {
+    for warning in warnings {
+        state.record(
+            crate::diagnostics::LogSeverity::Warning,
+            crate::diagnostics::LogSource::Studio,
+            warning,
+        );
+    }
 }
 
 /// Export the sealed publication snapshot: the exact canonical bytes the

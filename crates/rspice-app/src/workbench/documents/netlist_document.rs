@@ -2291,8 +2291,12 @@ pub struct NetlistDocumentState {
     /// `generated_input_digest` makes the retained artifact stale and blocks
     /// execution until generation succeeds.
     pub current_generation_input_digest: Option<crate::product::ContentDigest>,
-    /// Exact diagnostic from the latest failed generation attempt.
+    /// Diagnostic from the latest failed generation attempt.
     pub generation_error: Option<String>,
+    /// Input digest of the latest generation that failed. The same inputs
+    /// fail the same way, so they are not rebuilt, and the failure is not
+    /// recorded again, until one of them changes.
+    pub failed_generation_input_digest: Option<crate::product::ContentDigest>,
     /// Receipt for the latest exact visible source validation.
     pub validation: Option<NetlistValidationReceipt>,
     /// Exact validation failure retained until the bytes change or validation
