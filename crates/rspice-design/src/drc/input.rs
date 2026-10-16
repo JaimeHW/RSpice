@@ -4,6 +4,7 @@
 //! rules never see wires, junctions, or label positions, because judging those
 //! again would be a second extraction and two extractions disagree.
 
+use crate::schematic::component::WrittenCard;
 use crate::schematic::port::PortDirection;
 use rspice_design_model::Point;
 
@@ -28,15 +29,24 @@ pub struct ComponentInfo {
     /// Extraction computes this with the component's effective primitive or
     /// model-bound prefix; the checker never guesses from display text.
     pub reference_error: Option<String>,
-    /// The name the deck writes this instance under, or `None` when the
-    /// netlister cannot write it at all.
+    /// The cards the deck writes because this instance is drawn, under the
+    /// names it writes them, or `None` when the netlister cannot write the
+    /// instance at all.
     ///
-    /// The two differ for a reference the schema refuses: the netlister names
-    /// an unnamed primitive `<prefix><id>` and prefixes one that starts with
-    /// the wrong letter, so the run still starts, under a name the results
-    /// will carry. A cell instance is addressed by its occurrence path as
-    /// well, so one whose reference is not a path segment cannot be written.
-    pub deck_name: Option<String>,
+    /// Most instances write one card, their own element. Some make the deck
+    /// write others beside it, as a current-controlled source with no
+    /// controlling element of its own writes its sense source, or in its
+    /// place, as a transformer is written as its windings and their coupling.
+    /// A coupling is written once per winding set, so it is listed under one
+    /// instance only, and a drawn coupling the deck does not write lists none.
+    ///
+    /// The names differ from the reference where the schema refuses it: the
+    /// netlister names an unnamed primitive `<prefix><id>` and prefixes one
+    /// that starts with the wrong letter, so the run still starts, under a
+    /// name the results will carry. A cell instance is addressed by its
+    /// occurrence path as well, so one whose reference is not a path segment
+    /// cannot be written.
+    pub written_cards: Option<Vec<WrittenCard>>,
     /// A placed interface port. Its terminal is where the cellview's node
     /// continues into the parent, which is a connection no terminal inside
     /// the cellview represents.

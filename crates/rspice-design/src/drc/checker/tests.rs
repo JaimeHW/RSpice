@@ -49,14 +49,22 @@ fn declared_open_pin(name: &str, net: &str, direction: PortDirection) -> PinInfo
     }
 }
 
-/// The name the netlister writes for a resistor called `name`: its own, or
-/// `R<id>` when it has none.
-fn written_name(id: u64, name: &str) -> Option<String> {
-    Some(if name.is_empty() {
-        format!("R{id}")
+/// The one card an instance writes, its own element, under `name`.
+fn element(name: &str) -> Option<Vec<WrittenCard>> {
+    Some(vec![WrittenCard {
+        name: name.to_owned(),
+        role: CardRole::Element,
+    }])
+}
+
+/// The card the netlister writes for a resistor called `name`: under its own
+/// name, or `R<id>` when it has none.
+fn written_name(id: u64, name: &str) -> Option<Vec<WrittenCard>> {
+    if name.is_empty() {
+        element(&format!("R{id}"))
     } else {
-        name.to_owned()
-    })
+        element(name)
+    }
 }
 
 fn resistor(id: u64, name: &str, pins: Vec<PinInfo>) -> ComponentInfo {
@@ -70,7 +78,7 @@ fn resistor(id: u64, name: &str, pins: Vec<PinInfo>) -> ComponentInfo {
         is_ground_symbol: false,
         reference_required: true,
         reference_error: None,
-        deck_name: written_name(id, name),
+        written_cards: written_name(id, name),
         is_interface_port: false,
         component_known: Some(true),
         missing_parameters: Vec::new(),
@@ -92,7 +100,7 @@ fn vsource(id: u64, name: &str, plus_net: &str, minus_net: &str) -> ComponentInf
         is_ground_symbol: false,
         reference_required: true,
         reference_error: None,
-        deck_name: Some(name.to_owned()),
+        written_cards: element(name),
         is_interface_port: false,
         component_known: Some(true),
         missing_parameters: Vec::new(),
@@ -117,7 +125,7 @@ fn interface_port(id: u64, net: &str, attached: bool) -> ComponentInfo {
         is_ground_symbol: false,
         reference_required: false,
         reference_error: None,
-        deck_name: None,
+        written_cards: None,
         is_interface_port: true,
         component_known: Some(true),
         missing_parameters: Vec::new(),
@@ -147,7 +155,7 @@ fn ground_symbol(id: u64, point: Point, attached: bool) -> ComponentInfo {
         is_ground_symbol: true,
         reference_required: false,
         reference_error: None,
-        deck_name: None,
+        written_cards: None,
         is_interface_port: false,
         component_known: Some(true),
         missing_parameters: Vec::new(),
@@ -745,10 +753,10 @@ fn a_refused_reference_is_an_error_only_where_the_deck_cannot_write_it() {
     let unnamed = resistor(3, "", vec![]);
     let mut misnamed = resistor(4, "C4", vec![]);
     misnamed.reference_error = Some("Resistor designators must begin with `R`.".to_owned());
-    misnamed.deck_name = Some("RC4".to_owned());
+    misnamed.written_cards = element("RC4");
     let mut structural = resistor(5, "", vec![]);
     structural.reference_required = false;
-    structural.deck_name = None;
+    structural.written_cards = None;
     structural.component_type = "port".to_owned();
     let result = check(&[unnamed, misnamed, structural], config.clone());
 
@@ -775,9 +783,9 @@ fn a_refused_reference_is_an_error_only_where_the_deck_cannot_write_it() {
     let mut unusable = resistor(6, "X1-a", vec![]);
     unusable.reference_error =
         Some("Enter `X` followed by one or more ASCII letters, digits, or underscores.".to_owned());
-    unusable.deck_name = None;
+    unusable.written_cards = None;
     let mut unnamed_cell = resistor(7, "", vec![]);
-    unnamed_cell.deck_name = None;
+    unnamed_cell.written_cards = None;
     let result = check(&[unusable, unnamed_cell], config);
     let invalid = of_type(&result, DrcViolationType::InvalidName);
     assert_eq!(invalid.len(), 1);
@@ -963,7 +971,7 @@ fn fixed_violation_disappears_on_recheck() {
 
     // A rename changes the name the deck writes, which is what collided.
     components[2].name = "R2".to_string();
-    components[2].deck_name = Some("R2".to_string());
+    components[2].written_cards = element("R2");
     let result = check(&components, DrcConfig::default());
     assert!(of_type(&result, DrcViolationType::DuplicateName).is_empty());
     assert_eq!(result.total_count(), 0);

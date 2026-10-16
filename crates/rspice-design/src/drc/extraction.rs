@@ -16,7 +16,7 @@ use crate::hierarchy::{ConfigurationExecutionBinding, HierarchySource};
 use crate::properties::PropertyCatalog;
 use crate::properties::PropertyDefinition;
 use crate::properties::PropertyValue;
-use crate::schematic::component::{Component, LibraryCellInstance};
+use crate::schematic::component::{Component, LibraryCellInstance, WrittenCard, written_cards};
 use crate::schematic::component_references::{InstanceReference, resolve_instance_reference};
 use crate::schematic::component_type::ComponentType;
 use crate::schematic::document::SchematicDocument;
@@ -448,6 +448,7 @@ fn extract_components(
 ) -> Vec<ComponentInfo> {
     let mut components = Vec::with_capacity(schematic.components.len());
     let property_registry = PropertyCatalog::new();
+    let mut cards = written_cards(&schematic.components);
 
     // Terminals arrive in placement order and, within a component, in the
     // order the symbol declares its pins. Grouping preserves both.
@@ -514,7 +515,9 @@ fn extract_components(
             is_ground_symbol: comp.kind == ComponentType::Ground,
             reference_required,
             reference_error,
-            deck_name: reference_required.then(|| deck_name(comp)).flatten(),
+            written_cards: reference_required
+                .then(|| deck_cards(comp, cards.remove(&comp.id).unwrap_or_default()))
+                .flatten(),
             is_interface_port: comp.port_spec().is_some(),
             component_known: component_known(comp, hierarchy, context),
             missing_parameters: missing_parameters(comp, &property_registry),
@@ -556,29 +559,35 @@ fn broken_references(component: &Component, cellview: &[Component]) -> Vec<Broke
     }]
 }
 
-/// The name the deck writes one instance under, or `None` when it cannot
-/// write the instance at all.
+/// The cards the deck writes for one instance, `cards` as [`written_cards`]
+/// lists them, or `None` when it cannot write the instance at all.
 ///
 /// This is the netlister's own naming, not a second account of it: an unnamed
 /// primitive is written `<prefix><id>`, one whose name starts with the wrong
-/// letter is written with the prefix in front, and a controlled source the
-/// deck lowers to a behavioural card is written under that card's name, so
-/// two cards the engine would refuse as one name are judged as one here. A
-/// cell instance is also
-/// addressed by its occurrence path, so a reference that is not a path segment
-/// — an empty one among them — leaves the deck nothing to write it under. And
-/// the written name has to be one the engine's element-head parser reads as a
-/// name: a blank, a delimiter such as `(` `,` `=` `{`, a quote or a character
-/// outside ASCII would split or break the card it heads. That is judged by the
-/// parser's own rule, so the two cannot disagree about which names run.
-fn deck_name(component: &Component) -> Option<String> {
+/// letter is written with the prefix in front, a controlled source the deck
+/// lowers to a behavioural card is written under that card's name, and the
+/// cards written beside or in place of an element are named as the netlister
+/// names them, so two cards the engine would refuse as one name are judged as
+/// one here. A cell instance is also addressed by its occurrence path, so a
+/// reference that is not a path segment — an empty one among them — leaves
+/// the deck nothing to write it under. And every written name has to be one
+/// the engine's element-head parser reads as a name: a blank, a delimiter such
+/// as `(` `,` `=` `{`, a quote or a character outside ASCII would split or
+/// break the card it heads. That is judged by the parser's own rule, so the
+/// two cannot disagree about which names run. A sense source is named from
+/// its source's emitted name, so it reads as a name exactly when the source's
+/// own card does; a transformer's and a coupling's cards are named in letters,
+/// digits and underscores, and always do.
+fn deck_cards(component: &Component, cards: Vec<WrittenCard>) -> Option<Vec<WrittenCard>> {
     if component.kind == ComponentType::CellInstance
         && InstancePath::root().child(&component.name).is_err()
     {
         return None;
     }
-    let name = component.written_element_name();
-    rspice_core::netlist::lexer::is_xyce_device_name(&name).then_some(name)
+    cards
+        .iter()
+        .all(|card| rspice_core::netlist::lexer::is_xyce_device_name(&card.name))
+        .then_some(cards)
 }
 
 /// The interface the deck binds one instance to, read live.

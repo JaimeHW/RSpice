@@ -938,6 +938,12 @@ fn a_refused_reference_is_judged_by_what_the_deck_writes() {
     // Cell instances are addressed by path; these two have no path segment.
     top.components.push(instance(7, "X1-a", "amp"));
     top.components.push(instance(8, "", "amp"));
+    // A transformer is written as its windings and their coupling, named in
+    // letters, digits and underscores whatever it is drawn as.
+    top.components.push(
+        Component::new(9, ComponentType::Transformer, Point::new(0, 200))
+            .with_name_value("X(1)", "10m"),
+    );
     let views = buffers([("amp", SchematicDocument::default())]);
     let hierarchy = HierarchySource::from_buffers(&views);
 
@@ -985,6 +991,16 @@ fn a_refused_reference_is_judged_by_what_the_deck_writes() {
             finding(id)
         );
     }
+    let transformer = finding(9);
+    assert_eq!(transformer.violation_type, DrcViolationType::InvalidName);
+    assert_eq!(transformer.severity, DrcSeverity::Warning);
+    assert!(
+        transformer
+            .message
+            .ends_with("the netlist writes it as LX_1_PRI, LX_1_SEC and KX_1"),
+        "{}",
+        transformer.message
+    );
     assert_eq!(result.errors().len(), 2, "{:?}", result.violations());
 }
 
@@ -1125,6 +1141,170 @@ fn a_lowered_controlled_source_collides_with_the_name_it_is_written_under() {
     assert_eq!(duplicates.len(), 1, "{:?}", result.violations());
     assert_eq!(duplicates[0].message, "B1 and E1 are both written B1");
     assert!(duplicates[0].severity >= DrcSeverity::Error);
+}
+
+/// The duplicate findings of one drawing, as messages.
+fn duplicates_of(components: Vec<Component>) -> Vec<String> {
+    let top = SchematicDocument {
+        components,
+        ..SchematicDocument::default()
+    };
+    let views = buffers([]);
+    let hierarchy = HierarchySource::from_buffers(&views);
+    let result = run_check_with_hierarchy(&top, &hierarchy, connectivity_only());
+    of_type(&result, DrcViolationType::DuplicateName)
+        .into_iter()
+        .map(|finding| {
+            assert!(finding.severity >= DrcSeverity::Error, "{finding:?}");
+            finding.message.clone()
+        })
+        .collect()
+}
+
+fn with_params(mut component: Component, params: &str) -> Component {
+    component.params = params.to_owned();
+    component
+}
+
+/// A transformer writes no card under its own name: the deck writes its two
+/// windings and their coupling. So a transmission line drawn `T1` beside a
+/// transformer drawn `T1` is one `T1` card, and an inductor or a coupling
+/// drawn under one of the transformer's card names is two.
+#[test]
+fn a_transformer_is_judged_by_the_cards_it_writes() {
+    let transformer = || part(1, ComponentType::Transformer, "T1");
+    assert_eq!(
+        duplicates_of(vec![
+            transformer(),
+            part(2, ComponentType::TransmissionLine, "T1"),
+        ]),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        duplicates_of(vec![
+            transformer(),
+            part(2, ComponentType::Inductor, "LT1_PRI")
+        ]),
+        vec!["T1's primary winding and LT1_PRI are both written LT1_PRI"]
+    );
+    assert_eq!(
+        duplicates_of(vec![
+            transformer(),
+            part(2, ComponentType::Inductor, "lt1_sec")
+        ]),
+        vec![
+            "T1's secondary winding and lt1_sec are written LT1_SEC and lt1_sec, which the \
+             simulator reads as one name"
+        ]
+    );
+    assert_eq!(
+        duplicates_of(vec![
+            transformer(),
+            part(2, ComponentType::Inductor, "L1"),
+            part(3, ComponentType::Inductor, "L2"),
+            with_params(
+                part(4, ComponentType::CoupledInductor, "KT1"),
+                "inductors=\"L1 L2\"",
+            ),
+        ]),
+        vec!["T1's coupling and KT1 are both written KT1"]
+    );
+    // Two transformers drawn alike collide on all three cards, which is one
+    // defect.
+    assert_eq!(
+        duplicates_of(vec![
+            transformer(),
+            part(2, ComponentType::Transformer, "T1")
+        ]),
+        vec!["Duplicate component name 'T1' (2 instances), written LT1_PRI"]
+    );
+}
+
+/// A current-controlled source or switch with no controlling element of its
+/// own senses its control current through a 0 V source the deck writes beside
+/// it, `VSENSE_` before its name. A source drawn under that name is a second
+/// card of it.
+#[test]
+fn a_synthesized_sense_source_collides_with_a_drawn_one() {
+    let ccvs = |params: &str| with_params(part(1, ComponentType::Ccvs, "H1"), params);
+    assert_eq!(
+        duplicates_of(vec![
+            ccvs(""),
+            part(2, ComponentType::VoltageSource, "VSENSE_H1"),
+        ]),
+        vec!["H1's sense source and VSENSE_H1 are both written VSENSE_H1"]
+    );
+    assert_eq!(
+        duplicates_of(vec![
+            ccvs(""),
+            part(2, ComponentType::VoltageSource, "SENSE_H1"),
+        ]),
+        vec!["H1's sense source and SENSE_H1 are both written VSENSE_H1"]
+    );
+    assert_eq!(
+        duplicates_of(vec![
+            part(1, ComponentType::ISwitch, "W1"),
+            part(2, ComponentType::VoltageSource, "VSENSE_W1"),
+        ]),
+        vec!["W1's sense source and VSENSE_W1 are both written VSENSE_W1"]
+    );
+    // A source that names its controlling element writes no sense source.
+    assert_eq!(
+        duplicates_of(vec![
+            ccvs("vref=VSENSE_H1"),
+            part(2, ComponentType::VoltageSource, "VSENSE_H1"),
+        ]),
+        Vec::<String>::new()
+    );
+    // Two sources drawn alike collide on the element and on its sense source,
+    // which is one defect.
+    assert_eq!(
+        duplicates_of(vec![
+            ccvs(""),
+            with_params(part(2, ComponentType::Ccvs, "H1"), "")
+        ]),
+        vec!["Duplicate component name 'H1' (2 instances)"]
+    );
+}
+
+/// An inductor's `coupled_to` asks for a coupling of a winding set, which the
+/// deck writes once, as `K` before the windings' names. That card collides
+/// with a coupling drawn under the same name, and two inductors that name each
+/// other ask for one card, not two. Two drawn couplings of one winding set are
+/// one card as well: the deck writes the first.
+#[test]
+fn a_coupling_is_judged_once_per_winding_set() {
+    let windings = |first: &str, second: &str| {
+        vec![
+            with_params(part(1, ComponentType::Inductor, "L1"), first),
+            with_params(part(2, ComponentType::Inductor, "L2"), second),
+            part(3, ComponentType::Inductor, "L3"),
+            part(4, ComponentType::Inductor, "L4"),
+        ]
+    };
+    let coupling = |id: u64, name: &str, inductors: &str| {
+        with_params(
+            part(id, ComponentType::CoupledInductor, name),
+            &format!("inductors=\"{inductors}\""),
+        )
+    };
+    let mut drawing = windings("coupled_to=L2 coupling_factor=0.5", "");
+    drawing.push(coupling(5, "KL1_L2", "L3 L4"));
+    assert_eq!(
+        duplicates_of(drawing),
+        vec!["L1's coupling and KL1_L2 are both written KL1_L2"]
+    );
+
+    let reciprocal = windings(
+        "coupled_to=L2 coupling_factor=0.5",
+        "coupled_to=L1 coupling_factor=0.5",
+    );
+    assert_eq!(duplicates_of(reciprocal), Vec::<String>::new());
+
+    let mut twice = windings("", "");
+    twice.push(coupling(5, "K1", "L1 L2"));
+    twice.push(coupling(6, "K1", "L2 L1"));
+    assert_eq!(duplicates_of(twice), Vec::<String>::new());
 }
 
 /// Every leg of a passive is undeclared, so a drawing made of passives raises

@@ -5,13 +5,15 @@
 //! project can promote a warning to an error.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, HashMap};
 
 use super::input::ComponentInfo;
 use super::net::{NetInfo, fold_nets};
 use super::source_loops;
 use super::types::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
 use crate::connectivity::{ConnectivityAnchor, ConnectivityDiagnosticKind, ExtractedConnectivity};
+use crate::schematic::component::{CardRole, WrittenCard};
 use crate::schematic::port::PortDirection;
 
 /// Where one connectivity diagnostic points, in the vocabulary a finding uses.
@@ -205,9 +207,10 @@ impl DrcChecker {
             if !component.reference_required {
                 continue;
             }
-            let written = component.deck_name.is_some();
-            let consequence = match component.deck_name.as_deref() {
-                Some(deck_name) => format!("; the netlist writes it as {deck_name}"),
+            let written = component.written_cards.is_some();
+            let consequence = match component.written_cards.as_deref() {
+                Some([]) => "; the netlist writes no card for it".to_owned(),
+                Some(cards) => format!("; the netlist writes it as {}", written_as(cards)),
                 None => "; the netlist cannot write this instance".to_owned(),
             };
             if component.name.trim().is_empty() {
@@ -519,46 +522,76 @@ impl DrcChecker {
         }
     }
 
-    /// Report every set of instances the deck writes under one name.
+    /// Report every set of instances the deck writes cards of one name for.
     ///
     /// The engine refuses two elements whose names differ only in case within
     /// one scope, and each cellview is a scope of its own: the top level, or
     /// its own subcircuit. So it is the written names that are compared, and
     /// compared folded, not the drawn ones: a resistor drawn `C4` is written
     /// `RC4` beside a drawn `RC4`, an unnamed resistor #4 is written `R4`
-    /// beside a drawn `R4`, and `R1` beside `r1` is one name to the engine. An
-    /// instance the deck cannot write at all is the reference rule's error,
-    /// and collides with nothing.
+    /// beside a drawn `R4`, and `R1` beside `r1` is one name to the engine.
+    /// Every card the deck writes is compared, not only an instance's own
+    /// element: a source drawn `VSENSE_H1` is a second card of the sense
+    /// source written beside `H1`, and a transformer drawn `T1` writes no `T1`
+    /// for a transmission line drawn `T1` to collide with. Instances that
+    /// collide on several cards, as two sources drawn `H1` do on the source and
+    /// on its sense source, are one finding, stated on the card that matters
+    /// most. An instance the deck cannot write at all is the reference rule's
+    /// error, and collides with nothing.
     fn check_duplicate_names(&mut self, components: &[ComponentInfo], result: &mut DrcResult) {
-        let mut written: std::collections::BTreeMap<String, Vec<&ComponentInfo>> =
-            std::collections::BTreeMap::new();
+        type Sharing<'a> = Vec<(&'a ComponentInfo, &'a WrittenCard)>;
+        let mut written = BTreeMap::<String, Sharing<'_>>::new();
         for component in components {
-            if let Some(name) = component.deck_name.as_deref() {
+            for card in component.written_cards.iter().flatten() {
                 written
-                    .entry(name.to_ascii_uppercase())
+                    .entry(card.name.to_ascii_uppercase())
                     .or_default()
-                    .push(component);
+                    .push((component, card));
             }
         }
 
+        let mut collisions = BTreeMap::<Vec<u64>, Sharing<'_>>::new();
+        let significance = |sharing: &Sharing<'_>| sharing.iter().map(|(_, card)| card.role).min();
         for mut sharing in written.into_values() {
             if sharing.len() < 2 {
                 continue;
             }
-            sharing.sort_by_key(|component| component.id);
+            sharing.sort_by_key(|(component, card)| (component.id, card.role));
+            let between = sharing
+                .iter()
+                .map(|(component, _)| component.id)
+                .collect::<Vec<_>>();
+            match collisions.entry(between) {
+                Entry::Vacant(entry) => {
+                    entry.insert(sharing);
+                }
+                Entry::Occupied(mut entry) => {
+                    if significance(&sharing) < significance(entry.get()) {
+                        entry.insert(sharing);
+                    }
+                }
+            }
+        }
+        let mut collisions = collisions.into_values().collect::<Vec<_>>();
+        collisions.sort_by_key(|sharing| sharing[0].1.name.to_ascii_uppercase());
+
+        for sharing in collisions {
             let drawn = sharing
                 .iter()
-                .copied()
-                .map(component_identity)
+                .map(|(component, _)| component_identity(component))
+                .collect::<Vec<_>>();
+            let cards = sharing
+                .iter()
+                .map(|(component, card)| card_label(component, card))
                 .collect::<Vec<_>>();
             let mut spellings = sharing
                 .iter()
-                .filter_map(|component| component.deck_name.clone())
+                .map(|(_, card)| card.name.clone())
                 .collect::<Vec<_>>();
             spellings.sort();
             spellings.dedup();
             let message = match spellings.as_slice() {
-                [spelling] if drawn.iter().all(|name| *name == drawn[0]) => {
+                [spelling] if cards.iter().all(|card| *card == cards[0]) => {
                     let written = if drawn[0] == *spelling {
                         String::new()
                     } else {
@@ -571,15 +604,16 @@ impl DrcChecker {
                     )
                 }
                 [spelling] => {
-                    let quantity = if drawn.len() == 2 { "both" } else { "all" };
-                    format!("{} are {quantity} written {spelling}", listed(&drawn))
+                    let quantity = if cards.len() == 2 { "both" } else { "all" };
+                    format!("{} are {quantity} written {spelling}", listed(&cards))
                 }
                 _ => format!(
                     "{} are written {}, which the simulator reads as one name",
-                    listed(&drawn),
+                    listed(&cards),
                     listed(&spellings)
                 ),
             };
+            let (first, _) = sharing[0];
             let id = self.next_id();
             self.add_violation(
                 result,
@@ -588,8 +622,8 @@ impl DrcChecker {
                     DrcViolationType::DuplicateName,
                     message,
                     DrcLocation::Component {
-                        id: sharing[0].id,
-                        name: sharing[0].name.clone(),
+                        id: first.id,
+                        name: first.name.clone(),
                     },
                 )
                 .with_related(drawn),
@@ -1010,6 +1044,34 @@ pub(super) fn component_identity(component: &ComponentInfo) -> String {
         format!("component #{}", component.id)
     } else {
         component.name.clone()
+    }
+}
+
+/// What a duplicate finding calls one written card: the instance, for its own
+/// element, and otherwise the card's part in it, as in `H1's sense source`.
+fn card_label(component: &ComponentInfo, card: &WrittenCard) -> String {
+    let identity = component_identity(component);
+    let part = match card.role {
+        CardRole::Element => return identity,
+        CardRole::SenseSource => "sense source",
+        CardRole::PrimaryWinding => "primary winding",
+        CardRole::SecondaryWinding => "secondary winding",
+        CardRole::Coupling => "coupling",
+    };
+    format!("{identity}'s {part}")
+}
+
+/// The names a reference finding says the deck writes an instance under: its
+/// own element's, and where it has none, every card written in its place.
+fn written_as(cards: &[WrittenCard]) -> String {
+    match cards.iter().find(|card| card.role == CardRole::Element) {
+        Some(element) => element.name.clone(),
+        None => listed(
+            &cards
+                .iter()
+                .map(|card| card.name.clone())
+                .collect::<Vec<_>>(),
+        ),
     }
 }
 
