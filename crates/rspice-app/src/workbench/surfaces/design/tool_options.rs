@@ -76,3 +76,92 @@ fn strip(ui: &mut Ui, command: &str, options: impl FnOnce(&mut Ui)) {
             });
         });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{ComponentType, Point, Wire};
+
+    fn armed_move() -> RSpiceApp {
+        let mut app = RSpiceApp::test_instance();
+        let id = app
+            .state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::origin());
+        app.state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(id);
+        crate::workbench::app::arm_move_selection(&mut app.state);
+        app
+    }
+
+    fn armed_stretch() -> RSpiceApp {
+        let mut app = RSpiceApp::test_instance();
+        app.state
+            .schematic
+            .document_mut_for_test()
+            .wires
+            .push(Wire::new(7, vec![Point::new(0, 0), Point::new(20, 0)]));
+        app.state.schematic.session.editor.selection.select_wire(7);
+        crate::workbench::app::arm_stretch_selection(&mut app.state);
+        app
+    }
+
+    /// The strip belongs to the armed command, not to the canvas: it is there
+    /// while Move or Stretch is running and at no other time.
+    #[test]
+    fn the_strip_is_there_only_while_a_tool_with_an_option_is_armed() {
+        fn painted(app: &mut RSpiceApp) -> bool {
+            let mut shown = false;
+            let _ = rspice_ui_kit::raster::render(egui::vec2(900.0, 60.0), |ui, _background| {
+                let before = ui.cursor().top();
+                show(ui, app);
+                shown = ui.cursor().top() > before;
+            });
+            shown
+        }
+
+        assert!(!painted(&mut RSpiceApp::test_instance()));
+        assert!(painted(&mut armed_move()));
+        assert!(painted(&mut armed_stretch()));
+
+        let mut cancelled = armed_move();
+        crate::workbench::app::cancel_armed_move_selection(&mut cancelled.state);
+        assert!(!painted(&mut cancelled));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
+    fn render_tool_options_strip() {
+        use crate::ui::tokens::Mode;
+        use std::io::Write as _;
+
+        let directory = std::env::var("RSPICE_RASTER_DIR")
+            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+        std::fs::create_dir_all(&directory).expect("raster output directory");
+        let stderr = std::io::stderr();
+        let mut report = stderr.lock();
+
+        for (stem, mut app) in [("move", armed_move()), ("stretch", armed_stretch())] {
+            for (mode_stem, mode) in [("dark", Mode::Dark), ("light", Mode::Light)] {
+                let canvas = crate::ui::raster::render_themed(
+                    crate::ui::Theme {
+                        mode,
+                        ..crate::ui::Theme::default()
+                    },
+                    egui::vec2(900.0, 64.0),
+                    |ui, _background| show(ui, &mut app),
+                );
+                let height = canvas.content_height().max(1);
+                let path = directory.join(format!("tool-options-{stem}-{mode_stem}.png"));
+                std::fs::write(&path, canvas.png(height)).expect("write strip render");
+                writeln!(report, "{} {}x{}", path.display(), canvas.width(), height)
+                    .expect("write raster qualification report");
+            }
+        }
+    }
+}
