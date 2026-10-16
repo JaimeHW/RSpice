@@ -455,6 +455,8 @@ const PLACE_PIN: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, true
 const PLACE_TEXT: &[ShortcutBinding] =
     &[primary(chord(Key::T, false, false, true, "Shift+T"), ALL)];
 const MOVE_SELECTION: &[ShortcutBinding] = &[primary(chord(Key::M, false, false, false, "M"), ALL)];
+/// Virtuoso's `z`.
+const ZOOM_BOX: &[ShortcutBinding] = &[primary(chord(Key::Z, false, false, false, "Z"), ALL)];
 const STRETCH_SELECTION: &[ShortcutBinding] =
     &[primary(chord(Key::S, false, false, false, "S"), ALL)];
 const SYMBOL_PIN: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, false, "P"), ALL)];
@@ -752,7 +754,9 @@ impl Command {
             | Self::NextSheet
             | Self::PreviousSheet
             | Self::NewSheet
-            | Self::DeleteSheet => ShortcutContext::EngineeringCanvas,
+            | Self::DeleteSheet
+            | Self::ZoomToSelection
+            | Self::ZoomBox => ShortcutContext::EngineeringCanvas,
             Self::Cancel => ShortcutContext::ApplicationChrome,
             Self::AscendHierarchy
             | Self::DescendHierarchy
@@ -899,6 +903,7 @@ impl Command {
             Self::ZoomOut => ZOOM_OUT,
             Self::ZoomFit => ZOOM_FIT,
             Self::FitSchematicContent => FIT_SCHEMATIC_CONTENT,
+            Self::ZoomBox => ZOOM_BOX,
             Self::CycleGrid => GRID,
             Self::GridSnapRouting => NONE,
             Self::DrawingSheetLayers => NONE,

@@ -16,6 +16,21 @@ use rspice_design::{
 use rspice_design_model::Point;
 use std::collections::HashMap;
 
+/// One drawn object, as [`SchematicSymbolContext::bounds_where`] offers it to
+/// its filter.
+#[derive(Clone, Copy)]
+enum BoundedObject {
+    Component(u64),
+    Wire(u64),
+    Bus(u64),
+    BusTap(u64),
+    Junction(Point),
+    NetLabel(u64),
+    DesignNote(u64),
+    DocumentationShape(u64),
+    Probe(u64),
+}
+
 #[derive(Default)]
 pub struct SchematicSymbolContext {
     resolved_by_component_id: HashMap<u64, ResolvedCellSymbol>,
@@ -151,78 +166,129 @@ impl SchematicSymbolContext {
     }
 
     pub fn content_bounds(&self, document: &SchematicDocument) -> Option<(i32, i32, i32, i32)> {
-        if document.components.is_empty()
-            && document.wires.is_empty()
-            && document.buses.is_empty()
-            && document.bus_taps.is_empty()
-            && document.junctions.is_empty()
-            && document.net_labels.is_empty()
-            && document.design_notes.is_empty()
-            && document.documentation_shapes.is_empty()
-            && document.probes.is_empty()
-        {
-            return None;
-        }
+        self.bounds_where(document, |_| true)
+    }
 
-        let mut min_x = i32::MAX;
-        let mut min_y = i32::MAX;
-        let mut max_x = i32::MIN;
-        let mut max_y = i32::MIN;
+    /// The world bounds of what `selection` holds, `None` when it holds
+    /// nothing drawn.
+    pub fn selection_bounds(
+        &self,
+        document: &SchematicDocument,
+        selection: &Selection,
+    ) -> Option<(i32, i32, i32, i32)> {
+        self.bounds_where(document, |object| match object {
+            BoundedObject::Component(id) => selection.has_component(id),
+            BoundedObject::Wire(id) => {
+                selection.has_wire(id)
+                    || selection
+                        .wire_segments
+                        .iter()
+                        .any(|segment| segment.wire_id == id)
+                    || selection
+                        .wire_vertices
+                        .iter()
+                        .any(|vertex| vertex.wire_id == id)
+            }
+            BoundedObject::Bus(id) => selection.has_bus(id),
+            BoundedObject::BusTap(id) => selection.has_bus_tap(id),
+            BoundedObject::Junction(pos) => selection.has_junction(pos),
+            BoundedObject::NetLabel(id) => selection.has_net_label(id),
+            BoundedObject::DesignNote(id) => selection.has_design_note(id),
+            BoundedObject::DocumentationShape(id) => selection.has_documentation_shape(id),
+            BoundedObject::Probe(id) => selection.has_probe(id),
+        })
+    }
+
+    fn bounds_where(
+        &self,
+        document: &SchematicDocument,
+        mut keep: impl FnMut(BoundedObject) -> bool,
+    ) -> Option<(i32, i32, i32, i32)> {
+        let mut bounds: Option<(i32, i32, i32, i32)> = None;
         let mut include = |min: Point, max: Point| {
-            min_x = min_x.min(min.x);
-            min_y = min_y.min(min.y);
-            max_x = max_x.max(max.x);
-            max_y = max_y.max(max.y);
+            bounds = Some(match bounds {
+                None => (min.x, min.y, max.x, max.y),
+                Some((min_x, min_y, max_x, max_y)) => (
+                    min_x.min(min.x),
+                    min_y.min(min.y),
+                    max_x.max(max.x),
+                    max_y.max(max.y),
+                ),
+            });
         };
 
         for component in &document.components {
-            let (min, max) = self.component_bounds(component);
-            include(min, max);
+            if keep(BoundedObject::Component(component.id)) {
+                let (min, max) = self.component_bounds(component);
+                include(min, max);
+            }
         }
 
-        for wire in &document.wires {
+        for wire in document
+            .wires
+            .iter()
+            .filter(|wire| keep(BoundedObject::Wire(wire.id)))
+        {
             for point in &wire.points {
                 include(*point, *point);
             }
         }
 
-        for bus in &document.buses {
+        for bus in document
+            .buses
+            .iter()
+            .filter(|bus| keep(BoundedObject::Bus(bus.id)))
+        {
             for point in &bus.points {
                 include(*point, *point);
             }
         }
 
-        for tap in &document.bus_taps {
+        for tap in document
+            .bus_taps
+            .iter()
+            .filter(|tap| keep(BoundedObject::BusTap(tap.id)))
+        {
             for point in crate::bus_geometry::bus_tap_route_points(tap) {
                 include(point, point);
             }
         }
 
         for junction in &document.junctions {
-            include(junction.pos, junction.pos);
+            if keep(BoundedObject::Junction(junction.pos)) {
+                include(junction.pos, junction.pos);
+            }
         }
 
         for label in &document.net_labels {
-            let (min, max) = net_labels::world_bounds(label);
-            include(min, max);
+            if keep(BoundedObject::NetLabel(label.id)) {
+                let (min, max) = net_labels::world_bounds(label);
+                include(min, max);
+            }
         }
 
         for note in &document.design_notes {
-            let (min, max) = design_notes::conservative_world_bounds(note);
-            include(min, max);
+            if keep(BoundedObject::DesignNote(note.id)) {
+                let (min, max) = design_notes::conservative_world_bounds(note);
+                include(min, max);
+            }
         }
 
         for shape in &document.documentation_shapes {
-            let (min, max) = documentation_shapes::world_bounds(shape);
-            include(min, max);
+            if keep(BoundedObject::DocumentationShape(shape.id)) {
+                let (min, max) = documentation_shapes::world_bounds(shape);
+                include(min, max);
+            }
         }
 
         for probe in &document.probes {
-            let (min, max) = probe.world_bounds();
-            include(min, max);
+            if keep(BoundedObject::Probe(probe.id)) {
+                let (min, max) = probe.world_bounds();
+                include(min, max);
+            }
         }
 
-        Some((min_x, min_y, max_x, max_y))
+        bounds
     }
 
     pub fn select_in_rect(

@@ -61,6 +61,11 @@ pub(super) fn handle_tool_interactions(
     if primary_pan_gesture_active(ui, response) {
         return;
     }
+    // The armed zoom box owns the next primary drag, whatever the tool.
+    if state.schematic.session.editor.zoom_box.armed {
+        super::zoom_box::handle_zoom_box(ui, response, state, viewport);
+        return;
+    }
     let grid_size = state.schematic.document().grid_size;
     let current_tool = state.schematic.session.editor.tool;
     if state.dialogs.move_selection.armed && current_tool != Tool::MoveSelection {

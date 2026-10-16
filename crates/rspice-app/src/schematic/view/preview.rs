@@ -75,6 +75,7 @@ pub(super) fn draw_interaction_previews(
         symbol_library,
     );
     preview::draw_selection_rect(painter, &view, viewport);
+    super::zoom_box::paint_zoom_box(painter, state, viewport);
     draw_placement_badge(painter, response, state);
 }
 

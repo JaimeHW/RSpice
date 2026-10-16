@@ -3,6 +3,9 @@
 //! The pan, zoom, and grid a schematic reopens at.
 
 use super::*;
+use rspice_schematic_editor::view::navigation::{
+    SCHEMATIC_ZOOM_MAX, SCHEMATIC_ZOOM_MIN, ZoomRequest, apply_zoom_request, zoom_floor,
+};
 
 impl SchematicState {
     // =========================================================================
@@ -18,7 +21,57 @@ impl SchematicState {
     /// - `viewport_height`: Height of the schematic canvas in pixels
     pub fn zoom_to_fit(&mut self, viewport_width: f64, viewport_height: f64) {
         // Calculate bounding box of all content (in schematic pixel coordinates)
-        self.zoom_to_fit_bounds(self.content_bounds(), viewport_width, viewport_height);
+        self.zoom_to_fit_bounds(
+            self.content_bounds(),
+            viewport_width,
+            viewport_height,
+            SCHEMATIC_ZOOM_MIN,
+        );
+    }
+
+    /// The lowest zoom this canvas offers for the sheet `paper` frames: 25 %,
+    /// or the zoom that fits the whole sheet when that is lower.
+    pub(crate) fn zoom_floor_for_sheet(
+        paper: (f64, f64, f64, f64),
+        viewport_width: f64,
+        viewport_height: f64,
+        screen_inset: f64,
+    ) -> f64 {
+        let (zoom, _) =
+            world_rect_framing(paper, viewport_width, viewport_height, screen_inset);
+        zoom_floor(zoom)
+    }
+
+    /// Carry out a zoom a command left for the canvas, now that the canvas
+    /// rectangle is known. A step or a set zoom pivots on the middle of the
+    /// canvas; a frame fits its rectangle with `screen_inset` to spare.
+    pub(crate) fn apply_zoom_request(
+        &mut self,
+        request: ZoomRequest,
+        viewport_width: f64,
+        viewport_height: f64,
+        screen_inset: f64,
+        min_zoom: f64,
+    ) {
+        match request {
+            ZoomRequest::Frame(bounds) => self.zoom_to_fit_world_rect(
+                bounds,
+                viewport_width,
+                viewport_height,
+                screen_inset,
+                min_zoom,
+            ),
+            ZoomRequest::By(_) | ZoomRequest::To(_) => {
+                let editor = &mut self.session.editor;
+                apply_zoom_request(
+                    &mut editor.zoom,
+                    &mut editor.pan,
+                    (viewport_width, viewport_height),
+                    request,
+                    min_zoom,
+                );
+            }
+        }
     }
 
     pub(crate) fn zoom_to_fit_bounds(
@@ -26,6 +79,7 @@ impl SchematicState {
         bounds: Option<(i32, i32, i32, i32)>,
         viewport_width: f64,
         viewport_height: f64,
+        min_zoom: f64,
     ) {
         let Some((min_x, min_y, max_x, max_y)) = bounds else {
             // No content - reset to default view
@@ -56,10 +110,11 @@ impl SchematicState {
         let zoom_y = viewport_height / total_height;
         let fit_zoom = zoom_x.min(zoom_y);
 
-        // Use the same 25%–800% contract as direct canvas zoom. Keeping one
-        // range avoids a fit operation silently producing a scale that the
-        // wheel and toolbar cannot subsequently reach.
-        self.session.editor.zoom = fit_zoom.clamp(0.25, 8.0);
+        // Use the same range as direct canvas zoom. Keeping one range avoids
+        // a fit operation silently producing a scale that the wheel and
+        // toolbar cannot subsequently reach.
+        self.session.editor.zoom =
+            fit_zoom.clamp(min_zoom.min(SCHEMATIC_ZOOM_MAX), SCHEMATIC_ZOOM_MAX);
 
         // Calculate pan to center the content in the viewport
         // Screen position formula: screen = bounds.min + pan + schematic * zoom
@@ -93,31 +148,19 @@ impl SchematicState {
     /// Drawing-sheet paper uses physical dimensions which are not necessarily
     /// integral schematic units (for example, US Letter is 215.9 mm wide).
     /// Keeping this path in `f64` avoids coercing those edges while preserving
-    /// the editor's shared 25%-800% zoom contract.
+    /// the editor's shared zoom range, whose floor is `min_zoom`.
     pub(crate) fn zoom_to_fit_world_rect(
         &mut self,
         bounds: (f64, f64, f64, f64),
         viewport_width: f64,
         viewport_height: f64,
         screen_inset: f64,
+        min_zoom: f64,
     ) {
-        let (min_x, min_y, max_x, max_y) = bounds;
-        let width = (max_x - min_x).max(f64::EPSILON);
-        let height = (max_y - min_y).max(f64::EPSILON);
-        let inset_x = screen_inset
-            .max(0.0)
-            .min((viewport_width - 1.0).max(0.0) * 0.5);
-        let inset_y = screen_inset
-            .max(0.0)
-            .min((viewport_height - 1.0).max(0.0) * 0.5);
-        let usable_width = (viewport_width - inset_x * 2.0).max(1.0);
-        let usable_height = (viewport_height - inset_y * 2.0).max(1.0);
-        self.session.editor.zoom = (usable_width / width)
-            .min(usable_height / height)
-            .clamp(0.25, 8.0);
-
-        let center_x = (min_x + max_x) * 0.5;
-        let center_y = (min_y + max_y) * 0.5;
+        let (fit_zoom, (center_x, center_y)) =
+            world_rect_framing(bounds, viewport_width, viewport_height, screen_inset);
+        self.session.editor.zoom =
+            fit_zoom.clamp(min_zoom.min(SCHEMATIC_ZOOM_MAX), SCHEMATIC_ZOOM_MAX);
         self.session.editor.pan = (
             viewport_width * 0.5 - center_x * self.session.editor.zoom,
             viewport_height * 0.5 - center_y * self.session.editor.zoom,
@@ -215,6 +258,31 @@ impl SchematicState {
     }
 }
 
+/// The zoom that fits a world rectangle in the canvas with `screen_inset`
+/// pixels to spare on every side, unclamped, and the rectangle's centre.
+fn world_rect_framing(
+    bounds: (f64, f64, f64, f64),
+    viewport_width: f64,
+    viewport_height: f64,
+    screen_inset: f64,
+) -> (f64, (f64, f64)) {
+    let (min_x, min_y, max_x, max_y) = bounds;
+    let width = (max_x - min_x).max(f64::EPSILON);
+    let height = (max_y - min_y).max(f64::EPSILON);
+    let inset_x = screen_inset
+        .max(0.0)
+        .min((viewport_width - 1.0).max(0.0) * 0.5);
+    let inset_y = screen_inset
+        .max(0.0)
+        .min((viewport_height - 1.0).max(0.0) * 0.5);
+    let usable_width = (viewport_width - inset_x * 2.0).max(1.0);
+    let usable_height = (viewport_height - inset_y * 2.0).max(1.0);
+    (
+        (usable_width / width).min(usable_height / height),
+        ((min_x + max_x) * 0.5, (min_y + max_y) * 0.5),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::SchematicState;
@@ -222,7 +290,13 @@ mod tests {
     #[test]
     fn physical_world_rect_fit_preserves_fractional_edges_and_screen_inset() {
         let mut state = SchematicState::default();
-        state.zoom_to_fit_world_rect((-140.0, -40.0, 723.6, 1077.6), 1200.0, 800.0, 24.0);
+        state.zoom_to_fit_world_rect(
+            (-140.0, -40.0, 723.6, 1077.6),
+            1200.0,
+            800.0,
+            24.0,
+            super::SCHEMATIC_ZOOM_MIN,
+        );
 
         let left = state.session.editor.pan.0 + -140.0 * state.session.editor.zoom;
         let top = state.session.editor.pan.1 + -40.0 * state.session.editor.zoom;

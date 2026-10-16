@@ -5,8 +5,60 @@
 
 use egui::{Event, MouseWheelUnit, Pos2, Rect, Response, TouchPhase, Ui, Vec2};
 
-const SCHEMATIC_ZOOM_MIN: f64 = 0.25;
-const SCHEMATIC_ZOOM_MAX: f64 = 8.0;
+/// The lowest zoom offered whatever the sheet: 25 %.
+pub const SCHEMATIC_ZOOM_MIN: f64 = 0.25;
+pub const SCHEMATIC_ZOOM_MAX: f64 = 8.0;
+
+/// The lowest zoom the canvas offers: 25 %, or less when that is what it takes
+/// to show the whole sheet on this canvas.
+pub fn zoom_floor(sheet_fit_zoom: f64) -> f64 {
+    if sheet_fit_zoom.is_finite() && sheet_fit_zoom > 0.0 {
+        sheet_fit_zoom.min(SCHEMATIC_ZOOM_MIN)
+    } else {
+        SCHEMATIC_ZOOM_MIN
+    }
+}
+
+/// A change of view a command asks for. Only the canvas knows its own
+/// rectangle, so the canvas carries the request out on its next frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ZoomRequest {
+    /// Multiply the zoom by this factor, pivoting on the middle of the canvas.
+    By(f64),
+    /// Set this zoom, pivoting on the middle of the canvas.
+    To(f64),
+    /// Frame this world rectangle, `(min_x, min_y, max_x, max_y)`.
+    Frame((f64, f64, f64, f64)),
+}
+
+/// The zoom box: armed by its command, it frames the next rectangle dragged
+/// on the canvas and then lets go, as Virtuoso's `z` does.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ZoomBox {
+    pub armed: bool,
+    /// The world corners of the box being dragged: where the drag started and
+    /// where the pointer is.
+    pub drag: Option<((f64, f64), (f64, f64))>,
+}
+
+impl ZoomBox {
+    pub fn arm(&mut self) {
+        *self = Self {
+            armed: true,
+            drag: None,
+        };
+    }
+
+    pub fn disarm(&mut self) {
+        *self = Self::default();
+    }
+
+    /// The dragged box as `(min_x, min_y, max_x, max_y)`.
+    pub fn world_rect(&self) -> Option<(f64, f64, f64, f64)> {
+        let ((ax, ay), (bx, by)) = self.drag?;
+        Some((ax.min(bx), ay.min(by), ax.max(bx), ay.max(by)))
+    }
+}
 /// Convert normalized raw wheel/trackpad points into a continuous zoom.
 ///
 /// Egui deliberately replays discrete wheel notches through its smoothed
@@ -38,12 +90,15 @@ pub fn primary_pan_gesture_active(ui: &Ui, response: &Response) -> bool {
         || (space && (primary_owned || response.clicked_by(egui::PointerButton::Primary)))
 }
 
+/// Wheel, pinch and drag navigation. `min_zoom` is this frame's
+/// [`zoom_floor`].
 pub fn handle_viewport_navigation(
     ui: &Ui,
     response: &Response,
     available: Rect,
     zoom: &mut f64,
     pan: &mut (f64, f64),
+    min_zoom: f64,
 ) {
     // Middle-button pan follows the raw pointer delta from the very first
     // event: egui's click-vs-drag threshold would swallow the first few
@@ -65,7 +120,14 @@ pub fn handle_viewport_navigation(
         apply_pan_delta(pan, touch.translation_delta);
         if (touch.zoom_delta - 1.0).abs() > f32::EPSILON {
             let focus = response.hover_pos().unwrap_or(touch.start_pos);
-            apply_zoom_about(zoom, pan, available, focus, touch.zoom_delta as f64);
+            apply_zoom_about(
+                zoom,
+                pan,
+                available,
+                focus,
+                touch.zoom_delta as f64,
+                min_zoom,
+            );
         }
     }
 
@@ -86,6 +148,7 @@ pub fn handle_viewport_navigation(
                 available,
                 cursor_pos,
                 wheel_zoom_factor(scroll.y),
+                min_zoom,
             );
         }
     }
@@ -138,26 +201,69 @@ fn apply_pan_delta(pan: &mut (f64, f64), delta: Vec2) {
     pan.1 += delta.y as f64;
 }
 
-fn apply_zoom_about(
+/// Scale the zoom by `zoom_factor`, keeping the world point under
+/// `focus_pos` where it is on screen.
+pub fn apply_zoom_about(
     zoom: &mut f64,
     pan: &mut (f64, f64),
     available: Rect,
     focus_pos: Pos2,
     zoom_factor: f64,
+    min_zoom: f64,
 ) {
     if !zoom_factor.is_finite() || zoom_factor <= 0.0 {
         return;
     }
+    let target = *zoom * zoom_factor;
+    let focus = (
+        f64::from(focus_pos.x) - f64::from(available.min.x),
+        f64::from(focus_pos.y) - f64::from(available.min.y),
+    );
+    zoom_to_about(zoom, pan, focus, target, min_zoom);
+}
 
+/// Carry out a [`ZoomRequest::By`] or [`ZoomRequest::To`] about the middle of
+/// a canvas `canvas_size` pixels across. A [`ZoomRequest::Frame`] needs the
+/// fit policy the caller owns and is left to it.
+pub fn apply_zoom_request(
+    zoom: &mut f64,
+    pan: &mut (f64, f64),
+    canvas_size: (f64, f64),
+    request: ZoomRequest,
+    min_zoom: f64,
+) {
+    let target = match request {
+        ZoomRequest::By(factor) if factor.is_finite() && factor > 0.0 => *zoom * factor,
+        ZoomRequest::To(target) if target.is_finite() && target > 0.0 => target,
+        ZoomRequest::By(_) | ZoomRequest::To(_) | ZoomRequest::Frame(_) => return,
+    };
+    let middle = (canvas_size.0 * 0.5, canvas_size.1 * 0.5);
+    zoom_to_about(zoom, pan, middle, target, min_zoom);
+}
+
+/// Set the zoom to `target`, clamped to the range, keeping the world point
+/// at `focus` (canvas pixels from its top-left corner) where it is.
+fn zoom_to_about(
+    zoom: &mut f64,
+    pan: &mut (f64, f64),
+    focus: (f64, f64),
+    target: f64,
+    min_zoom: f64,
+) {
+    let floor = if min_zoom.is_finite() && min_zoom > 0.0 {
+        min_zoom.min(SCHEMATIC_ZOOM_MAX)
+    } else {
+        SCHEMATIC_ZOOM_MIN
+    };
     let old_zoom = *zoom;
-    let new_zoom = (old_zoom * zoom_factor).clamp(SCHEMATIC_ZOOM_MIN, SCHEMATIC_ZOOM_MAX);
+    let new_zoom = target.clamp(floor, SCHEMATIC_ZOOM_MAX);
 
-    let focus_schematic_x = (focus_pos.x as f64 - available.min.x as f64 - pan.0) / old_zoom;
-    let focus_schematic_y = (focus_pos.y as f64 - available.min.y as f64 - pan.1) / old_zoom;
+    let focus_schematic_x = (focus.0 - pan.0) / old_zoom;
+    let focus_schematic_y = (focus.1 - pan.1) / old_zoom;
 
     *zoom = new_zoom;
-    pan.0 = focus_pos.x as f64 - available.min.x as f64 - focus_schematic_x * new_zoom;
-    pan.1 = focus_pos.y as f64 - available.min.y as f64 - focus_schematic_y * new_zoom;
+    pan.0 = focus.0 - focus_schematic_x * new_zoom;
+    pan.1 = focus.1 - focus_schematic_y * new_zoom;
 }
 
 #[cfg(test)]
@@ -184,7 +290,14 @@ mod tests {
             (focus.x as f64 - available.min.x as f64 - pan.0) / zoom,
             (focus.y as f64 - available.min.y as f64 - pan.1) / zoom,
         );
-        apply_zoom_about(&mut zoom, &mut pan, available, focus, 1.5);
+        apply_zoom_about(
+            &mut zoom,
+            &mut pan,
+            available,
+            focus,
+            1.5,
+            SCHEMATIC_ZOOM_MIN,
+        );
         let after = (
             (focus.x as f64 - available.min.x as f64 - pan.0) / zoom,
             (focus.y as f64 - available.min.y as f64 - pan.1) / zoom,
@@ -245,10 +358,41 @@ mod tests {
         let mut pan = (0.0, 0.0);
         let mut zoom = 1.0;
 
-        apply_zoom_about(&mut zoom, &mut pan, available, focus, 100.0);
+        apply_zoom_about(&mut zoom, &mut pan, available, focus, 100.0, 0.25);
         assert_eq!(zoom, SCHEMATIC_ZOOM_MAX);
 
-        apply_zoom_about(&mut zoom, &mut pan, available, focus, 0.001);
+        apply_zoom_about(&mut zoom, &mut pan, available, focus, 0.001, 0.25);
         assert_eq!(zoom, SCHEMATIC_ZOOM_MIN);
+    }
+
+    /// A sheet too large for the canvas at 25 % lowers the floor to the zoom
+    /// that fits it; a sheet that fits leaves the floor at 25 %.
+    #[test]
+    fn the_zoom_floor_is_the_lower_of_a_quarter_and_the_sheet_fit() {
+        assert_eq!(zoom_floor(0.1), 0.1);
+        assert_eq!(zoom_floor(0.6), SCHEMATIC_ZOOM_MIN);
+        assert_eq!(zoom_floor(f64::NAN), SCHEMATIC_ZOOM_MIN);
+
+        let available = Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 300.0));
+        let mut pan = (0.0, 0.0);
+        let mut zoom = 0.25;
+        apply_zoom_about(&mut zoom, &mut pan, available, available.center(), 0.001, 0.1);
+        assert_eq!(zoom, 0.1);
+    }
+
+    /// A command's zoom pivots on the middle of the canvas.
+    #[test]
+    fn a_zoom_request_keeps_the_middle_of_the_canvas_in_place() {
+        let world_at_centre =
+            |zoom: f64, pan: (f64, f64)| ((200.0 - pan.0) / zoom, (150.0 - pan.1) / zoom);
+        let mut zoom = 0.5;
+        let mut pan = (-800.0, 40.0);
+        let before = world_at_centre(zoom, pan);
+        for request in [ZoomRequest::By(1.2), ZoomRequest::To(1.0), ZoomRequest::By(0.5)] {
+            apply_zoom_request(&mut zoom, &mut pan, (400.0, 300.0), request, 0.25);
+            let after = world_at_centre(zoom, pan);
+            assert!((after.0 - before.0).abs() < 1e-9 && (after.1 - before.1).abs() < 1e-9);
+        }
+        assert_eq!(zoom, 0.5);
     }
 }

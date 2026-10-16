@@ -56,6 +56,7 @@ fn execute_action(app: &mut RSpiceApp, request: MobileCanvasRequest) {
 mod tests {
     use super::*;
     use crate::workbench::state::Workspace;
+    use rspice_schematic_editor::view::navigation::ZoomRequest;
 
     fn execute_current(app: &mut RSpiceApp, action: MobileCanvasAction) {
         let request = MobileCanvasRequest {
@@ -84,13 +85,12 @@ mod tests {
                 _ => unreachable!(),
             }
             execute_action(&mut app, request);
-            let expected_zoom = if matches!(change, "none" | "read-only") {
-                1.2
-            } else {
-                1.0
-            };
+            // The canvas carries the zoom out on its next frame, about its
+            // middle (audit E-1); what the route decides is whether to ask.
+            let expected_request = matches!(change, "none" | "read-only")
+                .then_some(ZoomRequest::By(1.2));
             assert_eq!(
-                app.state.schematic.session.editor.zoom, expected_zoom,
+                app.state.schematic.session.editor.zoom_request, expected_request,
                 "{change}"
             );
         }
@@ -110,10 +110,17 @@ mod tests {
         // so it steps by COMMAND_ZOOM_FACTOR (1.2) rather than a rate of its
         // own. Asserting the shared factor is the point: a mobile-only zoom
         // step would mean the same command zoomed differently by input device.
+        // The canvas carries the step out on its next frame (audit E-1).
         execute_current(&mut app, MobileCanvasAction::ZoomOut);
-        assert!((app.state.schematic.session.editor.zoom - (1.0 / 1.2)).abs() < f64::EPSILON);
+        assert_eq!(
+            app.state.schematic.session.editor.zoom_request.take(),
+            Some(ZoomRequest::By(1.2_f64.recip()))
+        );
         execute_current(&mut app, MobileCanvasAction::ZoomIn);
-        assert!((app.state.schematic.session.editor.zoom - 1.0).abs() < f64::EPSILON);
+        assert_eq!(
+            app.state.schematic.session.editor.zoom_request.take(),
+            Some(ZoomRequest::By(1.2))
+        );
 
         // ZoomFit frames the drawing sheet; FitSchematicContent frames the
         // content. The touch route must not collapse that distinction, so

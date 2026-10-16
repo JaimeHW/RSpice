@@ -35,12 +35,14 @@ const MENU_TYPEAHEAD_ID: &str = "workbench.title_menu.typeahead";
 /// Named rather than written inline so the menu's rows are a value a test can
 /// look at: `VisibilityOptions` was drawn once inside the loop and once again
 /// straight after it, which no reader of a `for` body would see.
-const VIEW_VIEWPORT_COMMANDS: [Command; 9] = [
+const VIEW_VIEWPORT_COMMANDS: [Command; 11] = [
     Command::ZoomIn,
     Command::ZoomOut,
     Command::ZoomFit,
     Command::FitSchematicContent,
     Command::ZoomOneToOne,
+    Command::ZoomToSelection,
+    Command::ZoomBox,
     Command::CycleGrid,
     Command::GridSnapRouting,
     Command::DrawingSheetLayers,
