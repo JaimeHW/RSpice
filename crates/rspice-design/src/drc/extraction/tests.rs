@@ -1190,13 +1190,27 @@ fn sources_across_one_pair_of_globals_in_two_occurrences_are_a_loop() {
         loops[0].message
     );
     // Ground is the reference both sources hold the global against, so the
-    // loop is stated at the global.
+    // loop is stated at the global. Nothing in the top draws either source,
+    // so it is stated inside the first occurrence, where it can be changed.
     assert!(
         loops[0]
             .message
             .starts_with("Global node 'vdd!' and ground are joined by 2 voltage sources"),
         "{}",
         loops[0].message
+    );
+    let DrcLocation::InsideInstance { path, view, inner } = &loops[0].location else {
+        panic!("stated inside an occurrence: {:?}", loops[0].location);
+    };
+    assert_eq!(
+        (path.to_string(), view.key()),
+        ("/X1".to_owned(), "work/supply/schematic".to_owned())
+    );
+    assert_eq!(
+        **inner,
+        DrcLocation::Node {
+            net_name: "vdd!".to_owned()
+        }
     );
     // Within the cell the global is touched once, and that is not floating.
     assert!(of_type(&result, DrcViolationType::FloatingNode).is_empty());
@@ -1208,6 +1222,21 @@ fn sources_across_one_pair_of_globals_in_two_occurrences_are_a_loop() {
     let result = run_check_with_hierarchy(&placed_once, &hierarchy, DrcConfig::default());
     assert!(
         of_type(&result, DrcViolationType::SourceToSource).is_empty(),
+        "{:?}",
+        result.violations()
+    );
+
+    // With one of the two sources drawn in the top, the loop is the top's
+    // own to break, and it is stated there.
+    let mut beside = labelled(vec![(
+        part(2, ComponentType::VoltageSource, "V2"),
+        vec![("+", "vdd!"), ("-", "0")],
+    )]);
+    beside.components.push(instance(1, "X1", "supply"));
+    let result = run_check_with_hierarchy(&beside, &hierarchy, DrcConfig::default());
+    assert_eq!(
+        placed(&result, DrcViolationType::SourceToSource),
+        vec![("/".to_owned(), None)],
         "{:?}",
         result.violations()
     );

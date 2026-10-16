@@ -24,7 +24,7 @@ use rspice_design_model::cell_view::CellViewRef;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 mod walk;
-use walk::{InstanceGraph, MAX_REPORTED_OCCURRENCE_PATHS, Occurrences, SUBJECT};
+use walk::{InstanceGraph, MAX_REPORTED_OCCURRENCE_PATHS, Occurrences, ReachedView, SUBJECT};
 
 /// How much of the instantiated hierarchy one check states.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -310,7 +310,7 @@ fn check_subject(
                 }
             }
         }
-        for mut finding in drives.findings(&occurrences) {
+        for mut finding in drives.findings(&occurrences, &graph.views) {
             if let Some(severity) = config.severity_overrides.get(&finding.violation_type) {
                 finding.severity = *severity;
             }
@@ -979,7 +979,11 @@ impl GlobalDrives {
     ///
     /// Drivers that all sit in one occurrence of one cellview are that
     /// cellview's own rules' business, and are stated there.
-    fn findings(&self, occurrences: &[Occurrences]) -> Vec<DrcViolation> {
+    fn findings(
+        &self,
+        occurrences: &[Occurrences],
+        views: &[ReachedView<'_>],
+    ) -> Vec<DrcViolation> {
         let mut findings = Vec::new();
         for ((first, second), driven) in &self.sources {
             let Some((total, listed)) = conflict(&driven.drivers, occurrences) else {
@@ -1001,9 +1005,7 @@ impl GlobalDrives {
                         "{across} are joined by {total} voltage sources across the hierarchy: {}",
                         listed.join(", ")
                     ),
-                    DrcLocation::Node {
-                        net_name: driven.nodes[0].clone(),
-                    },
+                    driven.location(occurrences, views),
                 )
                 .with_related(listed),
             );
@@ -1022,14 +1024,39 @@ impl GlobalDrives {
                         driven.nodes[0],
                         listed.join(", ")
                     ),
-                    DrcLocation::Node {
-                        net_name: driven.nodes[0].clone(),
-                    },
+                    driven.location(occurrences, views),
                 )
                 .with_related(listed),
             );
         }
         findings
+    }
+}
+
+impl GlobalDriven {
+    /// Where a conflict on this node is stated.
+    ///
+    /// Where the subject draws one of the drivers, the node is the subject's
+    /// own, and that driver is something the subject can change. Where every
+    /// driver is drawn below it, there is nothing in the subject's drawing to
+    /// rewire: the conflict is stated inside the first driver's occurrence,
+    /// which is where a reader goes to resolve it.
+    fn location(&self, occurrences: &[Occurrences], views: &[ReachedView<'_>]) -> DrcLocation {
+        let node = DrcLocation::Node {
+            net_name: self.nodes[0].clone(),
+        };
+        let first = &self.drivers[0];
+        if self.drivers.iter().any(|driver| driver.view == SUBJECT) {
+            return node;
+        }
+        let Some(reference) = views[first.view].reference.clone() else {
+            return node;
+        };
+        DrcLocation::InsideInstance {
+            path: occurrences[first.view].paths[0].clone(),
+            view: reference,
+            inner: Box::new(node),
+        }
     }
 }
 
