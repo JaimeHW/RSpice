@@ -649,7 +649,8 @@ fn code_pane(
         t.color.text_dim,
     );
     let toolbar_content_right = toolbar.right() - EDITOR_SCROLLBAR_INSET;
-    let status_mark_x = toolbar_content_right - status_galley.size().x - 17.0;
+    let status_mark_x =
+        toolbar_content_right - status_galley.size().x - crate::ui::widgets::PROBLEM_MARK_ADVANCE;
     if live {
         ui.painter().circle_filled(
             egui::pos2(status_mark_x, toolbar.center().y),

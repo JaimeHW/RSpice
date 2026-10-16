@@ -280,14 +280,19 @@ pub(super) fn recovery_row(
                     theme::sans(tokens::FS_2, FontWeight::Regular),
                     t.color.text_dim,
                 );
-                let mark_advance = if problem.is_some() { 17.0 } else { 0.0 };
+                use crate::ui::widgets::{PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE};
+                let mark_advance = if problem.is_some() {
+                    PROBLEM_MARK_ADVANCE
+                } else {
+                    0.0
+                };
                 let left = cell.center().x - (mark_advance + galley.size().x) * 0.5;
                 if let Some(problem) = problem {
                     paint_problem_mark(
                         ui.painter(),
                         egui::Rect::from_center_size(
-                            egui::pos2(left + 5.5, cell.center().y),
-                            Vec2::splat(11.0),
+                            egui::pos2(left + PROBLEM_MARK_SIDE * 0.5, cell.center().y),
+                            Vec2::splat(PROBLEM_MARK_SIDE),
                         ),
                         problem,
                     );
