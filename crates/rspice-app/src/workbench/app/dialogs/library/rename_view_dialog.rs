@@ -7,7 +7,7 @@
 
 use super::shared::{LIBRARY_CATALOG_STALE_MESSAGE, validate_lcv_name};
 use super::{Context, RSpiceApp};
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, input_row, kv_row};
@@ -121,10 +121,14 @@ impl RSpiceApp {
             let name = self.state.dialogs.rename_view_name.trim().to_owned();
             match self.state.commit_rename_view_dialog() {
                 Ok(Some(remapped)) => {
-                    self.state.push_user_message(ConsoleMessage::info(format!(
-                        "Renamed view '{current}' to '{name}' — {remapped} instance \
-                         references remapped"
-                    )));
+                    self.state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        format!(
+                            "Renamed view '{current}' to '{name}'; {remapped} instance \
+                             references now name it."
+                        ),
+                    );
                     self.state.dialogs.rename_view_error = None;
                     should_close = true;
                 }

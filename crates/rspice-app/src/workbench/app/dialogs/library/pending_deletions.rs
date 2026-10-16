@@ -8,7 +8,7 @@
 
 use egui::Context;
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{CellViewRef, ProjectSourceOwner};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -272,7 +272,7 @@ impl RSpiceApp {
                 match prepare_design_management_removal(&self.state, &lib_name, &cell_name, None) {
                     Ok(removal) => removal,
                     Err(error) => {
-                        self.state.push_user_message(ConsoleMessage::error(error));
+                        self.state.prompt(error);
                         return;
                     }
                 };
@@ -284,7 +284,7 @@ impl RSpiceApp {
             ) {
                 Ok(prepared) => prepared,
                 Err(error) => {
-                    self.state.push_user_message(ConsoleMessage::error(error));
+                    self.state.prompt(error);
                     return;
                 }
             };
@@ -308,10 +308,11 @@ impl RSpiceApp {
                     // the reader gave about the placements is the one step
                     // that has to survive the deletion it was given for.
                     apply_instance_resolution(&mut self.state, &target, resolution);
-                    self.state.push_user_message(ConsoleMessage::info(format!(
-                        "Deleted cell '{}' from library '{}'",
-                        cell_name, lib_name
-                    )));
+                    self.state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        format!("Deleted cell '{cell_name}' from library '{lib_name}'."),
+                    );
                 }
             }
             if deleted && lib_name == VERILOGA_LIBRARY_NAME {
@@ -336,7 +337,7 @@ impl RSpiceApp {
             ) {
                 Ok(removal) => removal,
                 Err(error) => {
-                    self.state.push_user_message(ConsoleMessage::error(error));
+                    self.state.prompt(error);
                     return;
                 }
             };
@@ -349,7 +350,7 @@ impl RSpiceApp {
             ) {
                 Ok(prepared) => prepared,
                 Err(error) => {
-                    self.state.push_user_message(ConsoleMessage::error(error));
+                    self.state.prompt(error);
                     return;
                 }
             };
@@ -371,10 +372,11 @@ impl RSpiceApp {
                     self.state
                         .publish_project_library_mutation(project_mutation);
                     apply_instance_resolution(&mut self.state, &target, resolution);
-                    self.state.push_user_message(ConsoleMessage::info(format!(
-                        "Deleted view '{}' from cell '{}'",
-                        view_name, cell_name
-                    )));
+                    self.state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        format!("Deleted view '{view_name}' from cell '{cell_name}'."),
+                    );
                 }
             }
             if deleted && lib_name == VERILOGA_LIBRARY_NAME {
@@ -449,7 +451,7 @@ fn staged_resolution(
     match can_delete(state, target, &impact, resolution) {
         Ok(()) => Some(resolution.unwrap_or_default()),
         Err(error) => {
-            state.push_user_message(ConsoleMessage::error(error));
+            state.prompt(error);
             None
         }
     }
@@ -531,11 +533,15 @@ fn apply_instance_resolution(
         format!("remove placements of {}", target.display_path()),
         documents,
     );
-    state.push_user_message(ConsoleMessage::info(format!(
-        "Removed every placement of '{}' from {drawings} {}",
-        target.display_path(),
-        if drawings == 1 { "drawing" } else { "drawings" }
-    )));
+    state.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        format!(
+            "Removed every placement of '{}' from {drawings} {}.",
+            target.display_path(),
+            if drawings == 1 { "drawing" } else { "drawings" }
+        ),
+    );
 }
 
 /// The exact cell view a loaded schematic buffer belongs to.
@@ -1542,10 +1548,10 @@ mod tests {
             app.state.workspace.content.design_management, catalog_before_blocked_delete,
             "blocked deletion must not partially mutate governed design state"
         );
-        assert!(app.state.log_buffer.entries().any(|entry| {
-            entry.message.contains("Cannot delete cell 'work/amp'")
-                && entry
-                    .message
+        assert!(app.state.workbench.prompt.as_ref().is_some_and(|prompt| {
+            prompt.text.contains("Cannot delete cell 'work/amp'")
+                && prompt
+                    .text
                     .contains("Design Management still references it")
         }));
 
@@ -1752,9 +1758,9 @@ mod tests {
             "a placed master is not deleted until the reader has answered for its placements"
         );
         assert!(
-            app.state.log_buffer.entries().any(|entry| {
-                entry.message.contains("1 placement of 'user/amp' is drawn")
-                    && entry.message.contains("Choose what happens to it")
+            app.state.workbench.prompt.as_ref().is_some_and(|prompt| {
+                prompt.text.contains("1 placement of 'user/amp' is drawn")
+                    && prompt.text.contains("Choose what happens to it")
             }),
             "the refusal has to say what is missing"
         );

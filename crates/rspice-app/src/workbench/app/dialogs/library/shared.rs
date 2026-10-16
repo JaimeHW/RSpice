@@ -2,7 +2,7 @@
 //! validation.
 
 use super::{RSpiceApp, save_global_veriloga_library};
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(super) struct DialogActionOutcome {
@@ -30,12 +30,11 @@ impl RSpiceApp {
         if let Err(err) =
             save_global_veriloga_library(&self.state.library_manager, &self.state.workspace)
         {
-            log::warn!("Failed to persist global Verilog-A library: {}", err);
-            self.state
-                .push_user_message(ConsoleMessage::warning(format!(
-                    "Failed to persist Verilog-A library: {}",
-                    err
-                )));
+            self.state.record(
+                LogSeverity::Warning,
+                LogSource::Studio,
+                format!("The Verilog-A library could not be saved: {err}"),
+            );
         }
     }
 }

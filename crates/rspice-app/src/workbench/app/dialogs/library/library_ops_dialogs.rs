@@ -9,7 +9,7 @@
 
 use super::shared::{LIBRARY_CATALOG_STALE_MESSAGE, validate_lcv_name};
 use super::{Context, RSpiceApp};
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, input_row, kv_row};
@@ -192,9 +192,11 @@ impl RSpiceApp {
         if should_create {
             match self.state.commit_new_library_dialog() {
                 Ok(name) => {
-                    self.state.push_user_message(ConsoleMessage::info(format!(
-                        "Created library '{name}'"
-                    )));
+                    self.state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        format!("Created library '{name}'."),
+                    );
                     self.state.dialogs.new_library_error = None;
                     should_close = true;
                 }
@@ -254,10 +256,14 @@ impl RSpiceApp {
             let name = self.state.dialogs.rename_library_name.trim().to_owned();
             match self.state.commit_rename_library_dialog() {
                 Ok(Some(remapped)) => {
-                    self.state.push_user_message(ConsoleMessage::info(format!(
-                        "Renamed library '{current}' to '{name}' — {remapped} instance \
-                         references remapped"
-                    )));
+                    self.state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        format!(
+                            "Renamed library '{current}' to '{name}'; {remapped} instance \
+                             references now name it."
+                        ),
+                    );
                     self.state.dialogs.rename_library_error = None;
                     should_close = true;
                 }
@@ -339,10 +345,14 @@ impl RSpiceApp {
         match choice {
             DialogChoice::Primary => match self.state.commit_delete_library_review() {
                 Ok(cells) => {
-                    self.state.push_user_message(ConsoleMessage::info(format!(
-                        "Deleted library '{library}' and its {cells} cell{}",
-                        if cells == 1 { "" } else { "s" }
-                    )));
+                    self.state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        format!(
+                            "Deleted library '{library}' and its {cells} cell{}.",
+                            if cells == 1 { "" } else { "s" }
+                        ),
+                    );
                     self.state.dialogs.delete_library_error = None;
                     should_close = true;
                 }
