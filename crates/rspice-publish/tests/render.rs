@@ -67,8 +67,8 @@ fn a_figure_bundle_ships_the_faces_its_stylesheet_declares() {
     let styles = utf8(&bundle["assets/page.css"]).replace("\r\n", "\n");
     assert!(styles.contains("font-family: \"RSpice Plex Mono\";"));
     for (file, weight) in [
-        ("IBMPlexMono-Regular.ttf", 400),
-        ("IBMPlexMono-Medium.ttf", 500),
+        ("ibm-plex-mono-regular.ttf", 400),
+        ("ibm-plex-mono-medium.ttf", 500),
     ] {
         // The stylesheet names each cut relative to itself, at the weight
         // the face records, so a 500 line can never resolve to the 400 cut.
@@ -85,13 +85,77 @@ fn a_figure_bundle_ships_the_faces_its_stylesheet_declares() {
         );
     }
     assert!(
-        bundle.contains_key("assets/fonts/OFL-IBMPlex.txt"),
+        bundle.contains_key("assets/fonts/ofl-ibm-plex.txt"),
         "the faces travel with their licence"
     );
     assert!(
         utf8(&bundle["index.html"]).contains("font-family=\"'RSpice Plex Mono', "),
         "the figures letter in the face the page ships"
     );
+}
+
+/// The file types RSpice Cloud's render worker serves from a bundle (its
+/// `BUNDLE_CONTENT_TYPES`). Any other file dead-letters the whole
+/// publication, so a new kind of bundle file is admitted there first.
+const CLOUD_SERVED_EXTENSIONS: [&str; 11] = [
+    "html", "cir", "css", "csv", "json", "js", "png", "svg", "wasm", "ttf", "txt",
+];
+
+#[test]
+fn every_bundle_path_is_one_the_cloud_render_worker_accepts() {
+    for golden in [RC_LOWPASS, MULTI_ANALYSIS] {
+        let bundle =
+            render_bundle(&snapshot(golden), "0".repeat(64).as_str(), &viewer()).expect("render");
+        for path in bundle.keys() {
+            // The worker's canonical path grammar: lowercase ASCII letters,
+            // digits, `.`, `_`, `-` and `/`, opening on a letter or digit,
+            // with no empty or dot segment and at most four directories deep.
+            let canonical = path.len() <= 255
+                && path.starts_with(|first: char| {
+                    first.is_ascii_lowercase() || first.is_ascii_digit()
+                })
+                && path.bytes().all(|byte| {
+                    byte.is_ascii_lowercase()
+                        || byte.is_ascii_digit()
+                        || matches!(byte, b'.' | b'_' | b'/' | b'-')
+                })
+                && path
+                    .split('/')
+                    .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
+                && path.matches('/').count() <= 4;
+            assert!(canonical, "{path} breaks the cloud bundle path grammar");
+            let extension = path.rsplit_once('.').map(|(_, extension)| extension);
+            assert!(
+                extension.is_some_and(|extension| CLOUD_SERVED_EXTENSIONS.contains(&extension)),
+                "{path} is a file type the cloud does not serve"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_stylesheet_colours_every_paint_class_a_figure_can_carry() {
+    let bundle =
+        render_bundle(&snapshot(RC_LOWPASS), "0".repeat(64).as_str(), &viewer()).expect("render");
+    let styles = utf8(&bundle["assets/page.css"]);
+    let traces = (0..8).map(|index| format!("trace-{index}"));
+    let named = [
+        "foreground",
+        "secondary",
+        "grid",
+        "accent",
+        "warning",
+        "success",
+    ];
+    let roles = named.map(str::to_owned).into_iter().chain(traces);
+    for role in roles {
+        // The root draws with `fill="none"`, so a class the page leaves
+        // unstyled is invisible rather than black.
+        for (prefix, property) in [("s", "stroke"), ("f", "fill"), ("t", "fill")] {
+            let rule = format!("svg .{prefix}-{role} {{ {property}: var(--{role}); }}");
+            assert!(styles.contains(&rule), "page.css must carry `{rule}`");
+        }
+    }
 }
 
 #[test]

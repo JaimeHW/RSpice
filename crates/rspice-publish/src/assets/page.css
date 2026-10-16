@@ -6,14 +6,14 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("fonts/IBMPlexMono-Regular.ttf") format("truetype");
+  src: url("fonts/ibm-plex-mono-regular.ttf") format("truetype");
 }
 @font-face {
   font-family: "RSpice Plex Mono";
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url("fonts/IBMPlexMono-Medium.ttf") format("truetype");
+  src: url("fonts/ibm-plex-mono-medium.ttf") format("truetype");
 }
 
 :root {
@@ -305,6 +305,7 @@ svg .s-trace-0 { stroke: var(--trace-0); } svg .s-trace-1 { stroke: var(--trace-
 svg .f-foreground { fill: var(--foreground); } svg .f-secondary { fill: var(--secondary); } svg .f-grid { fill: var(--grid); } svg .f-accent { fill: var(--accent); } svg .f-warning { fill: var(--warning); } svg .f-success { fill: var(--success); }
 svg .f-trace-0 { fill: var(--trace-0); } svg .f-trace-1 { fill: var(--trace-1); } svg .f-trace-2 { fill: var(--trace-2); } svg .f-trace-3 { fill: var(--trace-3); } svg .f-trace-4 { fill: var(--trace-4); } svg .f-trace-5 { fill: var(--trace-5); } svg .f-trace-6 { fill: var(--trace-6); } svg .f-trace-7 { fill: var(--trace-7); }
 svg .t-foreground { fill: var(--foreground); } svg .t-secondary { fill: var(--secondary); } svg .t-grid { fill: var(--grid); } svg .t-accent { fill: var(--accent); } svg .t-warning { fill: var(--warning); } svg .t-success { fill: var(--success); }
+svg .t-trace-0 { fill: var(--trace-0); } svg .t-trace-1 { fill: var(--trace-1); } svg .t-trace-2 { fill: var(--trace-2); } svg .t-trace-3 { fill: var(--trace-3); } svg .t-trace-4 { fill: var(--trace-4); } svg .t-trace-5 { fill: var(--trace-5); } svg .t-trace-6 { fill: var(--trace-6); } svg .t-trace-7 { fill: var(--trace-7); }
 
 @media (max-width: 900px) {
   .publication-header { grid-template-columns: 1fr; grid-template-areas: "title" "description" "byline"; gap: 0; }

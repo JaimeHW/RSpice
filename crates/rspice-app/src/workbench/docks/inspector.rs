@@ -2316,8 +2316,11 @@ fn diagnostic_tone(
         crate::workbench::documents::netlist_document::DiagnosticSeverity::Hint => {
             tokens.color.text_dim
         }
+        // An informational diagnostic is not a problem, so it is not news:
+        // it reads as the hint beside it does. Warning and error keep their
+        // tones because those are the two the reader must act on.
         crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => {
-            tokens.color.info
+            tokens.color.text_dim
         }
         crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning => {
             tokens.color.warn

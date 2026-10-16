@@ -243,31 +243,115 @@ function safeFilename(value) {
   return normalized || "rspice-figure";
 }
 
-function exportSvg(figure) {
+const PAINT_ROLES = ["foreground", "secondary", "grid", "accent", "warning", "success"];
+for (let index = 0; index < 8; index += 1) PAINT_ROLES.push(`trace-${index}`);
+const PAINT_CLASS = /^([sft])-(.+)$/;
+
+function pageRules() {
+  const sheet = document.querySelector('link[rel="stylesheet"][href$="page.css"]')?.sheet;
+  try { return { href: sheet.href, rules: Array.from(sheet.cssRules) }; }
+  catch { return { href: location.href, rules: [] }; }
+}
+
+// A downloaded figure is a document, so it takes the light palette the page
+// opens in whatever theme the reader chose: light ink on a transparent ground
+// would vanish on paper.
+function exportPalette(rules) {
+  const light = rules.find((rule) => rule.selectorText === ":root")?.style;
+  const current = getComputedStyle(root);
+  return new Map(PAINT_ROLES.map((role) => {
+    const name = `--${role}`;
+    return [role, light?.getPropertyValue(name).trim() || current.getPropertyValue(name).trim()];
+  }));
+}
+
+function dataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+// The page's faces that the figure letters in, inlined so the file keeps its
+// lettering and weights on a machine without them. A face that cannot be read
+// is left out and its text falls back along the family list.
+async function embeddedFaces(stylesheet, clone) {
+  const texts = Array.from(clone.querySelectorAll("text"));
+  const faces = [];
+  for (const rule of stylesheet.rules) {
+    if (!(rule instanceof CSSFontFaceRule)) continue;
+    const family = rule.style.getPropertyValue("font-family").replace(/^["']|["']$/g, "");
+    const weight = rule.style.getPropertyValue("font-weight") || "400";
+    const used = texts.some((text) => (text.getAttribute("font-family") || "").startsWith(`'${family}'`)
+      && (text.getAttribute("font-weight") || "400") === weight);
+    const src = rule.style.getPropertyValue("src");
+    const path = /url\(\s*(["']?)(.*?)\1\s*\)/.exec(src)?.[2];
+    if (!used || !path) continue;
+    try {
+      const response = await fetch(new URL(path, stylesheet.href));
+      if (!response.ok) continue;
+      const format = /format\([^)]*\)/.exec(src)?.[0] || "";
+      faces.push(`@font-face{font-family:"${family}";font-weight:${weight};src:url("${await dataUrl(await response.blob())}") ${format}}`);
+    } catch {}
+  }
+  return faces.join("");
+}
+
+// The file is the static figure as published: paint resolved to plain
+// presentation attributes, which every SVG reader honours where many ignore
+// CSS variables, and none of the page's interaction state.
+async function exportSvg(figure) {
   const source = figure.querySelector("svg");
   if (!source) return false;
   const clone = source.cloneNode(true);
-  const roles = ["foreground", "secondary", "grid", "accent", "warning", "success"];
-  for (let index = 0; index < 8; index += 1) roles.push(`trace-${index}`);
-  const computed = getComputedStyle(root);
-  const variables = roles.map((role) => `--${role}:${computed.getPropertyValue(`--${role}`).trim()}`).join(";");
-  const rules = roles.map((role) => `.s-${role}{stroke:var(--${role})}.f-${role},.t-${role}{fill:var(--${role})}`).join("");
-  const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
-  style.textContent = `:root{${variables}}${rules}`;
-  clone.prepend(style);
+  // The loader hides the static figure while the interactive view is open.
+  clone.removeAttribute("style");
+  const stylesheet = pageRules();
+  const palette = exportPalette(stylesheet.rules);
+  for (const element of clone.querySelectorAll("[class]")) {
+    const kept = [];
+    for (const name of element.classList) {
+      const paint = PAINT_CLASS.exec(name);
+      const colour = paint && palette.get(paint[2]);
+      if (colour) element.setAttribute(paint[1] === "s" ? "stroke" : "fill", colour);
+      else if (name !== "is-selected") kept.push(name);
+    }
+    if (kept.length) element.setAttribute("class", kept.join(" "));
+    else element.removeAttribute("class");
+  }
+  for (const tag of clone.querySelectorAll("[tabindex]")) {
+    for (const name of ["tabindex", "role", "aria-label"]) tag.removeAttribute(name);
+  }
+  const faces = await embeddedFaces(stylesheet, clone);
+  if (faces) {
+    const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
+    style.textContent = faces;
+    clone.prepend(style);
+  }
   const bytes = new Blob([new XMLSerializer().serializeToString(clone)], { type: "image/svg+xml" });
   const url = URL.createObjectURL(bytes);
   const link = document.createElement("a");
   link.href = url;
   link.download = `${safeFilename(figure.querySelector("figcaption")?.textContent || "rspice-figure")}.svg`;
   link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  // Safari and Firefox read the blob after click() returns, so revoking it
+  // at once can cancel the download.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
   return true;
 }
 
 for (const button of document.querySelectorAll("[data-figure-svg]")) {
   const figure = button.closest("figure");
-  button.addEventListener("click", () => {
-    if (!figure || !exportSvg(figure)) announce("The static SVG is unavailable");
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      if (!figure || !(await exportSvg(figure))) announce("The static SVG is unavailable");
+    } catch {
+      announce("The static SVG is unavailable");
+    } finally {
+      button.disabled = false;
+    }
   });
 }

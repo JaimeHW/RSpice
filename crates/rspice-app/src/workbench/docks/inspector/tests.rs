@@ -918,15 +918,22 @@ fn the_result_inspector_routes_through_the_workspace_memos() {
 /// carve-out is gone and the surface that paints it is in the list.
 #[test]
 fn the_design_and_veriloga_inspectors_paint_no_status_color() {
+    // The token path, not one binding's spelling of it. These were
+    // `t.color.ok` and `t.color.info`, which let `tokens.color.info` through
+    // in `inspector.rs` — the file this scan is named after and did not read.
     const BANNED: &[&str] = &[
         "colored_label",
         "status_dot(",
         "StatusMark::Success",
         "StatusMark::Neutral",
-        "t.color.ok",
-        "t.color.info",
+        ".color.ok",
+        ".color.info",
     ];
     let files = [
+        (
+            "inspector.rs",
+            crate::source_guard::without_test_items(include_str!("../inspector.rs")),
+        ),
         (
             "design.rs",
             crate::source_guard::without_test_items(include_str!("design.rs")),
