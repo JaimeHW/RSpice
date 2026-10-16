@@ -20,9 +20,12 @@ use rspice_results_ui::selection::SelectedResultTrace;
 enum SchematicCrossProbeTarget {
     Component {
         component_id: u64,
-        /// The element the deck writes for it, which is the name its trace
-        /// and its source line carry.
+        /// The element the deck writes for it, which is the name its source
+        /// line carries.
         written_element: String,
+        /// The name the engine knows that element by, which is the name its
+        /// trace carries.
+        engine_element: String,
     },
     Net {
         name: String,
@@ -194,6 +197,7 @@ fn selected_target(state: &AppState) -> Option<SchematicCrossProbeTarget> {
         return Some(SchematicCrossProbeTarget::Component {
             component_id,
             written_element: component.written_element_name(),
+            engine_element: component.engine_element_name(),
         });
     }
 
@@ -368,11 +372,11 @@ fn compatible_result_trace(
     // drawing shows.
     let occurrence = state.workspace.content.occurrence_path();
     let signal = match target {
-        SchematicCrossProbeTarget::Component {
-            written_element, ..
-        } => crate::state::OccurrenceProbeSpelling::for_leaf(&occurrence, 'I', written_element)?
-            .engine()
-            .to_owned(),
+        SchematicCrossProbeTarget::Component { engine_element, .. } => {
+            crate::state::OccurrenceProbeSpelling::for_leaf(&occurrence, 'I', engine_element)?
+                .engine()
+                .to_owned()
+        }
         SchematicCrossProbeTarget::Net { name } => {
             let index = crate::state::CrossProbeIndex::from_receipt(
                 receipt,
@@ -443,6 +447,7 @@ fn source_line_for_target(
         SchematicCrossProbeTarget::Component {
             component_id,
             written_element,
+            ..
         } => {
             let identity =
                 GeneratedSourceMapEntry::component_identity_for(&view_identity, *component_id);
@@ -852,6 +857,53 @@ mod tests {
         );
     }
 
+    /// The engine files a memristor under its card's keyword, so its trace is
+    /// `I(YMEMRISTOR!MR1)`; `I(MR1)` would name a MOSFET.
+    #[test]
+    fn a_selected_memristor_selects_the_trace_the_engine_names_it_by() {
+        let mut state = AppState::default();
+        let component_id = state.schematic.add_component(
+            crate::state::ComponentType::Memristor,
+            crate::state::Point::new(20, 20),
+        );
+        let written = state
+            .schematic
+            .document()
+            .components
+            .iter()
+            .find(|component| component.id == component_id)
+            .map(crate::state::Component::written_element_name)
+            .expect("component exists");
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(component_id);
+        install_current_map(&mut state, "OUT");
+        let revision = state.workspace.content.project.revision();
+        let signal = format!("I(YMEMRISTOR!{written})");
+        state
+            .simulation
+            .retained
+            .runs
+            .push(prepared_run(revision, &signal));
+        state.simulation.view.active_run_idx = Some(0);
+
+        synchronize_schematic_cross_probe(&mut state);
+
+        assert_eq!(
+            state
+                .ui
+                .results
+                .session
+                .selected_trace
+                .as_ref()
+                .map(|trace| trace.source_name()),
+            Some(signal.as_str())
+        );
+    }
+
     #[test]
     fn generated_source_mapping_uses_exact_cell_view_and_component_identity() {
         let view = crate::state::CellViewRef::new("user", "top", "schematic");
@@ -892,6 +944,7 @@ mod tests {
                 &SchematicCrossProbeTarget::Component {
                     component_id: 42,
                     written_element: "R2".to_owned(),
+                    engine_element: "R2".to_owned(),
                 },
             ),
             Some(2)

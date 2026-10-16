@@ -1182,15 +1182,16 @@ fn unspellable_occurrence(occurrence: &crate::state::InstancePath) -> String {
 }
 
 /// Commit a current probe on one element at the active occurrence. The reader
-/// is shown the element's drawn name; the engine is asked for the element the
-/// deck writes, which a prefix or a behavioural lowering can rename.
+/// is shown the element's drawn name; the engine is asked for the element by
+/// its own name, which a prefix, a behavioural lowering or a keyword makes
+/// differ from the drawn one.
 fn commit_element_current(
     state: &mut AppState,
     drawn: &str,
-    written: &str,
+    engine: &str,
 ) -> (OccurrenceProbeSpelling, ProbeSignalOutcome) {
     let occurrence = state.workspace.content.occurrence_path();
-    match OccurrenceProbeSpelling::for_element(&occurrence, 'I', drawn, written) {
+    match OccurrenceProbeSpelling::for_element(&occurrence, 'I', drawn, engine) {
         Some(spelling) => {
             let outcome = request_probe_signal(state, &spelling);
             (spelling, outcome)
@@ -1588,8 +1589,8 @@ enum ComponentProbe {
     /// The voltage of the net under an exact pin.
     Voltage(String),
     /// The current of the element itself, shown by the name the drawing
-    /// gives it and asked for by the name the deck writes it under.
-    Current { drawn: String, written: String },
+    /// gives it and asked for by the name the engine knows it by.
+    Current { drawn: String, engine: String },
 }
 
 /// The quantity and the local leaf a click on a component probes, unscoped.
@@ -1638,7 +1639,8 @@ fn component_probe_expression(
     // quantity, including multi-terminal devices whose dialect defines that
     // accessor (for example the drain/reference lead of a MOS device). The
     // engine knows the device by the element the deck writes: a resistor
-    // drawn `C4` is `RC4`, and a limited VCVS drawn `E1` is the `B1` card.
+    // drawn `C4` is `RC4`, a limited VCVS drawn `E1` is the `B1` card, and a
+    // memristor `MR1` is `YMEMRISTOR!MR1`.
     if matches!(
         component.kind,
         ComponentType::Ground
@@ -1653,7 +1655,7 @@ fn component_probe_expression(
 
     Some(ComponentProbe::Current {
         drawn: component.spice_instance_name(),
-        written: component.written_element_name(),
+        engine: component.engine_element_name(),
     })
 }
 
@@ -1798,8 +1800,8 @@ fn handle_component_probe(
                 let display = format!("V({net})");
                 commit_probe_request(state, &net, &display, request_probe_signal)
             }
-            ComponentProbe::Current { drawn, written } => {
-                commit_element_current(state, &drawn, &written)
+            ComponentProbe::Current { drawn, engine } => {
+                commit_element_current(state, &drawn, &engine)
             }
         };
         let retain_marker = !matches!(

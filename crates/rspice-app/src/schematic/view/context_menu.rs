@@ -1088,8 +1088,8 @@ fn open_operating_point(state: &mut AppState) {
     state.workbench.activate(Workspace::Results);
 }
 
-/// The clicked instance's exact deck name, when exactly one is selected: the
-/// element the deck writes for it, inside the occurrence the tab is editing.
+/// The clicked instance's exact engine name, when exactly one is selected: the
+/// element the engine knows it by, inside the occurrence the tab is editing.
 ///
 /// The name comparison downstream is the one
 /// [`crate::workbench::documents::result_document::op_inspector`] uses to walk
@@ -1101,18 +1101,18 @@ fn clicked_instance_name(state: &AppState) -> Option<String> {
         .editor
         .selection
         .single_component()?;
-    let written = state
+    let element = state
         .schematic
         .document()
         .components
         .iter()
         .find(|component| component.id == id)?
-        .written_element_name();
+        .engine_element_name();
     let occurrence = state.workspace.content.occurrence_path();
     if occurrence.is_root() {
-        return Some(written);
+        return Some(element);
     }
-    occurrence.engine_name_for(&written).ok()
+    occurrence.engine_name_for(&element).ok()
 }
 
 /// The run's operating point, preferring one whose device report holds `device`.
