@@ -165,6 +165,7 @@ fn export_to_svg_with_resolved_symbol_entries(
   .bus-tap {{ stroke: {wire_color}; stroke-width: {tap_width}; fill: none; stroke-linecap: round; }}\n\
   .junction {{ fill: {wire_color}; stroke: none; }}\n\
   .component {{ stroke: {comp_color}; stroke-width: {comp_width}; fill: none; }}\n\
+  .symbol-resolution-error {{ stroke: {comp_color}; stroke-width: {comp_width}; fill: none; }}\n\
   .text {{ font-family: monospace; font-size: {font_size}px; fill: {text_color}; }}\n\
   .design-note-anchor {{ fill: {text_color}; stroke: none; }}\n\
   .design-note-requirement-link .text {{ text-decoration: underline; }}\n\
@@ -391,16 +392,27 @@ fn component_export_world_bounds(
     bounds
 }
 
+/// What the placeholder says on the sheet.
+///
+/// The exported drawing is read on its own, so the gap has to be visible in
+/// it — but in the sheet's own words and the sheet's own ink. `Resistor:
+/// missing canonical SVG` named an internal asset, in alarm red, across a
+/// drawing that is otherwise one colour. Which resolution step failed stays
+/// on the group's `data-error`, for whoever is debugging the library.
+fn symbol_resolution_error_label(component: &Component) -> String {
+    format!("{}: no symbol", component.kind.display_name())
+}
+
 fn symbol_resolution_error_world_bounds(
     component: &Component,
     config: &SvgExportConfig,
-    reason: &str,
+    _reason: &str,
 ) -> (f64, f64, f64, f64) {
     const HALF_SIZE: f64 = 12.0;
     const TEXT_HORIZONTAL_PADDING: f64 = 2.0;
     let x = f64::from(component.pos.x);
     let y = f64::from(component.pos.y);
-    let diagnostic = format!("{}: {reason}", component.kind.display_name());
+    let diagnostic = symbol_resolution_error_label(component);
     let grid_size = config.grid_size.max(f64::EPSILON);
     let text_half_width = (estimated_text_width(&diagnostic, config)
         + 2.0 * TEXT_HORIZONTAL_PADDING)
@@ -609,19 +621,23 @@ fn write_symbol_resolution_error(
     let size = half * 2.0;
     let kind = escape_xml(component.kind.display_name());
     let reason = escape_xml(reason);
+    let label = escape_xml(&symbol_resolution_error_label(component));
     writeln!(
         svg,
         "<g class=\"symbol-resolution-error\" data-component-kind=\"{kind}\" data-error=\"{reason}\">"
     )
     .unwrap();
+    // The group's own stroke, which the sheet's stylesheet sets to the ink
+    // the drawing is in: a placeholder is part of the drawing, and an
+    // exported schematic has no second colour to spend on an alarm.
     writeln!(
         svg,
-        "<rect x=\"{x}\" y=\"{y}\" width=\"{size}\" height=\"{size}\" fill=\"none\" stroke=\"#DC4646\"/>"
+        "<rect x=\"{x}\" y=\"{y}\" width=\"{size}\" height=\"{size}\"/>"
     )
     .unwrap();
     writeln!(
         svg,
-        "<path d=\"M {x} {y} L {} {} M {} {y} L {x} {}\" stroke=\"#DC4646\" fill=\"none\"/>",
+        "<path d=\"M {x} {y} L {} {} M {} {y} L {x} {}\"/>",
         x + size,
         y + size,
         x + size,
@@ -630,7 +646,7 @@ fn write_symbol_resolution_error(
     .unwrap();
     writeln!(
         svg,
-        "<text class=\"text\" x=\"{cx}\" y=\"{}\" text-anchor=\"middle\" fill=\"#DC4646\">{kind}: {reason}</text>",
+        "<text class=\"text\" x=\"{cx}\" y=\"{}\" text-anchor=\"middle\">{label}</text>",
         y + size + config.font_size
     )
     .unwrap();
@@ -897,7 +913,10 @@ mod tests {
             &config,
             "missing canonical SVG",
         );
-        let diagnostic = "Behavioral Source: missing canonical SVG";
+        let diagnostic = symbol_resolution_error_label(
+            schematic.document().components.first().expect("component"),
+        );
+        let diagnostic = diagnostic.as_str();
         let svg = export_to_svg(schematic.document(), &config);
         let width = expected.2 - expected.0;
         let height = expected.3 - expected.1;
