@@ -526,10 +526,10 @@ fn diagnostic_problem(severity: DiagnosticSeverity) -> Option<Problem> {
 /// Debounced re-parse: the squiggles, pips, and strip all derive from
 /// this one result.
 fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
-    let revision = state.ui.netlist.revision;
-    if state.ui.netlist.diag_revision == Some(revision) {
+    if state.ui.netlist.diagnostics_are_current() {
         return;
     }
+    let revision = state.ui.netlist.revision;
     let now = ui.input(|input| input.time);
     let settled = now - state.ui.netlist.last_edit_time >= PARSE_DEBOUNCE;
     if !settled && state.ui.netlist.diag_revision.is_some() {
@@ -1688,6 +1688,25 @@ M1 d g s b nch W={w} L={l*2}\n\
             "the override's second line, not the composed deck's sixth: {error:?}",
         );
         assert!(error.is_current());
+    }
+
+    /// Diagnostics are current only for the buffer revision they were parsed
+    /// for: an edit since leaves them describing an older buffer, which a
+    /// clean collection cannot vouch for.
+    #[test]
+    fn diagnostics_are_current_only_for_the_revision_they_were_parsed_for() {
+        let mut state = parameter_override_state(
+            "* generated\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n",
+            "* corner\n.temp 27\n",
+        );
+        let revision = state.ui.netlist.revision;
+        validate_visible_source(&mut state, revision);
+        assert!(state.ui.netlist.diagnostics_are_current());
+        state.ui.netlist.revision += 1;
+        assert!(
+            !state.ui.netlist.diagnostics_are_current(),
+            "an edit since leaves them behind",
+        );
     }
 
     #[test]
