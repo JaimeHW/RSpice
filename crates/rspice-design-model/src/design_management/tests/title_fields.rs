@@ -88,6 +88,46 @@ fn document_type_says_what_kind_of_document_a_sheet_is() {
 }
 
 #[test]
+fn document_status_holds_the_release_state_revision_and_date_used_to() {
+    let field = DrawingSheetTitleFieldId::DocumentStatus;
+    assert!(DrawingSheetTitleFieldId::ALL.contains(&field));
+    assert_eq!(field.display_label(), "Document status");
+    assert_eq!(
+        field.policy().value_authority,
+        DrawingSheetTitleFieldValueAuthority::Automatic
+    );
+    assert!(field.visible_by_default());
+
+    // An unreleased document letters its status in its own field, and the
+    // index and date fields hold nothing rather than a status word.
+    let control = DrawingSheetDocumentControl::default();
+    let authority_values = [
+        (
+            DrawingSheetTitleFieldId::Revision,
+            control.revision_index().to_owned(),
+        ),
+        (
+            DrawingSheetTitleFieldId::Date,
+            control.revision_date_utc.clone(),
+        ),
+        (field, control.status.label().to_owned()),
+    ]
+    .into_iter()
+    .collect();
+    let resolved =
+        resolve_drawing_sheet_title_fields(&SchematicSheetFormat::default(), &authority_values);
+    let value = |id| {
+        resolved
+            .iter()
+            .find(|resolved| resolved.id == id)
+            .map(|resolved| resolved.value.as_str())
+    };
+    assert_eq!(value(field), Some("Draft"));
+    assert_eq!(value(DrawingSheetTitleFieldId::Revision), Some("—"));
+    assert_eq!(value(DrawingSheetTitleFieldId::Date), Some("—"));
+}
+
+#[test]
 fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
     let format = SchematicSheetFormat::default();
     assert_eq!(
@@ -196,6 +236,7 @@ fn an_organization_template_sealed_while_paper_size_was_withdrawn_still_loads() 
     let gained = [
         DrawingSheetTitleFieldId::DocumentType,
         DrawingSheetTitleFieldId::PaperSize,
+        DrawingSheetTitleFieldId::DocumentStatus,
     ];
     let mut expected = DrawingSheetTitleFieldId::ALL
         .into_iter()

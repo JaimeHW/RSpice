@@ -2650,7 +2650,10 @@ fn an_organization_template_sealed_before_a_field_retired_still_loads() {
     );
     // The retired field keeps its place in the seal and nowhere else, and a
     // field the seal predates follows every field it names.
-    let gained = [DrawingSheetTitleFieldId::DocumentType];
+    let gained = [
+        DrawingSheetTitleFieldId::DocumentType,
+        DrawingSheetTitleFieldId::DocumentStatus,
+    ];
     let mut expected = DrawingSheetTitleFieldId::ALL
         .into_iter()
         .filter(|field| !gained.contains(field))

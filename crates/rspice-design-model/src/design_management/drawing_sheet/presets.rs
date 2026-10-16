@@ -621,6 +621,8 @@ impl DrawingSheetReleaseStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DrawingSheetDocumentControl {
+    /// The revision index, such as `B`. Empty until the document is issued
+    /// one; where it stands meanwhile is `status`.
     pub revision: String,
     /// Exact UTC calendar date in `YYYY-MM-DD` form. Empty means the document
     /// has not been dated for review or release.
@@ -634,7 +636,7 @@ pub struct DrawingSheetDocumentControl {
 impl Default for DrawingSheetDocumentControl {
     fn default() -> Self {
         Self {
-            revision: "DRAFT".to_owned(),
+            revision: String::new(),
             revision_date_utc: String::new(),
             status: DrawingSheetReleaseStatus::Draft,
             change_reference: String::new(),
@@ -644,7 +646,7 @@ impl Default for DrawingSheetDocumentControl {
 
 impl DrawingSheetDocumentControl {
     pub fn validate(&self) -> Result<(), DesignManagementError> {
-        validate_value("drawing sheet document revision", &self.revision, false)?;
+        validate_value("drawing sheet document revision", &self.revision, true)?;
         validate_bounded_document_control_text(
             "drawing sheet document revision",
             &self.revision,
@@ -677,7 +679,7 @@ impl DrawingSheetDocumentControl {
             self.status,
             DrawingSheetReleaseStatus::Released | DrawingSheetReleaseStatus::Obsolete
         ) {
-            if self.revision.eq_ignore_ascii_case("draft") {
+            if self.revision_index().is_empty() {
                 return Err(DesignManagementError::InvalidText {
                     field: "released drawing sheet document revision",
                     value: self.revision.clone(),
@@ -693,12 +695,16 @@ impl DrawingSheetDocumentControl {
         Ok(())
     }
 
+    /// The revision index a title block letters: empty until the document is
+    /// issued one. Builds that had no Document status field stored the word
+    /// `DRAFT` here in place of an index, and that placeholder reads as no
+    /// index rather than as one.
     #[must_use]
-    pub fn display_date(&self) -> &str {
-        if self.revision_date_utc.is_empty() {
-            "UNRELEASED"
+    pub fn revision_index(&self) -> &str {
+        if self.revision.eq_ignore_ascii_case("draft") {
+            ""
         } else {
-            &self.revision_date_utc
+            &self.revision
         }
     }
 }

@@ -38,6 +38,11 @@ pub enum DrawingSheetTitleFieldId {
     /// reads [`DRAWING_SHEET_DEFAULT_DOCUMENT_TYPE`] until a sheet says
     /// otherwise.
     DocumentType,
+    /// ISO 7200's *Document status*: where the document stands in its
+    /// release, read from the project's document control. Revision and Date
+    /// carry an index and a date; the status is lettered here instead of in
+    /// either of them.
+    DocumentStatus,
 }
 
 /// What a schematic sheet is, in the name IEC 61082 gives it: the Document
@@ -45,7 +50,7 @@ pub enum DrawingSheetTitleFieldId {
 pub const DRAWING_SHEET_DEFAULT_DOCUMENT_TYPE: &str = "Circuit diagram";
 
 impl DrawingSheetTitleFieldId {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::Project,
         Self::CellView,
         Self::SheetTitle,
@@ -57,6 +62,7 @@ impl DrawingSheetTitleFieldId {
         Self::CheckedBy,
         Self::ApprovedBy,
         Self::Date,
+        Self::DocumentStatus,
         Self::Organization,
         Self::DocumentId,
         Self::Classification,
@@ -105,6 +111,7 @@ impl DrawingSheetTitleFieldId {
             Self::DocumentId => "Document ID",
             Self::Classification => "Classification",
             Self::DocumentType => "Document type",
+            Self::DocumentStatus => "Document status",
         }
     }
 
@@ -132,7 +139,7 @@ impl DrawingSheetTitleFieldId {
             // The project name is the leading segment of `Cell / view` in a
             // single-library workspace, so the sheet must be free to carry
             // one or the other rather than always both.
-            Self::Project | Self::Date | Self::Scale | Self::PaperSize => {
+            Self::Project | Self::Date | Self::DocumentStatus | Self::Scale | Self::PaperSize => {
                 DrawingSheetTitleFieldPolicy {
                     required_visible: false,
                     value_authority: DrawingSheetTitleFieldValueAuthority::Automatic,

@@ -1304,6 +1304,14 @@ fn active_cell_view_identity(
     let view_key = state.workspace.content.active_key();
     let mut identity_material = b"rspice-cell-view-hardcopy-v1:".to_vec();
     identity_material.extend_from_slice(view_key.as_bytes());
+    let document_control = &state
+        .workspace
+        .content
+        .design_management
+        .drawing_sheet_settings()
+        .document_control;
+    let revision = document_control.revision_index();
+    let date = &document_control.revision_date_utc;
     HardcopySourceIdentity::try_new(
         format!("project:{}:cell-view:{view_key}", project_id.as_uuid()),
         HardcopyDocumentId::try_from_uuid(Uuid::new_v5(&project_id.as_uuid(), &identity_material))
@@ -1314,34 +1322,9 @@ fn active_cell_view_identity(
     .with_publication(HardcopyPublicationIdentity::try_new(
         state.workspace.content.project.name(),
         state.workspace.content.active_view.display_path(),
-        Some(
-            state
-                .workspace
-                .content
-                .design_management
-                .drawing_sheet_settings()
-                .document_control
-                .revision
-                .clone(),
-        ),
-        (!state
-            .workspace
-            .content
-            .design_management
-            .drawing_sheet_settings()
-            .document_control
-            .revision_date_utc
-            .is_empty())
-        .then(|| {
-            state
-                .workspace
-                .content
-                .design_management
-                .drawing_sheet_settings()
-                .document_control
-                .revision_date_utc
-                .clone()
-        }),
+        (!revision.is_empty()).then(|| revision.to_owned()),
+        (!date.is_empty()).then(|| date.clone()),
+        Some(document_control.status.label().to_owned()),
     )?)
 }
 

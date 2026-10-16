@@ -1536,7 +1536,7 @@ fn title_field_automatic_values(
     );
     values.insert(
         DrawingSheetTitleFieldId::Revision,
-        document_control.revision.clone(),
+        document_control.revision_index().to_owned(),
     );
     values.insert(
         DrawingSheetTitleFieldId::PaperSize,
@@ -1544,7 +1544,11 @@ fn title_field_automatic_values(
     );
     values.insert(
         DrawingSheetTitleFieldId::Date,
-        document_control.display_date().to_owned(),
+        document_control.revision_date_utc.clone(),
+    );
+    values.insert(
+        DrawingSheetTitleFieldId::DocumentStatus,
+        document_control.status.label().to_owned(),
     );
     values
 }
@@ -1566,7 +1570,7 @@ fn title_field_owner(id: DrawingSheetTitleFieldId) -> &'static str {
         DrawingSheetTitleFieldId::Page => "document order",
         DrawingSheetTitleFieldId::Revision => "working revision",
         DrawingSheetTitleFieldId::Scale => "retired",
-        DrawingSheetTitleFieldId::Date => "document",
+        DrawingSheetTitleFieldId::Date | DrawingSheetTitleFieldId::DocumentStatus => "document",
         DrawingSheetTitleFieldId::Organization | DrawingSheetTitleFieldId::DocumentId => "project",
         DrawingSheetTitleFieldId::Classification => "project policy",
     }

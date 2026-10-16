@@ -90,8 +90,8 @@ fn default_title_field_value(
             .design_management
             .drawing_sheet_settings()
             .document_control
-            .revision
-            .clone(),
+            .revision_index()
+            .to_owned(),
         DrawingSheetTitleFieldId::PaperSize => sheet.format.authored_size.paper_size().to_owned(),
         // Retired: never present in a normalized field set, so never resolved.
         DrawingSheetTitleFieldId::Scale => String::new(),
@@ -101,7 +101,16 @@ fn default_title_field_value(
             .design_management
             .drawing_sheet_settings()
             .document_control
-            .display_date()
+            .revision_date_utc
+            .clone(),
+        DrawingSheetTitleFieldId::DocumentStatus => state
+            .workspace
+            .content
+            .design_management
+            .drawing_sheet_settings()
+            .document_control
+            .status
+            .label()
             .to_owned(),
         DrawingSheetTitleFieldId::Organization
         | DrawingSheetTitleFieldId::DocumentId

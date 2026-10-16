@@ -39,7 +39,18 @@ fn drawing_sheet_document_control_is_backward_compatible_and_calendar_strict() {
         restored.document_control,
         DrawingSheetDocumentControl::default()
     );
-    assert_eq!(restored.document_control.display_date(), "UNRELEASED");
+    // An unreleased document has no revision index and no date yet; its
+    // Document status says where it stands.
+    assert_eq!(restored.document_control.revision_index(), "");
+    assert_eq!(restored.document_control.revision_date_utc, "");
+    restored.document_control.validate().unwrap();
+    // A project saved when the index held the word DRAFT letters no index.
+    let placeholder = DrawingSheetDocumentControl {
+        revision: "DRAFT".to_owned(),
+        ..DrawingSheetDocumentControl::default()
+    };
+    placeholder.validate().unwrap();
+    assert_eq!(placeholder.revision_index(), "");
 
     let invalid_date = DrawingSheetDocumentControl {
         revision: "A".to_owned(),
@@ -75,5 +86,21 @@ fn drawing_sheet_document_control_is_backward_compatible_and_calendar_strict() {
         change_reference: "ECO-1042".to_owned(),
     };
     released.validate().unwrap();
-    assert_eq!(released.display_date(), "2026-08-04");
+    assert_eq!(released.revision_index(), "B");
+
+    // A released document must name its index, and the old placeholder is
+    // not one.
+    for revision in ["", "DRAFT"] {
+        let unindexed = DrawingSheetDocumentControl {
+            revision: revision.to_owned(),
+            ..released.clone()
+        };
+        assert!(matches!(
+            unindexed.validate(),
+            Err(DesignManagementError::InvalidText {
+                field: "released drawing sheet document revision",
+                ..
+            })
+        ));
+    }
 }

@@ -38,13 +38,14 @@ pub fn drawing_sheet_title_values(
     values.insert(DrawingSheetTitleFieldId::CellView, source_view.to_owned());
     values.insert(DrawingSheetTitleFieldId::SheetTitle, sheet_title);
     values.insert(DrawingSheetTitleFieldId::Page, page);
+    // A published document has no revision index until one is assigned, and
+    // its project's internal revision counter is not one.
     values.insert(
         DrawingSheetTitleFieldId::Revision,
-        identity
-            .publication
-            .as_ref()
-            .and_then(|publication| publication.revision_label.clone())
-            .unwrap_or_else(|| identity.revision.get().to_string()),
+        identity.publication.as_ref().map_or_else(
+            || identity.revision.get().to_string(),
+            |publication| publication.revision_label.clone().unwrap_or_default(),
+        ),
     );
     values.insert(
         DrawingSheetTitleFieldId::PaperSize,
@@ -56,7 +57,15 @@ pub fn drawing_sheet_title_values(
             .publication
             .as_ref()
             .and_then(|publication| publication.publication_date_utc.clone())
-            .unwrap_or_else(|| "UNRELEASED".to_owned()),
+            .unwrap_or_default(),
+    );
+    values.insert(
+        DrawingSheetTitleFieldId::DocumentStatus,
+        identity
+            .publication
+            .as_ref()
+            .and_then(|publication| publication.document_status.clone())
+            .unwrap_or_default(),
     );
     if let Some(project_values) = project_title_block_field_values {
         for id in DrawingSheetTitleFieldId::PROJECT_OWNED {

@@ -94,6 +94,7 @@ fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
                 "analog/top/schematic",
                 Some("A".to_owned()),
                 Some("2026-08-04".to_owned()),
+                Some("Released".to_owned()),
             )
             .unwrap(),
         )
@@ -232,6 +233,13 @@ fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
                 .get(&DrawingSheetTitleFieldId::PaperSize)
                 .map(String::as_str),
             Some(expected_paper_size.as_str())
+        );
+        assert_eq!(
+            sheet
+                .drawing_sheet_title_values
+                .get(&DrawingSheetTitleFieldId::DocumentStatus)
+                .map(String::as_str),
+            Some("Released")
         );
         assert_eq!(
             sheet

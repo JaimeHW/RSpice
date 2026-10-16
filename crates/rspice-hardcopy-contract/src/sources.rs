@@ -40,6 +40,10 @@ pub struct HardcopyPublicationIdentity {
     pub revision_label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub publication_date_utc: Option<String>,
+    /// Where the document stands in its release, such as `Draft`, as the
+    /// title block's Document status letters it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_status: Option<String>,
 }
 
 impl HardcopyPublicationIdentity {
@@ -48,12 +52,14 @@ impl HardcopyPublicationIdentity {
         document_path: impl Into<String>,
         revision_label: Option<String>,
         publication_date_utc: Option<String>,
+        document_status: Option<String>,
     ) -> Result<Self, HardcopySourceError> {
         let identity = Self {
             project_name: project_name.into(),
             document_path: document_path.into(),
             revision_label,
             publication_date_utc,
+            document_status,
         };
         identity.validate()?;
         Ok(identity)
@@ -72,6 +78,9 @@ impl HardcopyPublicationIdentity {
         )?;
         if let Some(revision) = &self.revision_label {
             validate_label("publication revision", revision, DISPLAY_NAME_LIMIT)?;
+        }
+        if let Some(status) = &self.document_status {
+            validate_label("publication document status", status, DISPLAY_NAME_LIMIT)?;
         }
         if let Some(date) = &self.publication_date_utc
             && !is_iso_utc_date(date)
