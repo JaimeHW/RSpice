@@ -22,9 +22,9 @@
 //! a tap that carries one produces a destination declaration that matches, so
 //! no mismatch reaches the projection. What is left when one does reach it is
 //! an implicit mismatch, and emitting it would mean inventing or dropping
-//! conductors the drawing never named. The policy decides the severity the ERC
-//! reports it at — a mismatch a wider bus could be sliced into is a warning
-//! there — but it never decides whether a deck may carry one.
+//! conductors the drawing never named. The ERC reports it as an error under
+//! either policy for the same reason; the permissive policy only changes what
+//! the finding tells the designer to do.
 
 use super::*;
 use rspice_design::schematic::bus::declared_vector;

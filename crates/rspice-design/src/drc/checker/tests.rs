@@ -1065,8 +1065,11 @@ fn width_findings(
     result.violations().to_vec()
 }
 
+/// The netlister refuses a mismatched join under either policy, so the check
+/// does too; the permissive policy changes what the finding tells the
+/// designer to do, not whether the run can carry it.
 #[test]
-fn the_width_mismatch_policy_decides_whether_a_narrow_bus_blocks() {
+fn a_width_mismatch_blocks_under_either_policy() {
     use crate::connectivity_contract::BundleWidthMismatchPolicy;
 
     // The bus is wider than the connection asks for, so an explicit slice
@@ -1079,9 +1082,15 @@ fn the_width_mismatch_policy_decides_whether_a_narrow_bus_blocks() {
         DrcViolationType::VectorWidthMismatch
     );
     assert_eq!(blocked[0].severity, DrcSeverity::Error);
+    assert!(!blocked[0].message.contains("explicit slice"));
 
     let permitted = width_findings(&sliceable, BundleWidthMismatchPolicy::ExplicitSliceOrExtend);
-    assert_eq!(permitted[0].severity, DrcSeverity::Warning);
+    assert_eq!(permitted[0].severity, DrcSeverity::Error);
+    assert!(
+        permitted[0].message.contains("tap an explicit slice"),
+        "{}",
+        permitted[0].message
+    );
 
     // A bus with too few conductors cannot be sliced into a wider
     // connection, so neither policy lets it through.
