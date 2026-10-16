@@ -72,8 +72,8 @@ client's defect from its own:
 | Status | Cause |
 | --- | --- |
 | `0` | Bundle written |
-| `1` | Filesystem failure |
-| `2` | Snapshot rejected by the contract; the argument parser also exits `2` on a usage error |
+| `1` | Filesystem failure, or a usage error |
+| `2` | Snapshot rejected by the contract |
 | `3` | Output directory already exists |
 | `4` | No viewer runtime embedded, checked before any input is read |
 
