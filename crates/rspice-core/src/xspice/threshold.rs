@@ -75,6 +75,13 @@ impl AnalogBandLaw {
         }
         expired.then_some((DigitalState::Unknown, low))
     }
+
+    /// When an input that entered the band at `entry` reads X: the instant
+    /// a converter asks the stepper to land on, and the one `expired` is
+    /// measured against.
+    pub(crate) fn deadline(self, entry: Value) -> Value {
+        entry + self.timeout
+    }
 }
 
 impl AnalogThresholdBehavior {

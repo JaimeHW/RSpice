@@ -11,7 +11,7 @@ use crate::xspice::{
 /// A converter's small-signal stamp at a held event state: a static
 /// conductance or an ideal-source branch, so its AC stamp is exactly
 /// `G + jωC` with `C = 0` at every frequency.
-fn held_converter_descriptor() -> CmResult<XspiceSmallSignalDescriptor> {
+pub(super) fn held_converter_descriptor() -> CmResult<XspiceSmallSignalDescriptor> {
     Ok(XspiceSmallSignalDescriptor::AffineAc)
 }
 
@@ -23,13 +23,17 @@ pub(crate) const OFFICIAL_BRIDGE_TIMING_MIN: Value = 1.0e-12;
 const OFFICIAL_BRIDGE_RESISTANCE_MIN: Value = 1.0e-6;
 const OFFICIAL_BRIDGE_CONTROL_MIN: i64 = 0;
 const OFFICIAL_BRIDGE_CONTROL_MAX: i64 = 2;
-const ADC_UNINITIALIZED_STATE: i64 = -2;
+pub(super) const ADC_UNINITIALIZED_STATE: i64 = -2;
 
 fn official_bridge_timing(value: Value) -> Value {
     value.max(OFFICIAL_BRIDGE_TIMING_MIN)
 }
 
-fn finite_bridge_param(ctx: &CmContext, model_name: &str, name: &str) -> CmResult<Value> {
+pub(super) fn finite_bridge_param(
+    ctx: &CmContext,
+    model_name: &str,
+    name: &str,
+) -> CmResult<Value> {
     let value = ctx.param(name);
     if !value.is_finite() {
         return Err(CmError::InvalidParameter {
@@ -99,7 +103,7 @@ fn adc_input_thresholds(
         .collect())
 }
 
-fn adc_bridge_delay_for_transition(
+pub(super) fn adc_bridge_delay_for_transition(
     time: Value,
     previous_state: i64,
     new_state: i64,
@@ -225,7 +229,7 @@ fn tracking_adc_terms(
 }
 
 /// The port a supply-tracking converter reads its supply net through.
-fn with_supply_port(ports: &[PortSpec]) -> Vec<PortSpec> {
+pub(super) fn with_supply_port(ports: &[PortSpec]) -> Vec<PortSpec> {
     let mut ports = ports.to_vec();
     ports.push(PortSpec {
         name: "sup".to_string(),
@@ -243,7 +247,7 @@ fn with_supply_port(ports: &[PortSpec]) -> Vec<PortSpec> {
 }
 
 /// The supply voltage a supply-tracking converter converts against now.
-fn tracked_supply(ctx: &CmContext) -> Value {
+pub(super) fn tracked_supply(ctx: &CmContext) -> Value {
     ctx.input_analog("sup").unwrap_or(0.0)
 }
 
@@ -1620,7 +1624,7 @@ fn dac_bridge_completion_time(
     }
 }
 
-fn bridge_vector_width(ctx: &CmContext, model_name: &str) -> CmResult<usize> {
+pub(super) fn bridge_vector_width(ctx: &CmContext, model_name: &str) -> CmResult<usize> {
     let in_width = ctx.port_width("in");
     let out_width = ctx.port_width("out");
     if in_width == 0 || out_width == 0 {
@@ -1636,14 +1640,18 @@ fn bridge_vector_width(ctx: &CmContext, model_name: &str) -> CmResult<usize> {
     Ok(in_width)
 }
 
-fn analog_vector_input_value(ctx: &CmContext, name: &str, index: usize) -> Value {
+pub(super) fn analog_vector_input_value(ctx: &CmContext, name: &str, index: usize) -> Value {
     ctx.input_analog_vector_values(name)
         .and_then(|inputs| inputs.get(index))
         .map(|input| input.value)
         .unwrap_or(0.0)
 }
 
-fn digital_vector_input_value(ctx: &CmContext, name: &str, index: usize) -> DigitalValue {
+pub(super) fn digital_vector_input_value(
+    ctx: &CmContext,
+    name: &str,
+    index: usize,
+) -> DigitalValue {
     ctx.input_digital_vector_values(name)
         .and_then(|inputs| inputs.get(index).copied())
         .unwrap_or_default()
