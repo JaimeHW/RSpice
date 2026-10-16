@@ -18,7 +18,7 @@ use crate::state::{
 use crate::workbench::lifecycle::project_lifecycle::{
     SaveScope, accepted_generation, effective_save_scope, snapshot,
 };
-use rspice_design::drc::{DrcConfig, DrcLocation, DrcSeverity, run_check_with_hierarchy};
+use rspice_design::drc::{CheckReach, DrcConfig, DrcLocation, DrcSeverity, run_check_of_cellview};
 use rspice_design::hierarchy::HierarchySource;
 use rspice_simulation::netlist_gen::generate_netlist_hierarchical;
 
@@ -331,6 +331,31 @@ impl CheckAndSaveValidationReport {
             );
         }
 
+        let mut documents = match effective_scope {
+            SaveScope::ActiveDocument => {
+                vec![(active_view.key(), state.schematic.editor_ref().design)]
+            }
+            SaveScope::AllDocuments => buffers
+                .iter()
+                .map(|(key, schematic)| (key.clone(), *schematic))
+                .collect::<Vec<_>>(),
+        };
+        documents.sort_by(|left, right| left.0.cmp(&right.0));
+        let root_schematic_key = state.workspace.content.simulation_root_reference().key();
+        // Every cellview is checked exactly once. A document in scope is
+        // checked on its own, below, where its findings can point at the
+        // canvas; the configured root's walk states only the cellviews no
+        // such check covers, so one defect in a leaf placed under two parents
+        // is one finding rather than one per document that reaches it.
+        let checked_alone = documents
+            .iter()
+            .filter(|(key, _)| !key.eq_ignore_ascii_case(&root_schematic_key))
+            .filter(|(key, _)| {
+                projected_document(execution_projection.as_ref().ok(), key).is_some()
+            })
+            .map(|(key, _)| key.to_ascii_lowercase())
+            .collect::<std::collections::HashSet<_>>();
+
         match &execution_projection {
             Ok(projection) => {
                 let root = projection
@@ -339,13 +364,15 @@ impl CheckAndSaveValidationReport {
                 let configured_hierarchy = configured_hierarchy
                     .as_ref()
                     .expect("a resolved projection binds a hierarchy source");
-                let drc = run_check_with_hierarchy(
+                let drc = run_check_of_cellview(
                     root,
+                    projection.root(),
                     configured_hierarchy,
                     DrcConfig {
                         check_missing_ground: true,
                         ..DrcConfig::default()
                     },
+                    CheckReach::Hierarchy,
                 );
                 if !drc.completed {
                     insert_finding(
@@ -358,10 +385,27 @@ impl CheckAndSaveValidationReport {
                     );
                 }
                 for violation in drc.violations() {
+                    let below = match &violation.location {
+                        DrcLocation::InsideInstance { path, view, .. } => Some((path, view)),
+                        _ => None,
+                    };
+                    if below.is_some_and(|(_, view)| {
+                        checked_alone.contains(&view.key().to_ascii_lowercase())
+                    }) {
+                        continue;
+                    }
                     let level = if violation.severity >= DrcSeverity::Error {
                         CheckAndSaveFindingLevel::Blocker
                     } else {
                         CheckAndSaveFindingLevel::Advisory
+                    };
+                    // A finding inside an occurrence says which one, or two
+                    // occurrences of one defect read as the same sentence twice.
+                    let message = match below {
+                        Some((path, _)) => {
+                            format!("Configured root, {path}: {}", violation.message)
+                        }
+                        None => format!("Configured root: {}", violation.message),
                     };
                     insert_located_finding(
                         &mut findings,
@@ -371,7 +415,7 @@ impl CheckAndSaveValidationReport {
                             "configured-root:{:?}:{:?}:{}",
                             violation.violation_type, violation.location, violation.message
                         ),
-                        format!("Configured root: {}", violation.message),
+                        message,
                         root_is_active.then(|| violation.location.clone()),
                     );
                 }
@@ -446,17 +490,6 @@ impl CheckAndSaveValidationReport {
             ),
         }
 
-        let mut documents = match effective_scope {
-            SaveScope::ActiveDocument => {
-                vec![(active_view.key(), state.schematic.editor_ref().design)]
-            }
-            SaveScope::AllDocuments => buffers
-                .iter()
-                .map(|(key, schematic)| (key.clone(), *schematic))
-                .collect::<Vec<_>>(),
-        };
-        documents.sort_by(|left, right| left.0.cmp(&right.0));
-        let root_schematic_key = state.workspace.content.simulation_root_reference().key();
         let symbol_resolver = SymbolResolver::new(&state.library_manager, &buffers);
         for (key, schematic) in &documents {
             if let Err(error) = schematic.document().validated_revisions.validate() {
@@ -472,10 +505,28 @@ impl CheckAndSaveValidationReport {
             // hierarchy. Every other document is checked as the projection
             // materialized it — multi-sheet pages namespaced apart, the active
             // variant applied — because that is the document a run would read.
+            //
+            // It is checked for its own findings only: whatever it places is a
+            // document of its own, checked in turn, or a cellview the root's
+            // walk states. Nor is it asked for a ground: a cell takes its
+            // reference from whatever places it, and only the configured root
+            // is a design that runs.
             let projected = projected_document(execution_projection.as_ref().ok(), key)
-                .filter(|_| key != &root_schematic_key);
-            if let (Some(hierarchy), Some(schematic)) = (configured_hierarchy.as_ref(), projected) {
-                let drc = run_check_with_hierarchy(schematic, hierarchy, DrcConfig::default());
+                .filter(|_| !key.eq_ignore_ascii_case(&root_schematic_key));
+            let reference = cell_view_reference(key);
+            if let (Some(hierarchy), Some(schematic), Some(reference)) =
+                (configured_hierarchy.as_ref(), projected, reference.as_ref())
+            {
+                let drc = run_check_of_cellview(
+                    schematic,
+                    reference,
+                    hierarchy,
+                    DrcConfig {
+                        check_missing_ground: false,
+                        ..DrcConfig::default()
+                    },
+                    CheckReach::Cellview,
+                );
                 if !drc.completed {
                     insert_finding(
                         &mut findings,
@@ -795,27 +846,27 @@ fn validate_component_contracts<S: AsRef<rspice_design::schematic::document::Sch
             name: component.name.clone(),
         })
     };
-    let mut designators = BTreeMap::<String, Vec<u64>>::new();
+    // A reference the schema refuses is the design checks' finding, at the
+    // severity they give it — an error only where the deck cannot write the
+    // instance — so it is not stated a second time here. What is stated here
+    // is the collision the design checks do not see: two designators that
+    // differ only by case, which the deck folds into one.
+    let mut designators = BTreeMap::<String, Vec<(u64, &str)>>::new();
     for component in &schematic.components {
         let component_identity = format!("{document_key}:{}", component.id);
         if !component.kind.spice_prefix().is_empty() {
-            if let Err(error) = component.validate_reference_designator(component.name.trim()) {
-                insert_located_finding(
-                    findings,
-                    CheckAndSaveFindingLevel::Blocker,
-                    "naming",
-                    &format!("{component_identity}:{}", component.name),
-                    format!("{document_key}: {}: {error}", component.name),
-                    at(component),
-                );
-            }
             designators
                 .entry(component.name.to_ascii_lowercase())
                 .or_default()
-                .push(component.id);
+                .push((component.id, component.name.as_str()));
         }
 
-        for (field, error) in component_property_findings(state, component) {
+        // The reference is the one property whose emptiness is the design
+        // checks' finding rather than the schema's.
+        for (field, error) in component_property_findings(state, component)
+            .into_iter()
+            .filter(|(field, _)| field != "name")
+        {
             insert_located_finding(
                 findings,
                 CheckAndSaveFindingLevel::Blocker,
@@ -881,8 +932,11 @@ fn validate_component_contracts<S: AsRef<rspice_design::schematic::document::Sch
             );
         }
     }
-    for (name, ids) in designators {
-        if ids.len() > 1 {
+    for (name, placed) in designators {
+        // One spelling used twice is the design checks' duplicate name.
+        let one_spelling = placed.iter().all(|(_, spelling)| *spelling == placed[0].1);
+        if placed.len() > 1 && !one_spelling {
+            let ids = placed.iter().map(|(id, _)| *id).collect::<Vec<_>>();
             insert_finding(
                 findings,
                 CheckAndSaveFindingLevel::Blocker,
@@ -894,6 +948,22 @@ fn validate_component_contracts<S: AsRef<rspice_design::schematic::document::Sch
                 ),
             );
         }
+    }
+}
+
+/// The cell view a `library/cell/view` buffer key names.
+fn cell_view_reference(key: &str) -> Option<CellViewRef> {
+    let mut segments = key.split('/');
+    match (
+        segments.next(),
+        segments.next(),
+        segments.next(),
+        segments.next(),
+    ) {
+        (Some(library), Some(cell), Some(view), None) => {
+            Some(CellViewRef::new(library, cell, view))
+        }
+        _ => None,
     }
 }
 
@@ -1055,17 +1125,26 @@ mod tests {
         let position = placed.pos;
 
         let report = CheckAndSaveValidationReport::collect(&state).expect("report");
-        let located = report
+        // One refused designator is one finding. The netlister writes this
+        // resistor as `RQ1` and the run starts, so it advises rather than
+        // blocks.
+        let naming = report
             .blockers()
             .iter()
-            .find(|finding| {
-                finding.source == "naming"
-                    && matches!(
-                        &finding.location,
-                        Some(DrcLocation::Component { id, .. }) if *id == resistor
-                    )
-            })
-            .expect("a designator refused on the active document names its instance");
+            .chain(report.advisories())
+            .filter(|finding| finding.message.contains("'Q1'"))
+            .collect::<Vec<_>>();
+        assert_eq!(naming.len(), 1, "{naming:?}");
+        let located = naming[0];
+        assert_eq!(located.level, CheckAndSaveFindingLevel::Advisory);
+        assert!(located.message.contains("RQ1"), "{}", located.message);
+        assert!(
+            matches!(
+                &located.location,
+                Some(DrcLocation::Component { id, .. }) if *id == resistor
+            ),
+            "a designator refused on the active document names its instance: {located:?}"
+        );
 
         let anchor = finding_anchor(&state, located).expect("a located finding resolves an anchor");
         state.jump_to_log_anchor(anchor);
@@ -1088,6 +1167,78 @@ mod tests {
             ..located.clone()
         };
         assert!(finding_anchor(&state, &unlocated).is_none());
+    }
+
+    /// A first save checks every document, and every cellview exactly once.
+    /// A leaf with one open resistor, placed twice by a cell the root places
+    /// twice, used to be stated by the root at four occurrences, by the middle
+    /// cell at two and by the leaf itself — fourteen rows for two open legs.
+    #[test]
+    fn a_first_save_states_each_cellviews_findings_once() {
+        let mut state = AppState::default();
+        let mut work = crate::state::Library::new("work");
+        for name in ["leaf", "mid"] {
+            let mut cell = crate::state::Cell::new(name);
+            cell.add_view(crate::state::View::new(
+                "schematic",
+                crate::state::ViewType::Schematic,
+            ));
+            work.add_cell(cell);
+        }
+        state.library_manager.add_library(work);
+        let placed = |cell: &str| {
+            let mut binding = crate::state::LibraryCellInstance::new("work", cell, "schematic");
+            binding.bind_interface(&[]);
+            binding
+        };
+
+        let mut leaf = crate::state::SchematicState::default();
+        leaf.add_component(ComponentType::Resistor, Point::new(30, 0));
+        state
+            .workspace
+            .insert_schematic_editor("work/leaf/schematic".to_owned(), leaf);
+        let mut mid = crate::state::SchematicState::default();
+        mid.add_library_cell_component(Point::new(100, 0), placed("leaf"));
+        mid.add_library_cell_component(Point::new(300, 0), placed("leaf"));
+        state
+            .workspace
+            .insert_schematic_editor("work/mid/schematic".to_owned(), mid);
+        state
+            .schematic
+            .add_library_cell_component(Point::new(100, 0), placed("mid"));
+        state
+            .schematic
+            .add_library_cell_component(Point::new(300, 0), placed("mid"));
+        state.sync_active_schematic_to_workspace();
+
+        let report = CheckAndSaveValidationReport::collect(&state).expect("report");
+        assert_eq!(report.effective_scope, SaveScope::AllDocuments);
+
+        let open_legs = report
+            .blockers()
+            .iter()
+            .chain(report.advisories())
+            .filter(|finding| finding.message.contains("is not connected"))
+            .collect::<Vec<_>>();
+        assert_eq!(open_legs.len(), 2, "{open_legs:?}");
+        assert!(
+            open_legs
+                .iter()
+                .all(|finding| finding.message.starts_with("work/leaf/schematic: ")),
+            "each is stated by the leaf that holds it: {open_legs:?}"
+        );
+        // No cell is asked for a ground of its own: it takes its reference
+        // from whatever places it.
+        assert!(
+            report.blockers().iter().all(|finding| !finding
+                .message
+                .starts_with("work/leaf/schematic: Circuit has no ground")
+                && !finding
+                    .message
+                    .starts_with("work/mid/schematic: Circuit has no ground")),
+            "{:?}",
+            report.blockers()
+        );
     }
 
     #[test]
