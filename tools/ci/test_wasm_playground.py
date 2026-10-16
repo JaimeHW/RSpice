@@ -170,7 +170,7 @@ class WasmPlaygroundWorkerTests(unittest.TestCase):
         self.assertNotIn("full WASM IDE", readme)
         self.assertNotIn("later milestone", readme)
         self.assertIn("experimental browser IDE", readme)
-        self.assertIn("**Run .ac**", readme)
+        self.assertIn("**.ac**", readme)
 
 
 if __name__ == "__main__":

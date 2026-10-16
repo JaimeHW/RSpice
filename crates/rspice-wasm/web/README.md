@@ -29,7 +29,7 @@ The wasm-bindgen CLI version must equal the `wasm-bindgen` crate version in
 - Opens with a series-RLC step deck (zeta = 0.35, f0 = 800 Hz) in the editor.
 - **Run .tran** calls `runTransientAnalysisDocument(deck, tstop, hmax)` and
   plots `V(out)` and `V(in)` with the solve time.
-- **Run .ac** calls `runAcAnalysisDocument(deck, frequencies)` over logarithmic
+- **.ac** calls `runAcAnalysisDocument(deck, frequencies)` over logarithmic
   points from `fstart` to `fstop` and plots the magnitude of `V(out)`, or of
   `V(in)` when the deck has no `out` node, in dB.
 - **.op** calls `runOperatingPointDocument` and shows a node and branch table.
