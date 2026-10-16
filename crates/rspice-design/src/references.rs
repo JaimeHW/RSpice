@@ -54,15 +54,16 @@ fn append_document_paths<'a>(
             continue;
         }
         // Hierarchy resolution names placements by their authored instance
-        // names. Primitive current probes instead name emitted SPICE cards.
+        // names. Primitive current probes instead name the elements the deck
+        // writes.
         let emitted = emitted && component.kind != ComponentType::CellInstance;
         let from = if emitted {
-            component.emitted_instance_name()
+            component.written_element_name()
         } else {
             component.name.clone()
         };
         let to = if emitted {
-            candidate.emitted_instance_name()
+            candidate.written_element_name()
         } else {
             candidate.name.clone()
         };

@@ -28,13 +28,13 @@ impl PreparedCopyReferences {
         let mut card_names = HashMap::new();
         let mut winding_aliases = HashMap::new();
         for (index, source) in sources.iter().enumerate() {
-            let emitted = source.emitted_instance_name();
-            insert_alias(&mut card_names, &emitted, index);
+            let written = source.written_element_name();
+            insert_alias(&mut card_names, &written, index);
             if matches!(
                 source.kind,
                 ComponentType::Inductor | ComponentType::SaturableInductor
             ) {
-                for name in [source.name.trim(), &emitted] {
+                for name in [source.name.trim(), &written] {
                     insert_alias(&mut winding_aliases, name, index);
                 }
             }
@@ -92,10 +92,7 @@ impl PreparedCopyReferences {
 
     fn apply_selected(&self, copies: &mut [Component], selected: impl Fn(usize) -> bool) {
         assert_eq!(copies.len(), self.parameters.len());
-        let names: Vec<_> = copies
-            .iter()
-            .map(Component::emitted_instance_name)
-            .collect();
+        let names: Vec<_> = copies.iter().map(Component::written_element_name).collect();
         for (copy, parameters) in copies.iter_mut().zip(&self.parameters) {
             let Some(parameters) = parameters else {
                 continue;
@@ -190,20 +187,16 @@ fn prepare_component_edits<'a>(
         return Ok(components);
     }
     let mut names = HashMap::new();
-    let mut emitted_names = HashMap::new();
+    let mut written_names = HashMap::new();
     for (index, component) in components.iter().enumerate() {
         insert_alias(&mut names, &component.name, index);
-        insert_alias(
-            &mut emitted_names,
-            &component.emitted_instance_name(),
-            index,
-        );
+        insert_alias(&mut written_names, &component.written_element_name(), index);
     }
     for &index in &renamed {
         if names.get(&components[index].name.to_ascii_lowercase()) != Some(&Some(index))
-            || emitted_names.get(
+            || written_names.get(
                 &components[index]
-                    .emitted_instance_name()
+                    .written_element_name()
                     .to_ascii_lowercase(),
             ) != Some(&Some(index))
         {
@@ -239,7 +232,8 @@ fn prepare_component_edits<'a>(
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InstanceReference<'a> {
     /// The one instance it names. The deck writes the reference as that
-    /// instance's emitted name, which is the name the engine knows it by.
+    /// instance's written element name, which is the name the engine knows
+    /// it by.
     Names(&'a Component),
     /// More than one instance answers to it.
     Ambiguous,
@@ -251,12 +245,13 @@ pub enum InstanceReference<'a> {
 /// source's controlling element, for one — the way the deck must write it.
 ///
 /// The engine resolves the reference against the names the deck writes, and
-/// those are emitted names: a source drawn `sense` is written `Vsense`. So a
-/// reference that already is an emitted name names that instance, and failing
-/// that, a reference that is an instance's drawn name names the instance the
-/// author drew. Both compare without case, as the engine does. Writing a drawn
-/// name through unresolved would point the engine at an element the deck does
-/// not have.
+/// those are written element names: a source drawn `sense` is written
+/// `Vsense`, and a limited VCVS drawn `E1` is written `B1`. So a reference that
+/// already is a written name names that instance, and failing that, a
+/// reference that is an instance's drawn name names the instance the author
+/// drew. Both compare without case, as the engine does. Writing a drawn name
+/// through unresolved would point the engine at an element the deck does not
+/// have.
 pub fn resolve_instance_reference<'a>(
     components: &'a [Component],
     reference: &str,
@@ -270,7 +265,7 @@ pub fn resolve_instance_reference<'a>(
     let written = emitting()
         .filter(|component| {
             component
-                .emitted_instance_name()
+                .written_element_name()
                 .eq_ignore_ascii_case(reference)
         })
         .collect::<Vec<_>>();
