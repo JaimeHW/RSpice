@@ -77,7 +77,7 @@ impl StudyDocument {
                 if matches!(task.analysis, AnalysisSpec::MonteCarlo { .. } | AnalysisSpec::Parametric | AnalysisSpec::Corner) {
                     return Err(StudyDocumentError::UnsupportedCapability {
                         capability: "study.structured_sweeps",
-                        detail: format!("task {:?}: structured sweep settings are not yet supported by study documents", task.id),
+                        detail: format!("task {:?}: study documents refuse structured sweep settings (Monte Carlo, parametric and corner); run the sweep from a deck with `rspice run`", task.id),
                     });
                 }
                 let options = task.execution_options().map_err(&context)?;
@@ -273,7 +273,7 @@ fn analysis_cards(spec: &AnalysisSpec) -> Result<String, String> {
             analysis_spec_to_config(spec).map(|config| config.to_spice())
         }
         AnalysisSpec::MonteCarlo { .. } | AnalysisSpec::Parametric | AnalysisSpec::Corner => {
-            Err("structured sweep settings are not yet supported by study documents".into())
+            Err("study documents refuse structured sweep settings; use `rspice run`".into())
         }
         // These runners consume their complete typed specification. No second
         // source-level request is necessary, and no user-authored snippet can
