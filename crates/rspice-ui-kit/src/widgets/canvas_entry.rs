@@ -312,25 +312,27 @@ fn placed_at(ctx: &Context, anchor: egui::Pos2) -> egui::Pos2 {
     )
 }
 
-/// The status slot: [`STATUS_LINES`] lines tall, whatever it says.
+/// The status slot: up to [`STATUS_LINES`] lines, and no band at all when it
+/// says nothing.
 ///
 /// A refusal in a card this narrow runs to a second line more often than not,
-/// so the slot wraps rather than eliding — and reserves both lines whether or
-/// not it is using them, because a card that grows under the pointer is a
-/// card that moves the field out from under the caret.
+/// so it wraps rather than eliding. Unlike a dialog's, this slot is not
+/// reserved: the card has no footer under it, so a refusal appearing grows
+/// the card downwards and moves nothing the reader is pointing at — and a
+/// card that reserved it would be a card with a permanent empty band.
 fn paint_status(ui: &mut Ui, status: Result<Option<&str>, &str>) {
     let t = Tokens::get(ui.ctx());
+    let (message, color, problem) = match status {
+        Ok(None) => return,
+        Ok(Some(message)) => (message, t.color.text_dim, None),
+        Err(message) => (message, t.color.text, Some(Problem::Failure)),
+    };
     ui.add_space(STATUS_GAP);
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(
         vec2(width, LINE_H * STATUS_LINES as f32),
         egui::Sense::hover(),
     );
-    let (message, color, problem) = match status {
-        Ok(None) => return,
-        Ok(Some(message)) => (message, t.color.text_dim, None),
-        Err(message) => (message, t.color.text, Some(Problem::Failure)),
-    };
     let text_left = if problem.is_some() {
         PROBLEM_MARK_ADVANCE
     } else {
@@ -516,16 +518,18 @@ mod tests {
         );
     }
 
-    /// The slot is one line whether it says nothing, a neutral fact, or a
-    /// refusal, so the card never resizes under the pointer.
+    /// A status says its piece below the fields, so the card grows downwards
+    /// and the field the reader is typing in does not move. With nothing to
+    /// say there is no band at all: this card has no footer to hold still,
+    /// and a reserved slot here would be a permanent empty strip.
     #[test]
-    fn the_status_slot_holds_its_height() {
+    fn a_status_grows_the_card_downwards_and_never_moves_the_field() {
         let ctx = Context::default();
         crate::Theme::default().apply(&ctx);
         let anchor = egui::pos2(100.0, 100.0);
-        let height = |status: Result<Option<&str>, &str>| {
+        let measure = |status: Result<Option<&str>, &str>| {
             let mut name = String::from("vout");
-            let mut rect = egui::Rect::NOTHING;
+            let (mut card, mut field) = (egui::Rect::NOTHING, egui::Rect::NOTHING);
             for _ in 0..3 {
                 let _ = ctx.run_ui(
                     egui::RawInput {
@@ -540,22 +544,29 @@ mod tests {
                             .status(status)
                             .show(ctx, |rows| {
                                 let id = Id::new("test.height.name");
-                                rows.text("Name", id, &mut name, "vout");
+                                field = rows.text("Name", id, &mut name, "vout").rect;
                                 Some(id)
                             });
-                        rect = ctx.memory(|memory| memory.area_rect(Id::new((
-                            "rspice.canvas-entry",
-                            "test.height",
-                        ))))
-                        .unwrap_or(egui::Rect::NOTHING);
+                        card = ctx
+                            .memory(|memory| {
+                                memory.area_rect(Id::new((
+                                    "rspice.canvas-entry",
+                                    "test.height",
+                                )))
+                            })
+                            .unwrap_or(egui::Rect::NOTHING);
                     },
                 );
             }
-            rect.height()
+            (card.height(), field)
         };
-        let blank = height(Ok(None));
+        let (blank, blank_field) = measure(Ok(None));
+        let (fact, fact_field) = measure(Ok(Some("8 conductors")));
+        let (refused, refused_field) = measure(Err("a net name holds no space"));
         assert!(blank > 0.0);
-        assert_eq!(height(Ok(Some("8 conductors"))), blank);
-        assert_eq!(height(Err("a net name holds no space")), blank);
+        assert_eq!(fact_field, blank_field, "a fact moves no field");
+        assert_eq!(refused_field, blank_field, "a refusal moves no field");
+        assert!(fact > blank, "a fact is said under the fields");
+        assert_eq!(refused, fact, "both say their piece in the same band");
     }
 }

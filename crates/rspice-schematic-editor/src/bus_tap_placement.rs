@@ -8,7 +8,7 @@
 use crate::session::bus::PendingBusTap;
 use crate::vector_preview::deck_bits;
 use rspice_design::schematic::bus::{BusDeclaration, BusSlice, BusTapOrientation};
-use rspice_ui_kit::widgets::{FieldLine, FormRows};
+use rspice_ui_kit::widgets::FormRows;
 
 const BUS_EXAMPLE: &str = "DATA[15:0]";
 const SLICE_EXAMPLE: &str = "DATA[7:0]";
@@ -93,15 +93,12 @@ pub fn show(
     draft: &mut BusTapFields,
 ) -> Option<egui::Id> {
     let bus = rows.text("Bus", bus_field_id(), &mut draft.bus, BUS_EXAMPLE);
-    let slice = rows.text("Slice", field_id("Slice"), &mut draft.slice, SLICE_EXAMPLE);
-    let resolved = validation.resolved_bits();
-    rows.field_line(
-        Some(slice.id),
-        match resolved.as_deref() {
-            Some(bits) => FieldLine::Derived(bits),
-            None => FieldLine::Blank,
-        },
-    );
+    rows.text("Slice", field_id("Slice"), &mut draft.slice, SLICE_EXAMPLE);
+    // The conductors wrap rather than eliding: a tap on sixteen bits whose
+    // middle is an ellipsis has not said which bits it takes.
+    if let Some(bits) = validation.resolved_bits() {
+        rows.derived(&bits);
+    }
     let options = ORIENTATION_LABELS.map(str::to_owned);
     if let Some(index) = rows.select(
         "Orientation",
