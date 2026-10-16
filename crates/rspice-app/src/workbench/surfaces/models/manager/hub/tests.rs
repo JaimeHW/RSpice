@@ -1050,38 +1050,37 @@ fn a_failed_catalog_refresh_offers_the_one_retry_it_can_re_issue() {
     );
 }
 
-/// Every proof state an installed release can be in reaches the reader.
+/// The Catalog pane states what is wrong with an installed release, and
+/// nothing when nothing is.
 ///
 /// The re-proof itself has existed since packs shipped — `verify_installed`
 /// re-hashes the archive under the release key — with no control that
 /// called it and no cell that reported it, and the startup sweep computed
-/// each archive's digest and compared it to nothing. The phrases below are
-/// what those two facts look like once a reader can see them: the loud ones
-/// on the row, and every one of them in the inspector.
+/// each archive's digest and compared it to nothing. Making that visible
+/// first produced a pane that also announced its healthy states, including
+/// "nothing has re-proved it" beside an Attention cell already reading
+/// "never re-proved". Those two say nothing here now; the cell owns them.
 #[test]
-fn an_installed_release_reports_what_re_proved_it_and_what_did_not() {
+fn an_installed_release_reports_only_what_is_wrong_with_it() {
     let installed = held("1.0.0", Some(ArchiveEvidence::MatchesCatalog));
-    assert_eq!(
-        evidence(&installed, Some(&PackReProof::Verified)).1,
-        "re-proved this session"
-    );
-    assert_eq!(
-        evidence(&installed, None).0,
-        "the archive matches the published digest; nothing has re-proved it"
-    );
+    assert_eq!(evidence(&installed, Some(&PackReProof::Verified)), None);
+    assert_eq!(evidence(&installed, None), None);
     assert_eq!(
         evidence(
             &installed,
             Some(&PackReProof::Failed("truncated archive".to_owned()))
         ),
-        (
+        Some((
             "truncated archive".to_owned(),
             "re-proof under the release key"
-        )
+        ))
     );
+    // An archive that no longer matches outranks a clean re-proof.
     let replaced = held("1.0.0", Some(ArchiveEvidence::DiffersFromCatalog));
     assert_eq!(
-        evidence(&replaced, Some(&PackReProof::Verified)).0,
+        evidence(&replaced, Some(&PackReProof::Verified))
+            .expect("a replaced archive is always stated")
+            .0,
         "the retained archive no longer hashes to the published digest"
     );
 

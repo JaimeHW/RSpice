@@ -2157,12 +2157,16 @@ fn owned_source_provenance(ui: &mut Ui, state: &AppState) {
     }
     let digest = crate::state::content_digest(&state.simulation.source.netlist_content);
     if let Some(label) = owned_source_state(state, digest) {
-        let problem = if state.ui.netlist.external_change.is_some() {
-            Problem::Failure
-        } else {
-            Problem::Warning
-        };
-        property_row_problem(ui, "State", label, Some(problem));
+        // The same split the deck toolbar paints, and for the same reason:
+        // not yet checked is where the deck is, not a verdict on it. A file
+        // that changed underneath the editor is the one to act on.
+        let problem = state
+            .ui
+            .netlist
+            .external_change
+            .is_some()
+            .then_some(Problem::Warning);
+        property_row_problem(ui, "State", label, problem);
     }
 }
 

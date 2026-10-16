@@ -481,17 +481,20 @@ fn a_closure_edited_after_the_click_compiles_to_a_stale_result() {
     );
     assert!(veriloga.last_failure_token.is_none());
     let messages = app.state.ui.messages();
-    let (status, _) = code_workspace::veriloga_compile_status(
+    let (status, problem) = code_workspace::veriloga_compile_status(
         veriloga,
         app.state.workspace.content.project.id(),
         &edited,
         messages,
-        &crate::ui::tokens::Tokens::default(),
-    );
+    )
+    .expect("an edited source has something to say");
     assert_eq!(
         status,
         messages.text(crate::workbench::MessageId::VerilogAStatusModified)
     );
+    // Edited-since-the-last-compile is where the source is, not something
+    // wrong with it.
+    assert_eq!(problem, None);
 }
 
 /// A compile that fails says so where the reader already is: the inspector's
