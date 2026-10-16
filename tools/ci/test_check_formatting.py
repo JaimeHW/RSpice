@@ -296,6 +296,108 @@ class RustfmtOutcomeTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("could not check", printed)
         self.assertIn("exit status 1", printed)
+        self.assertIn(
+            "something unexpected",
+            printed,
+            "what rustfmt did print is the only account of what went wrong",
+        )
+
+
+def scripted(*outcomes: tuple[int, str, str]):
+    """A rustfmt that answers each batch with the next (code, stdout, stderr)."""
+    pending = list(outcomes)
+    calls: list[list[str]] = []
+
+    def runner(command: list[str]) -> subprocess.CompletedProcess:
+        calls.append(command)
+        code, stdout, stderr = pending.pop(0)
+        return subprocess.CompletedProcess(command, code, stdout, stderr)
+
+    return runner, calls
+
+
+class FormattingLoopTests(unittest.TestCase):
+    """The loop over batches, which is where a gate hides failures."""
+
+    GROUPED = {
+        ("rspice-app", "2024"): ["crates/rspice-app/src/lib.rs"],
+        ("rspice-core", "2024"): ["crates/rspice-core/src/lib.rs"],
+        ("rspice-output", "2024"): ["crates/rspice-output/src/lib.rs"],
+    }
+
+    def test_a_failure_does_not_stop_the_members_after_it(self) -> None:
+        """One break used to end the gate and hide everything after it.
+
+        A parse error in the first member must not stop the second from being
+        checked, or the third's diff from being named.
+        """
+        runner, calls = scripted(
+            (1, "", "error: expected item, found `}`"),
+            (0, "", ""),
+            (1, "Diff in /work/crates/rspice-output/src/lib.rs:3:\n", ""),
+        )
+        unformatted, failures, targets = check_formatting.format_members(
+            self.GROUPED, write=False, runner=runner
+        )
+        self.assertEqual(len(calls), 3, "every batch runs")
+        self.assertEqual(unformatted, ["/work/crates/rspice-output/src/lib.rs"])
+        self.assertEqual(len(failures), 1)
+        self.assertIn("rspice-app", failures[0])
+        self.assertIn("expected item", failures[0])
+        self.assertEqual(targets, 3)
+
+    def test_write_mode_keeps_formatting_past_a_file_it_cannot_parse(self) -> None:
+        runner, calls = scripted(
+            (1, "", "error: this file contains an unclosed delimiter"),
+            (0, "", ""),
+            (0, "", ""),
+        )
+        unformatted, failures, _ = check_formatting.format_members(
+            self.GROUPED, write=True, runner=runner
+        )
+        self.assertEqual(len(calls), 3, "the rest of the workspace is still formatted")
+        self.assertEqual(unformatted, [])
+        self.assertEqual(len(failures), 1)
+        for command in calls:
+            self.assertNotIn("--check", command)
+
+    def test_every_failure_and_every_file_is_printed(self) -> None:
+        """The summary lists all of it, not whichever came first."""
+        workspace = {
+            "packages": [
+                package(f"member-{index:02}", ("2024", f"/w/member-{index:02}/src/lib.rs"))
+                for index in range(MINIMUM_MEMBERS)
+            ]
+        }
+        answers = [(0, "", "")] * MINIMUM_MEMBERS
+        answers[0] = (1, "", "error: expected item")
+        answers[1] = (1, "Diff in /w/member-01/src/lib.rs:1:\n", "")
+        answers[2] = (1, "", "error: file not found for module `gone`")
+        runner, _ = scripted(*answers)
+        printed = io.StringIO()
+        with (
+            mock.patch.object(check_formatting, "metadata", return_value=workspace),
+            mock.patch.object(check_formatting, "run_rustfmt", runner),
+            mock.patch.object(sys, "argv", ["check_formatting.py"]),
+            contextlib.redirect_stdout(printed),
+        ):
+            code = check_formatting.main()
+        self.assertEqual(code, 1)
+        output = printed.getvalue()
+        self.assertIn("expected item", output)
+        self.assertIn("unformatted: /w/member-01/src/lib.rs", output)
+        self.assertIn("file not found for module", output)
+
+    def test_rustfmt_output_is_read_as_utf8(self) -> None:
+        """A diff quotes source lines, and the sources are UTF-8.
+
+        Read with the locale's codec — cp1252 on a Windows checkout — the first
+        typographic quote in a quoted line ended the gate in a traceback.
+        """
+        with mock.patch.object(check_formatting.subprocess, "run") as run:
+            check_formatting.run_rustfmt(["rustfmt", "--check", "a.rs"])
+        self.assertEqual(run.call_args.kwargs["encoding"], "utf-8")
+        self.assertEqual(run.call_args.kwargs["errors"], "replace")
 
 
 if __name__ == "__main__":
