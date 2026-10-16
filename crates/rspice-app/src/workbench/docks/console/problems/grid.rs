@@ -414,7 +414,8 @@ pub(super) fn row(
     );
     // Declared as a selectable label so the row's words are its name, then
     // given the role and state a list option has; egui's own projection of a
-    // selection is a toggle.
+    // selection is a toggle. Every row has the one role, so a row that leads
+    // nowhere says so, where the pointer is told by its cursor.
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::SelectableLabel,
@@ -425,6 +426,9 @@ pub(super) fn row(
     ui.ctx().accesskit_node_builder(id, |node| {
         node.set_role(egui::accesskit::Role::ListBoxOption);
         node.set_selected(cells.selected);
+        if !cells.target {
+            node.set_description("Has no location to go to");
+        }
     });
     if cells.selected {
         paint_current(ui, rect);

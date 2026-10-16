@@ -153,6 +153,7 @@ struct Announced {
     toggled: Option<egui::accesskit::Toggled>,
     selected: Option<bool>,
     expanded: Option<bool>,
+    description: Option<String>,
     bounds: Option<egui::Rect>,
 }
 
@@ -271,12 +272,12 @@ impl Harness {
     }
 
     fn frame(&self, state: &mut AppState, input: egui::RawInput) -> Render {
-        let output = self.ctx.run_ui(input, |ui| {
         if self.ctx.cumulative_pass_nr() == 0 {
             // This context counts passes from zero; a memo another harness
             // took of the same session must not answer for them.
             state.diagnostics.forget_pass();
         }
+        let output = self.ctx.run_ui(input, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 self.page.set(Some(ui.id()));
                 problems(ui, state);
@@ -400,6 +401,7 @@ fn collect(output: egui::FullOutput) -> Render {
                 toggled: node.toggled(),
                 selected: node.is_selected(),
                 expanded: node.is_expanded(),
+                description: node.description().map(str::to_owned),
                 bounds: node.bounds().map(|bounds| {
                     egui::Rect::from_min_max(
                         egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
@@ -1949,7 +1951,8 @@ fn a_wrapped_note_takes_its_wrapped_height_from_the_body() {
 
 /// Every row is an option of the list the table is, whether or not it leads
 /// anywhere, and says whether it is the current one as a list does: selected,
-/// rather than a toggle pressed or not.
+/// rather than a toggle pressed or not. One role for both kinds of row, so the
+/// row that leads nowhere says so in its description.
 #[test]
 fn every_row_announces_as_an_option_of_the_list() {
     let mut state = state_with_design_findings();
@@ -1968,9 +1971,13 @@ fn every_row_announces_as_an_option_of_the_list() {
     state.diagnostics.set_current_finding(followed);
 
     let render = render(&mut state, sized(egui::RawInput::default()));
-    for (message, selected) in [
-        ("R1 has no resistance", true),
-        ("a finding with nowhere to go", false),
+    for (message, selected, description) in [
+        ("R1 has no resistance", true, None),
+        (
+            "a finding with nowhere to go",
+            false,
+            Some("Has no location to go to"),
+        ),
     ] {
         let row = render
             .nodes
@@ -1986,6 +1993,11 @@ fn every_row_announces_as_an_option_of_the_list() {
             "{message:?} says whether it is the current row",
         );
         assert_eq!(row.toggled, None, "{message:?} is not a toggle");
+        assert_eq!(
+            row.description.as_deref(),
+            description,
+            "{message:?} says whether it leads anywhere",
+        );
     }
 }
 
