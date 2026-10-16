@@ -860,15 +860,26 @@ fn check_one_view(
 /// across the same pair of global nodes, or two declared outputs on one global,
 /// conflict wherever they are drawn — and the per-cellview rules cannot see the
 /// conflict when the two sit in different cellviews, or in two occurrences of
-/// one. Ground is a global like any other here: it is node 0 everywhere.
+/// one.
+///
+/// Ground is node 0 everywhere, but it is the reference, not a contested net:
+/// an output tied to ground in a cell placed twice is not two outputs fighting
+/// over one node, and ground is never a conflict by itself. A source from a
+/// global to ground is still one side of a loop, keyed on the pair, because two
+/// such sources hold the same global against the same reference.
 #[derive(Default)]
 struct GlobalDrives {
-    /// Voltage sources whose two terminals both stand on global nodes, by the
-    /// unordered pair of folded node names.
+    /// Voltage sources whose two terminals both stand on global nodes or
+    /// ground, at least one of them a global, by the unordered pair of folded
+    /// node names.
     sources: BTreeMap<(String, String), GlobalDriven>,
-    /// Declared outputs standing on a global node, by folded node name.
+    /// Declared outputs standing on a global node other than ground, by folded
+    /// node name.
     outputs: BTreeMap<String, GlobalDriven>,
 }
+
+/// The key ground takes in a pair of global nodes.
+const GROUND_KEY: &str = "0";
 
 /// What drives one global node, or one pair of them, across the walk.
 struct GlobalDriven {
@@ -889,7 +900,7 @@ impl GlobalDrives {
     fn collect(&mut self, view: usize, components: &[ComponentInfo], globals: &HashSet<String>) {
         let global = |net: &str| {
             if crate::schematic::ground_names::is_ground_reference(net) {
-                Some("0".to_owned())
+                Some(GROUND_KEY.to_owned())
             } else {
                 let folded = net.to_ascii_lowercase();
                 globals.contains(&folded).then_some(folded)
@@ -911,15 +922,25 @@ impl GlobalDrives {
                 let (Some(plus_key), Some(minus_key)) = (global(plus), global(minus)) else {
                     continue;
                 };
-                let key = if plus_key <= minus_key {
-                    (plus_key, minus_key)
+                if plus_key == GROUND_KEY && minus_key == GROUND_KEY {
+                    continue;
+                }
+                // The global is named first, so a source held against ground
+                // is stated at the node it actually fixes.
+                let (key, nodes) = if plus_key <= minus_key {
+                    ((plus_key, minus_key), [plus, minus])
                 } else {
-                    (minus_key, plus_key)
+                    ((minus_key, plus_key), [minus, plus])
+                };
+                let nodes = if key.0 == GROUND_KEY {
+                    [nodes[1], nodes[0]]
+                } else {
+                    nodes
                 };
                 self.sources
                     .entry(key)
                     .or_insert_with(|| GlobalDriven {
-                        nodes: vec![plus.to_owned(), minus.to_owned()],
+                        nodes: nodes.map(str::to_owned).to_vec(),
                         drivers: Vec::new(),
                     })
                     .drivers
@@ -929,14 +950,20 @@ impl GlobalDrives {
                     });
                 continue;
             }
+            // One driver per component and node, as the cellview's own rule
+            // counts: two output pins of one instance on one global are that
+            // instance's business, not two drivers fighting.
+            let mut driven = BTreeMap::new();
             for pin in component.pins.iter().filter(|pin| pin.drives()) {
-                let Some(key) = global(&pin.net_name) else {
-                    continue;
-                };
+                if let Some(key) = global(&pin.net_name).filter(|key| key != GROUND_KEY) {
+                    driven.entry(key).or_insert_with(|| pin.net_name.clone());
+                }
+            }
+            for (key, node) in driven {
                 self.outputs
                     .entry(key)
                     .or_insert_with(|| GlobalDriven {
-                        nodes: vec![pin.net_name.clone()],
+                        nodes: vec![node],
                         drivers: Vec::new(),
                     })
                     .drivers
@@ -954,19 +981,24 @@ impl GlobalDrives {
     /// cellview's own rules' business, and are stated there.
     fn findings(&self, occurrences: &[Occurrences]) -> Vec<DrcViolation> {
         let mut findings = Vec::new();
-        for driven in self.sources.values() {
+        for ((first, second), driven) in &self.sources {
             let Some((total, listed)) = conflict(&driven.drivers, occurrences) else {
                 continue;
+            };
+            let across = if first == GROUND_KEY || second == GROUND_KEY {
+                format!("Global node '{}' and ground", driven.nodes[0])
+            } else {
+                format!(
+                    "Global nodes '{}' and '{}'",
+                    driven.nodes[0], driven.nodes[1]
+                )
             };
             findings.push(
                 DrcViolation::new(
                     0,
                     DrcViolationType::SourceToSource,
                     format!(
-                        "Global nodes '{}' and '{}' are joined by {total} voltage sources \
-                         across the hierarchy: {}",
-                        driven.nodes[0],
-                        driven.nodes[1],
+                        "{across} are joined by {total} voltage sources across the hierarchy: {}",
                         listed.join(", ")
                     ),
                     DrcLocation::Node {

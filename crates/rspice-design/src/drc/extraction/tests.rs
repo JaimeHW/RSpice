@@ -1189,6 +1189,15 @@ fn sources_across_one_pair_of_globals_in_two_occurrences_are_a_loop() {
         "{}",
         loops[0].message
     );
+    // Ground is the reference both sources hold the global against, so the
+    // loop is stated at the global.
+    assert!(
+        loops[0]
+            .message
+            .starts_with("Global node 'vdd!' and ground are joined by 2 voltage sources"),
+        "{}",
+        loops[0].message
+    );
     // Within the cell the global is touched once, and that is not floating.
     assert!(of_type(&result, DrcViolationType::FloatingNode).is_empty());
 
@@ -1201,5 +1210,184 @@ fn sources_across_one_pair_of_globals_in_two_occurrences_are_a_loop() {
         of_type(&result, DrcViolationType::SourceToSource).is_empty(),
         "{:?}",
         result.violations()
+    );
+}
+
+/// One cellview drawn as `parts`, each listed terminal labelled with the node
+/// it stands on. Every part sits at its own spot, so only labels join them.
+fn labelled(parts: Vec<(Component, Vec<(&str, &str)>)>) -> SchematicDocument {
+    let mut document = SchematicDocument::default();
+    for (component, nodes) in parts {
+        let terminals = terminal_positions_with_hierarchy(&component, None);
+        for (index, (pin, node)) in (0_u64..).zip(nodes) {
+            let point = terminals
+                .iter()
+                .find_map(|(name, point)| (name == pin).then_some(*point))
+                .unwrap_or_else(|| panic!("{} has a terminal {pin}", component.name));
+            document
+                .net_labels
+                .push(NetLabel::new(component.id * 100 + index, point, node));
+        }
+        document.components.push(component);
+    }
+    document
+}
+
+/// A primitive at a spot of its own.
+fn part(id: u64, kind: ComponentType, name: &str) -> Component {
+    Component::new(id, kind, Point::new(400 * id as i32, 0)).with_name_value(name, "1")
+}
+
+/// What the cross-cellview driver rules leave alone: sources on different
+/// globals, a source on a port or on a local net of a cell placed twice —
+/// each occurrence's node is its own there — and a conflict confined to one
+/// occurrence, which that cellview's own rule states once.
+#[test]
+fn only_a_conflict_on_one_global_across_occurrences_is_a_hierarchy_finding() {
+    let source = |id: u64, plus: &'static str, minus: &'static str| {
+        (
+            part(id, ComponentType::VoltageSource, &format!("V{id}")),
+            vec![("+", plus), ("-", minus)],
+        )
+    };
+    let libraries = LibraryCatalog::default();
+    let contract = crate::connectivity_contract::ConnectivityContract::default();
+    let check = |views: &HashMap<String, SchematicDocument>, top: Vec<Component>| {
+        let hierarchy =
+            HierarchySource::from_workspace(&libraries, views).with_connectivity(&contract);
+        let top = SchematicDocument {
+            components: top,
+            ..SchematicDocument::default()
+        };
+        run_check_with_hierarchy(&top, &hierarchy, DrcConfig::default())
+    };
+
+    let views = buffers([
+        ("vdd", labelled(vec![source(1, "vdd!", "0")])),
+        ("vcc", labelled(vec![source(1, "vcc!", "0")])),
+    ]);
+    let result = check(
+        &views,
+        vec![instance(1, "XD", "vdd"), instance(2, "XC", "vcc")],
+    );
+    assert!(
+        of_type(&result, DrcViolationType::SourceToSource).is_empty(),
+        "{:?}",
+        result.violations()
+    );
+
+    let views = buffers([
+        (
+            "port",
+            labelled(vec![
+                source(1, "p", "0"),
+                (port(9, "p", "inout"), vec![("P", "p")]),
+            ]),
+        ),
+        ("local", labelled(vec![source(1, "n", "0")])),
+    ]);
+    let result = check(
+        &views,
+        vec![
+            instance(1, "XP1", "port"),
+            instance(2, "XP2", "port"),
+            instance(3, "XL1", "local"),
+            instance(4, "XL2", "local"),
+        ],
+    );
+    assert!(
+        of_type(&result, DrcViolationType::SourceToSource).is_empty(),
+        "{:?}",
+        result.violations()
+    );
+
+    let views = buffers([(
+        "pair",
+        labelled(vec![source(1, "vdd!", "0"), source(2, "vdd!", "0")]),
+    )]);
+    let result = check(&views, vec![instance(1, "X1", "pair")]);
+    assert_eq!(
+        placed(&result, DrcViolationType::SourceToSource),
+        vec![("/X1".to_owned(), Some("work/pair/schematic".to_owned()))],
+        "the cell's own rule states it, and the hierarchy rule does not repeat it"
+    );
+}
+
+/// A cell whose instance of `amp` drives `node` from each of `outputs`. The
+/// instance's pins are where `amp`'s symbol puts them.
+fn driving(
+    amp: &SchematicDocument,
+    node: &'static str,
+    outputs: &[&'static str],
+) -> SchematicDocument {
+    let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
+    binding.bind_interface(
+        &outputs
+            .iter()
+            .map(|name| PortSpec {
+                name: (*name).to_owned(),
+                direction: PortDirection::Out,
+            })
+            .collect::<Vec<_>>(),
+    );
+    let instance = Component::new(1, ComponentType::CellInstance, Point::new(0, 0))
+        .with_library_cell(binding)
+        .with_name_value("X1", "amp");
+    let views = buffers([("amp", amp.clone())]);
+    let libraries = LibraryCatalog::default();
+    let hierarchy = HierarchySource::from_workspace(&libraries, &views);
+    let terminals = terminal_positions_with_hierarchy(&instance, Some(&hierarchy));
+    let mut document = SchematicDocument::default();
+    for (id, output) in (100_u64..).zip(outputs) {
+        let point = terminals
+            .iter()
+            .find_map(|(name, point)| (name == output).then_some(*point))
+            .unwrap_or_else(|| panic!("amp's symbol has a pin {output}: {terminals:?}"));
+        document.net_labels.push(NetLabel::new(id, point, node));
+    }
+    document.components.push(instance);
+    document
+}
+
+/// Ground is the reference, not a contested net: one declared output tied to
+/// ground in a cell placed twice is not two outputs fighting. On a global it
+/// is, and the drivers are counted per instance, as the cell's own rule
+/// counts them, not per pin.
+#[test]
+fn cross_cellview_shorted_outputs_count_instances_and_leave_ground_alone() {
+    let amp = SchematicDocument {
+        components: vec![port(1, "o1", "out"), port(2, "o2", "out")],
+        ..SchematicDocument::default()
+    };
+    let libraries = LibraryCatalog::default();
+    let contract = crate::connectivity_contract::ConnectivityContract::default();
+    let twice = SchematicDocument {
+        components: vec![instance(1, "XA", "drv"), instance(2, "XB", "drv")],
+        ..SchematicDocument::default()
+    };
+
+    let views = buffers([("amp", amp.clone()), ("drv", driving(&amp, "0", &["o1"]))]);
+    let hierarchy =
+        HierarchySource::from_workspace(&libraries, &views).with_connectivity(&contract);
+    let result = run_check_with_hierarchy(&twice, &hierarchy, DrcConfig::default());
+    assert!(
+        of_type(&result, DrcViolationType::ShortedOutputs).is_empty(),
+        "{:?}",
+        result.violations()
+    );
+
+    let drv = driving(&amp, "bus!", &["o1", "o2"]);
+    let views = buffers([("amp", amp), ("drv", drv)]);
+    let hierarchy =
+        HierarchySource::from_workspace(&libraries, &views).with_connectivity(&contract);
+    let result = run_check_with_hierarchy(&twice, &hierarchy, DrcConfig::default());
+    let shorted = of_type(&result, DrcViolationType::ShortedOutputs);
+    assert_eq!(shorted.len(), 1, "{:?}", result.violations());
+    assert!(
+        shorted[0]
+            .message
+            .starts_with("Global node 'bus!' has 2 declared output drivers"),
+        "{}",
+        shorted[0].message
     );
 }
