@@ -805,14 +805,12 @@ impl CircuitData {
             return true;
         }
 
-        // External Verilog-A can model ideal branch constraints whose exact
-        // Newton step must not be rejected by global line-search damping.
-        #[cfg(feature = "veriloga-builtins-base")]
-        {
-            if self.has_generated_veriloga_devices() {
-                return true;
-            }
-        }
+        // A Verilog-A model, loaded from its `.va` source or generated from
+        // it, is not damped here: it can model ideal branch constraints whose
+        // exact Newton step global damping would reject, and ngspice applies
+        // no global damping to an OSDI model either; the model's own
+        // `$limit` calls are its limiting. Both routes of one model take the
+        // same Newton step.
 
         self.jfets.iter().any(|jfet| {
             !matches!(

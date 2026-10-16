@@ -914,6 +914,59 @@ fn bsimsoi_floating_body_matches_xyce_with_no_floor_on_the_models_own_nodes() {
     }
 }
 
+/// One BSIM-SOI 4.7 card takes the same Newton path on both routes: the same
+/// iteration count and the same operating point, bit for bit. The routes
+/// stamp the same Jacobian and right-hand side at every iterate, and the
+/// solver damped the generated device's node steps while it left the `.va`
+/// device's undamped: from one presolve, the internal drain and gate nodes
+/// went to 0.5 V on the generated route and to 1 V on the `.va` route.
+#[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
+#[test]
+fn bsimsoi_takes_one_newton_path_on_both_routes() {
+    let source = Bsimsoi47Source::write("newton_path");
+    let body = "Vd d 0 1.0\nVg g 0 1.0\nX1 d g 0 0 bsimsoi__18c250bc shmod=1 rth0=50";
+    let mut runs = Vec::new();
+    for (route, deck) in [
+        (".va", source.runtime_deck("newton path", body)),
+        (
+            "generated",
+            format!("* newton path generated route\n{body}\n.end\n"),
+        ),
+    ] {
+        assert_eq!(uses_generated_devices(&deck), route == "generated");
+        let netlist = Netlist::parse_validated(&deck).expect("deck parses");
+        let engine = Engine::default();
+        let result = engine
+            .run_dc_op(&netlist)
+            .unwrap_or_else(|err| panic!("{route}: {err}"));
+        let iterations = engine.convergence_quality().total_iterations;
+        runs.push((
+            route,
+            iterations,
+            result.node_voltages,
+            result.branch_currents,
+        ));
+    }
+    let (_, va_iterations, va_voltages, va_currents) = &runs[0];
+    let (_, generated_iterations, generated_voltages, generated_currents) = &runs[1];
+    assert_eq!(va_iterations, generated_iterations, "Newton iterations");
+    assert_eq!(va_voltages.len(), generated_voltages.len());
+    for (index, (va, generated)) in va_voltages.iter().zip(generated_voltages).enumerate() {
+        assert_eq!(
+            va.to_bits(),
+            generated.to_bits(),
+            "unknown {index}: {va:e} against {generated:e}"
+        );
+    }
+    for (va, generated) in va_currents.iter().zip(generated_currents) {
+        assert_eq!(
+            va.to_bits(),
+            generated.to_bits(),
+            "{va:e} against {generated:e}"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // An omitted terminal is a net of the instance's own
 //
@@ -1291,8 +1344,11 @@ fn bsimsoi_reaches_an_operating_point_with_body_and_thermal_terminals_omitted() 
 /// does (`cktop.c`, `dynamic_gmin`): when a failed stage finds the step
 /// factor below 1.00005. Before, it crept for 13,035 Newton iterations, about
 /// 0.7 s here and an estimated half hour on the interpreter's `.va` route.
-/// Now it takes
-/// 6,817 iterations and about 0.2 s.
+///
+/// Every route takes the same Newton path, 2,013 iterations, about 0.1 s on
+/// the generated route. Its direct Newton reaches an iterate the model cannot
+/// evaluate (body and `p` near 1.9e10 V), so the refusal names that
+/// non-finite evaluation, the diagnostic every exhausted aid defers to.
 #[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
 #[test]
 fn bsimsoi_thermal_runaway_is_refused_in_bounded_time() {
@@ -1316,7 +1372,7 @@ fn bsimsoi_thermal_runaway_is_refused_in_bounded_time() {
         let elapsed = start.elapsed();
         let message = trace[0].text.clone().unwrap_or_default();
         assert!(
-            message.contains("GMIN stepping stopped"),
+            message.contains("non-finite") && message.contains("at a trial iterate"),
             "the {card} card refuses: {trace:?}"
         );
         if !cfg!(debug_assertions) {
@@ -1325,7 +1381,8 @@ fn bsimsoi_thermal_runaway_is_refused_in_bounded_time() {
                 "the {card} card refuses in {elapsed:?}"
             );
         }
-        refusals.push(message);
+        // The refusal names the instance, which is the card's own name.
+        refusals.push(message.replace("'M1'", "'X1'"));
     }
     assert_eq!(refusals[0], refusals[1], "both cards refuse alike");
 
@@ -1349,7 +1406,9 @@ fn bsimsoi_thermal_runaway_is_refused_in_bounded_time() {
         let elapsed = start.elapsed();
         let message = trace[0].text.clone().unwrap_or_default();
         assert!(
-            message != "ok" && !message.contains("native JIT error"),
+            message.contains("non-finite")
+                && message.contains("at a trial iterate")
+                && !message.contains("native JIT error"),
             "the .va route refuses as a convergence failure: {trace:?}"
         );
         if !cfg!(debug_assertions) {
