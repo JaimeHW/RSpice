@@ -132,6 +132,32 @@ impl DrcChecker {
         result.add_violation(violation);
     }
 
+    /// Publish one finding about an emitted instance, `written` saying
+    /// whether the deck still writes it.
+    ///
+    /// The finding starts at what the instance makes it worth, and the
+    /// project's override then wins down to the floor for that instance and
+    /// no further: a deck that lowers the warning on an instance the
+    /// netlister renamed does not lower the error on one it cannot write,
+    /// which would only move the refusal from this report to the run.
+    fn add_instance_violation(
+        &self,
+        result: &mut DrcResult,
+        violation: DrcViolation,
+        written: bool,
+    ) {
+        let mut violation = violation.with_instance_severity(written);
+        if let Some(severity) = self
+            .config
+            .severity_overrides
+            .get(&violation.violation_type)
+        {
+            violation.severity =
+                (*severity).max(violation.violation_type.floor_for_instance(written));
+        }
+        result.add_violation(violation);
+    }
+
     /// Run every enabled rule over one extracted design.
     ///
     /// Both arguments come from the same [`ExtractedConnectivity`]: the
@@ -215,7 +241,7 @@ impl DrcChecker {
             };
             if component.name.trim().is_empty() {
                 let id = self.next_id();
-                self.add_violation(
+                self.add_instance_violation(
                     result,
                     DrcViolation::new(
                         id,
@@ -228,12 +254,12 @@ impl DrcChecker {
                             id: component.id,
                             name: String::new(),
                         },
-                    )
-                    .with_instance_severity(written),
+                    ),
+                    written,
                 );
             } else if let Some(error) = component.reference_error.as_deref() {
                 let id = self.next_id();
-                self.add_violation(
+                self.add_instance_violation(
                     result,
                     DrcViolation::new(
                         id,
@@ -247,8 +273,8 @@ impl DrcChecker {
                             id: component.id,
                             name: component.name.clone(),
                         },
-                    )
-                    .with_instance_severity(written),
+                    ),
+                    written,
                 );
             }
         }
@@ -330,7 +356,7 @@ impl DrcChecker {
         for component in components {
             let component_name = component_identity(component);
             let id = self.next_id();
-            self.add_violation(
+            self.add_instance_violation(
                 result,
                 DrcViolation::new(
                     id,
@@ -344,8 +370,8 @@ impl DrcChecker {
                         name: component.name.clone(),
                     },
                 )
-                .with_instance_severity(false)
                 .with_related(vec![component_name]),
+                false,
             );
         }
     }

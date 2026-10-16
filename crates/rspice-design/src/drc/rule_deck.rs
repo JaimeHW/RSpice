@@ -118,8 +118,8 @@ impl std::fmt::Display for DeckIssue {
                  checked at {}",
                 rule.rule_code(),
                 stored.display_name(),
-                rule.rule().floor.display_name(),
-                rule.rule().floor.display_name(),
+                rule.rule().floor.deck.display_name(),
+                rule.rule().floor.deck.display_name(),
             ),
         }
     }
@@ -142,20 +142,20 @@ impl std::fmt::Display for DeckEditRefusal {
             Self::Unread(issue) => write!(formatter, "{issue}"),
             Self::BelowFloor { rule } => {
                 let entry = rule.rule();
-                if entry.floor >= DrcSeverity::Error {
+                if entry.floor.deck >= DrcSeverity::Error {
                     write!(
                         formatter,
                         "{} cannot be set below {}: a finding of it refuses the run whatever the \
                          page reports it as",
                         entry.title,
-                        entry.floor.display_name()
+                        entry.floor.deck.display_name()
                     )
                 } else {
                     write!(
                         formatter,
                         "{} cannot be set below {}",
                         entry.title,
-                        entry.floor.display_name()
+                        entry.floor.deck.display_name()
                     )
                 }
             }
@@ -188,18 +188,17 @@ impl DesignRuleDeck {
     pub fn severity(&self, rule: DrcViolationType) -> Option<DrcSeverity> {
         self.severities
             .get(&rule)
-            .map(|stored| (*stored).max(rule.rule().floor))
+            .map(|stored| (*stored).max(rule.rule().floor.deck))
     }
 
     /// What `rule` will be reported as: its default unless this deck says
     /// otherwise.
     ///
-    /// Note that a finding may still be raised at a severity the instance
-    /// gives it — see [`DrcViolationType::severity_for_instance`] — and that
-    /// an override from this deck is applied after that and wins. This is
-    /// therefore what a reader is promised for every finding the deck
-    /// overrides, and what they are promised for an object that emits no
-    /// instance otherwise.
+    /// Note that a finding on an emitted instance the deck cannot write is
+    /// never reported below the rule's floor for such an instance — see
+    /// [`DrcViolationType::floor_for_instance`] — whatever this says. This is
+    /// therefore what a reader is promised for every other finding of the
+    /// rule.
     pub fn effective_severity(&self, rule: DrcViolationType) -> DrcSeverity {
         self.severity(rule)
             .unwrap_or_else(|| rule.default_severity())
@@ -220,7 +219,7 @@ impl DesignRuleDeck {
         if severity == rule.default_severity() {
             return self.clear(rule);
         }
-        if severity < rule.rule().floor {
+        if severity < rule.rule().floor.deck {
             return Err(DeckEditRefusal::BelowFloor { rule });
         }
         let replaced = self.retained.remove(rule.rule_code()).is_some();
@@ -252,7 +251,7 @@ impl DesignRuleDeck {
     pub fn entries(&self) -> impl Iterator<Item = (DrcViolationType, DrcSeverity)> + '_ {
         self.severities
             .iter()
-            .map(|(rule, severity)| (*rule, (*severity).max(rule.rule().floor)))
+            .map(|(rule, severity)| (*rule, (*severity).max(rule.rule().floor.deck)))
     }
 
     /// The deck as [`super::DrcConfig::severity_overrides`] takes it.
@@ -272,7 +271,7 @@ impl DesignRuleDeck {
             issues.push(unread.issue.clone());
         }
         for (rule, stored) in &self.severities {
-            if *stored < rule.rule().floor {
+            if *stored < rule.rule().floor.deck {
                 issues.push(DeckIssue::BelowFloor {
                     rule: *rule,
                     stored: *stored,
@@ -663,16 +662,23 @@ mod tests {
             deck.set_severity(DrcViolationType::DuplicateName, DrcSeverity::Error),
             Ok(true)
         );
-        // A rule that may only be raised: its default is a note, and a deck
-        // may set it no lower than an error.
+        // A master that resolves to nothing is never written, so the rule is
+        // held at an error throughout.
         assert!(
             deck.set_severity(DrcViolationType::UnknownComponent, DrcSeverity::Warning)
                 .is_err()
         );
         assert_eq!(
-            deck.set_severity(DrcViolationType::UnknownComponent, DrcSeverity::Info),
+            deck.set_severity(DrcViolationType::UnknownComponent, DrcSeverity::Error),
             Ok(false),
             "its own default is not an override"
+        );
+        // An empty reference refuses the run only on an instance the deck
+        // cannot write, which the checker holds at an error itself; the deck
+        // may lower it to a note for every other instance.
+        assert_eq!(
+            deck.set_severity(DrcViolationType::EmptyName, DrcSeverity::Info),
+            Ok(true)
         );
     }
 

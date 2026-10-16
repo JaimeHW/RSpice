@@ -872,18 +872,17 @@ fn unknown_component_requires_authoritative_resolution_and_honors_gate() {
 }
 
 /// The project's configured policy outranks the rule's own judgement, which
-/// now reads the component rather than the violation type alone.
+/// reads the component rather than the violation type alone — down to the
+/// floor for that instance and no further. A deck that lowers the warning on
+/// an instance the netlister renamed does not lower the error on one it
+/// cannot write: the run would be refused all the same.
 #[test]
 fn severity_overrides_outrank_the_severity_a_component_gives_a_finding() {
-    const NAMING_AND_BINDING: [DrcViolationType; 3] = [
-        DrcViolationType::EmptyName,
-        DrcViolationType::InvalidName,
-        DrcViolationType::UnknownComponent,
-    ];
-
     let empty = resistor(3, "", vec![]);
     let mut invalid = resistor(4, "C4", vec![]);
     invalid.reference_error = Some("Resistor designators must begin with `R`.".to_owned());
+    let mut unwritable = resistor(6, "", vec![]);
+    unwritable.written_cards = None;
     let mut unresolved = resistor(5, "X5", vec![]);
     unresolved.component_known = Some(false);
 
@@ -893,23 +892,137 @@ fn severity_overrides_outrank_the_severity_a_component_gives_a_finding() {
         check_unconnected_pins: false,
         ..DrcConfig::default()
     };
-    for violation_type in NAMING_AND_BINDING {
+    for violation_type in [
+        DrcViolationType::EmptyName,
+        DrcViolationType::InvalidName,
+        DrcViolationType::UnknownComponent,
+    ] {
         config
             .severity_overrides
             .insert(violation_type, DrcSeverity::Info);
     }
 
-    let result = check(&[empty, invalid, unresolved], config);
-    for violation_type in NAMING_AND_BINDING {
-        let findings = of_type(&result, violation_type);
-        assert_eq!(findings.len(), 1, "{violation_type:?}");
-        assert_eq!(
-            findings[0].severity,
-            DrcSeverity::Info,
-            "{violation_type:?}"
+    let result = check(&[empty, invalid, unwritable, unresolved], config);
+    let severity_at = |violation_type, id| {
+        of_type(&result, violation_type)
+            .into_iter()
+            .find(|finding| matches!(finding.location, DrcLocation::Component { id: at, .. } if at == id))
+            .map(|finding| finding.severity)
+    };
+    assert_eq!(
+        severity_at(DrcViolationType::EmptyName, 3),
+        Some(DrcSeverity::Info)
+    );
+    assert_eq!(
+        severity_at(DrcViolationType::InvalidName, 4),
+        Some(DrcSeverity::Info)
+    );
+    assert_eq!(
+        severity_at(DrcViolationType::EmptyName, 6),
+        Some(DrcSeverity::Error)
+    );
+    assert_eq!(
+        severity_at(DrcViolationType::UnknownComponent, 5),
+        Some(DrcSeverity::Error)
+    );
+    assert!(result.has_errors());
+}
+
+/// A deck that sets an instance rule to its floor, or raises it, means the
+/// same thing on every object it reaches, and promotes nothing it does not.
+///
+/// An object that emits no instance — a port, a ground, a drawn symbol whose
+/// type resolves to nothing — is never asked an instance rule at all, so no
+/// deck can make one of its findings an error. On an emitted instance the deck
+/// sets what the finding is reported at, and the floor for an instance the
+/// deck cannot write holds that one at an error.
+#[test]
+fn a_deck_at_an_instance_rules_floor_promotes_no_structural_object() {
+    let mut structural = resistor(7, "", vec![]);
+    structural.reference_required = false;
+    structural.written_cards = None;
+    structural.component_known = Some(false);
+    structural.component_type = "port".to_owned();
+    let written = resistor(8, "", vec![]);
+    let mut unwritable = resistor(9, "", vec![]);
+    unwritable.written_cards = None;
+    unwritable.component_known = Some(false);
+
+    let base = DrcConfig {
+        check_missing_ground: false,
+        check_floating_nodes: false,
+        check_unconnected_pins: false,
+        ..DrcConfig::default()
+    };
+    let severities = |deck: &crate::drc::DesignRuleDeck| {
+        let result = check(
+            &[structural.clone(), written.clone(), unwritable.clone()],
+            DrcConfig {
+                severity_overrides: deck.severity_overrides(),
+                ..base.clone()
+            },
         );
-    }
-    assert!(result.passed());
+        let at = |violation_type, id| {
+            of_type(&result, violation_type)
+                .into_iter()
+                .filter(|finding| matches!(finding.location, DrcLocation::Component { id: at, .. } if at == id))
+                .map(|finding| finding.severity)
+                .collect::<Vec<_>>()
+        };
+        (
+            [
+                at(DrcViolationType::EmptyName, 7),
+                at(DrcViolationType::UnknownComponent, 7),
+            ],
+            at(DrcViolationType::EmptyName, 8),
+            [
+                at(DrcViolationType::EmptyName, 9),
+                at(DrcViolationType::UnknownComponent, 9),
+            ],
+        )
+    };
+
+    // Each rule at its floor: an empty reference may go as low as a note, an
+    // unresolved master no lower than an error.
+    let mut at_floor = crate::drc::DesignRuleDeck::default();
+    at_floor
+        .set_severity(DrcViolationType::EmptyName, DrcSeverity::Info)
+        .expect("an empty reference may be lowered to a note");
+    at_floor
+        .set_severity(DrcViolationType::UnknownComponent, DrcSeverity::Error)
+        .expect("an unresolved master may be held at an error");
+    let (structural_findings, written_findings, unwritable_findings) = severities(&at_floor);
+    assert_eq!(
+        structural_findings,
+        [vec![], vec![]],
+        "a structural object is not asked"
+    );
+    assert_eq!(written_findings, vec![DrcSeverity::Info]);
+    assert_eq!(
+        unwritable_findings,
+        [vec![DrcSeverity::Error], vec![DrcSeverity::Error]]
+    );
+
+    // A raise is a raise on every instance it reaches, and still on no
+    // structural object.
+    let mut raised = crate::drc::DesignRuleDeck::default();
+    raised
+        .set_severity(DrcViolationType::EmptyName, DrcSeverity::Critical)
+        .expect("an empty reference may be raised");
+    raised
+        .set_severity(DrcViolationType::UnknownComponent, DrcSeverity::Critical)
+        .expect("an unresolved master may be raised");
+    let (structural_findings, written_findings, unwritable_findings) = severities(&raised);
+    assert_eq!(
+        structural_findings,
+        [vec![], vec![]],
+        "a structural object is not asked"
+    );
+    assert_eq!(written_findings, vec![DrcSeverity::Critical]);
+    assert_eq!(
+        unwritable_findings,
+        [vec![DrcSeverity::Critical], vec![DrcSeverity::Critical]]
+    );
 }
 
 #[test]

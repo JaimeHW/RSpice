@@ -248,31 +248,43 @@ impl DrcViolationType {
     /// Get the default severity for this violation type, from its entry in
     /// the rule table, where the reason for each one is written.
     ///
-    /// Three of them have no answer that holds for every object that can raise
-    /// them: an empty reference, an invalid one, and a type that resolves to
-    /// nothing each matter only as far as they change what the deck writes.
-    /// This returns what they are worth on an object that writes nothing;
-    /// [`Self::severity_for_instance`] is what a rule holding the instance
-    /// asks.
+    /// A finding on an emitted instance the deck cannot write is reported no
+    /// lower than its floor for such an instance; see
+    /// [`Self::severity_for_instance`].
     pub const fn default_severity(&self) -> DrcSeverity {
         self.rule().default_severity
     }
 
-    /// The severity this violation type carries on one emitted instance.
+    /// The severity this violation type carries on one emitted instance when
+    /// the project's deck says nothing.
     ///
     /// `written` says whether the deck still writes the instance. A run that
     /// will not start is an error, not a note: an instance the netlist cannot
     /// carry — a cell instance whose reference is not a path segment, or whose
     /// master resolves to nothing — refuses the run. An instance the netlister
     /// writes under a name it chose still runs, and the results carry that
-    /// name, so the finding is a warning the author has to see.
+    /// name, so the finding is reported at the rule's default, a warning the
+    /// author has to see.
     pub fn severity_for_instance(&self, written: bool) -> DrcSeverity {
-        match self {
-            Self::EmptyName | Self::InvalidName | Self::UnknownComponent if written => {
-                DrcSeverity::Warning
-            }
-            Self::EmptyName | Self::InvalidName | Self::UnknownComponent => DrcSeverity::Error,
-            _ => self.default_severity(),
+        self.default_severity()
+            .max(self.floor_for_instance(written))
+    }
+
+    /// The lowest severity a finding of this type on one emitted instance is
+    /// reported at, whatever the project's deck sets.
+    ///
+    /// The deck's own floor where the deck still writes the instance; where it
+    /// cannot, the rule's floor for an unwritten instance, which is an error
+    /// for every rule whose finding there refuses the run. Holding only those
+    /// findings there, rather than every finding of the rule, is what lets a
+    /// deck lower the warning on an instance the netlister renamed without
+    /// letting through one it cannot write.
+    pub fn floor_for_instance(&self, written: bool) -> DrcSeverity {
+        let floor = self.rule().floor;
+        if written {
+            floor.deck
+        } else {
+            floor.unwritten_instance
         }
     }
 
@@ -412,7 +424,8 @@ impl DrcViolation {
     /// stays a property of the finding rather than of its type alone, because
     /// a naming or binding failure stops a run only where it costs the deck
     /// the instance: see [`DrcViolationType::severity_for_instance`]. A
-    /// project's configured override is applied after this and still wins.
+    /// project's configured override is applied after this and wins, down to
+    /// [`DrcViolationType::floor_for_instance`] and no further.
     pub fn with_instance_severity(mut self, written: bool) -> Self {
         self.severity = self.violation_type.severity_for_instance(written);
         self

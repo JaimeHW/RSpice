@@ -14,6 +14,13 @@
 //! waiving it would not let the run through, it would only move the failure
 //! from the Problems page to the run. Every other rule may be set as low as a
 //! note and waived one finding at a time.
+//!
+//! Two rules refuse the run on some findings and not others: an empty or
+//! refused reference costs the deck its instance only where the netlister
+//! cannot write the instance under any name. Their floor says so, rather than
+//! holding every finding of the rule at the floor of the worst one: a deck
+//! may set them as low as a note, and a finding on an instance the deck cannot
+//! write is still reported as an error.
 
 use super::types::{DrcSeverity, DrcViolationType};
 
@@ -28,20 +35,55 @@ pub struct DrcRule {
     pub explanation: &'static str,
     /// What a finding is reported at when the project's deck says nothing.
     ///
-    /// Three rules have no answer that holds for every object that can raise
-    /// them — an empty reference, an invalid one, and a type that resolves to
-    /// nothing — and this is what they are worth on an object that writes
-    /// nothing; [`DrcViolationType::severity_for_instance`] is what a rule
-    /// holding the instance asks.
+    /// A finding on an emitted instance the deck cannot write is reported no
+    /// lower than [`DrcFloor::unwritten_instance`]; see
+    /// [`DrcViolationType::severity_for_instance`].
     pub default_severity: DrcSeverity,
-    /// The lowest severity a project's deck may set the rule to.
-    pub floor: DrcSeverity,
+    /// How low the rule may be set, and how low its findings are reported.
+    pub floor: DrcFloor,
     /// Whether one finding of the rule may be waived.
     pub waivable: bool,
 }
 
-const ENGINE_REFUSES: DrcSeverity = DrcSeverity::Error;
-const ANY: DrcSeverity = DrcSeverity::Info;
+/// How low a rule's findings may go.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrcFloor {
+    /// The lowest severity a project's deck may set the rule to.
+    pub deck: DrcSeverity,
+    /// The lowest severity a finding on an emitted instance the deck cannot
+    /// write is reported at, whatever the deck sets. Never below
+    /// [`Self::deck`]; above it only for a rule that refuses the run on such
+    /// an instance and not on one the netlister still writes.
+    pub unwritten_instance: DrcSeverity,
+}
+
+impl DrcFloor {
+    /// One floor for every finding of the rule.
+    const fn every(severity: DrcSeverity) -> Self {
+        Self {
+            deck: severity,
+            unwritten_instance: severity,
+        }
+    }
+
+    /// Whether some finding of the rule refuses the run whatever the deck
+    /// sets.
+    pub fn refuses_the_run(self) -> bool {
+        self.unwritten_instance >= DrcSeverity::Error
+    }
+}
+
+const ENGINE_REFUSES: DrcFloor = DrcFloor::every(DrcSeverity::Error);
+const ANY: DrcFloor = DrcFloor::every(DrcSeverity::Info);
+/// The deck is built and runs, with a value nobody entered in place of the
+/// one the finding is about: never lower than a warning.
+const INVENTED_VALUE: DrcFloor = DrcFloor::every(DrcSeverity::Warning);
+/// A note on an instance the netlister still writes; the run is refused on
+/// one it cannot write under any name.
+const UNWRITTEN_REFUSES: DrcFloor = DrcFloor {
+    deck: DrcSeverity::Info,
+    unwritten_instance: DrcSeverity::Error,
+};
 
 impl DrcViolationType {
     /// This rule's entry. Exhaustive, so a rule cannot be added without one.
@@ -254,25 +296,27 @@ impl DrcViolationType {
             Self::EmptyName => &DrcRule {
                 code: "DRC-EMPTY-NAME",
                 title: "Empty name",
-                explanation: "A component has no reference designator. On an object that writes \
-                    no card this is a note; on an instance the netlister writes under a name it \
-                    chose it is a warning, because the results carry that name; on one the deck \
-                    cannot carry at all it refuses the run. A deck may only raise it. Assign a \
-                    reference designator.",
-                default_severity: DrcSeverity::Info,
-                floor: ENGINE_REFUSES,
+                explanation: "An emitted instance has no reference designator. Where the \
+                    netlister writes it under a name it chose, the run starts and its results \
+                    carry that name, so it is a warning a deck may lower. Where the deck cannot \
+                    carry the instance at all, the run is refused, and the finding is an error \
+                    whatever the deck sets. An object that writes no card is not checked. Assign \
+                    a reference designator.",
+                default_severity: DrcSeverity::Warning,
+                floor: UNWRITTEN_REFUSES,
                 waivable: false,
             },
             Self::InvalidName => &DrcRule {
                 code: "DRC-INVALID-NAME",
                 title: "Invalid name",
-                explanation: "A component's reference designator contains characters the deck \
-                    cannot carry. It is a note on an object that writes no card, a warning where \
-                    the netlister writes the instance under a name it chose, and refuses the run \
-                    where the instance cannot be written at all. A deck may only raise it. Use \
-                    letters, digits and underscores.",
-                default_severity: DrcSeverity::Info,
-                floor: ENGINE_REFUSES,
+                explanation: "An emitted instance's reference designator is one the deck cannot \
+                    carry as written. Where the netlister writes the instance under a name it \
+                    chose, it is a warning a deck may lower; where the instance cannot be written \
+                    at all, the run is refused and the finding is an error whatever the deck \
+                    sets. An object that writes no card is not checked. Use letters, digits and \
+                    underscores.",
+                default_severity: DrcSeverity::Warning,
+                floor: UNWRITTEN_REFUSES,
                 waivable: false,
             },
             Self::CaseCollidingNetNames => &DrcRule {
@@ -294,7 +338,7 @@ impl DrcViolationType {
                     simulates a circuit that is not the drawing. A deck may lower it to a \
                     warning and no further, and a finding cannot be waived. Set the parameter.",
                 default_severity: DrcSeverity::Error,
-                floor: DrcSeverity::Warning,
+                floor: INVENTED_VALUE,
                 waivable: false,
             },
             Self::ValueOutOfRange => &DrcRule {
@@ -310,11 +354,12 @@ impl DrcViolationType {
             Self::UnknownComponent => &DrcRule {
                 code: "DRC-UNKNOWN-COMPONENT",
                 title: "Unknown component",
-                explanation: "A component's type resolves to nothing the netlister can write. \
-                    It is a note on an object that writes no card, and refuses the run on an \
-                    instance whose master resolves to nothing. A deck may only raise it. Check \
-                    the component type, or define its model.",
-                default_severity: DrcSeverity::Info,
+                explanation: "An emitted cell instance's master resolves to nothing the \
+                    netlister can write, so the deck cannot carry the instance and the run is \
+                    refused. It is only asked where the hierarchy can answer, and an object that \
+                    writes no card is not checked. Check the component type, or define its \
+                    model.",
+                default_severity: DrcSeverity::Error,
                 floor: ENGINE_REFUSES,
                 waivable: false,
             },
@@ -470,9 +515,9 @@ mod tests {
         assert_eq!(declared, listed);
     }
 
-    /// Every rule says what it is, and no rule's default is below what the
-    /// project may set it to — except the three whose severity follows the
-    /// instance, which a deck may only raise.
+    /// Every rule says what it is, no rule's default is below what the
+    /// project may set it to, and no floor for an unwritten instance is below
+    /// the rule's own.
     #[test]
     fn every_entry_is_complete_and_consistent() {
         for rule in DrcViolationType::ALL {
@@ -480,32 +525,29 @@ mod tests {
             assert!(!entry.title.is_empty(), "{rule:?}");
             assert!(entry.explanation.len() > 80, "{rule:?}");
             assert!(!entry.explanation.contains("  "), "{rule:?}");
-            let instance_dependent = matches!(
-                rule,
-                DrcViolationType::EmptyName
-                    | DrcViolationType::InvalidName
-                    | DrcViolationType::UnknownComponent
+            assert!(entry.default_severity >= entry.floor.deck, "{rule:?}");
+            assert!(
+                entry.floor.unwritten_instance >= entry.floor.deck,
+                "{rule:?}"
             );
-            if !instance_dependent {
-                assert!(entry.default_severity >= entry.floor, "{rule:?}");
-            }
         }
     }
 
-    /// The rules a deck cannot move below an error are exactly the rules no
-    /// finding of which may be waived: both are the findings that refuse the
-    /// run whatever the page says. `MissingParameter` is the one rule that is
-    /// neither demotable to a note nor waivable, because the deck it builds is
-    /// not the drawing.
+    /// A rule some finding of which refuses the run whatever the deck sets
+    /// may not be waived: a waiver would not let the run through, it would
+    /// only move the failure from the Problems page to the run. Every
+    /// waivable rule may also be set as low as a note. `MissingParameter` is
+    /// the one rule that is neither demotable to a note nor waivable, because
+    /// the deck it builds is not the drawing.
     #[test]
     fn a_rule_that_refuses_the_run_can_neither_be_demoted_nor_waived() {
         for rule in DrcViolationType::ALL {
             let entry = rule.rule();
-            if entry.floor >= DrcSeverity::Error {
+            if entry.floor.refuses_the_run() {
                 assert!(!entry.waivable, "{rule:?}");
             }
             if entry.waivable {
-                assert_eq!(entry.floor, DrcSeverity::Info, "{rule:?}");
+                assert_eq!(entry.floor, ANY, "{rule:?}");
             }
         }
         for rule in [
@@ -517,7 +559,29 @@ mod tests {
             DrcViolationType::SourceToSource,
             DrcViolationType::VectorWidthMismatch,
         ] {
-            assert_eq!(rule.rule().floor, DrcSeverity::Error, "{rule:?}");
+            assert_eq!(rule.rule().floor, ENGINE_REFUSES, "{rule:?}");
         }
+        assert_eq!(
+            DrcViolationType::MissingParameter.rule().floor.deck,
+            DrcSeverity::Warning
+        );
+    }
+
+    /// An empty or refused reference refuses the run only where the instance
+    /// cannot be written. The deck may lower what the netlister writes under a
+    /// name it chose, and nothing else.
+    #[test]
+    fn a_reference_finding_is_held_at_an_error_only_on_an_unwritten_instance() {
+        for rule in [DrcViolationType::EmptyName, DrcViolationType::InvalidName] {
+            assert_eq!(rule.rule().floor, UNWRITTEN_REFUSES, "{rule:?}");
+            assert_eq!(rule.floor_for_instance(true), DrcSeverity::Info);
+            assert_eq!(rule.floor_for_instance(false), DrcSeverity::Error);
+            assert_eq!(rule.severity_for_instance(true), DrcSeverity::Warning);
+            assert_eq!(rule.severity_for_instance(false), DrcSeverity::Error);
+        }
+        // A master that resolves to nothing is never written.
+        let unknown = DrcViolationType::UnknownComponent;
+        assert_eq!(unknown.severity_for_instance(false), DrcSeverity::Error);
+        assert_eq!(unknown.floor_for_instance(false), DrcSeverity::Error);
     }
 }
