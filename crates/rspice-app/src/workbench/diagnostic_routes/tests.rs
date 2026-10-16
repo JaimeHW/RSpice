@@ -104,3 +104,144 @@ fn a_netlist_route_to_a_retired_record_states_its_refusal() {
         "an unresolvable record must say so rather than opening nothing silently"
     );
 }
+
+/// A rule finding is about an object in one drawing. Checking `top`, opening
+/// `aux` and following a `top` finding used to centre and select in `aux` —
+/// on whatever object there happened to carry the same id.
+#[test]
+fn following_a_rule_finding_opens_its_cell_view_before_selecting() {
+    use crate::state::{Cell, CellViewRef, ComponentType, Library, Point, View, ViewType};
+    use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.authority.open_session();
+    let mut library = Library::new("work");
+    for name in ["top", "aux"] {
+        let mut cell = Cell::new(name);
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        library.add_cell(cell);
+    }
+    app.state.library_manager.add_library(library);
+    let top = CellViewRef::new("work", "top", "schematic");
+    let aux = CellViewRef::new("work", "aux", "schematic");
+
+    app.state.open_workspace_view(top.clone());
+    let resistor = app
+        .state
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(40, 40));
+    app.state.sync_active_schematic_to_workspace();
+    let mut result = DrcResult::new();
+    result.add_violation(DrcViolation::new(
+        1,
+        DrcViolationType::MissingParameter,
+        "R1 has no resistance",
+        DrcLocation::Component {
+            id: resistor,
+            name: "R1".to_owned(),
+        },
+    ));
+    result.completed = true;
+    app.state
+        .publish_active_design_check_result(result)
+        .expect("the checks publish against top");
+    let route = app
+        .state
+        .diagnostics
+        .batches()
+        .flat_map(|batch| batch.records.iter())
+        .find_map(|record| record.route.clone())
+        .expect("a finding about a drawn object has somewhere to go");
+
+    // The other drawing has an object of its own, which ids are allocated per
+    // drawing and so may well share the resistor's.
+    app.state.open_workspace_view(aux.clone());
+    app.state
+        .schematic
+        .add_component(ComponentType::Capacitor, Point::new(-200, -200));
+    assert_eq!(app.state.workspace.content.active_schematic_reference(), aux);
+
+    app.state.diagnostics.request_route(route);
+    apply_pending(&context(), &mut app);
+
+    assert_eq!(
+        app.state.workspace.content.active_schematic_reference(),
+        top,
+        "the finding's own view opens"
+    );
+    assert!(
+        app.state
+            .schematic
+            .session
+            .editor
+            .selection
+            .components
+            .contains(&resistor),
+        "the object is selected in the view the finding is about"
+    );
+    assert!(
+        app.state
+            .schematic
+            .document()
+            .components
+            .iter()
+            .any(|component| component.id == resistor
+                && component.kind == ComponentType::Resistor),
+        "and that view is the one holding the resistor"
+    );
+}
+
+/// A rule finding about a view that is not open still says where it is: the
+/// route is resolved in that view's own drawing rather than left out.
+#[test]
+fn a_rule_finding_about_a_view_that_is_not_open_keeps_its_route() {
+    use crate::state::{CellViewRef, ComponentType, Point, SchematicState};
+    use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.authority.open_session();
+    let root = app.state.workspace.content.simulation_root_reference();
+    let resistor = app
+        .state
+        .workspace
+        .schematic_editor_mut(&root.key())
+        .expect("default configured root buffer")
+        .editor
+        .add_component(ComponentType::Resistor, Point::new(40, 40));
+    app.state.workspace.content.active_view =
+        CellViewRef::new("user", "unrelated_editor", "schematic");
+    app.state.schematic = SchematicState::default();
+
+    let mut result = DrcResult::new();
+    result.add_violation(DrcViolation::new(
+        1,
+        DrcViolationType::MissingParameter,
+        "R1 has no resistance",
+        DrcLocation::Component {
+            id: resistor,
+            name: "R1".to_owned(),
+        },
+    ));
+    result.completed = true;
+    app.state
+        .publish_configured_root_design_check_result(result)
+        .expect("the root's findings publish");
+
+    let route = app
+        .state
+        .diagnostics
+        .batches()
+        .flat_map(|batch| batch.records.iter())
+        .find_map(|record| record.route.clone());
+    assert!(
+        matches!(
+            route,
+            Some(DiagnosticRoute::Anchor(crate::diagnostics::LogAnchor::Schematic {
+                ref cell_view,
+                component: Some(component),
+                ..
+            })) if *cell_view == root && component == resistor
+        ),
+        "{route:?}"
+    );
+}

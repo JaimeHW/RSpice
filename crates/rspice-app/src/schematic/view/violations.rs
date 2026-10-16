@@ -131,15 +131,35 @@ pub(crate) fn finding_anchor(
     location_anchor(state, &violation.location)
 }
 
-/// Where one finding location points, when it points anywhere.
+/// Where one finding location in the drawing in front of the reader points,
+/// when it points anywhere.
 ///
-/// Every surface that offers "go to this finding" resolves through here — the
-/// canvas badges, the console's per-finding rows, and the validated-save
-/// report, which carries a location rather than a whole violation. One
+/// Every surface that offers "go to this finding" resolves through here or
+/// through [`location_anchor_in`] — the canvas badges, the console's
+/// per-finding rows, the validated-save report, which carries a location
+/// rather than a whole violation, and the published rule findings. One
 /// resolver keeps them from sending the author to three different places for
 /// one location.
 pub(crate) fn location_anchor(
     state: &AppState,
+    location: &DrcLocation,
+) -> Option<crate::diagnostics::LogAnchor> {
+    location_anchor_in(
+        state,
+        &state.workspace.content.active_schematic_reference(),
+        location,
+    )
+}
+
+/// Where one finding location in `cell_view` points, when it points anywhere.
+///
+/// The drawing in front of the reader is asked through its live editor, and
+/// any other cell view through the working copy the workspace holds for it,
+/// so a finding about a view that is not open still says where it is. The
+/// anchor carries the view, and following it opens that view first.
+pub(crate) fn location_anchor_in(
+    state: &AppState,
+    cell_view: &crate::state::CellViewRef,
     location: &DrcLocation,
 ) -> Option<crate::diagnostics::LogAnchor> {
     if let DrcLocation::SymbolPin {
@@ -155,13 +175,36 @@ pub(crate) fn location_anchor(
         });
     }
 
-    let world = markers::anchor(&super::schematic_design_view(state), location)?;
+    let key = cell_view.key();
+    let world = if key.eq_ignore_ascii_case(&state.workspace.content.active_schematic_reference().key())
+    {
+        markers::anchor(&super::schematic_design_view(state), location)?
+    } else {
+        let (_, schematic) = state
+            .workspace
+            .content
+            .schematic_buffers
+            .iter()
+            .find(|(buffer, _)| buffer.eq_ignore_ascii_case(&key))?;
+        let view = rspice_schematic_editor::view::design_view::DesignView {
+            document: schematic.document(),
+            canvas_cache: None,
+            sheet_catalog: state
+                .workspace
+                .content
+                .design_management
+                .sheet_catalog(&key),
+            review_markers: state.ui.schematic_visibility.review_markers,
+        };
+        markers::anchor(&view, location)?
+    };
     let (component, wire) = match location {
         DrcLocation::Component { id, .. } => (Some(*id), None),
         DrcLocation::Wire { id } => (None, Some(*id)),
         _ => (None, None),
     };
     Some(crate::diagnostics::LogAnchor::Schematic {
+        cell_view: cell_view.clone(),
         x: world.x,
         y: world.y,
         component,

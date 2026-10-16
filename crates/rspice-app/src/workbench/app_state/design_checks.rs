@@ -185,7 +185,7 @@ impl AppState {
         // Canonical records are derived before anything is stored, because
         // one of them needs to ask the live drawing where its object is and
         // both insertions take the state mutably.
-        let records = design_rule_records(self, &subject, &result, is_active_subject);
+        let records = design_rule_records(self, &subject, &result);
         // Published before the receipt is stored, because the store can
         // refuse a batch and the receipt cannot: a receipt stored first would
         // put findings on the canvas and the check pill that the Problems
@@ -345,16 +345,16 @@ impl AppState {
 
 /// One canonical record per rule finding.
 ///
-/// `drawn` says whether the subject is the drawing in front of the reader.
-/// Only that drawing can be asked where an object is, so a finding in another
-/// cell view is published without a route rather than with one resolved
-/// against the wrong coordinate space — which is what a shared canvas
-/// projection would have produced.
+/// Each route is resolved in the subject's own drawing — the live editor when
+/// the subject is the view in front of the reader, the workspace's copy of it
+/// otherwise — and names that view, so following it opens the view before it
+/// selects anything. A finding about a view that is not open used to be
+/// published with no route at all, and one resolved against whichever view
+/// was open would have pointed into the wrong coordinate space.
 fn design_rule_records(
     state: &AppState,
     subject: &CellViewRef,
     result: &DrcResult,
-    drawn: bool,
 ) -> Vec<DiagnosticRecord> {
     let project = state.workspace.content.project.id();
     let revision = state.workspace.content.project.revision().get();
@@ -380,12 +380,12 @@ fn design_rule_records(
         .zip(keys)
         .zip(canonicals)
         .map(|((violation, key), canonical)| {
-            let route = drawn
-                .then(|| {
-                    crate::schematic::view::violations::location_anchor(state, &violation.location)
-                })
-                .flatten()
-                .map(DiagnosticRoute::Anchor);
+            let route = crate::schematic::view::violations::location_anchor_in(
+                state,
+                subject,
+                &violation.location,
+            )
+            .map(DiagnosticRoute::Anchor);
             DiagnosticRecord::new(
                 canonical,
                 violation.severity.into(),

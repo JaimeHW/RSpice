@@ -647,15 +647,16 @@ mod tests {
     #[test]
     fn a_stale_batch_offers_no_route() {
         let mut state = open_state();
+        let subject = state.workspace.content.active_schematic_reference();
         let anchored = record(&state, "T-ERROR", DiagnosticLevel::Error).with_route(Some(
             DiagnosticRoute::Anchor(crate::diagnostics::LogAnchor::Schematic {
+                cell_view: subject.clone(),
                 x: 0,
                 y: 0,
                 component: None,
                 wire: None,
             }),
         ));
-        let subject = state.workspace.content.active_schematic_reference();
         let inputs = DiagnosticInputs::DesignCheck {
             subject: subject.clone(),
         };
