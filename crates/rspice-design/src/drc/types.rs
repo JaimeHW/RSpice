@@ -92,6 +92,10 @@ pub enum DrcViolationType {
     /// label that lost its net to another name — that the deck does not
     /// write as node 0.
     GroundNotNodeZero,
+    /// A global net tied to ground in one cellview — a ground symbol on the
+    /// net its label names — while the rest of the design writes it as a node
+    /// of its own.
+    SupplyTiedToGround,
 
     //-------------------------------------------------------------------------
     // Hierarchy Issues
@@ -171,6 +175,10 @@ impl DrcViolationType {
             // Everything the drawing returns to that net is returned to a node
             // of its own, not to the reference the author drew.
             Self::GroundNotNodeZero => DrcSeverity::Error,
+            // The deck keeps the rail and the cellview's node 0 apart, so the
+            // circuit that runs is neither the short the drawing shows nor the
+            // rail the rest of the design uses.
+            Self::SupplyTiedToGround => DrcSeverity::Error,
             Self::MissingParameter => DrcSeverity::Error,
             // The engine refuses a card that names an element it does not have.
             Self::UnresolvedReference => DrcSeverity::Error,
@@ -254,6 +262,7 @@ impl DrcViolationType {
             Self::ShortedOutputs => "Multiple declared outputs connected to the same net",
             Self::UndrivenNet => "Net joins declared inputs and nothing drives it",
             Self::GroundNotNodeZero => "Net named as ground is not node 0 in the deck",
+            Self::SupplyTiedToGround => "Global net is tied to ground in only one cellview",
             Self::RecursiveInstantiation => "Cellview reaches itself through its instances",
             Self::MissingGround => "Circuit has no ground reference (node 0)",
             Self::SourceToSource => "Voltage sources form a closed loop",
@@ -299,6 +308,9 @@ impl DrcViolationType {
                 "Connect a driver to the net, or declare one of its pins an output"
             }
             Self::GroundNotNodeZero => "Use a ground symbol, or a net label named 0 or GND",
+            Self::SupplyTiedToGround => {
+                "Remove the tie to ground, or give this net a name of its own"
+            }
             Self::RecursiveInstantiation => {
                 "Remove the instance that reaches its own cellview, or bind it to another view"
             }

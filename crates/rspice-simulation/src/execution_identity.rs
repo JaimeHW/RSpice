@@ -1245,6 +1245,7 @@ fn drc_violation_type_tag(violation_type: DrcViolationType) -> u8 {
         DrcViolationType::UnresolvedReference => 29,
         DrcViolationType::UndrivenNet => 30,
         DrcViolationType::GroundNotNodeZero => 31,
+        DrcViolationType::SupplyTiedToGround => 32,
     }
 }
 

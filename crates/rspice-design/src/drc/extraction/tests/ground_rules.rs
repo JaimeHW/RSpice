@@ -320,3 +320,92 @@ fn a_ground_name_is_judged_by_the_node_its_net_is_written_as() {
         ]
     );
 }
+
+/// The top of a design that drives `VDD!` from V1 into a load, beside an
+/// instance of `cell`.
+fn supplied_beside(cell: &str) -> SchematicDocument {
+    let mut top = labelled(vec![
+        two(1, ComponentType::VoltageSource, "V1", "VDD!", "0"),
+        two(2, ComponentType::Resistor, "RL", "VDD!", "0"),
+    ]);
+    top.components.push(instance(9, "X1", cell));
+    top
+}
+
+/// A ground symbol names its net `0` over every label on it, so a cell that
+/// ties `VDD!` to one writes that net as node 0 while the top writes `VDD!` as
+/// the rail. The deck shorts nothing — no source closes a loop — and the tie
+/// the drawing shows is simply not there.
+#[test]
+fn a_supply_global_tied_to_ground_in_one_cellview_is_an_error() {
+    let views = buffers([("tie", tied_to_ground("VDD!"))]);
+    let result = checked_under(&unaliased(), &supplied_beside("tie"), &views);
+
+    let tied = of_type(&result, DrcViolationType::SupplyTiedToGround);
+    assert_eq!(tied.len(), 1, "{:?}", result.violations());
+    assert_eq!(tied[0].severity, DrcSeverity::Error);
+    assert_eq!(
+        tied[0].message,
+        "Global net 'VDD!' is tied to ground here: the deck writes this net as node 0, apart \
+         from 'VDD!' in the rest of the design"
+    );
+    let DrcLocation::InsideInstance { path, view, inner } = &tied[0].location else {
+        panic!("stated inside the occurrence: {:?}", tied[0].location);
+    };
+    assert_eq!(
+        (path.to_string(), view.key(), inner.as_ref().clone()),
+        (
+            "/X1".to_owned(),
+            "work/tie/schematic".to_owned(),
+            DrcLocation::NetLabel {
+                name: "VDD!".to_owned()
+            }
+        )
+    );
+    assert!(
+        of_type(&result, DrcViolationType::SourceToSource).is_empty(),
+        "{:?}",
+        result.violations()
+    );
+}
+
+/// A global no other cellview names is only another name for node 0 where it
+/// is tied. Tied in the cellview that drives it, every label of the name
+/// joins the one net, the source then stands across node 0, and that is the
+/// source rule's to say. A ground global on a ground symbol's net is ground.
+#[test]
+fn a_global_tied_to_ground_is_a_finding_only_where_the_design_parts_it() {
+    let tied = |top: &SchematicDocument, views: &HashMap<String, SchematicDocument>| {
+        let result = checked_under(&unaliased(), top, views);
+        (
+            of_type(&result, DrcViolationType::SupplyTiedToGround).len(),
+            of_type(&result, DrcViolationType::SourceToSource).len(),
+        )
+    };
+
+    let views = buffers([("tie", tied_to_ground("VDD!"))]);
+    let mut alone = labelled(vec![
+        two(1, ComponentType::VoltageSource, "V1", "in", "0"),
+        two(2, ComponentType::Resistor, "RL", "in", "0"),
+    ]);
+    alone.components.push(instance(9, "X1", "tie"));
+    assert_eq!(tied(&alone, &views), (0, 0));
+
+    let mut flat = tied_to_ground("VDD!");
+    let driven = labelled(vec![
+        two(5, ComponentType::VoltageSource, "V1", "VDD!", "0"),
+        two(6, ComponentType::Resistor, "RL", "VDD!", "0"),
+    ]);
+    flat.components.extend(driven.components);
+    flat.net_labels.extend(driven.net_labels);
+    let views = buffers([("top", flat)]);
+    assert_eq!(tied(&views["work/top/schematic"], &views), (0, 1));
+
+    let views = buffers([("tie", tied_to_ground("GND!"))]);
+    let mut returned = labelled(vec![
+        two(1, ComponentType::VoltageSource, "V1", "in", "0"),
+        two(2, ComponentType::Resistor, "RL", "in", "GND!"),
+    ]);
+    returned.components.push(instance(9, "X1", "tie"));
+    assert_eq!(tied(&returned, &views), (0, 0));
+}
