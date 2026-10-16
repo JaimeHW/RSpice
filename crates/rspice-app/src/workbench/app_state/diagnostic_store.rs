@@ -24,7 +24,7 @@
 pub(in crate::workbench) mod listing;
 mod producers;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
@@ -197,10 +197,80 @@ pub(in crate::workbench) enum DiagnosticRoute {
     Repair(PreflightRemediation),
 }
 
+/// What a finding is about, independent of when it was found or how it is
+/// worded: the producer, the rule, the document the object is in, and a
+/// stable key of the object itself.
+///
+/// This is what a finding's canonical identity is minted from, so it is also
+/// what decides whether a finding in a new pass is the same finding as one in
+/// the last. An identity bound to the pass instead — its ordinal, the project
+/// revision, the message — was re-minted by every re-check, and fixing one
+/// finding handed its identity to the next finding of the same rule.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(in crate::workbench) struct FindingKey {
+    pub(in crate::workbench) producer: Arc<str>,
+    pub(in crate::workbench) code: Arc<str>,
+    pub(in crate::workbench) document: Arc<str>,
+    pub(in crate::workbench) object: Arc<str>,
+}
+
+impl FindingKey {
+    pub(in crate::workbench) fn new(
+        producer: impl Into<Arc<str>>,
+        code: impl Into<Arc<str>>,
+        document: impl Into<Arc<str>>,
+        object: impl Into<Arc<str>>,
+    ) -> Self {
+        Self {
+            producer: producer.into(),
+            code: code.into(),
+            document: document.into(),
+            object: object.into(),
+        }
+    }
+}
+
+/// The canonical metadata of every finding one pass reported, in the order it
+/// reported them.
+///
+/// The one place a store record's identity is minted, so a surface that holds
+/// the findings rather than the records — the canvas tour holds violations —
+/// names them exactly as the records do by asking here. The occurrence index
+/// counts only findings whose keys are identical, in the order they were
+/// reported: it separates two findings about one object, and nothing else
+/// about the pass can move an identity.
+pub(in crate::workbench) fn mint_canonical(
+    keys: &[FindingKey],
+    revision: u64,
+    validation_id: &str,
+) -> Vec<CanonicalDiagnosticMetadata> {
+    let mut occurrences: HashMap<&FindingKey, usize> = HashMap::with_capacity(keys.len());
+    keys.iter()
+        .map(|key| {
+            let occurrence = occurrences.entry(key).or_insert(0);
+            let canonical = CanonicalDiagnosticMetadata::structural(
+                Arc::clone(&key.producer),
+                Arc::clone(&key.code),
+                Arc::clone(&key.document),
+                &key.object,
+                *occurrence,
+                revision,
+                validation_id,
+            );
+            *occurrence += 1;
+            canonical
+        })
+        .collect()
+}
+
 /// One condition, in the shape every consumer reads it in.
 #[derive(Debug, Clone)]
 pub(in crate::workbench) struct DiagnosticRecord {
     pub(in crate::workbench) canonical: CanonicalDiagnosticMetadata,
+    /// What the finding is about, as its identity was minted from it. A
+    /// republication that re-mints the current finding under a new
+    /// occurrence finds it again by this.
+    pub(in crate::workbench) key: FindingKey,
     pub(in crate::workbench) level: DiagnosticLevel,
     pub(in crate::workbench) subject: DiagnosticSubject,
     pub(in crate::workbench) message: String,
@@ -226,8 +296,17 @@ impl DiagnosticRecord {
         subject: DiagnosticSubject,
         message: impl Into<String>,
     ) -> Self {
+        // A record built from metadata alone is keyed by the document it is
+        // in; a structural producer states the object with `keyed`.
+        let key = FindingKey::new(
+            Arc::clone(&canonical.source),
+            Arc::clone(&canonical.code),
+            Arc::clone(&canonical.document_id),
+            "",
+        );
         Self {
             canonical,
+            key,
             level,
             subject,
             message: message.into(),
@@ -235,6 +314,12 @@ impl DiagnosticRecord {
             rule: String::new(),
             route: None,
         }
+    }
+
+    /// State the key the record's identity was minted from.
+    pub(in crate::workbench) fn keyed(mut self, key: FindingKey) -> Self {
+        self.key = key;
+        self
     }
 
     pub(in crate::workbench) fn with_details(mut self, details: impl Into<String>) -> Self {
@@ -478,10 +563,20 @@ pub(crate) struct DiagnosticStore {
     /// An identity rather than an index, because every ordering here is a
     /// presentation choice: the grid sorts, filters and groups, the tour walks
     /// worst-severity-first, and an index means something different in each.
-    /// It also needs no invalidation — a finding that leaves the store stops
-    /// being current because nothing resolves it any more, which is what the
-    /// index could not do when a batch was republished under it.
+    /// A finding that leaves the store stops being current because nothing
+    /// resolves it any more, which is what the index could not do when a
+    /// batch was republished under it.
     current: Option<uuid::Uuid>,
+    /// What the current finding is about, captured while a record of it was
+    /// in reach.
+    ///
+    /// Identities are structural, so a re-check names an unchanged finding
+    /// exactly as before and this is not consulted. It is what carries the
+    /// selection across the republications that do re-mint: an occurrence
+    /// index that moved because an identical finding before it was fixed,
+    /// and a run outcome superseded by the next run's outcome for the same
+    /// analysis.
+    current_key: Option<FindingKey>,
 }
 
 impl DiagnosticStore {
@@ -517,7 +612,50 @@ impl DiagnosticStore {
     /// something resolves it, which every reader of it does by looking the
     /// identity up in the list it is drawing.
     pub(crate) fn set_current_finding(&mut self, finding: Option<uuid::Uuid>) {
+        if finding == self.current {
+            return;
+        }
         self.current = finding;
+        self.current_key = finding.and_then(|id| self.record(id)).map(|record| record.key.clone());
+    }
+
+    /// The record a held identity names, where this store holds it.
+    fn record(&self, id: uuid::Uuid) -> Option<&DiagnosticRecord> {
+        let batch = self.batches.get(self.owners.get(&id)?)?;
+        batch
+            .records
+            .iter()
+            .find(|record| record.canonical.diagnostic_id == id)
+    }
+
+    /// Remember what the current finding is about while a record of it is
+    /// still held, before a republication or a withdrawal takes it away.
+    fn capture_current_key(&mut self) {
+        if let Some(record) = self.current.and_then(|id| self.record(id)) {
+            self.current_key = Some(record.key.clone());
+        }
+    }
+
+    /// Stand on the same finding again after a republication re-minted it.
+    ///
+    /// Only when the held identity no longer resolves: a finding still in
+    /// the store is still the current one, whatever else moved.
+    fn reanchor_current(&mut self) {
+        let (Some(current), Some(key)) = (self.current, self.current_key.as_ref()) else {
+            return;
+        };
+        if self.owners.contains_key(&current) {
+            return;
+        }
+        let found = self
+            .batches
+            .values()
+            .flat_map(|batch| batch.records.iter())
+            .find(|record| record.key == *key)
+            .map(|record| record.canonical.diagnostic_id);
+        if found.is_some() {
+            self.current = found;
+        }
     }
 
     pub(in crate::workbench) fn clear(&mut self) {
@@ -525,6 +663,7 @@ impl DiagnosticStore {
         self.owners.clear();
         self.pending_route = None;
         self.current = None;
+        self.current_key = None;
     }
 
     /// Replace a batch, and with it every identity the old one held.
@@ -538,6 +677,7 @@ impl DiagnosticStore {
         inputs: DiagnosticInputs,
         records: Vec<DiagnosticRecord>,
     ) -> Result<(), String> {
+        self.capture_current_key();
         let key = inputs.key();
         let replaced = self.batches.remove(&key);
         if let Some(replaced) = &replaced {
@@ -578,10 +718,12 @@ impl DiagnosticStore {
                 records,
             },
         );
+        self.reanchor_current();
         Ok(())
     }
 
     fn remove(&mut self, inputs: &DiagnosticInputs) {
+        self.capture_current_key();
         if let Some(removed) = self.batches.remove(&inputs.key()) {
             for record in &removed.records {
                 self.owners.remove(&record.canonical.diagnostic_id);

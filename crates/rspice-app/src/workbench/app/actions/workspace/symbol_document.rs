@@ -17,17 +17,16 @@ mod tests;
 use rspice_schematic_editor::symbol_editor::interaction::SymbolRequestSource;
 use std::collections::BTreeMap;
 
-use rspice_app_types::diagnostics::CanonicalDiagnosticMetadata;
-
 use crate::diagnostics::{ConsoleMessage, LogAnchor};
 use crate::state::{
     CellViewRef, ModelBoundSymbolDefinition, PinFindingKind, PortSpec,
     SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument, SymbolEditorMetadata,
 };
 use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::design_checks::location_key;
 use crate::workbench::app_state::diagnostic_store::{
     DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject,
-    symbol_pin_rule_code,
+    FindingKey, mint_canonical, symbol_pin_rule_code,
 };
 use crate::workbench::{SymbolCommitIntent, SymbolDocumentSnapshot};
 use rspice_design::symbol::publication::{
@@ -811,19 +810,28 @@ fn symbol_pin_records(
     let project = state.workspace.content.project.id();
     let revision = state.workspace.content.project.revision().get();
     let document_id = subject.key();
-    result
+    // Keyed by the pin each finding is about, through the one key the design
+    // rules use, and minted by the one function every store record is minted
+    // by: a re-check names an unchanged pin finding exactly as before.
+    let keys: Vec<FindingKey> = result
         .violations()
         .iter()
         .map(|violation| {
-            let canonical = CanonicalDiagnosticMetadata::current(
+            FindingKey::new(
                 SYMBOL_PIN_PRODUCER,
                 symbol_pin_rule_code(violation.violation_type),
-                document_id.clone(),
-                None,
-                revision,
-                format!("symbol-pins:{document_id}:{}", violation.id),
-                &violation.message,
-            );
+                document_id.as_str(),
+                location_key(&violation.location),
+            )
+        })
+        .collect();
+    let canonicals = mint_canonical(&keys, revision, &format!("symbol-pins:{document_id}"));
+    result
+        .violations()
+        .iter()
+        .zip(keys)
+        .zip(canonicals)
+        .map(|((violation, key), canonical)| {
             let route =
                 crate::schematic::view::violations::location_anchor(state, &violation.location)
                     .map(DiagnosticRoute::Anchor);
@@ -834,6 +842,7 @@ fn symbol_pin_records(
                     .in_cell_view(subject.clone()),
                 violation.message.clone(),
             )
+            .keyed(key)
             .with_details(violation.violation_type.suggested_fix())
             .with_rule(violation.violation_type.description())
             .with_route(route)

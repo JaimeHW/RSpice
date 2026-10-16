@@ -6,6 +6,7 @@
 //! relabel another cell's findings as current.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 
@@ -13,12 +14,12 @@ use crate::product::{ContentDigest, ProjectId};
 use crate::state::{
     CanonicalCellViewOwnerKey, CellViewRef, ViewType, canonical_cell_view_owner_key,
 };
-use rspice_app_types::diagnostics::CanonicalDiagnosticMetadata;
-use rspice_design::drc::{DrcConfig, DrcResult};
+use rspice_design::drc::{DrcConfig, DrcLocation, DrcResult};
 
 use super::AppState;
 use super::diagnostic_store::{
-    DiagnosticInputs, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject, design_rule_code,
+    DiagnosticInputs, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject, FindingKey,
+    design_rule_code, mint_canonical,
 };
 
 /// Producer identity every schematic and electrical rule finding carries.
@@ -185,9 +186,9 @@ impl AppState {
     /// The order is [`DrcResult::violations`]' own, because the records are
     /// derived from it one for one — which is what lets a surface holding the
     /// result name the finding at an ordinal without recomputing an identity.
-    /// Recomputing one would be a second copy of the identity rule, and it
-    /// would name a finding the store does not hold as soon as anything moved
-    /// the project revision the batch was published at.
+    /// Each identity is structural: it names the object the finding is about,
+    /// so an unrelated edit and a re-check name the same finding the same
+    /// way.
     ///
     /// Empty where these checks published no records for `subject`. A symbol
     /// view's findings are never among them: they are the pin checks', owned
@@ -309,11 +310,27 @@ fn design_rule_records(
     let project = state.workspace.content.project.id();
     let revision = state.workspace.content.project.revision().get();
     let document_id = subject.key();
-    result
+    let producer: Arc<str> = Arc::from(DESIGN_RULE_PRODUCER);
+    let document: Arc<str> = Arc::from(document_id.as_str());
+    let keys: Vec<FindingKey> = result
         .violations()
         .iter()
         .map(|violation| {
-            let canonical = design_rule_canonical(revision, &document_id, violation);
+            FindingKey::new(
+                Arc::clone(&producer),
+                design_rule_code(violation.violation_type),
+                Arc::clone(&document),
+                location_key(&violation.location),
+            )
+        })
+        .collect();
+    let canonicals = mint_canonical(&keys, revision, &format!("design-check:{document_id}"));
+    result
+        .violations()
+        .iter()
+        .zip(keys)
+        .zip(canonicals)
+        .map(|((violation, key), canonical)| {
             let route = drawn
                 .then(|| {
                     crate::schematic::view::violations::location_anchor(state, &violation.location)
@@ -327,6 +344,7 @@ fn design_rule_records(
                     .in_cell_view(subject.clone()),
                 violation.message.clone(),
             )
+            .keyed(key)
             .with_details(violation.violation_type.suggested_fix())
             .with_rule(violation.violation_type.description())
             .with_route(route)
@@ -334,32 +352,49 @@ fn design_rule_records(
         .collect()
 }
 
-/// The canonical identity and metadata of one rule finding.
+/// A stable key of the object a rule finding is located at.
 ///
-/// One function, because an identity minted twice by two pieces of arithmetic
-/// is two identities: the records this publishes and the canvas tour that
-/// selects them have to agree about what a finding is called, and the tour
-/// holds violations rather than records.
-fn design_rule_canonical(
-    revision: u64,
-    document_id: &str,
-    violation: &rspice_design::drc::DrcViolation,
-) -> CanonicalDiagnosticMetadata {
-    // The pass plus the finding's ordinal. Two findings of one rule can carry
-    // the same sentence about different objects — "Pin A is not connected" on
-    // two instances — and the ordinal is what keeps their canonical identities
-    // apart. It is stable for an unchanged design because the checks walk the
-    // design in a fixed order.
-    let validation_id = format!("design-check:{document_id}:{}", violation.id);
-    CanonicalDiagnosticMetadata::current(
-        DESIGN_RULE_PRODUCER,
-        design_rule_code(violation.violation_type),
-        document_id.to_owned(),
-        None,
-        revision,
-        validation_id,
-        &violation.message,
-    )
+/// What survives an unrelated edit is the object's own identity, so that is
+/// what the key is: a component or wire by its id, a terminal by its
+/// component and pin, a net or a label by its name. Where the object is drawn
+/// and what the message says about it are not part of it. A finding inside an
+/// instantiated cell view is keyed by the occurrence path down to that view
+/// and its own key inside it, which is what tells `X1/M3` from `X2/M3`. A
+/// point is the last resort, for a finding that names no object at all.
+pub(in crate::workbench) fn location_key(location: &DrcLocation) -> String {
+    match location {
+        DrcLocation::Terminal {
+            component_id,
+            pin_name,
+            ..
+        } => format!("terminal:{component_id}:{pin_name}"),
+        DrcLocation::Component { id, .. } => format!("component:{id}"),
+        DrcLocation::Node { net_name } => format!("net:{net_name}"),
+        DrcLocation::Wire { id } => format!("wire:{id}"),
+        DrcLocation::NetLabel { name } => format!("label:{name}"),
+        DrcLocation::Bus { id } => format!("bus:{id}"),
+        DrcLocation::BusTap { id } => format!("bus-tap:{id}"),
+        DrcLocation::InsideInstance { path, view, inner } => {
+            // Length-prefixed, because an instance name or a net name inside
+            // may contain any separator chosen here.
+            let path = path.to_string();
+            let view = view.key();
+            let inner = location_key(inner);
+            format!(
+                "instance:{}:{path}{}:{view}{}:{inner}",
+                path.len(),
+                view.len(),
+                inner.len()
+            )
+        }
+        DrcLocation::Global => "global".to_owned(),
+        DrcLocation::SymbolPin {
+            reference,
+            pin_name,
+            ..
+        } => format!("symbol-pin:{}:{pin_name}", reference.key()),
+        DrcLocation::Point { x, y } => format!("point:{x}:{y}"),
+    }
 }
 
 fn owner_key(subject: &CellViewRef) -> CanonicalCellViewOwnerKey {
@@ -478,6 +513,151 @@ mod tests {
         let mut result = DrcResult::new();
         result.completed = true;
         result
+    }
+
+    fn open_pin(component_id: u64, component: &str, pin: &str) -> DrcLocation {
+        DrcLocation::Terminal {
+            component_id,
+            component_name: component.to_owned(),
+            pin_name: pin.to_owned(),
+            point: crate::state::Point::new(0, 0),
+        }
+    }
+
+    /// Publish one completed pass of the active view's checks, in the order
+    /// given — which is the order the checks would have reported them in.
+    fn publish_pass(state: &mut AppState, findings: &[(DrcLocation, &str)]) {
+        let mut result = DrcResult::new();
+        for (ordinal, (location, message)) in findings.iter().enumerate() {
+            result.add_violation(rspice_design::drc::DrcViolation::new(
+                ordinal + 1,
+                rspice_design::drc::DrcViolationType::UnconnectedPin,
+                *message,
+                location.clone(),
+            ));
+        }
+        result.completed = true;
+        state
+            .publish_active_design_check_result(result)
+            .expect("the pass publishes");
+    }
+
+    /// The identity the published batch gives the finding about `object`.
+    fn identity_of(state: &AppState, object: &str) -> uuid::Uuid {
+        let subject = state.workspace.content.active_schematic_reference();
+        let published = DiagnosticInputs::DesignCheck { subject };
+        state
+            .diagnostics
+            .batches()
+            .find(|batch| batch.inputs == published)
+            .and_then(|batch| {
+                batch
+                    .records
+                    .iter()
+                    .find(|record| record.subject.object == object)
+            })
+            .map(|record| record.canonical.diagnostic_id)
+            .unwrap_or_else(|| panic!("a finding about {object} is published"))
+    }
+
+    /// An edit elsewhere moves everything an identity used to be minted
+    /// from — the project revision, the finding's ordinal, its wording — and
+    /// none of it is what the finding is about.
+    #[test]
+    fn an_unrelated_edit_and_a_recheck_keep_the_current_finding() {
+        let mut state = AppState::default();
+        publish_pass(
+            &mut state,
+            &[
+                (open_pin(4, "R1", "A"), "Pin R1.A is not connected"),
+                (open_pin(7, "R2", "B"), "Pin R2.B is not connected"),
+            ],
+        );
+        let standing = identity_of(&state, "Pin R2.B");
+        state.diagnostics.set_current_finding(Some(standing));
+
+        state
+            .workspace
+            .content
+            .project
+            .advance_revision()
+            .expect("the fixture revision advances");
+        publish_pass(
+            &mut state,
+            &[
+                (open_pin(2, "C1", "A"), "Pin C1.A is not connected"),
+                (open_pin(4, "R1", "A"), "Pin R1.A is not connected"),
+                (open_pin(7, "R2", "B"), "Pin R2.B has nothing attached"),
+            ],
+        );
+
+        assert_eq!(identity_of(&state, "Pin R2.B"), standing);
+        assert_eq!(
+            state.diagnostics.current_finding(),
+            Some(standing),
+            "the shared current finding survives the re-check",
+        );
+    }
+
+    /// Fixing one finding takes its identity away with it. With an ordinal in
+    /// the identity, the next finding of the same rule inherited it — and a
+    /// selection, or a waiver, on the fixed finding moved to that one.
+    #[test]
+    fn fixing_one_finding_does_not_hand_its_identity_to_another() {
+        let mut state = AppState::default();
+        publish_pass(
+            &mut state,
+            &[
+                (open_pin(4, "R1", "A"), "Pin R1.A is not connected"),
+                (open_pin(7, "R2", "B"), "Pin R2.B is not connected"),
+            ],
+        );
+        let fixed = identity_of(&state, "Pin R1.A");
+        let remaining = identity_of(&state, "Pin R2.B");
+        state.diagnostics.set_current_finding(Some(fixed));
+
+        publish_pass(
+            &mut state,
+            &[(open_pin(7, "R2", "B"), "Pin R2.B is not connected")],
+        );
+
+        let subject = state.workspace.content.active_schematic_reference();
+        assert_eq!(
+            state.design_rule_finding_identities(&subject),
+            vec![remaining],
+            "the remaining finding keeps its identity and the fixed one's is gone",
+        );
+        assert_ne!(
+            state.diagnostics.current_finding(),
+            Some(remaining),
+            "a selection on the fixed finding does not move to another finding",
+        );
+    }
+
+    /// Two findings about one object are told apart by the order they were
+    /// reported in. When the first goes, the second takes its occurrence —
+    /// and a selection on the second follows it there rather than being lost.
+    #[test]
+    fn a_selection_follows_its_finding_when_its_occurrence_moves() {
+        let mut state = AppState::default();
+        publish_pass(
+            &mut state,
+            &[
+                (open_pin(4, "R1", "A"), "first report"),
+                (open_pin(4, "R1", "A"), "second report"),
+            ],
+        );
+        let subject = state.workspace.content.active_schematic_reference();
+        let identities = state.design_rule_finding_identities(&subject);
+        assert_eq!(identities.len(), 2);
+        assert_ne!(identities[0], identities[1]);
+        state.diagnostics.set_current_finding(Some(identities[1]));
+
+        publish_pass(&mut state, &[(open_pin(4, "R1", "A"), "second report")]);
+
+        let remaining = state.design_rule_finding_identities(&subject);
+        assert_eq!(remaining, vec![identities[0]]);
+        assert_eq!(state.diagnostics.current_finding(), Some(remaining[0]));
     }
 
     #[test]

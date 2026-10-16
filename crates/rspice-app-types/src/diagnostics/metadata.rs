@@ -123,6 +123,50 @@ impl CanonicalDiagnosticMetadata {
         }
     }
 
+    /// A finding whose identity is what it is about, not when it was found.
+    ///
+    /// [`Self::current`] binds the identity to a revision, a validation pass
+    /// and the message, which is right for a parser reading one buffer and
+    /// wrong for a rule finding about a design object: every re-check would
+    /// re-mint every identity, and a fix that removed one finding would hand
+    /// its identity to the next finding of the same rule. Here the identity is
+    /// the producer, the rule, the document the object is in, a stable key of
+    /// the object itself, and an occurrence index that separates findings
+    /// whose keys are otherwise identical. The revision and the validation
+    /// pass are still recorded; they just do not name the finding.
+    pub fn structural(
+        source: impl Into<Arc<str>>,
+        code: impl Into<Arc<str>>,
+        document_id: impl Into<Arc<str>>,
+        object: &str,
+        occurrence: usize,
+        revision: u64,
+        validation_id: impl Into<Arc<str>>,
+    ) -> Self {
+        let source = source.into();
+        let code = code.into();
+        let document_id = document_id.into();
+        let diagnostic_id = structural_diagnostic_id(
+            source.as_ref(),
+            code.as_ref(),
+            document_id.as_ref(),
+            object,
+            occurrence,
+        );
+        Self {
+            diagnostic_id,
+            ..Self::current(
+                source,
+                code,
+                document_id,
+                None,
+                revision,
+                validation_id,
+                "",
+            )
+        }
+    }
+
     pub fn mark_currentness(&mut self, currentness: DiagnosticCurrentness) {
         self.currentness = currentness;
     }
@@ -130,6 +174,31 @@ impl CanonicalDiagnosticMetadata {
     pub const fn is_current(&self) -> bool {
         matches!(self.currentness, DiagnosticCurrentness::Current)
     }
+}
+
+/// The identity [`CanonicalDiagnosticMetadata::structural`] mints.
+///
+/// Its own namespace, so no structural identity can coincide with one minted
+/// from a revision and a message. Every field is length-prefixed, so no two
+/// different tuples spell the same string.
+fn structural_diagnostic_id(
+    source: &str,
+    code: &str,
+    document_id: &str,
+    object: &str,
+    occurrence: usize,
+) -> uuid::Uuid {
+    const NAMESPACE: uuid::Uuid = uuid::Uuid::from_u128(0x5b0e_4f1c_2d7a_5e93_8c61_a4f2_0b9d_3e57);
+    let mut identity =
+        String::with_capacity(source.len() + code.len() + document_id.len() + object.len() + 48);
+    for value in [source, code, document_id, object] {
+        identity.push_str(&value.len().to_string());
+        identity.push(':');
+        identity.push_str(value);
+        identity.push('|');
+    }
+    identity.push_str(&occurrence.to_string());
+    uuid::Uuid::new_v5(&NAMESPACE, identity.as_bytes())
 }
 
 #[cfg(test)]
@@ -160,6 +229,59 @@ mod tests {
         assert_eq!(first.diagnostic_id, repeat.diagnostic_id);
         assert_ne!(first.diagnostic_id, next_revision.diagnostic_id);
         assert_eq!(first.affected_consumers.len(), 5);
+    }
+
+    /// A structural identity names the object and nothing about the pass:
+    /// the revision, the validation pass and the wording can all move without
+    /// moving it, and only the object or the occurrence index can.
+    #[test]
+    fn a_structural_identity_ignores_the_revision_the_pass_and_the_wording() {
+        let first = CanonicalDiagnosticMetadata::structural(
+            "rspice.design.rules",
+            "DRC-UNCONNECTED-PIN",
+            "lib/top/schematic",
+            "terminal:4:A",
+            0,
+            8,
+            "design-check:8",
+        );
+        let rechecked = CanonicalDiagnosticMetadata::structural(
+            "rspice.design.rules",
+            "DRC-UNCONNECTED-PIN",
+            "lib/top/schematic",
+            "terminal:4:A",
+            0,
+            9,
+            "design-check:9",
+        );
+        assert_eq!(first.diagnostic_id, rechecked.diagnostic_id);
+        assert_eq!(rechecked.revision, 9, "the revision is still recorded");
+        assert_eq!(rechecked.validation_id.as_ref(), "design-check:9");
+
+        for (object, occurrence) in [("terminal:5:A", 0), ("terminal:4:A", 1)] {
+            let other = CanonicalDiagnosticMetadata::structural(
+                "rspice.design.rules",
+                "DRC-UNCONNECTED-PIN",
+                "lib/top/schematic",
+                object,
+                occurrence,
+                8,
+                "design-check:8",
+            );
+            assert_ne!(first.diagnostic_id, other.diagnostic_id, "{object} #{occurrence}");
+        }
+        // Length-prefixed, so moving a separator between fields is a
+        // different identity rather than the same string.
+        let shifted = CanonicalDiagnosticMetadata::structural(
+            "rspice.design.rules",
+            "DRC-UNCONNECTED-PIN",
+            "lib/top/schematic|terminal:4",
+            ":A",
+            0,
+            8,
+            "design-check:8",
+        );
+        assert_ne!(first.diagnostic_id, shifted.diagnostic_id);
     }
 
     #[test]
