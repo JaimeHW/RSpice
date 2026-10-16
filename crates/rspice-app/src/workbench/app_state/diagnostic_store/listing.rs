@@ -35,7 +35,8 @@ use crate::workbench::documents::netlist_document::NetlistDiagnosticCollection;
 pub(in crate::workbench) enum RowStanding {
     Current,
     /// The inputs this finding was derived from have moved. The words say
-    /// which, in the terms the producer measured them in.
+    /// which, in the terms the producer measured them in, as one full clause
+    /// a surface can print as it stands.
     Stale(String),
     /// The inputs cannot be read at all, in the producer's own words.
     Unavailable(String),
@@ -341,7 +342,7 @@ fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<DiagnosticRow<
                 level: record.level,
                 standing: match standing {
                     BatchStanding::Current => RowStanding::Current,
-                    BatchStanding::Stale => RowStanding::Stale(batch.inputs.description()),
+                    BatchStanding::Stale => RowStanding::Stale(batch.inputs.stale_reason()),
                     BatchStanding::Unavailable(reason) => RowStanding::Unavailable(reason.clone()),
                 },
                 subject: stored_subject(record),
@@ -887,10 +888,10 @@ mod tests {
         assert_eq!(
             row.standing,
             RowStanding::Stale(format!(
-                "the schematic working set behind {}",
+                "the schematic working set behind {} has changed since this was reported",
                 subject.display_path()
             )),
-            "a stale row says what moved under it, not merely that it is stale",
+            "a stale row says in one clause what moved under it, not merely that it is stale",
         );
     }
 

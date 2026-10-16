@@ -454,25 +454,30 @@ impl DiagnosticInputs {
         }
     }
 
-    /// What this batch was derived from, in words a reader can check against
-    /// the design. For a stale batch this is exactly what moved under it.
-    pub(in crate::workbench) fn description(&self) -> String {
+    /// What moved under a stale batch, as one clause a reader can check
+    /// against the design.
+    ///
+    /// A whole clause, as a source editor states its own stale findings, so
+    /// every stale row reads the same way wherever it came from: what the
+    /// batch was derived from, and that it has changed since.
+    pub(in crate::workbench) fn stale_reason(&self) -> String {
         match self {
             Self::DesignCheck { subject } => format!(
-                "the schematic working set behind {}",
+                "the schematic working set behind {} has changed since this was reported",
                 subject.display_path()
             ),
             Self::SymbolPins { subject } => format!(
-                "the artwork of {} and the interface contract its pins are checked against",
+                "the artwork of {}, or the interface contract its pins are checked against, has \
+                 changed since this was reported",
                 subject.display_path()
             ),
-            Self::Dispatch => {
-                "the configured design, the active simulation plan and the preflight report"
-                    .to_owned()
-            }
-            Self::Run { run_sequence } => {
-                format!("the design and solver setup run {run_sequence} was dispatched against")
-            }
+            Self::Dispatch => "the configured design, the active simulation plan or the preflight \
+                               report has changed since this was reported"
+                .to_owned(),
+            Self::Run { run_sequence } => format!(
+                "the design or solver setup run {run_sequence} was dispatched against has changed \
+                 since this was reported"
+            ),
         }
     }
 
