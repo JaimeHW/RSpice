@@ -2,8 +2,8 @@
 
 use super::{Point, SchematicState};
 pub use rspice_design::schematic::design_note::{
-    DesignNote, DesignNoteError, DesignNoteKind, DesignNoteLayer, DesignNoteRenderContext,
-    DesignReviewMutation, DesignReviewState, RequirementTarget,
+    DesignNote, DesignNoteError, DesignNoteKind, DesignNoteLayer, DesignReviewMutation,
+    DesignReviewState, RequirementTarget,
 };
 use rspice_design::schematic::design_note::{normalize_design_note_text, validate_kind_text};
 

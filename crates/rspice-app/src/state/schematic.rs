@@ -75,7 +75,7 @@ pub use component::{
 };
 pub use component_type::ComponentType;
 pub use design_note::{
-    DesignNote, DesignNoteKind, DesignNoteRenderContext, DesignReviewMutation, DesignReviewState,
+    DesignNote, DesignNoteKind, DesignReviewMutation, DesignReviewState,
     PendingDesignNotePlacement, RequirementTarget,
 };
 pub use device_catalog::{
