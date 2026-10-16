@@ -178,6 +178,7 @@ jobs:
           --test mixed_bit_aliases
           --test mixed_dc_sweep_state
           --test mixed_small_signal_held
+          --test pole_zero_veriloga_rational
           --test sensitivity_source_waveforms
           --test small_signal_transient_state
           --test spectre_analog_statements
@@ -364,6 +365,7 @@ jobs:
           --test mixed_bit_aliases
           --test mixed_dc_sweep_state
           --test mixed_small_signal_held
+          --test pole_zero_veriloga_rational
           --test sensitivity_source_waveforms
           --test small_signal_transient_state
           --test spectre_analog_statements

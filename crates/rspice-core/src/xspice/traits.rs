@@ -746,12 +746,31 @@ pub trait CodeModel: Send + Sync {
     /// Complete continuous-time small-signal equations for natural-pole studies.
     /// Frequency samples cannot establish the number of private dynamic states.
     /// Models must explicitly declare their descriptor; the default only admits
-    /// models that already guarantee a memoryless linear stamp.
+    /// models that already guarantee a memoryless linear stamp, and models
+    /// with no port that can drive an analog node. Small-signal analyses hold
+    /// the event state, so such a model stamps nothing analog at all.
     fn small_signal_descriptor(
         &self,
         _ctx: &super::CmContext,
     ) -> CmResult<XspiceSmallSignalDescriptor> {
-        Ok(if self.has_memoryless_linear_transient_stamp() {
+        // A conductance or hybrid terminal answers its input with a current
+        // or a voltage, so it drives the node whatever its declared direction.
+        let drives = |direction: PortDirection, port_type: &PortType| {
+            matches!(
+                port_type,
+                PortType::Conductance
+                    | PortType::DifferentialConductance
+                    | PortType::Hybrid
+                    | PortType::DifferentialHybrid
+            ) || (direction != PortDirection::In && port_type.is_analog())
+        };
+        let drives_analog = self.ports().iter().any(|port| {
+            std::iter::once(&port.default_type)
+                .chain(&port.allowed_types)
+                .any(|port_type| drives(port.direction, port_type))
+        });
+        let affine = self.has_memoryless_linear_transient_stamp() || !drives_analog;
+        Ok(if affine {
             XspiceSmallSignalDescriptor::AffineAc
         } else {
             XspiceSmallSignalDescriptor::Unsupported(

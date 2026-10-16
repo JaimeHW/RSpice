@@ -306,6 +306,8 @@ const NATIVE_REFUSALS: &str =
 const PERIODIC_REFUSALS: &str =
     "tests/capability_refusals.rs::harmonic_balance_refuses_a_device_it_cannot_stamp";
 const PZ_REFUSALS: &str = "tests/capability_refusals.rs::pole_zero_refuses_transmission_lines";
+const PZ_HELD_CONVERTERS: &str =
+    "tests/pole_zero_veriloga_rational.rs::held_converters_take_part_as_their_held_stamps";
 const MIXED_HELD: &str =
     "tests/mixed_small_signal_held.rs::the_held_trim_register_matches_its_held_source_twin";
 const MIXED_XSPICE_HELD: &str =
@@ -406,17 +408,18 @@ pub const fn capability_cell(
         },
         A::Pz => match family {
             F::SpiceNative => native_checks("analysis.pz.device"),
-            // The real-number boundary models are XSPICE code models and
-            // declare their descriptor the same way; the design's `S` for
-            // them waits on the descriptor wiring of P1.6 (L2b).
-            F::XspiceAnalog | F::XspiceEvent | F::VerilogARuntime | F::RealNumber => {
-                CellSupport::Restricted {
-                    gate: InstanceGate::PeriodicContracts,
-                    token: "analysis.pz.device",
-                    condition: "every instance whose dynamic state exports a complete rational G + sC descriptor",
-                    evidence: &[FIXTURES, PZ_REFUSALS],
-                }
-            }
+            F::XspiceAnalog | F::VerilogARuntime => CellSupport::Restricted {
+                gate: InstanceGate::PeriodicContracts,
+                token: "analysis.pz.device",
+                condition: "every instance whose dynamic state exports a complete rational G + sC descriptor",
+                evidence: &[FIXTURES, PZ_REFUSALS],
+            },
+            // A held event model with no analog output stamps nothing
+            // analog, and every converter and real-number boundary model
+            // declares its held stamp as exactly `G + sC` with `C = 0`.
+            F::XspiceEvent | F::RealNumber => CellSupport::Supported {
+                evidence: &[FIXTURES, PZ_HELD_CONVERTERS],
+            },
             F::VerilogAGenerated => supported(),
             F::VerilogAmsMixed => CellSupport::Refused {
                 token: DISCRETE_STATE,

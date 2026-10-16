@@ -3,8 +3,15 @@
 use crate::Value;
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, EvaluationPhase, ParamSpec, PortDirection, PortSpec,
-    PortType,
+    PortType, XspiceSmallSignalDescriptor,
 };
+
+/// A real-number boundary model at a held event state drives an ideal
+/// source at its held level or reads its input and stamps nothing, so its
+/// AC stamp is exactly `G + jωC` with `C = 0`.
+fn held_boundary_descriptor() -> CmResult<XspiceSmallSignalDescriptor> {
+    Ok(XspiceSmallSignalDescriptor::AffineAc)
+}
 
 const MIN_EVENT_DELAY: Value = 1.0e-15;
 
@@ -358,6 +365,10 @@ impl CodeModel for RealToVoltage {
         "real_to_v"
     }
 
+    fn small_signal_descriptor(&self, _ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
+        held_boundary_descriptor()
+    }
+
     fn description(&self) -> &str {
         "Real-valued event to analog output converter"
     }
@@ -465,6 +476,10 @@ impl CodeModel for RealToVoltageAlias {
         "r_to_v"
     }
 
+    fn small_signal_descriptor(&self, _ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
+        held_boundary_descriptor()
+    }
+
     fn description(&self) -> &str {
         RealToVoltage.description()
     }
@@ -544,6 +559,10 @@ pub(crate) struct VoltageToReal;
 impl CodeModel for VoltageToReal {
     fn name(&self) -> &str {
         "v_to_real"
+    }
+
+    fn small_signal_descriptor(&self, _ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
+        held_boundary_descriptor()
     }
 
     fn description(&self) -> &str {

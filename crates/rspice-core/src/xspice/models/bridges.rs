@@ -5,7 +5,15 @@ use crate::Value;
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, DigitalState, DigitalStrength, DigitalValue,
     EvaluationPhase, ParamSpec, PortDirection, PortSpec, PortType, XspiceCheckpointSupport,
+    XspiceSmallSignalDescriptor,
 };
+
+/// A converter's small-signal stamp at a held event state: a static
+/// conductance or an ideal-source branch, so its AC stamp is exactly
+/// `G + jωC` with `C = 0` at every frequency.
+fn held_converter_descriptor() -> CmResult<XspiceSmallSignalDescriptor> {
+    Ok(XspiceSmallSignalDescriptor::AffineAc)
+}
 
 /// The shortest transition the stock bridges admit, and the width over which
 /// a zero-duration digital-to-analog step completes — a D/A edge here, and a
@@ -116,6 +124,10 @@ pub struct AdcBridge;
 impl CodeModel for AdcBridge {
     fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
         XspiceCheckpointSupport::Serializable
+    }
+
+    fn small_signal_descriptor(&self, _ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
+        held_converter_descriptor()
     }
 
     /// A probe reads the input and commits nothing: no output, state or event.
@@ -235,6 +247,10 @@ impl CodeModel for MixedAdcBridge {
         XspiceCheckpointSupport::Serializable
     }
 
+    fn small_signal_descriptor(&self, _ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
+        held_converter_descriptor()
+    }
+
     fn name(&self) -> &str {
         "__rspice_mixed_adc"
     }
@@ -339,6 +355,10 @@ fn mixed_bridge_timing(ctx: &CmContext, name: &str) -> CmResult<Value> {
 impl CodeModel for MixedDacBridge {
     fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
         XspiceCheckpointSupport::Serializable
+    }
+
+    fn small_signal_descriptor(&self, _ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
+        held_converter_descriptor()
     }
 
     fn name(&self) -> &str {
@@ -1483,6 +1503,10 @@ impl CodeModel for DacBridge {
         XspiceCheckpointSupport::Serializable
     }
 
+    fn small_signal_descriptor(&self, _ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
+        held_converter_descriptor()
+    }
+
     /// A transient probe sets every output element from the accepted ramp
     /// state and its inputs; the ramp state and the completion breakpoint are
     /// written only outside a probe (see `evaluate_dac_bridge`).
@@ -1710,6 +1734,10 @@ fn evaluate_dac_bridge(
 impl CodeModel for BidiBridge {
     fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
         XspiceCheckpointSupport::Serializable
+    }
+
+    fn small_signal_descriptor(&self, _ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
+        held_converter_descriptor()
     }
 
     fn name(&self) -> &str {
