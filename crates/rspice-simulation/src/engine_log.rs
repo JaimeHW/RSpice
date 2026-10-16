@@ -2,7 +2,7 @@
 //!
 //! Hosts offer core records through their logger and drain a queue or forward
 //! observed lines. Sink guards restore prior capture on exit, including unwind.
-//! Only core records at Info and above are captured unless the run asks for
+//! Only engine records at Info and above are captured unless the run asks for
 //! Debug; Trace and records from other threads remain outside that run.
 
 use std::cell::RefCell;
@@ -224,9 +224,27 @@ impl Drop for RunSinkGuard {
     }
 }
 
-/// Whether the target names the engine rather than the application.
-fn is_core_target(target: &str) -> bool {
-    target == "rspice_core" || target.starts_with("rspice_core::")
+/// The log targets whose code executes inside an analysis, and so speaks for
+/// the run: the engine, the Verilog-A compiler and runtime it calls, the sparse
+/// solver under it, and the services that drive an analysis from this crate.
+///
+/// The rest of this crate is the runner's own bookkeeping: lock recovery,
+/// thread lifecycle and a `{:?}` dump of the request, none of which is the
+/// run's account of itself.
+const ENGINE_TARGETS: [&str; 4] = [
+    "rspice_core",
+    "rspice_veriloga",
+    "rspice_matrix",
+    "rspice_simulation::engine_services",
+];
+
+/// Whether the target is one of [`ENGINE_TARGETS`] or a module inside one.
+fn is_engine_target(target: &str) -> bool {
+    ENGINE_TARGETS.iter().any(|root| {
+        target
+            .strip_prefix(root)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with("::"))
+    })
 }
 
 /// The Console severity one engine level reports as, or `None` for a level the
@@ -248,7 +266,7 @@ fn severity_for_level(level: log::Level) -> Option<LogSeverity> {
 /// `log_enabled!` tells the engine the truth about whether formatting a
 /// `debug!` would reach anything.
 pub fn admits(metadata: &log::Metadata<'_>) -> bool {
-    if !is_core_target(metadata.target()) {
+    if !is_engine_target(metadata.target()) {
         return false;
     }
     let Some(severity) = severity_for_level(metadata.level()) else {
@@ -265,7 +283,7 @@ pub fn admits(metadata: &log::Metadata<'_>) -> bool {
 
 /// Offer one record to this thread's run, if it has one that wants it.
 pub fn offer(record: &log::Record<'_>) {
-    if !is_core_target(record.target()) {
+    if !is_engine_target(record.target()) {
         return;
     }
     let Some(severity) = severity_for_level(record.level()) else {
@@ -370,16 +388,77 @@ mod tests {
     fn a_line_from_outside_the_engine_is_not_captured() {
         let queue = Arc::new(Mutex::new(EngineLogQueue::default()));
         let _guard = install(RunLogSink::queued(Arc::clone(&queue), true));
-        for target in ["rspice_ui", "rspice_veriloga", "rspice_corella", "wgpu_hal"] {
-            offer(
-                &log::Record::builder()
-                    .level(log::Level::Info)
-                    .target(target)
-                    .args(format_args!("not the engine"))
-                    .build(),
-            );
+        for target in [
+            "rspice_ui",
+            "rspice_app::controller",
+            "rspice_corella",
+            "rspice_veriloga_runtime",
+            "rspice_simulation",
+            "rspice_simulation::runner",
+            "rspice_simulation::engine_services_extra",
+            "wgpu_hal",
+        ] {
+            offer_from(target, log::Level::Info, "not the engine");
         }
         assert!(lock_queue(&queue).drain().is_empty());
+    }
+
+    fn offer_from(target: &str, level: log::Level, message: &str) {
+        offer(
+            &log::Record::builder()
+                .level(level)
+                .target(target)
+                .args(format_args!("{message}"))
+                .build(),
+        );
+    }
+
+    fn captured_from(target: &str, message: &str) -> Vec<EngineLogLine> {
+        let queue = Arc::new(Mutex::new(EngineLogQueue::default()));
+        {
+            let _guard = install(RunLogSink::queued(Arc::clone(&queue), false));
+            assert!(admits(
+                &log::Metadata::builder()
+                    .level(log::Level::Warn)
+                    .target(target)
+                    .build()
+            ));
+            offer_from(target, log::Level::Warn, message);
+        }
+        lock_queue(&queue).drain()
+    }
+
+    /// The Verilog-A compiler reports a lost AC contribution while the run
+    /// elaborates its models.
+    #[test]
+    fn a_verilog_a_compiler_line_is_captured() {
+        let message = "ddt() on both sides of a product; reactive AC contribution omitted";
+        assert_eq!(
+            captured_from("rspice_veriloga::ir", message),
+            vec![core_record(log::Level::Warn, message)]
+        );
+    }
+
+    /// The sparse solver says when it changed factorization backends.
+    #[test]
+    fn a_sparse_solver_line_is_captured() {
+        let message = "klu backend could not factor this system; using faer fallback";
+        assert_eq!(
+            captured_from("rspice_matrix::sparse", message),
+            vec![core_record(log::Level::Warn, message)]
+        );
+    }
+
+    /// The service driving a transient says when it carried on without an
+    /// operating point.
+    #[test]
+    fn an_analysis_service_line_is_captured() {
+        let message = "DC OP computation failed: singular matrix (continuing with transient if \
+                       available)";
+        assert_eq!(
+            captured_from("rspice_simulation::engine_services::transient", message),
+            vec![core_record(log::Level::Warn, message)]
+        );
     }
 
     #[test]
