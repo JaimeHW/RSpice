@@ -49,14 +49,16 @@ oracle is a program rather than a file:
   `tools/rspice-conformance/tests/verilog_oracles.rs`.
 
   The difference that matters is what a green run means when the oracles are
-  absent, which on CI they always are — neither binary is installed there. The
-  suite then checks corpus integrity, testbench generation, and its own
-  comparator, and reports the absence; it does **not** claim the circuits are
-  right. `RSPICE_VERILOG_ORACLES_REQUIRED=1` turns that absence into a failure.
-  RSpice's own arm of the comparison runs behind the conformance crate's
-  `verilog-digital` feature, which is on by default; a construct the digital
-  front end does not implement is refused by name and recorded as `refused`,
-  never as a pass.
+  absent, which on CI they always are — neither binary is installed there.
+  Without them the suite still checks corpus integrity and testbench
+  generation, and checks RSpice's traces against expectations derived by hand
+  from IEEE 1364-2005 rather than produced by RSpice; the cross-simulator
+  comparisons report what they looked for and return, so a green run does
+  **not** mean RSpice agreed with Icarus or Verilator.
+  `RSPICE_VERILOG_ORACLES_REQUIRED=1` turns that absence into a failure.
+  RSpice's arm runs behind the conformance crate's `verilog-digital` feature,
+  which is on by default; a design the digital front end cannot compile becomes
+  a named refusal carrying the engine's diagnostic, never a pass.
 
 **The mixed-signal reference corpus** combines all three ideas:
 

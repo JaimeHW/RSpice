@@ -1,10 +1,11 @@
 # Vendored client provenance
 
 `rspice-pack`, `rspice-cloud-domain`, `rspice-cloud-contract` and
-`rspice-cloud-client` are vendored, not authored here: the authoritative copy
-lives in the RSpice-Cloud repository, because a pack archive and a catalog
-snapshot must reach the same verdict in this application as they do in the
-service that signed them.
+`rspice-cloud-client` are vendored, not authored here. They live in the private
+RSpice-Cloud repository beside the API they are tested against, and this
+workspace cannot take a git dependency on it: `deny.toml` admits only
+crates.io sources. The vendored trees are read-only here; behavioural authority
+stays in RSpice-Cloud.
 
 Run `python tools/cloud/sync_vendored_client.py --source <clean-checkout>` to
 import those four crates and their test fixtures. Native licensing fixtures

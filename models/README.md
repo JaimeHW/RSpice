@@ -30,17 +30,18 @@ packages are not shipped here: they are not ordinary Verilog-A model packages
 and their terms are not covered by this tree's redistribution review.
 
 These CMC sources are the canonical inputs to the Verilog-A to Rust generator,
-not a staging area for hand-written native ports. The generator preserves each
-source package's identity and attribution in the Rust it emits, and each
-generated device compiles in behind its own `veriloga-model-*` feature. The
-generated artifacts are checked in under
-[`crates/rspice-veriloga-models/`](../crates/rspice-veriloga-models/).
+not a staging area for hand-written native ports. The generated artifacts are
+checked in under
+[`crates/rspice-veriloga-models/`](../crates/rspice-veriloga-models/), whose
+`manifest.txt` records the digest of the source tree they were generated from;
+each generated device compiles in behind its own `veriloga-model-*` feature.
+Attribution stays with the sources here and with the root `NOTICE`.
 
-The remaining directories are non-CMC Verilog-A packs in the same layout.
-Discovery treats every module-bearing `.va` file under
-`veriloga/<pack>/<package>/` as a candidate model source, derives package
-identity from the first two path components, and scopes include directories to
-the package.
+The other directories under `veriloga/` are non-CMC Verilog-A packages.
+Discovery treats every module-bearing `.va` file under `veriloga/` as a
+candidate model source, takes its package identity from the first two
+directories of its path (for example `cmc/PSP104.1.0_vacode`), and scopes
+include directories to that package.
 
 No root-level BSIM4 Verilog-A source is bundled. Native BSIM4 v4.8 is
 implemented in `rspice-core` for MOS `LEVEL=14/54`.
