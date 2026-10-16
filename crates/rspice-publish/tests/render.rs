@@ -95,6 +95,31 @@ fn a_figure_bundle_ships_the_faces_its_stylesheet_declares() {
 }
 
 #[test]
+fn the_stylesheet_colours_every_paint_class_a_figure_can_carry() {
+    let bundle =
+        render_bundle(&snapshot(RC_LOWPASS), "0".repeat(64).as_str(), &viewer()).expect("render");
+    let styles = utf8(&bundle["assets/page.css"]);
+    let traces = (0..8).map(|index| format!("trace-{index}"));
+    let named = [
+        "foreground",
+        "secondary",
+        "grid",
+        "accent",
+        "warning",
+        "success",
+    ];
+    let roles = named.map(str::to_owned).into_iter().chain(traces);
+    for role in roles {
+        // The root draws with `fill="none"`, so a class the page leaves
+        // unstyled is invisible rather than black.
+        for (prefix, property) in [("s", "stroke"), ("f", "fill"), ("t", "fill")] {
+            let rule = format!("svg .{prefix}-{role} {{ {property}: var(--{role}); }}");
+            assert!(styles.contains(&rule), "page.css must carry `{rule}`");
+        }
+    }
+}
+
+#[test]
 fn rc_bundle_carries_every_disclosed_surface() {
     let value = snapshot(RC_LOWPASS);
     let bundle = render_bundle(&value, "0".repeat(64).as_str(), &viewer()).expect("render");
