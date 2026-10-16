@@ -79,8 +79,21 @@ fn da_level(variant: &str, vdd: f64) -> f64 {
 }
 
 /// Whether the comparator output reads 1 at supply `vdd`.
+///
+/// The comparison at equality is the built-in Verilog-AMS A/D converter's own
+/// (`AnalogThresholdBehavior::Hysteresis` in
+/// `crates/rspice-core/src/xspice/threshold.rs`, the law of
+/// `MixedAdcBridge`): an input exactly on its single threshold keeps the
+/// decision it already holds, and a converter with none reads 0. Every
+/// expectation here starts from a 0 (`por_n`'s initial value, or a fresh
+/// operating point), so a 1 needs the input strictly above the threshold.
+///
+/// That is also why a zero supply reads nothing high: at V(vdd) = 0 the
+/// comparator output and a supply-tracking threshold are both 0, an input on
+/// its threshold, and a supply of 0 V cannot make a high level. `por_n` is
+/// held 0 there.
 fn reads_high(variant: &str, vdd: f64, comparator_threshold: f64) -> bool {
-    comparator(vdd, comparator_threshold) >= ad_threshold(variant, vdd)
+    vdd > 0.0 && comparator(vdd, comparator_threshold) > ad_threshold(variant, vdd)
 }
 
 /// The supply at which the comparator output crosses the A/D threshold, by
@@ -295,6 +308,11 @@ mod tests {
         assert!(reads_high("base", 2.41, LO_THRESHOLD));
         assert!(!reads_high("live", 2.69, HI_THRESHOLD));
         assert!(reads_high("live", 2.71, HI_THRESHOLD));
+        // A zero supply puts the input on a zero threshold: nothing is high,
+        // so the upward sweep holds por_n at 0 until the hi threshold.
+        assert!(!reads_high("live", 0.0, HI_THRESHOLD));
+        assert!(!reads_high("live", 0.0, LO_THRESHOLD));
+        assert!(!reads_high("base", 0.0, HI_THRESHOLD));
         assert_eq!(da_level("base", 3.0), 3.3);
         assert_eq!(da_level("live", 3.0), 3.0);
     }
