@@ -1784,9 +1784,10 @@ fn an_error_inside_an_instantiated_cellview_refuses_the_run() {
     if cell.get_view("schematic").is_none() {
         cell.add_view(View::new("schematic", ViewType::Schematic));
     }
-    state
-        .workspace
-        .insert_schematic_editor(CellViewRef::new("user", "dangling", "schematic").key(), master);
+    state.workspace.insert_schematic_editor(
+        CellViewRef::new("user", "dangling", "schematic").key(),
+        master,
+    );
 
     let mut binding = LibraryCellInstance::new("user", "dangling", "schematic");
     binding.bind_interface(&[]);
@@ -1795,11 +1796,9 @@ fn an_error_inside_an_instantiated_cellview_refuses_the_run() {
         .add_library_cell_component(Point::new(400, 400), binding);
     state.dialogs.drc_checked_version = state.schematic.topology_version();
 
-    let error = SimulationController::build_prepared_snapshot(
-        &state,
-        SimulationRunIntent::SimulateRunSet,
-    )
-    .expect_err("a cellview with an open node cannot be prepared");
+    let error =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect_err("a cellview with an open node cannot be prepared");
     assert_eq!(error.stage(), PreparationStage::DesignChecks);
     assert!(
         error.message().contains("error"),
