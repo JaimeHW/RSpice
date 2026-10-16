@@ -926,9 +926,7 @@ fn the_design_and_veriloga_inspectors_paint_no_status_color() {
         ),
         (
             "surfaces/veriloga.rs",
-            crate::source_guard::without_test_items(include_str!(
-                "../../surfaces/veriloga.rs"
-            )),
+            crate::source_guard::without_test_items(include_str!("../../surfaces/veriloga.rs")),
         ),
     ];
     for (file, source) in files {
