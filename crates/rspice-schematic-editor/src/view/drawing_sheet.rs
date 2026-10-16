@@ -1333,7 +1333,9 @@ fn draw_title_block(
                 at(DRAWING_SHEET_TITLE_CAPTION_POSITION),
             )),
             Align2::LEFT_CENTER,
-            truncate_title_text(&field.id.display_label().to_uppercase(), caption_chars),
+            // The field's own wording, in the case the plot and the dialogs
+            // letter it in, so a caption reads the same on screen and on paper.
+            truncate_title_text(field.id.display_label(), caption_chars),
             theme::mono(
                 drawing_sheet_font_size(zoom, authored_lettering(lettering.caption_um)),
                 theme::FontWeight::Regular,
@@ -1364,14 +1366,9 @@ fn draw_title_block(
             )),
             Align2::LEFT_CENTER,
             truncate_canvas_title_value(&field.value, value_chars),
-            // A value carries more stroke than its caption rather than more
-            // height. Drafting practice letters a caption one height step
-            // below the data it names and leaves both in the same ink, which
-            // reads as a hierarchy only because a drawing is lettered wholly
-            // in capitals. RSpice cannot be: a cell or view name is a
-            // case-bearing identifier, and a caption's capitals come out the
-            // same height as a value's lower case. The step has to be bought
-            // in weight, because the cell has no room to buy it in height.
+            // A value stands a step of the series above its caption and in a
+            // heavier weight, so it reads as the field's content at a glance;
+            // the plot letters it the same way.
             theme::mono(
                 drawing_sheet_font_size(zoom, authored_lettering(lettering.data_um)),
                 theme::FontWeight::Medium,

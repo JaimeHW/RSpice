@@ -667,8 +667,8 @@ impl DrawingSheetTitleFieldId {
     }
 
     /// Canonical human-facing wording shared by canvas, dialogs, preview,
-    /// and hardcopy. Renderers may change case for typography, but not the
-    /// field's wording or engineering meaning.
+    /// and hardcopy. Every renderer letters it exactly as written, case
+    /// included, so a caption reads the same wherever the sheet is shown.
     #[must_use]
     pub const fn display_label(self) -> &'static str {
         match self {
