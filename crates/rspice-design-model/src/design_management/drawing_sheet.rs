@@ -924,6 +924,13 @@ impl DrawingSheetManagedTemplateSnapshot {
                 "drawing sheet managed template field order",
             ));
         }
+        // Every row must seat the block's lettering. A template sealed
+        // before that was asked of it still loads.
+        if !drawing_sheet_title_row_holds_lettering(snapshot.height_um / u64::from(snapshot.rows)) {
+            return Err(DesignManagementError::NumericRange(
+                "drawing sheet managed template rows",
+            ));
+        }
         snapshot.content_digest = snapshot.compute_content_digest()?;
         Ok(snapshot)
     }

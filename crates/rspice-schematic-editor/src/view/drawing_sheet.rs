@@ -15,14 +15,13 @@ use egui::{
 use crate::session::visibility::DrawingSheetLayerVisibility;
 use rspice_design_model::Point;
 use rspice_design_model::design_management::{
-    DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS, DRAWING_SHEET_TITLE_CAPTION_POSITION,
-    DRAWING_SHEET_TITLE_CELL_PADDING_UM, DRAWING_SHEET_TITLE_VALUE_POSITION,
-    DrawingSheetBorderTemplate, DrawingSheetDisplayUnit,
+    DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS, DRAWING_SHEET_TITLE_BLOCK_LETTERING,
+    DRAWING_SHEET_TITLE_CAPTION_POSITION, DRAWING_SHEET_TITLE_CELL_PADDING_UM,
+    DRAWING_SHEET_TITLE_VALUE_POSITION, DrawingSheetBorderTemplate, DrawingSheetDisplayUnit,
     DrawingSheetGeometry as AuthoredDrawingSheetGeometry, DrawingSheetLettering, DrawingSheetRect,
     DrawingSheetTitleBlockRotation, DrawingSheetTitleFieldValueAuthority, DrawingSheetZoneEdges,
     DrawingSheetZoneGrid, DrawingSheetZoneLabels, ResolvedDrawingSheetTitleField,
-    SchematicSheetFormat, drawing_sheet_mono_em_um, drawing_sheet_title_block_lettering,
-    drawing_sheet_zone_lettering_um,
+    SchematicSheetFormat, drawing_sheet_mono_em_um, drawing_sheet_zone_lettering_um,
 };
 use rspice_ui_kit::theme;
 use rspice_ui_kit::tokens::{Mode, Tokens};
@@ -272,15 +271,6 @@ fn authored_lettering(lettering_um: u64) -> f32 {
     drawing_sheet_mono_em_um(lettering_um) as f32 * DRAWING_SHEET_UNITS_PER_MM as f32 / 1_000.0
 }
 
-/// The heights this sheet's title block letters at: the sheet's own ISO 3098
-/// heights, stepped down where a row of the block it carries is too shallow
-/// to seat them. A sheet with no title block keeps the sheet's heights, which
-/// is what its remaining annotation is lettered at.
-fn sheet_lettering(sheet: &ActiveDrawingSheet) -> DrawingSheetLettering {
-    drawing_sheet_title_block_lettering(&sheet.format, &sheet.geometry.physical)
-        .unwrap_or_else(|| sheet.format.authored_size.lettering())
-}
-
 /// Font a zone reference in the border band is lettered in: the height and
 /// weight the plot letters it at, which depend on the band and not on the
 /// sheet.
@@ -415,7 +405,7 @@ pub fn draw_base(
     let tokens = Tokens::get(painter.ctx());
     let palette = DrawingSheetPalette::resolve(&tokens);
     let layers = input.layers;
-    let lettering = sheet_lettering(sheet);
+    let lettering = DRAWING_SHEET_TITLE_BLOCK_LETTERING;
     let lod = DrawingSheetLod::resolve(viewport.zoom, painter.ctx().pixels_per_point(), lettering);
     let paper = sheet.geometry.paper.screen_rect(viewport);
     let printable = sheet.geometry.printable.screen_rect(viewport);
@@ -530,7 +520,7 @@ pub fn draw_overflow_advisories(
     let lod = DrawingSheetLod::resolve(
         viewport.zoom,
         painter.ctx().pixels_per_point(),
-        sheet_lettering(sheet),
+        DRAWING_SHEET_TITLE_BLOCK_LETTERING,
     );
     if !overflow_advisories_visible(lod.tier) {
         return;
@@ -1248,7 +1238,7 @@ fn draw_title_block(
     else {
         return;
     };
-    let lettering = sheet_lettering(sheet);
+    let lettering = DRAWING_SHEET_TITLE_BLOCK_LETTERING;
     let capacity = |lettering_um| {
         rspice_design_model::design_management::drawing_sheet_title_cell_capacity(
             &sheet.format,

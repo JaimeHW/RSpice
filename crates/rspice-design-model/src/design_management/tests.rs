@@ -2884,14 +2884,26 @@ fn zone_references_letter_at_the_iso_5457_height_their_band_can_hold() {
 }
 
 #[test]
-fn title_block_lettering_steps_down_to_the_row_that_carries_it() {
-    // A title block is a fixed form: the block on an A0 sheet has the same
-    // rows in the same height as the block on an A4 one. The heights a sheet
-    // recommends rise with the paper, so on the largest sheets a value's line
-    // is taller than the space under its seat in the row — and the canvas
-    // clips a cell to its rules, which makes an unclamped height a field
-    // truncated outright rather than a field lettered generously.
-    let mut stepped_down = 0;
+fn a_title_block_letters_at_one_height_on_every_sheet() {
+    // ISO 7200 uses the same title block for every paper size, so the block
+    // letters ISO 3098's A4 row whatever sheet carries it: 1.8 mm captions,
+    // a step of the series below 2.5 mm values.
+    let lettering = DRAWING_SHEET_TITLE_BLOCK_LETTERING;
+    assert_eq!((lettering.caption_um, lettering.data_um), (1_800, 2_500));
+    assert_eq!(
+        lettering,
+        DrawingSheetLettering::for_sheet(210_000, 297_000)
+    );
+    for height_um in [lettering.caption_um, lettering.data_um] {
+        assert!(ISO_3098_HEIGHTS_UM.contains(&height_um));
+    }
+
+    // Every built-in block seats that lettering on every sheet. A line seated
+    // on a fraction of the row reaches 0.587 of its em below that seat — 3/8
+    // to the baseline, then 212/1000 to the foot of a `g` — and its capitals
+    // rise 0.323 of its em above it. The value has to stop above the rule
+    // under it, and the caption's descenders a tenth of the value's height
+    // above the value.
     for standard in DrawingSheetStandard::ALL {
         for template in [
             DrawingSheetTitleBlockTemplate::Compact,
@@ -2907,38 +2919,13 @@ fn title_block_lettering_steps_down_to_the_row_that_carries_it() {
                 })
                 .expect("every standard sheet size is a valid format");
             let geometry = format.geometry().expect("a standard sheet has geometry");
-            let Some(lettering) = drawing_sheet_title_block_lettering(&format, &geometry) else {
+            let Some(block) = geometry.title_block else {
                 continue;
             };
-            let recommended = format.authored_size.lettering();
-            assert!(
-                lettering.caption_um <= recommended.caption_um
-                    && lettering.data_um <= recommended.data_um,
-                "{standard:?} {template:?} must not letter above what its sheet recommends"
-            );
-            if lettering.data_um < recommended.data_um {
-                stepped_down += 1;
-            }
-            for height_um in [lettering.caption_um, lettering.data_um] {
-                assert!(
-                    ISO_3098_HEIGHTS_UM.contains(&height_um),
-                    "{standard:?} {template:?} letters at {height_um} um, off the series"
-                );
-            }
-            assert!(
-                lettering.caption_um < lettering.data_um,
-                "{standard:?} {template:?} letters a caption level with or above its value"
-            );
-
-            // A line seated on a fraction of the row reaches 0.587 of its em
-            // below that seat — 3/8 to the baseline, then 212/1000 to the foot
-            // of a `g` — and its capitals rise 0.323 of its em above it. The
-            // value has to stop above the rule under it, and the caption's
-            // descenders a tenth of the value's height above the value.
             let rows = format
                 .title_block_rows(geometry.effective_title_block_template)
                 .expect("a block has rows") as u64;
-            let row_height_um = geometry.title_block.expect("a block has a rect").height_um / rows;
+            let row_height_um = block.height_um / rows;
             let seat_um =
                 |(numerator, denominator): (u64, u64)| row_height_um * numerator / denominator;
             let value_seat_um = seat_um(DRAWING_SHEET_TITLE_VALUE_POSITION);
@@ -2955,37 +2942,59 @@ fn title_block_lettering_steps_down_to_the_row_that_carries_it() {
                 caption_foot_um + lettering.data_um / 10 <= value_capitals_um,
                 "{standard:?} {template:?} seats caption descenders on the value's capitals"
             );
+            assert!(drawing_sheet_title_row_holds_lettering(row_height_um));
         }
     }
+
+    // An organization template sealed from now on must have rows that do the
+    // same.
     assert!(
-        stepped_down > 0,
-        "the largest sheets recommend more lettering than a title row can seat"
+        DrawingSheetManagedTemplateSnapshot::try_new(
+            "example.shallow-title-block",
+            "1",
+            180_000,
+            30_000,
+            5,
+            DrawingSheetTitleFieldId::ALL.to_vec(),
+            Vec::new(),
+        )
+        .is_err(),
+        "6 mm rows cannot seat 2.5 mm values under 1.8 mm captions"
     );
 
-    // An organization may seal rows too shallow for any step between the
-    // two: both then stand on the lowest height, and the caption still never
-    // outgrows the value.
-    let shallow = DrawingSheetManagedTemplateSnapshot::try_new(
-        "example.shallow-title-block",
-        "1",
-        180_000,
-        30_000,
-        5,
-        DrawingSheetTitleFieldId::ALL.to_vec(),
-        Vec::new(),
-    )
-    .unwrap();
-    let format = SchematicSheetFormat::default()
+    // One sealed before that was asked of it still loads.
+    let managed = SchematicSheetFormat::default()
         .try_update(|draft| {
-            draft.authored_size = AuthoredDrawingSheetSize::Standard {
-                standard: DrawingSheetStandard::IsoA0,
-            };
-            draft.margins = DrawingSheetStandard::IsoA0.default_margins();
             draft.title_block.template = DrawingSheetTitleBlockTemplate::OrganizationManaged;
-            draft.title_block.managed_template = Some(shallow);
         })
         .unwrap();
-    let lettering = drawing_sheet_title_block_lettering(&format, &format.geometry().unwrap())
-        .expect("a managed block has lettering");
-    assert_eq!((lettering.caption_um, lettering.data_um), (1_800, 1_800));
+    let mut wire = serde_json::to_value(&managed).unwrap();
+    let template = &mut wire["title_block"]["managed_template"];
+    template["template_id"] = serde_json::json!("example.shallow-title-block");
+    template["revision"] = serde_json::json!("1");
+    template["height_um"] = serde_json::json!(30_000);
+    template["field_order"] = serde_json::json!([
+        "project",
+        "cell-view",
+        "sheet-title",
+        "page",
+        "revision",
+        "format",
+        "scale",
+        "drawn-by",
+        "checked-by",
+        "approved-by",
+        "date",
+        "organization",
+        "document-id",
+        "classification",
+    ]);
+    template["locked_fields"] = serde_json::json!([]);
+    template["content_digest"] =
+        serde_json::json!("cbf756a281c949ca600bf5c2c3a92186ca7b8970a5e1ef17f8b79c6bc623ce9d");
+    let restored: SchematicSheetFormat = serde_json::from_value(wire).unwrap();
+    assert_eq!(
+        restored.title_block_dimensions_um(DrawingSheetTitleBlockTemplate::OrganizationManaged),
+        Some((180_000, 30_000))
+    );
 }

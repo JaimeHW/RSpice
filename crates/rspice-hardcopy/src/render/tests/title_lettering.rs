@@ -3,7 +3,7 @@
 
 use super::*;
 use rspice_design_model::design_management::{
-    DrawingSheetBorderTemplate, drawing_sheet_mono_em_um, drawing_sheet_title_block_lettering,
+    DRAWING_SHEET_TITLE_BLOCK_LETTERING, DrawingSheetBorderTemplate, drawing_sheet_mono_em_um,
     drawing_sheet_zone_lettering_um,
 };
 
@@ -67,8 +67,9 @@ fn plotted_title_capitals_stand_at_the_height_the_standard_names() {
             SchematicSheetFormat::from_standard(standard, SchematicPageOrientation::Landscape)
                 .try_update(|draft| draft.title_block.template = template)
                 .unwrap();
-        let lettering =
-            drawing_sheet_title_block_lettering(&format, &format.geometry().unwrap()).unwrap();
+        // ISO 7200 uses one title block for every paper size, so an A0 block
+        // letters what an A4 one does.
+        let lettering = DRAWING_SHEET_TITLE_BLOCK_LETTERING;
         let (captions, values) = plotted_title_ems(&format);
         assert!(
             !values.is_empty() && captions.len() == values.len(),
