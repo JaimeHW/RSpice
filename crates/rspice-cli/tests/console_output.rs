@@ -471,7 +471,7 @@ fn hdl_writes_to_the_stderr_descriptor_reach_stderr() {
     assert_eq!(transcript, "to stdout\nto stderr 7\nno newline");
 }
 
-/// One call site warns five times and then says the rest are suppressed,
+/// One call site warns five times, the fifth saying the rest are suppressed,
 /// however often the deck trips it.
 #[test]
 fn a_repeated_warning_is_shown_five_times_then_suppressed() {
@@ -500,7 +500,10 @@ fn a_repeated_warning_is_shown_five_times_then_suppressed() {
     );
     assert_eq!(
         stderr
-            .matches("Further occurrences of this warning are suppressed.")
+            .matches(
+                "save/print directive without output signals ignored (further occurrences of \
+                 this warning will be suppressed)"
+            )
             .count(),
         1,
         "{stderr}"

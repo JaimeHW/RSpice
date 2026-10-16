@@ -3,7 +3,7 @@
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rspice_simulation::engine_log::{FURTHER_WARNINGS_SUPPRESSED, WarningLimiter, WarningVerdict};
+use rspice_simulation::engine_log::{WarningLimiter, WarningVerdict, last_warning};
 
 use crate::cli::{CliError, LogFormat};
 
@@ -175,16 +175,19 @@ impl log::Log for LimitedLogger {
             .judge(record);
         match verdict {
             WarningVerdict::Show => self.inner.log(record),
-            WarningVerdict::ShowSuppressionNotice => self.inner.log(
-                &log::Record::builder()
-                    .level(record.level())
-                    .target(record.target())
-                    .module_path(record.module_path())
-                    .file(record.file())
-                    .line(record.line())
-                    .args(format_args!("{FURTHER_WARNINGS_SUPPRESSED}"))
-                    .build(),
-            ),
+            WarningVerdict::ShowLast => {
+                let message = last_warning(record.args());
+                self.inner.log(
+                    &log::Record::builder()
+                        .level(record.level())
+                        .target(record.target())
+                        .module_path(record.module_path())
+                        .file(record.file())
+                        .line(record.line())
+                        .args(format_args!("{message}"))
+                        .build(),
+                );
+            }
             WarningVerdict::Withhold => {}
         }
     }

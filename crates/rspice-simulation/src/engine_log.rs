@@ -74,7 +74,7 @@ pub struct EngineLogQueue {
 
 impl EngineLogQueue {
     /// Warnings this run did not show because their call site had already
-    /// said [`FURTHER_WARNINGS_SUPPRESSED`], for the run's summary to state.
+    /// shown its [`last_warning`], for the run's summary to state.
     pub fn suppressed_warnings(&self) -> usize {
         self.suppressed_warnings
     }
@@ -160,9 +160,14 @@ pub type EngineLogSealObserver = fn(EngineLogSeal);
 /// instead: Spectre's `maxwarns` default.
 const WARNINGS_PER_SITE: usize = 5;
 
-/// What a call site that has used up its warnings says once, in place of the
-/// next one.
-pub const FURTHER_WARNINGS_SUPPRESSED: &str = "Further occurrences of this warning are suppressed.";
+/// What a call site's last shown warning ends with, on the same line, so the
+/// notice cannot be read as being about whatever another site logged next.
+const FURTHER_WARNINGS_SUPPRESSED: &str = "further occurrences of this warning will be suppressed";
+
+/// `text`, the last warning its call site shows in a run, with the notice.
+pub fn last_warning(text: impl std::fmt::Display) -> String {
+    format!("{text} ({FURTHER_WARNINGS_SUPPRESSED})")
+}
 
 /// Holds each call site to [`WARNINGS_PER_SITE`] warnings for as long as it
 /// lives: one run's sink, or one command-line run.
@@ -183,8 +188,8 @@ pub struct WarningLimiter {
 pub enum WarningVerdict {
     /// Show the record.
     Show,
-    /// Show [`FURTHER_WARNINGS_SUPPRESSED`] in the record's place.
-    ShowSuppressionNotice,
+    /// Show the record as [`last_warning`]: its site shows no more this run.
+    ShowLast,
     /// Show nothing; the record is counted.
     Withhold,
 }
@@ -203,16 +208,13 @@ impl WarningLimiter {
             .entry((file, record.line().unwrap_or(0)))
             .or_insert(0);
         *count = count.saturating_add(1);
-        if *count <= WARNINGS_PER_SITE {
-            return WarningVerdict::Show;
-        }
-        // The record the notice stands in for is counted too: its text was
-        // not shown either.
-        self.suppressed = self.suppressed.saturating_add(1);
-        if *count == WARNINGS_PER_SITE + 1 {
-            WarningVerdict::ShowSuppressionNotice
-        } else {
-            WarningVerdict::Withhold
+        match (*count).cmp(&WARNINGS_PER_SITE) {
+            std::cmp::Ordering::Less => WarningVerdict::Show,
+            std::cmp::Ordering::Equal => WarningVerdict::ShowLast,
+            std::cmp::Ordering::Greater => {
+                self.suppressed = self.suppressed.saturating_add(1);
+                WarningVerdict::Withhold
+            }
         }
     }
 
@@ -362,7 +364,7 @@ impl ActiveRun {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .judge(record);
-        if verdict != WarningVerdict::Show {
+        if verdict == WarningVerdict::Withhold {
             self.sink.count_suppressed_warning();
         }
         verdict
@@ -510,23 +512,25 @@ pub fn offer(record: &log::Record<'_>) {
         if !run.sink.admits(severity) {
             return;
         }
-        match run.judge(record) {
-            WarningVerdict::Withhold => {}
-            // About the call site across the whole run, so it names no point.
-            WarningVerdict::ShowSuppressionNotice => run.deliver(|| EngineLogLine {
-                severity: LogSeverity::Info,
-                message: FURTHER_WARNINGS_SUPPRESSED.to_owned(),
-                origin: EngineLogOrigin::Engine,
-            }),
-            WarningVerdict::Show => run.deliver(|| EngineLogLine {
+        let verdict = run.judge(record);
+        if verdict == WarningVerdict::Withhold {
+            return;
+        }
+        run.deliver(|| {
+            let message = match point {
+                Some(point) => format!("{point}: {}", record.args()),
+                None => record.args().to_string(),
+            };
+            EngineLogLine {
                 severity,
-                message: match point {
-                    Some(point) => format!("{point}: {}", record.args()),
-                    None => record.args().to_string(),
+                message: if verdict == WarningVerdict::ShowLast {
+                    last_warning(message)
+                } else {
+                    message
                 },
                 origin: EngineLogOrigin::Engine,
-            }),
-        }
+            }
+        });
     });
 }
 
@@ -880,8 +884,8 @@ mod tests {
         );
     }
 
-    /// Spectre's `maxwarns`: five from a call site, then one notice, then a
-    /// count the run's summary can state.
+    /// Spectre's `maxwarns`: five from a call site, the fifth saying it is the
+    /// last, then a count the run's summary can state.
     #[test]
     fn a_call_site_shows_five_warnings_then_says_the_rest_are_suppressed() {
         let queue = Arc::new(Mutex::new(EngineLogQueue::default()));
@@ -899,10 +903,12 @@ mod tests {
         }
         let mut queue = lock_queue(&queue);
         let messages: Vec<_> = queue.drain().into_iter().map(|line| line.message).collect();
-        let mut expected: Vec<String> = (1..=5)
+        let mut expected: Vec<String> = (1..=4)
             .map(|index| format!("M{index}: vds clamped"))
             .collect();
-        expected.push(FURTHER_WARNINGS_SUPPRESSED.to_owned());
+        expected.push(
+            "M5: vds clamped (further occurrences of this warning will be suppressed)".to_owned(),
+        );
         expected.push("R1: negative resistance".to_owned());
         expected.extend(std::iter::repeat_n("singular matrix".to_owned(), 7));
         assert_eq!(messages, expected);
@@ -922,10 +928,10 @@ mod tests {
             }
         }
         let lines = lock_queue(&queue).drain();
-        // Each run: five warnings and the notice standing in for the sixth.
-        assert_eq!(lines.len(), 12, "{lines:?}");
-        assert_eq!(lines[5].message, FURTHER_WARNINGS_SUPPRESSED);
-        assert_eq!(lines[6].message, "run 1");
+        // Each run: five warnings, the fifth saying the sixth is held back.
+        assert_eq!(lines.len(), 10, "{lines:?}");
+        assert_eq!(lines[4].message, last_warning("run 0"));
+        assert_eq!(lines[5].message, "run 1");
         assert_eq!(lock_queue(&queue).suppressed_warnings(), 2);
     }
 
@@ -1026,14 +1032,14 @@ mod tests {
                 warn_at(100, log::Level::Warn, &format!("M{index}: vds clamped"));
             }
         }
-        // Five warnings and the notice make 2004 lines offered: 2000 posted.
+        // Five warnings shown make 2003 lines offered: 2000 posted.
         assert_eq!(POSTED.load(Ordering::Relaxed), MAX_ENGINE_LOG_LINES);
         let seals = SEALS
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         let expected = EngineLogSeal {
-            withheld: 4,
+            withheld: 3,
             suppressed_warnings: 3,
         };
         assert_eq!(seals, vec![expected]);
@@ -1045,7 +1051,7 @@ mod tests {
         assert_eq!(rows.len(), 1, "{rows:?}");
         assert_eq!(
             rows[0].message,
-            "\u{2026} 4 further engine lines were not shown (the Console keeps the first 2000 \
+            "\u{2026} 3 further engine lines were not shown (the Console keeps the first 2000 \
              of a run)"
         );
         assert_eq!(queue.suppressed_warnings(), 3);
