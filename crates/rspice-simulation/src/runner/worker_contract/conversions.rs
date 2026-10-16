@@ -413,6 +413,21 @@ fn emit_worker_checkpoint(bytes: &[u8], kind: &str) -> Result<(), SimulationErro
 /// request so a superseded run's lines cannot land in a newer run's Console.
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub(super) fn emit_worker_engine_log(line: &crate::engine_log::EngineLogLine) {
+    post_worker_engine_log("line", line);
+}
+
+/// Post what the worker's run withheld, once, as its sink drops.
+///
+/// On the same `engineLog` message as the lines, under `seal` instead of
+/// `line`, so it is keyed and ordered with them: it arrives after the last
+/// line it accounts for and before the run's result.
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub(super) fn emit_worker_engine_log_seal(seal: crate::engine_log::EngineLogSeal) {
+    post_worker_engine_log("seal", &seal);
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+fn post_worker_engine_log(field: &str, payload: &impl serde::Serialize) {
     use wasm_bindgen::JsCast as _;
     use wasm_bindgen::JsValue;
 
@@ -431,8 +446,8 @@ pub(super) fn emit_worker_engine_log(line: &crate::engine_log::EngineLogLine) {
         &JsValue::from_str("id"),
         &JsValue::from_f64(id as f64),
     );
-    if let Ok(line) = serde_wasm_bindgen::to_value(line) {
-        let _ = js_sys::Reflect::set(&message, &JsValue::from_str("line"), &line);
+    if let Ok(payload) = serde_wasm_bindgen::to_value(payload) {
+        let _ = js_sys::Reflect::set(&message, &JsValue::from_str(field), &payload);
     } else {
         return;
     }
@@ -519,10 +534,10 @@ fn run_decoded_worker_request(
                 transient_checkpoint_observer: Some(Arc::new(emit_worker_transient_checkpoint)),
                 transient_sample_observer: stream_transient_samples
                     .then_some(emit_worker_transient_sample),
-                engine_log: Some(crate::engine_log::RunLogSink::observed(
-                    emit_worker_engine_log,
-                    verbose,
-                )),
+                engine_log: Some(
+                    crate::engine_log::RunLogSink::observed(emit_worker_engine_log, verbose)
+                        .sealed_by(emit_worker_engine_log_seal),
+                ),
                 ..Default::default()
             },
         ),

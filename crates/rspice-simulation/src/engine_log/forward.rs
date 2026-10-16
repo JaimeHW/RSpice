@@ -50,7 +50,7 @@ impl RunLineForwarder {
         if let Some(point) = point {
             line.message = format!("{point}: {}", line.message);
         }
-        run.sink.deliver(line);
+        run.deliver(|| line);
     }
 
     /// One nonfatal compiler finding, in the words the command line prints it.

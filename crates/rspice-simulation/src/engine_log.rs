@@ -83,7 +83,9 @@ impl EngineLogQueue {
     ///
     /// Reached two ways: a native run's sink pushes what it captured, and the
     /// browser UI instance pushes what the worker posted across the contract.
-    /// The bound is applied here so both arrive under the same one.
+    /// The worker bounds its run before posting and reports the rest through
+    /// [`Self::seal_with`]; the bound applies here as well, so both arrive
+    /// under the same one.
     pub fn push(&mut self, line: EngineLogLine) {
         if self.kept >= MAX_ENGINE_LOG_LINES {
             self.withheld = self.withheld.saturating_add(1);
@@ -115,6 +117,19 @@ impl EngineLogQueue {
         });
     }
 
+    /// Close a browser worker run's log with what the worker withheld.
+    ///
+    /// The worker applies the line bound before it posts, so the lines past
+    /// it never reach this queue to be counted here; the worker's own count
+    /// arrives once, when its run ends, and closes the log with the same row.
+    pub fn seal_with(&mut self, seal: EngineLogSeal) {
+        self.withheld = self.withheld.saturating_add(seal.withheld);
+        self.suppressed_warnings = self
+            .suppressed_warnings
+            .saturating_add(seal.suppressed_warnings);
+        self.seal();
+    }
+
     pub fn clear(&mut self) {
         self.lines.clear();
         self.kept = 0;
@@ -127,6 +142,19 @@ impl EngineLogQueue {
         self.lines.drain(..).collect()
     }
 }
+
+/// What a browser worker's run withheld, sent once when its sink drops.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct EngineLogSeal {
+    /// Lines past the run's bound that the worker counted and did not post.
+    pub withheld: usize,
+    /// Warnings the run's per-site limit held back.
+    pub suppressed_warnings: usize,
+}
+
+/// Where a browser worker run's [`EngineLogSeal`] goes: a posted message, as
+/// each line is.
+pub type EngineLogSealObserver = fn(EngineLogSeal);
 
 /// Warning lines one call site may log in one run before the rest are counted
 /// instead: Spectre's `maxwarns` default.
@@ -207,6 +235,7 @@ pub type EngineLogObserver = fn(&EngineLogLine);
 pub struct RunLogSink {
     queue: Option<Arc<Mutex<EngineLogQueue>>>,
     observer: Option<EngineLogObserver>,
+    seal_observer: Option<EngineLogSealObserver>,
     verbose: bool,
 }
 
@@ -216,6 +245,7 @@ impl RunLogSink {
         Self {
             queue: Some(queue),
             observer: None,
+            seal_observer: None,
             verbose,
         }
     }
@@ -228,7 +258,18 @@ impl RunLogSink {
         Self {
             queue: None,
             observer: Some(observer),
+            seal_observer: None,
             verbose,
+        }
+    }
+
+    /// The same observed sink, reporting what it withheld when its run ends.
+    #[cfg(any(target_arch = "wasm32", test))]
+    #[must_use]
+    pub fn sealed_by(self, seal_observer: EngineLogSealObserver) -> Self {
+        Self {
+            seal_observer: Some(seal_observer),
+            ..self
         }
     }
 
@@ -236,12 +277,12 @@ impl RunLogSink {
         severity != LogSeverity::Debug || self.verbose
     }
 
-    fn deliver(&self, line: EngineLogLine) {
+    fn deliver(&self, line: &EngineLogLine) {
         if let Some(queue) = &self.queue {
             lock_queue(queue).push(line.clone());
         }
         if let Some(observer) = self.observer {
-            observer(&line);
+            observer(line);
         }
     }
 
@@ -267,9 +308,54 @@ impl RunLogSink {
 struct ActiveRun {
     sink: RunLogSink,
     warnings: Mutex<WarningLimiter>,
+    /// Lines offered to a sink with no queue. A queue applies the bound
+    /// itself; a browser worker applies it here, before it formats and posts a
+    /// line the UI would only have counted and dropped.
+    unqueued: AtomicUsize,
 }
 
 impl ActiveRun {
+    fn new(sink: RunLogSink) -> Self {
+        Self {
+            sink,
+            warnings: Mutex::new(WarningLimiter::default()),
+            unqueued: AtomicUsize::new(0),
+        }
+    }
+
+    /// Deliver the line `line` builds, building it only if it will be sent.
+    fn deliver(&self, line: impl FnOnce() -> EngineLogLine) {
+        if self.sink.queue.is_none()
+            && self.unqueued.fetch_add(1, Ordering::Relaxed) >= MAX_ENGINE_LOG_LINES
+        {
+            return;
+        }
+        self.sink.deliver(&line());
+    }
+
+    /// Close the run's log: a queue states what it withheld, and a worker
+    /// sends its count across so the UI's queue can.
+    fn seal(&self) {
+        self.sink.seal();
+        let Some(seal_observer) = self.sink.seal_observer else {
+            return;
+        };
+        let seal = EngineLogSeal {
+            withheld: self
+                .unqueued
+                .load(Ordering::Relaxed)
+                .saturating_sub(MAX_ENGINE_LOG_LINES),
+            suppressed_warnings: self
+                .warnings
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .suppressed(),
+        };
+        if seal != EngineLogSeal::default() {
+            seal_observer(seal);
+        }
+    }
+
     fn judge(&self, record: &log::Record<'_>) -> WarningVerdict {
         let verdict = self
             .warnings
@@ -324,10 +410,7 @@ static STDERR_LEVEL: AtomicUsize = AtomicUsize::new(0);
 #[must_use]
 pub fn install(sink: RunLogSink) -> RunSinkGuard {
     let verbose = sink.verbose;
-    let run = Arc::new(ActiveRun {
-        sink,
-        warnings: Mutex::new(WarningLimiter::default()),
-    });
+    let run = Arc::new(ActiveRun::new(sink));
     let owner: Arc<dyn Any + Send + Sync> = Arc::clone(&run) as _;
     let scope = log_scope::enter(Some(LogScope::new(owner)));
     if verbose {
@@ -356,7 +439,7 @@ impl Drop for RunSinkGuard {
         // here on lands after the run's closing row. A worker the run spawned
         // has been joined by now: the run returned before its guard dropped.
         drop(self.scope.take());
-        self.run.sink.seal();
+        self.run.seal();
         if self.verbose {
             VERBOSE_RUNS.fetch_sub(1, Ordering::SeqCst);
             apply_max_level();
@@ -427,27 +510,23 @@ pub fn offer(record: &log::Record<'_>) {
         if !run.sink.admits(severity) {
             return;
         }
-        let message = match run.judge(record) {
-            WarningVerdict::Withhold => return,
+        match run.judge(record) {
+            WarningVerdict::Withhold => {}
             // About the call site across the whole run, so it names no point.
-            WarningVerdict::ShowSuppressionNotice => {
-                run.sink.deliver(EngineLogLine {
-                    severity: LogSeverity::Info,
-                    message: FURTHER_WARNINGS_SUPPRESSED.to_owned(),
-                    origin: EngineLogOrigin::Engine,
-                });
-                return;
-            }
-            WarningVerdict::Show => match point {
-                Some(point) => format!("{point}: {}", record.args()),
-                None => record.args().to_string(),
-            },
-        };
-        run.sink.deliver(EngineLogLine {
-            severity,
-            message,
-            origin: EngineLogOrigin::Engine,
-        });
+            WarningVerdict::ShowSuppressionNotice => run.deliver(|| EngineLogLine {
+                severity: LogSeverity::Info,
+                message: FURTHER_WARNINGS_SUPPRESSED.to_owned(),
+                origin: EngineLogOrigin::Engine,
+            }),
+            WarningVerdict::Show => run.deliver(|| EngineLogLine {
+                severity,
+                message: match point {
+                    Some(point) => format!("{point}: {}", record.args()),
+                    None => record.args().to_string(),
+                },
+                origin: EngineLogOrigin::Engine,
+            }),
+        }
     });
 }
 
@@ -917,6 +996,72 @@ mod tests {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
         assert_eq!(observed, vec!["posted".to_owned()]);
+    }
+
+    /// The browser worker bounds a run before it posts, and says once, as
+    /// the run ends, what it held back, so the UI's queue closes the run's log
+    /// with the row a native run's queue writes.
+    #[test]
+    fn an_observed_sink_posts_the_bound_and_seals_with_the_rest() {
+        static POSTED: AtomicUsize = AtomicUsize::new(0);
+        static SEALS: Mutex<Vec<EngineLogSeal>> = Mutex::new(Vec::new());
+        fn post(_: &EngineLogLine) {
+            POSTED.fetch_add(1, Ordering::Relaxed);
+        }
+        fn seal(seal: EngineLogSeal) {
+            SEALS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(seal);
+        }
+
+        {
+            let _guard = install(RunLogSink::observed(post, false).sealed_by(seal));
+            for index in 0..(MAX_ENGINE_LOG_LINES - 2) {
+                offer_core(log::Level::Info, &format!("line {index}"));
+            }
+            for index in 0..8 {
+                warn_at(100, log::Level::Warn, &format!("M{index}: vds clamped"));
+            }
+        }
+        // Five warnings and the notice make 2004 lines offered: 2000 posted.
+        assert_eq!(POSTED.load(Ordering::Relaxed), MAX_ENGINE_LOG_LINES);
+        let seals = SEALS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let expected = EngineLogSeal {
+            withheld: 4,
+            suppressed_warnings: 3,
+        };
+        assert_eq!(seals, vec![expected]);
+
+        // The UI side: the worker's count closes its queue with the native row.
+        let mut queue = EngineLogQueue::default();
+        queue.seal_with(expected);
+        let rows = queue.drain();
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(
+            rows[0].message,
+            "\u{2026} 4 further engine lines were not shown (the Console keeps the first 2000 \
+             of a run)"
+        );
+        assert_eq!(queue.suppressed_warnings(), 3);
+    }
+
+    /// A run that withheld nothing sends no seal.
+    #[test]
+    fn an_observed_run_within_its_bound_sends_no_seal() {
+        static SEALED: AtomicUsize = AtomicUsize::new(0);
+        fn post(_: &EngineLogLine) {}
+        fn seal(_: EngineLogSeal) {
+            SEALED.fetch_add(1, Ordering::Relaxed);
+        }
+        {
+            let _guard = install(RunLogSink::observed(post, false).sealed_by(seal));
+            offer_core(log::Level::Info, "one line");
+        }
+        assert_eq!(SEALED.load(Ordering::Relaxed), 0);
     }
 
     #[test]
