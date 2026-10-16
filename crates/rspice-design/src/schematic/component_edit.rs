@@ -217,6 +217,30 @@ pub fn placed_loop_probe_names(document: &SchematicDocument) -> Vec<String> {
     names
 }
 
+/// The placed loop probe, out of [`placed_loop_probe_names`], that a
+/// stability plan's chosen reference names.
+///
+/// A plan saved while the picker offered drawn names holds `LOOP1` for the
+/// probe the deck writes `VLOOP1`. A loop probe is written by the prefix rule
+/// alone, so either spelling names one probe. `None` when no placed probe
+/// answers to the reference.
+pub fn placed_loop_probe<'a>(placed: &'a [String], reference: &str) -> Option<&'a str> {
+    let reference = reference.trim();
+    let written = rspice_app_types::hierarchy_path::written_instance_name(
+        ComponentType::LoopProbe.spice_prefix(),
+        reference,
+    );
+    placed
+        .iter()
+        .find(|name| name.eq_ignore_ascii_case(reference))
+        .or_else(|| {
+            placed
+                .iter()
+                .find(|name| name.eq_ignore_ascii_case(&written))
+        })
+        .map(String::as_str)
+}
+
 fn next_library_reference_name(components: &[Component], prefix: &str) -> String {
     let prefix = prefix.trim().to_ascii_uppercase();
     (1_u64..)
