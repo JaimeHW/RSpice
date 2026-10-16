@@ -7,9 +7,9 @@
 
 use super::{
     array::{
-        ArrayObjectIds, SchematicArrayCount, SchematicArrayError, SchematicArrayImpact,
-        SchematicArrayKind, SchematicArrayNameAtom, SchematicArrayNaming, SchematicArrayPlacement,
-        SchematicArrayPlan, SchematicArrayPreview,
+        ArrayObjectIds, NameSequenceKey, SchematicArrayCount, SchematicArrayError,
+        SchematicArrayImpact, SchematicArrayKind, SchematicArrayNameAtom, SchematicArrayNaming,
+        SchematicArrayPlacement, SchematicArrayPlan, SchematicArrayPreview,
     },
     bus::{Bus, BusNotation, BusSlice, BusTap, MAX_BUS_MEMBER_INDEX},
     clipboard::ClipboardData,
@@ -268,29 +268,18 @@ impl<J: Iterator<Item = Point> + Clone> ArraySource<'_, J> {
             .filter(|item| self.selection.objects.components.contains(&item.id))
             .collect();
         selected_components.sort_by_key(|item| item.id);
-        let mut reference_groups =
-            HashMap::<(String, String, Option<usize>), Vec<SchematicArrayNameAtom>>::new();
+        // Every part name counts through a sequence: its one numeric run, an
+        // indexed bit, or a numbered suffix when the name has no single run.
+        let mut reference_groups = HashMap::<NameSequenceKey, Vec<SchematicArrayNameAtom>>::new();
         for component in &selected_components {
             if component.name.is_empty() {
                 continue;
             }
             let atom = SchematicArrayNameAtom::parse(&component.name)?;
-            if let SchematicArrayNameAtom::Reference {
-                prefix,
-                suffix,
-                minimum_width,
-                ..
-            } = &atom
-            {
-                reference_groups
-                    .entry((prefix.clone(), suffix.clone(), *minimum_width))
-                    .or_default()
-                    .push(atom);
-            } else {
-                return Err(SchematicArrayError::InvalidSourceName {
-                    name: component.name.clone(),
-                });
-            }
+            reference_groups
+                .entry(atom.sequence_key())
+                .or_default()
+                .push(atom);
         }
         let selected_ids = &self.selection.objects.components;
         let occupied_names: HashSet<String> = self
@@ -312,16 +301,10 @@ impl<J: Iterator<Item = Point> + Clone> ArraySource<'_, J> {
                 continue;
             }
             let atom = SchematicArrayNameAtom::parse(&component.name)?;
-            let key = match &atom {
-                SchematicArrayNameAtom::Reference {
-                    prefix,
-                    suffix,
-                    minimum_width,
-                    ..
-                } => (prefix.clone(), suffix.clone(), *minimum_width),
-                _ => unreachable!("component references were validated above"),
-            };
-            let stride = reference_strides.get(&key).copied().unwrap_or(1);
+            let stride = reference_strides
+                .get(&atom.sequence_key())
+                .copied()
+                .unwrap_or(1);
             let end = atom
                 .numeric_value()
                 .checked_add(

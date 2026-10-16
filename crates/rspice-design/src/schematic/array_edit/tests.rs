@@ -195,3 +195,147 @@ fn discarded_array_preserves_document_and_allocators() {
     assert_eq!(document.components[1].name, "R2");
     assert_eq!(document.components[1].pos, Point::new(101, 0));
 }
+
+fn named_resistor(id: u64, name: &str, x: i32) -> Component {
+    let mut component = Component::new(
+        id,
+        super::super::component_type::ComponentType::Resistor,
+        Point::new(x, 0),
+    );
+    component.name = name.to_owned();
+    component
+}
+
+fn naming_source<'a>(
+    document: &'a SchematicDocument,
+    components: &'a HashSet<u64>,
+    labels: &'a HashSet<u64>,
+    empty: &'a HashSet<u64>,
+) -> ArraySource<'a, std::iter::Empty<Point>> {
+    ArraySource {
+        document,
+        identity_cursor: 100,
+        selection: ArraySelection {
+            objects: CopySelection {
+                components,
+                wires: empty,
+                buses: empty,
+                bus_taps: empty,
+                net_labels: labels,
+                design_notes: empty,
+                documentation_shapes: empty,
+                probes: empty,
+            },
+            junctions: std::iter::empty(),
+            has_partial_objects: false,
+            on_sheet: &every_sheet,
+        },
+    }
+}
+
+#[test]
+fn a_name_without_one_numeric_run_is_arrayed_with_a_numbered_suffix() {
+    // A common-source stage {M1, Rload, Vdd, M1_2}; Rload_1 already exists.
+    let mut document = SchematicDocument::default();
+    document.components.extend([
+        named_resistor(1, "M1", 0),
+        named_resistor(2, "Rload", 100),
+        named_resistor(3, "Vdd", 200),
+        named_resistor(4, "M1_2", 300),
+        named_resistor(5, "Rload_1", 400),
+    ]);
+    let components = HashSet::from([1, 2, 3, 4]);
+    let empty = HashSet::new();
+    let source = naming_source(&document, &components, &empty, &empty);
+
+    let naming = source
+        .default_array_naming(SchematicArrayCount::new(4, 1).unwrap())
+        .unwrap();
+
+    let names = |name: &str| {
+        (0..4)
+            .map(|member| naming.value_for_source(name, member).unwrap())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names("M1"), ["M1", "M2", "M3", "M4"]);
+    assert_eq!(names("Vdd"), ["Vdd", "Vdd_1", "Vdd_2", "Vdd_3"]);
+    assert_eq!(names("M1_2"), ["M1_2", "M1_2_1", "M1_2_2", "M1_2_3"]);
+    assert_eq!(
+        names("Rload"),
+        ["Rload", "Rload_2", "Rload_4", "Rload_6"],
+        "the generated names step over the existing Rload_1"
+    );
+    let shown = naming.to_string();
+    assert_eq!(
+        SchematicArrayNaming::parse(&shown)
+            .unwrap()
+            .normalized_for_members(4)
+            .unwrap(),
+        naming,
+        "the clause the dialog shows reads back as the same naming: {shown}"
+    );
+
+    let terminals = |component: &Component| {
+        component
+            .terminal_positions()
+            .into_iter()
+            .map(|(name, point)| (name.to_owned(), point))
+            .collect()
+    };
+    let placement = SchematicArrayPlacement::Pitch(Point::new(0, 100));
+    let plan =
+        SchematicArrayPlan::parse(SchematicArrayKind::Linear, "4 × 1", &shown, placement).unwrap();
+    let preview = source
+        .preview_array_selection_resolved(&plan, terminals, Component::bounding_box)
+        .unwrap();
+    let created: HashSet<&str> = preview
+        .components()
+        .iter()
+        .map(|component| component.name.as_str())
+        .collect();
+    assert!(created.contains("Rload_2") && created.contains("Vdd_3"));
+
+    // A typed range that would reuse an existing name is refused.
+    let typed = shown.replace("Rload…Rload_6", "Rload…Rload_3");
+    let plan =
+        SchematicArrayPlan::parse(SchematicArrayKind::Linear, "4 × 1", &typed, placement).unwrap();
+    assert_eq!(
+        source.preview_array_selection_resolved(&plan, terminals, Component::bounding_box),
+        Err(SchematicArrayError::NameCollision {
+            name: "Rload_1".to_owned()
+        })
+    );
+}
+
+#[test]
+fn an_angle_bracket_bit_with_a_digit_in_its_stem_is_arrayed() {
+    let mut document = SchematicDocument::default();
+    document
+        .net_labels
+        .push(NetLabel::new(1, Point::origin(), "A2D<3>"));
+    let labels = HashSet::from([1]);
+    let empty = HashSet::new();
+    let source = naming_source(&document, &empty, &labels, &empty);
+
+    let naming = source
+        .default_array_naming(SchematicArrayCount::new(4, 1).unwrap())
+        .unwrap();
+
+    assert_eq!(naming.to_string(), "A2D<3>…A2D<6>");
+    assert_eq!(
+        naming.value_for_source("A2D<3>", 3).as_deref(),
+        Some("A2D<6>")
+    );
+    // A bit spelled with brackets is not the sequence of one spelled with
+    // angles, and a plan saved before bits carried their notation still
+    // reads as the square-bracket bit it was.
+    assert!(matches!(
+        SchematicArrayNaming::parse("A2D<3>…A2D[6]"),
+        Err(SchematicArrayError::MismatchedNamingEndpoints { .. })
+    ));
+    let saved: SchematicArrayNameAtom = serde_json::from_value(serde_json::json!({
+        "kind": "indexed", "stem": "DATA", "index": 7, "minimum_width": null
+    }))
+    .unwrap();
+    assert_eq!(saved.to_string(), "DATA[7]");
+}
