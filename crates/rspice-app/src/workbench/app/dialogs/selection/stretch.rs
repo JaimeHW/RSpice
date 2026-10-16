@@ -9,7 +9,6 @@
 //! sheet's wire-routing style, so a sheet drawn at 45 degrees does not have to
 //! turn it off on every stretch.
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{StretchOrthogonalPolicy, Tool};
 
 use crate::workbench::app::SchematicEditAuthority;
@@ -31,20 +30,16 @@ fn policy_for_sheet(state: &AppState) -> StretchOrthogonalPolicy {
 }
 
 pub(crate) fn arm_stretch_selection(state: &mut AppState) {
+    // Stretch is greyed on a read-only schematic and with nothing to stretch,
+    // so those two return without a word.
     if state.schematic_edit_read_only() {
-        state.push_user_message(ConsoleMessage::warning("The schematic is read-only."));
         return;
     }
     if !state.schematic.session.editor.selection.probes.is_empty() {
-        state.push_user_message(ConsoleMessage::warning(
-            "A probe marker cannot be stretched. Move it instead.",
-        ));
+        state.prompt("A probe marker cannot be stretched. Move it instead.");
         return;
     }
     let Some(target) = state.schematic.default_stretch_target() else {
-        state.push_user_message(ConsoleMessage::warning(
-            "Select one wire, bus or documentation shape to stretch first.",
-        ));
         return;
     };
     if state.dialogs.move_selection.armed {

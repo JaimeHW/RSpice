@@ -5,12 +5,10 @@
 //! reader dismisses without reading. What the old review surface computed and
 //! showed up front is still computed — which nets a deletion touches, which
 //! saved outputs and probes still name them, which nets a cut leaves open —
-//! and is reported to the console afterwards, which is where a reader looks
-//! once an edit has already happened.
+//! and is reported on the status bar afterwards, as the answer to the gesture.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::schematic::view::schematic_symbol_context;
 use crate::schematic::view::sheet_visibility::{
     selectable_objects_on_active_sheet, selection_filtered_to_active_sheet,
@@ -48,15 +46,15 @@ impl AppState {
             std::mem::replace(&mut state.schematic.session.editor.selection, target);
         if !with_hidden_wire_topology_preserved(state, SchematicState::delete_selection) {
             state.schematic.session.editor.selection = previous_selection;
-            state.push_user_message(ConsoleMessage::warning("Nothing was deleted."));
+            state.prompt("Nothing was deleted.");
             return false;
         }
         state.sync_active_schematic_to_workspace();
 
         let headline = format!("Deleted {}.", object_count(count));
-        state.push_user_message(match impact.detail() {
-            Some(detail) => ConsoleMessage::warning(format!("{headline} {detail}")),
-            None => ConsoleMessage::info(headline),
+        state.prompt(match impact.detail() {
+            Some(detail) => format!("{headline} {detail}"),
+            None => headline,
         });
         true
     }
@@ -90,19 +88,14 @@ impl AppState {
         if !with_hidden_wire_topology_preserved(state, SchematicState::delete_selection) {
             state.schematic.session.editor.clipboard = previous_clipboard;
             state.schematic.session.editor.selection = previous_selection;
-            state.push_user_message(ConsoleMessage::warning("Nothing was cut."));
+            state.prompt("Nothing was cut.");
             return false;
         }
         state.sync_active_schematic_to_workspace();
 
-        let headline = format!("Cut {}.", object_count(count));
-        state.push_user_message(match open_nets {
-            Ok(0) | Err(_) => ConsoleMessage::info(headline),
-            Ok(open) => ConsoleMessage::warning(format!(
-                "Cut {}; {}.",
-                object_count(count),
-                open_nets_clause(open)
-            )),
+        state.prompt(match open_nets {
+            Ok(0) | Err(_) => format!("Cut {}.", object_count(count)),
+            Ok(open) => format!("Cut {}; {}.", object_count(count), open_nets_clause(open)),
         });
         true
     }
@@ -171,29 +164,28 @@ impl AppState {
         state.schematic.session.editor.clipboard = previous_clipboard;
         if !matches!(pasted, Ok(true)) {
             state.schematic.session.editor.selection = previous_selection;
-            state.push_user_message(ConsoleMessage::warning(
+            state.prompt(
                 pasted
                     .err()
                     .unwrap_or_else(|| "Nothing was duplicated.".to_owned()),
-            ));
+            );
             return false;
         }
         state.sync_active_schematic_to_workspace();
 
-        let headline = format!("Duplicated {}.", object_count(count));
-        state.push_user_message(if unresolved_nets {
-            ConsoleMessage::warning(format!(
+        state.prompt(if unresolved_nets {
+            format!(
                 "Duplicated {}; named-net connections could not be resolved.",
                 object_count(count)
-            ))
+            )
         } else if kept == 0 {
-            ConsoleMessage::info(headline)
+            format!("Duplicated {}.", object_count(count))
         } else {
-            ConsoleMessage::info(format!(
+            format!(
                 "Duplicated {}; kept {}.",
                 object_count(count),
                 named_net_connections(kept)
-            ))
+            )
         });
         true
     }
@@ -204,9 +196,7 @@ impl AppState {
         let selection = selectable_objects_on_active_sheet(state);
         let count = selection.count();
         if count == 0 {
-            state.push_user_message(ConsoleMessage::warning(
-                "Nothing matches the selection filter.",
-            ));
+            state.prompt("Nothing matches the selection filter.");
             return false;
         }
         state.schematic.session.editor.selection = selection;
@@ -218,24 +208,20 @@ impl AppState {
             buffer.editor.session.editor.selection =
                 state.schematic.session.editor.selection.clone();
         }
-        state.push_user_message(ConsoleMessage::info(format!(
-            "Selected {}.",
-            object_count(count)
-        )));
+        state.prompt(format!("Selected {}.", object_count(count)));
         true
     }
 }
 
-fn refuse_read_only(state: &mut AppState) -> bool {
-    if !state.schematic_edit_read_only() {
-        return false;
-    }
-    state.push_user_message(ConsoleMessage::warning("The schematic is read-only."));
-    true
+/// Whether the schematic refuses edits. Silent: every place these commands are
+/// offered, the menu, the context menu and the canvas keys, already greys them
+/// on a read-only schematic.
+fn refuse_read_only(state: &AppState) -> bool {
+    state.schematic_edit_read_only()
 }
 
 fn refuse_empty(state: &mut AppState) {
-    state.push_user_message(ConsoleMessage::warning("Select something first."));
+    state.prompt("Select something first.");
 }
 
 fn object_count(count: usize) -> String {
