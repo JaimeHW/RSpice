@@ -216,7 +216,7 @@ impl InsertionRule {
 fn supply_net_of(parameter: &ParameterOverride) -> Option<&SmolStr> {
     match (&parameter.name, &parameter.value) {
         (Some(name), crate::ast::Expression::Identifier(net))
-            if name.eq_ignore_ascii_case("vsup") =>
+            if name.eq_ignore_ascii_case("vsup") && net.name != "inf" =>
         {
             Some(&net.name)
         }
@@ -224,11 +224,13 @@ fn supply_net_of(parameter: &ParameterOverride) -> Option<&SmolStr> {
     }
 }
 
-/// A signed numeric literal, and nothing else.
+/// A signed numeric literal or `inf`, and nothing else. `inf` is the value
+/// of a timeout that never expires and of a resistance that conducts nothing.
 fn fold_literal(expression: &crate::ast::Expression) -> Option<f64> {
     use crate::ast::{Expression, UnaryOp};
     match expression {
         Expression::Number(number) => Some(number.value),
+        Expression::Identifier(identifier) if identifier.name == "inf" => Some(f64::INFINITY),
         Expression::Unary(unary) => {
             let operand = fold_literal(&unary.operand)?;
             match unary.op {

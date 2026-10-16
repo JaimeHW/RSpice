@@ -477,7 +477,10 @@ pub(super) struct DesignConnectRules {
     table: ConnectRuleTable,
     disciplines: DisciplineDb,
     source: Option<std::sync::Arc<str>>,
-    builtin_delegations: std::collections::BTreeSet<String>,
+    builtin_delegations: std::collections::BTreeMap<
+        String,
+        rspice_veriloga::connect::library::BuiltinSignature,
+    >,
     configuration: std::sync::OnceLock<std::sync::Arc<rspice_veriloga::ConnectionConfiguration>>,
     executions: std::cell::RefCell<
         std::collections::HashMap<
@@ -773,7 +776,7 @@ impl DesignConnectRules {
         let mut executions = self.executions.borrow_mut();
         let execution = executions.entry(key).or_insert_with(|| {
             std::sync::Arc::new(
-                if self.builtin_delegations.contains(&selected.name)
+                if self.builtin_delegations.contains_key(&selected.name)
                     && expected_library_module(kind) == Some(selected.name.as_str())
                 {
                     super::connect_execution::ConnectExecution::Delegated

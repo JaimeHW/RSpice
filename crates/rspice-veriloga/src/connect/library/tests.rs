@@ -193,20 +193,57 @@ endmodule
 /// not read would be a knob a deck can set and nothing can hear.
 #[test]
 fn the_delegated_parameters_are_named_and_defaulted_as_the_engine_reads_them() {
-    let expected: [(&str, &str, &[(&str, f64)]); 3] = [
+    /// A default that names another parameter, which does not fold.
+    const DEPENDENT: f64 = f64::NAN;
+    const A2D_FULL: &[(&str, f64)] = &[
+        ("vsup", 3.3),
+        ("vsupmin", 0.0),
+        ("vthi", DEPENDENT),
+        ("vtlo", DEPENDENT),
+        ("txdel", f64::INFINITY),
+        ("tdrise", 0.0),
+        ("tdfall", 0.0),
+    ];
+    const D2A_FULL: &[(&str, f64)] = &[
+        ("vsup", 3.3),
+        ("vsupmin", 0.0),
+        ("vlo", 0.0),
+        ("vhi", DEPENDENT),
+        ("vx", DEPENDENT),
+        ("vz", DEPENDENT),
+        ("rlo", 20.0),
+        ("rhi", 20.0),
+        ("rx", DEPENDENT),
+        ("rz", f64::INFINITY),
+        ("rsup", DEPENDENT),
+        ("rpull", 10e3),
+        ("rweak", 100e3),
+        ("trise", 0.0),
+        ("tfall", 0.0),
+        ("tdelay", 0.0),
+    ];
+    let bidir_full: Vec<(&str, f64)> = A2D_FULL
+        .iter()
+        .chain(D2A_FULL.iter().skip(2))
+        .copied()
+        .collect();
+    let expected: [(&str, &str, &[(&str, f64)]); 6] = [
+        ("a2d", A2D, A2D_FULL),
+        ("d2a", D2A, D2A_FULL),
+        ("bidir", BIDIR, &bidir_full),
         (
             "a2d",
-            A2D,
+            LEGACY_BUILTIN_CONNECT_MODULES[0].1,
             &[("vsup", 3.3), ("tdrise", 1e-9), ("tdfall", 1e-9)],
         ),
         (
             "d2a",
-            D2A,
+            LEGACY_BUILTIN_CONNECT_MODULES[1].1,
             &[("vsup", 3.3), ("trise", 1e-9), ("tfall", 1e-9)],
         ),
         (
             "bidir",
-            BIDIR,
+            LEGACY_BUILTIN_CONNECT_MODULES[2].1,
             &[("vsup", 3.3), ("trise", 1e-9), ("tfall", 1e-9)],
         ),
     ];
@@ -232,14 +269,43 @@ fn the_delegated_parameters_are_named_and_defaulted_as_the_engine_reads_them() {
                 .iter()
                 .find(|parameter| parameter.name == *parameter_name)
                 .unwrap_or_else(|| panic!("{name} declares {parameter_name}"));
+            if value.is_nan() {
+                assert!(
+                    parameter.default.is_none() && parameter.default_expr.is_some(),
+                    "{name} parameter {parameter_name} defaults to an expression"
+                );
+                continue;
+            }
             let default = parameter
                 .default
                 .unwrap_or_else(|| panic!("{name} folds {parameter_name} to a constant"));
             assert!(
-                (default - value).abs() <= 1e-12,
+                default == *value || (default - value).abs() <= 1e-12,
                 "{name} parameter {parameter_name} defaults to {default}, expected {value}"
             );
         }
+    }
+}
+
+/// A verbatim copy of either signature delegates, and says which; a copy
+/// that changes one default delegates as neither.
+#[test]
+fn both_signatures_delegate_and_an_edited_copy_neither() {
+    let delegations = |source: &str| equivalent_declarations(source, &parse(source));
+    for (index, (name, full)) in BUILTIN_CONNECT_MODULES.iter().enumerate() {
+        let legacy = LEGACY_BUILTIN_CONNECT_MODULES[index].1;
+        assert_eq!(
+            delegations(full).get(*name),
+            Some(&BuiltinSignature::Full),
+            "{name}"
+        );
+        assert_eq!(
+            delegations(legacy).get(*name),
+            Some(&BuiltinSignature::Legacy),
+            "{name}"
+        );
+        let edited = full.replacen("vsupmin = 0", "vsupmin = 1", 1);
+        assert!(delegations(&edited).is_empty(), "{name}");
     }
 }
 
