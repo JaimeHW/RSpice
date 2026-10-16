@@ -15,6 +15,9 @@ use std::sync::{Arc, Mutex};
 use rspice_app_types::diagnostics::LogSeverity;
 use rspice_core::log_scope::{self, LogScope, LogScopeGuard};
 
+mod forward;
+pub(crate) use forward::RunLineForwarder;
+
 /// Lines one run's Console log keeps before it starts counting instead.
 ///
 /// A solver trace is unbounded — a stiff transient can ask for a line per
