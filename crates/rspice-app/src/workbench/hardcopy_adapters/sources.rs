@@ -1373,6 +1373,9 @@ fn selected_symbol_document(
         // hardcopy extent.
         name_anchor: document.origin,
         value_anchor: document.origin,
+        // A printed selection is a drawing; the waivers stored with the
+        // symbol are decisions about its findings and print nothing.
+        waivers: rspice_design::drc::DrcWaivers::default(),
     };
     if selected.pins.is_empty() && selected.body.is_empty() {
         return Err(HardcopySourceError::EmptySelection);

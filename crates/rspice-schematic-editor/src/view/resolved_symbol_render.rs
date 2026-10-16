@@ -935,6 +935,7 @@ mod tests {
                     points: vec![Point::new(20, 10), Point::new(50, 20)],
                     closed: false,
                 }],
+                ..SymbolDocument::default()
             },
             &[port("OUT", PortDirection::Out)],
         )

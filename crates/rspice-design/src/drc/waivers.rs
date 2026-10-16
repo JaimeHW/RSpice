@@ -109,7 +109,9 @@ impl std::fmt::Display for WaiverEditRefusal {
                 ),
                 None => write!(formatter, "{code} is not a rule this build has"),
             },
-            Self::NoReason => formatter.write_str("a waiver has to say why the finding is accepted"),
+            Self::NoReason => {
+                formatter.write_str("a waiver has to say why the finding is accepted")
+            }
         }
     }
 }
@@ -197,7 +199,9 @@ impl DrcWaivers {
     fn from_stored(stored: serde_json::Value) -> Self {
         let read = match stored.get("schema_version").map(serde_json::Value::as_u64) {
             Some(Some(1)) => Self::read_v1(&stored),
-            Some(Some(version)) => Err(format!("waiver schema {version} is not one this build reads")),
+            Some(Some(version)) => Err(format!(
+                "waiver schema {version} is not one this build reads"
+            )),
             Some(None) => Err("its schema_version is not a version".to_owned()),
             None => Err("it states no schema_version".to_owned()),
         };
@@ -349,8 +353,7 @@ impl CheckWaivers {
     pub fn instantiating(mut self, cellview: &CellViewRef, waivers: &DrcWaivers) -> Self {
         let applied = applied(waivers);
         if !applied.is_empty() {
-            self.instantiated
-                .insert(owner_key(cellview), applied);
+            self.instantiated.insert(owner_key(cellview), applied);
         }
         self
     }
@@ -446,7 +449,9 @@ mod tests {
     fn stored(waivers: &[DrcWaiver]) -> DrcWaivers {
         let mut stored = DrcWaivers::default();
         for waiver in waivers {
-            stored.waive(waiver.clone()).expect("the rule may be waived");
+            stored
+                .waive(waiver.clone())
+                .expect("the rule may be waived");
         }
         stored
     }
@@ -529,10 +534,8 @@ mod tests {
     /// whether there are errors, and there are none.
     #[test]
     fn a_waived_error_does_not_count() {
-        let applied = CheckWaivers::for_subject(&stored(&[waiver(
-            "DRC-SHORTED-OUTPUTS",
-            "net:out",
-        )]));
+        let applied =
+            CheckWaivers::for_subject(&stored(&[waiver("DRC-SHORTED-OUTPUTS", "net:out")]));
         let mut result = DrcResult::new();
         result.add_violation(finding(
             DrcViolationType::ShortedOutputs,
@@ -545,7 +548,11 @@ mod tests {
         assert!(!result.has_errors());
         assert!(result.passed());
         assert_eq!(result.summary().errors, 0);
-        assert_eq!(result.total_count(), 1, "a waived finding is still a finding");
+        assert_eq!(
+            result.total_count(),
+            1,
+            "a waived finding is still a finding"
+        );
     }
 
     /// A rule that may not be waived refuses a waiver, and one stored anyway —
@@ -556,7 +563,9 @@ mod tests {
         let duplicate = waiver("DRC-DUPLICATE-NAME", "component:5");
         assert_eq!(
             DrcWaivers::default().waive(duplicate.clone()),
-            Err(WaiverEditRefusal::NotWaivable("DRC-DUPLICATE-NAME".to_owned()))
+            Err(WaiverEditRefusal::NotWaivable(
+                "DRC-DUPLICATE-NAME".to_owned()
+            ))
         );
         let stored = serde_json::from_value::<DrcWaivers>(serde_json::json!({
             "schema_version": 1,

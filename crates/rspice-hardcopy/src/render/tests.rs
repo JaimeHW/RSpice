@@ -382,6 +382,7 @@ fn resolved_symbol() -> ResolvedHardcopyDocument {
         origin: SchematicPoint::origin(),
         name_anchor: SchematicPoint::new(-20, -25),
         value_anchor: SchematicPoint::new(-20, 25),
+        ..SymbolDocument::default()
     };
     resolve_symbol_document(
         HardcopySourceIdentity::try_new(
@@ -412,6 +413,7 @@ fn resolved_wide_symbol() -> ResolvedHardcopyDocument {
         origin: SchematicPoint::origin(),
         name_anchor: SchematicPoint::origin(),
         value_anchor: SchematicPoint::origin(),
+        ..SymbolDocument::default()
     };
     resolve_symbol_document(
         HardcopySourceIdentity::try_new(

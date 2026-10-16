@@ -64,6 +64,7 @@ pub fn materialize_symbol_document(definition: &ModelBoundSymbolDefinition) -> S
             origin: Point::origin(),
             name_anchor: Point::new(-half_width, -half_height - 30),
             value_anchor: Point::new(-half_width, half_height + 30),
+            waivers: crate::drc::DrcWaivers::default(),
         };
     }
     let mut side_counts = HashMap::<SymbolPinSide, usize>::new();
@@ -99,6 +100,7 @@ pub fn materialize_symbol_document(definition: &ModelBoundSymbolDefinition) -> S
         origin: Point::origin(),
         name_anchor: Point::new(-half_width, -half_height - 30),
         value_anchor: Point::new(-half_width, half_height + 30),
+        waivers: crate::drc::DrcWaivers::default(),
     }
 }
 

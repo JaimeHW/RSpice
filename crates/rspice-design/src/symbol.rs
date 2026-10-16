@@ -803,6 +803,7 @@ impl SymbolDocument {
                 -body_half_width,
                 body_half_height + SYMBOL_TERMINAL_GRID * 2,
             ),
+            waivers: crate::drc::DrcWaivers::default(),
         }
     }
 
