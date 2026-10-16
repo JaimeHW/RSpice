@@ -86,6 +86,8 @@ pub enum DrcViolationType {
     /// Independent voltage sources that close a loop among themselves, which
     /// leaves the loop's current undetermined.
     SourceToSource,
+    /// A node that joins declared inputs and nothing that drives them.
+    UndrivenNet,
 
     //-------------------------------------------------------------------------
     // Hierarchy Issues
@@ -159,6 +161,9 @@ impl DrcViolationType {
             Self::UndrivenInput => DrcSeverity::Error,
             Self::ShortedOutputs => DrcSeverity::Error,
             Self::SourceToSource => DrcSeverity::Error,
+            // Inputs tied to nothing that drives them are a node the solver
+            // has no source for, as one open input is.
+            Self::UndrivenNet => DrcSeverity::Error,
             Self::MissingParameter => DrcSeverity::Error,
             // The engine refuses a card that names an element it does not have.
             Self::UnresolvedReference => DrcSeverity::Error,
@@ -240,6 +245,7 @@ impl DrcViolationType {
                 "Off-sheet connector has no partner on another sheet"
             }
             Self::ShortedOutputs => "Multiple declared outputs connected to the same net",
+            Self::UndrivenNet => "Net joins declared inputs and nothing drives it",
             Self::RecursiveInstantiation => "Cellview reaches itself through its instances",
             Self::MissingGround => "Circuit has no ground reference (node 0)",
             Self::SourceToSource => "Voltage sources form a closed loop",
@@ -281,6 +287,9 @@ impl DrcViolationType {
                 "Place the matching connector on the other sheet, or make this an ordinary net label"
             }
             Self::ShortedOutputs => "Leave only one declared output driver on the net",
+            Self::UndrivenNet => {
+                "Connect a driver to the net, or declare one of its pins an output"
+            }
             Self::RecursiveInstantiation => {
                 "Remove the instance that reaches its own cellview, or bind it to another view"
             }

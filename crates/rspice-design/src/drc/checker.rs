@@ -185,6 +185,7 @@ impl DrcChecker {
             self.check_source_to_source(components, &mut result);
             self.check_shorted_outputs(&net_map, &mut result);
             self.check_duplicate_bus_member_drivers(&net_map, &mut result);
+            self.check_undriven_nets(&net_map, &mut result);
         }
 
         result.completed = true;
@@ -846,6 +847,55 @@ impl DrcChecker {
                     },
                 )
                 .with_related(drivers),
+            );
+        }
+    }
+
+    /// Report every node that ties declared inputs together and nothing else.
+    ///
+    /// An input waits to be driven, and on this node nothing can drive it:
+    /// every terminal on it is a pin an interface declares an input.
+    /// Everything else counts as a driver here — a declared output, a
+    /// source's drive terminal, a bidirectional or supply pin, and every
+    /// terminal no interface classified, which is every passive leg and every
+    /// primitive device terminal, so one resistor to a rail is enough. A node
+    /// that continues outside the cellview is driven from there: an interface
+    /// port carries the parent's net in, and a global is one node with every
+    /// other cellview that names it. Node 0 is the reference itself.
+    ///
+    /// One input alone on its node is not this finding: unattached it is an
+    /// undriven input, and attached to a bare conductor it is a node of one
+    /// connection, and each of those already says so.
+    fn check_undriven_nets(&mut self, net_map: &HashMap<String, NetInfo>, result: &mut DrcResult) {
+        let mut names = net_map.keys().collect::<Vec<_>>();
+        names.sort();
+        for name in names {
+            let net = &net_map[name];
+            let receivers = &net.declared_inputs;
+            if receivers.len() < 2
+                || receivers.len() != net.connection_count
+                || net.continues_outside
+                || net.is_ground
+            {
+                continue;
+            }
+            let id = self.next_id();
+            self.add_violation(
+                result,
+                DrcViolation::new(
+                    id,
+                    DrcViolationType::UndrivenNet,
+                    format!(
+                        "Net '{}' joins {} declared inputs and nothing drives it: {}",
+                        net.display_name,
+                        receivers.len(),
+                        receivers.join(", ")
+                    ),
+                    DrcLocation::Node {
+                        net_name: name.clone(),
+                    },
+                )
+                .with_related(receivers.clone()),
             );
         }
     }

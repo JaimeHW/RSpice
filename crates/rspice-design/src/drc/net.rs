@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 use super::checker::component_identity;
 use super::input::ComponentInfo;
 use crate::connectivity::ExtractedConnectivity;
+use crate::schematic::port::PortDirection;
 
 /// What the rules know about one electrical node.
 #[derive(Debug, Clone, Default)]
@@ -40,6 +41,10 @@ pub(super) struct NetInfo {
     pub(super) connected_components: Vec<String>,
     pub(super) output_drivers: HashSet<String>,
     pub(super) declared_output_drivers: HashSet<String>,
+    /// The terminals on this node an interface declares inputs, as
+    /// `component.pin`. A node every terminal of which is one has receivers
+    /// and nothing to drive them.
+    pub(super) declared_inputs: Vec<String>,
     pub(super) wire_ids: Vec<u64>,
     /// A typed bus tap binds this node: a real electrical endpoint that no
     /// placed terminal represents.
@@ -93,6 +98,11 @@ pub(super) fn fold_nets(
             if !entry.connected_components.contains(&identity) {
                 entry.connected_components.push(identity.clone());
             }
+            if pin.direction == Some(PortDirection::In) {
+                entry
+                    .declared_inputs
+                    .push(format!("{identity}.{}", pin.name));
+            }
             if pin.drives() {
                 entry.output_drivers.insert(identity.clone());
                 // A source's drive terminal is not a declared output: what
@@ -117,6 +127,7 @@ pub(super) fn fold_nets(
             || crate::schematic::bus::BusSlice::parse(name).is_ok_and(|slice| slice.is_scalar());
         net.connected_components.sort();
         net.connected_components.dedup();
+        net.declared_inputs.sort();
         net.wire_ids.sort_unstable();
         net.wire_ids.dedup();
     }

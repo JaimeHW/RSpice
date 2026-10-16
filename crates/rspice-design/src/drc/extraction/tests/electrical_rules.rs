@@ -114,7 +114,8 @@ fn working_circuits_raise_no_electrical_finding() {
             .filter(|finding| {
                 matches!(
                     finding.violation_type,
-                    DrcViolationType::UnconnectedPin
+                    DrcViolationType::UndrivenNet
+                        | DrcViolationType::UnconnectedPin
                         | DrcViolationType::UndrivenInput
                         | DrcViolationType::FloatingNode
                         | DrcViolationType::MissingGround
@@ -227,3 +228,173 @@ fn an_open_bulk_below_the_subject_is_stated_inside_its_occurrence() {
     );
 }
 
+/// An instance of `amp`, whose one port `A` its master declares an input.
+fn input_cell(id: u64, name: &str) -> Component {
+    let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
+    binding.bind_interface(&[PortSpec {
+        name: "A".to_owned(),
+        direction: PortDirection::In,
+    }]);
+    Component::new(
+        id,
+        ComponentType::CellInstance,
+        Point::new(400 * id as i32, 0),
+    )
+    .with_library_cell(binding)
+    .with_name_value(name, "amp")
+}
+
+/// The master `amp`: an input port loaded by a resistor to ground.
+fn amp() -> SchematicDocument {
+    let mut amp = labelled(vec![between(2, ComponentType::Resistor, "RIN", "A", "0")]);
+    amp.components.push(port(1, "A", "in"));
+    amp
+}
+
+/// [`labelled`], with each instance's terminals where its master's symbol
+/// puts them — the geometry the check itself reads.
+fn labelled_over(
+    views: &HashMap<String, SchematicDocument>,
+    parts: Vec<(Component, Vec<(&'static str, &'static str)>)>,
+) -> SchematicDocument {
+    let libraries = LibraryCatalog::default();
+    let hierarchy = HierarchySource::from_workspace(&libraries, views);
+    let mut document = SchematicDocument::default();
+    for (component, nodes) in parts {
+        let terminals = terminal_positions_with_hierarchy(&component, Some(&hierarchy));
+        for (index, (pin, node)) in (0_u64..).zip(nodes) {
+            let point = terminals
+                .iter()
+                .find_map(|(name, point)| (name == pin).then_some(*point))
+                .unwrap_or_else(|| panic!("{} has a terminal {pin}", component.name));
+            document
+                .net_labels
+                .push(NetLabel::new(component.id * 100 + index, point, node));
+        }
+        document.components.push(component);
+    }
+    document
+}
+
+/// The views that hold `amp`.
+fn amp_views() -> HashMap<String, SchematicDocument> {
+    buffers([("amp", amp())])
+}
+
+/// Two inputs tied together on `node`, and whatever else the net is given.
+fn tied_inputs(
+    node: &'static str,
+    beside: Vec<(Component, Vec<(&'static str, &'static str)>)>,
+) -> SchematicDocument {
+    let mut parts = vec![
+        (input_cell(1, "X1"), vec![("A", node)]),
+        (input_cell(2, "X2"), vec![("A", node)]),
+    ];
+    parts.extend(beside);
+    labelled_over(&amp_views(), parts)
+}
+
+/// A net of declared inputs and nothing else has nothing to drive it, and
+/// that is the net's finding, not one per input.
+#[test]
+fn inputs_tied_together_with_nothing_to_drive_them_are_an_undriven_net() {
+    let result = checked(&tied_inputs("sense", Vec::new()), &amp_views());
+    let undriven = of_type(&result, DrcViolationType::UndrivenNet);
+    assert_eq!(undriven.len(), 1, "{:?}", result.violations());
+    assert_eq!(undriven[0].severity, DrcSeverity::Error);
+    assert_eq!(
+        undriven[0].message,
+        "Net 'sense' joins 2 declared inputs and nothing drives it: X1.A, X2.A"
+    );
+    assert_eq!(
+        undriven[0].location,
+        DrcLocation::Node {
+            net_name: "sense".to_owned()
+        }
+    );
+    assert_eq!(undriven[0].related_items, ["X1.A", "X2.A"]);
+    for already in [
+        DrcViolationType::UndrivenInput,
+        DrcViolationType::FloatingNode,
+    ] {
+        assert!(
+            of_type(&result, already).is_empty(),
+            "{:?}",
+            result.violations()
+        );
+    }
+}
+
+/// Anything but another input drives the net: a passive to a rail, a source,
+/// a port the parent drives, a global another cellview may drive. One input
+/// alone is an open-ended node, which is already said as that.
+#[test]
+fn a_net_with_anything_but_inputs_on_it_is_driven() {
+    let views = amp_views();
+    let undriven = |drawing: SchematicDocument| {
+        let result = checked(&drawing, &views);
+        of_type(&result, DrcViolationType::UndrivenNet)
+            .into_iter()
+            .map(|finding| finding.message.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        undriven(tied_inputs(
+            "sense",
+            vec![between(3, ComponentType::Resistor, "RB", "sense", "0")]
+        )),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        undriven(tied_inputs(
+            "sense",
+            vec![between(3, ComponentType::VoltageSource, "VS", "sense", "0")]
+        )),
+        Vec::<String>::new()
+    );
+    let mut ported = tied_inputs("sense", Vec::new());
+    ported.components.push(port(3, "sense", "in"));
+    assert_eq!(undriven(ported), Vec::<String>::new());
+    // A global is declared by a label in the project's views, so the drawing
+    // that labels it is one of them.
+    let global = buffers([("amp", amp()), ("top", tied_inputs("sense!", Vec::new()))]);
+    let result = checked(&global["work/top/schematic"], &global);
+    assert!(
+        of_type(&result, DrcViolationType::UndrivenNet).is_empty(),
+        "{:?}",
+        result.violations()
+    );
+    assert_eq!(
+        undriven(labelled_over(
+            &views,
+            vec![(input_cell(1, "X1"), vec![("A", "lonely")])]
+        )),
+        Vec::<String>::new()
+    );
+}
+
+/// Inside a placed cell, the undriven net is stated at the occurrence.
+#[test]
+fn an_undriven_net_below_the_subject_is_stated_inside_its_occurrence() {
+    let views = buffers([("amp", amp()), ("pair", tied_inputs("sense", Vec::new()))]);
+    let top = SchematicDocument {
+        components: vec![instance(1, "XP", "pair")],
+        ..SchematicDocument::default()
+    };
+    let result = checked(&top, &views);
+    let undriven = of_type(&result, DrcViolationType::UndrivenNet);
+    assert_eq!(undriven.len(), 1, "{:?}", result.violations());
+    let DrcLocation::InsideInstance { path, view, inner } = &undriven[0].location else {
+        panic!("stated inside the occurrence: {:?}", undriven[0].location);
+    };
+    assert_eq!(
+        (path.to_string(), view.key(), inner.as_ref().clone()),
+        (
+            "/XP".to_owned(),
+            "work/pair/schematic".to_owned(),
+            DrcLocation::Node {
+                net_name: "sense".to_owned()
+            }
+        )
+    );
+}
