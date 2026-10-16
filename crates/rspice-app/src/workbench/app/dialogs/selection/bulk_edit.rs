@@ -1,4 +1,4 @@
-//! Mockup-owned filtered selection and atomic schematic bulk editing.
+//! Filtered selection and atomic schematic bulk editing.
 //!
 //! Queries may inspect the active hierarchy or complete project, but edits are
 //! deliberately limited to the active schematic owner. A commit preflights
@@ -24,15 +24,15 @@ use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
 use crate::workbench::design_system::{
-    PANEL_SECTION_H, WorkbenchIcon, property_row, property_row_toned, section_header,
+    PANEL_SECTION_H, WorkbenchIcon, property_row, section_header,
 };
 use crate::workbench::{SelectionBulkFilter, SelectionBulkHierarchyScope, SelectionBulkObjectKind};
 
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
-const TITLE: &str = "Selection and bulk property editing";
-const PRIMARY: &str = "Commit bulk edit";
+const TITLE: &str = "Bulk edit";
+const PRIMARY: &str = "Apply";
 
 const BULK_PROPERTIES: [SelectionBulkProperty; 5] = [
     SelectionBulkProperty::ModelSection,
@@ -138,9 +138,7 @@ impl SelectionBulkEditAuthority {
     }
 
     fn stale_reason(&self, state: &AppState) -> Option<String> {
-        let reopen = |reason: &str| {
-            format!("{reason}. Close and reopen Selection and bulk property editing.")
-        };
+        let reopen = |reason: &str| format!("{reason}. Close Bulk edit and open it again.");
         let current = crate::workbench::app::schematic_editor_request_source(state);
         if self.active.source.design_epoch != current.design_epoch {
             return Some(reopen("The design document changed"));
@@ -197,8 +195,7 @@ impl SelectionBulkEditAuthority {
     }
 
     fn validate_commit(&self, state: &AppState) -> Result<(), String> {
-        self.active
-            .validate(state, "Selection and bulk property editing")?;
+        self.active.validate(state, TITLE)?;
         if state.workbench.safe_mode.project_read_only() {
             return Err("Safe mode has opened the project read-only.".to_owned());
         }
@@ -329,9 +326,7 @@ impl RSpiceApp {
             .or(impact.error.as_deref())
             .map(str::to_owned);
         let mut dialog = Dialog::new(TITLE, PRIMARY)
-            .description(
-                "Filter authored schematic objects, review the exact impact, and commit one governed bulk-edit transaction.",
-            )
+            .description("Change one property on every object the filter matches.")
             .size(DialogSize::SimulationWorkflow)
             .initial_height(640.0)
             .flush_body()
@@ -343,13 +338,13 @@ impl RSpiceApp {
         if !write_allowed {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Progress,
-                "Inspection only",
-                "The active schematic or project is read-only. Filters and exact impact review remain available; commit is disabled.",
+                "Read only",
+                "This schematic cannot be edited. The filter still works.",
             );
         } else if let Some(error) = error.as_deref() {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
-                "Bulk edit cannot be committed",
+                "Nothing was changed",
                 error,
             );
         }
@@ -832,7 +827,7 @@ fn selection_filter_panel(
             );
             ui.add_sized(
                 [88.0, 16.0],
-                egui::Label::new(RichText::new("Lock").strong()),
+                egui::Label::new(RichText::new("Locked").strong()),
             );
             ui.end_row();
         });
@@ -879,7 +874,10 @@ fn selection_filter_panel(
                         .on_hover_text(&row.path);
                         ui.add_sized([82.0, 20.0], egui::Label::new(&row.value).truncate())
                             .on_hover_text(&row.value);
-                        let lock = row.lock.as_deref().unwrap_or("editable");
+                        // A cell only when something is in the way; an
+                        // editable row says nothing, which is the whole
+                        // column's news.
+                        let lock = row.lock.as_deref().unwrap_or("");
                         ui.add_sized([88.0, 20.0], egui::Label::new(lock).truncate())
                             .on_hover_text(lock);
                         ui.end_row();
@@ -939,13 +937,15 @@ fn bulk_edit_panel(
     });
     ui.add_space(8.0);
     property_row(ui, "Objects changed", &impact.changed.to_string());
-    let warning = Tokens::get(ui.ctx()).color.warn;
-    property_row_toned(
-        ui,
-        "Locked / excluded",
-        &impact.locked_or_excluded.to_string(),
-        warning,
-    );
+    // Only a non-zero count is news. A row reading "0" on every clean filter
+    // is a row the reader learns to skip.
+    if impact.locked_or_excluded > 0 {
+        property_row(
+            ui,
+            "Locked or excluded",
+            &impact.locked_or_excluded.to_string(),
+        );
+    }
     property_row(
         ui,
         "Simulation tasks affected",
@@ -956,7 +956,6 @@ fn bulk_edit_panel(
         }
         .as_str(),
     );
-    property_row(ui, "Undo boundary", "one transaction");
 }
 
 fn new_value_control(ui: &mut Ui, dialog: &mut SelectionBulkEditDialogState) -> bool {
