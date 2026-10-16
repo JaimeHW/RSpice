@@ -72,17 +72,23 @@
 //! for the run, and a bias that moves them refuses the run by name rather
 //! than rendering a spectrum the model no longer states.
 //!
+//! A Verilog-A process whose injection gain depends on frequency is noise the
+//! module shapes itself through `ddt`, `idt` or `laplace_*`. Its scaled train
+//! is the input of the process's exact finite-state realization, discretized
+//! on the sample grid ([`shaped`]), and each injection carries one of the
+//! filter's outputs.
+//!
 //! # What is refused
 //!
 //! A mechanism whose density cannot be rendered from what the model states is
 //! refused by name rather than approximated, because guessing the missing
 //! degree of freedom would be inventing physics:
 //!
-//! * a Verilog-A process whose injection gain depends on frequency — noise the
-//!   module shapes through `ddt`, `idt` or `laplace_*` — is refused as
-//!   `analysis.tran.noise.shaped_process`, and one from a module carrying
-//!   `absdelay`, `zi_*` or `idtmod`, which no finite-state realization
-//!   represents, as `analysis.tran.noise.non_rational_shaping`;
+//! * a shaped process whose shaping passes through `absdelay`, `zi_*` or
+//!   `idtmod`, which no finite-state realization represents, as
+//!   `analysis.tran.noise.non_rational_shaping`; and one whose filter
+//!   dynamics move with the bias, as
+//!   `analysis.tran.noise.bias_dependent_shaping`;
 //! * burst/popcorn noise, a Lorentzian plateau `P0` with corner `fb`: a
 //!   random-telegraph process reproduces it exactly, but `(P0, fb)` fixes only
 //!   two of its three parameters, and choosing the third is an assumption the
@@ -97,6 +103,7 @@
 //! `.NOISE`.
 
 pub(in crate::engine) mod processes;
+mod shaped;
 mod table;
 
 use std::collections::HashMap;
@@ -109,7 +116,7 @@ use super::noise::{
 use crate::abort_signal::AbortSignal;
 use crate::analysis::noise::{NoiseSource, NoiseSourceIdentity, NoiseSourceType};
 use crate::circuit::device_noise::{
-    InjectedNoiseSource, NoiseInjection, NoiseTrain, TransientDeviceNoise,
+    InjectedNoiseSource, NoiseInjection, NoiseTrain, ShapedNoise, TransientDeviceNoise,
 };
 use crate::config::SpiceDialect;
 use crate::engine::noise::CollectedNoiseSources;
@@ -119,15 +126,18 @@ use crate::netlist::TransientNoiseConfig;
 use crate::numerics::fnv1a;
 use crate::{CircuitData, Value};
 use processes::{
-    CollectedNoiseProcess, NoiseProcessKey, NoiseProcessSpectrum, collect_noise_processes,
-    has_structural_noise_processes,
+    CollectedNoiseProcess, NoiseProcessKey, NoiseProcessRoute, NoiseProcessSpectrum,
+    ShapingDescriptor, collect_noise_processes, has_structural_noise_processes,
 };
+use shaped::{ShapedRealization, ShapingRefusal};
 use table::{TableShape, tabulated_unit_train};
 
 /// Total materialized samples one run may hold, across every source.
 ///
 /// A flat mechanism costs no memory at all, so this bounds the flicker and
-/// tabulated trains, warm-ups included: 16M values is 128 MB, past which a
+/// tabulated trains, warm-ups included, a shaped process's own train and its
+/// filter's warm-up among them. The shaping filter itself is streamed from a
+/// few state values and costs nothing here. 16M values is 128 MB, past which a
 /// deck should raise `NOISEFMAX`'s reciprocal or shorten the run rather than
 /// have the simulator quietly take the machine.
 const MAX_TOTAL_MATERIALIZED_SAMPLES: usize = 1 << 24;
@@ -332,8 +342,12 @@ struct ProcessEntry {
     mechanism: String,
     law: AmplitudeLaw,
     frozen: FrozenOperands,
-    /// The injection endpoints whose gains were proven frequency-flat.
+    /// The injection endpoints whose gains were proven frequency-flat, or,
+    /// for a shaped process, the endpoints its filter outputs drive.
     classified: Vec<(usize, usize)>,
+    /// A shaped process's descriptor as installed, whose state rows the
+    /// rendered filter integrates; `None` for a frequency-flat process.
+    shaping: Option<ShapingDescriptor>,
     /// Where the process's injected source sits in the installed plan.
     slot: usize,
 }
@@ -341,7 +355,8 @@ struct ProcessEntry {
 impl ProcessEntry {
     /// Whether this evaluation is the structure classification proved flat.
     fn covers(&self, process: &CollectedNoiseProcess) -> bool {
-        process.injections.len() == self.classified.len()
+        self.shaping.is_none()
+            && process.injections.len() == self.classified.len()
             && process.injections.iter().zip(&self.classified).all(
                 |(injection, &(node_pos, node_neg))| {
                     injection.node_pos == node_pos
@@ -423,8 +438,9 @@ pub(in crate::engine) struct TransientNoiseRenderPlan {
     /// The law each native elementary source renders with, by position;
     /// `None` injects nothing.
     native_laws: Vec<Option<AmplitudeLaw>>,
-    /// Every active Verilog-A process, proven frequency-flat, with its law.
-    processes: Vec<(CollectedNoiseProcess, AmplitudeLaw)>,
+    /// Every active Verilog-A process with its law, and, for a shaped one,
+    /// its realization.
+    processes: Vec<(CollectedNoiseProcess, AmplitudeLaw, ProcessShape)>,
     /// Whether the circuit holds Verilog-A processes at all, active or not.
     tracks_processes: bool,
 }
@@ -508,9 +524,9 @@ impl TransientNoiseRuntime {
     ///
     /// Called at accepted points only — the ordinary acceptance and the
     /// force-accepted one alike — so a rejected step restamps exactly the
-    /// amplitudes and gains the last accepted point left, and the samples
-    /// themselves are functions of their index alone: nothing a rejection
-    /// touches needs restoring.
+    /// amplitudes and gains the last accepted point left. The samples
+    /// themselves are functions of their index alone, and a shaped filter's
+    /// state advances only here: nothing a rejection touches needs restoring.
     ///
     /// Re-collecting the catalog is what makes the density the device model's
     /// own at the present bias rather than a frozen operating-point value.
@@ -526,6 +542,11 @@ impl TransientNoiseRuntime {
         time: Value,
         abort: &dyn AbortSignal,
     ) -> Result<(), SimulationError> {
+        // A shaped filter absorbs the samples this point has completed at
+        // the amplitudes its stamps used, before the bias re-derives them.
+        if let Some(plan) = circuit.transient_device_noise_mut() {
+            plan.commit_accepted(time);
+        }
         if (self.entries.is_empty() && !self.tracks_processes) || !self.bias_moved(solution) {
             #[cfg(test)]
             tests::record_accepted_refresh(time, circuit);
@@ -676,16 +697,21 @@ impl TransientNoiseRuntime {
         self.checked_amplitude(coefficient, named)
     }
 
-    /// Draw one mechanism's unit train.
+    /// Draw one mechanism's unit train, `lead` samples longer than the run
+    /// so a shaping filter can warm up on its leading samples.
     fn draw_train(
         &mut self,
         law: AmplitudeLaw,
         operands: &FrozenOperands,
         seed: u64,
+        lead: usize,
         named: &str,
         abort: &dyn AbortSignal,
     ) -> Result<NoiseTrain, SimulationError> {
-        let grid = self.grid;
+        let grid = NoiseGrid {
+            sample_count: self.grid.sample_count.saturating_add(lead),
+            ..self.grid
+        };
         Ok(match (law, operands) {
             (AmplitudeLaw::Flat, _) => NoiseTrain::Flat { stream_seed: seed },
             (AmplitudeLaw::PowerLaw, FrozenOperands::Exponent(ef)) => NoiseTrain::Materialized {
@@ -726,17 +752,54 @@ impl TransientNoiseRuntime {
         &mut self,
         process: &CollectedNoiseProcess,
         law: AmplitudeLaw,
+        shape: ProcessShape,
         abort: &dyn AbortSignal,
     ) -> Result<(InjectedNoiseSource, ProcessEntry), SimulationError> {
         let named = process.describe();
         let frozen = FrozenOperands::of_process(&process.spectrum);
         let seed = process_stream_seed(self.seed, process);
-        let train = self.draw_train(law, &frozen, seed, &named, abort)?;
         let amplitude = self.process_amplitude(law, process.psd, &named)?;
-        let source = InjectedNoiseSource {
-            train,
-            amplitude,
-            injections: process_injections(process),
+        let (source, shaping) = match shape {
+            ProcessShape::Static => {
+                let train = self.draw_train(law, &frozen, seed, 0, &named, abort)?;
+                let source = InjectedNoiseSource {
+                    train,
+                    amplitude,
+                    injections: process_injections(process),
+                    shaping: None,
+                };
+                (source, None)
+            }
+            ProcessShape::Shaped(realization) => {
+                let warmup = self.shaping_warmup();
+                let train = self.draw_train(law, &frozen, seed, warmup, &named, abort)?;
+                let nt = self.grid.nt;
+                let step =
+                    shaped::discretized_step(&realization.descriptor, nt).map_err(|detail| {
+                        SimulationError::Circuit(format!(
+                            "transient noise cannot render noise process '{named}': {detail}"
+                        ))
+                    })?;
+                let outputs = shaped::discretized_outputs(
+                    &realization.descriptor,
+                    process.injections.len(),
+                    nt,
+                );
+                let shaping = ShapedNoise::warmed(step, outputs, warmup, &train, amplitude);
+                let source = InjectedNoiseSource {
+                    train,
+                    amplitude,
+                    injections: process
+                        .injections
+                        .iter()
+                        .map(|injection| {
+                            NoiseInjection::unit(injection.node_pos, injection.node_neg)
+                        })
+                        .collect(),
+                    shaping: Some(shaping),
+                };
+                (source, Some(realization.descriptor))
+            }
         };
         let entry = ProcessEntry {
             key: process.key(),
@@ -748,9 +811,24 @@ impl TransientNoiseRuntime {
                 .iter()
                 .map(|injection| (injection.node_pos, injection.node_neg))
                 .collect(),
+            shaping,
             slot: usize::MAX,
         };
         Ok((source, entry))
+    }
+
+    /// How many samples a shaping filter runs before the record opens.
+    ///
+    /// The lowest frequency the run represents is `fmin`, so a filter that
+    /// has run `1/fmin` from rest has settled everything the record can
+    /// resolve, exactly as the `1/f` kernel's warm-up does.
+    fn shaping_warmup(&self) -> usize {
+        let periods = 1.0 / (self.grid.fmin * self.grid.nt);
+        if periods.is_finite() && periods >= 1.0 {
+            (periods.ceil() as usize).min(self.grid.sample_count)
+        } else {
+            0
+        }
     }
 
     /// Re-derive every process's amplitude and gains, and start injecting
@@ -788,35 +866,81 @@ impl TransientNoiseRuntime {
             }
         }
 
-        // A process whose injection structure is not the one proven flat —
-        // an injection switched on by the bias, or one that turned complex —
-        // and a process seen for the first time are classified before they
-        // inject anything.
+        // A flat process whose injection structure is not the one proven
+        // flat — an injection switched on by the bias, or one that turned
+        // complex — is classified again before it injects anything. It was
+        // rendered without a filter, so turning shaped is a refusal.
         let unproven: Vec<&CollectedNoiseProcess> = known
             .iter()
-            .filter(|(index, process)| !self.processes[*index].covers(process))
+            .filter(|(index, process)| {
+                let entry = &self.processes[*index];
+                entry.shaping.is_none() && !entry.covers(process)
+            })
             .map(|(_, process)| process)
-            .chain(fresh.iter())
             .collect();
-        classify_processes(circuit, solution, &self.grid, &unproven, time)?;
+        let shapes = classify_processes(circuit, solution, &self.grid, &unproven, time)?;
+        if let Some((process, _)) = unproven
+            .iter()
+            .zip(&shapes)
+            .find(|(_, shape)| matches!(shape, ProcessShape::Shaped(_)))
+        {
+            return Err(bias_dependent_shaping_refusal(process, time));
+        }
+
+        // A shaped process keeps the dynamics its filter integrates; only
+        // its gain rows follow the bias.
+        let shaped_known: Vec<(usize, &CollectedNoiseProcess)> = known
+            .iter()
+            .filter(|(index, _)| self.processes[*index].shaping.is_some())
+            .map(|(index, process)| (*index, process))
+            .collect();
+        let shaped_processes: Vec<&CollectedNoiseProcess> =
+            shaped_known.iter().map(|(_, process)| *process).collect();
+        let realized =
+            shaped::realize_shaped_processes(circuit, solution, &shaped_processes, self.grid.fmax);
+        let mut shaped_outputs = HashMap::with_capacity(shaped_known.len());
+        for ((index, process), realization) in shaped_known.iter().zip(realized) {
+            let realization =
+                realization.map_err(|refusal| shaping_error(process, refusal, time))?;
+            let entry = &self.processes[*index];
+            let installed = entry.shaping.as_ref();
+            if injection_endpoints(process) != entry.classified
+                || installed.is_none_or(|installed| {
+                    shaped::state_rows_moved(installed, &realization.descriptor, self.reltol)
+                })
+            {
+                return Err(bias_dependent_shaping_refusal(process, time));
+            }
+            shaped_outputs.insert(
+                *index,
+                shaped::discretized_outputs(
+                    &realization.descriptor,
+                    process.injections.len(),
+                    self.grid.nt,
+                ),
+            );
+        }
 
         let mut updates = Vec::with_capacity(known.len());
         for (index, process) in &known {
             let entry = &self.processes[*index];
             let amplitude = self.process_amplitude(entry.law, process.psd, &process.describe())?;
-            updates.push((entry.slot, amplitude, process_injections(process)));
+            let gains = match shaped_outputs.remove(index) {
+                Some(outputs) => ProcessGains::Shaped(outputs),
+                None => ProcessGains::Static(process_injections(process)),
+            };
+            updates.push((entry.slot, amplitude, gains));
         }
         for (index, process) in &known {
-            self.processes[*index].classified = process
-                .injections
-                .iter()
-                .map(|injection| (injection.node_pos, injection.node_neg))
-                .collect();
+            self.processes[*index].classified = injection_endpoints(process);
         }
+        let fresh_processes: Vec<&CollectedNoiseProcess> = fresh.iter().collect();
+        let fresh_shapes =
+            classify_processes(circuit, solution, &self.grid, &fresh_processes, time)?;
         let mut added = Vec::with_capacity(fresh.len());
-        for process in &fresh {
+        for (process, shape) in fresh.iter().zip(fresh_shapes) {
             let law = process_law(process)?;
-            added.push(self.process_source(process, law, abort)?);
+            added.push(self.process_source(process, law, shape, abort)?);
         }
 
         let silent: Vec<usize> = self
@@ -828,10 +952,17 @@ impl TransientNoiseRuntime {
             .collect();
         let plan = installed_plan(circuit)?;
         let sources = plan.sources_mut();
-        for (slot, amplitude, injections) in updates {
+        for (slot, amplitude, gains) in updates {
             if let Some(source) = sources.get_mut(slot) {
                 source.amplitude = amplitude;
-                source.injections = injections;
+                match gains {
+                    ProcessGains::Static(injections) => source.injections = injections,
+                    ProcessGains::Shaped(outputs) => {
+                        if let Some(shaping) = source.shaping.as_mut() {
+                            shaping.set_outputs(outputs);
+                        }
+                    }
+                }
             }
         }
         // An inactive process injects nothing, which is what its own model
@@ -861,6 +992,32 @@ fn installed_plan(circuit: &mut CircuitData) -> Result<&mut TransientDeviceNoise
     })
 }
 
+/// How one process reaches the circuit: through plain gains, or through the
+/// filter its realization defines.
+enum ProcessShape {
+    /// Every injection gain is real and frequency-flat.
+    Static,
+    /// The gains depend on frequency, realized exactly.
+    Shaped(ShapedRealization),
+}
+
+/// What a refresh writes into one process's injected source.
+enum ProcessGains {
+    /// The plain injections of a flat process.
+    Static(Vec<NoiseInjection>),
+    /// The discretized gain rows of a shaped process.
+    Shaped(Vec<crate::circuit::device_noise::ShapedOutput>),
+}
+
+/// The endpoints of every injection of a process, in order.
+fn injection_endpoints(process: &CollectedNoiseProcess) -> Vec<(usize, usize)> {
+    process
+        .injections
+        .iter()
+        .map(|injection| (injection.node_pos, injection.node_neg))
+        .collect()
+}
+
 /// The circuit injections of one process at this evaluation.
 ///
 /// Classification has proven every gain real, so the real part is the gain.
@@ -876,8 +1033,9 @@ fn process_injections(process: &CollectedNoiseProcess) -> Vec<NoiseInjection> {
         .collect()
 }
 
-/// Prove every candidate process frequency-flat, or refuse the first that is
-/// not.
+/// Classify every candidate process as frequency-flat or shaped, realizing
+/// each shaped one, or refuse the first shaped one no finite-state filter
+/// represents.
 ///
 /// A process is flat when each of its injection gains is real and identical
 /// at both ends of the band and at their geometric mean. The candidates were
@@ -888,9 +1046,9 @@ fn classify_processes(
     grid: &NoiseGrid,
     candidates: &[&CollectedNoiseProcess],
     time: Value,
-) -> Result<(), SimulationError> {
+) -> Result<Vec<ProcessShape>, SimulationError> {
     if candidates.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let [low, middle, _] = grid.classification_frequencies();
     let at_low = collect_noise_processes(circuit, solution, low)?;
@@ -903,6 +1061,8 @@ fn classify_processes(
             .collect::<HashMap<_, _>>()
     };
     let (low_index, middle_index) = (index(&at_low), index(&at_middle));
+    let mut shaped = Vec::new();
+    let mut flat = Vec::with_capacity(candidates.len());
     for candidate in candidates {
         let key = candidate.key();
         let same_everywhere = [(&at_low, &low_index), (&at_middle, &middle_index)]
@@ -924,50 +1084,124 @@ fn classify_processes(
             .injections
             .iter()
             .all(|injection| injection.gain.im == 0.0);
-        if !(same_everywhere && real) {
-            return Err(shaped_process_refusal(candidate, time));
+        let is_flat = same_everywhere && real;
+        if !is_flat && candidate.route == NoiseProcessRoute::Generated {
+            // A generated gain is `real + jω·reactive` by construction; the
+            // other two evaluations prove the form before it is relied on.
+            let first_order = [
+                (&at_low, &low_index, low),
+                (&at_middle, &middle_index, middle),
+            ]
+            .iter()
+            .all(|(processes, positions, frequency)| {
+                positions.get(&key).is_some_and(|&position| {
+                    shaped::is_first_order(candidate, grid.fmax, &processes[position], *frequency)
+                })
+            });
+            if !first_order {
+                return Err(SimulationError::Circuit(format!(
+                    "generated noise process '{}' of instance '{}' has injection gains that are \
+                     not real + jω·reactive across the noise band",
+                    candidate.mechanism, candidate.instance
+                )));
+            }
         }
+        if !is_flat {
+            shaped.push(*candidate);
+        }
+        flat.push(is_flat);
     }
-    Ok(())
+    let mut realized =
+        shaped::realize_shaped_processes(circuit, solution, &shaped, grid.fmax).into_iter();
+    let mut shapes = Vec::with_capacity(candidates.len());
+    for (candidate, is_flat) in candidates.iter().zip(flat) {
+        if is_flat {
+            shapes.push(ProcessShape::Static);
+            continue;
+        }
+        let realization = realized.next().unwrap_or_else(|| {
+            Err(ShapingRefusal::Failed(
+                "the realization batch is shorter than its candidates".to_string(),
+            ))
+        });
+        let realization = realization.map_err(|refusal| shaping_error(candidate, refusal, time))?;
+        shapes.push(ProcessShape::Shaped(realization));
+    }
+    Ok(shapes)
 }
 
-/// The refusal for a process whose injection depends on frequency.
-fn shaped_process_refusal(process: &CollectedNoiseProcess, time: Value) -> SimulationError {
-    let at = if time > 0.0 {
+/// The error a shaped process's failed realization reports.
+fn shaping_error(
+    process: &CollectedNoiseProcess,
+    refusal: ShapingRefusal,
+    time: Value,
+) -> SimulationError {
+    match refusal {
+        ShapingRefusal::NonRational(operator) => {
+            non_rational_shaping_refusal(process, operator, time)
+        }
+        ShapingRefusal::Failed(detail) => SimulationError::Circuit(format!(
+            "transient noise cannot realize the shaping of noise process '{}' of instance \
+             '{}': {detail}",
+            process.mechanism, process.instance
+        )),
+    }
+}
+
+/// `" at t=… s"` for a refusal after the operating point, nothing at it.
+fn refusal_time(time: Value) -> String {
+    if time > 0.0 {
         format!(" at t={time:e} s")
     } else {
         String::new()
-    };
-    let (token, detail) = if process.non_rational_operators.is_empty() {
-        (
-            "analysis.tran.noise.shaped_process",
-            format!(
-                "transient noise cannot render noise process '{}' of instance '{}' (module \
-                 '{}'){at}: its injection gain depends on frequency, so the module shapes the \
-                 noise through ddt, idt or laplace_*, and this build renders only noise whose \
-                 injection is frequency-flat. Use .NOISE for this instance.",
-                process.mechanism, process.instance, process.module
-            ),
-        )
-    } else {
-        (
-            "analysis.tran.noise.non_rational_shaping",
-            format!(
-                "transient noise cannot render noise process '{}' of instance '{}' (module \
-                 '{}'){at}: its injection gain depends on frequency and the module carries {}, \
-                 which no finite-state realization represents. Use .NOISE for this instance.",
-                process.mechanism,
-                process.instance,
-                process.module,
-                process.non_rational_operators.join(", ")
-            ),
-        )
-    };
-    UnsupportedCapabilityError::new(token, detail)
-        .for_analysis_kind(AnalysisKind::Tran)
-        .for_instance(process.instance.clone())
-        .for_module(process.module.clone())
-        .into()
+    }
+}
+
+/// The refusal for a shaped process whose shaping passes through an
+/// operator no finite-state filter represents.
+fn non_rational_shaping_refusal(
+    process: &CollectedNoiseProcess,
+    operator: &str,
+    time: Value,
+) -> SimulationError {
+    UnsupportedCapabilityError::new(
+        "analysis.tran.noise.non_rational_shaping",
+        format!(
+            "transient noise cannot render noise process '{}' of instance '{}' (module \
+             '{}'){}: the module shapes it through {operator}, which no finite-state \
+             realization represents. Use .NOISE for this instance.",
+            process.mechanism,
+            process.instance,
+            process.module,
+            refusal_time(time)
+        ),
+    )
+    .for_analysis_kind(AnalysisKind::Tran)
+    .for_instance(process.instance.clone())
+    .for_module(process.module.clone())
+    .into()
+}
+
+/// The refusal for a shaped process whose filter dynamics moved with the
+/// bias, or a flat process the bias made shaped.
+fn bias_dependent_shaping_refusal(process: &CollectedNoiseProcess, time: Value) -> SimulationError {
+    UnsupportedCapabilityError::new(
+        "analysis.tran.noise.bias_dependent_shaping",
+        format!(
+            "transient noise cannot follow noise process '{}' of instance '{}' (module \
+             '{}'){}: the poles or input map of the filter the module shapes it through \
+             changed with the bias, and the rendered filter state was integrated under the \
+             dynamics it had. Use .NOISE at the operating points of interest.",
+            process.mechanism,
+            process.instance,
+            process.module,
+            refusal_time(time)
+        ),
+    )
+    .for_analysis_kind(AnalysisKind::Tran)
+    .for_instance(process.instance.clone())
+    .for_module(process.module.clone())
+    .into()
 }
 
 /// The refusal for a mechanism whose exponent or table moved with the bias.
@@ -1123,10 +1357,10 @@ impl Engine {
         if tracks_processes {
             let collected = collect_noise_processes(circuit, solution, grid.fmax)?;
             let candidates: Vec<&CollectedNoiseProcess> = collected.iter().collect();
-            classify_processes(circuit, solution, grid, &candidates, 0.0)?;
-            for process in collected {
+            let shapes = classify_processes(circuit, solution, grid, &candidates, 0.0)?;
+            for (process, shape) in collected.into_iter().zip(shapes) {
                 let law = process_law(&process)?;
-                processes.push((process, law));
+                processes.push((process, law, shape));
             }
         }
         Ok(TransientNoiseRenderPlan {
@@ -1216,11 +1450,12 @@ impl Engine {
             let seed = stream_seed(run_seed, identity, source.noise_type, *ordinal);
             *ordinal += 1;
             let frozen = FrozenOperands::of_source(source);
-            let train = runtime.draw_train(law, &frozen, seed, &describe(identity), abort)?;
+            let train = runtime.draw_train(law, &frozen, seed, 0, &describe(identity), abort)?;
             injected.push(InjectedNoiseSource {
                 train,
                 amplitude: 0.0,
                 injections: vec![NoiseInjection::unit(source.node_pos, source.node_neg)],
+                shaping: None,
             });
             runtime.entries.push(AmplitudeEntry {
                 identity: identity.clone(),
@@ -1232,9 +1467,9 @@ impl Engine {
                 frozen,
             });
         }
-        for (process, law) in &plan.processes {
+        for (process, law, shape) in plan.processes {
             check_noise_abort(abort)?;
-            let (source, mut entry) = runtime.process_source(process, *law, abort)?;
+            let (source, mut entry) = runtime.process_source(&process, law, shape, abort)?;
             entry.slot = injected.len();
             injected.push(source);
             runtime

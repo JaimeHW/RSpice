@@ -20,7 +20,7 @@ use rspice_design_model::design_management::{
     DrawingSheetGeometry as AuthoredDrawingSheetGeometry, DrawingSheetLettering, DrawingSheetRect,
     DrawingSheetTitleBlockRotation, DrawingSheetTitleFieldValueAuthority, DrawingSheetZoneEdges,
     DrawingSheetZoneGrid, DrawingSheetZoneLabels, ResolvedDrawingSheetTitleField,
-    SchematicSheetFormat,
+    SchematicSheetFormat, drawing_sheet_mono_em_um, drawing_sheet_title_block_lettering,
 };
 use rspice_ui_kit::theme;
 use rspice_ui_kit::tokens::{Mode, Tokens};
@@ -264,10 +264,36 @@ fn drawing_sheet_font_size(zoom: f32, authored_size: f32) -> f32 {
     ((authored_size * zoom.max(0.0) * 4.0).round() * 0.25).max(1.0)
 }
 
-/// ISO 3098-1 lettering heights in world units, four of which span one
-/// millimetre. These mirror the micrometre constants the durable sheet
-/// domain publishes, so canvas and hardcopy letter a field identically.
+/// Em size, in world units, that letters a field at the given ISO 3098
+/// height — four world units spanning one millimetre.
+///
+/// The standard measures a height by its capitals and egui sizes a line by
+/// its em, so the two are not the same number. The conversion between them
+/// comes from the durable sheet domain rather than from here, so canvas and
+/// hardcopy letter a field identically.
 fn authored_lettering(lettering_um: u64) -> f32 {
+    drawing_sheet_mono_em_um(lettering_um) as f32 * DRAWING_SHEET_UNITS_PER_MM as f32 / 1_000.0
+}
+
+/// The heights this sheet's title block letters at: the sheet's own ISO 3098
+/// heights, stepped down where a row of the block it carries is too shallow
+/// to seat them. A sheet with no title block keeps the sheet's heights, which
+/// is what its remaining annotation is lettered at.
+fn sheet_lettering(sheet: &ActiveDrawingSheet) -> DrawingSheetLettering {
+    drawing_sheet_title_block_lettering(&sheet.format, &sheet.geometry.physical)
+        .unwrap_or_else(|| sheet.format.authored_size.lettering())
+}
+
+/// Em a zone reference in the border band is lettered at.
+///
+/// A zone reference is bounded by the band that carries it rather than by the
+/// sheet. That band is a fixed 2.5 to 6 mm whatever the paper, so lettering a
+/// reference at the capital height ISO 3098 recommends for the sheet would
+/// drive an A0 label — 7 mm of capitals — straight through a 5 mm frame. The
+/// band therefore keeps the size it has always been painted at, and sizing
+/// the two to each other is the border's problem to solve, not the title
+/// block's.
+fn authored_zone_lettering(lettering_um: u64) -> f32 {
     lettering_um as f32 * DRAWING_SHEET_UNITS_PER_MM as f32 / 1_000.0
 }
 
@@ -280,7 +306,8 @@ impl DrawingSheetLod {
     fn resolve(zoom: f32, pixels_per_point: f32, lettering: DrawingSheetLettering) -> Self {
         let millimetre_pixels =
             DRAWING_SHEET_UNITS_PER_MM as f32 * zoom * pixels_per_point.max(0.5);
-        let data_lettering_px = millimetre_pixels * lettering.data_um as f32 / 1_000.0;
+        let data_lettering_px =
+            millimetre_pixels * drawing_sheet_mono_em_um(lettering.data_um) as f32 / 1_000.0;
         let tier = if millimetre_pixels < 0.55 {
             DrawingSheetLodTier::Thumbnail
         } else if millimetre_pixels < 1.5 {
@@ -394,7 +421,7 @@ pub fn draw_base(
     let tokens = Tokens::get(painter.ctx());
     let palette = DrawingSheetPalette::resolve(&tokens);
     let layers = input.layers;
-    let lettering = sheet.format.authored_size.lettering();
+    let lettering = sheet_lettering(sheet);
     let lod = DrawingSheetLod::resolve(viewport.zoom, painter.ctx().pixels_per_point(), lettering);
     let paper = sheet.geometry.paper.screen_rect(viewport);
     let printable = sheet.geometry.printable.screen_rect(viewport);
@@ -514,7 +541,7 @@ pub fn draw_overflow_advisories(
     let lod = DrawingSheetLod::resolve(
         viewport.zoom,
         painter.ctx().pixels_per_point(),
-        sheet.format.authored_size.lettering(),
+        sheet_lettering(sheet),
     );
     if !overflow_advisories_visible(lod.tier) {
         return;
@@ -1061,7 +1088,7 @@ fn draw_zone_band(
         return;
     }
     let font = theme::mono(
-        drawing_sheet_font_size(zoom, authored_lettering(lod.lettering.reference_um)),
+        drawing_sheet_font_size(zoom, authored_zone_lettering(lod.lettering.reference_um)),
         theme::FontWeight::Medium,
     );
     let top_y = (printable.top() + drawing_area.top()) * 0.5;
@@ -1237,7 +1264,7 @@ fn draw_title_block(
     else {
         return;
     };
-    let lettering = sheet.format.authored_size.lettering();
+    let lettering = sheet_lettering(sheet);
     let capacity = |lettering_um| {
         rspice_design_model::design_management::drawing_sheet_title_cell_capacity(
             &sheet.format,
@@ -1337,9 +1364,17 @@ fn draw_title_block(
             )),
             Align2::LEFT_CENTER,
             truncate_canvas_title_value(&field.value, value_chars),
+            // A value carries more stroke than its caption rather than more
+            // height. Drafting practice letters a caption one height step
+            // below the data it names and leaves both in the same ink, which
+            // reads as a hierarchy only because a drawing is lettered wholly
+            // in capitals. RSpice cannot be: a cell or view name is a
+            // case-bearing identifier, and a caption's capitals come out the
+            // same height as a value's lower case. The step has to be bought
+            // in weight, because the cell has no room to buy it in height.
             theme::mono(
                 drawing_sheet_font_size(zoom, authored_lettering(lettering.data_um)),
-                theme::FontWeight::Regular,
+                theme::FontWeight::Medium,
             ),
             palette.block_ink,
             rotation,

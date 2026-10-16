@@ -114,10 +114,6 @@ pub(in crate::engine) struct CollectedNoiseProcess {
     /// white noise, the density at 1 Hz for flicker, and the table's scale.
     pub(in crate::engine) psd: Value,
     pub(in crate::engine) injections: Vec<NoiseProcessInjection>,
-    /// The operators in the instance's module that no finite-state
-    /// realization represents (`absdelay`, `zi_*`, `idtmod`). A shaped
-    /// process from such a module may pass through one of them.
-    pub(in crate::engine) non_rational_operators: Vec<&'static str>,
 }
 
 /// The identity a process keeps across biases and frequencies.
@@ -232,6 +228,161 @@ pub(in crate::engine) fn collect_noise_processes(
     Ok(processes)
 }
 
+/// A row or column of a [`ShapingDescriptor`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(in crate::engine) enum ShapingIndex {
+    /// The gain row of injection `i`, in the process's injection order.
+    Output(usize),
+    /// An explicit operator state.
+    #[cfg_attr(not(feature = "veriloga"), allow(dead_code))]
+    State(usize),
+    /// The process's unit noise input.
+    Input,
+}
+
+/// One coefficient `g + s·c` of a shaping descriptor.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(in crate::engine) struct ShapingEntry {
+    pub(in crate::engine) row: ShapingIndex,
+    pub(in crate::engine) col: ShapingIndex,
+    pub(in crate::engine) g: Value,
+    pub(in crate::engine) c: Value,
+}
+
+/// How one process's unit input reaches its injections, as a `G + sC`
+/// descriptor: `states` explicit operator states, each with its own
+/// equation row, and one gain row per injection.
+///
+/// Reducing the states out gives, at `s = jω`, the injection gains the
+/// per-frequency evaluation reports:
+///
+/// ```text
+/// gain_i(s) = M_iu − M_iS · M_SS⁻¹ · M_Su,   M = G + sC
+/// ```
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(in crate::engine) struct ShapingDescriptor {
+    pub(in crate::engine) states: usize,
+    pub(in crate::engine) entries: Vec<ShapingEntry>,
+}
+
+/// Why a shaped process has no finite-state realization.
+#[derive(Clone, Debug, PartialEq)]
+pub(in crate::engine) enum RealizationFailure {
+    /// The shaping passes through an operator no finite rational
+    /// realization represents: `absdelay`, `zi_*` or `idtmod`.
+    #[cfg_attr(not(feature = "veriloga"), allow(dead_code))]
+    NonRational(&'static str),
+    /// The realization could not be evaluated.
+    Failed(String),
+}
+
+/// The shaping of one process of a runtime instance or mixed host.
+#[derive(Clone, Debug, PartialEq)]
+pub(in crate::engine) struct ProcessRealization {
+    pub(in crate::engine) process_id: usize,
+    pub(in crate::engine) descriptor: ShapingDescriptor,
+    /// `(node_pos, node_neg)` of each injection, in evaluation order.
+    pub(in crate::engine) injections: Vec<(usize, usize)>,
+}
+
+/// The shaping descriptor of every noise process of one runtime instance or
+/// mixed host at `solution`, keyed by `process_id`, with each process's
+/// injection endpoints.
+///
+/// The processes and their injections are those
+/// [`collect_noise_processes`] reports for the same instance and bias, in
+/// the same order. Generated devices have no descriptor evaluator: their
+/// gains are `real + jω·reactive` by construction, which the caller
+/// realizes from the gains themselves.
+pub(in crate::engine) fn runtime_noise_realizations(
+    circuit: &CircuitData,
+    solution: &[Value],
+    route: NoiseProcessRoute,
+    instance: &str,
+) -> Result<Vec<ProcessRealization>, RealizationFailure> {
+    #[cfg(feature = "veriloga")]
+    {
+        let device = match route {
+            NoiseProcessRoute::Runtime => circuit
+                .veriloga_devices()
+                .iter()
+                .find(|device| device.name == instance),
+            NoiseProcessRoute::MixedHost => circuit
+                .mixed_signal_hosts
+                .iter()
+                .find(|host| host.instance_name() == instance)
+                .map(|host| host.analog_device()),
+            NoiseProcessRoute::Generated => None,
+        };
+        let Some(device) = device else {
+            return Err(RealizationFailure::Failed(format!(
+                "no runtime Verilog-A instance '{instance}' carries its noise processes"
+            )));
+        };
+        realize_runtime_device(device, instance, solution)
+    }
+    #[cfg(not(feature = "veriloga"))]
+    {
+        let _ = (circuit, solution, route);
+        Err(RealizationFailure::Failed(format!(
+            "instance '{instance}' needs the Verilog-A runtime to realize its noise shaping"
+        )))
+    }
+}
+
+#[cfg(feature = "veriloga")]
+fn realize_runtime_device(
+    device: &rspice_veriloga::device::VerilogADevice,
+    instance: &str,
+    solution: &[Value],
+) -> Result<Vec<ProcessRealization>, RealizationFailure> {
+    use rspice_veriloga::vm::{DescriptorIndex, VmError};
+
+    let mut probe = device.clone();
+    probe.try_set_analysis_type(3).map_err(|err| {
+        RealizationFailure::Failed(format!(
+            "Verilog-A device '{instance}' noise analysis setup failed: {err}"
+        ))
+    })?;
+    let realizations = probe
+        .try_noise_process_realizations(solution)
+        .map_err(|err| match err {
+            VmError::NonRationalOperator(name) => RealizationFailure::NonRational(name),
+            other => RealizationFailure::Failed(format!(
+                "Verilog-A device '{instance}' noise shaping realization failed: {other}"
+            )),
+        })?;
+    let index = |position: DescriptorIndex| match position {
+        DescriptorIndex::Circuit(injection) => ShapingIndex::Output(injection),
+        DescriptorIndex::State(state) => ShapingIndex::State(state),
+        DescriptorIndex::NoiseInput => ShapingIndex::Input,
+    };
+    Ok(realizations
+        .into_iter()
+        .map(|realization| {
+            let descriptor = ShapingDescriptor {
+                states: realization.descriptor.states.len(),
+                entries: realization
+                    .descriptor
+                    .entries
+                    .iter()
+                    .map(|entry| ShapingEntry {
+                        row: index(entry.row),
+                        col: index(entry.col),
+                        g: entry.g,
+                        c: entry.c,
+                    })
+                    .collect(),
+            };
+            ProcessRealization {
+                process_id: realization.process_id,
+                descriptor,
+                injections: realization.injections,
+            }
+        })
+        .collect())
+}
+
 /// Whether a host's analog device has noise this collector must evaluate.
 ///
 /// The ordinary noise catalog never walks hosts, so a host whose artifact
@@ -240,19 +391,6 @@ pub(in crate::engine) fn collect_noise_processes(
 #[cfg(feature = "veriloga")]
 fn host_carries_processes(device: &rspice_veriloga::device::VerilogADevice) -> bool {
     device.has_grouped_noise_processes() || !device.uses_grouped_noise_processes()
-}
-
-/// The operators that leave a shaped process without a finite-state
-/// realization.
-#[cfg(feature = "veriloga")]
-fn non_rational_shaping_operators(
-    device: &rspice_veriloga::device::VerilogADevice,
-) -> Vec<&'static str> {
-    device
-        .non_rational_analog_operators()
-        .into_iter()
-        .filter(|operator| matches!(*operator, "absdelay" | "zi" | "idtmod"))
-        .collect()
 }
 
 #[cfg(feature = "veriloga")]
@@ -282,7 +420,6 @@ fn collect_runtime_device(
         return Ok(());
     }
     let module = device.model_name().to_string();
-    let non_rational_operators = non_rational_shaping_operators(device);
     for process in evaluated {
         let spectrum = match (process.table, process.exponent) {
             (Some((points, log_interp)), _) => NoiseProcessSpectrum::Table { points, log_interp },
@@ -306,7 +443,6 @@ fn collect_runtime_device(
                     gain: Complex64::new(injection.gain.re, injection.gain.im),
                 })
                 .collect(),
-            non_rational_operators: non_rational_operators.clone(),
         });
     }
     Ok(())
@@ -494,10 +630,6 @@ fn generated_process(
         spectrum,
         psd: process.psd,
         injections,
-        // Generated code is emitted from the same front end, and its shaped
-        // processes are classified by their gains; it has no separately
-        // reportable operator inventory.
-        non_rational_operators: Vec::new(),
     })
 }
 

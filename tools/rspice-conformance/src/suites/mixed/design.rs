@@ -43,6 +43,7 @@ pub fn required_analyses(id: &str) -> Option<&'static [&'static str]> {
         "P06a" => &["trnoise"],
         "P06b" => &["mc-tran", "step-tran"],
         "P06c" => &["tran"],
+        "P06d" => &["trnoise"],
         _ => return None,
     })
 }
@@ -63,7 +64,7 @@ pub fn required_oracles(id: &str) -> Option<&'static [&'static str]> {
         "C10" => &["O6", "O3"],
         "C11" => &["O6"],
         "C12" => &["O5", "O6"],
-        "P06a" | "P06b" | "P06c" => &["O6"],
+        "P06a" | "P06b" | "P06c" | "P06d" => &["O6"],
         _ => return None,
     })
 }

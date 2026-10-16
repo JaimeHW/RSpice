@@ -4134,7 +4134,6 @@ mod tests {
                     gain,
                 })
                 .collect(),
-            non_rational_operators: Vec::new(),
         }
     }
 

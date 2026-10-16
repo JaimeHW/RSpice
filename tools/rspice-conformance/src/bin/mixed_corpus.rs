@@ -153,7 +153,8 @@ fn run() -> Result<ExitCode, String> {
                 "a" => "P06a",
                 "b" => "P06b",
                 "c" => "P06c",
-                other => return Err(format!("unknown probe {other}; use a, b or c")),
+                "d" => "P06d",
+                other => return Err(format!("unknown probe {other}; use a, b, c or d")),
             };
             run_corpus(runner::RunOptions {
                 designs: vec![id.to_owned()],

@@ -12,6 +12,7 @@ pub(super) struct PdfFonts {
     pub(super) sans: Font,
     pub(super) semibold: Font,
     pub(super) mono: Font,
+    pub(super) mono_medium: Font,
 }
 
 impl PdfFonts {
@@ -20,6 +21,7 @@ impl PdfFonts {
             sans: load_pdf_font(IBM_PLEX_SANS_REGULAR, "IBM Plex Sans Regular")?,
             semibold: load_pdf_font(IBM_PLEX_SANS_SEMIBOLD, "IBM Plex Sans Semibold")?,
             mono: load_pdf_font(IBM_PLEX_MONO_REGULAR, "IBM Plex Mono Regular")?,
+            mono_medium: load_pdf_font(IBM_PLEX_MONO_MEDIUM, "IBM Plex Mono Medium")?,
         })
     }
 
@@ -28,6 +30,7 @@ impl PdfFonts {
             SceneFont::Sans => &self.sans,
             SceneFont::SansSemibold => &self.semibold,
             SceneFont::Monospace => &self.mono,
+            SceneFont::MonospaceMedium => &self.mono_medium,
         }
     }
 }

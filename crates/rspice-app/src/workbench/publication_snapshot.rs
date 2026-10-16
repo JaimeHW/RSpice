@@ -971,6 +971,13 @@ fn convert_primitive(
                 SceneFont::Sans => TextFont::Sans,
                 SceneFont::SansSemibold => TextFont::SansSemibold,
                 SceneFont::Monospace => TextFont::Monospace,
+                // A sealed snapshot letters this at the regular weight: the
+                // publication contract's font vocabulary has one monospace
+                // class, and widening it is additive schema evolution that
+                // the contract reserves for a version bump. A title-block
+                // value therefore carries less stroke on a sealed page than
+                // on the plot of the same sheet.
+                SceneFont::MonospaceMedium => TextFont::Monospace,
             },
             anchor: match anchor {
                 SceneTextAnchor::Start => TextAnchor::Start,

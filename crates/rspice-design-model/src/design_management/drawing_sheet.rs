@@ -2414,27 +2414,8 @@ pub fn drawing_sheet_title_cell_capacity(
     Some((lettered_um / advance_um).max(4) as usize)
 }
 
-/// Advance width of one IBM Plex Mono character at the given lettering
-/// height. The face advances 600 units per 1000-unit em for every glyph, so
-/// this is a width measurement, not an approximation of one.
-#[must_use]
-pub const fn drawing_sheet_mono_advance_um(lettering_um: u64) -> u64 {
-    let advance_um = lettering_um * 3 / 5;
-    if advance_um == 0 { 1 } else { advance_um }
-}
-
-/// Distance from the vertical centre of a line of IBM Plex Mono down to its
-/// alphabetic baseline.
-///
-/// The canvas centres a laid-out line on a point; publication backends place
-/// the baseline on one. The face ascends 1025 and descends 275 units per
-/// 1000-unit em, so the two conventions differ by exactly 3/8 of the
-/// lettering height, and converting between them keeps a field's ink in the
-/// same place on screen and on paper.
-#[must_use]
-pub const fn drawing_sheet_mono_baseline_offset_um(lettering_um: u64) -> u64 {
-    lettering_um * 3 / 8
-}
+pub(super) mod lettering;
+pub use lettering::*;
 
 pub(super) mod presets;
 pub use presets::*;

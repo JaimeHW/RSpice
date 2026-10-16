@@ -1,0 +1,24 @@
+schema = "rspice-mixed-tolerance/1"
+time_precision = 1e-12
+
+# Decisive assertion: the sample standard deviation of the shaped node over the
+# whole 1 ms record. The 100 µs warm-up NOISEFMIN=10k sets is a hundred of the
+# filter's 1 µs time constants, so the record opens stationary.
+#
+# The held samples are an AR(1) sequence with ρ = 1/(1 + ωp·NT) = 0.990, so the
+# variance estimate over N = 1e5 samples has relative standard deviation
+# sqrt((2/N)·(1 + ρ²)/(1 − ρ²)) = 4.5%, and σ's is 2.2%: the 99% interval is
+# ±5.8%. The backward difference moves the discrete variance by
+# 2b²/((1 − a²)·ωp·NT) − 1 = −0.5% (a = ρ, b = 1 − ρ), inside it.
+
+[[q]]
+id = "sigma.shaped"
+analysis = "trnoise"
+variants = ["base"]
+kind = "stat"
+stat = "std"
+over = "samples"
+of = { kind = "held_at", signal = "v(p)", times = { start = 1e-8, step = 1e-8, count = 100000 } }
+interval = [4.71e-4, 5.29e-4]
+oracle = "O6"
+why = "√(S·R²·ωp/4) = √(1e-18 A²/Hz · (1 kΩ)² · 1e6/4) = 0.500 mV: noise shaped by laplace_np must render at |H|²·S"

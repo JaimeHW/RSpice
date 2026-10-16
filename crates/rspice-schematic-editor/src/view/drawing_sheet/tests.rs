@@ -177,8 +177,19 @@ fn test_lettering() -> DrawingSheetLettering {
 
 #[test]
 fn drawing_sheet_lettering_keeps_its_authored_height_on_the_page() {
+    // The height the standard names is the height of the capitals, and the
+    // size a font engine takes is an em, so these are not the same number:
+    // 2.5 mm capitals need a 3.58 mm em. Ten world units of capitals is what
+    // has to come back out.
     let data = authored_lettering(test_lettering().data_um);
-    assert_eq!(data, 10.0, "2.5 mm is ten world units on A4");
+    assert!(
+        data > 10.0,
+        "an em lettering 2.5 mm capitals is taller than the capitals"
+    );
+    assert!(
+        (data * 0.698 - 10.0).abs() < 0.05,
+        "an em of {data} world units must letter capitals ten world units tall"
+    );
 
     // A larger sheet letters larger, as ISO 3098 requires: text legible on A4
     // at arm's length is not legible on a sheet four times the size.
@@ -208,16 +219,37 @@ fn drawing_sheet_lettering_keeps_its_authored_height_on_the_page() {
 }
 
 #[test]
+fn title_block_capitals_stand_at_the_height_the_standard_names() {
+    // The arithmetic above is only worth as much as the assumption under it:
+    // that the size egui takes is an em. Paint a capital at the size a 2.5 mm
+    // field is lettered at and measure the ink it leaves. Ten world units of
+    // capital is the 2.5 mm ISO 3098 names, and a size taken as a cap height
+    // instead of an em would leave seven.
+    let em = authored_lettering(test_lettering().data_um);
+    let rows = rspice_ui_kit::raster::glyph_ink_rows("H", em);
+    let (first, last) = (
+        *rows.first().expect("a capital leaves ink"),
+        *rows.last().expect("a capital leaves ink"),
+    );
+    let painted = (last - first + 1) as f32;
+    assert!(
+        (painted - 10.0).abs() <= 1.5,
+        "a capital lettered at a {em}-unit em measured {painted} units, not the authored ten"
+    );
+}
+
+#[test]
 fn title_block_fields_are_withheld_until_their_lettering_is_legible() {
     let legible = DrawingSheetLod::resolve(1.0, 1.0, test_lettering());
     assert!(
         legible.show_title_block_fields,
-        "2.5 mm lettering at four pixels per millimetre is ten pixels and must be drawn"
+        "2.5 mm capitals at four pixels per millimetre set a 14-pixel em and must be drawn"
     );
     let illegible = DrawingSheetLod::resolve(0.3, 1.0, test_lettering());
     assert!(
         !illegible.show_title_block_fields,
-        "2.5 mm lettering at three pixels is unreadable and must be withheld, not inflated"
+        "the same capitals at a fifth of that set a 4-pixel em, which is \
+         unreadable and must be withheld rather than inflated"
     );
     assert!(
         illegible.show_border,

@@ -1,7 +1,13 @@
 """Regression tests for the workspace formatting gate."""
 
+import contextlib
+import io
+import subprocess
+import sys
 import unittest
+from unittest import mock
 
+import check_formatting
 from check_formatting import (
     ARGUMENT_BUDGET,
     MINIMUM_MEMBERS,
@@ -189,6 +195,49 @@ class WorkspaceTests(unittest.TestCase):
         for paths in core:
             for run in batches(paths):
                 self.assertLessEqual(sum(len(path) + 3 for path in run), ARGUMENT_BUDGET)
+
+
+class WorkspaceDescriptionTests(unittest.TestCase):
+    """What the gate says when cargo will not describe the workspace."""
+
+    def run_main(self, failure: Exception) -> tuple[int, str]:
+        printed = io.StringIO()
+        with (
+            mock.patch.object(
+                check_formatting.subprocess, "check_output", side_effect=failure
+            ),
+            mock.patch.object(sys, "argv", ["check_formatting.py"]),
+            contextlib.redirect_stdout(printed),
+        ):
+            return check_formatting.main(), printed.getvalue()
+
+    def test_a_stale_lockfile_names_cargos_refusal_and_its_cause(self) -> None:
+        """A landing tree that merged two branches is the common case here.
+
+        The gate used to raise `CalledProcessError` out of `main`, which reads
+        as the gate itself being broken. The tree is what is stale, and only
+        cargo knows which lockfile it is.
+        """
+        refusal = subprocess.CalledProcessError(101, ("cargo", "metadata"))
+        refusal.stderr = (
+            "error: the lock file /w/Cargo.lock needs to be updated but "
+            "--locked was passed to prevent this\n"
+        )
+        code, printed = self.run_main(refusal)
+        self.assertEqual(code, 1)
+        self.assertIn("needs to be updated", printed)
+        self.assertIn("Cargo.lock must match the manifests", printed)
+        self.assertNotIn("Traceback", printed)
+
+    def test_a_refusal_with_nothing_on_stderr_still_exits_rather_than_raising(
+        self,
+    ) -> None:
+        """`stderr` is `None` when a caller captured it elsewhere."""
+        code, printed = self.run_main(
+            subprocess.CalledProcessError(101, ("cargo", "metadata"))
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("could not describe the workspace", printed)
 
 
 if __name__ == "__main__":

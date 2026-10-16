@@ -9,8 +9,9 @@
 //! * one noise-function call reaching several branches is one coherent
 //!   process, and two calls are independent whatever their names;
 //! * flicker and tabulated densities keep their shape in time;
-//! * noise shaped by the module itself is refused by name until it can be
-//!   rendered;
+//! * noise the module shapes through `ddt`, `idt` or `laplace_*` renders at
+//!   `|H|²·S`, and shaping no finite-state filter represents, or whose
+//!   dynamics move with the bias, is refused by name;
 //! * the run is a function of its seed alone, rejected steps included;
 //! * the run seed is one seed, whatever authored the noise;
 //! * a transient-noise run that would need its noise streams persisted is a
@@ -194,7 +195,11 @@ mod veriloga {
         for (time, value) in result.time.iter().zip(waveform) {
             let boundary = (time / nt).round();
             if boundary >= 1.0 && (time - boundary * nt).abs() <= 1.0e-6 * nt {
-                samples.insert(boundary as usize, *value);
+                // The first point at a boundary is the one that closes its
+                // hold interval; a later point within this tolerance may
+                // already lie in the next interval, as when an event
+                // micro-steps just past the boundary.
+                samples.entry(boundary as usize).or_insert(*value);
             }
         }
         samples
@@ -595,39 +600,266 @@ endmodule
         }
     }
 
-    /// Test 6: noise the module shapes itself is refused by name until it can
-    /// be rendered, with the instance, the module and the analysis typed.
-    #[test]
-    fn shaped_module_noise_is_a_typed_refusal() {
-        let model = ModelFile::new(
-            "shaped",
-            r#"
+    /// The low-pass of test 6: `laplace_np(n, {1}, {-1e6, 0})` is
+    /// `H(s) = 1/(1 + s/1e6)` (LRM 2.4 §4.5.13: a pole entry is the root of
+    /// `1 − s/p`, so the stable pole is the negative one).
+    const SHAPED: &str = r#"
 `include "disciplines.vams"
 module shaped(p, n);
   inout p, n; electrical p, n;
-  analog I(p, n) <+ V(p, n)/1000.0 + laplace_np(white_noise(1e-18, "b"), '{1}, '{1e6, 0});
+  analog I(p, n) <+ V(p, n)/1000.0 + laplace_np(white_noise(1e-18, "b"), '{1}, '{-1e6, 0});
+endmodule
+"#;
+
+    /// The same analog body in a mixed Verilog-AMS host.
+    const SHAPED_MIXED: &str = r#"
+`include "disciplines.vams"
+`timescale 1ns/1ps
+module shaped_mixed(p, n, q);
+  inout p, n; electrical p, n; output q; reg q;
+  initial q = 1'b0; always #50 q = ~q;
+  analog I(p, n) <+ V(p, n)/1000.0 + laplace_np(white_noise(1e-18, "b"), '{1}, '{-1e6, 0});
+endmodule
+"#;
+
+    /// `|H(j2πf)|²·S·R²` against the bank's estimate over each band, with
+    /// `injected(f) = |H(j2πf)|²·S` in A²/Hz and `R` the module's 1 kΩ.
+    ///
+    /// Every band ends at or below `fmax/4`, where the backward difference
+    /// and the sampled record together move a pure power of `s` by at most
+    /// `(θ/(2·sin(θ/2)))^±2 − 1 = 5.3%` at `θ = 2πf·NT = π/4`; the bands
+    /// average over their bins, which keeps the discretization under 3%. The
+    /// first two bins are left out: they carry the Hann window's leakage of
+    /// each segment's own mean. 2048-sample segments give 288 periodograms
+    /// over the bank, about 6% per bin, and every band holds at least 9
+    /// bins, so its mean's standard error is under 2.5%: 10% is over 4σ.
+    fn assert_shaped_density(
+        label: &str,
+        estimate: &[(f64, f64)],
+        bands: &[(f64, f64)],
+        injected: impl Fn(f64) -> f64,
+    ) {
+        let model = |f: f64| 1.0e6 * injected(f);
+        for (low, high) in bands {
+            let (measured, expected) = band(estimate, *low, *high, model);
+            assert_within(
+                &format!("{label} density over {low:e}–{high:e} Hz (ratio)"),
+                measured / expected,
+                0.9,
+                1.1,
+            );
+        }
+    }
+
+    /// Test 6: noise the module shapes through `laplace_np` renders, with
+    /// the density `|H|²·S` below `fmax/4`.
+    ///
+    /// `S = 1e-18` A²/Hz into 1 kΩ and `|H|² = 1/(1 + (2πf/1e6)²)`. The
+    /// filter's 1 µs time constant is a hundredth of the 100 µs warm-up the
+    /// 10 kHz `NOISEFMIN` sets, so the record opens stationary.
+    #[test]
+    fn a_laplace_shaped_process_renders_its_transfer() {
+        let estimate = bank_estimate("shaped", SHAPED, 2048);
+        assert_shaped_density(
+            "laplace_np low-pass",
+            &estimate,
+            &[(90.0e3, 500.0e3), (1.0e6, 12.5e6)],
+            |f| 1.0e-18 / (1.0 + (std::f64::consts::TAU * f / 1.0e6).powi(2)),
+        );
+    }
+
+    /// An `idt`-shaped process is the integral of its noise:
+    /// `|H|² = 1/(2πf)²`.
+    ///
+    /// The integral is a random walk, so each segment carries its own trend,
+    /// whose Hann-windowed leakage falls as the fourth power of the bin
+    /// index against the `1/f²` density; the bands start at bin 6, where it
+    /// is under 0.1%.
+    #[test]
+    fn an_idt_shaped_process_renders_its_transfer() {
+        let estimate = bank_estimate(
+            "integrated",
+            r#"
+`include "disciplines.vams"
+module integrated(p, n);
+  inout p, n; electrical p, n;
+  analog I(p, n) <+ V(p, n)/1000.0 + idt(white_noise(1e-18, "i"), 0.0);
 endmodule
 "#,
+            2048,
         );
+        assert_shaped_density(
+            "idt",
+            &estimate,
+            &[(290.0e3, 1.0e6), (1.0e6, 12.5e6)],
+            |f| 1.0e-18 / (std::f64::consts::TAU * f).powi(2),
+        );
+    }
+
+    /// A `ddt`-shaped process is the derivative of its noise:
+    /// `|H|² = (2πf)²`.
+    #[test]
+    fn a_ddt_shaped_process_renders_its_transfer() {
+        let estimate = bank_estimate(
+            "differentiated",
+            r#"
+`include "disciplines.vams"
+module differentiated(p, n);
+  inout p, n; electrical p, n;
+  analog I(p, n) <+ V(p, n)/1000.0 + ddt(white_noise(1e-30, "d"));
+endmodule
+"#,
+            2048,
+        );
+        assert_shaped_density("ddt", &estimate, &[(90.0e3, 1.0e6), (1.0e6, 12.5e6)], |f| {
+            1.0e-30 * (std::f64::consts::TAU * f).powi(2)
+        });
+    }
+
+    /// A shaped process in a mixed host renders through the same collector
+    /// and filter as its analog-only twin: one instance name, one mechanism
+    /// and one call give one seed, so the two runs inject the same samples.
+    #[test]
+    fn a_shaped_process_renders_identically_in_a_mixed_host() {
+        let analog = ModelFile::new("shaped", SHAPED);
+        let mixed = ModelFile::new("shaped_mixed", SHAPED_MIXED);
+        let samples = |instance: &str, model: &ModelFile, module: &str| {
+            let deck = format!(
+                "* shaped noise route\n\
+                 {instance}\n\
+                 rq q 0 10k\n\
+                 .va \"{}\" {module}\n\
+                 .tran 1n 2u NOISEFMAX=500meg NOISESEED=7\n\
+                 .end\n",
+                model.deck_path()
+            );
+            let result = run(&deck, 2.0e-6, 1.0e-9);
+            (
+                window(&held_samples(&result, "p", NT), NT, 0.0, 2.0e-6),
+                result
+                    .digital_trace_named("q")
+                    .map_or(0, |trace| trace.len()),
+            )
+        };
+        let (runtime, _) = samples("x1 p 0 shaped", &analog, "shaped");
+        let (host, toggles) = samples("x1 p 0 q shaped_mixed", &mixed, "shaped_mixed");
+        assert!(
+            toggles >= 40,
+            "x1 must run as a mixed host: traced {toggles} points"
+        );
+        assert!(
+            runtime.iter().any(|value| *value != 0.0),
+            "the shaped process must inject"
+        );
+        for (index, (left, right)) in runtime.iter().zip(&host).enumerate() {
+            assert!(
+                (left - right).abs() <= 1.0e-9 * left.abs().max(right.abs()),
+                "sample {index}: runtime {left:e}, mixed host {right:e}"
+            );
+        }
+    }
+
+    /// Run a deck expected to refuse, returning the typed refusal.
+    fn refused(name: &str, source: &str, deck_body: &str) -> SimulationError {
+        let model = ModelFile::new(name, source);
         let deck = format!(
-            "* shaped noise\n\
-             x1 p 0 shaped\n\
-             .va \"{}\" shaped\n\
+            "* refused shaping\n\
+             {deck_body}\n\
+             .va \"{}\" {name}\n\
              .tran 1n 2u NOISEFMAX=500meg NOISESEED=7\n\
              .end\n",
             model.deck_path()
         );
         let netlist = Netlist::parse(&deck).expect("the deck parses");
-        let error = engine()
+        engine()
             .run_tran(&netlist, 2.0e-6, 1.0e-9)
-            .expect_err("a shaped process must be refused");
-        let SimulationError::UnsupportedCapability(refusal) = &error else {
+            .expect_err("the shaping must be refused")
+    }
+
+    fn assert_shaping_refusal(error: &SimulationError, token: &str, module: &str) {
+        let SimulationError::UnsupportedCapability(refusal) = error else {
             panic!("expected a capability refusal, got {error}");
         };
-        assert_eq!(refusal.capability, "analysis.tran.noise.shaped_process");
+        assert_eq!(refusal.capability, token, "{error}");
         assert_eq!(error.descriptor().analysis_kind, Some(AnalysisKind::Tran));
         assert_eq!(error.instance_name(), Some("x1"));
-        assert_eq!(refusal.module.as_deref(), Some("shaped"));
+        assert_eq!(refusal.module.as_deref(), Some(module));
+    }
+
+    /// Noise shaped through `absdelay` has no finite-state realization, and
+    /// is refused by name with its instance and module.
+    #[test]
+    fn non_rational_shaping_is_a_typed_refusal() {
+        let error = refused(
+            "delayed",
+            r#"
+`include "disciplines.vams"
+module delayed(p, n);
+  inout p, n; electrical p, n;
+  analog I(p, n) <+ V(p, n)/1000.0 + absdelay(white_noise(1e-18, "a"), 1n);
+endmodule
+"#,
+            "x1 p 0 delayed",
+        );
+        assert_shaping_refusal(
+            &error,
+            "analysis.tran.noise.non_rational_shaping",
+            "delayed",
+        );
+        assert!(error.to_string().contains("absdelay"), "{error}");
+    }
+
+    /// A filter whose input map moves with the bias cannot be continued from
+    /// the state integrated under the old one, and is refused by name.
+    #[test]
+    fn bias_dependent_shaping_is_a_typed_refusal() {
+        let error = refused(
+            "driftshape",
+            r#"
+`include "disciplines.vams"
+module driftshape(p, n, c);
+  inout p, n, c; electrical p, n, c;
+  analog I(p, n) <+ V(p, n)/1000.0 + idt(V(c)*white_noise(1e-18, "s"), 0.0);
+endmodule
+"#,
+            "x1 p 0 c driftshape\nVc c 0 PWL(0 1 1u 2)",
+        );
+        assert_shaping_refusal(
+            &error,
+            "analysis.tran.noise.bias_dependent_shaping",
+            "driftshape",
+        );
+        assert!(error.to_string().contains("t="), "{error}");
+    }
+
+    /// F8 holds for shaped noise: its filter state is not in a checkpoint.
+    #[test]
+    fn checkpointing_a_shaped_noise_run_is_a_typed_capability_refusal() {
+        let model = ModelFile::new("shaped", SHAPED);
+        let netlist = Netlist::parse(&format!(
+            "* checkpointed shaped noise\n\
+             x1 p 0 shaped\n\
+             .va \"{}\" shaped\n\
+             .tran 1n 100n NOISEFMAX=500meg NOISESEED=7\n\
+             .end\n",
+            model.deck_path()
+        ))
+        .expect("the deck parses");
+        let validator = engine()
+            .validate_transient_checkpoint_request(
+                &netlist,
+                100.0e-9,
+                1.0e-9,
+                TransientCheckpointStart::Fresh(TransientStartupMode::OperatingPoint),
+                &[50.0e-9],
+                &NoAbort,
+            )
+            .expect_err("a scheduled checkpoint of a shaped-noise run must be refused");
+        assert_checkpoint_refusal(&validator, "streamed checkpoint validator");
+        let run = engine()
+            .run_tran_checkpointed(&netlist, 100.0e-9, 1.0e-9)
+            .expect_err("a retained checkpoint of a shaped-noise run must be refused");
+        assert_checkpoint_refusal(&run, "checkpointed transient run");
     }
 
     /// A flicker exponent is frozen at installation: the train realizes the
@@ -681,16 +913,28 @@ endmodule
     /// LTE — at the pulse edges, which the run counts as timestep reductions.
     #[test]
     fn the_injected_samples_survive_rejected_steps() {
-        let model = ModelFile::new("noisy_va", NOISY_VA);
+        assert_samples_survive_rejected_steps("noisy_va", NOISY_VA);
+    }
+
+    /// Test 7 for a shaped process: its filter state advances only at
+    /// accepted points, so a rejected step restamps the sample the accepted
+    /// one will see.
+    #[test]
+    fn shaped_samples_survive_rejected_steps() {
+        assert_samples_survive_rejected_steps("shaped", SHAPED);
+    }
+
+    fn assert_samples_survive_rejected_steps(module: &str, source: &str) {
+        let model = ModelFile::new(module, source);
         let deck = |options: &str| {
             format!(
                 "* determinism across rejected steps\n\
                  {options}\n\
-                 x1 p 0 noisy_va\n\
+                 x1 p 0 {module}\n\
                  V1 in 0 PULSE(0 1 100n 1n 1n 200n 400n)\n\
                  R1 in c 1k\n\
                  C1 c 0 10p\n\
-                 .va \"{}\" noisy_va\n\
+                 .va \"{}\" {module}\n\
                  .tran 1n 1u NOISEFMAX=500meg NOISESEED=7\n\
                  .end\n",
                 model.deck_path()

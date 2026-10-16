@@ -385,6 +385,7 @@ pub(super) fn svg_font(font: SceneFont) -> (&'static str, &'static str) {
         SceneFont::Sans => (PUBLICATION_SANS, "400"),
         SceneFont::SansSemibold => (PUBLICATION_SANS, "600"),
         SceneFont::Monospace => (PUBLICATION_MONO, "400"),
+        SceneFont::MonospaceMedium => (PUBLICATION_MONO, "500"),
     }
 }
 
