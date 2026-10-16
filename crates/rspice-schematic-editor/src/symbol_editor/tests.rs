@@ -2,6 +2,115 @@
 
 use super::*;
 
+/// The symbol editor's two surfaces, written to PNGs for a human to look at:
+/// the inspector with one pin selected, and the canvas with its check note
+/// and its unpublished-changes strip.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "writes PNGs for a human to look at; run with --ignored"]
+fn print_symbol_editor_renders_for_review() {
+    use std::io::Write as _;
+
+    let directory = std::env::var("RSPICE_RASTER_DIR")
+        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+    std::fs::create_dir_all(&directory).expect("raster output directory");
+    let stderr = std::io::stderr();
+    let mut report = stderr.lock();
+
+    let reference = CellViewRef::new("work", "amp", "symbol");
+    // One bus pin selected, one pin the schematic does not declare, and one
+    // declared port with no pin: every row the panel can show at once.
+    let mut document = SymbolDocument::default();
+    document.body.push(SymbolShape::Polyline {
+        points: vec![
+            Point::new(-40, -30),
+            Point::new(40, -30),
+            Point::new(40, 30),
+            Point::new(-40, 30),
+        ],
+        closed: true,
+    });
+    document.pins = vec![
+        SymbolPin::new("DATA[3:0]", PortDirection::In, Some(Point::new(-40, -10))),
+        SymbolPin::new("SPARE", PortDirection::Out, Some(Point::new(40, 10))),
+    ];
+    let metadata = SymbolEditorMetadata::for_document(&document);
+    let ports = [
+        PortSpec {
+            name: "DATA[3:0]".to_owned(),
+            direction: PortDirection::In,
+        },
+        PortSpec {
+            name: "EN".to_owned(),
+            direction: PortDirection::In,
+        },
+    ];
+    let source = interaction::SymbolRequestSource {
+        project: rspice_app_types::product::ProjectId::new(),
+        document: reference.clone(),
+        occurrence: None,
+        design_epoch: 1,
+        document_epoch: 1,
+        library_revision: 1,
+        window: 1,
+    };
+
+    let mut session = SymbolEditorSession::default();
+    session.select_pin("DATA[3:0]");
+    interaction::bind_canvas_source(&mut session, source.clone());
+
+    let inspector = rspice_ui_kit::raster::render_themed(
+        rspice_ui_kit::Theme::default(),
+        vec2(360.0, 620.0),
+        |ui, _background| {
+            rspice_ui_kit::panels::panel_body(ui, |ui| {
+                let _ = inspector::show(
+                    ui,
+                    source.clone(),
+                    document.clone(),
+                    metadata.clone(),
+                    &ports,
+                    &session,
+                    interaction::SymbolEditCapabilities { edit: true },
+                );
+            });
+        },
+    );
+    let path = directory.join("symbol-inspector.png");
+    let height = inspector.content_height().max(1);
+    std::fs::write(&path, inspector.png(height)).expect("write inspector render");
+    writeln!(report, "{} {}x{}", path.display(), inspector.width(), height)
+        .expect("write raster report");
+
+    let canvas = rspice_ui_kit::raster::render_themed(
+        rspice_ui_kit::Theme::default(),
+        vec2(980.0, 560.0),
+        |ui, _background| {
+            surface::unpublished_changes_strip(ui, true);
+            let stage = ui.available_rect_before_wrap();
+            let (rect, response) =
+                ui.allocate_exact_size(stage.size(), egui::Sense::click_and_drag());
+            let mut session = session.clone();
+            let viewport = update_viewport(ui, &mut session, rect, &document, &response);
+            draw_canvas(
+                ui,
+                viewport,
+                &document,
+                &metadata,
+                &ports,
+                &session,
+                &reference,
+            );
+            surface::canvas_check_note(ui.ctx(), &document, &ports, stage);
+        },
+    );
+    let path = directory.join("symbol-canvas.png");
+    let height = canvas.content_height().max(1);
+    std::fs::write(&path, canvas.png(height)).expect("write canvas render");
+    writeln!(report, "{} {}x{}", path.display(), canvas.width(), height)
+        .expect("write raster report");
+}
+
 #[test]
 fn smooth_scroll_zoom_factor_is_proportional_not_binary() {
     let tiny = symbol_scroll_zoom_factor(1.0).expect("tiny smooth scroll should zoom");
