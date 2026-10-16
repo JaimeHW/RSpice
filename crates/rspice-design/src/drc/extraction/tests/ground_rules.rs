@@ -82,6 +82,34 @@ fn sources_across(ground: &'static str) -> SchematicDocument {
     ])
 }
 
+/// R2 with its `+` wired to a ground symbol and labelled `label` there, and
+/// its `-` labelled `x`.
+fn tied_to_ground(label: &'static str) -> SchematicDocument {
+    let resistor = part(1, ComponentType::Resistor, "R2");
+    let ground = Component::new(2, ComponentType::Ground, Point::new(0, 200));
+    let terminal = |pin: &str| {
+        terminal_positions_with_hierarchy(&resistor, None)
+            .into_iter()
+            .find_map(|(name, point)| (name == pin).then_some(point))
+            .expect("a resistor has both terminals")
+    };
+    let (plus, minus) = (terminal("+"), terminal("-"));
+    let wire = Wire::segment(
+        10,
+        plus,
+        terminal_positions_with_hierarchy(&ground, None)[0].1,
+    );
+    SchematicDocument {
+        components: vec![resistor, ground],
+        wires: vec![wire],
+        net_labels: vec![
+            NetLabel::new(20, plus, label),
+            NetLabel::new(21, minus, "x"),
+        ],
+        ..SchematicDocument::default()
+    }
+}
+
 /// The top of a design whose only content is one instance of `cell`.
 fn only(cell: &str) -> SchematicDocument {
     SchematicDocument {
@@ -193,5 +221,102 @@ fn a_loop_across_cellviews_closes_only_through_node_zero() {
         1,
         "{:?}",
         result.violations()
+    );
+}
+
+const BANG_NOT_ZERO: &str =
+    "Net label 'GND!' reads as ground, but the deck writes its net as node 'GND!', not as node 0";
+
+/// The drawing says ground where the deck writes a node of its own: once per
+/// node, at the label that says it. Promoted onto `GND`, it is node 0.
+#[test]
+fn a_ground_global_the_deck_writes_as_its_own_node_is_an_error() {
+    let views = buffers([("top", grounded_by_bang())]);
+    let top = &views["work/top/schematic"];
+
+    let result = checked_under(&unaliased(), top, &views);
+    let stray = of_type(&result, DrcViolationType::GroundNotNodeZero);
+    assert_eq!(stray.len(), 1, "{:?}", result.violations());
+    assert_eq!(stray[0].severity, DrcSeverity::Error);
+    assert_eq!(stray[0].message, BANG_NOT_ZERO);
+    assert_eq!(
+        stray[0].location,
+        DrcLocation::NetLabel {
+            name: "GND!".to_owned()
+        }
+    );
+
+    let result = checked_under(&aliased(), top, &views);
+    assert!(
+        of_type(&result, DrcViolationType::GroundNotNodeZero).is_empty(),
+        "{:?}",
+        result.violations()
+    );
+}
+
+/// Inside a placed cell, the label is stated at the occurrence.
+#[test]
+fn a_ground_global_below_the_subject_is_stated_inside_its_occurrence() {
+    let views = buffers([("leg", grounded_by_bang())]);
+
+    let result = checked_under(&unaliased(), &only("leg"), &views);
+    let stray = of_type(&result, DrcViolationType::GroundNotNodeZero);
+    assert_eq!(stray.len(), 1, "{:?}", result.violations());
+    let DrcLocation::InsideInstance { path, view, inner } = &stray[0].location else {
+        panic!("stated inside the occurrence: {:?}", stray[0].location);
+    };
+    assert_eq!(
+        (path.to_string(), view.key(), inner.as_ref().clone()),
+        (
+            "/X1".to_owned(),
+            "work/leg/schematic".to_owned(),
+            DrcLocation::NetLabel {
+                name: "GND!".to_owned()
+            }
+        )
+    );
+
+    let result = checked_under(&aliased(), &only("leg"), &views);
+    assert!(
+        of_type(&result, DrcViolationType::GroundNotNodeZero).is_empty(),
+        "{:?}",
+        result.violations()
+    );
+}
+
+/// A name the deck writes as node 0 is ground however it is spelled, and so
+/// is a `GND!` that shares its net with a ground symbol, which names the net
+/// `0`. A `GND` label whose net an earlier label already named is not: the
+/// deck writes that name.
+#[test]
+fn a_ground_name_is_judged_by_the_node_its_net_is_written_as() {
+    let stray = |drawing: SchematicDocument| {
+        let views = buffers([("top", drawing)]);
+        let result = checked_under(&unaliased(), &views["work/top/schematic"], &views);
+        of_type(&result, DrcViolationType::GroundNotNodeZero)
+            .into_iter()
+            .map(|finding| finding.message.clone())
+            .collect::<Vec<_>>()
+    };
+    for ground in ["0", "GND", "gnd", "Ground"] {
+        let returned = labelled(vec![
+            two(1, ComponentType::VoltageSource, "V1", "in", ground),
+            two(2, ComponentType::Resistor, "R1", "in", ground),
+        ]);
+        assert_eq!(stray(returned), Vec::<String>::new(), "{ground}");
+    }
+    assert_eq!(stray(tied_to_ground("GND!")), Vec::<String>::new());
+
+    let mut renamed = labelled(vec![
+        two(1, ComponentType::VoltageSource, "V1", "in", "VSS"),
+        two(2, ComponentType::Resistor, "R1", "in", "0"),
+    ]);
+    let minus = renamed.net_labels[1].pos;
+    renamed.net_labels.push(NetLabel::new(900, minus, "GND"));
+    assert_eq!(
+        stray(renamed),
+        [
+            "Net label 'GND' reads as ground, but the deck writes its net as node 'VSS', not as node 0"
+        ]
     );
 }

@@ -120,6 +120,7 @@ fn working_circuits_raise_no_electrical_finding() {
                         | DrcViolationType::FloatingNode
                         | DrcViolationType::MissingGround
                         | DrcViolationType::SourceToSource
+                        | DrcViolationType::GroundNotNodeZero
                 )
             })
             .collect::<Vec<_>>();

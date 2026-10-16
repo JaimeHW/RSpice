@@ -5,8 +5,9 @@
 //! the deck will actually write, so a finding quotes what the engine sees.
 
 use super::checker::{
-    DrcChecker, DrcConfig, append_case_collision_violations, append_off_sheet_connector_violations,
-    append_vector_width_violations, component_identity, diagnostic_location,
+    DrcChecker, DrcConfig, append_case_collision_violations, append_ground_not_node_zero,
+    append_off_sheet_connector_violations, append_vector_width_violations, component_identity,
+    diagnostic_location,
 };
 use super::input::{BrokenReference, ComponentInfo, ParameterRangeIssue, PinInfo};
 use super::source_loops::{self, GROUND_KEY};
@@ -243,6 +244,17 @@ fn check_subject(
         if index == SUBJECT || reach == CheckReach::Hierarchy {
             let mut report =
                 check_one_view(view.document, &view_config, &components, &connectivity);
+            // A ground mark the deck does not write as node 0 is a fact of the
+            // cellview that draws it, unlike whether the design reaches node 0
+            // at all, so it is stated with that cellview's findings.
+            if config.check_missing_ground {
+                append_ground_not_node_zero(
+                    view.document,
+                    &connectivity,
+                    &mut report,
+                    &config.severity_overrides,
+                );
+            }
             graph.append_recursive_findings(
                 index,
                 reach,

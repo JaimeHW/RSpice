@@ -1102,6 +1102,61 @@ pub(super) fn append_case_collision_violations(
     }
 }
 
+/// Report each net the drawing names as ground that the deck does not write
+/// as node 0, at the first label that names it so.
+///
+/// The canvas reads `GND!` as ground because Xyce's `REPLACEGROUND` folds it,
+/// but the netlister writes it as a global node of its own unless the
+/// project's technology global-net catalog promotes it onto a name the deck
+/// writes as node 0, so everything returned through it is returned to that
+/// node instead of the reference. A label spelled as node 0 can lose its net
+/// the same way to a name that claimed it first, an interface port's or an
+/// earlier label's, and the deck then writes that name. Either way the
+/// drawing says ground where the deck does not. A label on no net is the
+/// orphan-label rule's.
+pub(super) fn append_ground_not_node_zero(
+    schematic: &crate::schematic::document::SchematicDocument,
+    connectivity: &ExtractedConnectivity,
+    result: &mut DrcResult,
+    severity_overrides: &HashMap<DrcViolationType, DrcSeverity>,
+) {
+    let mut labels: Vec<&crate::schematic::net_label::NetLabel> =
+        schematic.net_labels.iter().collect();
+    labels.sort_by_key(|label| label.id);
+    let mut stated = std::collections::HashSet::new();
+    let mut next_id = result.total_count();
+    for label in labels {
+        if !label.is_ground() {
+            continue;
+        }
+        let Some(node) = connectivity.net_at(label.pos).map(|net| net.spice_name()) else {
+            continue;
+        };
+        if crate::schematic::ground_names::writes_node_zero(&node)
+            || !stated.insert(node.to_ascii_lowercase())
+        {
+            continue;
+        }
+        let mut violation = DrcViolation::new(
+            next_id,
+            DrcViolationType::GroundNotNodeZero,
+            format!(
+                "Net label '{}' reads as ground, but the deck writes its net as node '{node}', \
+                 not as node 0",
+                label.name.trim()
+            ),
+            DrcLocation::NetLabel {
+                name: label.name.clone(),
+            },
+        );
+        if let Some(severity) = severity_overrides.get(&DrcViolationType::GroundNotNodeZero) {
+            violation.severity = *severity;
+        }
+        result.add_violation(violation);
+        next_id += 1;
+    }
+}
+
 /// What a finding calls this component: the authored reference where there is
 /// one, and its identity otherwise, so a message never names an empty string.
 pub(super) fn component_identity(component: &ComponentInfo) -> String {
