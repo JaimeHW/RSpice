@@ -347,16 +347,19 @@ fn retained_fixture() -> crate::state::model_library::ModelLibrary {
     library
 }
 
+/// One pinned source of a [`drifted_library`]: its file name, the bytes the
+/// project accepted, and the bytes it still holds — `None` for a source the
+/// project no longer has, which is the finding that can name only one digest.
+type DriftedSource<'a> = (&'a str, &'a [u8], Option<&'a [u8]>);
+
 /// A library whose pinned sources and retained bytes disagree.
 ///
-/// Each entry is one pinned source: the bytes the project accepted, and the
-/// bytes it still holds — `None` for a source the project no longer has, which
-/// is the finding that can name only one digest. Built this way rather than by
-/// writing findings straight into the view state, so the render is of the path
-/// an edited PDK really takes through [`drift::scan`].
+/// Built from [`DriftedSource`] entries rather than by writing findings
+/// straight into the view state, so the render is of the path an edited PDK
+/// really takes through [`drift::scan`].
 fn drifted_library(
     name: &str,
-    sources: &[(&str, &[u8], Option<&[u8]>)],
+    sources: &[DriftedSource<'_>],
 ) -> crate::state::model_library::ModelLibrary {
     use crate::product::{ContentDigest, ModelSourceId};
     use crate::state::model_library::{DeviceModel, ModelSourceContent, ModelSourcePin, ModelType};
