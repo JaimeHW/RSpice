@@ -1756,7 +1756,7 @@ const PAINTED_UI_CRATES: &[&str] = &[
 /// commit as the fix — an entry whose site is clean fails this test, so the
 /// list cannot rot into a record of problems that no longer exist.
 ///
-/// It is 63 entries because the class is 63 sites wide and fixing them is a
+/// It is 62 entries because the class is 62 sites wide and fixing them is a
 /// program rather than a change. It was measured, not estimated: the two
 /// known-worst sites were repaired first — Check and save's rows, and
 /// `models/manager/paint.rs::property`, which painted all three columns of
@@ -1814,7 +1814,6 @@ const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-app/src/workbench/surfaces/veriloga.rs::source_editor",
     "rspice-app/src/workbench/tools/notification_center.rs::foot",
     "rspice-results-ui/src/noise_contrib.rs::contributor_header",
-    "rspice-results-ui/src/polar.rs::register_table",
     "rspice-results-ui/src/waves/expression_editor.rs::show",
     "rspice-schematic-editor/src/property_values.rs::render_value_editor",
     "rspice-ui-kit/src/panels.rs::card_with_body_margin",
@@ -1860,6 +1859,9 @@ fn without_test_items(source: &str) -> String {
         let mut opened = false;
         loop {
             let trimmed = item.trim_end();
+            if !opened && trimmed.matches('{').count() > trimmed.matches('}').count() {
+                opened = true;
+            }
             let closed = if opened {
                 // The closer of a braced item is the only `}` at the
                 // attribute's own indentation; its contents are indented
@@ -1868,12 +1870,10 @@ fn without_test_items(source: &str) -> String {
                 trimmed.trim_start().starts_with('}')
                     && item.len() - item.trim_start().len() == indent
             } else {
-                if trimmed.matches('{').count() > trimmed.matches('}').count() {
-                    opened = true;
-                    false
-                } else {
-                    trimmed.contains('{') || trimmed.ends_with(';') || trimmed.ends_with(',')
-                }
+                // Balanced braces on the first line finish the item here — a
+                // one-line `fn`, or a `use` naming a brace list. So does a
+                // statement, an out-of-line `mod`, or an attributed field.
+                trimmed.contains('{') || trimmed.ends_with(';') || trimmed.ends_with(',')
             };
             if closed || index >= lines.len() {
                 break;
