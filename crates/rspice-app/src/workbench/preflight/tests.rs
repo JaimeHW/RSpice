@@ -674,6 +674,58 @@ fn a_topology_the_engine_refuses_is_an_ordered_preflight_blocker() {
     assert_eq!(topology.remediation, PreflightRemediation::DesignChecks);
 }
 
+/// A loop of voltage sources is one fact with one owner: the design rule that
+/// finds it across the hierarchy, without a deck. Preflight states it through
+/// the blocker that stands for the rule errors and files no row of its own,
+/// which it used to, so the page listed the loop twice.
+#[test]
+fn a_voltage_source_loop_is_stated_once_by_the_rule_that_owns_it() {
+    use crate::state::{ComponentType, Point, Wire};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.authority.open_session();
+    let root = app.state.workspace.content.simulation_root_reference();
+    let editor = &mut app
+        .state
+        .workspace
+        .schematic_editor_mut(&root.key())
+        .expect("default configured root buffer")
+        .editor;
+    editor.add_component(ComponentType::Ground, Point::new(0, 40));
+    editor.add_component(ComponentType::VoltageSource, Point::new(0, 10));
+    editor.add_component(ComponentType::VoltageSource, Point::new(60, 10));
+    let wires = &mut editor.document_mut_for_test().wires;
+    wires.push(Wire::segment(1, Point::new(0, -10), Point::new(60, -10)));
+    wires.push(Wire::segment(2, Point::new(0, 30), Point::new(60, 30)));
+
+    run(&mut app);
+
+    let report = app
+        .state
+        .workbench
+        .preflight
+        .report
+        .as_ref()
+        .expect("the pass retains its report");
+    assert_eq!(
+        report
+            .blockers
+            .iter()
+            .filter(|issue| issue.check == "Schematic validation")
+            .count(),
+        1,
+        "{:?}",
+        report.blockers
+    );
+    let loop_rows = crate::workbench::app_state::diagnostic_store::listing::listing(&app.state);
+    let loop_rows: Vec<String> = (0..loop_rows.len())
+        .filter_map(|index| loop_rows.row(index))
+        .map(|row| row.message.to_owned())
+        .filter(|message| message.contains("closed loop"))
+        .collect();
+    assert_eq!(loop_rows.len(), 1, "the loop is listed once: {loop_rows:?}");
+}
+
 /// Every preparation stage is repaired where the thing it failed on lives.
 #[test]
 fn a_preparation_failure_names_the_destination_that_repairs_it() {

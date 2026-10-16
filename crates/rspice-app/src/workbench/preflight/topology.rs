@@ -1,12 +1,14 @@
 //! The topology refusals the engine makes, decided before a run is queued.
 //!
-//! Two of the engine's refusals are structural rather than numerical: a node
-//! that no chain of DC-conducting elements ties to the reference has no
-//! operating point the circuit determines, and a cycle built only from voltage
-//! sources states two voltages for one node pair. The engine raises both while
+//! A node that no chain of DC-conducting elements ties to the reference has no
+//! operating point the circuit determines. The engine raises that while
 //! elaborating the deck — after the author has already committed to a run — so
-//! preflight decides them here and names the offending nodes and instances
-//! while the drawing is still on screen.
+//! preflight decides it here and names the offending nodes while the drawing is
+//! still on screen.
+//!
+//! A cycle built only from voltage sources is not decided here. The design
+//! rules own that fact (`SourceToSource`), across the hierarchy and without a
+//! deck, and an error-level rule finding already blocks the run.
 //!
 //! Connectivity is read, never re-derived: the caller passes the design's one
 //! [`ExtractedConnectivity`], the same graph the netlister and the design-rule
@@ -17,16 +19,15 @@
 use crate::state::SchematicState;
 use rspice_design::schematic::document::SchematicDocument;
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::HashMap;
 
 use crate::state::{Component, ComponentType, PortDirection, is_ground_reference};
 use crate::workbench::state::{PreflightIssue, PreflightRemediation};
 use rspice_design::connectivity::ExtractedConnectivity;
 
-/// Row labels the Solver surface states as enforced contract. The refusal and
+/// Row label the Solver surface states as enforced contract. The refusal and
 /// the statement of the rule use one vocabulary.
 const NO_DC_PATH_CHECK: &str = "Nodes without a DC path";
-const VOLTAGE_LOOP_CHECK: &str = "Voltage-source loops";
 
 /// How many offending nodes one refusal quotes before it counts the rest, as
 /// the engine's own message does.
@@ -54,10 +55,9 @@ pub(super) fn topology_blockers(
             });
     }
 
-    let mut issues = Vec::new();
-    issues.extend(no_dc_path_issue(schematic, &nodes, &terminals));
-    issues.extend(voltage_source_loop_issues(schematic, &nodes, &terminals));
-    issues
+    no_dc_path_issue(schematic, &nodes, &terminals)
+        .into_iter()
+        .collect()
 }
 
 /// One placed terminal, bound to the deck node it sits on.
@@ -124,15 +124,11 @@ impl DisjointSets {
         root
     }
 
-    /// Join two sets, reporting `false` when they were already one — which is
-    /// exactly the condition that makes a new edge close a cycle.
-    fn union(&mut self, left: usize, right: usize) -> bool {
+    fn union(&mut self, left: usize, right: usize) {
         let (left, right) = (self.find(left), self.find(right));
-        if left == right {
-            return false;
+        if left != right {
+            self.parent[right] = left;
         }
-        self.parent[right] = left;
-        true
     }
 }
 
@@ -176,33 +172,6 @@ fn dc_conduction(component: &Component) -> DcConduction {
         | ComponentType::Nmesfet
         | ComponentType::Pmesfet => DcConduction::ExceptControlGate,
         _ => DcConduction::Through,
-    }
-}
-
-fn is_independent_voltage_source(kind: ComponentType) -> bool {
-    matches!(
-        kind,
-        ComponentType::VoltageSource
-            | ComponentType::VoltageSourceAc
-            | ComponentType::VoltageSourcePulse
-            | ComponentType::VoltageSourceSin
-            | ComponentType::VoltageSourceExp
-            | ComponentType::VoltageSourceSffm
-            | ComponentType::VoltageSourceAm
-            | ComponentType::VoltageSourcePat
-            | ComponentType::VoltageSourceNoise
-            | ComponentType::VoltageSourceRandom
-            | ComponentType::VoltageSourcePwl
-            | ComponentType::VoltageSourcePwlFile
-    )
-}
-
-/// How a refusal names one instance, in the spelling the checker already uses.
-fn designator(component: &Component) -> String {
-    if component.name.trim().is_empty() {
-        format!("component #{}", component.id)
-    } else {
-        component.name.clone()
     }
 }
 
@@ -276,76 +245,6 @@ fn no_dc_path_issue(
     })
 }
 
-/// Every cycle whose edges are all independent voltage sources, one refusal
-/// each, naming the sources the cycle runs through.
-///
-/// Only independent voltage sources are edges. An inductor is a DC short and a
-/// dependent source can be one too, but a cycle through either is a refusal
-/// this preflight leaves to the engine rather than a run it stops on a reading
-/// the deck may not share.
-fn voltage_source_loop_issues(
-    schematic: &SchematicDocument,
-    nodes: &Nodes,
-    terminals: &HashMap<u64, Vec<TerminalNode>>,
-) -> Vec<PreflightIssue> {
-    let mut sets = DisjointSets::new(nodes.len());
-    let mut adjacency: Vec<Vec<(usize, usize)>> = vec![Vec::new(); nodes.len()];
-    let mut placed: Vec<String> = Vec::new();
-    let mut issues = Vec::new();
-
-    for component in &schematic.components {
-        if !is_independent_voltage_source(component.kind) {
-            continue;
-        }
-        let Some(pins) = terminals.get(&component.id) else {
-            continue;
-        };
-        let (Some(plus), Some(minus)) = (pin_node(pins, "+"), pin_node(pins, "-")) else {
-            continue;
-        };
-        let designator = designator(component);
-        if plus == minus {
-            issues.push(loop_issue(&format!(
-                "Voltage source {designator} has both terminals on node '{}'",
-                nodes.name(plus)
-            )));
-            continue;
-        }
-        if sets.union(plus, minus) {
-            adjacency[plus].push((minus, placed.len()));
-            adjacency[minus].push((plus, placed.len()));
-            placed.push(designator);
-            continue;
-        }
-        let mut members = tree_path(&adjacency, plus, minus)
-            .into_iter()
-            .map(|edge| placed[edge].clone())
-            .collect::<Vec<_>>();
-        members.push(designator);
-        issues.push(loop_issue(&format!(
-            "Voltage sources {} form a closed loop",
-            members.join(", ")
-        )));
-    }
-    issues
-}
-
-fn loop_issue(observed: &str) -> PreflightIssue {
-    PreflightIssue {
-        check: VOLTAGE_LOOP_CHECK.to_owned(),
-        observed: format!("{observed}: the loop states two voltages for one node pair."),
-        required: "A series element inside the loop, or one fewer source across the pair"
-            .to_owned(),
-        remediation: PreflightRemediation::DesignChecks,
-    }
-}
-
-fn pin_node(pins: &[TerminalNode], name: &str) -> Option<usize> {
-    pins.iter()
-        .find(|terminal| terminal.pin == name)
-        .map(|terminal| terminal.node)
-}
-
 fn join(sets: &mut DisjointSets, mut terminals: impl Iterator<Item = usize>) {
     let Some(first) = terminals.next() else {
         return;
@@ -353,32 +252,6 @@ fn join(sets: &mut DisjointSets, mut terminals: impl Iterator<Item = usize>) {
     for node in terminals {
         sets.union(first, node);
     }
-}
-
-/// The edges of the spanning-forest path between two nodes already in one set.
-fn tree_path(adjacency: &[Vec<(usize, usize)>], from: usize, to: usize) -> Vec<usize> {
-    let mut arrival: HashMap<usize, (usize, usize)> = HashMap::new();
-    let mut seen: HashSet<usize> = HashSet::from([from]);
-    let mut queue: VecDeque<usize> = VecDeque::from([from]);
-    while let Some(node) = queue.pop_front() {
-        if node == to {
-            break;
-        }
-        for &(next, edge) in &adjacency[node] {
-            if seen.insert(next) {
-                arrival.insert(next, (node, edge));
-                queue.push_back(next);
-            }
-        }
-    }
-    let mut edges = Vec::new();
-    let mut cursor = to;
-    while let Some(&(previous, edge)) = arrival.get(&cursor) {
-        edges.push(edge);
-        cursor = previous;
-    }
-    edges.reverse();
-    edges
 }
 
 /// The offending nodes, quoted up to the limit and counted past it.
@@ -544,52 +417,6 @@ mod tests {
         wire(&mut sound, Point::new(120, 30), Point::new(0, 30));
         let sound_issues = blockers(&sound);
         assert!(sound_issues.is_empty(), "{sound_issues:?}");
-    }
-
-    /// Two sources across one node pair have no solution, and the refusal has
-    /// to name both of them: naming only the one that closed the cycle would
-    /// point at whichever instance happened to be drawn second.
-    #[test]
-    fn a_voltage_source_loop_blocks_with_every_source_named() {
-        let mut schematic = SchematicState::default();
-        place(&mut schematic, ComponentType::Ground, Point::new(0, 40), "");
-        place(
-            &mut schematic,
-            ComponentType::VoltageSource,
-            Point::new(0, 10),
-            "V1",
-        );
-        place(
-            &mut schematic,
-            ComponentType::VoltageSource,
-            Point::new(60, 10),
-            "V2",
-        );
-        wire(&mut schematic, Point::new(0, -10), Point::new(60, -10));
-        wire(&mut schematic, Point::new(0, 30), Point::new(60, 30));
-
-        let issues = blockers(&schematic);
-
-        let loops = issues
-            .iter()
-            .filter(|issue| issue.check == VOLTAGE_LOOP_CHECK)
-            .collect::<Vec<_>>();
-        assert_eq!(loops.len(), 1, "{issues:?}");
-        assert!(loops[0].observed.contains("V1"), "{loops:?}");
-        assert!(loops[0].observed.contains("V2"), "{loops:?}");
-        assert_eq!(loops[0].remediation, PreflightRemediation::DesignChecks);
-
-        // One source across the same pair is an ordinary drive, not a loop.
-        schematic
-            .document_mut_for_test()
-            .components
-            .retain(|component| component.name != "V2");
-        assert!(
-            !blockers(&schematic)
-                .iter()
-                .any(|issue| issue.check == VOLTAGE_LOOP_CHECK),
-            "a single source states one voltage"
-        );
     }
 
     /// Without a reference node every node is unreachable, and listing them
