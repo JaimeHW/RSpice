@@ -20,7 +20,9 @@ use rspice_results_ui::selection::SelectedResultTrace;
 enum SchematicCrossProbeTarget {
     Component {
         component_id: u64,
-        emitted_instance: String,
+        /// The element the deck writes for it, which is the name its trace
+        /// and its source line carry.
+        written_element: String,
     },
     Net {
         name: String,
@@ -191,7 +193,7 @@ fn selected_target(state: &AppState) -> Option<SchematicCrossProbeTarget> {
         }
         return Some(SchematicCrossProbeTarget::Component {
             component_id,
-            emitted_instance: emitted_instance_name(component),
+            written_element: component.written_element_name(),
         });
     }
 
@@ -260,29 +262,6 @@ fn conductor_selection(selection: &crate::state::Selection) -> bool {
         && selection.design_notes.is_empty()
         && selection.documentation_shapes.is_empty()
         && selection.probes.is_empty()
-}
-
-/// The instance name generation would emit for this placement.
-///
-/// The prefix test is taken over bytes rather than over a string slice.
-/// `base` is authored text: an instance named `Ω1` makes `base[..1]` a slice
-/// through the middle of a two-byte character, and slicing there panics. The
-/// SPICE prefixes are all ASCII, so comparing the leading bytes answers the
-/// same question and answers it for every name a reader can type.
-fn emitted_instance_name(component: &crate::state::Component) -> String {
-    let base = component.spice_instance_name();
-    let prefix = component.kind.spice_prefix();
-    if prefix.is_empty()
-        || base.is_empty()
-        || base
-            .as_bytes()
-            .get(..prefix.len())
-            .is_some_and(|head| head.eq_ignore_ascii_case(prefix.as_bytes()))
-    {
-        base
-    } else {
-        format!("{prefix}{base}")
-    }
 }
 
 /// Nets of the open view as the configured design resolves it.
@@ -390,8 +369,8 @@ fn compatible_result_trace(
     let occurrence = state.workspace.content.occurrence_path();
     let signal = match target {
         SchematicCrossProbeTarget::Component {
-            emitted_instance, ..
-        } => crate::state::OccurrenceProbeSpelling::for_leaf(&occurrence, 'I', emitted_instance)?
+            written_element, ..
+        } => crate::state::OccurrenceProbeSpelling::for_leaf(&occurrence, 'I', written_element)?
             .engine()
             .to_owned(),
         SchematicCrossProbeTarget::Net { name } => {
@@ -463,7 +442,7 @@ fn source_line_for_target(
     match target {
         SchematicCrossProbeTarget::Component {
             component_id,
-            emitted_instance,
+            written_element,
         } => {
             let identity =
                 GeneratedSourceMapEntry::component_identity_for(&view_identity, *component_id);
@@ -475,7 +454,7 @@ fn source_line_for_target(
                     artifact.source_map_entry(*line).is_some_and(|entry| {
                         line_matches_view(entry)
                             && entry.instance_identity().is_some_and(|candidate| {
-                                candidate.eq_ignore_ascii_case(emitted_instance)
+                                candidate.eq_ignore_ascii_case(written_element)
                             })
                     })
                 })
@@ -841,7 +820,7 @@ mod tests {
             .components
             .iter()
             .find(|component| component.id == component_id)
-            .map(emitted_instance_name)
+            .map(crate::state::Component::written_element_name)
             .expect("component exists");
         state
             .schematic
@@ -912,7 +891,7 @@ mod tests {
                 &view,
                 &SchematicCrossProbeTarget::Component {
                     component_id: 42,
-                    emitted_instance: "R2".to_owned(),
+                    written_element: "R2".to_owned(),
                 },
             ),
             Some(2)
@@ -1069,6 +1048,6 @@ mod tests {
             crate::state::Point::origin(),
         )
         .with_name_value("Ω1", "1k");
-        assert_eq!(emitted_instance_name(&component), "RΩ1");
+        assert_eq!(component.written_element_name(), "RΩ1");
     }
 }

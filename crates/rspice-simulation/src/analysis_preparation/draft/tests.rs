@@ -297,3 +297,49 @@ fn transient_noise_seed_inheritance_and_zero_scale_reach_the_solver() {
         );
     }
 }
+
+/// The report names each device as the engine does, so a device selected on
+/// the drawing is requested under the name the deck writes it under: a
+/// resistor drawn `C4` is `RC4`, an unnamed resistor is `R<id>`, and a VCVS
+/// with an output limit is the behavioural source `B1`.
+#[test]
+fn op_selected_devices_are_requested_by_their_written_names() {
+    use rspice_design::schematic::component::Component;
+    use rspice_design::schematic::component_type::ComponentType;
+    use rspice_design::schematic::document::SchematicDocument;
+    use rspice_design_model::Point;
+
+    let mut limited =
+        Component::new(2, ComponentType::Vcvs, Point::new(200, 0)).with_name_value("E1", "2");
+    limited.params = "vmax=1".to_owned();
+    let schematic = SchematicDocument {
+        components: vec![
+            Component::new(1, ComponentType::Resistor, Point::new(0, 0))
+                .with_name_value("C4", "1k"),
+            limited,
+            Component::new(3, ComponentType::Resistor, Point::new(400, 0)),
+        ],
+        ..SchematicDocument::default()
+    };
+    let selected = std::collections::HashSet::from([1, 2, 3]);
+    let inputs: AnalysisInputs<'_, SimulationRun, AnalysisResult> = AnalysisInputs {
+        sim_setup: &Default::default(),
+        schematic: &schematic,
+        selected_components: &selected,
+        runs: &[],
+        active_run: None,
+        project_revision: rspice_app_types::product::ObjectRevision::INITIAL,
+        plan_payloads: &[],
+    };
+
+    let spec = crate::analysis_preparation::build_op_spec(&inputs, &Default::default())
+        .expect("selected devices name canonical netlist elements");
+
+    let AnalysisSpec::DcOp {
+        selected_devices, ..
+    } = spec
+    else {
+        panic!("an OP draft builds an OP spec: {spec:?}");
+    };
+    assert_eq!(selected_devices, ["B1", "R3", "RC4"]);
+}

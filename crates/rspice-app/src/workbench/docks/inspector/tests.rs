@@ -647,6 +647,27 @@ fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
     );
 }
 
+/// The engine scopes a cell drawn `amp` by the name the deck writes it
+/// under, so its trace is `V(xamp.out)`. On that cell's sheet the trace is the
+/// conductor the sheet draws, not a trace read elsewhere.
+#[test]
+fn cross_probe_finds_a_trace_scoped_by_the_written_instance_name() {
+    let mut app = result_app_with_current_out_map(false);
+    let view = app.state.workspace.content.active_view.clone();
+    let view_type = app.state.workspace.content.active_view_type();
+    let parent = crate::state::CellViewRef::new(&view.library, "tb", &view.view);
+    app.state.workspace.open_as_root(parent, view_type);
+    app.state
+        .workspace
+        .descend_into("amp".to_owned(), view, view_type);
+
+    let net = cross_probe_trace_to_design(&mut app, "V(xamp.out)")
+        .expect("the written scope is this occurrence");
+
+    assert!(net.eq_ignore_ascii_case("out"), "{net}");
+    assert_eq!(app.state.workbench.workspace, Workspace::Design);
+}
+
 #[test]
 fn failure_row_reserves_a_non_overlapping_margin_column_at_drawer_width() {
     let row_width = 228.0;

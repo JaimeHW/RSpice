@@ -480,20 +480,13 @@ fn source_line_component(
         .components
         .iter()
         .find_map(|component| {
-            let base = component.spice_instance_name();
-            let prefix = component.kind.spice_prefix();
-            let emitted = if prefix.is_empty()
-                || base.is_empty()
-                || (base.len() >= prefix.len() && base[..prefix.len()].eq_ignore_ascii_case(prefix))
-            {
-                base
-            } else {
-                format!("{prefix}{base}")
-            };
-            token.eq_ignore_ascii_case(&emitted).then(|| {
+            // A card is headed by the element it writes, which is the
+            // component's written name: a limited `E1` heads its card `B1`.
+            let written = component.written_element_name();
+            token.eq_ignore_ascii_case(&written).then(|| {
                 let identity =
                     GeneratedSourceMapEntry::component_identity_for(&reference.key(), component.id);
-                (emitted, identity)
+                (written, identity)
             })
         })
 }

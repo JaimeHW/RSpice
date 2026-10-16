@@ -416,7 +416,10 @@ fn voltage_source_component_probe_preserves_device_current_semantics() {
 
     assert_eq!(
         component_probe_expression(&state, 23, Point::origin(), &symbols),
-        Some(('I', "VBIAS".to_owned()))
+        Some(ComponentProbe::Current {
+            drawn: "VBIAS".to_owned(),
+            written: "VBIAS".to_owned(),
+        })
     );
 }
 
@@ -430,7 +433,41 @@ fn ordinary_component_body_probe_requests_device_current_not_nearest_pin_voltage
 
     assert_eq!(
         component_probe_expression(&state, 24, Point::origin(), &symbols),
-        Some(('I', "RLOAD".to_owned()))
+        Some(ComponentProbe::Current {
+            drawn: "RLOAD".to_owned(),
+            written: "RLOAD".to_owned(),
+        })
+    );
+}
+
+/// The engine knows an element by the name the deck writes it under: a
+/// resistor drawn `C4` is `RC4`, and a VCVS with an output limit is the
+/// behavioural source `B1`. A body click asks the engine for that element.
+#[test]
+fn component_current_probe_asks_for_the_element_the_deck_writes() {
+    let mut state = AppState::default();
+    let mut limited =
+        Component::new(26, ComponentType::Vcvs, Point::new(400, 0)).with_name_value("E1", "2");
+    limited.params = "vmax=1".to_owned();
+    state.schematic.document_mut_for_test().components.extend([
+        Component::new(27, ComponentType::Resistor, Point::origin()).with_name_value("C4", "1k"),
+        limited,
+    ]);
+    let symbols = schematic_symbol_context(&state);
+
+    assert_eq!(
+        component_probe_expression(&state, 27, Point::origin(), &symbols),
+        Some(ComponentProbe::Current {
+            drawn: "C4".to_owned(),
+            written: "RC4".to_owned(),
+        })
+    );
+    assert_eq!(
+        component_probe_expression(&state, 26, Point::new(400, 0), &symbols),
+        Some(ComponentProbe::Current {
+            drawn: "E1".to_owned(),
+            written: "B1".to_owned(),
+        })
     );
 }
 
@@ -444,7 +481,7 @@ fn exact_component_terminal_probe_requests_its_node_voltage() {
 
     assert_eq!(
         component_probe_expression(&state, 25, Point::new(-20, 0), &symbols),
-        Some(('V', "net1".to_owned()))
+        Some(ComponentProbe::Voltage("net1".to_owned()))
     );
 }
 

@@ -538,7 +538,7 @@ impl<'a> NetlistGenerator<'a> {
     }
 }
 #[cfg(test)]
-struct FixtureSourceFiles;
+pub(crate) struct FixtureSourceFiles;
 
 #[cfg(test)]
 impl NetlistSourceHost for FixtureSourceFiles {
@@ -566,7 +566,9 @@ impl NetlistSourceHost for FixtureSourceFiles {
 }
 
 #[cfg(test)]
-fn test_placement(position: Point) -> rspice_design::schematic::component_edit::ComponentPlacement {
+pub(crate) fn test_placement(
+    position: Point,
+) -> rspice_design::schematic::component_edit::ComponentPlacement {
     rspice_design::schematic::component_edit::ComponentPlacement {
         position,
         rotation: rspice_design::schematic::rotation::Rotation::R0,

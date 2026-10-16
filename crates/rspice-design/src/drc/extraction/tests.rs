@@ -1102,6 +1102,31 @@ fn instances_written_under_one_name_are_duplicates() {
     }
 }
 
+/// A controlled source with an output limit or a polynomial is written as a
+/// behavioural card named after it — a limited `E1` is the card `B1` — so a
+/// drawn `B1` beside it is two `B1` cards, which the engine refuses.
+#[test]
+fn a_lowered_controlled_source_collides_with_the_name_it_is_written_under() {
+    let mut limited =
+        Component::new(2, ComponentType::Vcvs, Point::new(400, 0)).with_name_value("E1", "10");
+    limited.params = "vmax=1 vmin=-1".to_owned();
+    let top = SchematicDocument {
+        components: vec![
+            Component::new(1, ComponentType::BehavioralSource, Point::new(0, 0))
+                .with_name_value("B1", "V=1"),
+            limited,
+        ],
+        ..SchematicDocument::default()
+    };
+    let views = buffers([]);
+    let hierarchy = HierarchySource::from_buffers(&views);
+    let result = run_check_with_hierarchy(&top, &hierarchy, connectivity_only());
+    let duplicates = of_type(&result, DrcViolationType::DuplicateName);
+    assert_eq!(duplicates.len(), 1, "{:?}", result.violations());
+    assert_eq!(duplicates[0].message, "B1 and E1 are both written B1");
+    assert!(duplicates[0].severity >= DrcSeverity::Error);
+}
+
 /// Every leg of a passive is undeclared, so a drawing made of passives raises
 /// no undriven-input error however many terminals it leaves open — and each
 /// open leg is one finding, not an open pin and a floating node besides.

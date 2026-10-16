@@ -2,6 +2,7 @@
 
 use crate::session::EditorSession;
 use rspice_app_types::hierarchy_path::{InstancePath, ProbeTarget};
+use rspice_design::schematic::component::component_for_engine_device;
 use rspice_design::schematic::document::SchematicDocument;
 use rspice_design_model::Point;
 use std::collections::HashMap;
@@ -131,8 +132,11 @@ fn borrow_signal_conductor<'a>(
     let Some(net_to_points) = view.net_to_points else {
         return Err(LocateSignalError::NoCurrentMap);
     };
+    // The trace's scope is spelled by written instance names — `xamp` for a
+    // cell drawn `amp` — so it is compared with the tab's drawn occurrence by
+    // those names.
     let occurrence = view.occurrence;
-    if target.scope.fold_key() != occurrence.fold_key() {
+    if !target.scope.same_engine_scope(occurrence) {
         return Err(LocateSignalError::OtherOccurrence(target.scope.to_string()));
     }
     // Report the net as the design spells it, not as the trace happened to.
@@ -165,10 +169,8 @@ pub fn drawn_failure_site_count(
     let drawn_devices = devices
         .iter()
         .filter(|device| {
-            view.document
-                .components
-                .iter()
-                .any(|component| component.spice_instance_name().eq_ignore_ascii_case(device))
+            component_for_engine_device(&view.document.components, view.occurrence, device)
+                .is_some()
         })
         .count();
     Ok(drawn_nets + drawn_devices)
@@ -242,10 +244,7 @@ pub fn select_failure_sites(
     let components: Vec<(u64, String, Point)> = devices
         .iter()
         .filter_map(|device| {
-            view.document
-                .components
-                .iter()
-                .find(|component| component.spice_instance_name().eq_ignore_ascii_case(device))
+            component_for_engine_device(&view.document.components, view.occurrence, device)
                 .map(|component| (component.id, component.spice_instance_name(), component.pos))
                 .or_else(|| {
                     selection.unlocated.push(device.clone());
@@ -346,5 +345,62 @@ mod tests {
 
         assert_eq!(error, LocateSignalError::UnknownNet("missing".to_owned()));
         assert!(error.message("V(missing)").contains("missing"));
+    }
+
+    /// The engine scopes a cell drawn `amp` by the name the deck writes it
+    /// under, so its trace is `V(xamp.out)`. On that cell's tab the trace is
+    /// this sheet's conductor; on any other occurrence it is not.
+    #[test]
+    fn a_trace_scoped_by_the_written_instance_name_is_this_occurrences_net() {
+        let (document, points, mut editor) = fixture();
+        let occurrence = InstancePath::parse("/amp").expect("drawn occurrence");
+        let view = CrossProbeView {
+            document: &document,
+            occurrence: &occurrence,
+            net_to_points: Some(&points),
+        };
+
+        let net = select_signal_conductor(&view, &mut editor, "V(xamp.out)")
+            .expect("the written scope is this occurrence");
+        assert_eq!(net, "OUT");
+
+        let other = InstancePath::parse("/amp2").expect("another occurrence");
+        let elsewhere = CrossProbeView {
+            occurrence: &other,
+            ..view
+        };
+        assert!(matches!(
+            select_signal_conductor(&elsewhere, &mut editor, "V(xamp.out)"),
+            Err(LocateSignalError::OtherOccurrence(_))
+        ));
+    }
+
+    /// A failed run names devices as the engine does. On the sheet of `/amp`
+    /// the resistor drawn `C4` is `xamp.rc4`; a root device of the same name
+    /// is not on this sheet.
+    #[test]
+    fn failure_devices_are_found_by_their_written_names_in_this_occurrence() {
+        use rspice_design::schematic::component::Component;
+        use rspice_design::schematic::component_type::ComponentType;
+
+        let (mut document, points, mut editor) = fixture();
+        document.components.push(
+            Component::new(7, ComponentType::Resistor, Point::new(200, 200))
+                .with_name_value("C4", "1k"),
+        );
+        let occurrence = InstancePath::parse("/amp").expect("drawn occurrence");
+        let view = CrossProbeView {
+            document: &document,
+            occurrence: &occurrence,
+            net_to_points: Some(&points),
+        };
+        let devices = ["xamp.rc4".to_owned(), "rc4".to_owned()];
+
+        assert_eq!(drawn_failure_site_count(&view, &[], &devices), Ok(1));
+        let selection =
+            select_failure_sites(&view, &mut editor, &[], &devices).expect("the map is current");
+        assert_eq!(selection.devices, ["C4"]);
+        assert_eq!(selection.unlocated, ["rc4"]);
+        assert!(editor.selection.components.contains(&7));
     }
 }

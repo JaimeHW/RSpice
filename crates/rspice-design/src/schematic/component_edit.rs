@@ -191,8 +191,8 @@ fn transform_components_with(
     }
 }
 
-/// The emitted names of every loop probe drawn on this sheet, in the
-/// spelling the deck will carry.
+/// The names the deck writes every loop probe drawn on this sheet under, which
+/// are the voltage sources `.STB` can name: a probe drawn `LOOP1` is `VLOOP1`.
 ///
 /// This reads the drawing, not an elaborated circuit, so it answers for
 /// the sheet the engineer is looking at. A probe placed inside a
@@ -205,7 +205,7 @@ pub fn placed_loop_probe_names(document: &SchematicDocument) -> Vec<String> {
         .components
         .iter()
         .filter(|component| component.kind == ComponentType::LoopProbe)
-        .map(Component::spice_instance_name)
+        .map(Component::written_element_name)
         .filter(|name| !name.is_empty())
         .collect();
     names.sort_by(|left, right| {

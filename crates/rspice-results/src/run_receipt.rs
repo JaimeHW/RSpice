@@ -332,7 +332,7 @@ impl HierarchyMapRow {
         if master.trim().is_empty() {
             return Err(format!("hierarchy map row {path} has no master name"));
         }
-        let engine_prefix = engine_prefix.into();
+        let mut engine_prefix = engine_prefix.into();
         if !engine_prefix.is_empty() {
             let derived = path
                 .to_engine_name()
@@ -340,11 +340,23 @@ impl HierarchyMapRow {
                 .map_err(|error| {
                     format!("hierarchy map row {path} has no engine scope: {error}")
                 })?;
-            if engine_prefix != derived {
+            // A row sealed before the engine scope followed the written
+            // instance name spells a segment drawn without its `X` as drawn:
+            // `/amp` as `AMP`. The deck wrote that instance `Xamp` all the
+            // same, so the row names the same occurrence and is read as the
+            // scope the run had.
+            let drawn_spelling = path
+                .segments()
+                .iter()
+                .map(|segment| segment.to_ascii_uppercase())
+                .collect::<Vec<_>>()
+                .join(".");
+            if engine_prefix != derived && engine_prefix != drawn_spelling {
                 return Err(format!(
                     "hierarchy map row {path} carries engine prefix '{engine_prefix}' rather than '{derived}'"
                 ));
             }
+            engine_prefix = derived;
         }
         Ok(Self {
             occurrence: path.to_string(),

@@ -560,8 +560,11 @@ fn broken_references(component: &Component, cellview: &[Component]) -> Vec<Broke
 /// write the instance at all.
 ///
 /// This is the netlister's own naming, not a second account of it: an unnamed
-/// primitive is written `<prefix><id>`, and one whose name starts with the
-/// wrong letter is written with the prefix in front. A cell instance is also
+/// primitive is written `<prefix><id>`, one whose name starts with the wrong
+/// letter is written with the prefix in front, and a controlled source the
+/// deck lowers to a behavioural card is written under that card's name, so
+/// two cards the engine would refuse as one name are judged as one here. A
+/// cell instance is also
 /// addressed by its occurrence path, so a reference that is not a path segment
 /// — an empty one among them — leaves the deck nothing to write it under. And
 /// the written name has to be one the engine's element-head parser reads as a
@@ -574,7 +577,7 @@ fn deck_name(component: &Component) -> Option<String> {
     {
         return None;
     }
-    let name = component.emitted_instance_name();
+    let name = component.written_element_name();
     rspice_core::netlist::lexer::is_xyce_device_name(&name).then_some(name)
 }
 

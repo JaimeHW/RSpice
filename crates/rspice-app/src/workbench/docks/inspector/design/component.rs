@@ -1155,15 +1155,15 @@ pub(super) fn operating_point_rows(
 }
 
 /// The engine's name for `component` at the occurrence being edited: the
-/// card name on the top sheet, the dotted instance path below it. The report
-/// names every device that way, so a bare name below the root would read the
-/// operating point of a different instance of the same master.
+/// element the deck writes on the top sheet, the dotted instance path below
+/// it. The report names every device that way, so a bare name below the root
+/// would read the operating point of a different instance of the same master.
 pub(super) fn device_engine_name(state: &AppState, component: &Component) -> Option<String> {
     state
         .workspace
         .content
         .occurrence_path()
-        .engine_name_for(&component.emitted_instance_name())
+        .engine_name_for(&component.written_element_name())
         .ok()
 }
 
