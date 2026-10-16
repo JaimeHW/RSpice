@@ -1193,9 +1193,10 @@ pub struct PreflightIssue {
     pub remediation: PreflightRemediation,
 }
 
-/// Immutable snapshot rendered by the mockup-specified preflight workflow.
-/// It is intentionally runtime-only: a saved project persists the simulation
-/// plan, while validation evidence must be regenerated for the live revision.
+/// Immutable snapshot the preflight pass retains and a run is queued against.
+/// Its findings are published to the Problems page. It is intentionally
+/// runtime-only: a saved project persists the simulation plan, while
+/// validation evidence must be regenerated for the live revision.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreflightReport {
     pub project_revision: u64,
@@ -1475,7 +1476,7 @@ impl PreflightCurrency {
         matches!(self, Self::Expired | Self::Blocked { .. })
     }
 
-    /// The chip's leading word, in the vocabulary the preflight dialog uses.
+    /// The chip's leading word.
     pub const fn status(self) -> &'static str {
         match self {
             Self::Absent => "not run",
