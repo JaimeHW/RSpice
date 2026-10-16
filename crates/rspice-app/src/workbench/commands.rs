@@ -10,6 +10,7 @@ use crate::workbench::app::sheets as sheet_actions;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::menu_bar::{FileMenuAction, dispatch_file_menu_action};
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_schematic_editor::symbol_editor::commands::SymbolTransform;
 use std::cell::RefCell;
 
 use super::state::{
@@ -22,6 +23,37 @@ pub(crate) mod result_navigation;
 pub(crate) mod vocabulary;
 
 const COMMAND_ZOOM_FACTOR: f64 = 1.2;
+
+/// A test seam on the dispatch boundary. While a recording is open,
+/// [`Command::execute`] notes the command it was handed and returns before
+/// acting, so a test can prove a route reaches the boundary without carrying
+/// the command out.
+#[cfg(test)]
+pub(crate) mod dispatch_probe {
+    use super::Command;
+    use std::cell::RefCell;
+
+    thread_local! {
+        static REACHED: RefCell<Option<Vec<Command>>> = const { RefCell::new(None) };
+    }
+
+    /// Run `route` and return every command it handed to `Command::execute`.
+    pub(crate) fn reached(route: impl FnOnce()) -> Vec<Command> {
+        REACHED.with(|reached| *reached.borrow_mut() = Some(Vec::new()));
+        route();
+        REACHED.with(|reached| reached.borrow_mut().take().unwrap_or_default())
+    }
+
+    pub(super) fn intercept(command: Command) -> bool {
+        REACHED.with(|reached| {
+            reached
+                .borrow_mut()
+                .as_mut()
+                .map(|log| log.push(command))
+                .is_some()
+        })
+    }
+}
 
 fn stop_simulation_enabled(simulation: &crate::state::SimulationState) -> bool {
     simulation.can_request_abort_active_run()
@@ -535,6 +567,14 @@ impl Command {
             Self::RenameSelection => {
                 active_schematic_editor(app)
                     && crate::workbench::app::rename_selection_available(state)
+            }
+            Self::RotateSelection
+            | Self::MirrorSelectionHorizontal
+            | Self::MirrorSelectionVertical
+                if active_symbol_editor(app) =>
+            {
+                !state.active_view_read_only()
+                    && !state.ui.symbol.editor.effective_selection().is_empty()
             }
             Self::RotateSelection
             | Self::MirrorSelectionHorizontal
@@ -1117,6 +1157,10 @@ impl Command {
     }
 
     pub fn execute(self, app: &mut RSpiceApp) {
+        #[cfg(test)]
+        if dispatch_probe::intercept(self) {
+            return;
+        }
         if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(&app.state)
             && self.blocked_by_project_operation()
         {
@@ -1720,6 +1764,15 @@ impl Command {
             },
             Self::Place(ComponentType::Port) => Self::PlacePin.execute(app),
             Self::Place(kind) => set_tool(app, Tool::Place(kind)),
+            Self::RotateSelection if active_symbol_editor(app) => {
+                app.transform_selected_symbol_item(SymbolTransform::Rotate);
+            }
+            Self::MirrorSelectionHorizontal if active_symbol_editor(app) => {
+                app.transform_selected_symbol_item(SymbolTransform::MirrorHorizontal);
+            }
+            Self::MirrorSelectionVertical if active_symbol_editor(app) => {
+                app.transform_selected_symbol_item(SymbolTransform::MirrorVertical);
+            }
             Self::RotateSelection => {
                 let symbol_context = schematic_symbol_context(&app.state);
                 crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
@@ -1801,7 +1854,14 @@ impl Command {
                 }
             }
             Self::Cancel => {
-                if app.state.workbench.workspace == Workspace::Design
+                if active_symbol_editor(app) {
+                    // The symbol canvas's one interaction in flight is an
+                    // open polyline; Escape keeps what has been drawn.
+                    app.finish_pending_symbol_polyline();
+                    rspice_schematic_editor::symbol_editor::commands::finish_cancel(
+                        &mut app.state.ui.symbol.editor,
+                    );
+                } else if app.state.workbench.workspace == Workspace::Design
                     && app.state.workbench.inline_edit.session().is_some()
                 {
                     app.state.workbench.inline_edit.end();

@@ -76,7 +76,10 @@ impl RSpiceApp {
         apply_edit_request(&mut self.state, request);
     }
 
-    pub(super) fn transform_selected_symbol_item(&mut self, transform: SymbolTransform) {
+    pub(in crate::workbench) fn transform_selected_symbol_item(
+        &mut self,
+        transform: SymbolTransform,
+    ) {
         if self.state.ui.symbol.editor.effective_selection().is_empty()
             || self.state.deny_read_only_edit()
         {
@@ -96,8 +99,8 @@ impl RSpiceApp {
         apply_edit_request(&mut self.state, request);
     }
 
-    pub(super) fn finish_pending_symbol_polyline_from_shortcut(&mut self) {
-        // A shortcut can arrive after navigation and before the new canvas has rendered.
+    pub(in crate::workbench) fn finish_pending_symbol_polyline(&mut self) {
+        // A command can arrive after navigation and before the new canvas has rendered.
         let source = self.state.symbol_editor_request_source();
         bind_canvas_source(&mut self.state.ui.symbol.editor, source);
         if self.state.ui.symbol.editor.pending_polyline.len() < 2

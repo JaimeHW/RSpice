@@ -22,9 +22,7 @@ pub(in crate::workbench) mod workspace;
 use egui::{Context, Popup};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::schematic::view::schematic_symbol_context;
 use crate::workbench::commands::vocabulary::Command as ShortcutCommand;
-use rspice_schematic_editor::symbol_editor::commands::SymbolTransform;
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
@@ -120,475 +118,16 @@ impl RSpiceApp {
         }
     }
 
+    /// Carry out the command a key resolved to.
+    ///
+    /// A key has no behaviour of its own once it has been resolved: the
+    /// command runs through [`ShortcutCommand::execute`], the boundary the
+    /// menus, toolbar, context menu and palette call, so a key and a menu row
+    /// cannot drift apart. What is particular to keys — the chord, the
+    /// focus owner, the opening keystroke the palette inherits — is settled in
+    /// [`Self::handle_shortcuts`] before this runs.
     pub(in crate::workbench) fn execute_shortcut_command(&mut self, command: ShortcutCommand) {
-        use crate::state::{ComponentType, Tool};
-
-        if self.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol
-            && self.execute_symbol_shortcut_command(command)
-        {
-            return;
-        }
-
-        if self.state.schematic_edit_read_only() && command_edits_schematic(command) {
-            self.state.deny_read_only_edit();
-            return;
-        }
-        if command.commits_inspector_edit() && !self.state.commit_pending_inspector_edit() {
-            return;
-        }
-
-        match command {
-            ShortcutCommand::ProjectLauncher => self.state.workbench.open_project_launcher(),
-            ShortcutCommand::NewProject => self.execute_project_file_shortcut(
-                crate::workbench::menu_bar::FileMenuAction::NewProject,
-            ),
-            ShortcutCommand::OpenProject => self.execute_project_file_shortcut(
-                crate::workbench::menu_bar::FileMenuAction::OpenProject,
-            ),
-            ShortcutCommand::Save => {
-                self.execute_project_file_shortcut(crate::workbench::menu_bar::FileMenuAction::Save)
-            }
-            ShortcutCommand::SaveAs => self.execute_project_file_shortcut(
-                crate::workbench::menu_bar::FileMenuAction::SaveProjectAs,
-            ),
-            ShortcutCommand::SaveAll => self
-                .execute_project_file_shortcut(crate::workbench::menu_bar::FileMenuAction::SaveAll),
-            ShortcutCommand::CloseActiveDocument => self.execute_project_file_shortcut(
-                crate::workbench::menu_bar::FileMenuAction::CloseActiveDocument,
-            ),
-            ShortcutCommand::CloseProject => self.execute_project_file_shortcut(
-                crate::workbench::menu_bar::FileMenuAction::CloseProject,
-            ),
-            ShortcutCommand::Undo => self.action_edit_undo(),
-            ShortcutCommand::Redo => self.action_edit_redo(),
-            ShortcutCommand::Copy => self.action_edit_copy(),
-            ShortcutCommand::Paste => self.action_edit_paste(),
-            ShortcutCommand::Cut => self.action_edit_cut(),
-            ShortcutCommand::Delete => self.action_edit_delete(),
-            ShortcutCommand::SelectAll => self.action_edit_select_all(),
-            ShortcutCommand::ToggleNavigator => {
-                ShortcutCommand::ToggleNavigator.execute(self);
-            }
-            ShortcutCommand::ToggleConsole => {
-                ShortcutCommand::ToggleConsole.execute(self);
-            }
-            ShortcutCommand::KeyboardShortcuts => {
-                self.state.dialogs.shortcuts_help = true;
-            }
-            ShortcutCommand::SelectTool => {
-                self.state.schematic.arm_tool(Tool::Select);
-            }
-            ShortcutCommand::PlaceWire => {
-                self.state.schematic.arm_tool(Tool::Wire);
-            }
-            ShortcutCommand::PlaceBus => {
-                self.state.schematic.arm_tool(Tool::Bus);
-            }
-            ShortcutCommand::PlaceBusTap => {
-                crate::workbench::app::open_bus_tap(&mut self.state);
-            }
-            ShortcutCommand::PlaceJunction => {
-                self.state.schematic.arm_tool(Tool::Junction);
-            }
-            ShortcutCommand::Place(ComponentType::Ground) => {
-                self.state
-                    .schematic
-                    .arm_tool(Tool::Place(ComponentType::Ground));
-            }
-            ShortcutCommand::Place(ComponentType::VoltageSource) => {
-                self.state
-                    .schematic
-                    .arm_tool(Tool::Place(ComponentType::VoltageSource));
-            }
-            ShortcutCommand::Place(ComponentType::CurrentSource) => {
-                self.state
-                    .schematic
-                    .arm_tool(Tool::Place(ComponentType::CurrentSource));
-            }
-            ShortcutCommand::Place(ComponentType::Capacitor) => {
-                self.state
-                    .schematic
-                    .arm_tool(Tool::Place(ComponentType::Capacitor));
-            }
-            ShortcutCommand::Place(ComponentType::Inductor) => {
-                self.state
-                    .schematic
-                    .arm_tool(Tool::Place(ComponentType::Inductor));
-            }
-            ShortcutCommand::Place(ComponentType::Diode) => {
-                self.state
-                    .schematic
-                    .arm_tool(Tool::Place(ComponentType::Diode));
-            }
-            ShortcutCommand::Place(ComponentType::Nmos) => {
-                self.state
-                    .schematic
-                    .arm_tool(Tool::Place(ComponentType::Nmos));
-            }
-            ShortcutCommand::Place(ComponentType::NpnBjt) => {
-                self.state
-                    .schematic
-                    .arm_tool(Tool::Place(ComponentType::NpnBjt));
-            }
-            ShortcutCommand::PlaceProbe => {
-                self.state.schematic.arm_tool(Tool::Probe);
-            }
-            ShortcutCommand::PlacePin
-            | ShortcutCommand::PlaceText
-            | ShortcutCommand::PlaceShape
-            | ShortcutCommand::MoveSelection
-            | ShortcutCommand::StretchSelection
-            | ShortcutCommand::ArraySelection
-            | ShortcutCommand::ReplaceInstance => command.execute(self),
-            ShortcutCommand::SymbolPinTool
-            | ShortcutCommand::SymbolPolylineTool
-            | ShortcutCommand::SymbolRectangleTool
-            | ShortcutCommand::SymbolCircleTool
-            | ShortcutCommand::SymbolArcTool
-            | ShortcutCommand::SymbolPolygonTool
-            | ShortcutCommand::SymbolTextTool
-            | ShortcutCommand::SymbolRotatePin
-            | ShortcutCommand::SymbolMirrorPin
-            | ShortcutCommand::SymbolSave => {
-                command.execute(self);
-            }
-            ShortcutCommand::Place(ComponentType::Resistor) => {
-                self.state
-                    .schematic
-                    .arm_tool(Tool::Place(ComponentType::Resistor));
-            }
-            ShortcutCommand::RotateSelection => {
-                self.state.schematic.session.editor.preview_rotation = self
-                    .state
-                    .schematic
-                    .session
-                    .editor
-                    .preview_rotation
-                    .rotate_cw();
-                if !self.state.schematic.session.editor.selection.is_empty() {
-                    self.rotate_schematic_selection_with_symbols();
-                }
-            }
-            ShortcutCommand::MirrorSelectionHorizontal => {
-                if !self.state.schematic.session.editor.selection.is_empty() {
-                    self.mirror_schematic_selection_h_with_symbols();
-                }
-            }
-            ShortcutCommand::MirrorSelectionVertical => {
-                if !self.state.schematic.session.editor.selection.is_empty() {
-                    self.mirror_schematic_selection_v_with_symbols();
-                }
-            }
-            ShortcutCommand::ObjectProperties => {
-                crate::workbench::app::open_selected_object_properties(&mut self.state);
-            }
-            ShortcutCommand::Cancel => {
-                if self.state.workbench.workspace == crate::workbench::state::Workspace::Design
-                    && self.state.workbench.inline_edit.session().is_some()
-                {
-                    self.state.workbench.inline_edit.end();
-                } else if self.state.dialogs.move_selection.armed {
-                    crate::workbench::app::cancel_armed_move_selection(&mut self.state);
-                } else if self.state.dialogs.stretch_selection.armed {
-                    crate::workbench::app::cancel_armed_stretch_selection(&mut self.state);
-                } else if self.state.dialogs.array_selection.armed {
-                    crate::workbench::app::cancel_armed_array_selection(&mut self.state);
-                } else if self.state.workbench.drawer.is_some() {
-                    self.state.workbench.close_drawer();
-                } else if self.state.dialogs.object_properties.open {
-                    self.state.dialogs.object_properties.close();
-                } else if self.state.tabbed_property_dialog.open {
-                    self.state.tabbed_property_dialog.attempt_close();
-                } else if self.state.workbench.workspace
-                    == crate::workbench::state::Workspace::Results
-                    && self.state.ui.results.session.cursors.any()
-                {
-                    self.state.ui.results.session.clear_cursors();
-                } else {
-                    self.state.schematic.cancel_interaction_step();
-                }
-            }
-            ShortcutCommand::RunSimulation => {
-                if self.state.workbench.workspace == crate::workbench::state::Workspace::Netlist {
-                    if self.manual_deck_run_block_reason().is_none() {
-                        self.state.request_netlist_manual_deck_run();
-                    }
-                } else {
-                    self.state.workbench.preflight.request_run_and_queue();
-                }
-            }
-            ShortcutCommand::StopSimulation => {
-                if self.state.simulation.can_request_abort_active_run()
-                    && crate::simulation::execution::execution_target_supports_cancellation()
-                    && let Err(error) = self.state.simulation.request_abort_active_run()
-                {
-                    self.state.push_sim_message(ConsoleMessage::warning(error));
-                }
-            }
-            ShortcutCommand::RunChecks => {
-                crate::workbench::menu_bar::run_design_rule_check(&mut self.state);
-            }
-            ShortcutCommand::NextViolation => {
-                crate::schematic::view::violations::cycle_violation(&mut self.state, 1);
-            }
-            ShortcutCommand::PreviousViolation => {
-                crate::schematic::view::violations::cycle_violation(&mut self.state, -1);
-            }
-            ShortcutCommand::NextWorkspace => {
-                self.state.workbench.cycle_workspace(false);
-            }
-            ShortcutCommand::ZoomIn
-            | ShortcutCommand::ZoomOut
-            | ShortcutCommand::ToggleLinkedCursors => command.execute(self),
-            ShortcutCommand::ZoomFit
-            | ShortcutCommand::FitSchematicContent
-            | ShortcutCommand::DrawingSheetLayers => command.execute(self),
-            ShortcutCommand::ZoomOneToOne => {
-                self.state.schematic.session.editor.zoom = 1.0;
-            }
-            ShortcutCommand::PlaceLabel => {
-                self.state.schematic.arm_tool(Tool::Label);
-            }
-            ShortcutCommand::PlaceInstance => {
-                self.state
-                    .workbench
-                    .activate(crate::workbench::state::Workspace::Design);
-                self.state.workbench.navigator_visible = true;
-                self.state.workbench.drawer = Some(crate::workbench::state::Drawer::Navigator);
-                self.state.workbench.design_panel =
-                    crate::workbench::state::DesignPanel::ComponentShelf;
-                self.state.workbench.focus_placement_search = true;
-            }
-            ShortcutCommand::DescendHierarchy => {
-                crate::workbench::app::open_descend_hierarchy_dialog(&mut self.state);
-            }
-            ShortcutCommand::DescendHierarchyDirect => {
-                self.state.open_selected_instance_master();
-            }
-            ShortcutCommand::AscendHierarchy => {
-                self.state.ascend_workspace_level();
-            }
-            ShortcutCommand::FindInDesign => {
-                if crate::workbench::documents::code_workspace::design_hosts_veriloga(
-                    self.state.workbench.workspace,
-                    &self.state.workspace,
-                ) {
-                    // A Verilog-A cell view has no instances or nets to find;
-                    // Ctrl+F searches its source bundle instead.
-                    if let Err(error) =
-                        crate::workbench::documents::code_workspace::open_active_source_search(self)
-                    {
-                        self.state.push_user_message(ConsoleMessage::warning(error));
-                    }
-                } else if self.state.workbench.workspace
-                    == crate::workbench::state::Workspace::Netlist
-                {
-                    self.state.ui.netlist.find.open = true;
-                } else {
-                    self.state
-                        .workbench
-                        .activate(crate::workbench::state::Workspace::Design);
-                    self.state.workbench.navigator_visible = true;
-                    self.state.workbench.focus_navigator_search = true;
-                }
-            }
-            ShortcutCommand::CommandPalette => {
-                self.state.dialogs.command_palette.open();
-            }
-            _ => command.execute(self),
-        }
-    }
-
-    fn execute_project_file_shortcut(
-        &mut self,
-        action: crate::workbench::menu_bar::FileMenuAction,
-    ) {
-        crate::workbench::menu_bar::dispatch_file_menu_action(
-            &mut self.state,
-            action,
-            self.file_workflow_io.as_ref(),
-            self.export_workflow_io.as_ref(),
-        );
-    }
-
-    fn execute_symbol_shortcut_command(&mut self, command: ShortcutCommand) -> bool {
-        use crate::workbench::SymbolTool;
-
-        match command {
-            ShortcutCommand::Undo => {
-                self.action_edit_undo();
-                true
-            }
-            ShortcutCommand::Redo => {
-                self.action_edit_redo();
-                true
-            }
-            ShortcutCommand::Delete => {
-                self.delete_selected_symbol_item(false);
-                true
-            }
-            ShortcutCommand::Cut => {
-                self.delete_selected_symbol_item(true);
-                true
-            }
-            ShortcutCommand::Copy => {
-                self.copy_selected_symbol_shape();
-                true
-            }
-            ShortcutCommand::Paste => {
-                self.paste_symbol_shape();
-                true
-            }
-            ShortcutCommand::SelectAll => {
-                self.select_all_symbol_items();
-                true
-            }
-            ShortcutCommand::SelectTool => {
-                self.activate_symbol_tool(SymbolTool::Select);
-                true
-            }
-            ShortcutCommand::SymbolPinTool => {
-                self.activate_symbol_tool(SymbolTool::PlacePin);
-                true
-            }
-            ShortcutCommand::SymbolPolylineTool => {
-                self.activate_symbol_tool(SymbolTool::Line);
-                true
-            }
-            ShortcutCommand::SymbolRectangleTool => {
-                self.activate_symbol_tool(SymbolTool::Rectangle);
-                true
-            }
-            ShortcutCommand::SymbolCircleTool => {
-                self.activate_symbol_tool(SymbolTool::Circle);
-                true
-            }
-            ShortcutCommand::SymbolArcTool => {
-                self.activate_symbol_tool(SymbolTool::Arc);
-                true
-            }
-            ShortcutCommand::SymbolPolygonTool => {
-                self.activate_symbol_tool(SymbolTool::Polygon);
-                true
-            }
-            ShortcutCommand::SymbolTextTool => {
-                self.activate_symbol_tool(SymbolTool::Text);
-                true
-            }
-            ShortcutCommand::SymbolRotatePin
-            | ShortcutCommand::SymbolMirrorPin
-            | ShortcutCommand::SymbolSave => {
-                command.execute(self);
-                true
-            }
-            ShortcutCommand::RotateSelection => {
-                self.transform_selected_symbol_item(SymbolTransform::Rotate);
-                true
-            }
-            ShortcutCommand::MirrorSelectionHorizontal => {
-                self.transform_selected_symbol_item(SymbolTransform::MirrorHorizontal);
-                true
-            }
-            ShortcutCommand::MirrorSelectionVertical => {
-                self.transform_selected_symbol_item(SymbolTransform::MirrorVertical);
-                true
-            }
-            ShortcutCommand::Cancel => {
-                self.finish_pending_symbol_polyline_from_shortcut();
-                rspice_schematic_editor::symbol_editor::commands::finish_cancel(
-                    &mut self.state.ui.symbol.editor,
-                );
-                true
-            }
-            ShortcutCommand::ZoomIn | ShortcutCommand::ZoomOut => {
-                command.execute(self);
-                true
-            }
-            ShortcutCommand::ZoomFit => {
-                self.state.ui.symbol.editor.needs_fit = true;
-                true
-            }
-            ShortcutCommand::ZoomOneToOne => {
-                self.state.ui.symbol.editor.zoom = 4.0;
-                self.state.ui.symbol.editor.pan = (0.0, 0.0);
-                true
-            }
-            ShortcutCommand::RunChecks => {
-                self.state.run_active_symbol_pin_checks();
-                true
-            }
-            ShortcutCommand::NextViolation => {
-                crate::schematic::view::violations::cycle_violation(&mut self.state, 1);
-                true
-            }
-            ShortcutCommand::PreviousViolation => {
-                crate::schematic::view::violations::cycle_violation(&mut self.state, -1);
-                true
-            }
-            ShortcutCommand::ObjectProperties => {
-                self.state.workbench.inspector_visible = true;
-                self.state.workbench.drawer = Some(crate::workbench::state::Drawer::Inspector);
-                true
-            }
-            ShortcutCommand::Place(_)
-            | ShortcutCommand::PlaceWire
-            | ShortcutCommand::PlaceBus
-            | ShortcutCommand::PlaceBusTap
-            | ShortcutCommand::PlaceJunction
-            | ShortcutCommand::PlaceProbe
-            | ShortcutCommand::PlacePin
-            | ShortcutCommand::PlaceText
-            | ShortcutCommand::PlaceShape
-            | ShortcutCommand::MoveSelection
-            | ShortcutCommand::StretchSelection
-            | ShortcutCommand::ArraySelection
-            | ShortcutCommand::ReplaceInstance
-            | ShortcutCommand::PlaceLabel
-            | ShortcutCommand::PlaceInstance
-            | ShortcutCommand::DescendHierarchy
-            | ShortcutCommand::DescendHierarchyDirect
-            | ShortcutCommand::AscendHierarchy => true,
-            _ => false,
-        }
-    }
-
-    fn rotate_schematic_selection_with_symbols(&mut self) {
-        let symbol_context = schematic_symbol_context(&self.state);
-        crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(&mut self.state);
-        crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
-            &mut self.state,
-            |schematic| {
-                schematic.rotate_selection_resolved(|component| {
-                    symbol_context.terminal_points(component)
-                })
-            },
-        );
-    }
-
-    fn mirror_schematic_selection_h_with_symbols(&mut self) {
-        let symbol_context = schematic_symbol_context(&self.state);
-        crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(&mut self.state);
-        crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
-            &mut self.state,
-            |schematic| {
-                schematic.mirror_selection_h_resolved(|component| {
-                    symbol_context.terminal_points(component)
-                })
-            },
-        );
-    }
-
-    fn mirror_schematic_selection_v_with_symbols(&mut self) {
-        let symbol_context = schematic_symbol_context(&self.state);
-        crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(&mut self.state);
-        crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
-            &mut self.state,
-            |schematic| {
-                schematic.mirror_selection_v_resolved(|component| {
-                    symbol_context.terminal_points(component)
-                })
-            },
-        );
+        command.execute(self);
     }
 
     fn try_project_design_undo(&mut self) -> bool {
@@ -796,19 +335,6 @@ impl RSpiceApp {
             .push_user_message(ConsoleMessage::info("Nothing to redo"));
     }
 
-    pub(in crate::workbench) fn action_edit_copy(&mut self) {
-        if self.state.workbench.workspace == crate::workbench::state::Workspace::Results {
-            if let Some(text) =
-                crate::workbench::documents::result_document::copy_cursor_text(&mut self.state)
-            {
-                self.state.ui.clipboard_text_request = Some(text);
-            }
-            return;
-        }
-        crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(&mut self.state);
-        self.state.copy_active_schematic_selection();
-    }
-
     pub(in crate::workbench) fn action_edit_paste(&mut self) {
         let anchor = self.state.schematic_paste_anchor();
         let message = match self.state.schematic.paste_at_checked(anchor) {
@@ -818,18 +344,6 @@ impl RSpiceApp {
         };
         self.state
             .push_user_message(ConsoleMessage::warning(message));
-    }
-
-    pub(in crate::workbench) fn action_edit_cut(&mut self) {
-        self.state.cut_schematic_selection();
-    }
-
-    pub(in crate::workbench) fn action_edit_delete(&mut self) {
-        self.state.delete_schematic_selection();
-    }
-
-    pub(in crate::workbench) fn action_edit_select_all(&mut self) {
-        self.state.select_all_schematic_objects();
     }
 }
 
@@ -850,13 +364,6 @@ fn project_step_is_newer(
         (Some(_), None) => true,
         (None, _) => false,
     }
-}
-
-/// Commands that mutate the open schematic — refused on read-only views.
-/// Copy and Select All are reads; tools that only inspect (select, probe)
-/// and navigation stay live.
-fn command_edits_schematic(command: ShortcutCommand) -> bool {
-    crate::workbench::commands::command_edits_schematic(command)
 }
 
 #[cfg(test)]
@@ -1044,6 +551,56 @@ mod shortcut_ownership_tests {
 
         app.action_edit_undo();
         assert!(app.state.schematic.document().components.is_empty());
+    }
+
+    fn app_on_a_symbol_view() -> RSpiceApp {
+        use crate::state::{Cell, CellViewRef, Library, SymbolDocument, View, ViewType};
+
+        let mut app = RSpiceApp::test_instance();
+        let mut library = Library::new("dispatch");
+        let mut cell = Cell::new("amp");
+        let mut view = View::new("symbol", ViewType::Symbol);
+        SymbolDocument::default().store_in_view(&mut view).unwrap();
+        cell.add_view(view);
+        library.add_cell(cell);
+        app.state.library_manager.add_library(library);
+        app.state
+            .open_workspace_view(CellViewRef::new("dispatch", "amp", "symbol"));
+        app.state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Design);
+        app
+    }
+
+    /// A key runs the command the menus, toolbar, context menu and palette
+    /// run. The key route used to carry its own copy of some forty commands,
+    /// and the copies drifted: Find, Escape and Zoom 1:1 each did something
+    /// different depending on how they were asked for.
+    #[test]
+    fn every_shortcut_command_reaches_the_one_dispatcher() {
+        use crate::workbench::commands::dispatch_probe;
+        use crate::workbench::commands::vocabulary::COMMAND_REGISTRY;
+
+        let mut schematic = RSpiceApp::test_instance();
+        schematic
+            .state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Design);
+        let mut symbol = app_on_a_symbol_view();
+        for app in [&mut schematic, &mut symbol] {
+            let view = app.state.workspace.content.active_view_type();
+            let mut bypassed = Vec::new();
+            for &command in COMMAND_REGISTRY {
+                let reached = dispatch_probe::reached(|| app.execute_shortcut_command(command));
+                if reached != [command] {
+                    bypassed.push(command);
+                }
+            }
+            assert!(
+                bypassed.is_empty(),
+                "on a {view:?} view these keys bypass Command::execute: {bypassed:?}"
+            );
+        }
     }
 
     #[test]
