@@ -55,7 +55,7 @@ impl DraftValidation {
     /// by not having typed yet.
     pub fn status(&self) -> Result<Option<&str>, &str> {
         match self {
-            Self::Incomplete(message) if message.is_empty() => Ok(None),
+            Self::Incomplete("") => Ok(None),
             Self::Incomplete(message) => Ok(Some(message)),
             Self::Invalid(message) => Err(message.as_str()),
             Self::Valid(_) => Ok(None),
