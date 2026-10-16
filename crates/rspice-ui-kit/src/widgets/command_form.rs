@@ -31,7 +31,7 @@ use crate::tokens::{self, Tokens};
 use super::dialog::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
 use super::form;
 use super::segmented::{SegmentedWidth, segmented};
-use super::select::select;
+use super::select::{SelectOutput, select, select_with_response};
 use super::status_mark::{PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE, Problem, paint_problem_mark};
 
 /// Air between a row's label column and its control.
@@ -55,6 +55,11 @@ const STACKED_LABEL_GAP: f32 = 4.0;
 /// field give the value they show. A read-only value starts there too, so
 /// every value in a form starts at one x.
 const VALUE_INSET: f32 = 8.0;
+/// One further line of a multi-line field, past the first.
+const MULTILINE_LINE_H: f32 = 17.0;
+/// A whole-number field: wide enough for four digits and its drag affordance,
+/// narrow enough to leave the bounds beside it on one line.
+const NUMBER_FIELD_W: f32 = 64.0;
 /// One line of a set of checks or choices, and one entry of a list, under a
 /// fine pointer. These are words beside a mark, not inputs, so they take less
 /// than a field; under a finger every line is a full control tall.
@@ -211,6 +216,34 @@ impl<'u> FormRows<'u> {
         })
     }
 
+    /// One bounded whole number, with what the engine will accept stated
+    /// after it.
+    ///
+    /// The words are the bounds, not a restatement of the control: a port
+    /// that may be left out says so there, where the reader is choosing.
+    pub fn number(
+        &mut self,
+        label: &str,
+        value: &mut usize,
+        range: std::ops::RangeInclusive<usize>,
+        allowed: &str,
+    ) -> Response {
+        self.row(label, |ui, _| {
+            let t = Tokens::get(ui.ctx());
+            let response = ui.add_sized(
+                vec2(NUMBER_FIELD_W, t.metrics.ctl_h),
+                egui::DragValue::new(value).range(range).speed(1.0),
+            );
+            form::name_control(ui, &response, label);
+            ui.label(
+                egui::RichText::new(allowed)
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_dim),
+            );
+            response
+        })
+    }
+
     /// One multi-line mono text field, `lines` controls tall.
     ///
     /// For the one value in this family that is prose rather than a name: a
@@ -225,8 +258,10 @@ impl<'u> FormRows<'u> {
         hint: &str,
         lines: usize,
     ) -> Response {
-        let height = Tokens::get(self.ui.ctx()).metrics.ctl_h * lines.max(2) as f32;
-        self.block(label, height, |ui, width| {
+        let t = Tokens::get(self.ui.ctx());
+        let first_line_h = t.metrics.ctl_h;
+        let height = first_line_h + MULTILINE_LINE_H * lines.saturating_sub(1) as f32;
+        self.block(label, first_line_h, |ui, width| {
             let response = ui.add_sized(
                 vec2(width, height),
                 egui::TextEdit::multiline(value)
@@ -295,6 +330,20 @@ impl<'u> FormRows<'u> {
     ) -> Option<usize> {
         self.row(label, |ui, width| {
             select(ui, id_salt, label, selected, options, width)
+        })
+    }
+
+    /// [`Self::select`] with the control itself, for a form whose only row is
+    /// the dropdown and which therefore has to be able to give it the caret.
+    pub fn select_with_response(
+        &mut self,
+        label: &str,
+        id_salt: &str,
+        selected: &str,
+        options: &[String],
+    ) -> SelectOutput {
+        self.row(label, |ui, width| {
+            select_with_response(ui, id_salt, label, selected, options, width)
         })
     }
 
