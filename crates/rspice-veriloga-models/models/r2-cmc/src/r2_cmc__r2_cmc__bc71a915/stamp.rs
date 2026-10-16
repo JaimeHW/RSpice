@@ -652,4 +652,6 @@ impl Instance {
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
     }
 
+
+    pub const STAMP_PATTERN: rspice_veriloga_runtime::GeneratedVerilogAStampPattern = rspice_veriloga_runtime::GeneratedVerilogAStampPattern { resistive: &[(0, 0), (0, 1), (1, 0), (1, 1)], dynamic: &[], reactive: &[], rhs_rows: &[0, 1] };
 }

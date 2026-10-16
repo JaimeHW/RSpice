@@ -287,6 +287,91 @@ fn every_builtin_evaluates_finitely_at_its_probe_points() {
     );
 }
 
+/// Every entry a model writes lies inside the stamp pattern its descriptor
+/// publishes: the DC stamp inside `resistive`, a transient stamp inside
+/// `resistive` and `dynamic`, the small-signal reactive stamp inside
+/// `reactive`, and every right-hand-side row inside `rhs_rows`. The private
+/// node test reads the pattern as the whole truth about which equations can
+/// reach a node, so an entry outside it would be an equation the test cannot
+/// see.
+#[test]
+fn every_builtin_writes_only_inside_its_stamp_pattern() {
+    use std::collections::BTreeSet;
+    let mut failures = Vec::new();
+    let mut checked = 0usize;
+
+    for model_name in builtins::builtin_names() {
+        let Ok(mut harness) = GoldenHarness::new(model_name, &[]) else {
+            continue;
+        };
+        let pattern = builtins::descriptor(model_name)
+            .expect("a built-in has a descriptor")
+            .stamp_pattern;
+        let size = harness.size();
+        let resistive: BTreeSet<_> = pattern.resistive.iter().copied().collect();
+        let dynamic: BTreeSet<_> = pattern.dynamic.iter().copied().collect();
+        let reactive: BTreeSet<_> = pattern.reactive.iter().copied().collect();
+        let rhs_rows: BTreeSet<_> = pattern.rhs_rows.iter().copied().collect();
+        let mut outside = |label: &str,
+                           index: usize,
+                           dense: &[f64],
+                           allowed: &dyn Fn(usize, usize) -> bool| {
+            for (at, value) in dense.iter().enumerate() {
+                let (row, col) = (at / size, at % size);
+                if *value != 0.0 && !allowed(row, col) {
+                    failures.push(format!(
+                        "{model_name}: point {index}: {label} writes ({row}, {col}) = {value:e} outside its pattern"
+                    ));
+                }
+            }
+        };
+        let mut rhs_outside = Vec::new();
+        for (index, point) in harness.probe_points(PROBE_POINTS).into_iter().enumerate() {
+            let Ok(record) = harness.evaluate(&point) else {
+                continue;
+            };
+            checked += 1;
+            outside("the DC stamp", index, &record.jacobian, &|row, col| {
+                resistive.contains(&(row, col))
+            });
+            outside(
+                "the reactive stamp",
+                index,
+                &record.capacitance,
+                &|row, col| reactive.contains(&(row, col)),
+            );
+            let Ok((jacobian, rhs)) = harness.stamp_dynamic(&point, 1.0e3) else {
+                continue;
+            };
+            outside("a transient stamp", index, &jacobian, &|row, col| {
+                resistive.contains(&(row, col)) || dynamic.contains(&(row, col))
+            });
+            for (row, value) in record.rhs.iter().chain(&rhs).enumerate() {
+                if *value != 0.0 && !rhs_rows.contains(&(row % size)) {
+                    rhs_outside.push(format!(
+                        "{model_name}: point {index}: right-hand side row {} outside its pattern",
+                        row % size
+                    ));
+                }
+            }
+        }
+        failures.extend(rhs_outside);
+    }
+
+    // Evaluation failures are the finiteness test's business; this one only
+    // has to have looked at something.
+    eprintln!(
+        "{checked} bias points over {} built-ins",
+        builtins::builtin_names().len()
+    );
+    assert!(checked > 0, "no built-in evaluated at any probe point");
+    assert!(
+        failures.is_empty(),
+        "a generated built-in wrote outside its stamp pattern:\n{}",
+        failures.join("\n")
+    );
+}
+
 #[test]
 fn stamped_jacobians_match_a_numerical_derivative_of_the_stamped_currents() {
     let mut failures = Vec::new();

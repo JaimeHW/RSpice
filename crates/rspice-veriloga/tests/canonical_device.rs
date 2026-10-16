@@ -7781,6 +7781,14 @@ pub mod runtime {
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct GeneratedVerilogAStampPattern {
+        pub resistive: &'static [(usize, usize)],
+        pub dynamic: &'static [(usize, usize)],
+        pub reactive: &'static [(usize, usize)],
+        pub rhs_rows: &'static [usize],
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum GeneratedParameterOrigin {
         DeclaredScope,
         ModelCard,

@@ -360,6 +360,88 @@ impl MirModel {
             Err(diagnostics)
         }
     }
+
+    /// Whether a DC evaluation of `equation` can write nothing: its
+    /// contribution is a sum of `ddt()` terms, each scaled or divided by a
+    /// factor that holds no `ddt()` of its own, with literal zeros and the
+    /// arms of a conditional read alike.
+    ///
+    /// Read from the source expression rather than from a lowered body, so
+    /// every route that builds from this MIR classifies an equation the same
+    /// way. A term it cannot see through (a variable that holds a `ddt()`,
+    /// say) counts as conduction: the answer may say "conduction" of an
+    /// equation that is not, never the reverse.
+    pub fn equation_stores_only_charge(&self, equation: &MirEquation) -> bool {
+        self.expression_stores_only_charge(equation.expression.id, 0)
+    }
+
+    fn expression_stores_only_charge(&self, id: ExprId, depth: usize) -> bool {
+        const MAX_DEPTH: usize = 64;
+        let Some(expression) = self.expressions.get(usize::from(id)) else {
+            return false;
+        };
+        if depth > MAX_DEPTH || expression.id != id {
+            return false;
+        }
+        let only = |id: ExprId| self.expression_stores_only_charge(id, depth + 1);
+        match &expression.kind {
+            HirExprKind::Number { value, .. } => *value == 0.0,
+            HirExprKind::Call { name, args } if name.eq_ignore_ascii_case("ddt") => {
+                !args.is_empty()
+            }
+            HirExprKind::Unary { op, operand } if op == "-" || op == "+" => only(*operand),
+            HirExprKind::Binary { op, left, right } => match op.as_str() {
+                "+" | "-" => only(*left) && only(*right),
+                "*" => {
+                    (only(*left) && !self.expression_reads_ddt(*right, depth + 1))
+                        || (only(*right) && !self.expression_reads_ddt(*left, depth + 1))
+                }
+                "/" => only(*left) && !self.expression_reads_ddt(*right, depth + 1),
+                _ => false,
+            },
+            HirExprKind::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => only(*then_expr) && only(*else_expr),
+            _ => false,
+        }
+    }
+
+    /// Whether `id` can read a `ddt()`, answering yes for anything it cannot
+    /// see into.
+    fn expression_reads_ddt(&self, id: ExprId, depth: usize) -> bool {
+        const MAX_DEPTH: usize = 64;
+        let Some(expression) = self.expressions.get(usize::from(id)) else {
+            return true;
+        };
+        if depth > MAX_DEPTH || expression.id != id {
+            return true;
+        }
+        let reads = |id: ExprId| self.expression_reads_ddt(id, depth + 1);
+        match &expression.kind {
+            HirExprKind::Number { .. }
+            | HirExprKind::StringLiteral { .. }
+            | HirExprKind::BranchAccess { .. }
+            | HirExprKind::NamedBranchAccess { .. } => false,
+            // A parameter holds no `ddt()`; a variable may.
+            HirExprKind::Identifier { name } => !self
+                .parameters
+                .iter()
+                .any(|parameter| parameter.name.eq_ignore_ascii_case(name)),
+            HirExprKind::Call { name, args } | HirExprKind::SystemFunction { name, args } => {
+                name.eq_ignore_ascii_case("ddt") || args.iter().copied().any(reads)
+            }
+            HirExprKind::Unary { operand, .. } => reads(*operand),
+            HirExprKind::Binary { left, right, .. } => reads(*left) || reads(*right),
+            HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => reads(*condition) || reads(*then_expr) || reads(*else_expr),
+            _ => true,
+        }
+    }
 }
 
 const fn canonical_default_transition() -> f64 {
