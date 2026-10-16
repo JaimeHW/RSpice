@@ -1548,10 +1548,19 @@ fn the_detail_region_states_where_the_batch_stands_only_when_it_is_not_current()
     // what moved rather than only that it is stale.
     state.workspace.content.connectivity.policy.width_mismatch =
         crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+    let reason = {
+        use crate::workbench::app_state::diagnostic_store::listing::RowStanding;
+        let listed = listing(&state);
+        match listed.row(0).expect("the finding keeps its row").standing {
+            RowStanding::Stale(reason) => reason,
+            standing => panic!("the moved inputs stale the batch: {standing:?}"),
+        }
+    };
     let stale = render(&mut state, sized(egui::RawInput::default()));
+    let line = format!("Stale · {reason}");
     assert!(
-        stale.has("Stale · the schematic working set behind"),
-        "a stale finding says what moved: {:?}",
+        stale.exact(&line).is_some(),
+        "a stale finding states its producer's reason as it stands, {line:?}: {:?}",
         stale.texts,
     );
     assert!(

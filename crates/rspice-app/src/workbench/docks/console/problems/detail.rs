@@ -189,23 +189,31 @@ pub(super) fn detail(
 }
 
 /// Where the current finding's batch stands, where that is not simply current,
-/// and what moved. "Stale" alone left the reader to guess what to re-run; a
-/// current finding is the normal case and says nothing, so the line appears
-/// only when it has something to say.
+/// and why. "Stale" alone left the reader to guess what to re-run; a current
+/// finding is the normal case and says nothing, so the line appears only when
+/// it has something to say.
+///
+/// The reason is the producer's own clause and is printed as it stands: the
+/// page appending words of its own to it is how a source reason came to read
+/// "… since this was reported moved".
 fn standing(row: &DiagnosticRow<'_>) -> Option<String> {
     use crate::workbench::app_state::diagnostic_store::listing::RowStanding;
     match &row.standing {
         RowStanding::Current => None,
-        RowStanding::Stale(moved) => Some(format!("Stale · {moved} moved")),
+        RowStanding::Stale(reason) => Some(format!("Stale · {reason}")),
         RowStanding::Unavailable(reason) => Some(format!("Cannot be evaluated · {reason}")),
     }
 }
 
 /// The fix the page can actually apply for this finding, if any.
+///
+/// Only a current finding offers one. A fix is a range of the text it was
+/// computed against, and a finding that no longer describes the text has no
+/// range of the text in front of the reader to offer.
 fn applicable_fix<'a>(
     row: &'a DiagnosticRow<'_>,
 ) -> Option<&'a rspice_app_types::diagnostics::CanonicalQuickFix> {
-    matches!(row.route, Some(DiagnosticRoute::NetlistDiagnostic(_)))
+    (row.current() && matches!(row.route, Some(DiagnosticRoute::NetlistDiagnostic(_))))
         .then(|| row.quick_fixes.first())
         .flatten()
 }
@@ -378,6 +386,16 @@ mod tests {
         assert_eq!(
             applicable_fix(&netlist).map(|fix| fix.label.as_str()),
             Some("Replace with nch"),
+        );
+
+        // Once the text has moved on, the finding's range no longer names
+        // the bytes in front of the reader, so it offers nothing to apply.
+        netlist.standing = RowStanding::Stale(
+            "the source has been edited since this was reported".to_owned(),
+        );
+        assert!(
+            applicable_fix(&netlist).is_none(),
+            "a stale finding offers no fix, whatever route it still carries",
         );
 
         let mut source = row(Some(DiagnosticRoute::CodeDocument {
