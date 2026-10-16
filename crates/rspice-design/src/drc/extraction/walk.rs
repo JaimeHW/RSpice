@@ -39,9 +39,11 @@ pub(super) struct ReachedView<'a> {
     /// The cellview, or `None` for a subject the caller did not name.
     pub(super) reference: Option<CellViewRef>,
     pub(super) document: &'a SchematicDocument,
-    /// The first occurrence path that reached it, which is proof that at least
-    /// one path can name it. The subject's is the root.
-    pub(super) first_path: InstancePath,
+    /// Where the walk follows the plan, the occurrence path the plan is asked
+    /// about this cellview's instances with: the first that reached it, which
+    /// speaks for every occurrence because the plan's master identity is the
+    /// node's key. The subject's is the root.
+    pub(super) plan_path: Option<InstancePath>,
 }
 
 impl ReachedView<'_> {
@@ -107,25 +109,21 @@ pub(super) const MAX_REPORTED_OCCURRENCE_PATHS: usize = 8;
 
 /// The instantiated hierarchy below one checked cellview.
 ///
-/// Where a configuration governs the subject, the walk descends exactly where
-/// the deck does: into the view the configuration materializes at each
+/// Where an execution plan is rooted at the subject, the walk descends exactly
+/// where the deck does: into the view the plan materializes at each
 /// occurrence, and never into a stop view or a view that is written from its
-/// own source. That needs the plan's own occurrence paths, which start at the
-/// plan's root, so it holds only when the subject is that root. Anywhere else —
-/// a check of one cellview from the editor, with no configuration or as a
-/// sub-cell of one — the walk follows the drawing's placed bindings, which is
-/// what that drawing says it instantiates.
+/// own source. A plan decides that whether or not a configuration shaped it —
+/// without one it still maps a placement on a cell's symbol to the cell's
+/// schematic, and the deck is written from the plan either way. That needs the
+/// plan's own occurrence paths, which start at the plan's root, so it holds
+/// only when the subject is that root. Anywhere else — a check of one cellview
+/// from the editor, or of a sub-cell — the walk follows the drawing's placed
+/// bindings, which is what that drawing says it instantiates.
 pub(super) struct InstanceGraph<'a> {
     pub(super) views: Vec<ReachedView<'a>>,
     edges: Vec<InstanceEdge>,
     recursive: Vec<RecursiveInstance>,
     index: HashMap<ViewKey, usize>,
-    /// The paths here are the plan's own, so the plan can be asked what any
-    /// occurrence binds.
-    pub(super) plan_paths: bool,
-    /// A configuration decides what each occurrence binds, and the walk
-    /// follows it.
-    pub(super) follows_plan: bool,
 }
 
 impl<'a> InstanceGraph<'a> {
@@ -142,7 +140,9 @@ impl<'a> InstanceGraph<'a> {
         reference: Option<CellViewRef>,
         hierarchy: &HierarchySource<'a>,
     ) -> Self {
-        let plan_paths = reference.as_ref().is_some_and(|reference| {
+        // The plan's paths start at its root, so it can be asked about this
+        // walk's occurrences only when the subject is that root.
+        let follows_plan = reference.as_ref().is_some_and(|reference| {
             hierarchy
                 .execution_plan()
                 .is_some_and(|plan| plan.root().key().eq_ignore_ascii_case(&reference.key()))
@@ -151,13 +151,11 @@ impl<'a> InstanceGraph<'a> {
             views: vec![ReachedView {
                 reference: reference.clone(),
                 document: subject,
-                first_path: InstancePath::root(),
+                plan_path: follows_plan.then(InstancePath::root),
             }],
             edges: Vec::new(),
             recursive: Vec::new(),
             index: HashMap::new(),
-            plan_paths,
-            follows_plan: plan_paths && hierarchy.has_execution_plan(),
         };
         if let Some(reference) = reference {
             graph.index.insert(
@@ -183,7 +181,7 @@ impl<'a> InstanceGraph<'a> {
         enclosing: &mut Vec<(usize, Option<(u64, String)>)>,
     ) {
         let document = self.views[parent].document;
-        let parent_path = self.views[parent].first_path.clone();
+        let parent_path = self.views[parent].plan_path.clone();
         let mut instances = document
             .components
             .iter()
@@ -200,10 +198,25 @@ impl<'a> InstanceGraph<'a> {
             // the ones the hierarchy resolver stops at and reports; in every
             // case the design surface states the boundary, so the walk does
             // not invent a second finding for it.
-            let Ok(child_path) = parent_path.child(&instance.name) else {
-                continue;
+            //
+            // Following the plan, the plan is asked by occurrence path, and an
+            // occurrence past the limits is one it could not resolve either.
+            // Following the drawing, what an instance binds does not depend on
+            // where its parent occurs, so the segment alone decides whether
+            // the walk goes below it; which occurrences have a path is
+            // `occurrences`' to work out. Taking the first path that reached
+            // the parent instead made a subtree's walk depend on which
+            // occurrence happened to be visited first.
+            let child_path = match &parent_path {
+                Some(parent_path) => match parent_path.child(&instance.name) {
+                    Ok(path) => Some(path),
+                    Err(_) => continue,
+                },
+                None if InstancePath::root().child(&instance.name).is_err() => continue,
+                None => None,
             };
-            let Some((reference, master, key)) = self.target(instance, &child_path, hierarchy)
+            let Some((reference, master, key)) =
+                self.target(instance, child_path.as_ref(), hierarchy)
             else {
                 continue;
             };
@@ -241,7 +254,7 @@ impl<'a> InstanceGraph<'a> {
                     self.views.push(ReachedView {
                         reference: Some(reference),
                         document: master,
-                        first_path: child_path,
+                        plan_path: child_path,
                     });
                     self.index.insert(key, child);
                     enclosing.push((child, Some((instance.id, instance.name.clone()))));
@@ -261,16 +274,19 @@ impl<'a> InstanceGraph<'a> {
     /// The schematic one instance descends into, or `None` where the deck
     /// descends into none.
     ///
+    /// `path` is the instance's occurrence path where the walk follows the
+    /// plan, and `None` where it follows the drawing.
+    ///
     /// A binding that carries its own source or netlist text is a leaf: that
     /// text is what the deck writes, so there is no schematic below it for a
     /// rule to read.
     fn target(
         &self,
         instance: &Component,
-        path: &InstancePath,
+        path: Option<&InstancePath>,
         hierarchy: &HierarchySource<'a>,
     ) -> Option<(CellViewRef, &'a SchematicDocument, ViewKey)> {
-        if self.follows_plan {
+        if let Some(path) = path {
             // An occurrence the plan rejected or never reached is the plan's
             // to report, and the deck emits nothing below it.
             let execution = hierarchy.execution_binding(path)?;
@@ -296,7 +312,7 @@ impl<'a> InstanceGraph<'a> {
             return None;
         }
         let master = hierarchy.schematic_master_for_binding(binding)?;
-        let reference = CellViewRef::new(&binding.library, &binding.cell, &binding.view);
+        let reference = HierarchySource::placed_master(binding);
         let key = ViewKey::Cellview(reference.key().to_ascii_lowercase());
         Some((reference, master, key))
     }
@@ -443,12 +459,10 @@ impl<'a> InstanceGraph<'a> {
             }
         }
 
-        // Every reached cellview was reached by a path that parsed, so it is
-        // named by at least that one however its later occurrences fare.
-        for (index, occurrence) in occurrences.iter_mut().enumerate() {
-            if occurrence.paths.is_empty() {
-                occurrence.paths.push(self.views[index].first_path.clone());
-            }
+        // A cellview whose every occurrence is past the limits keeps no path:
+        // the deck cannot address it either, and there is nowhere to state a
+        // finding inside it.
+        for occurrence in &mut occurrences {
             occurrence.count = occurrence.count.max(1);
         }
         occurrences

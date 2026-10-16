@@ -58,7 +58,6 @@ pub fn extract_checked_design(
         hierarchy,
         &ViewContext {
             plan_path: None,
-            follows_plan: false,
             globals: &globals,
         },
     )
@@ -66,11 +65,9 @@ pub fn extract_checked_design(
 
 /// What one cellview's extraction knows about where it stands.
 struct ViewContext<'g> {
-    /// The cellview's occurrence path in the plan's own terms, when the plan
-    /// can be asked what this cellview's instances bind.
+    /// The cellview's occurrence path in the plan's own terms, when the walk
+    /// follows the plan, which then decides what each instance binds.
     plan_path: Option<&'g InstancePath>,
-    /// A configuration decides what each instance binds.
-    follows_plan: bool,
     /// The deck's global node names, folded.
     globals: &'g HashSet<String>,
 }
@@ -123,10 +120,9 @@ fn component_known(
     let Some(binding) = component.library_cell.as_ref() else {
         return Some(false);
     };
-    if context.follows_plan {
-        // The configuration decides what this occurrence binds, and the plan
-        // is asked: an occurrence it could not materialize is one the deck
-        // cannot write.
+    if context.plan_path.is_some() {
+        // The plan decides what this occurrence binds, and it is asked: an
+        // occurrence it could not materialize is one the deck cannot write.
         return context.occurrence(component).map(|path| {
             hierarchy
                 .execution_binding(&path)
@@ -160,8 +156,8 @@ fn component_known(
 ///
 /// The subject's own cellview is recognized when the caller hands over one of
 /// the very buffers `hierarchy` indexes; a caller holding a copy should name
-/// it with [`run_check_of_cellview`]. Where a configuration governs a subject
-/// that is its root, the walk descends where the deck does.
+/// it with [`run_check_of_cellview`]. Where the hierarchy's execution plan is
+/// rooted at the subject, the walk descends where the deck does.
 pub fn run_check_with_hierarchy(
     schematic: &impl AsRef<SchematicDocument>,
     hierarchy: &HierarchySource<'_>,
@@ -229,9 +225,17 @@ fn check_subject(
         if index != SUBJECT && !read_below {
             break;
         }
+        if occurrences[index].paths.is_empty() {
+            // Every occurrence of it is past the hierarchy's limits, which the
+            // resolver reports at the parent: the deck writes none of it, and
+            // no finding inside it has a place to be stated.
+            if reach == CheckReach::Hierarchy {
+                reports.push(DrcResult::new());
+            }
+            continue;
+        }
         let context = ViewContext {
-            plan_path: graph.plan_paths.then_some(&view.first_path),
-            follows_plan: graph.follows_plan,
+            plan_path: view.plan_path.as_ref(),
             globals: &globals,
         };
         let (components, connectivity) = extract_view(view.document, hierarchy, &context);
@@ -299,6 +303,9 @@ fn check_subject(
 
     if reach == CheckReach::Hierarchy {
         for index in (SUBJECT + 1)..graph.views.len() {
+            if occurrences[index].paths.is_empty() {
+                continue;
+            }
             let reference = graph.views[index]
                 .reference
                 .as_ref()

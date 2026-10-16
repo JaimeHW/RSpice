@@ -276,12 +276,31 @@ impl<'a> HierarchySource<'a> {
 
     /// The exact cell view a placed binding names. A master is a Library/Cell/
     /// View, so the view is never dropped from the lookup: two views of one
-    /// cell are two masters.
+    /// cell are two masters. See [`Self::placed_master`] for the one view a
+    /// placement names that is not a master.
     pub fn schematic_master_for_binding(
         &self,
         binding: &LibraryCellInstance,
     ) -> Option<&'a SchematicDocument> {
-        self.master_view(&binding.library, &binding.cell, &binding.view)
+        let master = Self::placed_master(binding);
+        self.master_view(&master.library, &master.cell, &master.view)
+    }
+
+    /// The cell view a placed binding instantiates.
+    ///
+    /// That is the view it names, except a cell's `symbol`: a symbol is how
+    /// an instance is drawn, not what it contains, so a placement made from
+    /// it instantiates the cell's schematic. The hierarchy resolver binds it
+    /// so, and the deck is written from what the resolver binds; a lookup
+    /// that took `symbol` literally would find no master where the deck has
+    /// one.
+    pub fn placed_master(binding: &LibraryCellInstance) -> CellViewRef {
+        let view = if binding.view.eq_ignore_ascii_case("symbol") {
+            rspice_design_model::cell_view::DEFAULT_SCHEMATIC_VIEW
+        } else {
+            binding.view.as_str()
+        };
+        CellViewRef::new(&binding.library, &binding.cell, view)
     }
 
     /// The view type of one cell view, or the schematic every buffer in this

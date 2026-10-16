@@ -311,6 +311,43 @@ fn a_diamond_is_stated_at_both_of_its_paths() {
 
 /// A cellview that reaches itself has no finite expansion. The walk states it
 /// and stops rather than following the cycle.
+/// Whether a subtree is walked does not depend on which occurrence of its
+/// parent is visited first. Under a reference so long that no child path
+/// fits beside it, `mid` still has a second occurrence, `/M`, through which
+/// its `leaf` is named — whichever of the two the walk meets first.
+#[test]
+fn a_subtree_is_walked_whichever_occurrence_is_visited_first() {
+    let long = format!("X{}", "a".repeat(1_021));
+    let mut mid = SchematicDocument::default();
+    mid.components.push(instance(1, "L", "leaf"));
+    let mut leaf = SchematicDocument::default();
+    leaf.components.push(open_resistor(1, "R1"));
+    let views = buffers([("mid", mid), ("leaf", leaf)]);
+    let hierarchy = HierarchySource::from_buffers(&views);
+
+    for ids in [[1, 2], [2, 1]] {
+        let top = SchematicDocument {
+            components: vec![instance(ids[0], &long, "mid"), instance(ids[1], "M", "mid")],
+            ..SchematicDocument::default()
+        };
+        let result = run_check_with_hierarchy(&top, &hierarchy, connectivity_only());
+        let legs = of_type(&result, DrcViolationType::UnconnectedPin);
+        assert_eq!(
+            placed(&result, DrcViolationType::UnconnectedPin),
+            vec![("/M/L".to_owned(), Some("work/leaf/schematic".to_owned())); 2],
+            "ids {ids:?}: {:?}",
+            result.violations()
+        );
+        // The occurrence with no path is counted, not dropped.
+        assert!(
+            legs.iter().all(|finding| finding
+                .message
+                .contains("2 occurrences; 1 has no instance path within the hierarchy limits")),
+            "{legs:?}"
+        );
+    }
+}
+
 #[test]
 fn a_cycle_is_reported_rather_than_followed() {
     let mut top = SchematicDocument::default();
@@ -809,6 +846,54 @@ fn a_rebound_occurrence_is_checked_with_what_it_instantiates() {
             "/X2/XA work/amp/schematic_v2".to_owned(),
         ]
     );
+}
+
+/// A placement made from a cell's symbol instantiates the cell's schematic.
+/// The plan binds it so with no configuration at all, and the deck is written
+/// from the plan; a walk that followed only a configured plan, and took the
+/// symbol view literally, found no master where the deck has one and called
+/// the instance unknown.
+#[test]
+fn a_symbol_placement_is_walked_as_the_unconfigured_plan_binds_it() {
+    let mut design = Rebindable::new();
+    let mut binding = LibraryCellInstance::new("work", "amp", "symbol");
+    binding.bind_interface(&[]);
+    let on_symbol = Component::new(1, ComponentType::CellInstance, Point::new(0, 0))
+        .with_library_cell(binding)
+        .with_name_value("X1", "amp");
+    let top = SchematicDocument {
+        components: vec![on_symbol],
+        ..SchematicDocument::default()
+    };
+    design.views.insert("work/top/schematic".to_owned(), top);
+    let (resolution, plan) = resolve_hierarchy(
+        HierarchyContext {
+            documents: &Buffers(&design.views),
+            libraries: &design.libraries,
+            project_id: design.project,
+            project_sources: &design.sources,
+            source_files: &ProjectKeysOnly,
+        },
+        CellViewRef::new("work", "top", "schematic"),
+        None,
+    );
+    assert!(resolution.is_valid());
+    assert!(plan.configuration_id().is_none());
+
+    let planned = HierarchySource::from_buffers(&design.views).with_execution_plan(plan);
+    let drawn = HierarchySource::from_buffers(&design.views);
+    for hierarchy in [&planned, &drawn] {
+        let result = design.check(hierarchy);
+        assert!(
+            of_type(&result, DrcViolationType::UnknownComponent).is_empty(),
+            "{:?}",
+            result.violations()
+        );
+        assert_eq!(
+            placed(&result, DrcViolationType::UnconnectedPin),
+            vec![("/X1".to_owned(), Some("work/amp/schematic".to_owned())); 2],
+        );
+    }
 }
 
 /// The reference rules decide by what the deck does with the name, driven
