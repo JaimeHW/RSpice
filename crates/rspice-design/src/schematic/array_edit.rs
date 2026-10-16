@@ -33,6 +33,17 @@ pub struct ArraySelection<'a, J> {
     pub objects: CopySelection<'a>,
     pub junctions: J,
     pub has_partial_objects: bool,
+    /// Whether an object is drawn on the sheet the selection was made on.
+    ///
+    /// A cell view's sheets share one coordinate space, so an object on
+    /// another sheet can stand exactly where a replica will. It neither
+    /// collides with the replicas nor travels with them.
+    pub on_sheet: &'a dyn Fn(u64) -> bool,
+}
+
+/// The predicate of a cell view with one sheet, which owns every object.
+pub fn every_sheet(_: u64) -> bool {
+    true
 }
 
 /// Immutable document and allocation inputs for array validation and preview.
@@ -448,14 +459,20 @@ impl<J: Iterator<Item = Point> + Clone> ArraySource<'_, J> {
             object_ids: captured_object_ids(&capture.objects),
             ..Default::default()
         };
-        let outside_geometry =
-            geometry_for_document(self.document, terminal_points_for, component_bounds_for);
+        let on_sheet = self.selection.on_sheet;
+        let outside_geometry = geometry_for_document(
+            self.document,
+            on_sheet,
+            terminal_points_for,
+            component_bounds_for,
+        );
         let mut collision_index = GeometryBroadPhase::from_geometry(&outside_geometry);
         let radial_documentation = plan.kind == SchematicArrayKind::RadialDocumentation;
         let mut radial_note_positions: Vec<(u64, Point)> = if radial_documentation {
             self.document
                 .design_notes
                 .iter()
+                .filter(|note| on_sheet(note.id))
                 .map(|note| (note.id, note.pos))
                 .collect()
         } else {
@@ -466,6 +483,7 @@ impl<J: Iterator<Item = Point> + Clone> ArraySource<'_, J> {
                 self.document
                     .documentation_shapes
                     .iter()
+                    .filter(|shape| on_sheet(shape.id))
                     .map(|shape| (shape.id, shape.geometry.clone()))
                     .collect()
             } else {
@@ -1731,12 +1749,15 @@ fn resolved_replica_connections(
     Ok(connections)
 }
 
+/// The geometry already drawn on the selection's sheet, which the replicas
+/// may neither overlap nor touch.
 fn geometry_for_document(
     document: &SchematicDocument,
+    on_sheet: &dyn Fn(u64) -> bool,
     terminal_points_for: &mut impl FnMut(&Component) -> Vec<(String, Point)>,
     component_bounds_for: &mut impl FnMut(&Component) -> (i32, i32, i32, i32),
 ) -> ReplicaGeometry {
-    geometry_from_parts(
+    let mut geometry = geometry_from_parts(
         ArrayGeometryInput {
             components: &document.components,
             wires: &document.wires,
@@ -1747,7 +1768,12 @@ fn geometry_for_document(
         },
         terminal_points_for,
         component_bounds_for,
-    )
+    );
+    geometry.component_bounds.retain(|(id, _)| on_sheet(*id));
+    geometry.terminals.retain(|(id, _)| on_sheet(*id));
+    geometry.conductors.retain(|(id, _, _)| on_sheet(*id));
+    geometry.anchors.retain(|(id, _)| on_sheet(*id));
+    geometry
 }
 
 fn geometry_for_additions(

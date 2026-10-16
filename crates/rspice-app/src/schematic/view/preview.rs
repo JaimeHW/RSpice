@@ -331,6 +331,7 @@ fn draw_array_selection_preview(
             .schematic
             .preview_array_selection_resolved(
                 &plan,
+                &|id| super::sheet_visibility::object_is_on_active_sheet(state, id),
                 |component| symbol_context.named_terminal_points(component),
                 |component| symbol_context.component_bounds_tuple(component),
             )

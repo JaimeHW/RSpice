@@ -124,6 +124,7 @@ fn discarded_array_preserves_document_and_allocators() {
         },
         junctions: std::iter::empty(),
         has_partial_objects: false,
+        on_sheet: &every_sheet,
     };
     let plan = SchematicArrayPlan::parse(
         SchematicArrayKind::Linear,

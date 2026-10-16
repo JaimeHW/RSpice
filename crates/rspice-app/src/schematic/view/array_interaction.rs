@@ -109,8 +109,13 @@ fn commit_armed_array_selection(state: &mut AppState, symbol_context: &Schematic
         }
     };
 
+    let sheets = &state.workspace.content.design_management;
+    let catalog = sheets.sheet_catalog(&state.workspace.content.active_schematic_reference().key());
+    let on_sheet =
+        |id| rspice_schematic_editor::view::design_view::object_is_on_active_sheet(catalog, id);
     match state.schematic.array_selection_resolved(
         &plan,
+        &on_sheet,
         |component| symbol_context.named_terminal_points(component),
         |component| symbol_context.component_bounds_tuple(component),
     ) {
@@ -220,6 +225,52 @@ mod tests {
         assert!(state.schematic.undo());
         assert_eq!(state.schematic.document().components.len(), 1);
         assert!(!state.schematic.can_undo());
+    }
+
+    /// Arm Create array on the selected parts and wires with `pitch`, and
+    /// commit it.
+    fn commit_array_of(state: &mut AppState, components: &[u64], wires: &[u64], pitch: Point) {
+        let selection = &mut state.schematic.session.editor.selection;
+        selection.clear();
+        for id in components {
+            selection.select_component(*id);
+        }
+        for id in wires {
+            selection.select_wire(*id);
+        }
+        state.schematic.recalculate_runtime_state();
+        state.schematic.clear_undo_history();
+        crate::workbench::app::open_array_selection_dialog(state);
+        state.dialogs.array_selection.arm();
+        state.dialogs.array_selection.canvas.preview_delta = pitch;
+        state.schematic.arm_tool(Tool::ArraySelection);
+        let symbols = schematic_symbol_context(state);
+        commit_armed_array_selection(state, &symbols);
+    }
+
+    #[test]
+    fn another_sheets_wire_does_not_block_the_array() {
+        use crate::state::Wire;
+        // R1 on the active sheet; on Sheet 2, a wire right where the
+        // first replica will stand.
+        let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[1], &[2]);
+        let drawing = state.schematic.document_mut_for_test();
+        drawing
+            .components
+            .push(Component::new(1, ComponentType::Resistor, Point::origin()));
+        drawing.wires.push(Wire::segment(
+            2,
+            Point::new(-200, 100),
+            Point::new(400, 100),
+        ));
+
+        commit_array_of(&mut state, &[1], &[], Point::new(0, 100));
+
+        assert_eq!(
+            state.dialogs.array_selection.canvas.preview_error, None,
+            "a wire the active sheet does not show refused the array"
+        );
+        assert_eq!(state.schematic.document().components.len(), 8);
     }
 
     #[test]
