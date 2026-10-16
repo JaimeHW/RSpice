@@ -30,8 +30,9 @@
 //! The table is one stop in the keyboard's Tab order, not one per row. Inside
 //! it the arrows, Home, End and the page keys move the current finding, Enter
 //! follows it and Escape lets it go; Tab leaves. Following a finding — by
-//! Enter or by a click — hands the keyboard to the surface it lands on, whose
-//! own shortcuts would otherwise be held off by a table that kept focus.
+//! Enter or by a click — lets go of the keyboard, and a finding followed to
+//! the drawing gives it to the canvas, so the canvas's own keys act on what
+//! the finding named without a second click to reach it.
 
 mod arrange;
 mod detail;
@@ -45,12 +46,14 @@ use std::borrow::Cow;
 use egui::{Key, Modifiers, Ui, Vec2};
 
 use super::{AppState, CONSOLE_FONT_SIZE, CONSOLE_ROW_MIN_HEIGHT, muted};
+use crate::diagnostics::LogAnchor;
 use crate::ui::theme::{self, FontWeight};
 use crate::workbench::app_state::diagnostic_store::listing::{
     DiagnosticListing, DiagnosticRow, EmptyReason, listing,
 };
 use crate::workbench::app_state::diagnostic_store::{DiagnosticLevel, DiagnosticRoute};
 use crate::workbench::app_state::problems_view::ProblemsView;
+use crate::workbench::app_state::session::shortcuts::request_engineering_canvas_focus;
 
 use crate::ui::widgets::Problem;
 use arrange::{Arrangement, Line};
@@ -276,6 +279,9 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) {
     state.problems_view = view;
     state.diagnostics.set_current_finding(selection.finding);
     if let Some(route) = intent.route {
+        if lands_on_canvas(&route) {
+            request_engineering_canvas_focus(ui.ctx());
+        }
         state.diagnostics.request_route(route);
     }
     if let Some(text) = intent.clipboard {
@@ -572,9 +578,25 @@ fn keyboard(
         && route_refusal(state, &route).is_none()
     {
         intent.route = Some(route);
-        // Enter goes where the finding is, and the keyboard goes with it.
+        // Enter goes where the finding is, and the table lets go of the
+        // keyboard; a canvas the route lands on takes it.
         ui.memory_mut(|memory| memory.surrender_focus(id));
     }
+}
+
+/// Whether following `route` lands on a drawing canvas.
+///
+/// Such a finding is followed to act on what it names — delete it, wire it,
+/// rotate it — and the canvas's keys act only while it holds the keyboard, so
+/// the canvas is asked to take it. A run's dataset and the documents the other
+/// routes open are not canvases.
+const fn lands_on_canvas(route: &DiagnosticRoute) -> bool {
+    matches!(
+        route,
+        DiagnosticRoute::Anchor(
+            LogAnchor::Schematic { .. } | LogAnchor::Symbol { .. } | LogAnchor::Simulation { .. }
+        )
+    )
 }
 
 /// Why a row carrying `route` cannot be followed, or `None` if it can.

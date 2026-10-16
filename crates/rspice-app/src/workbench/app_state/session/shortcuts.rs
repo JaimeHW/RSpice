@@ -17,8 +17,10 @@ mod input_snapshot;
 mod platform;
 mod resolver;
 
-pub(in crate::workbench) use canvas_focus::engineering_canvas_has_focus;
 pub(crate) use canvas_focus::report_engineering_canvas_focus;
+pub(in crate::workbench) use canvas_focus::{
+    engineering_canvas_has_focus, request_engineering_canvas_focus,
+};
 pub(in crate::workbench) use category::ShortcutCategory;
 pub(in crate::workbench) use input_snapshot::ShortcutInputSnapshot;
 pub(crate) use platform::runtime_command_platform;

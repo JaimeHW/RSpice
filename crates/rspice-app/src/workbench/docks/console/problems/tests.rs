@@ -58,24 +58,35 @@ fn publish(state: &mut AppState, records: Vec<DiagnosticRecord>) {
 /// messages: "finding 00", "finding 01", and on.
 fn state_with_findings(count: usize) -> AppState {
     let mut state = open_state();
+    publish_findings(&mut state, count);
+    state
+}
+
+fn publish_findings(state: &mut AppState, count: usize) {
     let records = (0..count)
         .map(|index| {
             record(
-                &state,
+                state,
                 &format!("T-{index:02}"),
                 DiagnosticLevel::Warning,
                 &format!("finding {index:02}"),
             )
         })
         .collect();
-    publish(&mut state, records);
-    state
+    publish(state, records);
 }
 
 /// One finding each from two rules of the live drawing: an error on an object
 /// the drawing carries, and a warning on a wire.
 fn state_with_design_findings() -> AppState {
     let mut state = open_state();
+    publish_design_findings(&mut state);
+    state
+}
+
+/// The two findings of [`state_with_design_findings`], on `state`'s own
+/// drawing. Returns the resistor the error is about.
+fn publish_design_findings(state: &mut AppState) -> u64 {
     let resistor = state
         .schematic
         .add_component(ComponentType::Resistor, Point::new(40, 40));
@@ -100,7 +111,7 @@ fn state_with_design_findings() -> AppState {
     state
         .publish_active_design_check_result(result)
         .expect("the fixture publishes a current receipt");
-    state
+    resistor
 }
 
 /// A netlist finding that carries the fix its producer offered.
@@ -1104,6 +1115,89 @@ fn following_a_row_with_a_click_leaves_the_shortcuts_working() {
     harness.focus_table();
     harness.settle(&mut state);
     assert_eq!(next_finding(&harness, &mut state), None);
+}
+
+/// The application root with a project open on the Design workspace and an
+/// empty drawing, as the frame loop finds it.
+fn design_app() -> crate::workbench::RSpiceApp {
+    let mut app = crate::workbench::RSpiceApp::test_instance();
+    app.state.project_lifecycle.authority.open_session();
+    app.state
+        .workbench
+        .activate(crate::workbench::state::Workspace::Design);
+    app.state.schematic = crate::state::SchematicState::default();
+    app.state.schematic.session.editor.needs_fit = false;
+    app.state.schematic.session.editor.needs_drawing_sheet_fit = false;
+    app
+}
+
+/// One frame in the order the frame loop runs it: shortcuts first, then the
+/// dock, then the central canvas, and last the route the dock asked for.
+fn app_frame(
+    ctx: &egui::Context,
+    app: &mut crate::workbench::RSpiceApp,
+    input: egui::RawInput,
+) -> Render {
+    collect(ctx.run_ui(input, |ui| {
+        app.handle_shortcuts(ui.ctx());
+        let whole = ui.max_rect();
+        let (canvas, dock) = whole.split_top_bottom_at_y(whole.top() + 160.0);
+        ui.scope_builder(egui::UiBuilder::new().max_rect(dock), |ui| {
+            problems(ui, &mut app.state);
+        });
+        ui.scope_builder(egui::UiBuilder::new().max_rect(canvas), |ui| {
+            crate::schematic::view::render_schematic_view(ui, &mut app.state, None);
+        });
+        crate::workbench::diagnostic_routes::apply_pending(ui.ctx(), app);
+    }))
+}
+
+/// Following a finding to the drawing gives the canvas the keyboard, so the
+/// canvas's own keys act on what the finding named straight away rather than
+/// after a click on the canvas the reader was just taken to.
+#[test]
+fn following_a_finding_to_the_drawing_gives_the_canvas_the_keyboard() {
+    use crate::workbench::app_state::session::shortcuts::engineering_canvas_has_focus;
+
+    let mut app = design_app();
+    let resistor = publish_design_findings(&mut app.state);
+    let harness = Harness::new();
+    let _ = app_frame(&harness.ctx, &mut app, sized(egui::RawInput::default()));
+    let render = app_frame(&harness.ctx, &mut app, sized(egui::RawInput::default()));
+    let _ = app_frame(
+        &harness.ctx,
+        &mut app,
+        click_on(&render, "R1 has no resistance"),
+    );
+    assert!(
+        app.state
+            .schematic
+            .session
+            .editor
+            .selection
+            .has_component(resistor),
+        "precondition: the route was followed to the resistor",
+    );
+
+    let _ = app_frame(&harness.ctx, &mut app, sized(egui::RawInput::default()));
+    assert!(
+        engineering_canvas_has_focus(
+            &harness.ctx,
+            crate::workbench::state::Workspace::Design,
+            crate::state::ViewType::Schematic,
+        ),
+        "the canvas the finding led to holds the keyboard",
+    );
+    let _ = app_frame(&harness.ctx, &mut app, keyed(egui::Key::Delete));
+    assert!(
+        app.state
+            .schematic
+            .document()
+            .components
+            .iter()
+            .all(|component| component.id != resistor),
+        "Delete acts on the object the finding named",
+    );
 }
 
 /// A row with nowhere to go keeps the reader in the table: the click makes it
