@@ -99,6 +99,9 @@ pub mod expr;
 pub mod identity;
 pub mod io;
 pub mod library;
+/// Which run a log record belongs to, carried onto the engine's worker threads.
+/// A leaf: the analyses that hand work to another thread read down into it.
+pub mod log_scope;
 /// SPICE naming rules: what a name means in a deck, independent of dialect.
 /// A leaf — everything else depends on it, so it depends on nothing.
 pub(crate) mod naming;

@@ -113,6 +113,9 @@ const LAYERS: &[(&str, u32)] = &[
     // and the engine's typed errors carry them, so a leaf is what keeps the
     // error taxonomy from reaching up into the orchestration layer.
     ("identity", 0),
+    // Which run a log record belongs to. It names nothing in the crate: the
+    // analyses that hand work to another thread read down into it.
+    ("log_scope", 0),
     // SPICE RAW waveform files, read and written. A leaf by construction:
     // `raw_export` names nothing in the crate at all and the reader needs only
     // `resource` for its read limits, so a format module never has to move

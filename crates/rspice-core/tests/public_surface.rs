@@ -153,8 +153,15 @@ use rspice_core::analysis::harmonic_balance::{
 // The census was 5,703.
 // `netlist::lexer::is_xyce_device_name` adds one: the design crate's DRC
 // extraction (`drc/extraction.rs`) judges a card's name by the parser's own
-// rule rather than a copy of it. The census is 5,704, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5704;
+// rule rather than a copy of it.
+// The log scope that carries a run onto the engine's worker threads adds nine
+// statements for the simulation service's run log (`rspice-simulation`
+// engine_log.rs): the `log_scope` module; `LogScope` with `new`, which the
+// run's sink is installed through, `owner` and `point`, which every offered
+// record is read through, and `at_point`, which its worker test labels a
+// sample with; `capture` and `enter`; and `LogScopeGuard`, which `enter`
+// returns. The census is 5,713, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5713;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

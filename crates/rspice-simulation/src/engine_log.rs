@@ -1,16 +1,18 @@
-//! Bounded engine log capture scoped to the executing run and thread.
+//! Bounded engine log capture scoped to the executing run.
 //!
-//! Hosts offer core records through their logger and drain a queue or forward
-//! observed lines. Sink guards restore prior capture on exit, including unwind.
-//! Only engine records at Info and above are captured unless the run asks for
-//! Debug; Trace and records from other threads remain outside that run.
+//! Hosts offer engine records through their logger and drain a queue or
+//! forward observed lines. Sink guards restore prior capture on exit, including
+//! unwind. Only engine records at Info and above are captured unless the run
+//! asks for Debug; Trace, and records from threads the run did not hand work
+//! to, remain outside that run.
 
-use std::cell::RefCell;
+use std::any::Any;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rspice_app_types::diagnostics::LogSeverity;
+use rspice_core::log_scope::{self, LogScope, LogScopeGuard};
 
 /// Lines one run's Console log keeps before it starts counting instead.
 ///
@@ -180,9 +182,17 @@ pub fn lock_queue(queue: &Arc<Mutex<EngineLogQueue>>) -> std::sync::MutexGuard<'
     }
 }
 
-thread_local! {
-    /// The run executing on this thread, if one is.
-    static RUN_SINK: RefCell<Option<RunLogSink>> = const { RefCell::new(None) };
+/// The sink of the run executing on this thread, if one is, and the point of
+/// that run the thread is solving.
+///
+/// The sink sits in the engine's log scope rather than a thread-local of this
+/// module's, because the engine hands parts of a run to threads it spawns — a
+/// Monte Carlo worker, a chunk of a parallel sweep — and enters the scope on
+/// each. A thread this module never saw is then still inside the run.
+fn with_current_run<R>(use_run: impl FnOnce(&RunLogSink, Option<&str>) -> R) -> Option<R> {
+    let scope = log_scope::capture()?;
+    let sink = scope.owner().downcast_ref::<RunLogSink>()?;
+    Some(use_run(sink, scope.point()))
 }
 
 /// Runs that asked for verbose and have not finished.
@@ -205,36 +215,36 @@ static STDERR_LEVEL: AtomicUsize = AtomicUsize::new(0);
 #[must_use]
 pub fn install(sink: RunLogSink) -> RunSinkGuard {
     let verbose = sink.verbose;
-    let previous = RUN_SINK
-        .try_with(|cell| cell.borrow_mut().replace(sink))
-        .unwrap_or(None);
+    let sink = Arc::new(sink);
+    let owner: Arc<dyn Any + Send + Sync> = Arc::clone(&sink) as _;
+    let scope = log_scope::enter(Some(LogScope::new(owner)));
     if verbose {
         VERBOSE_RUNS.fetch_add(1, Ordering::SeqCst);
         apply_max_level();
     }
     RunSinkGuard {
-        previous,
+        scope: Some(scope),
+        sink,
         verbose,
-        _thread_bound: std::marker::PhantomData,
     }
 }
 
 /// What removes a run's sink, whatever happens to the run.
+///
+/// Bound to its thread by the scope guard it holds.
 pub struct RunSinkGuard {
-    previous: Option<RunLogSink>,
+    scope: Option<LogScopeGuard>,
+    sink: Arc<RunLogSink>,
     verbose: bool,
-    // Dropping a guard restores thread-local state, so it must stay on its thread.
-    _thread_bound: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 
 impl Drop for RunSinkGuard {
     fn drop(&mut self) {
-        let sink = RUN_SINK
-            .try_with(|cell| std::mem::replace(&mut *cell.borrow_mut(), self.previous.take()))
-            .unwrap_or(None);
-        if let Some(sink) = sink {
-            sink.seal();
-        }
+        // Leave the scope before sealing, so nothing this thread logs from
+        // here on lands after the run's closing row. A worker the run spawned
+        // has been joined by now: the run returned before its guard dropped.
+        drop(self.scope.take());
+        self.sink.seal();
         if self.verbose {
             VERBOSE_RUNS.fetch_sub(1, Ordering::SeqCst);
             apply_max_level();
@@ -290,13 +300,7 @@ pub fn admits(metadata: &log::Metadata<'_>) -> bool {
     let Some(severity) = severity_for_level(metadata.level()) else {
         return false;
     };
-    RUN_SINK
-        .try_with(|cell| {
-            cell.borrow()
-                .as_ref()
-                .is_some_and(|sink| sink.admits(severity))
-        })
-        .unwrap_or(false)
+    with_current_run(|sink, _| sink.admits(severity)).unwrap_or(false)
 }
 
 /// Offer one record to this thread's run, if it has one that wants it.
@@ -307,17 +311,17 @@ pub fn offer(record: &log::Record<'_>) {
     let Some(severity) = severity_for_level(record.level()) else {
         return;
     };
-    let _ = RUN_SINK.try_with(|cell| {
-        let sink = cell.borrow();
-        let Some(sink) = sink.as_ref() else {
-            return;
-        };
+    with_current_run(|sink, point| {
         if !sink.admits(severity) {
             return;
         }
+        let message = match point {
+            Some(point) => format!("{point}: {}", record.args()),
+            None => record.args().to_string(),
+        };
         sink.deliver(EngineLogLine {
             severity,
-            message: record.args().to_string(),
+            message,
             origin: EngineLogOrigin::Engine,
         });
     });
@@ -659,6 +663,33 @@ mod tests {
         .join()
         .expect("the offering thread finishes");
         assert!(lock_queue(&held).drain().is_empty());
+    }
+
+    /// A worker the engine hands a sample to logs into the run that spawned
+    /// it, and its lines say which sample they came from.
+    #[test]
+    fn a_line_from_a_worker_inside_the_run_is_captured_with_its_point() {
+        let queue = Arc::new(Mutex::new(EngineLogQueue::default()));
+        {
+            let _guard = install(RunLogSink::queued(Arc::clone(&queue), false));
+            let captured = log_scope::capture();
+            std::thread::scope(|threads| {
+                threads.spawn(|| {
+                    let _run = log_scope::enter(captured.clone());
+                    let _sample =
+                        log_scope::enter(log_scope::capture().map(|run| run.at_point("sample 4")));
+                    offer_core(log::Level::Warn, "vds clamped to 5 V");
+                });
+            });
+            offer_core(log::Level::Info, "the run's own line");
+        }
+        assert_eq!(
+            lock_queue(&queue).drain(),
+            vec![
+                core_record(log::Level::Warn, "sample 4: vds clamped to 5 V"),
+                core_record(log::Level::Info, "the run's own line"),
+            ]
+        );
     }
 
     #[test]

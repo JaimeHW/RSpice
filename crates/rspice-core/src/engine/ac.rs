@@ -3235,10 +3235,13 @@ impl Engine {
                     .enumerate()
                     .map(|(chunk_index, chunk)| (circuit.clone(), chunk_index * chunk_len, chunk))
                     .collect();
+                // A chunk's lines belong to the run, on whichever pool thread.
+                let log_scope = crate::log_scope::capture();
                 let chunk_results: Result<Vec<Vec<AcResult>>, SimulationError> = self
                     .install_parallel(|| {
                         work.into_par_iter()
                             .map(|(mut worker_circuit, chunk_start, chunk)| {
+                                let _log_scope = crate::log_scope::enter(log_scope.clone());
                                 let mut workspace = ComplexMatrix::from_real_structure(&matrix);
                                 chunk
                                     .iter()

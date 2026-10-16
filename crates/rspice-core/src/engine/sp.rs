@@ -346,9 +346,12 @@ impl Engine {
                         )
                     })
                     .collect::<Vec<_>>();
+                // A chunk's lines belong to the run, on whichever pool thread.
+                let log_scope = crate::log_scope::capture();
                 let chunks = engine.install_parallel(|| {
                     work.into_par_iter()
                         .map(|(mut circuit, mut workspace, mut noise, start, chunk)| {
+                            let _log_scope = crate::log_scope::enter(log_scope.clone());
                             chunk
                                 .iter()
                                 .enumerate()
