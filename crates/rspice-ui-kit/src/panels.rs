@@ -131,7 +131,8 @@ pub enum WorkbenchIcon {
 /// needed the same warning triangle: a mini that cannot draw the engine's
 /// refusal has to say so with the mark the row beside it uses.
 pub use crate::widgets::{
-    Problem, StatusMark, paint_problem_mark, paint_status_mark, problem_line,
+    PROBLEM_MARK_ADVANCE, PROBLEM_MARK_GAP, PROBLEM_MARK_SIDE, Problem, StatusMark,
+    paint_problem_mark, paint_status_mark, problem_line,
 };
 
 /// The neutral text ramp a value is painted in.

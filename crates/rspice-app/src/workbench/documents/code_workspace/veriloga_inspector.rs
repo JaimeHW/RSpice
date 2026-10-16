@@ -65,49 +65,49 @@ pub(crate) fn veriloga_diagnostics(
         })
 }
 
-/// One phrase and tone for where the source stands with the compiler.
+/// One phrase for where the source stands with the compiler, and whether the
+/// reader has to act on it.
 ///
 /// The editor's status strip and the inspector's status row both read this,
 /// so the two can never disagree about whether the visible text compiled.
-/// A pass carrying advisories is still a pass: the words say so, and the
-/// tone says Diagnostics still has something to read.
+/// Compiling and edited-since-the-last-compile are where the source is, not
+/// something wrong with it, so they carry no mark; a failure, ports that
+/// disagree with the schematic, and advisories left in Diagnostics do.
 pub(crate) fn veriloga_compile_status(
     state: &VerilogAWorkbenchState,
     project_id: ProjectId,
     selected: &SelectedVerilogASource,
     messages: MessageCatalog,
-    t: &Tokens,
-) -> (String, Color32) {
+) -> Option<(String, Option<Problem>)> {
     if state.pending.is_some() {
-        return (
-            messages.text(MessageId::VerilogAStatusCompiling),
-            t.color.info,
-        );
+        return Some((messages.text(MessageId::VerilogAStatusCompiling), None));
     }
     let failed = state
         .last_failure_token
         .is_some_and(|token| selected.matches_token(project_id, token));
     match veriloga_receipt(state, project_id, selected) {
-        None if failed => (messages.text(MessageId::VerilogAStatusFailed), t.color.err),
-        None => (
-            messages.text(MessageId::VerilogAStatusModified),
-            t.color.warn,
-        ),
+        None if failed => Some((
+            messages.text(MessageId::VerilogAStatusFailed),
+            Some(Problem::Failure),
+        )),
+        None => Some((messages.text(MessageId::VerilogAStatusModified), None)),
         // The module compiled, but it is not the cell its schematic defines.
         Some(VerilogACompileReceipt {
             interface: Some(VerilogAInterfaceOutcome::SchematicMismatch { .. }),
             ..
-        }) => (
+        }) => Some((
             messages.text(MessageId::VerilogAStatusPortsDiffer),
-            t.color.err,
-        ),
+            Some(Problem::Failure),
+        )),
         Some(receipt) => {
             let summary = receipt.diagnostics.summary();
             match summary.total().saturating_sub(summary.errors) {
-                0 => (messages.text(MessageId::VerilogAStatusPass), t.color.ok),
+                // A clean compile is the state the reader expects. Saying so
+                // is a success report, so the strip says nothing instead.
+                0 => None,
                 advisories => {
                     let count = advisories.to_string();
-                    (
+                    Some((
                         messages.format(
                             if advisories == 1 {
                                 MessageId::VerilogAStatusPassAdvisorySingular
@@ -116,8 +116,8 @@ pub(crate) fn veriloga_compile_status(
                             },
                             &[("count", &count)],
                         ),
-                        t.color.warn,
-                    )
+                        Some(Problem::Warning),
+                    ))
                 }
             }
         }

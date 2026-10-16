@@ -701,16 +701,29 @@ fn netlist_diagnostic_locations_are_one_based_and_exact() {
     assert_eq!(diagnostic_location(&diagnostic), "line 128 · column 9");
 }
 
+/// A deck that matches the schematic says nothing at all: the three states
+/// left are the ones a designer has to act on.
 #[test]
-fn generated_provenance_never_claims_source_mapping_without_evidence() {
+fn generated_provenance_speaks_only_when_the_deck_is_not_the_schematic() {
     let mut state = AppState::default();
     state.ui.netlist.generated_source = "generated\n.end\n".to_owned();
     let input = crate::product::ContentDigest::from_bytes([0x31; 32]);
     state.ui.netlist.generated_input_digest = Some(input);
     state.ui.netlist.current_generation_input_digest = Some(input);
+    assert_eq!(generated_state(&state), None);
 
-    assert_eq!(generated_state(&state), "generated · current");
-    assert!(!generated_state(&state).contains("source mapped"));
+    state.ui.netlist.current_generation_input_digest =
+        Some(crate::product::ContentDigest::from_bytes([0x32; 32]));
+    assert_eq!(
+        generated_state(&state),
+        Some(("Older than the schematic", Problem::Warning))
+    );
+
+    state.ui.netlist.generated_source.clear();
+    assert_eq!(
+        generated_state(&state),
+        Some(("Not generated yet", Problem::Warning))
+    );
 }
 
 #[test]
@@ -731,21 +744,17 @@ fn owned_provenance_requires_exact_saved_and_validated_bytes() {
         },
     );
 
-    assert_eq!(
-        owned_source_state(&state, digest),
-        "externally synchronized · validated"
-    );
+    // Saved and validated is the ordinary state, and so is a dirty project —
+    // the document tab's marker owns that one.
+    assert_eq!(owned_source_state(&state, digest), None);
     state.workspace.content.netlist_source_dirty = true;
-    assert_eq!(
-        owned_source_state(&state, digest),
-        "externally synchronized · validated · project modified"
-    );
+    assert_eq!(owned_source_state(&state, digest), None);
+
+    // Edited since the validation receipt was taken: the receipt no longer
+    // describes these bytes, and the panel says so.
     state.simulation.source.netlist_content.push_str("* edit\n");
     let edited = crate::state::content_digest(&state.simulation.source.netlist_content);
-    assert_eq!(
-        owned_source_state(&state, edited),
-        "modified · validation required"
-    );
+    assert_eq!(owned_source_state(&state, edited), Some("Not checked yet"));
 }
 
 #[test]
@@ -882,8 +891,10 @@ fn the_result_inspector_routes_through_the_workspace_memos() {
 /// nothing about success: no colored status text, no status dots, no success
 /// or neutral marks.
 ///
-/// `veriloga_compile_status` is left out of the scan: it is the editor strip's
-/// compile status, which the strip paints, not the inspector.
+/// The editor strip is scanned with them. `veriloga_compile_status` used to be
+/// carved out of this scan because the strip painted its five tones and an
+/// always-on dot; it now returns neutral text and an `Option<Problem>`, so the
+/// carve-out is gone and the surface that paints it is in the list.
 #[test]
 fn the_design_and_veriloga_inspectors_paint_no_status_color() {
     const BANNED: &[&str] = &[
@@ -894,30 +905,6 @@ fn the_design_and_veriloga_inspectors_paint_no_status_color() {
         "t.color.ok",
         "t.color.info",
     ];
-    let without_fn = |source: String, name: &str| {
-        let lines = source.lines().collect::<Vec<_>>();
-        let start = lines
-            .iter()
-            .position(|line| line.contains(&format!("fn {name}(")))
-            .unwrap_or_else(|| panic!("the scanned source no longer declares {name}"));
-        let end = start
-            + lines[start..]
-                .iter()
-                .position(|line| *line == "}")
-                .expect("the function closes at column 0");
-        lines
-            .iter()
-            .enumerate()
-            .map(|(index, line)| {
-                if (start..=end).contains(&index) {
-                    ""
-                } else {
-                    line
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
     let files = [
         (
             "design.rs",
@@ -933,12 +920,13 @@ fn the_design_and_veriloga_inspectors_paint_no_status_color() {
         ),
         (
             "veriloga_inspector.rs",
-            without_fn(
-                crate::source_guard::without_test_items(include_str!(
-                    "../../documents/code_workspace/veriloga_inspector.rs"
-                )),
-                "veriloga_compile_status",
-            ),
+            crate::source_guard::without_test_items(include_str!(
+                "../../documents/code_workspace/veriloga_inspector.rs"
+            )),
+        ),
+        (
+            "surfaces/veriloga.rs",
+            crate::source_guard::without_test_items(include_str!("../../surfaces/veriloga.rs")),
         ),
     ];
     for (file, source) in files {

@@ -373,8 +373,9 @@ fn preview_toolbar_text(ui: &Ui, toolbar: Rect, facts: &DeckFacts, t: &Tokens) {
     let state_font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let state_left = facts
         .publication
-        .map_or(toolbar.right() - 11.0, |publication| {
+        .and_then(|publication| {
             let (label, problem) = publication_presentation(publication);
+            let label = label?;
             let mut left = ui
                 .painter()
                 .text(
@@ -397,8 +398,9 @@ fn preview_toolbar_text(ui: &Ui, toolbar: Rect, facts: &DeckFacts, t: &Tokens) {
                 );
                 left -= PUBLICATION_MARK_SIDE;
             }
-            left
-        });
+            Some(left)
+        })
+        .unwrap_or(toolbar.right() - 11.0);
     let name_font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let name_left = title_rect.right() + 9.0;
     let name_width = (state_left - 9.0 - name_left).max(0.0);
@@ -528,7 +530,7 @@ fn card_tone(t: &Tokens, line: usize, card: &str) -> Color32 {
 /// outside this project is the one the reader has to act on.
 const fn publication_presentation(
     publication: OwnedNetlistPublicationState,
-) -> (&'static str, Option<Problem>) {
+) -> (Option<&'static str>, Option<Problem>) {
     (
         publication.label(),
         if publication.external_change_pending {
@@ -656,25 +658,25 @@ mod tests {
             name: "design-netlist-first-1440x900",
             size: Vec2::new(1440.0, 900.0),
             truncated: false,
-            fingerprint: "1a20afc4a55fcb7d05d060fdd92dfb4768929332533c4c57694af873541e4ff6",
+            fingerprint: "7d8ac3db59a53544383b28a0974fdffcd3d68d53184ef5f6adf3e7503efe1fca",
         },
         NetlistFirstBaseline {
             name: "design-netlist-first-820x1180",
             size: Vec2::new(820.0, 1180.0),
             truncated: false,
-            fingerprint: "0014dc16fb685b5d33f3f2f3f392ec33b231cb6e87e44daf025100a3967ddb81",
+            fingerprint: "989420cf358d04b739eb9326b97dd9c8729ee929a42a26c5503c78b4ec74032f",
         },
         NetlistFirstBaseline {
             name: "design-netlist-first-390x844",
             size: Vec2::new(390.0, 844.0),
             truncated: false,
-            fingerprint: "87a3f2cda5a0becbd2e4e6ad09d92be538d51ce40103896b88345b29d1e2dbff",
+            fingerprint: "1ff94d3bbafd3324f9e05a3677a616bfb59d8bdefdbb23afea680344db35e2b0",
         },
         NetlistFirstBaseline {
             name: "design-netlist-first-1440x900-truncated",
             size: Vec2::new(1440.0, 900.0),
             truncated: true,
-            fingerprint: "d697fa259294553b9e56f4556f8d6917cd23105a57c5c164f9955a9d541faf13",
+            fingerprint: "41129546344f1bc3b4af15f838579f5335cd350afc536cc6360a33b5614fd45f",
         },
     ];
 

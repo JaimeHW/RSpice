@@ -270,7 +270,16 @@ pub fn paint_scene(
                         TextFont::Sans | TextFont::SansSemibold => {
                             FontId::proportional(text.height_um as f32 * scale)
                         }
-                        TextFont::Monospace => FontId::monospace(text.height_um as f32 * scale),
+                        // The viewer lays out from egui's own families, which
+                        // carry one weight each, so a weighted class resolves
+                        // to the same face as its regular sibling -- as sans
+                        // semibold above already does. Rendering the contract's
+                        // weights apart needs weighted families installed here
+                        // first, which is a change to the viewer's typography
+                        // rather than to what the snapshot carries.
+                        TextFont::Monospace | TextFont::MonospaceMedium => {
+                            FontId::monospace(text.height_um as f32 * scale)
+                        }
                     };
                     let anchor = match text.anchor {
                         TextAnchor::Start => Align2::LEFT_BOTTOM,

@@ -75,11 +75,17 @@ impl Problem {
 }
 
 /// Side of a problem mark set in front of a line of text.
-pub(crate) const PROBLEM_MARK_SIDE: f32 = 11.0;
+///
+/// Exported because a surface that paints its own marked line — a toolbar
+/// status, a run strip, a header chip — has to match the kit's rows to the
+/// pixel, and two dozen files were restating this number by hand.
+pub const PROBLEM_MARK_SIDE: f32 = 11.0;
 /// From the mark's left edge to where its text starts: the mark and the gap
 /// after it. Every row that sets a mark before its value uses this advance, so
 /// a marked line and an unmarked one beside it differ by exactly this much.
-pub(crate) const PROBLEM_MARK_ADVANCE: f32 = 17.0;
+pub const PROBLEM_MARK_ADVANCE: f32 = 17.0;
+/// The gap alone, for a mark set *after* its text rather than before it.
+pub const PROBLEM_MARK_GAP: f32 = PROBLEM_MARK_ADVANCE - PROBLEM_MARK_SIDE;
 
 /// Paint one mark, sized to the shorter side of `rect`.
 pub fn paint_status_mark(painter: &egui::Painter, rect: Rect, mark: StatusMark, color: Color32) {

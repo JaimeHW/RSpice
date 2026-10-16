@@ -483,11 +483,19 @@ impl DialogLayout {
                         available
                     }
                 } else {
-                    measured_height
-                        .filter(|_| !spec.fill_height)
-                        .unwrap_or(spec.max_height)
-                        .min(spec.max_height)
-                        .min((screen.height() - vertical_inset).max(1.0))
+                    let viewport = (screen.height() - vertical_inset).max(1.0);
+                    if spec.fill_height {
+                        spec.max_height.min(viewport)
+                    } else {
+                        // `max_height` is a desktop ceiling: how tall this
+                        // surface may grow inside a desktop window. At narrow
+                        // the viewport is the only ceiling that means
+                        // anything, and holding the desktop number there made
+                        // a content-height route scroll its last row inside a
+                        // portrait that had room for all of it.
+                        let ceiling = if narrow { viewport } else { spec.max_height };
+                        measured_height.unwrap_or(ceiling).min(ceiling)
+                    }
                 },
             );
             if spec.top_anchored {
