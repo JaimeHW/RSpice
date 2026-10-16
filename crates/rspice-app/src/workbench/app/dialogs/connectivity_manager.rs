@@ -25,8 +25,8 @@ use crate::ui::widgets::{
 use crate::workbench::design_system::section_header;
 use rspice_design::connectivity::summary::{DesignNet, NetClass, projection_nets};
 use rspice_design::drc::{
-    DrcConfig, DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
-    run_check_with_hierarchy,
+    CheckReach, DrcConfig, DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
+    run_check_of_cellview,
 };
 use rspice_design::hierarchy::HierarchySource;
 
@@ -288,13 +288,24 @@ fn preview_projection(
     state: &AppState,
     policy: &ConnectivityPolicy,
 ) -> Result<std::sync::Arc<DesignProjection>, String> {
+    projection_with_open_view(state, policy, &state.schematic)
+}
+
+/// The design as `policy` resolves it with `open_view` standing for the open
+/// view's buffer, which is how a repair candidate is projected exactly as the
+/// design it would replace.
+fn projection_with_open_view(
+    state: &AppState,
+    policy: &ConnectivityPolicy,
+    open_view: &SchematicState,
+) -> Result<std::sync::Arc<DesignProjection>, String> {
     if state.workspace.content.connectivity.policy == *policy {
         return state
             .workspace
             .design_projection(
                 &state.library_manager,
                 &state.workspace.content.active_view,
-                &state.schematic,
+                open_view,
             )
             .map_err(|error| error.to_string());
     }
@@ -304,9 +315,32 @@ fn preview_projection(
         .design_projection(
             &state.library_manager,
             &state.workspace.content.active_view,
-            &state.schematic,
+            open_view,
         )
         .map_err(|error| error.to_string())
+}
+
+/// The design check the manager states and validates repairs against: the
+/// open view as the projection materialized it, checked as the cellview it
+/// is.
+///
+/// The cellview is named rather than recognized from the buffer, so a
+/// configured root is walked as its configuration runs it whichever document
+/// holds the drawing — the projection's own buffer or a repair candidate's.
+fn check_projected_open_view(
+    state: &AppState,
+    projection: &DesignProjection,
+) -> Result<DrcResult, String> {
+    let subject = projected_open_view(state, projection)?;
+    let hierarchy =
+        HierarchySource::from_design_projection(state.library_manager.catalog(), projection);
+    Ok(run_check_of_cellview(
+        subject,
+        &state.workspace.content.active_view,
+        &hierarchy,
+        connectivity_drc_config(state),
+        CheckReach::Hierarchy,
+    ))
 }
 
 /// The open view exactly as the projection materialized it: multi-sheet pages
@@ -333,14 +367,12 @@ fn build_report(
 ) -> Result<ConnectivityReport, String> {
     let projection = preview_projection(state, policy)?;
     let subject = projected_open_view(state, &projection)?;
-    let hierarchy =
-        HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
     let design_nets = projection_nets(
         state.library_manager.catalog(),
         &projection,
         &state.workspace.content.active_view.key(),
     );
-    let drc = run_check_with_hierarchy(subject, &hierarchy, connectivity_drc_config(state));
+    let drc = check_projected_open_view(state, &projection)?;
     // Typed-bus geometry, the bus rows, and every reveal anchor below stay on
     // the document the canvas paints: a materialized page carries namespaced
     // coordinates that would scroll the editor off the design.
@@ -1305,7 +1337,7 @@ impl RSpiceApp {
         }
         if !selected.is_empty() {
             candidate.recalculate_runtime_state();
-            validate_repair_candidate(&self.state, &candidate, &dialog.report.drc)?;
+            validate_repair_candidate(&self.state, &candidate, &contract_candidate.policy)?;
             let after = SchematicSnapshot::capture(candidate.document());
             let changed = self.state.schematic.with_undo(
                 "apply reviewed connectivity repairs",
@@ -1477,25 +1509,25 @@ fn apply_repair_to_candidate(
     }
 }
 
+/// Refuse a candidate whose design check is worse than the design's.
+///
+/// The two are checked exactly alike: each projected under the policy the
+/// repairs are applied with, and each checked as the open view's cellview.
+/// Checking the candidate's editor buffer instead walked the placed bindings
+/// where the baseline walked the configuration, so on a configured root a
+/// master the configuration does not run was judged in one and not the other,
+/// and every repair was refused for that master's findings.
 fn validate_repair_candidate(
     state: &AppState,
     candidate: &SchematicState,
-    baseline_drc: &DrcResult,
+    policy: &ConnectivityPolicy,
 ) -> Result<(), String> {
-    let projection = state
-        .workspace
-        .design_projection(
-            &state.library_manager,
-            &state.workspace.content.active_view,
-            &state.schematic,
-        )
-        .map_err(|error| error.to_string())?;
-    let hierarchy =
-        HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
-    let candidate_drc =
-        run_check_with_hierarchy(candidate, &hierarchy, connectivity_drc_config(state));
-    let before = severe_drc_counts(baseline_drc);
-    let after = severe_drc_counts(&candidate_drc);
+    let check = |open_view: &SchematicState| -> Result<DrcResult, String> {
+        let projection = projection_with_open_view(state, policy, open_view)?;
+        check_projected_open_view(state, &projection)
+    };
+    let before = severe_drc_counts(&check(&state.schematic)?);
+    let after = severe_drc_counts(&check(candidate)?);
     for (kind, count) in after {
         if count > before.get(&kind).copied().unwrap_or_default() {
             return Err(format!(
@@ -2457,6 +2489,150 @@ mod tests {
             2,
             "both open legs of the view's own resistor are offered"
         );
+    }
+
+    /// A repair is judged by the design check the report states. On a root
+    /// whose configuration runs `amp/fixed` in place of the placed
+    /// `amp/schematic`, the error drawn in `amp/schematic` is in neither the
+    /// design nor the repaired design, so it must not refuse the repair.
+    #[test]
+    fn a_repair_candidate_is_checked_as_the_configuration_runs_it() {
+        let mut state = AppState::default();
+        let mut work = crate::state::Library::new("work");
+        let mut amp = crate::state::Cell::new("amp");
+        for view in ["schematic", "fixed"] {
+            amp.add_view(crate::state::View::new(
+                view,
+                crate::state::ViewType::Schematic,
+            ));
+        }
+        work.add_cell(amp);
+        state.library_manager.add_library(work);
+
+        // Two sources across one pair of nodes: a loop, which is an Error.
+        let mut drawn = SchematicState::default();
+        let sources = [
+            drawn.add_component(
+                crate::state::ComponentType::VoltageSource,
+                Point::new(30, 0),
+            ),
+            drawn.add_component(
+                crate::state::ComponentType::VoltageSource,
+                Point::new(90, 0),
+            ),
+        ];
+        let terminal = |master: &SchematicState, id: u64, pin: &str| {
+            master
+                .document()
+                .components
+                .iter()
+                .find(|component| component.id == id)
+                .and_then(|component| {
+                    component
+                        .terminal_positions()
+                        .into_iter()
+                        .find_map(|(name, point)| (name == pin).then_some(point))
+                })
+                .expect("a voltage source has both terminals")
+        };
+        for pin in ["+", "-"] {
+            let from = terminal(&drawn, sources[0], pin);
+            let to = terminal(&drawn, sources[1], pin);
+            drawn
+                .add_wire(vec![from, to])
+                .expect("the two terminals are joined");
+        }
+        state
+            .workspace
+            .insert_schematic_editor("work/amp/schematic".to_owned(), drawn);
+        state
+            .workspace
+            .insert_schematic_editor("work/amp/fixed".to_owned(), SchematicState::default());
+
+        let mut binding = crate::state::LibraryCellInstance::new("work", "amp", "schematic");
+        binding.bind_interface(&[]);
+        let placed = state
+            .schematic
+            .add_library_cell_component(Point::new(400, 400), binding);
+        let dut = state
+            .schematic
+            .document()
+            .components
+            .iter()
+            .find(|component| component.id == placed)
+            .map(|component| format!("/{}", component.name))
+            .expect("the instance is placed");
+        // An alias the manager offers to repair.
+        for (id, x, name) in [(10, 0, "VDD!"), (11, 1, "VDD")] {
+            state
+                .schematic
+                .document_mut_for_test()
+                .net_labels
+                .push(NetLabel::new(id, Point::new(x, 0), name));
+        }
+        state.sync_active_schematic_to_workspace();
+        let root = state.workspace.content.active_view.clone();
+        state
+            .workspace
+            .content
+            .configuration_sets
+            .create(crate::state::ConfigurationSetDefinition {
+                name: "Fixed amplifier".to_owned(),
+                root,
+                dut_path: dut,
+                executable_view_policy: vec!["fixed".to_owned(), "schematic".to_owned()],
+                stop_views: Vec::new(),
+                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: Vec::new(),
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "connectivity manager test".to_owned(),
+            })
+            .expect("the fixture configuration is well formed");
+
+        let policy = state.workspace.content.connectivity.policy.clone();
+        let report = build_report(&state, &policy).expect("the configuration resolves");
+        assert!(
+            report
+                .drc
+                .violations()
+                .iter()
+                .all(|finding| finding.violation_type != DrcViolationType::SourceToSource),
+            "the configured design runs amp/fixed: {:?}",
+            report.drc.violations()
+        );
+        let repair = report
+            .repairs
+            .iter()
+            .find(|repair| repair.action.is_some())
+            .expect("the alias is offered as a repair");
+        let mut candidate = state.schematic.clone();
+        apply_repair_to_candidate(&mut candidate, repair).expect("the repair applies");
+        candidate.recalculate_runtime_state();
+
+        // The candidate as its own buffer follows the placed binding into the
+        // master the configuration replaced, which is the reading that
+        // refused every repair here.
+        let projection = preview_projection(&state, &policy).expect("a design projection");
+        let hierarchy =
+            HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
+        let drawn = rspice_design::drc::run_check_with_hierarchy(
+            &candidate,
+            &hierarchy,
+            connectivity_drc_config(&state),
+        );
+        assert!(
+            drawn
+                .errors()
+                .iter()
+                .any(|finding| finding.violation_type == DrcViolationType::SourceToSource),
+            "{:?}",
+            drawn.violations()
+        );
+
+        validate_repair_candidate(&state, &candidate, &policy)
+            .expect("the repair adds no finding to the design the configuration runs");
     }
 
     /// All three panes are built from one projection, so the global-net pane
