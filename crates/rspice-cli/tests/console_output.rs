@@ -470,3 +470,39 @@ fn hdl_writes_to_the_stderr_descriptor_reach_stderr() {
     let transcript = std::fs::read_to_string(directory.join("out.hdl.log")).unwrap();
     assert_eq!(transcript, "to stdout\nto stderr 7\nno newline");
 }
+
+/// One call site warns five times and then says the rest are suppressed,
+/// however often the deck trips it.
+#[test]
+fn a_repeated_warning_is_shown_five_times_then_suppressed() {
+    let directory = common::test_dir("warning_limit");
+    let saves = ".save\n".repeat(9);
+    std::fs::write(
+        directory.join("saves.cir"),
+        format!("* bare saves\nV1 in 0 1\nR1 in 0 1k\n{saves}.op\n.end\n"),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["run", "saves.cir"])
+        .current_dir(&directory)
+        .env_remove("RUST_LOG")
+        .env_remove("RSPICE_OUTPUT_FORMAT")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        stderr
+            .matches("save/print directive without output signals ignored")
+            .count(),
+        5,
+        "{stderr}"
+    );
+    assert_eq!(
+        stderr
+            .matches("Further occurrences of this warning are suppressed.")
+            .count(),
+        1,
+        "{stderr}"
+    );
+}

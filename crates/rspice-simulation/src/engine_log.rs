@@ -7,7 +7,8 @@
 //! to, remain outside that run.
 
 use std::any::Any;
-use std::collections::VecDeque;
+use std::borrow::Cow;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -65,9 +66,16 @@ pub struct EngineLogQueue {
     kept: usize,
     withheld: usize,
     sealed: bool,
+    suppressed_warnings: usize,
 }
 
 impl EngineLogQueue {
+    /// Warnings this run did not show because their call site had already
+    /// said [`FURTHER_WARNINGS_SUPPRESSED`], for the run's summary to state.
+    pub fn suppressed_warnings(&self) -> usize {
+        self.suppressed_warnings
+    }
+
     /// Keep one line, or count it.
     ///
     /// Reached two ways: a native run's sink pushes what it captured, and the
@@ -109,10 +117,77 @@ impl EngineLogQueue {
         self.kept = 0;
         self.withheld = 0;
         self.sealed = false;
+        self.suppressed_warnings = 0;
     }
 
     pub fn drain(&mut self) -> Vec<EngineLogLine> {
         self.lines.drain(..).collect()
+    }
+}
+
+/// Warning lines one call site may log in one run before the rest are counted
+/// instead: Spectre's `maxwarns` default.
+const WARNINGS_PER_SITE: usize = 5;
+
+/// What a call site that has used up its warnings says once, in place of the
+/// next one.
+pub const FURTHER_WARNINGS_SUPPRESSED: &str = "Further occurrences of this warning are suppressed.";
+
+/// Holds each call site to [`WARNINGS_PER_SITE`] warnings for as long as it
+/// lives: one run's sink, or one command-line run.
+///
+/// Keyed by the site — the file and line of the `warn!` — rather than by the
+/// text, because a clamp warning names the instance and the value, so no two
+/// lines of a flood are worded alike. Only warnings are limited. An error is a
+/// failure the run states every time, and Info and Debug are the run's account
+/// of itself, bounded by the line cap.
+#[derive(Debug, Default)]
+pub struct WarningLimiter {
+    sites: HashMap<(Cow<'static, str>, u32), usize>,
+    suppressed: usize,
+}
+
+/// What [`WarningLimiter::judge`] decided for one record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WarningVerdict {
+    /// Show the record.
+    Show,
+    /// Show [`FURTHER_WARNINGS_SUPPRESSED`] in the record's place.
+    ShowSuppressionNotice,
+    /// Show nothing; the record is counted.
+    Withhold,
+}
+
+impl WarningLimiter {
+    pub fn judge(&mut self, record: &log::Record<'_>) -> WarningVerdict {
+        if record.level() != log::Level::Warn {
+            return WarningVerdict::Show;
+        }
+        let file = match record.file_static() {
+            Some(file) => Cow::Borrowed(file),
+            None => Cow::Owned(record.file().unwrap_or(record.target()).to_owned()),
+        };
+        let count = self
+            .sites
+            .entry((file, record.line().unwrap_or(0)))
+            .or_insert(0);
+        *count = count.saturating_add(1);
+        if *count <= WARNINGS_PER_SITE {
+            return WarningVerdict::Show;
+        }
+        // The record the notice stands in for is counted too: its text was
+        // not shown either.
+        self.suppressed = self.suppressed.saturating_add(1);
+        if *count == WARNINGS_PER_SITE + 1 {
+            WarningVerdict::ShowSuppressionNotice
+        } else {
+            WarningVerdict::Withhold
+        }
+    }
+
+    /// Warnings judged and not shown.
+    pub fn suppressed(&self) -> usize {
+        self.suppressed
     }
 }
 
@@ -167,10 +242,41 @@ impl RunLogSink {
         }
     }
 
+    fn count_suppressed_warning(&self) {
+        if let Some(queue) = &self.queue {
+            let mut queue = lock_queue(queue);
+            queue.suppressed_warnings = queue.suppressed_warnings.saturating_add(1);
+        }
+    }
+
     fn seal(&self) {
         if let Some(queue) = &self.queue {
             lock_queue(queue).seal();
         }
+    }
+}
+
+/// What one run keeps in the engine's log scope while it executes: where its
+/// lines go, and how many warnings each call site has spent.
+///
+/// The limiter lives here rather than in [`RunLogSink`], which a request
+/// carries and may clone, so its count is exactly one installed run's.
+struct ActiveRun {
+    sink: RunLogSink,
+    warnings: Mutex<WarningLimiter>,
+}
+
+impl ActiveRun {
+    fn judge(&self, record: &log::Record<'_>) -> WarningVerdict {
+        let verdict = self
+            .warnings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .judge(record);
+        if verdict != WarningVerdict::Show {
+            self.sink.count_suppressed_warning();
+        }
+        verdict
     }
 }
 
@@ -189,10 +295,10 @@ pub fn lock_queue(queue: &Arc<Mutex<EngineLogQueue>>) -> std::sync::MutexGuard<'
 /// module's, because the engine hands parts of a run to threads it spawns — a
 /// Monte Carlo worker, a chunk of a parallel sweep — and enters the scope on
 /// each. A thread this module never saw is then still inside the run.
-fn with_current_run<R>(use_run: impl FnOnce(&RunLogSink, Option<&str>) -> R) -> Option<R> {
+fn with_current_run<R>(use_run: impl FnOnce(&ActiveRun, Option<&str>) -> R) -> Option<R> {
     let scope = log_scope::capture()?;
-    let sink = scope.owner().downcast_ref::<RunLogSink>()?;
-    Some(use_run(sink, scope.point()))
+    let run = scope.owner().downcast_ref::<ActiveRun>()?;
+    Some(use_run(run, scope.point()))
 }
 
 /// Runs that asked for verbose and have not finished.
@@ -215,8 +321,11 @@ static STDERR_LEVEL: AtomicUsize = AtomicUsize::new(0);
 #[must_use]
 pub fn install(sink: RunLogSink) -> RunSinkGuard {
     let verbose = sink.verbose;
-    let sink = Arc::new(sink);
-    let owner: Arc<dyn Any + Send + Sync> = Arc::clone(&sink) as _;
+    let run = Arc::new(ActiveRun {
+        sink,
+        warnings: Mutex::new(WarningLimiter::default()),
+    });
+    let owner: Arc<dyn Any + Send + Sync> = Arc::clone(&run) as _;
     let scope = log_scope::enter(Some(LogScope::new(owner)));
     if verbose {
         VERBOSE_RUNS.fetch_add(1, Ordering::SeqCst);
@@ -224,7 +333,7 @@ pub fn install(sink: RunLogSink) -> RunSinkGuard {
     }
     RunSinkGuard {
         scope: Some(scope),
-        sink,
+        run,
         verbose,
     }
 }
@@ -234,7 +343,7 @@ pub fn install(sink: RunLogSink) -> RunSinkGuard {
 /// Bound to its thread by the scope guard it holds.
 pub struct RunSinkGuard {
     scope: Option<LogScopeGuard>,
-    sink: Arc<RunLogSink>,
+    run: Arc<ActiveRun>,
     verbose: bool,
 }
 
@@ -244,7 +353,7 @@ impl Drop for RunSinkGuard {
         // here on lands after the run's closing row. A worker the run spawned
         // has been joined by now: the run returned before its guard dropped.
         drop(self.scope.take());
-        self.sink.seal();
+        self.run.sink.seal();
         if self.verbose {
             VERBOSE_RUNS.fetch_sub(1, Ordering::SeqCst);
             apply_max_level();
@@ -300,7 +409,7 @@ pub fn admits(metadata: &log::Metadata<'_>) -> bool {
     let Some(severity) = severity_for_level(metadata.level()) else {
         return false;
     };
-    with_current_run(|sink, _| sink.admits(severity)).unwrap_or(false)
+    with_current_run(|run, _| run.sink.admits(severity)).unwrap_or(false)
 }
 
 /// Offer one record to this thread's run, if it has one that wants it.
@@ -311,15 +420,27 @@ pub fn offer(record: &log::Record<'_>) {
     let Some(severity) = severity_for_level(record.level()) else {
         return;
     };
-    with_current_run(|sink, point| {
-        if !sink.admits(severity) {
+    with_current_run(|run, point| {
+        if !run.sink.admits(severity) {
             return;
         }
-        let message = match point {
-            Some(point) => format!("{point}: {}", record.args()),
-            None => record.args().to_string(),
+        let message = match run.judge(record) {
+            WarningVerdict::Withhold => return,
+            // About the call site across the whole run, so it names no point.
+            WarningVerdict::ShowSuppressionNotice => {
+                run.sink.deliver(EngineLogLine {
+                    severity: LogSeverity::Info,
+                    message: FURTHER_WARNINGS_SUPPRESSED.to_owned(),
+                    origin: EngineLogOrigin::Engine,
+                });
+                return;
+            }
+            WarningVerdict::Show => match point {
+                Some(point) => format!("{point}: {}", record.args()),
+                None => record.args().to_string(),
+            },
         };
-        sink.deliver(EngineLogLine {
+        run.sink.deliver(EngineLogLine {
             severity,
             message,
             origin: EngineLogOrigin::Engine,
@@ -663,6 +784,65 @@ mod tests {
         .join()
         .expect("the offering thread finishes");
         assert!(lock_queue(&held).drain().is_empty());
+    }
+
+    fn warn_at(line: u32, level: log::Level, message: &str) {
+        offer(
+            &log::Record::builder()
+                .level(level)
+                .target("rspice_core::engine::transient")
+                .file_static(Some("crates/rspice-core/src/engine/transient.rs"))
+                .line(Some(line))
+                .args(format_args!("{message}"))
+                .build(),
+        );
+    }
+
+    /// Spectre's `maxwarns`: five from a call site, then one notice, then a
+    /// count the run's summary can state.
+    #[test]
+    fn a_call_site_shows_five_warnings_then_says_the_rest_are_suppressed() {
+        let queue = Arc::new(Mutex::new(EngineLogQueue::default()));
+        {
+            let _guard = install(RunLogSink::queued(Arc::clone(&queue), false));
+            for index in 1..=8 {
+                warn_at(100, log::Level::Warn, &format!("M{index}: vds clamped"));
+            }
+            // Another site keeps its own five.
+            warn_at(200, log::Level::Warn, "R1: negative resistance");
+            // A failure is stated every time.
+            for _ in 0..7 {
+                warn_at(300, log::Level::Error, "singular matrix");
+            }
+        }
+        let mut queue = lock_queue(&queue);
+        let messages: Vec<_> = queue.drain().into_iter().map(|line| line.message).collect();
+        let mut expected: Vec<String> = (1..=5).map(|index| format!("M{index}: vds clamped")).collect();
+        expected.push(FURTHER_WARNINGS_SUPPRESSED.to_owned());
+        expected.push("R1: negative resistance".to_owned());
+        expected.extend(std::iter::repeat_n("singular matrix".to_owned(), 7));
+        assert_eq!(messages, expected);
+        assert_eq!(queue.suppressed_warnings(), 3);
+        queue.clear();
+        assert_eq!(queue.suppressed_warnings(), 0);
+    }
+
+    /// The limit is one run's: the next run of the same site starts again.
+    #[test]
+    fn each_run_starts_with_every_call_site_unspent() {
+        let queue = Arc::new(Mutex::new(EngineLogQueue::default()));
+        for run in 0..2 {
+            let _guard = install(RunLogSink::queued(Arc::clone(&queue), false));
+            for _ in 0..6 {
+                warn_at(100, log::Level::Warn, &format!("run {run}"));
+            }
+        }
+        let lines = lock_queue(&queue).drain();
+        // Each run: five warnings and the notice standing in for the sixth.
+        assert_eq!(lines.len(), 12, "{lines:?}");
+        assert_eq!(lines[5].message, FURTHER_WARNINGS_SUPPRESSED);
+        assert_eq!(lines[6].message, "run 1");
+        assert_eq!(lock_queue(&queue).suppressed_warnings(), 2);
     }
 
     /// A worker the engine hands a sample to logs into the run that spawned
