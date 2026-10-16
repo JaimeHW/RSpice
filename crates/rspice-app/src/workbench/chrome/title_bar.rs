@@ -72,12 +72,13 @@ const DESIGN_SHEET_COMMANDS: [Command; 4] = [
     Command::NewSheet,
     Command::DeleteSheet,
 ];
-const DESIGN_MANAGEMENT_COMMANDS: [Command; 7] = [
+const DESIGN_MANAGEMENT_COMMANDS: [Command; 8] = [
     Command::CreateHierarchy,
     Command::DesignManagement,
     Command::SelectionBulkEdit,
     Command::ConnectivityManager,
     Command::ConfigurationSets,
+    Command::RuleSetup,
     Command::ReviewComments,
     Command::RevisionHistory,
 ];
@@ -1327,7 +1328,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::ReplaceInstance => WorkbenchIcon::Refresh,
         Command::CreateHierarchy | Command::DesignManagement => WorkbenchIcon::Folder,
         Command::ConnectivityManager => WorkbenchIcon::Bus,
-        Command::SelectionBulkEdit => WorkbenchIcon::Sliders,
+        Command::SelectionBulkEdit | Command::RuleSetup => WorkbenchIcon::Sliders,
         Command::ReviewComments => WorkbenchIcon::Info,
         Command::RevisionHistory => WorkbenchIcon::History,
         Command::AscendHierarchy => WorkbenchIcon::ArrowLeft,

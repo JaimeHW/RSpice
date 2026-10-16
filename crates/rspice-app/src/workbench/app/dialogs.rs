@@ -42,6 +42,7 @@ pub(in crate::workbench) mod property_dialog;
 pub(in crate::workbench) mod publish_web;
 pub(in crate::workbench) mod replace_instance;
 pub(in crate::workbench) mod review_primitives;
+pub(in crate::workbench) mod rule_setup;
 pub(in crate::workbench) mod schematic_command;
 pub(in crate::workbench) mod selection;
 pub(in crate::workbench) mod source_document;

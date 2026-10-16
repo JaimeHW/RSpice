@@ -903,6 +903,7 @@ impl RSpiceApp {
         self.render_create_model_bound_symbol_dialog(ctx);
         self.render_symbol_definition_dialogs(ctx);
         self.render_configuration_sets_dialog(ctx);
+        self.render_rule_setup_dialog(ctx);
         self.render_drawing_sheet_setup_dialog(ctx);
         self.render_drawing_sheet_defaults_dialog(ctx);
         self.render_drawing_sheet_preset_dialogs(ctx);

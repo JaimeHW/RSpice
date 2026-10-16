@@ -571,6 +571,7 @@ impl Command {
                 | Self::DesignManagement
                 | Self::SelectionBulkEdit
                 | Self::ConfigurationSets
+                | Self::RuleSetup
                 | Self::ReviewComments
                 | Self::RevisionHistory
                 | Self::CreateHierarchy
@@ -666,6 +667,7 @@ impl Command {
                 | Self::DesignManagement
                 | Self::SelectionBulkEdit
                 | Self::ConfigurationSets
+                | Self::RuleSetup
                 | Self::ReviewComments
                 | Self::RevisionHistory
                 | Self::CreateHierarchy
@@ -770,6 +772,7 @@ impl Command {
             | Self::DesignManagement
             | Self::SelectionBulkEdit
             | Self::ConfigurationSets
+            | Self::RuleSetup
             | Self::ReviewComments
             | Self::RevisionHistory
             | Self::DesignSpecialistWorkspaces => ShortcutContext::DesignWorkspace,
@@ -943,6 +946,7 @@ impl Command {
             Self::DesignManagement => NONE,
             Self::SelectionBulkEdit => NONE,
             Self::ConfigurationSets => NONE,
+            Self::RuleSetup => NONE,
             Self::ReviewComments => NONE,
             Self::RevisionHistory => NONE,
             Self::SymbolPinTool => SYMBOL_PIN,
@@ -1209,7 +1213,7 @@ impl Command {
             }
             Self::SheetFormatManager => "command is unavailable in this context",
             Self::SelectionBulkEdit => "open a schematic project",
-            Self::ConfigurationSets => "open a project",
+            Self::ConfigurationSets | Self::RuleSetup => "open a project",
             Self::ReviewComments => "open a schematic project",
             Self::RevisionHistory => "open a project",
             Self::Paste => "clipboard has no compatible content",

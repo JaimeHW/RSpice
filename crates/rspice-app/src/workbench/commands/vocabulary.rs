@@ -159,6 +159,9 @@ pub enum Command {
     DesignManagement,
     SelectionBulkEdit,
     ConfigurationSets,
+    /// The project's design-rule deck: the severity each rule is reported
+    /// at in this project.
+    RuleSetup,
     ReviewComments,
     RevisionHistory,
     DesignSpecialistWorkspaces,
@@ -595,6 +598,7 @@ impl Command {
             Self::ConfigurationSets => {
                 spec("configuration-sets", "Configuration sets\u{2026}", "Design")
             }
+            Self::RuleSetup => spec("design-rule-setup", "Design rule setup\u{2026}", "Design"),
             Self::ReviewComments => spec("review-comments", "Review comments\u{2026}", "Design"),
             Self::RevisionHistory => spec("revision-history", "Revision history\u{2026}", "Design"),
             Self::DesignSpecialistWorkspaces => spec(
@@ -1244,6 +1248,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::SelectionBulkEdit,
     Command::ConnectivityManager,
     Command::ConfigurationSets,
+    Command::RuleSetup,
     Command::ReviewComments,
     Command::RevisionHistory,
     Command::DesignSpecialistWorkspaces,
