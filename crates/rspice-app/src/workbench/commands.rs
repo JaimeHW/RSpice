@@ -785,16 +785,18 @@ impl Command {
             Self::CheckAndSave => {
                 active_schematic_editor(app) && !state.schematic_edit_read_only()
             }
-            Self::ClearChecks if active_symbol_editor(app) => state.dialogs.drc_results.is_some(),
+            Self::ClearChecks if active_symbol_editor(app) => {
+                state.active_symbol_pin_finding_count().is_some()
+            }
             Self::ClearChecks => {
                 state.dialogs.drc_results.is_some()
                     || state.active_design_check_status().last_receipt().is_some()
             }
-            Self::NextViolation | Self::PreviousViolation if active_symbol_editor(app) => state
-                .dialogs
-                .drc_results
-                .as_ref()
-                .is_some_and(|result| !result.violations().is_empty()),
+            Self::NextViolation | Self::PreviousViolation if active_symbol_editor(app) => {
+                state
+                    .active_symbol_pin_finding_count()
+                    .is_some_and(|findings| findings > 0)
+            }
             Self::NextViolation | Self::PreviousViolation => state
                 .active_design_check_status()
                 .current_receipt()
@@ -1845,7 +1847,9 @@ impl Command {
                 crate::workbench::app::open_check_and_save_dialog(&mut app.state);
             }
             Self::ClearChecks => {
-                if !active_symbol_editor(app) {
+                if active_symbol_editor(app) {
+                    app.state.clear_active_symbol_pin_checks();
+                } else {
                     app.state.clear_active_design_check();
                 }
                 app.state.dialogs.drc_results = None;
