@@ -405,6 +405,108 @@ pub fn line_column_for_span(buffer: &str, offset: usize) -> (usize, usize) {
     (line, target.saturating_sub(line_start))
 }
 
+/// Carry diagnostics of a composed narrow-override deck back into the
+/// override's own text.
+///
+/// A narrow override executes as the generated base with the override's
+/// lines spliced in before the base's `.end`, so that is the deck the editor
+/// parses and every line, column and byte range the parse reports is a
+/// position in it. The override is what the editor shows and what a fix
+/// edits, so a position taken over unchanged rewrote the wrong bytes of the
+/// reader's file and decorated the wrong lines.
+///
+/// The splice re-terminates every line in the base's own line ending, so the
+/// override's bytes are not one span of the composed deck — but each of its
+/// lines is one whole line of it, the block that ends at the composed deck's
+/// terminal `.end`. Positions are carried line by line. A diagnostic about
+/// the generated base has no place in this text: it keeps its message, says
+/// where it is, and loses its range and its fix.
+pub(super) fn in_authored_text(
+    diagnostics: Vec<Diagnostic>,
+    composed: &str,
+    authored: &str,
+) -> Vec<Diagnostic> {
+    let composed_starts: Vec<usize> = std::iter::once(0)
+        .chain(composed.match_indices('\n').map(|(index, _)| index + 1))
+        .collect();
+    // Each authored line as the splice sees it: its start, and the length of
+    // its text without the line ending `str::lines` drops.
+    let mut authored_lines = Vec::new();
+    let mut start = 0;
+    for line in authored.lines() {
+        authored_lines.push((start, line.len()));
+        start = authored[start..]
+            .find('\n')
+            .map_or(authored.len(), |newline| start + newline + 1);
+    }
+    let end_line = rspice_simulation::netlist_preparation::terminal_end_card_offset(composed)
+        .map(|end| composed[..end].matches('\n').count());
+    let first = end_line.and_then(|end| end.checked_sub(authored_lines.len()));
+    let authored_line = |composed_line: usize| {
+        first
+            .zip(end_line)
+            .filter(|(first, end)| (*first..*end).contains(&composed_line))
+            .map(|(first, _)| composed_line - first)
+    };
+    let line_of = |offset: usize| composed_starts.partition_point(|start| *start <= offset) - 1;
+    let offset_in_authored = |offset: usize| {
+        let line = line_of(offset);
+        let (start, length) = authored_lines[authored_line(line)?];
+        Some(start + (offset - composed_starts[line]).min(length))
+    };
+    let range_in_authored = |range: &Range<usize>| {
+        let start = offset_in_authored(range.start)?;
+        let end = if range.end > range.start {
+            offset_in_authored(range.end - 1)? + 1
+        } else {
+            start
+        };
+        Some(start..end.max(start))
+    };
+
+    diagnostics
+        .into_iter()
+        .map(|mut diagnostic| {
+            let Some(line) = diagnostic
+                .line
+                .or_else(|| diagnostic.span.as_ref().map(|span| line_of(span.start)))
+            else {
+                // Not located in the root deck at all: an included source's
+                // own line, or no place.
+                return diagnostic;
+            };
+            match authored_line(line) {
+                Some(own_line) => {
+                    if diagnostic.source_line == diagnostic.line {
+                        diagnostic.source_line = diagnostic.line.map(|_| own_line);
+                    }
+                    diagnostic.line = diagnostic.line.map(|_| own_line);
+                    diagnostic.span = diagnostic.span.as_ref().and_then(range_in_authored);
+                    diagnostic.fix = diagnostic.fix.take().and_then(|fix| {
+                        range_in_authored(&fix.span).map(|span| DiagnosticFix { span, ..fix })
+                    });
+                }
+                None => {
+                    diagnostic.message = format!("{} (in the generated base)", diagnostic.message);
+                    diagnostic.line = None;
+                    diagnostic.source_line = None;
+                    diagnostic.column = None;
+                    diagnostic.span = None;
+                    diagnostic.fix = None;
+                }
+            }
+            if diagnostic.fix.is_none() {
+                // The canonical record keeps the fixes it already had when
+                // there is no new one to derive, and the ones it has are
+                // ranges of the composed deck.
+                diagnostic.canonical.quick_fixes.clear();
+            }
+            diagnostic.refresh_canonical_location();
+            diagnostic
+        })
+        .collect()
+}
+
 pub(super) fn unknown_reference_diagnostics(buffer: &str) -> Vec<Diagnostic> {
     if has_external_model_sources(buffer) {
         return Vec::new();
@@ -745,6 +847,55 @@ mod tests {
     #[test]
     fn line_column_for_span_clamps_offsets_after_eof() {
         assert_eq!(line_column_for_span("a\nbc", 99), (1, 2));
+    }
+
+    /// Positions in a composed override deck are carried back into the
+    /// override's own text, line by line — here an override written with
+    /// CRLF endings spliced into a base that uses LF, so the override's bytes
+    /// are not one span of the composed deck. A finding in the base keeps no
+    /// range and no fix in this text, and says where it is.
+    #[test]
+    fn composed_positions_are_carried_back_into_the_override() {
+        let base = "deck\nM2 d g s b pchh W=1u L=1u\n.model nch nmos\n.model pch pmos\n.end\n";
+        let authored = "* override\r\nM1 d g s b nchh W=1u L=1u\r\n";
+        let composed =
+            rspice_simulation::netlist_preparation::splice_before_terminal_end_card(base, authored);
+
+        let diagnostics = in_authored_text(
+            unknown_reference_diagnostics(&composed),
+            &composed,
+            authored,
+        );
+        assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
+
+        let own = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.message.contains("nchh"))
+            .expect("the override's own finding");
+        assert_eq!(own.line, Some(1), "the override's second line");
+        assert_eq!(&authored[own.span.clone().unwrap()], "nchh");
+        let fix = own.fix.as_ref().expect("its fix is kept");
+        assert_eq!(&authored[fix.span.clone()], "nchh");
+        let mut fixed = authored.to_owned();
+        fixed.replace_range(fix.span.clone(), &fix.replacement);
+        assert_eq!(fixed, "* override\r\nM1 d g s b nch W=1u L=1u\r\n");
+
+        let base_finding = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.message.contains("pchh"))
+            .expect("the base's finding");
+        assert!(
+            base_finding.message.ends_with("(in the generated base)"),
+            "{}",
+            base_finding.message,
+        );
+        assert_eq!(base_finding.line, None);
+        assert_eq!(base_finding.source_line, None);
+        assert!(base_finding.span.is_none() && base_finding.fix.is_none());
+        assert!(
+            base_finding.canonical.quick_fixes.is_empty(),
+            "no fix of the composed deck survives into this text",
+        );
     }
 
     #[test]

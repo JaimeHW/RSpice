@@ -540,7 +540,12 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
             .request_repaint_after(std::time::Duration::from_millis(120));
         return;
     }
+    validate_visible_source(state, revision);
+}
 
+/// Validate the visible source as it stands and publish the result, bound to
+/// `revision`.
+fn validate_visible_source(state: &mut AppState, revision: u64) {
     if state.ui.netlist.active_document == super::ActiveNetlistDocument::GeneratedDiff {
         Arc::make_mut(&mut state.ui.netlist.diagnostics).clear();
         state.ui.netlist.diag_revision = Some(revision);
@@ -582,6 +587,19 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
         .as_ref()
         .ok()
         .and_then(|source| first_external_dependency_line(source));
+    // A narrow override is parsed as the deck it executes as: the generated
+    // base with the override spliced in. Every position the parse reports is
+    // a position in that deck, and has to be carried back into the text the
+    // editor shows and a fix edits.
+    let composed = materialized
+        .as_ref()
+        .ok()
+        .filter(|source| **source != buffer)
+        .cloned();
+    let in_buffer = |diagnostics: Vec<Diagnostic>| match composed.as_deref() {
+        Some(composed) => super::diagnostics::in_authored_text(diagnostics, composed, &buffer),
+        None => diagnostics,
+    };
     let sealed_sources = if platform_include_access() == IncludeAccess::AuthenticatedBundleOnly
         && materialized_external_line.is_some()
     {
@@ -589,12 +607,12 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
             Ok(sources) => Some(sources),
             Err(error) => {
                 let netlist = &mut state.ui.netlist;
-                let mut diagnostics = vec![
+                let mut diagnostics = in_buffer(vec![
                     Diagnostic::error(format!(
                         "Authenticated browser source bundle is invalid: {error}"
                     ))
                     .with_line(materialized_external_line),
-                ];
+                ]);
                 let validation_id = crate::state::content_digest(&buffer).to_string();
                 for diagnostic in &mut diagnostics {
                     diagnostic.bind_validation(revision, &validation_id);
@@ -619,16 +637,19 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
     let (mut diagnostics, symbols) = if buffer.trim().is_empty() {
         (Vec::new(), Some(Vec::new()))
     } else {
-        match materialized {
-            Ok(source) => parse_buffer_with_context(
-                &source,
-                source_path,
-                &include_search,
-                platform_include_access(),
-                sealed_sources.as_ref(),
-                &NoAbort,
-            ),
-            Err(error) => (vec![Diagnostic::error(error)], None),
+        match &materialized {
+            Ok(source) => {
+                let (diagnostics, symbols) = parse_buffer_with_context(
+                    source,
+                    source_path,
+                    &include_search,
+                    platform_include_access(),
+                    sealed_sources.as_ref(),
+                    &NoAbort,
+                );
+                (in_buffer(diagnostics), symbols)
+            }
+            Err(error) => (vec![Diagnostic::error(error.clone())], None),
         }
     };
     diagnostics.extend(shadowed_include_diagnostics(state, &buffer));
@@ -1585,6 +1606,88 @@ M1 d g s b nch W={w} L={l*2}\n\
         assert_eq!(CODE_LEFT_PADDING, 12.0);
         assert_eq!(GUTTER_W + CODE_LEFT_PADDING, 59.0);
         assert_eq!(CODE_TOP_PADDING, 8);
+    }
+
+    /// A parameter override, shown in the editor as its own lines, over a
+    /// retained generated base.
+    fn parameter_override_state(base: &str, authored: &str) -> AppState {
+        let provenance = crate::state::GeneratedProvenance::try_new(
+            "netlist-editor-override-test",
+            crate::state::GenerationInput::new(
+                crate::product::ObjectRevision::INITIAL,
+                crate::state::content_digest("netlist-editor-override-input"),
+            ),
+        )
+        .unwrap();
+        let artifact = crate::state::GeneratedArtifact::try_from_utf8(
+            provenance,
+            base.as_bytes().to_vec(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap();
+        let generated = crate::state::NetlistDocument::from_generated(
+            crate::state::NetlistDocumentId::new(),
+            artifact,
+        )
+        .unwrap();
+        let mut owned = generated
+            .create_editable_copy(
+                crate::state::NetlistDocumentId::new(),
+                generated.content_digest(),
+            )
+            .unwrap();
+        owned
+            .replace_editable_source(owned.content_digest(), authored.as_bytes().to_vec())
+            .unwrap();
+        let mut state = AppState::default();
+        state.workspace.content.netlist_source = Some(authored.to_owned());
+        state.workspace.content.netlist_document = Some(owned.clone());
+        state.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
+            deck_id: uuid::Uuid::new_v4(),
+            artifact_name: "corner.cir".to_owned(),
+            strategy: crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
+            source_encoding: crate::state::NetlistTextEncoding::Utf8,
+            source_line_ending: crate::state::NetlistLineEnding::Lf,
+            imported_dialect: None,
+            compatibility_reviewed: false,
+            execution_profile: Some(crate::state::NetlistExecutionProfile::RSpiceCanonicalV1),
+            external_file_sha256: None,
+            save_history: Vec::new(),
+            revision_history: Vec::new(),
+            owned_includes: Vec::new(),
+        });
+        state.ui.netlist.owned_document = Some(owned);
+        state.ui.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
+        state.simulation.source.netlist_content = authored.to_owned();
+        state
+    }
+
+    /// A parameter override is validated as the deck it executes as — the
+    /// base with the override spliced in before `.end` — and its error is
+    /// reported on the override's own line, not on the line it lands on in
+    /// that deck.
+    #[test]
+    fn a_parameter_override_error_is_reported_on_its_own_line() {
+        let base = "* generated\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
+        let authored = "* corner\n.temp -273.15\n";
+        let mut state = parameter_override_state(base, authored);
+
+        let revision = state.ui.netlist.revision;
+        validate_visible_source(&mut state, revision);
+        let error = state
+            .ui
+            .netlist
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+            .expect("a temperature below absolute zero is refused");
+        assert_eq!(
+            error.line,
+            Some(1),
+            "the override's second line, not the composed deck's sixth: {error:?}",
+        );
+        assert!(error.is_current());
     }
 
     #[test]
