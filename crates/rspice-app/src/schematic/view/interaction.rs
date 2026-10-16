@@ -27,7 +27,7 @@ use super::navigation::primary_pan_gesture_active;
 use super::selection_drag::handle_select_dragging;
 use super::sheet_visibility::{
     active_junction_at, active_wire_at, finish_wire_on_active_sheet, objects_on_active_sheet,
-    retain_selection_on_active_sheet,
+    retain_selection_on_active_sheet, with_active_wire_topology_in,
 };
 use super::snap_resolution::resolve_grid_pointer;
 use super::stretch_interaction::handle_armed_stretch_selection;
@@ -486,6 +486,33 @@ fn refuse_label_on_unmarked_crossing(ui: &Ui, state: &mut AppState, anchor: Poin
     state.push_user_message(ConsoleMessage::warning(message));
 }
 
+/// A placed part whose pin lands inside one of this sheet's wires is
+/// connected there: the wire splits so the pin owns a vertex and the wire
+/// follows the part, and the dot the join earns is placed under the
+/// document's junction policy.
+fn connect_pins_inside_wires(
+    workspace: &crate::state::ProjectWorkspace,
+    schematic: &mut crate::state::SchematicState,
+    component: u64,
+    symbols: &SchematicSymbolContext,
+) {
+    with_active_wire_topology_in(workspace, schematic, |schematic, scope| {
+        let placed = std::collections::HashSet::from([component]);
+        if schematic.split_wires_under_pins(
+            &placed,
+            |component| symbols.terminal_points(component),
+            scope,
+        ) && schematic
+            .document()
+            .document_policy
+            .wire_junctions
+            .automatic_junctions()
+        {
+            schematic.update_wire_junctions(scope);
+        }
+    });
+}
+
 fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos: Point) {
     match component_type {
         ComponentType::Port => place_pending_port(state, grid_pos),
@@ -511,10 +538,13 @@ fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos
                 return;
             }
             let library_cell = pending.binding.clone();
+            let symbols = super::schematic_symbol_context(state);
+            let workspace = &state.workspace;
             let changed = state
                 .schematic
                 .with_undo("place library cell", |schematic| {
-                    schematic.add_library_cell_component(grid_pos, library_cell);
+                    let id = schematic.add_library_cell_component(grid_pos, library_cell);
+                    connect_pins_inside_wires(workspace, schematic, id, &symbols);
                 });
             if changed {
                 log::info!("Placed library cell instance at {:?}", grid_pos);
@@ -522,10 +552,13 @@ fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos
         }
         // An armed stimulus definition is placed as an adopter in this undo group.
         _ => {
+            let symbols = super::schematic_symbol_context(state);
+            let workspace = &state.workspace;
             let changed = state.schematic.with_undo(
                 format!("place {}", component_type.display_name()),
                 |schematic| {
-                    schematic.add_armed_component(component_type, grid_pos);
+                    let id = schematic.add_armed_component(component_type, grid_pos);
+                    connect_pins_inside_wires(workspace, schematic, id, &symbols);
                 },
             );
             if changed {

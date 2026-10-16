@@ -318,13 +318,14 @@ pub(crate) fn off_active_sheet(
     |id| !object_is_on_active_sheet_in_workspace(workspace, id)
 }
 
-/// The same operation on a copy of the schematic, as a preview runs it.
-pub(crate) fn with_active_wire_topology_of<R>(
-    state: &AppState,
+/// The same operation on a schematic borrowed apart from its workspace: a
+/// preview's copy, or the buffer inside an undo record.
+pub(crate) fn with_active_wire_topology_in<R>(
+    workspace: &crate::state::ProjectWorkspace,
     schematic: &mut SchematicState,
     operation: impl FnOnce(&mut SchematicState, &ActiveSheetTopology) -> R,
 ) -> R {
-    schematic.with_active_wire_topology(off_active_sheet(&state.workspace), operation)
+    schematic.with_active_wire_topology(off_active_sheet(workspace), operation)
 }
 
 /// Finish the route being drawn on the active sheet. Conductors on the cell

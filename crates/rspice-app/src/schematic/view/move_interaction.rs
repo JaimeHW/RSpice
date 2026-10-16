@@ -119,6 +119,13 @@ fn commit_armed_move_selection(state: &mut AppState, symbol_context: &SchematicS
                 .document_policy
                 .wire_junctions
                 .automatic_junctions();
+            // A pin moved inside a wire is connected there and owns a vertex.
+            let moved = schematic.session.editor.selection.components.clone();
+            schematic.split_wires_under_pins(
+                &moved,
+                |component| symbol_context.terminal_points(component),
+                scope,
+            );
             schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope);
         }
         movement

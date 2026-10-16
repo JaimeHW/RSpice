@@ -19,6 +19,14 @@ impl Schematic {
         }
         split
     }
+    pub fn split_wires_under_pins(&mut self, pins: &[Point]) -> bool {
+        let changed =
+            wire_edit::split_wires_under_pins(&mut self.document, &mut self.identity, pins);
+        if changed {
+            self.invalidate_topology();
+        }
+        changed
+    }
     pub fn optimize_all_wires(&mut self) -> bool {
         let changed = wire_edit::optimize_all_wires(&mut self.document);
         if changed {

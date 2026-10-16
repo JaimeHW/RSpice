@@ -28,6 +28,30 @@ impl SchematicState {
         split
     }
 
+    /// Split the wires that pins of `components` land inside, so each pin
+    /// owns a vertex there and the wire follows the part. A pin on an
+    /// unmarked crossing of two wires is left for the user to resolve.
+    pub fn split_wires_under_pins(
+        &mut self,
+        components: &std::collections::HashSet<u64>,
+        mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+        _scope: &ActiveSheetTopology,
+    ) -> bool {
+        let pins = self
+            .design
+            .document()
+            .components
+            .iter()
+            .filter(|component| components.contains(&component.id))
+            .flat_map(&mut terminal_points_for)
+            .collect::<Vec<_>>();
+        let changed = self.design.split_wires_under_pins(&pins);
+        if changed {
+            self.session.is_dirty = true;
+        }
+        changed
+    }
+
     /// Optimize all wires by removing collinear intermediate points
     pub fn optimize_all_wires(&mut self, _scope: &ActiveSheetTopology) {
         if self.design.optimize_all_wires() {

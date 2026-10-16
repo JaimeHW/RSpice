@@ -240,8 +240,8 @@ pub(super) fn move_preview_candidate(
     Result<bool, rspice_design::schematic::movement::MoveSelectionError>,
 ) {
     let mut candidate = state.schematic.clone();
-    let result = super::sheet_visibility::with_active_wire_topology_of(
-        state,
+    let result = super::sheet_visibility::with_active_wire_topology_in(
+        &state.workspace,
         &mut candidate,
         |candidate, scope| {
             candidate.move_selection_with_mode_resolved(

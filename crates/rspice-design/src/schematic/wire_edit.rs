@@ -252,6 +252,31 @@ pub fn move_vertices_at(document: &mut SchematicDocument, old_pos: Point, new_po
     moved
 }
 
+/// Split each wire a pin lands inside, so the pin owns a vertex there and the
+/// wire follows the part when it moves. The extractor already joins a pin to
+/// a wire it lies on; without the vertex, a move leaves the wire behind.
+///
+/// A pin exactly where wire interiors cross with no junction is left alone:
+/// splitting there would join both wires, and which one the pin means is the
+/// user's call, which the design check asks for.
+pub fn split_wires_under_pins(
+    document: &mut SchematicDocument,
+    identity: &mut SchematicIdentity,
+    pins: &[Point],
+) -> bool {
+    let crossings = super::junction_edit::CrossingIndex::new(&document.wires, &document.junctions);
+    let mut changed = false;
+    for &pin in pins {
+        if crossings.is_unmarked_crossing(pin) {
+            continue;
+        }
+        for wire in wires_to_split_at(document, pin) {
+            changed |= split_wire(document, identity, wire, pin).is_some();
+        }
+    }
+    changed
+}
+
 /// Existing wires crossing a point without a vertex, in document order.
 pub fn wires_to_split_at(document: &SchematicDocument, point: Point) -> Vec<u64> {
     document

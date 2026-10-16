@@ -57,6 +57,7 @@ mod tests {
     /// Every editor operation that scans the whole document's wires.
     const WHOLE_DOCUMENT_OPERATIONS: &[&str] = &[
         "split_wires_at_t_junction",
+        "split_wires_under_pins",
         "update_wire_junctions",
         "auto_place_junctions",
         "remove_orphan_junctions",

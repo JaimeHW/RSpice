@@ -178,7 +178,15 @@ fn apply(
                 .document_policy
                 .wire_junctions
                 .automatic_junctions();
+            let moved = state.schematic.session.editor.selection.components.clone();
             with_active_wire_topology(state, |schematic, scope| {
+                // A pin dropped inside a wire is connected there; the vertex
+                // it gets is what lets the next move carry the wire.
+                schematic.split_wires_under_pins(
+                    &moved,
+                    |component| symbols.terminal_points(component),
+                    scope,
+                );
                 schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope)
             });
             // One undo entry for the whole gesture (no-ops deduplicate).
@@ -279,6 +287,97 @@ mod tests {
             );
             from = position;
         }
+    }
+
+    /// Drag the selected part by `delta` as one whole gesture.
+    fn drag(
+        state: &mut AppState,
+        ctx: &egui::Context,
+        symbols: &crate::schematic::view::SchematicSymbolContext,
+        target: PointerTarget,
+        from: Point,
+        delta: Point,
+    ) {
+        dispatch(
+            state,
+            ctx,
+            symbols,
+            SelectionDragAction::BeginSelection {
+                target,
+                position: from,
+            },
+        );
+        let operation_id = state.schematic.pending_operation_id().expect("a gesture");
+        let position = Point::new(from.x + delta.x, from.y + delta.y);
+        dispatch(
+            state,
+            ctx,
+            symbols,
+            SelectionDragAction::MoveSelection {
+                operation_id,
+                from,
+                delta,
+                position,
+            },
+        );
+        dispatch(
+            state,
+            ctx,
+            symbols,
+            SelectionDragAction::Finish { operation_id },
+        );
+    }
+
+    /// A part dragged until its pin lies inside a wire is connected there,
+    /// so the wire splits and the pin owns the vertex: the next drag carries
+    /// the wire instead of silently leaving it behind.
+    #[test]
+    fn a_pin_dragged_into_a_wire_splits_it_and_the_next_drag_carries_it() {
+        let ctx = egui::Context::default();
+        let mut state = AppState::default();
+        let id = state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::origin());
+        let pin = state.schematic.document().components[0].terminal_positions()[1].1;
+        let landing = Point::new(pin.x + 20, pin.y);
+        state
+            .schematic
+            .document_mut_for_test()
+            .wires
+            .push(crate::state::Wire::segment(
+                9,
+                Point::new(landing.x, landing.y - 100),
+                Point::new(landing.x, landing.y + 100),
+            ));
+        state.schematic.init_undo_history();
+        let symbols = super::super::schematic_symbol_context(&state);
+        let target = PointerTarget::Component(id);
+
+        drag(&mut state, &ctx, &symbols, target, Point::origin(), Point::new(20, 0));
+        let at_pin = |state: &AppState, point: Point| {
+            state
+                .schematic
+                .document()
+                .wires
+                .iter()
+                .filter(|wire| wire.points.contains(&point))
+                .count()
+        };
+        assert_eq!(at_pin(&state, landing), 2, "the wire was split at the pin");
+
+        drag(
+            &mut state,
+            &ctx,
+            &symbols,
+            target,
+            Point::new(20, 0),
+            Point::new(0, 20),
+        );
+        assert_eq!(
+            at_pin(&state, Point::new(landing.x, landing.y + 20)),
+            2,
+            "both halves followed the pin"
+        );
     }
 
     #[test]
