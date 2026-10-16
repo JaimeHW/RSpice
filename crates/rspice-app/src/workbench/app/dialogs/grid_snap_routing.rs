@@ -7,7 +7,6 @@
 
 use egui::{Context, Frame, Margin, Stroke, Ui, vec2};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{GridStyle, SchematicWireRoutingStyle, WireRoutingMode};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -32,9 +31,7 @@ pub(crate) fn open_grid_snap_routing_dialog(state: &mut AppState) -> bool {
         return false;
     }
     if state.schematic.canvas_settings_change_blocked() {
-        state.push_user_message(ConsoleMessage::warning(
-            "Finish or cancel the active canvas authoring gesture before changing snap or routing settings.",
-        ));
+        state.prompt("Finish or cancel the drawing in progress before changing snap or routing.");
         return false;
     }
 
@@ -183,9 +180,7 @@ fn commit_grid_snap_routing(state: &mut AppState) -> Result<(), GridSnapRoutingC
         state.sync_active_schematic_to_workspace();
     }
     state.dialogs.grid_snap_routing.close();
-    state.push_user_message(ConsoleMessage::info(
-        "Canvas grid, snap targets, and wire routing were applied atomically.".to_owned(),
-    ));
+    state.prompt("Grid, snap and routing settings applied.");
     Ok(())
 }
 

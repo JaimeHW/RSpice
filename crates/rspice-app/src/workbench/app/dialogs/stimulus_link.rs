@@ -540,8 +540,7 @@ fn commit_extraction(state: &mut AppState, component_id: u64) -> Result<String, 
     }
     state.workbench.selected_stimulus_definition = Some(name.clone());
     Ok(format!(
-        "{} saved {name} as r1 in this project's stimulus library and now reads adopted \u{00b7} \
-         r1.",
+        "Saved stimulus definition {name} at r1 from {}.",
         session.reference
     ))
 }

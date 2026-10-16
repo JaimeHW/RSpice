@@ -169,12 +169,9 @@ impl RSpiceApp {
                     setup.commit_error = None;
                 }
                 Err(error) => {
-                    // Raised in the console: the surface has no banner, and a
-                    // refused request must not fail silently.
-                    self.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::error(
-                            error.clone(),
-                        ));
+                    // Answered on the status bar: the surface has no banner,
+                    // and a refused request must not fail silently.
+                    self.state.prompt(error.clone());
                     self.state.dialogs.drawing_sheet_setup.commit_error = Some(error);
                 }
             }
@@ -186,14 +183,9 @@ impl RSpiceApp {
                 self.state.dialogs.drawing_sheet_setup.close();
             }
             DialogChoice::Primary => match apply_drawing_sheet_setup(self) {
-                Ok(message) => self
-                    .state
-                    .push_user_message(crate::diagnostics::ConsoleMessage::info(message)),
+                Ok(message) => self.state.prompt(message),
                 Err(error) => {
-                    self.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::error(
-                            error.clone(),
-                        ));
+                    self.state.prompt(error.clone());
                     self.state.dialogs.drawing_sheet_setup.commit_error = Some(error);
                 }
             },

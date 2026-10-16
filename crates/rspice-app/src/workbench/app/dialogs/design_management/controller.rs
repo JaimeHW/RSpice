@@ -4,7 +4,7 @@ use super::manager::design_management_manager_body;
 use super::subflows::design_management_subflow_body;
 use super::widgets::parse_reserved_ranges;
 use super::*;
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_design_management_dialog(&mut self, ctx: &Context) {
@@ -254,11 +254,14 @@ impl RSpiceApp {
         self.state.design_execution_epoch = self.state.design_execution_epoch.wrapping_add(1);
         self.invalidate_simulation_preflight();
         self.state.ui.netlist.current_generation_input_digest = None;
-        self.state.push_user_message(ConsoleMessage::info(format!(
-            "Design Management revision {} was published as project revision {:?}.",
-            candidate.revision(),
-            committed_revision
-        )));
+        self.state.record(
+            LogSeverity::Info,
+            LogSource::Studio,
+            format!(
+                "Applied design management changes (revision {}).",
+                committed_revision.get()
+            ),
+        );
         let owner_key = self.state.dialogs.design_management.owner_key.clone();
         let selection_object_ids = self
             .state

@@ -8,7 +8,6 @@
 use egui::Context;
 use rspice_schematic_editor::requests::EditorRequestSource;
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{
     Bus, BusDeclaration, BusPropertyImpact, BusSlice, BusTap, BusTapOrientation, DesignNote,
     DesignNoteKind, DesignReviewState, DocumentationShape, DocumentationShapeGeometry, NetLabel,
@@ -165,9 +164,8 @@ impl RSpiceApp {
         let Some(draft) = self.state.dialogs.object_properties.draft.as_ref() else {
             // Fail closed instead of retaining an invisible modal owner.
             self.state.dialogs.object_properties.close();
-            self.state.push_user_message(ConsoleMessage::warning(
-                "Object properties closed because its typed draft was unavailable.".to_owned(),
-            ));
+            self.state
+                .prompt("Object properties closed: the edit was no longer open.");
             return;
         };
 

@@ -2,7 +2,6 @@
 
 use egui::{Align, Context, Frame, Layout, Margin, Rect, Response, Sense, Stroke, Ui, Vec2, vec2};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -67,11 +66,11 @@ impl RSpiceApp {
         match response.choice {
             DialogChoice::Primary => {
                 if let Err(error) = commit_create_model_bound_symbol(&mut self.state) {
+                    // The dialog stays open and states the refusal in place.
                     self.state
                         .dialogs
                         .create_model_bound_symbol
-                        .validation_error = Some(error.clone());
-                    self.state.push_user_message(ConsoleMessage::warning(error));
+                        .validation_error = Some(error);
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {

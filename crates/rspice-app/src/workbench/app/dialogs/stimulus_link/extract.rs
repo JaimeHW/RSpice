@@ -110,7 +110,11 @@ pub(super) fn render(
     match choice {
         DialogChoice::Primary => match super::commit_extraction(state, session.component_id) {
             Ok(line) => {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::info(line));
+                state.record(
+                    crate::diagnostics::LogSeverity::Info,
+                    crate::diagnostics::LogSource::Studio,
+                    line,
+                );
                 state.dialogs.stimulus_link.close();
             }
             Err(refusal) => state.dialogs.stimulus_link.error = Some(refusal),

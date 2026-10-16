@@ -1061,7 +1061,7 @@ fn apply_legacy_sheet_setup(
             committed_revision,
         });
     app.state.ui.preferences = personal_candidate;
-    Ok("The active schematic now owns a governed authored drawing sheet.".to_owned())
+    Ok("The active schematic now has its own drawing sheet.".to_owned())
 }
 
 fn migrate_and_canonicalize_project_title_values(

@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use egui::{Context, Key, Modifiers, Response, Stroke, Ui, WidgetInfo, WidgetType};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
@@ -1213,11 +1212,9 @@ fn commit_editor(ctx: &Context, state: &mut AppState) {
         .expect("editor draft");
     let mut candidate = state.ui.preferences.shortcut_profiles().clone();
     if let Err(error) = candidate.replace_active(draft) {
+        // The editor stays open and states the refusal in place.
         state.dialogs.shortcut_editor.error_summary =
             Some(format!("Shortcut profile was not saved: {error}"));
-        state.push_console_message(ConsoleMessage::error(format!(
-            "Shortcut profile was not saved: {error}"
-        )));
         return;
     }
     if state.shortcut_library_publication_continuation.is_some() {

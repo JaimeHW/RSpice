@@ -29,7 +29,6 @@ use rspice_simulation::project_veriloga::build_profile::{
     is_preprocessor_symbol, resolve_veriloga_build_profile,
 };
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{ProjectSourceLanguage, ProjectSourceOwner, ViewType};
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine, FormRows, ListWords};
 use crate::workbench::app::{RSpiceApp, VERILOGA_LIBRARY_NAME};
@@ -508,7 +507,7 @@ impl RSpiceApp {
                 match save_veriloga_build_settings(self) {
                     Ok(_) if choice == DialogChoice::Primary => {
                         if let Err(error) = code_workspace::request_veriloga_compile(self) {
-                            self.state.push_user_message(ConsoleMessage::error(error));
+                            self.state.prompt(error);
                         }
                     }
                     Ok(_) => {}

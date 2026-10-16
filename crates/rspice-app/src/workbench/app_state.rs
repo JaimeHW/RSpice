@@ -1078,11 +1078,6 @@ impl AppState {
         }
     }
 
-    /// Push a legacy console message and mirror it into the structured log.
-    pub fn push_console_message(&mut self, message: ConsoleMessage) {
-        self.push_console_message_with_source(crate::diagnostics::LogSource::Studio, message);
-    }
-
     /// Push a console message with an explicit structured-log source.
     pub fn push_console_message_with_source(
         &mut self,

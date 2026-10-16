@@ -12,7 +12,6 @@ use egui::{
 };
 use egui_extras::{Column, TableBuilder};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{
     DrawingSheetDocumentControl, DrawingSheetInheritance, DrawingSheetReleaseStatus,
     DrawingSheetTitleFieldId, DrawingSheetTitleFieldState, DrawingSheetTitleFieldValueAuthority,
@@ -373,7 +372,7 @@ impl RSpiceApp {
             }
             DialogChoice::Primary => match apply_sheet_format_manager(self) {
                 Ok(message) => {
-                    self.state.push_user_message(ConsoleMessage::info(message));
+                    self.state.prompt(message);
                     self.state.dialogs.drawing_sheet_support.manager = Default::default();
                 }
                 Err(error) => self.state.dialogs.drawing_sheet_support.manager.error = Some(error),
@@ -433,7 +432,7 @@ impl RSpiceApp {
         match choice {
             DialogChoice::Primary => match apply_title_block_fields(self) {
                 Ok(message) => {
-                    self.state.push_user_message(ConsoleMessage::info(message));
+                    self.state.prompt(message);
                     self.state.dialogs.drawing_sheet_support.title_fields = Default::default();
                 }
                 Err(error) => {
