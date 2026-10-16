@@ -876,6 +876,78 @@ fn a_refused_reference_is_judged_by_what_the_deck_writes() {
     assert_eq!(result.errors().len(), 2, "{:?}", result.violations());
 }
 
+/// A name the netlister writes but the engine's element-head parser refuses
+/// never runs, so it is an error rather than a renamed-and-run warning. Each
+/// character the parser keeps for the card's own grammar is tried on its own;
+/// punctuation the parser does read as part of a name stays a warning.
+#[test]
+fn a_reference_the_engine_cannot_parse_is_an_error() {
+    let refused = [
+        "R(1", "R1)", "R1,2", "Rx=1", "R{a", "Ra}", "R'a", "R\"a", "R;a",
+    ];
+    let mut top = SchematicDocument::default();
+    for (index, name) in (1_u64..).zip(refused) {
+        top.components.push(
+            Component::new(
+                index,
+                ComponentType::Resistor,
+                Point::new(0, 200 * index as i32),
+            )
+            .with_name_value(name, "1k"),
+        );
+    }
+    top.components.push(
+        Component::new(100, ComponentType::Resistor, Point::new(1000, 0))
+            .with_name_value("R+1", "1k"),
+    );
+    let views = buffers([]);
+    let hierarchy = HierarchySource::from_buffers(&views);
+
+    let result = run_check_with_hierarchy(
+        &top,
+        &hierarchy,
+        DrcConfig {
+            check_missing_ground: false,
+            check_floating_nodes: false,
+            check_unconnected_pins: false,
+            ..DrcConfig::default()
+        },
+    );
+
+    let finding = |id: u64| {
+        result
+            .violations()
+            .iter()
+            .find(|finding| {
+                matches!(&finding.location, DrcLocation::Component { id: found, .. } if *found == id)
+            })
+            .unwrap_or_else(|| panic!("component #{id} is reported: {:?}", result.violations()))
+    };
+    for (id, name) in (1_u64..).zip(refused) {
+        let refused = finding(id);
+        assert_eq!(
+            refused.violation_type,
+            DrcViolationType::InvalidName,
+            "{name}"
+        );
+        assert_eq!(refused.severity, DrcSeverity::Error, "{name}");
+        assert!(
+            refused
+                .message
+                .ends_with("the netlist cannot write this instance"),
+            "{name}: {}",
+            refused.message
+        );
+    }
+    let readable = finding(100);
+    assert_eq!(readable.severity, DrcSeverity::Warning);
+    assert!(
+        readable.message.ends_with("the netlist writes it as R+1"),
+        "{}",
+        readable.message
+    );
+}
+
 /// Every leg of a passive is undeclared, so a drawing made of passives raises
 /// no undriven-input error however many terminals it leaves open — and each
 /// open leg is one finding, not an open pin and a floating node besides.

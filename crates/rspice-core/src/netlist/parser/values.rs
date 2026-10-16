@@ -1758,12 +1758,7 @@ pub(super) fn expect_element_name(
             message: format!("Expected element name, found {:?}", first.kind),
         });
     };
-    if !head
-        .chars()
-        .next()
-        .is_some_and(|character| character.is_ascii_alphabetic())
-        || !head.chars().all(is_xyce_dev_name_char)
-    {
+    if !crate::netlist::lexer::is_xyce_device_name(head) {
         return Err(ParseError::Syntax {
             line: line_num,
             message: format!("Invalid Xyce element name '{}'", first.lexeme),

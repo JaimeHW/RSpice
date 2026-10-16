@@ -508,8 +508,10 @@ fn extract_components(
 /// wrong letter is written with the prefix in front. A cell instance is also
 /// addressed by its occurrence path, so a reference that is not a path segment
 /// — an empty one among them — leaves the deck nothing to write it under. And
-/// a name with a blank or a character outside ASCII would split or break the
-/// card it heads.
+/// the written name has to be one the engine's element-head parser reads as a
+/// name: a blank, a delimiter such as `(` `,` `=` `{`, a quote or a character
+/// outside ASCII would split or break the card it heads. That is judged by the
+/// parser's own rule, so the two cannot disagree about which names run.
 fn deck_name(component: &Component) -> Option<String> {
     if component.kind == ComponentType::CellInstance
         && InstancePath::root().child(&component.name).is_err()
@@ -517,7 +519,7 @@ fn deck_name(component: &Component) -> Option<String> {
         return None;
     }
     let name = component.emitted_instance_name();
-    (!name.is_empty() && name.chars().all(|character| character.is_ascii_graphic())).then_some(name)
+    rspice_core::netlist::lexer::is_xyce_device_name(&name).then_some(name)
 }
 
 /// The interface the deck binds one instance to, read live.

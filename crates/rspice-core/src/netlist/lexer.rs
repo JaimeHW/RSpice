@@ -623,6 +623,19 @@ pub fn is_xyce_device_name_char(character: char) -> bool {
         )
 }
 
+/// Return whether a whole name can head an element card.
+///
+/// The leading ASCII letter is what selects the device; every character after
+/// it must be one [`is_xyce_device_name_char`] admits. The element-head parser
+/// applies exactly this rule, and a design check that predicts whether a
+/// written card will parse asks it here rather than keeping its own copy.
+pub fn is_xyce_device_name(name: &str) -> bool {
+    name.chars()
+        .next()
+        .is_some_and(|character| character.is_ascii_alphabetic())
+        && name.chars().all(is_xyce_device_name_char)
+}
+
 // Preserve the public lexer API while keeping the suffix policy below both
 // expression parsers and the deck lexer in the architectural layer graph.
 pub use crate::spice_number::spice_suffix_scale;
