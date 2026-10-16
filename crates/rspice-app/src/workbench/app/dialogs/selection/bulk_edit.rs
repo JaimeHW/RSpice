@@ -806,29 +806,25 @@ fn selection_filter_panel(
         .show(ui, |ui| {
             selection_filter_fields(ui, dialog, hierarchy_path, action);
         });
+    let [object_w, path_w, value_w, lock_w] = result_columns(ui.available_width());
     Grid::new("selection-bulk-result-header")
         .num_columns(5)
         .striped(false)
         .min_col_width(0.0)
-        .spacing(Vec2::new(6.0, 4.0))
+        .spacing(Vec2::new(RESULT_COLUMN_GAP, 4.0))
         .show(ui, |ui| {
-            ui.allocate_space(Vec2::new(20.0, 16.0));
-            ui.add_sized(
-                [78.0, 16.0],
-                egui::Label::new(RichText::new("Object").strong()),
-            );
-            ui.add_sized(
-                [158.0, 16.0],
-                egui::Label::new(RichText::new("Path").strong()),
-            );
-            ui.add_sized(
-                [82.0, 16.0],
-                egui::Label::new(RichText::new("Value").strong()),
-            );
-            ui.add_sized(
-                [88.0, 16.0],
-                egui::Label::new(RichText::new("Locked").strong()),
-            );
+            ui.allocate_space(Vec2::new(RESULT_CHECK_W, 16.0));
+            for (label, width) in [
+                ("Object", object_w),
+                ("Path", path_w),
+                ("Value", value_w),
+                ("Locked", lock_w),
+            ] {
+                ui.add_sized(
+                    [width, 16.0],
+                    egui::Label::new(RichText::new(label).strong()),
+                );
+            }
             ui.end_row();
         });
     ScrollArea::vertical()
@@ -840,7 +836,7 @@ fn selection_filter_panel(
                 .num_columns(5)
                 .striped(true)
                 .min_col_width(0.0)
-                .spacing(Vec2::new(6.0, 4.0))
+                .spacing(Vec2::new(RESULT_COLUMN_GAP, 4.0))
                 .show(ui, |ui| {
                     for row in &rows[range] {
                         let mut selected = dialog.selected.contains(&row.key);
@@ -865,25 +861,41 @@ fn selection_filter_panel(
                                 dialog.selected.remove(&row.key);
                             }
                         }
-                        ui.add_sized([78.0, 20.0], egui::Label::new(&row.object).truncate())
+                        ui.add_sized([object_w, 20.0], egui::Label::new(&row.object).truncate())
                             .on_hover_text(&row.object);
                         ui.add_sized(
-                            [158.0, 20.0],
+                            [path_w, 20.0],
                             egui::Label::new(RichText::new(&row.path).monospace()).truncate(),
                         )
                         .on_hover_text(&row.path);
-                        ui.add_sized([82.0, 20.0], egui::Label::new(&row.value).truncate())
+                        ui.add_sized([value_w, 20.0], egui::Label::new(&row.value).truncate())
                             .on_hover_text(&row.value);
                         // A cell only when something is in the way; an
                         // editable row says nothing, which is the whole
                         // column's news.
                         let lock = row.lock.as_deref().unwrap_or("");
-                        ui.add_sized([88.0, 20.0], egui::Label::new(lock).truncate())
+                        ui.add_sized([lock_w, 20.0], egui::Label::new(lock).truncate())
                             .on_hover_text(lock);
                         ui.end_row();
                     }
                 });
         });
+}
+
+/// A row's select box, and the air between two result columns.
+const RESULT_CHECK_W: f32 = 20.0;
+const RESULT_COLUMN_GAP: f32 = 6.0;
+/// What a vertical scroll bar takes out of the pane the rows are laid in.
+const RESULT_SCROLLBAR_W: f32 = 12.0;
+
+/// Object, Path, Value and Locked across whatever width this pane has.
+///
+/// These were four fixed widths summing to more than half the dialog, so the
+/// Locked column painted over the impact panel beside it at every viewport
+/// the dialog actually opens at. A path is the long one and gets the room.
+fn result_columns(pane: f32) -> [f32; 4] {
+    let text = (pane - RESULT_CHECK_W - RESULT_COLUMN_GAP * 4.0 - RESULT_SCROLLBAR_W).max(140.0);
+    [text * 0.21, text * 0.40, text * 0.18, text * 0.21]
 }
 
 fn bulk_edit_panel(
@@ -1546,6 +1558,24 @@ mod tests {
         binding.model_section = section.map(str::to_owned);
         component.library_cell = Some(binding);
         component
+    }
+
+    /// The four result columns and the select box fit the pane they are laid
+    /// in. They were fixed widths that summed past it, so the last column
+    /// painted over the impact panel beside it.
+    #[test]
+    fn the_result_columns_fit_inside_their_pane() {
+        for pane in [240.0_f32, 300.0, 360.0, 520.0, 900.0] {
+            let columns = result_columns(pane);
+            let used = RESULT_CHECK_W
+                + RESULT_COLUMN_GAP * 4.0
+                + RESULT_SCROLLBAR_W
+                + columns.iter().sum::<f32>();
+            assert!(
+                used <= pane.max(RESULT_CHECK_W + RESULT_COLUMN_GAP * 4.0 + 140.0),
+                "{pane} pt pane lays out {used} pt of columns"
+            );
+        }
     }
 
     #[test]
