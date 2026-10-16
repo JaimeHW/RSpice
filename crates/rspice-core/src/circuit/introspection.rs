@@ -1401,7 +1401,10 @@ impl CircuitData {
             .map(|(_, count)| count)
             .sum();
         if others > 0 {
-            families.push(format!("{others} others"));
+            families.push(format!(
+                "{others} {}",
+                if others == 1 { "other" } else { "others" }
+            ));
         }
         let nodes = self.num_nodes();
         let mut line = format!(
@@ -1525,7 +1528,7 @@ mod inventory_tests {
         assert_eq!(
             circuit.inventory_line(),
             "Circuit: 6 nodes, 12 devices (4 resistor, 1 bjt, 1 capacitor, 1 diode, \
-             1 inductor, 1 isource, 1 vccs, 1 vcvs, 1 others)"
+             1 inductor, 1 isource, 1 vccs, 1 vcvs, 1 other)"
         );
         assert_eq!(circuit.device_count(), 12);
     }
