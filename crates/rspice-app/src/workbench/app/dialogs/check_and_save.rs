@@ -740,7 +740,11 @@ fn check_and_save_body(
             form.response.rect.bottom(),
             Stroke::new(1.0, Tokens::get(ui.ctx()).color.border_strong),
         );
-        preconditions_panel(ui, CHECK_AND_SAVE_BODY_HEIGHT, preconditions);
+        // Stacked, the panel sits under the form rather than beside it, so
+        // the form's height is not a measure it has to match: holding it to
+        // one left the two facts of the snapshot over 94 points of bare
+        // panel at 560.
+        preconditions_panel(ui, 0.0, preconditions);
         return form.inner;
     }
     let body = ui.allocate_ui_with_layout(
@@ -1056,6 +1060,34 @@ mod tests {
         assert_eq!(
             DESCRIPTION,
             "Run connectivity, parameter, hierarchy, model, pin, and naming checks before explicit save."
+        );
+    }
+
+    /// Check and save states no status in colour.
+    ///
+    /// Colour here is for data identity, a failing verdict, an error
+    /// attached to the input it rejects, and the selected item. A status
+    /// dot, a success tone and an informational tone are none of those, and
+    /// the kit's `Success` and `Neutral` marks are being withdrawn — a
+    /// caller added here after they go would not compile, but one added
+    /// before them is exactly how they survive.
+    #[test]
+    fn this_dialog_states_no_status_in_colour() {
+        let source = crate::source_guard::production_source(include_str!("check_and_save.rs"));
+        let found = [
+            "colored_label",
+            "status_dot(",
+            "StatusMark::Success",
+            "StatusMark::Neutral",
+            ".color(t.color.ok",
+            ".color(t.color.info",
+        ]
+        .into_iter()
+        .filter(|pattern| source.contains(pattern))
+        .collect::<Vec<_>>();
+        assert!(
+            found.is_empty(),
+            "Check and save paints status in colour again: {found:?}"
         );
     }
 
