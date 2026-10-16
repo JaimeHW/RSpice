@@ -133,8 +133,9 @@ fn parameters_contents(
             }
 
             if component_type.is_pwl_source() {
+                // No heading here: the point table heads itself, and two
+                // stacked headings over one table read as two tables.
                 ui.add_space(12.0);
-                property_group_heading(ui, "Piecewise-linear waveform");
                 let pwl_result = crate::pwl_editor::render_pwl_editor(
                     ui,
                     &mut draft.pwl_editor,
@@ -325,24 +326,29 @@ fn field_block_height(
 ) -> f32 {
     let control_h = Tokens::get(ui.ctx()).metrics.ctl_h;
     let hint = field_hint(definition, draft, advisories);
-    let hint_h = if hint.is_empty() {
-        HINT_LINE_H
-    } else {
-        ui.fonts_mut(|fonts| fonts.layout_job(hint_layout_job(&hint, width)))
-            .size()
-            .y
-            .max(HINT_LINE_H)
-    };
+    // A field with nothing to report takes no hint track at all. Reserving
+    // one kept a blank line under every field for the few that ever use it.
+    if hint.is_empty() {
+        return CAPTION_H + TRACK_GAP + control_h;
+    }
+    let hint_h = ui
+        .fonts_mut(|fonts| fonts.layout_job(hint_layout_job(&hint, width)))
+        .size()
+        .y
+        .max(HINT_LINE_H);
     CAPTION_H + TRACK_GAP + control_h + TRACK_GAP + hint_h
 }
 
-/// The micro-copy under one field: its validation error when it has one, then
-/// what the engine will do with the value it currently holds, and its schema
-/// description otherwise.
+/// The micro-copy under one field: its validation error when it has one, and
+/// otherwise what the engine will do with the value it currently holds.
 ///
-/// An advisory outranks the description because the description states what the
-/// field is for, which the reader can already see from its label, while the
-/// advisory states what will actually happen to the value in front of them.
+/// The schema description is not among them. It states what the field is for,
+/// which does not change and which the label already carries, and a permanent
+/// faint line under every field in a two-column grid was most of this
+/// dialog's height. It is the field's tooltip and its accessible description
+/// instead, so the track under the control belongs to the two things that do
+/// change: a value the sheet rejects, and a value the run will not use as
+/// written.
 fn field_hint(
     definition: &PropertyDefinition,
     draft: &ComponentPropertyDraft,
@@ -351,16 +357,12 @@ fn field_hint(
     if let Some(error) = draft.validation_errors.get(&definition.name) {
         return error.clone();
     }
-    let advisories = advisories
+    advisories
         .iter()
         .filter(|finding| finding.field == definition.name)
         .map(|finding| finding.message.as_str())
-        .collect::<Vec<_>>();
-    if advisories.is_empty() {
-        definition.description.clone()
-    } else {
-        advisories.join(" · ")
-    }
+        .collect::<Vec<_>>()
+        .join(" \u{b7} ")
 }
 
 /// Wrapped, row-capped layout for a hint track. The cap keeps one verbose
@@ -488,6 +490,12 @@ fn render_property_field(
                 egui::StrokeKind::Inside,
             );
         }
+        // What the field is for, on the field, for the reader who wants it.
+        if !def.description.is_empty()
+            && let Some(response) = ui.ctx().read_response(control_id)
+        {
+            response.on_hover_text(def.description.clone());
+        }
     }
     if let Some(text) = numeric_text {
         draft.update_numeric_text_draft(&def.name, text, numeric_parse_error);
@@ -516,9 +524,9 @@ fn render_property_field(
     // The unit is presented once, in the caption; repeating it here would be
     // the only duplicated token on the block.
     let hint = field_hint(def, draft, advisories);
-    let hint_height = (ui.available_height() - TRACK_GAP).max(HINT_LINE_H);
-    let (rect, response) = ui.allocate_exact_size(vec2(width, hint_height), Sense::hover());
     if !hint.is_empty() {
+        let hint_height = (ui.available_height() - TRACK_GAP).max(HINT_LINE_H);
+        let (rect, response) = ui.allocate_exact_size(vec2(width, hint_height), Sense::hover());
         if ui.is_rect_visible(rect) {
             let galley = ui.fonts_mut(|fonts| fonts.layout_job(hint_layout_job(&hint, width)));
             ui.painter().galley(
@@ -690,7 +698,7 @@ fn property_group_heading(ui: &mut Ui, label: &str) {
     if ui.is_rect_visible(rect) {
         let galley = ui.fonts_mut(|fonts| {
             fonts.layout_no_wrap(
-                label.to_uppercase(),
+                label.to_owned(),
                 theme::mono(tokens::FS_0, FontWeight::Medium),
                 t.color.text_faint,
             )
