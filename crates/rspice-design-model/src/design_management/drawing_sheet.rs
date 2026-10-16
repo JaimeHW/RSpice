@@ -1092,6 +1092,8 @@ impl Default for DrawingSheetTitleBlock {
             })
             .collect::<BTreeMap<_, _>>();
         Self {
+            // What a sheet saved before title blocks were stored has always
+            // been drawn with. A new sheet starts on ISO 7200's block instead.
             template: DrawingSheetTitleBlockTemplate::Compact,
             anchor: DrawingSheetTitleBlockAnchor::BottomRight,
             rotation: DrawingSheetTitleBlockRotation::Upright,
@@ -1521,6 +1523,7 @@ impl SchematicSheetFormat {
             title_block: DrawingSheetTitleBlock::default(),
             inheritance: DrawingSheetInheritance::Explicit,
         };
+        format.start_on_iso_7200_title_block();
         format.fit_default_title_block();
         debug_assert!(format.validate().is_ok());
         format
@@ -1573,6 +1576,7 @@ impl SchematicSheetFormat {
             title_block: DrawingSheetTitleBlock::default(),
             inheritance: DrawingSheetInheritance::Explicit,
         };
+        format.start_on_iso_7200_title_block();
         format.fit_default_title_block();
         format.validate()?;
         Ok(format)
@@ -1867,6 +1871,18 @@ impl SchematicSheetFormat {
             ));
         }
         Ok(rect)
+    }
+
+    /// Start a new sheet on ISO 7200's 180 mm title block, which holds the
+    /// standard's 25-character title and 16-character document identifier.
+    /// Paper too narrow to carry it keeps the compact block, rather than
+    /// requesting one that Page Setup would then report as substituted.
+    fn start_on_iso_7200_title_block(&mut self) {
+        let fallback = self.title_block.template;
+        self.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
+        if self.title_block_substituted() || self.geometry().is_err() {
+            self.title_block.template = fallback;
+        }
     }
 
     fn fit_default_title_block(&mut self) {

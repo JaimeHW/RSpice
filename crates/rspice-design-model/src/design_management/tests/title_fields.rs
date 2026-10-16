@@ -56,6 +56,65 @@ fn paper_size_names_the_sheet_as_iso_7200_writes_it() {
 }
 
 #[test]
+fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
+    let format = SchematicSheetFormat::default();
+    assert_eq!(
+        format.title_block.template,
+        DrawingSheetTitleBlockTemplate::Standard
+    );
+    assert!(!format.title_block_substituted());
+    let geometry = format.geometry().unwrap();
+    assert_eq!(geometry.title_block.unwrap().width_um, 180_000);
+
+    // ISO 7200 recommends 25 characters for a title and 16 for the document
+    // identifier; every value cell of the default block holds the longer.
+    let visible = resolve_drawing_sheet_title_fields(&format, &BTreeMap::new()).len();
+    let value_chars = drawing_sheet_title_cell_capacity(
+        &format,
+        &geometry,
+        visible,
+        format.authored_size.lettering().data_um,
+    )
+    .unwrap();
+    assert!(
+        value_chars >= 25,
+        "the default block holds {value_chars} characters a value"
+    );
+
+    // Paper too narrow for that block starts on the compact one, rather than
+    // requesting a block Page Setup would report as substituted.
+    for narrow in [
+        SchematicSheetFormat::from_standard(
+            DrawingSheetStandard::IsoA4,
+            SchematicPageOrientation::Portrait,
+        ),
+        crate::custom_format("Panel", 250_000, 400_000, crate::StartingFrame::IsoA).unwrap(),
+    ] {
+        assert_eq!(
+            narrow.title_block.template,
+            DrawingSheetTitleBlockTemplate::Compact
+        );
+        assert!(!narrow.title_block_substituted());
+    }
+    let wide_custom =
+        crate::custom_format("Panel", 420_000, 297_000, crate::StartingFrame::AnsiA).unwrap();
+    assert_eq!(
+        wide_custom.title_block.template,
+        DrawingSheetTitleBlockTemplate::Standard
+    );
+
+    // A sheet saved before title blocks were stored is still drawn with the
+    // compact block it always had.
+    let mut legacy = serde_json::to_value(&format).unwrap();
+    legacy.as_object_mut().unwrap().remove("title_block");
+    let restored: SchematicSheetFormat = serde_json::from_value(legacy).unwrap();
+    assert_eq!(
+        restored.title_block.template,
+        DrawingSheetTitleBlockTemplate::Compact
+    );
+}
+
+#[test]
 fn an_organization_template_sealed_while_paper_size_was_withdrawn_still_loads() {
     let managed = SchematicSheetFormat::default()
         .try_update(|draft| {

@@ -1281,9 +1281,16 @@ mod tests {
                 .get_mut(&DrawingSheetTitleFieldId::SheetTitle)
                 .unwrap()
                 .value = "Sheet 1".to_owned();
+            // A new portrait A4 sheet starts on the compact block, but turning
+            // a sheet keeps the block it asked for: portrait paper paints the
+            // compact one in its place and says so, and turning back restores
+            // it.
+            format.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
         })
         .unwrap();
-        assert_eq!(draft.validate().unwrap().page_format, expected);
+        let turned = draft.validate().unwrap().page_format;
+        assert_eq!(turned, expected);
+        assert!(turned.title_block_substituted());
     }
 
     #[test]

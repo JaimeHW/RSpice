@@ -692,10 +692,10 @@ fn drawing_sheet_geometry_is_canonical_and_bounded() {
     assert_eq!(
         geometry.title_block,
         Some(DrawingSheetRect {
-            x_um: 152_000,
-            y_um: 163_000,
-            width_um: 130_000,
-            height_um: 32_000,
+            x_um: 102_000,
+            y_um: 150_000,
+            width_um: 180_000,
+            height_um: 45_000,
         })
     );
     assert_eq!(geometry.zones.unwrap().columns, 4);

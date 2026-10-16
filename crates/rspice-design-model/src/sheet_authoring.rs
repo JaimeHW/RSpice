@@ -98,5 +98,16 @@ pub fn custom_format(
             }
         })
         .map_err(|error| error.to_string())?;
+    // ISO 7200 and ASME Y14.1 both draw a title block about 180 mm wide.
+    // Paper that carries one starts on it; narrower paper keeps the compact
+    // block rather than one Page Setup would report as substituted.
+    if matches!(frame, StartingFrame::IsoA | StartingFrame::AnsiA)
+        && let Ok(iso_7200) = format.try_update(|draft| {
+            draft.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
+        })
+        && !iso_7200.title_block_substituted()
+    {
+        format = iso_7200;
+    }
     Ok(format)
 }
