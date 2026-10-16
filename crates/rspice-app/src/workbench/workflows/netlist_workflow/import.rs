@@ -49,28 +49,20 @@ pub(super) fn apply_imported_netlist_transaction(
     dependencies: Vec<crate::state::DependencyMetadata>,
 ) -> bool {
     if source.trim().is_empty() {
-        state.push_user_message(ConsoleMessage::error(format!(
-            "SPICE deck import failed: {display_name} is empty"
-        )));
+        record_import_failure(state, &format!("{display_name} is empty"));
         return false;
     }
 
     if !state.project_lifecycle.is_open() {
-        state.push_user_message(ConsoleMessage::error(
-            "SPICE deck import requires an open project",
-        ));
+        state.prompt("SPICE deck import needs an open project.");
         return false;
     }
     if state.workbench.safe_mode.project_read_only() && !initializing_netlist_project {
-        state.push_user_message(ConsoleMessage::error(
-            "SPICE deck import is unavailable because the project is open read-only",
-        ));
+        state.prompt("SPICE deck import is unavailable: the project is open read-only.");
         return false;
     }
     if state.simulation.execution.has_active_execution() {
-        state.push_user_message(ConsoleMessage::error(
-            "SPICE deck import is blocked while a simulation execution owns the project",
-        ));
+        state.prompt("SPICE deck import is unavailable while a simulation is running.");
         return false;
     }
 
@@ -84,9 +76,7 @@ pub(super) fn apply_imported_netlist_transaction(
     ) {
         Ok(canonical) => canonical,
         Err(error) => {
-            state.push_user_message(ConsoleMessage::error(format!(
-                "SPICE deck import failed: {error}"
-            )));
+            record_import_failure(state, &error);
             return false;
         }
     };
@@ -96,9 +86,7 @@ pub(super) fn apply_imported_netlist_transaction(
         && let Err(error) =
             crate::workbench::documents::netlist_document::retain_active_top_deck(&mut candidate)
     {
-        state.push_user_message(ConsoleMessage::error(format!(
-            "SPICE deck import failed: {error}"
-        )));
+        record_import_failure(state, &error);
         return false;
     }
     descriptor.artifact_name =
@@ -137,16 +125,27 @@ pub(super) fn apply_imported_netlist_transaction(
         .content
         .validate_simulation_configuration()
     {
-        state.push_user_message(ConsoleMessage::error(format!(
-            "SPICE deck import failed: {error}"
-        )));
+        record_import_failure(state, &error.to_string());
         return false;
     }
     *state = candidate;
-    state.push_user_message(ConsoleMessage::info(format!(
-        "Imported SPICE deck: {display_name}"
-    )));
+    // Opening a netlist as a project says so itself, once.
+    if !initializing_netlist_project {
+        state.record(
+            LogSeverity::Info,
+            LogSource::Netlist,
+            format!("Imported SPICE deck {display_name}."),
+        );
+    }
     true
+}
+
+pub(super) fn record_import_failure(state: &mut AppState, error: &str) {
+    state.record(
+        LogSeverity::Error,
+        LogSource::Netlist,
+        format!("SPICE deck import failed: {error}"),
+    );
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,15 +189,15 @@ pub(super) fn apply_opened_netlist_project(
     dependencies: Vec<crate::state::DependencyMetadata>,
 ) -> bool {
     if source.trim().is_empty() {
-        state.push_user_message(ConsoleMessage::error(format!(
-            "Netlist project open failed: {display_name} is empty"
-        )));
+        state.record(
+            LogSeverity::Error,
+            LogSource::Netlist,
+            format!("Netlist project open failed: {display_name} is empty"),
+        );
         return false;
     }
     if state.simulation.execution.has_active_execution() {
-        state.push_user_message(ConsoleMessage::error(
-            "Netlist project open is blocked while a simulation execution owns the project",
-        ));
+        state.prompt("A netlist project cannot be opened while a simulation is running.");
         return false;
     }
 
@@ -234,14 +233,18 @@ pub(super) fn apply_opened_netlist_project(
         metadata,
         dependencies,
     ) {
-        state.push_user_message(ConsoleMessage::error(
-            "Netlist project open failed; the current project was left unchanged",
-        ));
+        state.record(
+            LogSeverity::Error,
+            LogSource::Netlist,
+            "Netlist project open failed; the current project was left unchanged.",
+        );
         return false;
     }
-    candidate.push_user_message(ConsoleMessage::info(format!(
-        "Opened netlist-first project: {display_name}"
-    )));
+    let opened = format!(
+        "Opened netlist project {} ({display_name}).",
+        candidate.workspace.content.project.display_name()
+    );
+    candidate.record(LogSeverity::Info, LogSource::Studio, opened);
     *state = candidate;
     true
 }

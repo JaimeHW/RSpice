@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::io::SchematicIoError;
 use crate::state::{SchematicState, ViewType};
 use crate::workbench::app_state::AppState;
@@ -36,7 +36,7 @@ impl<'a> SchematicLoadOrigin<'a> {
 
     fn success_prefix(self) -> &'static str {
         match self {
-            Self::PersistentPath(_) => "Opened",
+            Self::PersistentPath(_) => "Opened schematic",
             #[cfg(any(test, target_arch = "wasm32"))]
             Self::BrowserImport(_) => "Imported schematic",
         }
@@ -99,7 +99,11 @@ pub(crate) fn create_new_schematic(state: &mut AppState) {
     let schematic = state.new_schematic_document();
     replace_active_schematic_document(state, schematic);
     state.clear_design_execution_context();
-    state.push_user_message(ConsoleMessage::info("Created new schematic"));
+    state.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        "Created a new schematic.",
+    );
 }
 
 fn replace_active_schematic_document(state: &mut AppState, mut schematic: SchematicState) {
@@ -161,7 +165,9 @@ pub(crate) fn load_schematic_from_path_with_io(
             return true;
         }
         Ok(None) => {}
-        Err(error) => state.push_user_message(ConsoleMessage::warning(error)),
+        Err(error) => {
+            state.record(LogSeverity::Warning, LogSource::Studio, error);
+        }
     }
     load_schematic_bypassing_autosave(state, path, io)
 }
@@ -178,7 +184,11 @@ pub(crate) fn load_schematic_bypassing_autosave(
             apply_loaded_schematic(state, schematic, SchematicLoadOrigin::PersistentPath(path))
         }
         Err(e) => {
-            state.push_user_message(ConsoleMessage::error(format!("Failed to open: {}", e)));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Schematic open failed: {e}"),
+            );
             false
         }
     }
@@ -195,11 +205,11 @@ pub(crate) fn apply_loaded_schematic(
     if let Some(path) = origin.recent_path() {
         state.remember_recent_file(crate::workbench::app_state::RecentKind::Schematic, path);
     }
-    state.push_user_message(ConsoleMessage::info(format!(
-        "{}: {}",
-        origin.success_prefix(),
-        origin.display_label()
-    )));
+    state.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        format!("{} {}.", origin.success_prefix(), origin.display_label()),
+    );
     true
 }
 
@@ -231,13 +241,13 @@ pub(crate) fn open_schematic_from_dialog_with_io(
     {
         let _ = io;
         match start_browser_schematic_import() {
-            Ok(()) => {
-                state.push_user_message(ConsoleMessage::info(
-                    "Choose an RSpice schematic file to open",
-                ));
-            }
+            Ok(()) => state.prompt("Choose an RSpice schematic file to open."),
             Err(error) => {
-                state.push_user_message(ConsoleMessage::error(format!("Open failed: {}", error)));
+                state.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    format!("Schematic open failed: {error}"),
+                );
             }
         }
     }
@@ -252,7 +262,11 @@ pub(crate) fn open_schematic_from_dialog_with_io(
             // User cancelled - no message needed
         }
         Err(e) => {
-            state.push_user_message(ConsoleMessage::error(format!("Open failed: {}", e)));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Schematic open failed: {e}"),
+            );
         }
     }
 }
@@ -341,16 +355,21 @@ pub(crate) fn poll_browser_schematic_import(state: &mut AppState) -> bool {
                     SchematicLoadOrigin::BrowserImport(&file.name),
                 ),
                 Err(error) => {
-                    state.push_user_message(ConsoleMessage::error(format!(
-                        "Open failed: {}",
-                        error
-                    )));
+                    state.record(
+                        LogSeverity::Error,
+                        LogSource::Studio,
+                        format!("Schematic open failed: {error}"),
+                    );
                     false
                 }
             }
         }
         BrowserSchematicImportResult::Failed(error) => {
-            state.push_user_message(ConsoleMessage::error(format!("Open failed: {}", error)));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Schematic open failed: {error}"),
+            );
             false
         }
         BrowserSchematicImportResult::Cancelled => false,
@@ -380,7 +399,15 @@ pub(crate) fn save_schematic_to_path_with_io(
                     if let Err(error) =
                         crate::workbench::lifecycle::recovery_checkpoint::cleanup_checkpoint(path)
                     {
-                        log::warn!("Saved source but autosave checkpoint cleanup failed: {error}");
+                        state.record(
+                            LogSeverity::Warning,
+                            LogSource::Studio,
+                            format!(
+                                "Saved {}, but its recovery checkpoint could not be removed: \
+                                 {error}",
+                                path.display()
+                            ),
+                        );
                     }
                 }
             }
@@ -388,18 +415,27 @@ pub(crate) fn save_schematic_to_path_with_io(
             if saved_path_is_reopenable {
                 state
                     .remember_recent_file(crate::workbench::app_state::RecentKind::Schematic, path);
-                state.push_user_message(ConsoleMessage::info(format!("Saved: {}", path.display())));
+                state.record(
+                    LogSeverity::Info,
+                    LogSource::Studio,
+                    format!("Saved schematic {}.", path.display()),
+                );
             } else {
                 state.browser_schematic_save_name = file_name_string(path);
-                state.push_user_message(ConsoleMessage::info(format!(
-                    "Downloaded schematic copy: {}",
-                    path.display()
-                )));
+                state.record(
+                    LogSeverity::Info,
+                    LogSource::Studio,
+                    format!("Downloaded a copy of the schematic: {}.", path.display()),
+                );
             }
             true
         }
         Err(e) => {
-            state.push_user_message(ConsoleMessage::error(format!("Save failed: {}", e)));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Schematic save failed: {e}"),
+            );
             false
         }
     }
@@ -430,7 +466,11 @@ pub(crate) fn save_schematic_as_with_io(
             false
         }
         Err(e) => {
-            state.push_user_message(ConsoleMessage::error(format!("Save As failed: {}", e)));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Schematic Save As failed: {e}"),
+            );
             false
         }
     }
@@ -547,7 +587,7 @@ mod tests {
         assert!(state.log_buffer.entries().any(|entry| {
             entry
                 .message
-                .contains("Imported schematic: browser-filter.rsch")
+                .contains("Imported schematic browser-filter.rsch.")
         }));
     }
 

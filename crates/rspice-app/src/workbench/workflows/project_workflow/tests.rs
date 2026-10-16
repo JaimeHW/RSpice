@@ -419,7 +419,7 @@ fn browser_import_applies_project_clears_runs_and_skips_recents() {
     assert!(state.log_buffer.entries().any(|entry| {
         entry
             .message
-            .contains("Imported project: browser-import.rspiceproj")
+            .contains("Imported project browser-import (browser-import.rspiceproj).")
     }));
 }
 
@@ -634,7 +634,7 @@ fn a_project_whose_plan_needs_no_technology_opens_without_a_blocked_run_warning(
     let blocked = state
         .log_buffer
         .entries()
-        .filter(|entry| entry.message.contains("simulation execution blocked"))
+        .filter(|entry| entry.message.contains("Simulation is blocked"))
         .map(|entry| entry.message.clone())
         .collect::<Vec<_>>();
     assert!(blocked.is_empty(), "{blocked:#?}");
@@ -945,7 +945,7 @@ fn invalid_execution_context_does_not_partially_replace_open_project() {
     assert!(state.log_buffer.entries().any(|entry| {
         entry
             .message
-            .contains("persisted execution context is invalid")
+            .contains("its saved simulation setup is invalid")
             && entry.message.contains("appears more than once")
     }));
 }
@@ -1625,9 +1625,9 @@ fn an_invalid_identity_creates_nothing_and_names_the_field() {
     assert_eq!(state.workspace.content.project.id(), before);
     assert!(
         state
-            .log_buffer
-            .entries()
-            .any(|entry| entry.message.contains("New project blocked"))
+            .prompt_text()
+            .is_some_and(|prompt| prompt.starts_with("New project not created")),
+        "the refusal answers on the status bar"
     );
 }
 

@@ -3,27 +3,21 @@
 //! The two targets present the same workflow: the native side resolves a
 //! path synchronously, the browser side polls a permission-scoped handle.
 
-use super::import::{NetlistImportMode, netlist_import_start_block_reason};
+use super::import::{NetlistImportMode, netlist_import_start_block_reason, record_import_failure};
 use super::staging::stage_netlist_import;
 use super::*;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn import_netlist_with_mode(state: &mut AppState, mode: NetlistImportMode) -> bool {
     if let Some(reason) = netlist_import_start_block_reason(state, mode) {
-        state.push_user_message(ConsoleMessage::error(format!(
-            "{} is unavailable: {reason}",
-            mode.dialog_title()
-        )));
+        state.prompt(format!("{} is unavailable: {reason}.", mode.dialog_title()));
         return false;
     }
     let transaction =
         match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
             Ok(transaction) => transaction,
             Err(error) => {
-                state.push_user_message(ConsoleMessage::error(format!(
-                    "{} is unavailable: {error}",
-                    mode.dialog_title()
-                )));
+                state.prompt(format!("{} is unavailable: {error}.", mode.dialog_title()));
                 return false;
             }
         };
@@ -41,10 +35,10 @@ pub(super) fn import_netlist_with_mode(state: &mut AppState, mode: NetlistImport
                 )
             {
                 crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
-                state.push_user_message(ConsoleMessage::error(format!(
+                state.prompt(format!(
                     "{} was cancelled because the project changed: {error}",
                     mode.dialog_title()
-                )));
+                ));
                 return false;
             }
             let display_name = path
@@ -56,9 +50,7 @@ pub(super) fn import_netlist_with_mode(state: &mut AppState, mode: NetlistImport
         Err(error) => {
             crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
             if error != "cancelled" {
-                state.push_user_message(ConsoleMessage::error(format!(
-                    "SPICE deck import failed: {error}"
-                )));
+                record_import_failure(state, &error);
             }
             false
         }
@@ -100,7 +92,7 @@ pub(crate) fn request_dependency_relink(state: &mut AppState, logical_identity: 
         state,
         logical_identity,
     ) {
-        state.push_user_message(ConsoleMessage::error(error));
+        state.prompt(error);
         return false;
     }
     let picked = rfd::FileDialog::new()
@@ -128,9 +120,7 @@ pub(crate) fn request_dependency_relink(state: &mut AppState, logical_identity: 
         Ok(bytes) => bytes,
         Err(error) => {
             crate::workbench::documents::netlist_document::cancel_dependency_relink(state);
-            state.push_user_message(ConsoleMessage::error(format!(
-                "SPICE dependency relink failed: {error}"
-            )));
+            record_relink_failure(state, &error);
             return false;
         }
     };
@@ -138,9 +128,10 @@ pub(crate) fn request_dependency_relink(state: &mut AppState, logical_identity: 
         Ok(source) => source,
         Err(error) => {
             crate::workbench::documents::netlist_document::cancel_dependency_relink(state);
-            state.push_user_message(ConsoleMessage::error(format!(
-                "SPICE dependency relink failed: selected source could not be decoded: {error}"
-            )));
+            record_relink_failure(
+                state,
+                &format!("the selected file could not be decoded: {error}"),
+            );
             return false;
         }
     };
@@ -155,38 +146,43 @@ pub(crate) fn request_dependency_relink(state: &mut AppState, logical_identity: 
         Some(path.display().to_string()),
     ) {
         Ok(()) => {
-            let message = state
-                .ui
-                .messages()
-                .text(crate::workbench::MessageId::NetlistRelinkSucceeded);
-            state.push_user_message(ConsoleMessage::info(message));
+            record_relink_success(state);
             true
         }
         Err(error) => {
             crate::workbench::documents::netlist_document::cancel_dependency_relink(state);
-            state.push_user_message(ConsoleMessage::error(format!(
-                "SPICE dependency relink failed: {error}"
-            )));
+            record_relink_failure(state, &error);
             false
         }
     }
 }
 
+fn record_relink_success(state: &mut AppState) {
+    let message = state
+        .ui
+        .messages()
+        .text(crate::workbench::MessageId::NetlistRelinkSucceeded);
+    state.record(LogSeverity::Info, LogSource::Netlist, message);
+}
+
+fn record_relink_failure(state: &mut AppState, error: &str) {
+    state.record(
+        LogSeverity::Error,
+        LogSource::Netlist,
+        format!("SPICE dependency relink failed: {error}"),
+    );
+}
+
 #[cfg(target_arch = "wasm32")]
 pub(super) fn import_netlist_with_mode(state: &mut AppState, mode: NetlistImportMode) -> bool {
     if let Some(reason) = netlist_import_start_block_reason(state, mode) {
-        state.push_user_message(ConsoleMessage::error(format!(
-            "{} is unavailable: {reason}",
-            mode.dialog_title()
-        )));
+        state.prompt(format!("{} is unavailable: {reason}.", mode.dialog_title()));
         return false;
     }
     match start_browser_netlist_import(state, mode) {
         Ok(()) => true,
         Err(error) => {
-            state.push_user_message(ConsoleMessage::error(format!(
-                "SPICE deck import failed: {error}"
-            )));
+            record_import_failure(state, &error);
             false
         }
     }
@@ -263,7 +259,7 @@ pub(crate) fn request_dependency_relink(state: &mut AppState, logical_identity: 
         state,
         logical_identity,
     ) {
-        state.push_user_message(ConsoleMessage::error(error));
+        state.prompt(error);
         return false;
     }
     let token = match crate::workbench::browser::file_import::try_begin_text_import(
@@ -272,7 +268,7 @@ pub(crate) fn request_dependency_relink(state: &mut AppState, logical_identity: 
         Ok(token) => token,
         Err(error) => {
             crate::workbench::documents::netlist_document::cancel_dependency_relink(state);
-            state.push_user_message(ConsoleMessage::error(error));
+            state.prompt(error);
             return false;
         }
     };
@@ -309,18 +305,19 @@ pub(crate) fn poll_browser_dependency_relink(state: &mut AppState) -> bool {
                 .unwrap_or_else(|| file.contents.into_bytes());
             if bytes.starts_with(b"PK\x03\x04") {
                 crate::workbench::documents::netlist_document::cancel_dependency_relink(state);
-                state.push_user_message(ConsoleMessage::error(
-                    "A bundle cannot relink one dependency. Select the exact SPICE member source.",
-                ));
+                state.prompt(
+                    "A bundle cannot relink one dependency. Select the SPICE source file itself.",
+                );
                 return false;
             }
             let source = match rspice_core::netlist::decode_source_bytes(&bytes) {
                 Ok(source) => source,
                 Err(error) => {
                     crate::workbench::documents::netlist_document::cancel_dependency_relink(state);
-                    state.push_user_message(ConsoleMessage::error(format!(
-                        "SPICE dependency relink failed: selected source could not be decoded: {error}"
-                    )));
+                    record_relink_failure(
+                        state,
+                        &format!("the selected file could not be decoded: {error}"),
+                    );
                     return false;
                 }
             };
@@ -328,27 +325,19 @@ pub(crate) fn poll_browser_dependency_relink(state: &mut AppState) -> bool {
                 state, source, file.name, None,
             ) {
                 Ok(()) => {
-                    let message = state
-                        .ui
-                        .messages()
-                        .text(crate::workbench::MessageId::NetlistRelinkSucceeded);
-                    state.push_user_message(ConsoleMessage::info(message));
+                    record_relink_success(state);
                     true
                 }
                 Err(error) => {
                     crate::workbench::documents::netlist_document::cancel_dependency_relink(state);
-                    state.push_user_message(ConsoleMessage::error(format!(
-                        "SPICE dependency relink failed: {error}"
-                    )));
+                    record_relink_failure(state, &error);
                     false
                 }
             }
         }
         BrowserDependencyRelinkResult::Failed(error) => {
             crate::workbench::documents::netlist_document::cancel_dependency_relink(state);
-            state.push_user_message(ConsoleMessage::error(format!(
-                "SPICE dependency relink failed: {error}"
-            )));
+            record_relink_failure(state, &error);
             false
         }
         BrowserDependencyRelinkResult::Cancelled => {
@@ -416,10 +405,10 @@ pub(crate) fn poll_browser_netlist_import(state: &mut AppState) -> bool {
             state,
             completion.transaction,
         );
-        state.push_user_message(ConsoleMessage::error(format!(
+        state.prompt(format!(
             "{} was cancelled because the project changed: {error}",
             completion.mode.dialog_title()
-        )));
+        ));
         return false;
     }
     match completion.result {
@@ -437,9 +426,7 @@ pub(crate) fn poll_browser_netlist_import(state: &mut AppState) -> bool {
                 state,
                 completion.transaction,
             );
-            state.push_user_message(ConsoleMessage::error(format!(
-                "SPICE deck import failed: {error}"
-            )));
+            record_import_failure(state, &error);
             false
         }
         BrowserNetlistImportResult::Cancelled => {

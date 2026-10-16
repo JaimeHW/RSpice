@@ -23,16 +23,15 @@ pub(crate) fn save_owned_netlist_source(
     commit_message: &str,
 ) -> bool {
     if state.ui.netlist.active_dependency_identity.is_some() {
-        state.push_user_message(ConsoleMessage::warning(
-            "Include documents are persisted with the project. Return to the root deck before publishing standalone root-source bytes.",
-        ));
+        state.prompt(
+            "Include files are saved with the project. Return to the top-level deck to save it \
+             as a file.",
+        );
         return false;
     }
     let commit_message = commit_message.trim();
     if commit_message.chars().any(char::is_control) || commit_message.chars().count() > 240 {
-        state.push_user_message(ConsoleMessage::warning(
-            "Use an optional one-line source revision note of at most 240 characters.",
-        ));
+        state.prompt("A revision note is one line of at most 240 characters.");
         return false;
     }
     let commit_message = if commit_message.is_empty() {
@@ -41,15 +40,11 @@ pub(crate) fn save_owned_netlist_source(
         commit_message
     };
     let Some(source) = state.workspace.content.netlist_source.clone() else {
-        state.push_user_message(ConsoleMessage::warning(
-            "Create an editable source deck before saving source bytes.",
-        ));
+        state.prompt("There is no editable deck to save.");
         return false;
     };
     if source != state.simulation.source.netlist_content {
-        state.push_user_message(ConsoleMessage::error(
-            "Source save was blocked because the editor and project-owned deck differ.",
-        ));
+        state.prompt("The deck was not saved: the editor and the project's deck differ.");
         return false;
     }
     let visible_digest = crate::state::content_digest(&source);
@@ -103,9 +98,7 @@ pub(crate) fn save_owned_netlist_source(
     let encoded_source = match encoding.encode(&source) {
         Ok(bytes) => bytes,
         Err(error) => {
-            state.push_user_message(ConsoleMessage::error(format!(
-                "SPICE source save failed: {error}"
-            )));
+            record_save_failure(state, &error.to_string());
             return false;
         }
     };
@@ -127,9 +120,7 @@ pub(crate) fn save_owned_netlist_source(
     let Some(mut path) = (match picked {
         Ok(path) => path,
         Err(error) => {
-            state.push_user_message(ConsoleMessage::error(format!(
-                "SPICE source save failed: {error}"
-            )));
+            record_save_failure(state, &error);
             return false;
         }
     }) else {
@@ -143,16 +134,15 @@ pub(crate) fn save_owned_netlist_source(
     if ordinary_save_to_origin && let Some(expected) = expected_external_sha256 {
         match stage_external_netlist_change(state, &path, expected, &source) {
             Ok(true) => {
-                state.push_user_message(ConsoleMessage::warning(
-                    "The source changed outside RSpice. Review the exact local, external, and merge candidates before saving.",
-                ));
+                state.prompt(
+                    "The source changed outside RSpice. Review the local, external and merged \
+                     versions before saving.",
+                );
                 return false;
             }
             Ok(false) => {}
             Err(error) => {
-                state.push_user_message(ConsoleMessage::error(format!(
-                    "SPICE source save failed before publication: {error}"
-                )));
+                record_save_failure(state, &error);
                 return false;
             }
         }
@@ -173,9 +163,7 @@ pub(crate) fn save_owned_netlist_source(
         match locator.and_then(|locator| next.acknowledge_save(next.content_digest(), locator)) {
             Ok(_) => Some(next),
             Err(error) => {
-                state.push_user_message(ConsoleMessage::error(format!(
-                    "SPICE source save was blocked before publication: {error}"
-                )));
+                record_save_failure(state, &error.to_string());
                 return false;
             }
         }
@@ -208,18 +196,14 @@ pub(crate) fn save_owned_netlist_source(
                     });
             }
             if let Err(error) = descriptor.retain_revision(document, commit_message) {
-                state.push_user_message(ConsoleMessage::error(format!(
-                    "SPICE source save was blocked before publication: {error}"
-                )));
+                record_save_failure(state, &error);
                 return false;
             }
             Some(descriptor)
         }
         (None, None) => None,
         _ => {
-            state.push_user_message(ConsoleMessage::error(
-                "SPICE source save was blocked because canonical document metadata is incomplete.",
-            ));
+            record_save_failure(state, "the deck's save record is incomplete");
             return false;
         }
     };
@@ -253,19 +237,26 @@ pub(crate) fn save_owned_netlist_source(
             }
             if canonical_publication {
                 state.ui.netlist.externally_saved_content_digest = Some(visible_digest);
-                state.push_user_message(ConsoleMessage::info(
+                state.record(
+                    LogSeverity::Info,
+                    LogSource::Studio,
                     crate::workbench::workflows::export_workflow::export_completion_message(
                         "SPICE source",
                         &path,
                         None,
                         io,
                     ),
-                ));
+                );
             } else {
-                state.push_user_message(ConsoleMessage::info(format!(
-                    "Downloaded independent SPICE source copy {}. Browser downloads are not a reopenable save binding, so the project source remains modified until the project itself is saved.",
-                    path.display()
-                )));
+                state.record(
+                    LogSeverity::Info,
+                    LogSource::Studio,
+                    format!(
+                        "Downloaded a copy of the SPICE source: {}. The project's deck stays \
+                         modified until the project is saved.",
+                        path.display()
+                    ),
+                );
             }
             true
         }
@@ -278,15 +269,22 @@ pub(crate) fn save_owned_netlist_source(
                     Ok(true)
                 )
             {
-                state.push_user_message(ConsoleMessage::warning(
-                    "The source changed during publication. No bytes were overwritten; review the newly observed external revision.",
-                ));
+                state.prompt(
+                    "The source changed while it was being saved; nothing was overwritten. \
+                     Review the external version.",
+                );
                 return false;
             }
-            state.push_user_message(ConsoleMessage::error(format!(
-                "SPICE source save failed: {error}"
-            )));
+            record_save_failure(state, &error);
             false
         }
     }
+}
+
+fn record_save_failure(state: &mut AppState, error: &str) {
+    state.record(
+        LogSeverity::Error,
+        LogSource::Studio,
+        format!("SPICE source save failed: {error}"),
+    );
 }

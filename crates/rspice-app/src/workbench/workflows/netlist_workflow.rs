@@ -4,7 +4,7 @@
 //! Validation is pinned to an exact content digest and project revision, so
 //! an edit after validation invalidates it rather than being carried along.
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
@@ -45,9 +45,8 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
     };
 
     if app.state.ui.netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
-        app.state.push_user_message(ConsoleMessage::warning(
-            "Revision comparisons are read-only review documents and cannot be validated for execution.",
-        ));
+        app.state
+            .prompt("A revision comparison is read-only and cannot be validated.");
         return false;
     }
     if app.state.ui.netlist.active_dependency_identity.is_some() {
@@ -56,8 +55,7 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
             .ui
             .messages()
             .text(crate::workbench::MessageId::NetlistRootValidationRequired);
-        app.state
-            .push_user_message(ConsoleMessage::warning(message));
+        app.state.prompt(message);
         return false;
     }
     if app.state.ui.netlist.active_document == ActiveNetlistDocument::Generated
@@ -73,10 +71,8 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
             .clone()
             .unwrap_or_else(|| "Generated netlist is stale.".to_owned());
         app.state.ui.netlist.validation = None;
-        app.state.ui.netlist.validation_error = Some(error.clone());
-        app.state.push_user_message(ConsoleMessage::error(format!(
-            "Netlist validation failed: {error}"
-        )));
+        record_validation_failure(&mut app.state, &error);
+        app.state.ui.netlist.validation_error = Some(error);
         return false;
     }
 
@@ -92,19 +88,15 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
             ) {
                 app.invalidate_simulation_preflight();
                 app.state.ui.netlist.validation = None;
-                app.state.ui.netlist.validation_error = Some(error.clone());
-                app.state.push_user_message(ConsoleMessage::error(format!(
-                    "Netlist validation failed: {error}"
-                )));
+                record_validation_failure(&mut app.state, &error);
+                app.state.ui.netlist.validation_error = Some(error);
                 return false;
             }
             if let Err(error) = acknowledge_canonical_validation(&mut app.state) {
                 app.invalidate_simulation_preflight();
                 app.state.ui.netlist.validation = None;
-                app.state.ui.netlist.validation_error = Some(error.clone());
-                app.state.push_user_message(ConsoleMessage::error(format!(
-                    "Netlist validation failed: {error}"
-                )));
+                record_validation_failure(&mut app.state, &error);
+                app.state.ui.netlist.validation_error = Some(error);
                 return false;
             }
             app.state.ui.netlist.validation = Some(NetlistValidationReceipt {
@@ -116,26 +108,34 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
                 advisory_count: metadata.advisories.len(),
             });
             app.state.ui.netlist.validation_error = None;
-            app.state.push_user_message(ConsoleMessage::info(format!(
-                "Validated exact visible SPICE source: {} task{} · authored {} · executable {}",
-                metadata.task_count,
-                if metadata.task_count == 1 { "" } else { "s" },
-                short_digest(visible_digest),
-                short_digest(metadata.source_digest),
-            )));
+            app.state.record(
+                LogSeverity::Info,
+                LogSource::Netlist,
+                format!(
+                    "Validated the netlist: {} task{}.",
+                    metadata.task_count,
+                    if metadata.task_count == 1 { "" } else { "s" },
+                ),
+            );
             true
         }
         Err(error) => {
             let message = error.to_string();
             invalidate_canonical_validation(&mut app.state);
             app.state.ui.netlist.validation = None;
-            app.state.ui.netlist.validation_error = Some(message.clone());
-            app.state.push_user_message(ConsoleMessage::error(format!(
-                "Netlist validation failed: {message}"
-            )));
+            record_validation_failure(&mut app.state, &message);
+            app.state.ui.netlist.validation_error = Some(message);
             false
         }
     }
+}
+
+fn record_validation_failure(state: &mut AppState, error: &str) {
+    state.record(
+        LogSeverity::Error,
+        LogSource::Netlist,
+        format!("Netlist validation failed: {error}"),
+    );
 }
 
 /// Retain where each dependency resolved so the navigator and the Problems
@@ -559,8 +559,4 @@ fn invalidate_canonical_validation(state: &mut AppState) {
     {
         state.workspace.content.netlist_document = state.ui.netlist.owned_document.clone();
     }
-}
-
-fn short_digest(digest: crate::product::ContentDigest) -> String {
-    digest.to_string().chars().take(12).collect()
 }
