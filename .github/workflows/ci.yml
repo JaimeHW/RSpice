@@ -31,6 +31,7 @@ jobs:
       CARGO_BUILD_JOBS: "2"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        id: checkout
       - name: Install Rust toolchain
         id: toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --component rustfmt --component clippy
@@ -44,9 +45,11 @@ jobs:
       # changes what gets reported, never what is enforced.
       #
       # `!cancelled()` rather than `always()`, so cancelling a run still stops
-      # it. The six steps that drive cargo or rustfmt also require the
-      # toolchain to have installed, because without it they would fail for a
-      # reason that has nothing to do with what they check.
+      # it. Each check also requires what it cannot run without, because it
+      # would otherwise fail for a reason that has nothing to do with what it
+      # checks: the six that drive cargo or rustfmt require the toolchain to
+      # have installed, which itself runs only after a checkout, and every
+      # other check requires the checkout.
       #
       # The loop this replaced ran `cargo fmt -p` per member under
       # `set -euo pipefail`, which meant the first unformatted member ended the
@@ -64,7 +67,7 @@ jobs:
         if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
         run: python3 tools/ci/test_check_formatting.py
       - name: Lint GitHub workflows
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: |
           export GOBIN="$RUNNER_TEMP/actionlint-bin"
           go install "github.com/rhysd/actionlint/cmd/actionlint@v${ACTIONLINT_VERSION}"
@@ -100,46 +103,46 @@ jobs:
         if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
         run: python3 tools/ci/test_ui_build_identity.py
       - name: Browser artifact reporting regression tests
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 tools/ci/test_wasm_artifact_size.py
       - name: Browser workbench harness regressions
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 tools/ci/test_browser_workbench.py
       - name: Vendored cloud client integrity
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 tools/ci/test_cloud_client_vendor.py
       - name: WASM playground worker tests
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 tools/ci/test_wasm_playground.py
       - name: WASM IDE worker tests
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 tools/ci/test_ide_worker.py
       - name: Browser module loading tests
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: node --test tools/ci/test_wasm_loader.mjs tools/ci/test_wasm_playground.mjs
       - name: Native release packager tests
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 tools/release/test_package_native.py
       - name: Managed Python runtime staging tests
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 tools/release/test_stage_managed_python.py
       - name: Browser automation runtime asset integrity
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 tools/ci/test_automation_runtime_assets.py
       - name: Source-distribution lockfile repair tests
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 tools/release/test_repair_sdist_lock.py
       - name: No restricted model files are vendored
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 tools/models/license_audit.py --check
       - name: Model pack manifest and catalog are current
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 tools/models/build_manifest.py --check
       - name: Drawing-sheet qualification harness regressions
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 tools/ci/test_qualify_drawing_sheet.py
       - name: Mixed-deck fingerprint comparison regressions
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 tools/ci/test_compare_trifamily_fingerprints.py
       - name: Clippy (warnings denied)
         if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}

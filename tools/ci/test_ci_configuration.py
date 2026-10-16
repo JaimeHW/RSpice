@@ -835,30 +835,58 @@ class CiConfigurationTests(unittest.TestCase):
         steps = workflow_named_steps(job)
         self.assertGreater(len(steps), 20, "the quality job's steps were not found")
 
-        # The toolchain install is the one named step every cargo check needs,
-        # so it is referenced by id rather than by position.
+        # An unnamed step is invisible to the loops below, because a step's
+        # body runs to the next `- name:` and an unnamed one is folded into the
+        # step before it. Only the two setup actions ahead of the first check
+        # may go unnamed, so a new check cannot escape by leaving its name off.
+        unnamed = re.findall(r"(?m)^      - (?!name: )(.*)$", job)
+        self.assertEqual(
+            [line.split("@", 1)[0] for line in unnamed],
+            ["uses: actions/checkout", "uses: Swatinem/rust-cache"],
+            "every check in the quality job carries a name",
+        )
+
+        # The prerequisites are referenced by id rather than by position.
+        self.assertRegex(job, r"uses: actions/checkout@[^\n]*\n        id: checkout\n")
         self.assertIn("id: toolchain", workflow_step_body(job, "Install Rust toolchain"))
 
+        toolchain = "steps.toolchain.outcome == 'success'"
+        checkout = "steps.checkout.outcome == 'success'"
+        conditions = {}
         for name, body in steps:
             if name == "Install Rust toolchain":
                 continue
-            self.assertIn(
-                "!cancelled()",
-                body,
+            # The step's own `if:` key, never a comment or a line of its
+            # command: text that merely mentions a condition enforces nothing.
+            guards = re.findall(r"(?m)^        if: \$\{\{ (.*) \}\}$", body)
+            self.assertEqual(
+                len(guards),
+                1,
                 f"the {name!r} step stops reporting as soon as an earlier check "
-                f"fails; give it `if: ${{{{ !cancelled() }}}}`",
+                "fails; give it one `if:` that starts with `!cancelled()`",
+            )
+            terms = [term.strip() for term in guards[0].split("&&")]
+            self.assertNotIn("||", guards[0], f"{name!r}: every term must hold")
+            self.assertEqual(
+                terms[0], "!cancelled()", f"{name!r} must still stop when cancelled"
+            )
+            self.assertTrue(
+                toolchain in terms or checkout in terms,
+                f"{name!r} must require what it runs on: the toolchain, or the "
+                "checkout for a check that needs no toolchain",
             )
             self.assertNotIn(
                 "continue-on-error",
                 body,
                 f"{name!r} would no longer fail the job",
             )
+            conditions[name] = terms
 
-        # A step that drives cargo or rustfmt itself cannot run without the
-        # toolchain, and would otherwise fail for a reason unrelated to what it
-        # checks. Read from the step's own command, so a new cargo step is
-        # covered without being listed here. Comment lines are dropped first: a
-        # step's body runs to the next `- name:`, so a comment written above the
+        # A step that drives cargo or rustfmt cannot run without the toolchain,
+        # and would otherwise fail for a reason unrelated to what it checks.
+        # Read from the step's own command, so a new cargo step is covered
+        # without being listed here. Comment lines are dropped first: a step's
+        # body runs to the next `- name:`, so a comment written above the
         # following step sits in this one, and several of them discuss cargo.
         for name, body in steps:
             if name == "Install Rust toolchain":
@@ -870,27 +898,27 @@ class CiConfigurationTests(unittest.TestCase):
             command = command[1] if len(command) == 2 else ""
             if re.search(r"\b(cargo|rustfmt)\b", command):
                 self.assertIn(
-                    "steps.toolchain.outcome == 'success'",
-                    body,
+                    toolchain,
+                    conditions[name],
                     f"{name!r} runs cargo or rustfmt, so it must require the "
                     "toolchain install to have succeeded",
                 )
 
-        # These three reach cargo from inside the script they run rather than
-        # from the step's command, so no reading of the workflow alone can find
-        # them. Asserting the names exist means a rename fails here instead of
-        # quietly dropping the requirement.
-        named = dict(steps)
+        # These reach cargo or rustfmt from inside the script they run rather
+        # than from the step's command, so no reading of the workflow alone can
+        # find them. Asserting the names exist means a rename fails here
+        # instead of quietly dropping the requirement.
         for name in (
+            "Format",
             "Formatting gate regression tests",
             "CI configuration tests",
             "UI incremental build identity regressions",
         ):
-            self.assertIn(name, named, "a renamed step still needs the toolchain")
+            self.assertIn(name, conditions, "a renamed step still needs the toolchain")
             self.assertIn(
-                "steps.toolchain.outcome == 'success'",
-                named[name],
-                f"{name!r} runs cargo from the script it invokes",
+                toolchain,
+                conditions[name],
+                f"{name!r} runs cargo or rustfmt from the script it invokes",
             )
 
     def test_surface_crates_are_linted_and_tested_on_every_change(self) -> None:
