@@ -324,6 +324,8 @@ const XSPICE_DC: &str =
     "tests/mixed_dc_sweep_state.rs::the_xspice_latch_twin_reads_its_time_zero_state_at_every_point";
 const TRANSIENT_NOISE_VERILOGA: &str =
     "tests/transient_noise_veriloga.rs::mixed_and_runtime_module_noise_reach_the_transient";
+const SHAPED_NOISE_VERILOGA: &str =
+    "tests/transient_noise_veriloga.rs::a_laplace_shaped_process_renders_its_transfer";
 
 /// The reason periodic analyses refuse a running discrete state.
 const DISCRETE_STATE_REASON: &str = "a periodic steady state with a running discrete state has no formulation yet: the digital half's event queue, process resumptions and drivers are not part of a period map";
@@ -365,15 +367,18 @@ const fn rational_descriptor(evidence: &'static [&'static str]) -> CellSupport {
     }
 }
 
-const fn renderable(evidence: &'static [&'static str]) -> CellSupport {
+const fn renderable(condition: &'static str, evidence: &'static [&'static str]) -> CellSupport {
     CellSupport::Restricted {
         gate: InstanceGate::TransientNoiseRenderable,
         token: "analysis.tran.noise",
-        // Shaped Verilog-A processes arrive with P1.5 (L1b).
-        condition: "every noise mechanism the transient-noise render plan can render: white, flicker and tabulated sources (shaped Verilog-A noise processes are not rendered yet)",
+        condition,
         evidence,
     }
 }
+
+const NATIVE_RENDERABLE: &str = "every native noise mechanism the transient-noise render plan can render: white, flicker and tabulated sources, without burst noise, BSIM4 tnoiMod=2 correlated thermal noise or a noise-only private row";
+
+const VERILOGA_RENDERABLE: &str = "every Verilog-A noise process whose shaping is rational: white, flicker and tabulated noise, and noise shaped through ddt, idt or laplace_* with bias-independent filter dynamics, without absdelay, zi_* or idtmod on its path";
 
 /// The answer of one cell. Exhaustive over both axes, with no catch-all arm,
 /// so a new family or analysis does not compile until every cell of it is
@@ -440,11 +445,12 @@ pub const fn capability_cell(
             F::VerilogAmsMixed => rational_descriptor(&[FIXTURES, PZ_MIXED, PZ_NON_RATIONAL]),
         },
         A::TranNoise => match family {
-            F::SpiceNative => renderable(&[FIXTURES]),
+            F::SpiceNative => renderable(NATIVE_RENDERABLE, &[FIXTURES]),
             F::XspiceAnalog | F::XspiceEvent | F::RealNumber => supported(),
-            F::VerilogARuntime | F::VerilogAGenerated | F::VerilogAmsMixed => {
-                renderable(&[FIXTURES, TRANSIENT_NOISE_VERILOGA])
-            }
+            F::VerilogARuntime | F::VerilogAGenerated | F::VerilogAmsMixed => renderable(
+                VERILOGA_RENDERABLE,
+                &[FIXTURES, TRANSIENT_NOISE_VERILOGA, SHAPED_NOISE_VERILOGA],
+            ),
         },
         A::Pss | A::Hb | A::Pac | A::Pnoise | A::Pxf | A::Pstb => match family {
             F::SpiceNative | F::XspiceAnalog => periodic_contracts(
