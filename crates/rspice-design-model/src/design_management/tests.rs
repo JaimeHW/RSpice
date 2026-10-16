@@ -2752,39 +2752,29 @@ fn a_new_sheet_shows_only_the_fields_an_unreleased_drawing_can_fill() {
 fn drawing_sheet_lettering_is_iso_3098_and_its_budget_is_a_measurement() {
     // Every height a sheet can letter at, for every size RSpice supports,
     // must be a step on the ISO 3098 series, and a caption must never
-    // outweigh the value it names nor a value its zone reference.
+    // outweigh the value it names.
     const SERIES: [u64; 8] = [1_800, 2_500, 3_500, 5_000, 7_000, 10_000, 14_000, 20_000];
     for standard in DrawingSheetStandard::ALL {
         let (width_um, height_um) = standard.portrait_dimensions_um();
         let lettering = DrawingSheetLettering::for_sheet(width_um, height_um);
-        for height in [
-            lettering.caption_um,
-            lettering.data_um,
-            lettering.reference_um,
-        ] {
+        for height in [lettering.caption_um, lettering.data_um] {
             assert!(
                 SERIES.contains(&height),
                 "{height} um on {standard:?} is not an ISO 3098 lettering height"
             );
         }
         assert!(
-            lettering.caption_um < lettering.data_um && lettering.data_um < lettering.reference_um,
+            lettering.caption_um < lettering.data_um,
             "{standard:?} letters its captions at or above its values"
         );
     }
 
     // The recommended minimum rises with the sheet, and A4 takes the row the
-    // standard gives it: 1.8 mm notes, 2.5 mm titles, 3.5 mm headings.
+    // standard gives it: 1.8 mm notes and 2.5 mm titles.
     let a4 = DrawingSheetLettering::for_sheet(210_000, 297_000);
-    assert_eq!(
-        (a4.caption_um, a4.data_um, a4.reference_um),
-        (1_800, 2_500, 3_500)
-    );
+    assert_eq!((a4.caption_um, a4.data_um), (1_800, 2_500));
     let a0 = DrawingSheetLettering::for_sheet(841_000, 1_189_000);
-    assert_eq!(
-        (a0.caption_um, a0.data_um, a0.reference_um),
-        (3_500, 5_000, 7_000)
-    );
+    assert_eq!((a0.caption_um, a0.data_um), (3_500, 5_000));
     assert_eq!(
         DrawingSheetLettering::for_sheet(297_000, 420_000),
         DrawingSheetLettering::for_sheet(594_000, 841_000),
@@ -2837,6 +2827,43 @@ fn drawing_sheet_lettering_is_iso_3098_and_its_budget_is_a_measurement() {
             caption.chars().count()
         );
     }
+}
+
+#[test]
+fn zone_references_letter_at_the_iso_5457_height_their_band_can_hold() {
+    // ISO 5457 letters a grid reference 3.5 mm high on every sheet, because
+    // the band carrying it is the same width on every sheet. A band too
+    // narrow for that steps down the series until the capitals clear both
+    // rules by a tenth of their height.
+    for border in [
+        DrawingSheetBorderTemplate::Standard,
+        DrawingSheetBorderTemplate::Plain,
+        DrawingSheetBorderTemplate::OrganizationManaged,
+    ] {
+        let band_um = border.band_width_um();
+        let height_um = drawing_sheet_zone_lettering_um(band_um);
+        assert!(ISO_3098_HEIGHTS_UM.contains(&height_um));
+        assert!(height_um <= 3_500);
+        assert!(
+            height_um + 2 * (height_um / 10) <= band_um,
+            "{border:?} letters {height_um} um references that crowd its {band_um} um band"
+        );
+    }
+    assert_eq!(
+        drawing_sheet_zone_lettering_um(DrawingSheetBorderTemplate::Standard.band_width_um()),
+        3_500
+    );
+    assert_eq!(
+        drawing_sheet_zone_lettering_um(DrawingSheetBorderTemplate::Plain.band_width_um()),
+        1_800
+    );
+    assert_eq!(
+        drawing_sheet_zone_lettering_um(
+            DrawingSheetBorderTemplate::OrganizationManaged.band_width_um()
+        ),
+        3_500,
+        "a wider band does not letter its references any larger"
+    );
 }
 
 #[test]

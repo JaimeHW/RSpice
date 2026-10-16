@@ -2335,7 +2335,9 @@ pub const DRAWING_SHEET_TITLE_VALUE_POSITION: (u64, u64) = (7, 10);
 /// recommended minimum rises with the sheet: text that is legible on A4 at
 /// arm's length is not legible on a drawing twice the size read from the
 /// same distance. Every renderer letters a sheet from this one table, so a
-/// field is the same physical height on the canvas and on the plot.
+/// field is the same physical height on the canvas and on the plot. Zone
+/// references are not in it: they belong to the frame, which does not grow
+/// with the sheet (see [`drawing_sheet_zone_lettering_um`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DrawingSheetLettering {
     /// Field captions: the smallest text on the sheet, since a caption only
@@ -2343,9 +2345,6 @@ pub struct DrawingSheetLettering {
     pub caption_um: u64,
     /// Field values and sheet dimensions — the text the reader came for.
     pub data_um: u64,
-    /// Zone references in the border band, which are read while scanning the
-    /// whole sheet rather than while reading one cell.
-    pub reference_um: u64,
 }
 
 impl DrawingSheetLettering {
@@ -2371,19 +2370,16 @@ impl DrawingSheetLettering {
             Self {
                 caption_um: 1_800,
                 data_um: 2_500,
-                reference_um: 3_500,
             }
         } else if area < A1_TO_A0_UM2 {
             Self {
                 caption_um: 2_500,
                 data_um: 3_500,
-                reference_um: 5_000,
             }
         } else {
             Self {
                 caption_um: 3_500,
                 data_um: 5_000,
-                reference_um: 7_000,
             }
         }
     }

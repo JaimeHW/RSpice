@@ -8,7 +8,8 @@
 use std::borrow::Cow;
 
 use egui::{
-    Align2, Color32, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, epaint::TextShape, pos2, vec2,
+    Align2, Color32, FontId, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, epaint::TextShape,
+    pos2, vec2,
 };
 
 use crate::session::visibility::DrawingSheetLayerVisibility;
@@ -21,6 +22,7 @@ use rspice_design_model::design_management::{
     DrawingSheetTitleBlockRotation, DrawingSheetTitleFieldValueAuthority, DrawingSheetZoneEdges,
     DrawingSheetZoneGrid, DrawingSheetZoneLabels, ResolvedDrawingSheetTitleField,
     SchematicSheetFormat, drawing_sheet_mono_em_um, drawing_sheet_title_block_lettering,
+    drawing_sheet_zone_lettering_um,
 };
 use rspice_ui_kit::theme;
 use rspice_ui_kit::tokens::{Mode, Tokens};
@@ -236,11 +238,6 @@ enum DrawingSheetLodTier {
 #[derive(Debug, Clone, Copy)]
 struct DrawingSheetLod {
     tier: DrawingSheetLodTier,
-    /// The heights this level of detail was resolved against. Every painter
-    /// that letters the sheet already carries the level of detail, so it
-    /// reads them from here rather than taking a second argument that could
-    /// disagree with the one the tier was decided from.
-    lettering: DrawingSheetLettering,
     show_border: bool,
     show_margins: bool,
     show_zone_labels: bool,
@@ -284,17 +281,15 @@ fn sheet_lettering(sheet: &ActiveDrawingSheet) -> DrawingSheetLettering {
         .unwrap_or_else(|| sheet.format.authored_size.lettering())
 }
 
-/// Em a zone reference in the border band is lettered at.
-///
-/// A zone reference is bounded by the band that carries it rather than by the
-/// sheet. That band is a fixed 2.5 to 6 mm whatever the paper, so lettering a
-/// reference at the capital height ISO 3098 recommends for the sheet would
-/// drive an A0 label — 7 mm of capitals — straight through a 5 mm frame. The
-/// band therefore keeps the size it has always been painted at, and sizing
-/// the two to each other is the border's problem to solve, not the title
-/// block's.
-fn authored_zone_lettering(lettering_um: u64) -> f32 {
-    lettering_um as f32 * DRAWING_SHEET_UNITS_PER_MM as f32 / 1_000.0
+/// Font a zone reference in the border band is lettered in: the height and
+/// weight the plot letters it at, which depend on the band and not on the
+/// sheet.
+fn zone_label_font(sheet: &ActiveDrawingSheet, zoom: f32) -> FontId {
+    let lettering_um = drawing_sheet_zone_lettering_um(sheet.geometry.physical.border_band_um);
+    theme::mono(
+        drawing_sheet_font_size(zoom, authored_lettering(lettering_um)),
+        theme::FontWeight::Regular,
+    )
 }
 
 /// Smallest em height, in physical pixels, at which title-block lettering is
@@ -319,7 +314,6 @@ impl DrawingSheetLod {
         };
         Self {
             tier,
-            lettering,
             show_border: tier != DrawingSheetLodTier::Thumbnail,
             show_margins: tier != DrawingSheetLodTier::Thumbnail,
             show_zone_labels: matches!(
@@ -477,15 +471,10 @@ pub fn draw_base(
         if layers.zones
             && let Some(zones) = sheet.geometry.physical.zones
         {
-            draw_zone_band(
-                painter,
-                printable,
-                drawing_area,
-                zones,
-                lod,
-                viewport.zoom,
-                palette,
-            );
+            let label_font = lod
+                .show_zone_labels
+                .then(|| zone_label_font(sheet, viewport.zoom));
+            draw_zone_band(painter, printable, drawing_area, zones, label_font, palette);
         }
     }
     if layers.title_block
@@ -1046,8 +1035,7 @@ fn draw_zone_band(
     printable: Rect,
     drawing_area: Rect,
     zones: DrawingSheetZoneGrid,
-    lod: DrawingSheetLod,
-    zoom: f32,
+    label_font: Option<FontId>,
     palette: DrawingSheetPalette,
 ) {
     let column_width = drawing_area.width() / f32::from(zones.columns);
@@ -1084,13 +1072,9 @@ fn draw_zone_band(
             );
         }
     }
-    if !lod.show_zone_labels || !zone_edge_labels_visible(zones.labels) {
+    let Some(font) = label_font.filter(|_| zone_edge_labels_visible(zones.labels)) else {
         return;
-    }
-    let font = theme::mono(
-        drawing_sheet_font_size(zoom, authored_zone_lettering(lod.lettering.reference_um)),
-        theme::FontWeight::Medium,
-    );
+    };
     let top_y = (printable.top() + drawing_area.top()) * 0.5;
     let bottom_y = (drawing_area.bottom() + printable.bottom()) * 0.5;
     for column in 0..zones.columns {

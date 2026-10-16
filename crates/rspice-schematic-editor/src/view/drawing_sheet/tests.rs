@@ -8,6 +8,7 @@ use rspice_design::schematic::{
     net_label::{Junction, NetLabel},
     wire::Wire,
 };
+use rspice_design_model::design_management::DrawingSheetStandard;
 use rspice_design_model::{SchematicPageOrientation, SchematicPageSize};
 
 fn test_sheet() -> ActiveDrawingSheet {
@@ -153,8 +154,7 @@ fn coordinates_only_zones_retain_bands_but_suppress_labels_and_references() {
                 labels: DrawingSheetZoneLabels::Coordinates,
                 edges: DrawingSheetZoneEdges::All,
             },
-            DrawingSheetLod::resolve(1.5, 1.0, test_lettering()),
-            1.5,
+            Some(theme::mono(12.0, theme::FontWeight::Regular)),
             DrawingSheetPalette::resolve(&Tokens::get(context)),
         );
     });
@@ -216,6 +216,45 @@ fn drawing_sheet_lettering_keeps_its_authored_height_on_the_page() {
     for zoom in [0.25_f32, 1.0, 4.0] {
         assert!(drawing_sheet_font_size(zoom, caption) < drawing_sheet_font_size(zoom, data));
     }
+}
+
+#[test]
+fn zone_references_letter_at_the_height_of_their_band_not_their_sheet() {
+    let sheet = |format: SchematicSheetFormat| ActiveDrawingSheet {
+        geometry: DrawingSheetGeometry::from_format(&format),
+        format,
+        sheet_name: "top".to_owned(),
+        page_label: "1 of 1".to_owned(),
+    };
+    // ISO 5457 letters a grid reference 3.5 mm high whatever the paper, and
+    // a Standard band is 5 mm wide on A0 as on A4. Fourteen world units of
+    // capitals is that 3.5 mm.
+    let a4 = zone_label_font(&test_sheet(), 1.0);
+    let a0 = zone_label_font(
+        &sheet(SchematicSheetFormat::from_standard(
+            DrawingSheetStandard::IsoA0,
+            SchematicPageOrientation::Landscape,
+        )),
+        1.0,
+    );
+    assert_eq!(a4, a0, "a zone reference must not grow with the sheet");
+    assert!(
+        (a4.size * 0.698 - 14.0).abs() < 0.1,
+        "a {}-unit em must letter 3.5 mm capitals",
+        a4.size
+    );
+
+    // A Plain band is 2.5 mm wide, too narrow for 3.5 mm capitals, so its
+    // references step down to 1.8 mm.
+    let plain = zone_label_font(
+        &sheet(
+            SchematicSheetFormat::default()
+                .try_update(|draft| draft.apply_border_template(DrawingSheetBorderTemplate::Plain))
+                .expect("a plain border is valid"),
+        ),
+        1.0,
+    );
+    assert!((plain.size * 0.698 - 7.2).abs() < 0.1);
 }
 
 #[test]

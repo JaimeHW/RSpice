@@ -628,6 +628,7 @@ impl<'a> SemanticSceneCompiler<'a> {
                 geometry.printable,
                 geometry.drawing_area,
                 zones,
+                geometry.border_band_um,
                 frame_stroke,
             )?;
         }
@@ -832,6 +833,7 @@ impl<'a> SemanticSceneCompiler<'a> {
         printable: DrawingSheetRect,
         drawing_area: DrawingSheetRect,
         zones: DrawingSheetZoneGrid,
+        border_band_um: u64,
         stroke: StrokeStyle,
     ) -> Result<(), HardcopyRenderError> {
         let right =
@@ -912,6 +914,13 @@ impl<'a> SemanticSceneCompiler<'a> {
         }
         if zones.labels != DrawingSheetZoneLabels::Coordinates {
             let label_color = stroke.color;
+            // A reference is lettered at the canvas's height and centred in
+            // the band as the canvas centres it: across the zone, and with
+            // its baseline converted from the band's centre line.
+            let lettering_um = drawing_sheet_zone_lettering_um(border_band_um);
+            let label_em_um = drawing_sheet_mono_em_um(lettering_um);
+            let baseline_um = drawing_sheet_mono_baseline_offset_um(lettering_um) as i64;
+            let centred = (TextAnchor::Middle, SceneTextRotation::Upright);
             let top_label_y = midpoint_coordinate(
                 printable.y_um,
                 drawing_area.y_um,
@@ -939,21 +948,23 @@ impl<'a> SemanticSceneCompiler<'a> {
                     DrawingSheetZoneLabels::Coordinates => unreachable!(),
                 };
                 if show_top_left {
-                    self.add_text(
-                        self.drawing_sheet_point(center_x, top_label_y)?,
+                    self.add_text_placed(
+                        self.drawing_sheet_point(center_x, top_label_y + baseline_um)?,
                         &text,
                         SceneFont::Monospace,
-                        1_800,
+                        label_em_um,
                         label_color,
+                        centred,
                     )?;
                 }
                 if show_bottom_right {
-                    self.add_text(
-                        self.drawing_sheet_point(center_x, bottom_label_y)?,
+                    self.add_text_placed(
+                        self.drawing_sheet_point(center_x, bottom_label_y + baseline_um)?,
                         &text,
                         SceneFont::Monospace,
-                        1_800,
+                        label_em_um,
                         label_color,
+                        centred,
                     )?;
                 }
             }
@@ -970,21 +981,23 @@ impl<'a> SemanticSceneCompiler<'a> {
                     DrawingSheetZoneLabels::Coordinates => unreachable!(),
                 };
                 if show_top_left {
-                    self.add_text(
-                        self.drawing_sheet_point(left_label_x, center_y)?,
+                    self.add_text_placed(
+                        self.drawing_sheet_point(left_label_x, center_y + baseline_um)?,
                         &text,
                         SceneFont::Monospace,
-                        1_800,
+                        label_em_um,
                         label_color,
+                        centred,
                     )?;
                 }
                 if show_bottom_right {
-                    self.add_text(
-                        self.drawing_sheet_point(right_label_x, center_y)?,
+                    self.add_text_placed(
+                        self.drawing_sheet_point(right_label_x, center_y + baseline_um)?,
                         &text,
                         SceneFont::Monospace,
-                        1_800,
+                        label_em_um,
                         label_color,
+                        centred,
                     )?;
                 }
             }

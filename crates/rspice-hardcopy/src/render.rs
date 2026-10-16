@@ -54,6 +54,7 @@ use rspice_design_model::design_management::{
     DrawingSheetTitleBlockRotation, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId,
     DrawingSheetZoneEdges, DrawingSheetZoneGrid, DrawingSheetZoneLabels, SchematicSheetFormat,
     drawing_sheet_mono_baseline_offset_um, drawing_sheet_mono_em_um,
+    drawing_sheet_zone_lettering_um,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_hardcopy_contract::RenderTarget;
