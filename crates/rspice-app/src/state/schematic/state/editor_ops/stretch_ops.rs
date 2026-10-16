@@ -150,7 +150,10 @@ impl SchematicState {
         let document = self.design.document();
         let visible;
         let document = if document.wires.iter().any(|wire| hidden(wire.id))
-            || document.junctions.iter().any(|junction| hidden(junction.id))
+            || document
+                .junctions
+                .iter()
+                .any(|junction| hidden(junction.id))
         {
             let mut only_this_sheet = document.clone();
             only_this_sheet.wires.retain(|wire| !hidden(wire.id));

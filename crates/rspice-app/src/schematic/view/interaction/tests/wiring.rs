@@ -19,7 +19,10 @@ fn the_label_tool_refuses_an_unmarked_crossing() {
     crossing(&mut state, 1, 2);
 
     assert!(label_anchor_on_unmarked_crossing(&state, Point::origin()));
-    assert!(!label_anchor_on_unmarked_crossing(&state, Point::new(40, 0)));
+    assert!(!label_anchor_on_unmarked_crossing(
+        &state,
+        Point::new(40, 0)
+    ));
 
     state
         .schematic

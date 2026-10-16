@@ -688,7 +688,8 @@ fn break_mode_translates_both_endpoints_of_an_explicitly_selected_tap() {
     schematic.session.editor.selection.select_only_bus_tap(2);
 
     assert_eq!(
-        schematic.move_with_mode_on_one_sheet(Point::new(1, 0), MoveSelectionMode::BreakConnections,),
+        schematic
+            .move_with_mode_on_one_sheet(Point::new(1, 0), MoveSelectionMode::BreakConnections,),
         Ok(true)
     );
 
@@ -719,7 +720,8 @@ fn break_mode_rejects_a_selected_tap_that_would_leave_its_source_bus() {
     let topology = schematic.topology_version();
 
     assert_eq!(
-        schematic.move_with_mode_on_one_sheet(Point::new(0, 1), MoveSelectionMode::BreakConnections,),
+        schematic
+            .move_with_mode_on_one_sheet(Point::new(0, 1), MoveSelectionMode::BreakConnections,),
         Err(MoveSelectionError::InvalidTapAttachment { tap_id: 2 })
     );
 

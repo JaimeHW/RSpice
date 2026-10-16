@@ -426,7 +426,8 @@ pub fn simplify_polyline(points: Vec<Point>) -> Vec<Point> {
                 * (i128::from(point.y) - i128::from(b.y))
                 == (i128::from(b.y) - i128::from(a.y)) * (i128::from(point.x) - i128::from(b.x));
             // A vertex the bus folds back at is where it reaches farthest.
-            let onward = (i128::from(b.x) - i128::from(a.x)) * (i128::from(point.x) - i128::from(b.x))
+            let onward = (i128::from(b.x) - i128::from(a.x))
+                * (i128::from(point.x) - i128::from(b.x))
                 + (i128::from(b.y) - i128::from(a.y)) * (i128::from(point.y) - i128::from(b.y));
             if !collinear || onward < 0 {
                 break;
@@ -567,7 +568,11 @@ mod tests {
         let folded = vec![Point::origin(), Point::new(40, 0), Point::new(20, 0)];
         assert_eq!(simplify_polyline(folded.clone()), folded);
         assert_eq!(
-            simplify_polyline(vec![Point::origin(), Point::new(20, 20), Point::new(40, 40)]),
+            simplify_polyline(vec![
+                Point::origin(),
+                Point::new(20, 20),
+                Point::new(40, 40)
+            ]),
             vec![Point::origin(), Point::new(40, 40)]
         );
     }

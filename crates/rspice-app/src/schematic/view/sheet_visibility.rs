@@ -637,7 +637,11 @@ mod tests {
             .schematic
             .document_mut_for_test()
             .components
-            .push(Component::new(20, ComponentType::Resistor, Point::new(20, 0)));
+            .push(Component::new(
+                20,
+                ComponentType::Resistor,
+                Point::new(20, 0),
+            ));
         let pin = state.schematic.document().components[0].terminal_positions()[0].1;
         state.schematic.init_undo_history();
 

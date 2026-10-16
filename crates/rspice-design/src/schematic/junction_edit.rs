@@ -433,7 +433,11 @@ mod tests {
 
     /// Conductor ends at `point`, counted the slow way: (ends of wires with a
     /// vertex there, wires running through it, pins on it).
-    fn ends_at(document: &SchematicDocument, pins: &[Point], point: Point) -> (usize, usize, usize) {
+    fn ends_at(
+        document: &SchematicDocument,
+        pins: &[Point],
+        point: Point,
+    ) -> (usize, usize, usize) {
         let mut vertex_ends = 0;
         let mut interiors = 0;
         for wire in &document.wires {
@@ -471,7 +475,11 @@ mod tests {
             .iter()
             .map(|junction| junction.pos)
             .collect::<HashSet<_>>();
-        assert_eq!(dots.len(), document.junctions.len(), "{name}: one dot per point");
+        assert_eq!(
+            dots.len(),
+            document.junctions.len(),
+            "{name}: one dot per point"
+        );
         for &dot in &dots {
             let (vertex_ends, interiors, on_pins) = ends_at(document, &pins, dot);
             assert!(
@@ -481,7 +489,11 @@ mod tests {
             let net = extracted
                 .net_at(dot)
                 .unwrap_or_else(|| panic!("{name}: the dot at {dot:?} is on no net"));
-            for wire in document.wires.iter().filter(|wire| wire.contains_point(dot)) {
+            for wire in document
+                .wires
+                .iter()
+                .filter(|wire| wire.contains_point(dot))
+            {
                 assert_eq!(
                     extracted.net_of_wire(wire.id).map(|net| net.id),
                     Some(net.id),
@@ -490,7 +502,11 @@ mod tests {
                 );
             }
             for terminal in extracted.terminals.iter().filter(|t| t.point == dot) {
-                assert_eq!(terminal.net_name, net.spice_name(), "{name}: pin at {dot:?}");
+                assert_eq!(
+                    terminal.net_name,
+                    net.spice_name(),
+                    "{name}: pin at {dot:?}"
+                );
             }
         }
         let candidates = document
@@ -503,7 +519,10 @@ mod tests {
             let (vertex_ends, interiors, on_pins) = ends_at(document, &pins, point);
             let crossing = vertex_ends == 0 && interiors >= 2;
             if !crossing && vertex_ends + 2 * interiors + on_pins >= 3 {
-                assert!(dots.contains(&point), "{name}: no dot at the join {point:?}");
+                assert!(
+                    dots.contains(&point),
+                    "{name}: no dot at the join {point:?}"
+                );
             }
         }
     }
@@ -627,7 +646,9 @@ mod tests {
                 1 => Point::new(x, y + length),
                 _ => Point::new(x + length, y + length),
             };
-            document.wires.push(Wire::segment(id, Point::new(x, y), end));
+            document
+                .wires
+                .push(Wire::segment(id, Point::new(x, y), end));
             id += 1;
         }
         for _ in 0..next(3) {

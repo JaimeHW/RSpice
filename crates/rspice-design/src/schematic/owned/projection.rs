@@ -384,7 +384,11 @@ fn projected_cross_sheet_anchor(
             // the drawing's coordinates, so the authored document would let
             // another page's wire through the same point satisfy the check;
             // the projected one has laid the pages apart.
-            if !projected.wires.iter().any(|wire| wire.contains_point(anchor)) {
+            if !projected
+                .wires
+                .iter()
+                .any(|wire| wire.contains_point(anchor))
+            {
                 return Err(DesignManagementError::MissingReference {
                     domain: "cross-sheet component terminal connection",
                     identity: format!("{}:{}", component_id, terminal_name),

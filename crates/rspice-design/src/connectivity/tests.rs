@@ -150,7 +150,9 @@ fn a_label_spelled_as_a_bus_member_joins_the_bit_without_a_tap() {
 
     let extracted = extracted(&document);
 
-    let labelled = extracted.net_at(Point::new(20, 40)).expect("the label's net");
+    let labelled = extracted
+        .net_at(Point::new(20, 40))
+        .expect("the label's net");
     assert_eq!(labelled.spice_name(), "DATA#3");
     assert_eq!(
         extracted
@@ -187,7 +189,9 @@ fn every_ground_spelling_is_one_net_with_the_ground_symbol() {
 
     let extracted = extracted(&document);
 
-    let ground_net = extracted.ground_net.expect("the ground symbol binds node 0");
+    let ground_net = extracted
+        .ground_net
+        .expect("the ground symbol binds node 0");
     for wire in 1..=4 {
         assert_eq!(
             extracted.net_of_wire(wire).map(|net| net.id),

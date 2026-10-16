@@ -353,7 +353,14 @@ mod tests {
         let symbols = super::super::schematic_symbol_context(&state);
         let target = PointerTarget::Component(id);
 
-        drag(&mut state, &ctx, &symbols, target, Point::origin(), Point::new(20, 0));
+        drag(
+            &mut state,
+            &ctx,
+            &symbols,
+            target,
+            Point::origin(),
+            Point::new(20, 0),
+        );
         let at_pin = |state: &AppState, point: Point| {
             state
                 .schematic
