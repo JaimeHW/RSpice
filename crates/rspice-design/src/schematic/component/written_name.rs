@@ -6,6 +6,7 @@
 //! heads from the same answer.
 
 use super::{Component, ComponentType};
+use rspice_app_types::hierarchy_path::{InstancePath, ProbeTarget};
 
 /// What makes the deck write a controlled source as a behavioural `B` card: a
 /// polynomial or an output limit, neither of which a linear E/G/F/H card can
@@ -87,10 +88,65 @@ impl Component {
     }
 }
 
+/// The component drawn on the sheet of `occurrence` that the engine names
+/// `device`, a device name read off a result.
+///
+/// The engine's name carries the written names on both sides of the drawing:
+/// `xamp.rc4` is, on the sheet of `/amp`, the resistor drawn `C4`. So the scope
+/// is matched by written instance names and the device by its written element
+/// name. `None` when the device is read in another occurrence, or when no
+/// component on the sheet writes it.
+pub fn component_for_engine_device<'a>(
+    components: &'a [Component],
+    occurrence: &InstancePath,
+    device: &str,
+) -> Option<&'a Component> {
+    let device = device.trim();
+    let (scope, leaf) = match ProbeTarget::parse(device) {
+        Ok(target) => (target.scope, target.leaf),
+        Err(_) => (InstancePath::root(), device.to_owned()),
+    };
+    if !scope.same_engine_scope(occurrence) {
+        return None;
+    }
+    components
+        .iter()
+        .filter(|component| !component.kind.spice_prefix().is_empty())
+        .find(|component| component.written_element_name().eq_ignore_ascii_case(&leaf))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rspice_design_model::Point;
+
+    #[test]
+    fn a_device_read_off_a_result_finds_the_component_that_writes_it() {
+        let mut limited = drawn(ComponentType::Vcvs, "E1", "vmax=1");
+        limited.id = 8;
+        let components = [drawn(ComponentType::Resistor, "C4", ""), limited];
+        let amp = InstancePath::parse("/amp").expect("drawn occurrence");
+        let root = InstancePath::root();
+
+        let found = |occurrence: &InstancePath, device: &str| {
+            component_for_engine_device(&components, occurrence, device).map(|found| found.id)
+        };
+        assert_eq!(found(&amp, "xamp.rc4"), Some(7));
+        assert_eq!(found(&amp, "XAMP.B1"), Some(8));
+        assert_eq!(found(&root, "RC4"), Some(7));
+        assert_eq!(
+            found(&root, "C4"),
+            None,
+            "the drawn name is not the element"
+        );
+        assert_eq!(found(&root, "E1"), None, "a lowered source is its B card");
+        assert_eq!(
+            found(&amp, "rc4"),
+            None,
+            "a root device is not on this sheet"
+        );
+        assert_eq!(found(&root, "xamp.rc4"), None);
+    }
 
     fn drawn(kind: ComponentType, name: &str, params: &str) -> Component {
         let mut component = Component::new(7, kind, Point::new(0, 0)).with_name_value(name, "1");

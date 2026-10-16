@@ -5,7 +5,7 @@
 mod variant;
 mod written_name;
 pub use variant::PreparedVariantReplacement;
-pub use written_name::BehavioralLowering;
+pub use written_name::{BehavioralLowering, component_for_engine_device};
 
 use super::component_type::ComponentType;
 use super::label_position::LabelPosition;
