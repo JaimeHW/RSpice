@@ -2157,4 +2157,32 @@ M1 d g s b nch W={w} L={l*2}\n\
         );
         assert_eq!(state.simulation.source.netlist_content, edited);
     }
+
+    /// An edit that moves the revision and leaves the bytes as they were —
+    /// typed and undone — still refuses the fix: the digest alone would let
+    /// it through, so the revision is what refuses it.
+    #[test]
+    fn a_quick_fix_is_refused_when_only_the_revision_moved() {
+        let (mut state, finding) = validated_fix_state();
+        state.ui.netlist.revision += 1;
+        let refused = apply_quick_fix_for_finding(&mut state, finding)
+            .expect_err("the finding was validated at an earlier revision");
+        assert!(refused.contains("has changed"), "{refused}");
+        assert_eq!(state.simulation.source.netlist_content, FIX_DECK);
+    }
+
+    /// The caret's preferred fix is offered only for the revision it was
+    /// validated at, so the command that applies it is not offered for a fix
+    /// it would refuse.
+    #[test]
+    fn the_preferred_fix_is_withdrawn_when_only_the_revision_moved() {
+        let (mut state, _) = validated_fix_state();
+        state.ui.netlist.cursor_line = 2;
+        assert!(
+            preferred_quick_fix_available(&state),
+            "precondition: the caret is on the finding's line",
+        );
+        state.ui.netlist.revision += 1;
+        assert!(!preferred_quick_fix_available(&state));
+    }
 }
