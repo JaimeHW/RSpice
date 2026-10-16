@@ -148,7 +148,7 @@ pub fn decode_native_bundle(
     let digest = format!("{:x}", sha2::Sha256::digest(&dataset_bytes));
     if !manifest.dataset_sha256.eq_ignore_ascii_case(&digest) {
         return Err(NativeBundleError::InvalidData(
-            "dataset.json SHA-256 does not match the signed manifest identity".into(),
+            "dataset.json SHA-256 does not match the manifest's dataset_sha256".into(),
         ));
     }
     admission::check(&dataset_bytes, limits)?;
