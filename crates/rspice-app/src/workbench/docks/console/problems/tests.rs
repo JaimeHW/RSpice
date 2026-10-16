@@ -349,10 +349,14 @@ fn collect(output: egui::FullOutput) -> Render {
 }
 
 fn sized(input: egui::RawInput) -> egui::RawInput {
+    sized_to(input, HEIGHT)
+}
+
+fn sized_to(input: egui::RawInput, height: f32) -> egui::RawInput {
     egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(
             egui::Pos2::ZERO,
-            egui::vec2(WIDTH, HEIGHT),
+            egui::vec2(WIDTH, height),
         )),
         ..input
     }
@@ -1319,29 +1323,38 @@ fn a_finding_made_current_elsewhere_is_scrolled_into_view() {
 fn a_half_shown_row_made_current_is_scrolled_whole() {
     let mut state = state_with_findings(60);
     let order = reported(&state);
-    let harness = Harness::new();
-    // Stand on a finding far down, which leaves the body scrolled to wherever
-    // that finding's bottom edge put it.
-    state.diagnostics.set_current_finding(Some(order[45]));
-    harness.settle(&mut state);
-    harness.settle(&mut state);
-    let render = harness.frame(&mut state, sized(egui::RawInput::default()));
-    let table = harness.table();
-    let cut = (0..order.len())
-        .map(|index| format!("finding {index:02}"))
-        .find(|message| {
-            render.cell(message).is_some_and(|cell| {
-                let row = row_of(cell);
-                row.top() < table.top() - 0.5 && row.bottom() > table.top() + 0.5
+    // Standing on a finding far down leaves the body scrolled to wherever that
+    // finding's bottom edge put it. Whether its top edge then cuts a row
+    // depends on the body's height, so the page is tried at heights a point
+    // apart until one does.
+    for height in (400_u16..440).map(f32::from) {
+        let input = || sized_to(egui::RawInput::default(), height);
+        let harness = Harness::new();
+        state.diagnostics.set_current_finding(Some(order[45]));
+        let _ = harness.frame(&mut state, input());
+        let _ = harness.frame(&mut state, input());
+        let render = harness.frame(&mut state, input());
+        let table = harness.table();
+        let Some(cut) = (0..order.len())
+            .map(|index| format!("finding {index:02}"))
+            .find(|message| {
+                render.cell(message).is_some_and(|cell| {
+                    let row = row_of(cell);
+                    row.top() < table.top() - 0.5 && row.bottom() > table.top() + 0.5
+                })
             })
-        })
-        .expect("precondition: the body's top edge cuts a row");
+        else {
+            continue;
+        };
 
-    let index: usize = cut["finding ".len()..].parse().expect("a numbered finding");
-    state.diagnostics.set_current_finding(Some(order[index]));
-    harness.settle(&mut state);
-    let render = harness.frame(&mut state, sized(egui::RawInput::default()));
-    assert!(harness.shows_whole(&render, &cut), "{cut} shows whole");
+        let index: usize = cut["finding ".len()..].parse().expect("a numbered finding");
+        state.diagnostics.set_current_finding(Some(order[index]));
+        let _ = harness.frame(&mut state, input());
+        let render = harness.frame(&mut state, input());
+        assert!(harness.shows_whole(&render, &cut), "{cut} shows whole");
+        return;
+    }
+    panic!("precondition: some page height between 400 and 440 points cuts a row");
 }
 
 /// Clicking a row low in a full body opens the detail region under it, which
