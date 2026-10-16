@@ -1,92 +1,67 @@
 # rspice-python
 
-Python bindings for the RSpice circuit simulation engine, built for
-automation, scripting, and automated circuit verification: running SPICE
-regression tests in CI the same way you run unit tests.
+Python bindings for the RSpice simulation engine, imported as `rspice`. A test
+suite can parse a deck, run it, read the results as NumPy arrays and fail on
+its `.MEAS` checks like any other assertion, so analog regression tests run in
+CI beside software tests. This package embeds RSpice in Python; the desktop
+application's own Python automation is a separate surface.
 
-These bindings put RSpice inside your Python. The desktop IDE has the reverse,
-Python automation inside RSpice, and the two are separate.
+## What's in here
 
-## What is here
+| Module | Contents |
+| :--- | :--- |
+| `netlist` | `Netlist` parsing, introspection and parameter variants |
+| `engine` | `Engine`: one call per analysis family, the deck runner `Engine.run`, cancellation and health |
+| `config` | `SimulationConfig`, `ConvergenceConfig`, `ResourceLimits` and their enums |
+| `results` | One result class per analysis family, with NumPy accessors, the shared result document and pickling |
+| `measure` | `.MEAS` evaluation against existing results |
+| `export` | Touchstone, SPICE raw, CSV and VCD writers |
+| `abort` | Ctrl-C handling and `Engine.cancel()` |
+| `errors` | The exception hierarchy |
 
-- **Every analysis the engine has**: DC, AC and AC-DATA, third-order Volterra
-  distortion, transient, noise, pole-zero, STB, N-port S-parameters with
-  complex `Cy` noise correlation and two-port `Rn`/`NF`/`NFmin`/`Sopt`, PSS,
-  HB, PAC, PXF, envelope, driven PNoise, oscillator phase noise, Monte Carlo,
-  sensitivity, transfer function, Fourier/THD, and parametric analysis.
-- **Verification first**: `engine.run(netlist)` executes the netlist's own
-  analysis directives, evaluates `.MEAS` statements, and
-  `report.assert_passed()` turns them into a CI gate.
-- **NumPy throughout**: waveforms, spectra, and complex AC phasors as ndarrays.
-- **Runtime Verilog-A**: default builds compile `.va` models through the core
-  native backend. AC results retain the solved frequency prefix when a model
-  requests `$finish`, and AC-DATA applies each row's parameter values.
-- **Long-run controls**: resumable netlist-fingerprinted transient checkpoints
-  and error-bounded compressed voltage waveforms.
-- **Export**: Touchstone v1, ngspice-compatible SPICE raw (ASCII and binary,
-  real and complex), RFC 4180 CSV, and VCD.
-- **Netlist introspection**: walk elements, nodes, and `.PARAM` values, and
-  derive parameter variants without string-editing the deck.
-- **Cancellable and thread-friendly**: simulation calls release the GIL, Ctrl-C
-  raises `KeyboardInterrupt` instead of blocking, and `engine.cancel()` stops
-  every active call on an Engine from another thread.
-- **Strict error discipline**: accessors raise `IndexError`/`KeyError` for
-  invalid nodes, argument errors raise `ValueError`, and nothing fabricates a
-  silent zero.
-- **Resource governance**: one `ResourceLimits` policy bounds netlist and
-  dependency ingestion, hierarchy and circuit growth, analysis and result
-  sizes, batch runs, external data, and shared caches, across parsing and
-  execution alike.
-- **Typed**: a complete `rspice.pyi` stub, installed with a `py.typed` marker.
+`rspice.pyi` is the complete type stub, checked against the built module by
+`mypy.stubtest` in CI. It and the docstrings are the API reference.
 
-The full API is in that stub and in the docstrings, which carry more than two
-hundred runnable examples. This README covers what `help()` cannot: how to use
-the bindings for verification, and the contracts that are not visible from a
-signature.
+## Boundaries
+
+- Analyses, devices and netlist dialects belong to `rspice-core`; the analysis
+  and device tables are in the root `README.md`.
+- The command-line simulator is `rspice-cli` and the browser module is
+  `rspice-wasm`; all three publish the same `rspice-analysis-result` document.
 
 ## Installation
 
-Requires CPython 3.10 or newer and `numpy>=2.0,<3`. Release wheels are built
-against the stable ABI (abi3-py310), so one wheel per platform covers every
-supported interpreter.
-
-The Python package is private and is not published to PyPI. Install it from an
-authorized source checkout or from a privately supplied build artifact. Its use
-and distribution are governed by the same RSpice Personal Use License as the
-rest of the repository.
+Requires CPython 3.10 or newer and `numpy>=2.0,<3`. Wheels are built against
+the stable ABI (abi3-py310), so one wheel per platform covers every supported
+interpreter. The package is private and is not published to PyPI: install it
+from an authorized source checkout or a privately supplied build artifact. Its
+use and distribution are governed by the RSpice Personal Use License.
 
 ```bash
 python -m pip install "maturin==1.15.0"
-
 cd crates/rspice-python
 maturin develop --release --locked
 ```
 
-The default `veriloga-native` Cargo feature enables runtime Verilog-A model
-compilation. `--no-default-features` builds the bindings without that backend.
-
 `maturin build --release --locked` produces an installable abi3 wheel for
-authorized testing and private delivery; it does not grant redistribution
-rights. CI builds manylinux2014 x86-64/AArch64, macOS Intel/Apple-Silicon, and
-Windows x86-64/ARM64 wheels as private workflow artifacts. The same six targets
-also produce version-specific `cp314t` wheels for free-threaded CPython 3.14;
-the full binding suite runs with the GIL disabled on Linux, macOS, and Windows.
+authorized testing and private delivery; it grants no redistribution rights.
+CI builds wheels for manylinux2014 x86-64 and AArch64, macOS Intel and Apple
+silicon, and Windows x86-64 and ARM64, plus `cp314t` wheels for free-threaded
+CPython 3.14 on the same six targets, and runs the binding suite with the GIL
+disabled on Linux, macOS and Windows.
 
-The workspace-aware source distribution requires one post-processing step. It
-reconciles maturin's pruned workspace with the repository lockfile, and it
-restores the files `rspice-core` embeds from the workspace root: maturin fills
-the archive from `cargo package --list`, which never reports a file outside a
-package directory, so without them the archive does not compile at all.
+A source distribution needs one repair step, because maturin builds it from
+`cargo package --list`, which omits the files `rspice-core` embeds from the
+workspace root and prunes the workspace lockfile:
 
 ```bash
 maturin sdist --out dist
 python ../../tools/release/repair_sdist_lock.py dist/rspice-*.tar.gz
 ```
 
-The repair runs offline by default, rejects any new or changed external Cargo
-package identity, source, or checksum, and verifies the resulting archive with
-Cargo's `--locked` mode. Run `cargo fetch --locked` first on a clean build
-machine so the dependency index and sources are present locally.
+The repair runs offline unless given `--online`, rejects any new or changed
+external package identity, source or checksum, and verifies the archive with
+Cargo's `--locked` mode; run `cargo fetch --locked` first on a clean machine.
 
 ## Quick start
 
@@ -142,107 +117,37 @@ def test_rc_step_response():
     assert report.measurement("trise").value == pytest.approx(219.7e-6, rel=0.02)
 ```
 
-`engine.run` executes every analysis directive the deck contains, in deck
-order, and returns a `RunReport`. What matters about that report is not the
-accessor list (the stub has it) but its discipline:
+`engine.run` executes every analysis directive in the deck, in deck order, and
+returns a `RunReport`:
 
-- **Nothing is dropped silently.** `report.records` holds at least one record
-  per directive; anything the engine could not execute is listed with
-  `skipped=True` and a reason. `.four` adds one record per output, and
-  `.sp donoise` adds a noise record.
-- **Repeated directives are all kept.** The `all_*` accessors return every
-  result of a kind; the singular accessors are the last of each.
-- **Different quantities get different fields.** A `.pnoise` card around a
-  driven carrier reports an output power spectral density
-  (`report.pnoise`); the same card around an autonomous `.pss` carrier
-  reports a carrier-normalized dBc/Hz phase-noise spectrum with the
-  phase-diffusion constant beside it (`report.oscillator_noise`). One field
-  with a mode flag would hide that.
-- **Run axes are identified, not flattened.** Each record produced under a run
-  axis carries `analysis_id` (`ac-001`, `ac-002`) and a typed `coordinate`
-  with its stable ID and axis assignments. An authored `.TEMP` wraps the deck's
-  physical analyses at each temperature; it does not add an unrelated
-  operating-point sweep.
-- **`report.assert_passed()` cannot be green-washed.** It raises
-  `MeasurementError` unless every directive ran, at least one measurement was
-  evaluated, and all of them passed, so neither a skipped analysis nor a
-  skipped measurement passes as success.
+- `report.records` holds at least one record per directive; a directive the
+  engine could not execute is listed with `skipped=True` and a reason.
+- The singular accessors (`report.ac`) return the last result of a kind, and
+  the `all_*` accessors return every one.
+- A `.PNOISE` card around a driven carrier reports an output power spectral
+  density in `report.pnoise`; around an autonomous `.PSS` carrier it reports a
+  carrier-normalized dBc/Hz phase-noise spectrum in `report.oscillator_noise`.
+- A record produced under a `.STEP` or `.TEMP` axis carries its `analysis_id`
+  (`ac-001`, `ac-002`) and a typed `coordinate` with its stable ID and axis
+  assignments.
+- `report.assert_passed()` raises `MeasurementError` unless every directive
+  ran, at least one measurement was evaluated and every measurement passed, so
+  neither a skipped analysis nor a missing measurement passes as success.
 
-A directive that fails is recorded and the rest of the deck still runs, so one
-unconverged sweep does not cost you the results and `.MEAS` outcomes of
-everything else. Pass `continue_on_error=False` to abort on the first failure
-and raise it instead.
+A directive that fails is recorded and the rest of the deck still runs; pass
+`continue_on_error=False` to raise on the first failure instead.
+`Engine.measure` evaluates the deck's `.MEAS` statements against a
+`TransientResult` or `DcSweepResult` already in hand, and raises `TypeError`
+for any other result.
 
-Measurements can also run against results you already have, though
-`Engine.measure` is intentionally narrower than `Engine.run`: it accepts
-`TransientResult` and `DcSweepResult` only, and raises `TypeError` for
-anything else.
+## Results and export
 
-```python
-tran = engine.run_tran(netlist, stop_time=1e-3)
-for m in engine.measure(netlist, tran):
-    print(m.name, m.value, m.passed)
-```
-
-### Supported `.MEAS` forms
-
-- Windowed statistics over `FROM=`/`TO=`: `MAX`, `MIN`, `PP`, `AVG`, `RMS`,
-  `INTEG` (`INTEGRAL`)
-- Point queries: `FIND ... AT=` / `FIND ... WHEN ...` (including
-  `FIND TIME WHEN ...`), standalone `WHEN`, and `DERIV` (`DERIVATIVE`)
-- `TRIG ... TARG ...` delay measurements
-- Expressions over earlier results: `PARAM='expr'`, and `EQN` for Xyce
-  continuous equation measures re-evaluated at every accepted point
-- Waveform comparison: `ERR`/`ERR1` (RMS norm) and `ERR2` (mean-absolute norm)
-  between two signals, and `ERROR ... FILE=` against a column of an external
-  Xyce PRN, CSV, or CSDF table
-
-Signals address node voltages (`V(out)`) and branch currents (`I(V1)`). For AC,
-plain `V(out)` and `VM(out)` measure magnitude; `VDB(out)` measures dB
-magnitude, `VP(out)` phase in degrees, `VR(out)` real, and `VI(out)` imaginary.
-The AC sweep axis is available as `TIME`, `FREQUENCY`, or `FREQ`; branch
-currents use the same `I*` variants. For NOISE, measure `ONOISE` or `INOISE`
-(also `ONOISE_SPECTRUM` / `INOISE_SPECTRUM`) against the noise frequency axis.
-
-## The shared result document
-
-Beyond the flat accessors, every result family exposes `signals()`,
-`scalars()`, `device_observables()`, and `document()`: the same
-`rspice-analysis-result` document the CLI, the browser, and the cloud
-engine-adapter publish.
-
-`scalars()` attaches a unit and an `unavailable_reason` to quantities without
-a finite measurement. STB margin and crossover-frequency accessors also return
-`None` when the sampled band resolves no such crossing; the corresponding
-typed scalar reason is `no_crossover`. A finite sweep cannot establish an
-infinite margin. A signal descriptor carries canonical name, kind,
-unit, owner, and an `availability` tag (`available`, `not_projected`,
-`absent_at_coordinate`), so a channel the authored output projection did not
-retain is distinguishable from one that does not exist. `document()` names the
-authored card the result came from and, for a `.STEP` or `.TEMP` run, the
-coordinate it was solved at.
-
-STB's `assessment` summarizes measured margins; it is not a circuit stability
-verdict. `multiple_crossovers` replaces the former `conditionally_stable`
-property, and the margin-only `is_stable` property has been removed. STB pickles
-preserve paired margin availability and independent DC evidence. Older pickles
-recompute margins from retained loop samples and discard inferred stability
-claims; a legacy first AC sample is not restored as a DC measurement.
-`phase_degrees` retains the core's continuous Bode phase, including across a
-pickle round trip. Use `numpy.angle(result.loop_gain, deg=True)` when principal
-phase values in [-180, 180] degrees are needed instead.
-
-At zero loop gain, `magnitude` is zero while dB magnitude and phase are undefined.
-The NumPy accessors encode undefined quantities as `NaN`; `magnitude_validity`,
-`magnitude_db_validity`, and `phase_validity` identify defined samples explicitly.
-The result document uses `null`, and phase unwrapping restarts after a zero sample.
-
-A result restored from `pickle` carries this binding's own projection rather
-than the core result these are built from, and says so with
-`RSpiceNotImplementedError`. Pickle `result.document()` when the document
-itself has to survive a round trip.
-
-## Exporting results
+Every result family exposes NumPy accessors and, beside them, `signals()`,
+`scalars()`, `device_observables()` and `document()`, the shared
+`rspice-analysis-result` document. A quantity with no finite value is never a
+silent zero: NumPy accessors encode it as `NaN` with a validity array beside
+it where one applies, `scalars()` gives it an `unavailable_reason`, and the
+document uses `null`.
 
 ```python
 # Touchstone v1 for scikit-rf, ADS, or a datasheet plot
@@ -253,30 +158,21 @@ text = sparams.to_touchstone(frequency_unit="ghz", comments=["nominal corner"])
 tran.write_raw("run.raw", format="binary")
 ac.write_raw("ac.raw")                          # or ac.to_raw() -> bytes
 
-# Value Change Dump of the event timelines, for a logic viewer. The same bytes
-# `rspice run -f vcd` publishes; VCD keeps four bit states and no strength.
+# Value Change Dump of the event timelines: the dump `rspice run -f vcd` writes
 tran.write_vcd("run.vcd")                       # or tran.to_vcd() -> str
 
 # RFC 4180 CSV; AC splits each phasor into <name>_real / <name>_imag
 tran.write_csv("run.csv")
-print(sweep.to_csv())
 tran.export_columns                             # column order, in advance
 ```
 
-Touchstone v1 carries a single reference impedance. A sweep whose ports do not
-all share one is refused rather than written with an `R` that misdescribes it;
-renormalize the ports first.
+Touchstone v1 carries one reference impedance, so a sweep whose ports do not
+share one is refused; renormalize the ports first. Every `write_*` call stages
+the complete file beside its destination and then replaces it atomically, so a
+failure leaves the previous file, or no file, in place.
 
-Every native result-file publication (`write_csv`, `write_raw`,
-`write_touchstone`, `write_vcd`) is transactional: RSpice stages and
-synchronizes the complete file beside its destination before atomically
-replacing it. A serialization, flush, or commit failure therefore preserves the
-previous complete artifact, or leaves an absent destination absent.
-
-## Parallelism
-
-Simulation calls release the GIL, so threads work directly. For process-based
-parallelism, netlists, configurations, and most results pickle:
+Netlists, configurations and most results pickle, so they cross process
+boundaries:
 
 ```python
 from concurrent.futures import ProcessPoolExecutor
@@ -290,37 +186,15 @@ with ProcessPoolExecutor() as pool:
         print(rval, v_out)
 ```
 
-A `Netlist` pickles by replaying its parse from the deck text it retains, so
-the payload stays the size of the source rather than the whole AST, and the
-`ResourceLimits` it was parsed under are reapplied.
+A `Netlist` pickles as its deck text and replays the parse under the same
+`ResourceLimits`. A pickled result keeps every quantity its accessors expose,
+but it carries the binding's projection rather than the core result, so its
+`signals()`, `scalars()`, `device_observables()` and `document()` raise
+`RSpiceNotImplementedError` after a round trip; pickle `result.document()` when
+the document itself must survive. `SParameterResult`, `PxfResult` and
+`EnvelopeResult` do not pickle; send their `document()` instead.
 
-A pickleable result carries the state behind everything its own accessors
-expose, so each readable quantity, and each quantity derived from one such as
-`PssResult.thd_percent` or `HbResult.is_valid`, is unchanged across a round
-trip. **`SParameterResult`, `PxfResult`, and `EnvelopeResult` do not implement
-the pickle protocol**; move those across a process boundary as
-`result.document()` instead.
-
-Compressed transient pickles preserve retained step sizes, every
-descriptor-keyed channel with its unit, owner and per-sample validity mask, the
-XSPICE digital and real event traces, the parent analysis/coordinate/topology
-identity, and the typed `.FFT`, `.FOUR` and `.MEASURE` post-results. A pickle
-whose sample is neither a number nor a typed absence, or whose channel role,
-unit or absence reason this build does not know, is rejected rather than
-repaired. Transient FFT state is explicitly versioned and is identical in full
-and compressed transient pickles. Legacy transient pickles from bindings that
-discarded FFT products are rejected because they cannot prove whether an empty
-FFT list is genuine; rerun and repickle those analyses with the current schema.
-FFT state version 2 adds completion status; earlier FFT pickle states are also
-rejected. `FftResult.status` is `"complete"` for a computed spectrum or
-`"incomplete-history"` when the requested sample record extends beyond the
-retained trajectory, including checkpoint resume without earlier samples.
-`incomplete_history` gives the available `(start, stop)` times for the latter.
-These requests retain their configured window and transform length, with empty
-bin arrays and no metrics. Their shared result document uses schema version 4,
-with the same status and zero spectral points.
-
-## Error handling
+## Errors, threads and cancellation
 
 All errors derive from `rspice.RSpiceError`:
 
@@ -339,18 +213,15 @@ RSpiceError
 └── RSpiceNotImplementedError    # also a NotImplementedError
 ```
 
-The last five derive from both `RSpiceError` and the builtin exception a caller
-already expects, so `except rspice.RSpiceError` catches everything the library
-raises while `except KeyError` keeps working unchanged.
-
-Both error families carry structured attributes so automation never has to
-parse a display message. `SimulationError` and its subclasses expose the stable
-snake-case `kind`, `code`, and `category` tags, a conservative `retryable`
-flag, `iterations` for convergence failures, and `resource`/`requested`/`limit`
-when a `ResourceLimits` ceiling was hit. `ParseError` adds `kind`, `category`,
-and the source provenance for the failure: `line`/`source`, the
-`primary_*`/`related_*` pair for two-location errors, and error-specific fields
-such as `unresolved_output_symbols`. The `.pyi` stub declares the full set.
+The last five also derive from the builtin exception a caller already expects,
+so `except rspice.RSpiceError` catches everything the library raises while
+`except KeyError` keeps working. Errors carry structured attributes, so
+automation never parses a message: `SimulationError` exposes snake-case
+`kind`, `code` and `category` tags, a conservative `retryable` flag,
+`iterations` for convergence failures and `resource`, `requested` and `limit`
+when a `ResourceLimits` ceiling was hit; `ParseError` carries `kind`,
+`category`, the `line` and `source` of the failure and the fields specific to
+its kind, all declared in the stub.
 
 ```python
 try:
@@ -360,64 +231,28 @@ except rspice.ConvergenceError:
 except rspice.SimulationError as e:
     if e.code == "resource_limit":
         print(f"{e.resource}: requested {e.requested}, limit {e.limit}")
-    elif e.retryable:
-        report = engine.run(netlist)
 ```
 
-Result accessors raise standard Python exceptions: `IndexError` for
-out-of-range node indices, `KeyError` for unknown node or branch names, in
-every result type including AC. Invalid arguments (empty frequency lists,
-non-positive stop times, zero sweep steps) raise `ValueError` before the
-simulation starts.
+Simulation calls release the GIL, so several engines can run in parallel
+threads, and the free-threaded `cp314t` wheels keep the GIL disabled with
+`Netlist`, `Engine` and result objects shared across threads. A call runs on a
+worker thread while the calling thread keeps servicing Python signal handlers,
+so Ctrl-C raises `KeyboardInterrupt` during a long run. From another thread,
+`engine.cancel()` stops every active call on that Engine (they raise
+`CancelledError`, and the Engine stays usable), `engine.is_running` and
+`engine.active_run_count` report activity, and `engine.progress` gives the
+completed fraction when exactly one call that reports progress is active.
 
-## Threading and cancellation
+## Feature flags
 
-Simulation calls release the GIL, so a long transient can run in a worker
-thread while the main thread stays responsive, and several engines can simulate
-different netlists in parallel threads.
+| Flag | Effect |
+| :--- | :--- |
+| `veriloga-native` | Default. Compiles `.va` models at run time through the core's native Verilog-A backend; `--no-default-features` builds without it |
+| `extension-module` | Builds the PyO3 extension module; maturin enables it through `pyproject.toml` |
 
-RSpice also supports free-threaded CPython 3.14. Dedicated `cp314t` wheels keep
-the GIL disabled, and immutable `Netlist`, `Engine`, and result objects may be
-shared across Python threads.
+## Building and testing
 
-Applications do not need to synthesize operating-system signals. A GUI or
-service thread may inspect `engine.is_running` and `engine.active_run_count`
-and call `engine.cancel()`. The method returns the number of active calls
-signalled; those calling threads receive `rspice.CancelledError`, and later
-calls on the same Engine remain usable. When exactly one analysis is active,
-`engine.progress` returns its completed fraction if that solver provides one;
-it is `None` for idle Engines, concurrent calls, or analyses with no meaningful
-progress scale.
-
-DC operating points and sweeps, AC, distortion, and S-parameter sweeps,
-transfer-function, STB, pole-zero, transient and checkpoint/resume runs, noise,
-Monte Carlo, parameter steps, sensitivity, PSS, HB, PAC, driven PNoise, and
-oscillator-noise calls poll Python signal handlers while they run. Ctrl-C
-cancels these simulations with `KeyboardInterrupt` instead of arriving only
-after a completed result is returned.
-
-## Testing
-
-For routine Rust workspace checks, keep PyO3 and the wasm target out of the
-fast path, then check this crate separately after selecting a real interpreter:
-
-```bash
-cargo check --workspace --exclude rspice-python --exclude rspice-wasm
-cargo check -p rspice-python
-```
-
-On Windows, the Microsoft Store `python`/`python3` aliases can point PyO3 at
-stub executables under `WindowsApps` and break local checks. `PYO3_PYTHON` is
-the reliable override:
-
-```powershell
-py -3 -m venv .venv
-$env:PYO3_PYTHON = (Resolve-Path .\.venv\Scripts\python.exe).Path
-cargo check -p rspice-python
-```
-
-The binding test suite lives in `tests/` and runs through a maturin development
-install:
+The binding suite in `tests/` runs against a development install:
 
 ```bash
 cd crates/rspice-python
@@ -426,15 +261,22 @@ maturin develop --release --locked
 python -m pytest tests/ -v
 ```
 
-There are also Rust-side unit tests covering the interpreter-free logic
-(signal-spec parsing, the export formats, error mapping). A bare
-`cargo test -p rspice-python` runs nothing, because a cdylib cannot link into a
-test harness; they need the lib target named explicitly:
+The Rust-side unit tests cover the interpreter-free logic. The crate is a
+cdylib with `test = false`, so a bare `cargo test -p rspice-python` runs
+nothing; name the lib target:
 
 ```bash
 cargo test -p rspice-python --lib
 ```
 
-That is a complement to the pytest suite, not a substitute for it.
+On Windows, the Microsoft Store `python` alias can point PyO3 at a stub
+executable; set `PYO3_PYTHON` to a real interpreter before any `cargo` command
+on this crate:
+
+```powershell
+py -3 -m venv .venv
+$env:PYO3_PYTHON = (Resolve-Path .\.venv\Scripts\python.exe).Path
+cargo check -p rspice-python
+```
 
 Licensed under the [RSpice Personal Use License](../../LICENSE).
