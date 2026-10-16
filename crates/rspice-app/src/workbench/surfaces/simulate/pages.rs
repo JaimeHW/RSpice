@@ -572,6 +572,86 @@ mod tests {
         }
     }
 
+    /// Everything the Analyses route states, by name and by value: a label
+    /// widget's text is its AccessKit value, not its name.
+    fn analyses_text(seed: impl FnOnce(&mut crate::workbench::AppState)) -> Vec<String> {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.simulation_page = SimulationPage::Analyses;
+        seed(&mut app.state);
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 1600.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| super::super::show(ui, &mut app));
+            },
+        );
+        output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update")
+            .nodes
+            .iter()
+            .flat_map(|(_, node)| [node.label(), node.value()])
+            .flatten()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// The dispatch contract states what an authorized, current report
+    /// authorizes — under the plan it authorizes — and nothing for a report
+    /// that authorizes nothing: one that is blocked, one that has expired,
+    /// or none at all.
+    #[test]
+    fn the_dispatch_contract_is_stated_only_for_an_authorized_current_report() {
+        const TARGET: &str = "Desktop background thread";
+
+        let authorized = analyses_text(|state| {
+            state.workbench.preflight.report = Some(current_report(
+                state,
+                Vec::new(),
+                Some(prepared_contract(3)),
+            ));
+        });
+        for expected in ["Authorized for dispatch", "1 stable instance", TARGET] {
+            assert!(
+                authorized.iter().any(|text| text.contains(expected)),
+                "an authorized report states {expected:?}: {authorized:?}"
+            );
+        }
+
+        let blocked = analyses_text(|state| {
+            state.workbench.preflight.report = Some(current_report(
+                state,
+                vec![blocker()],
+                Some(prepared_contract(3)),
+            ));
+        });
+        let expired = analyses_text(|state| {
+            let mut stale = current_report(state, Vec::new(), Some(prepared_contract(3)));
+            stale.project_revision += 1;
+            state.workbench.preflight.report = Some(stale);
+        });
+        let absent = analyses_text(|_| {});
+        for (standing, text) in [("blocked", blocked), ("expired", expired), ("absent", absent)] {
+            assert!(
+                !text
+                    .iter()
+                    .any(|text| text.contains("Authorized for dispatch") || text.contains(TARGET)),
+                "a {standing} report authorizes no dispatch and states none: {text:?}"
+            );
+        }
+    }
+
     /// A report that authorizes dispatch is a report with nothing to say.
     ///
     /// It painted a green "PREFLIGHT CURRENT · 2 tasks ready" chip on every

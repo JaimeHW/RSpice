@@ -377,6 +377,26 @@ pub(in crate::workbench) enum DiagnosticOwner {
 }
 
 impl DiagnosticOwner {
+    /// Every owner, in the order the page lists their batches.
+    ///
+    /// Beside the enum, so a new owner joins it in the same change: the
+    /// exhaustive [`Self::position`] makes the author give it a place, and
+    /// the assertion below holds this list to one owner per place. The tests
+    /// that must drive every owner walk this list rather than naming the
+    /// owners they happen to know about.
+    pub(in crate::workbench) const ALL: [Self; 4] =
+        [Self::DesignRules, Self::SymbolPins, Self::Dispatch, Self::Run];
+
+    /// This owner's place in [`Self::ALL`].
+    const fn position(self) -> usize {
+        match self {
+            Self::DesignRules => 0,
+            Self::SymbolPins => 1,
+            Self::Dispatch => 2,
+            Self::Run => 3,
+        }
+    }
+
     const fn key_prefix(self) -> &'static str {
         match self {
             Self::DesignRules => "design-rules",
@@ -386,6 +406,15 @@ impl DiagnosticOwner {
         }
     }
 }
+
+// `ALL` holds every owner exactly once, at its own position.
+const _: () = {
+    let mut index = 0;
+    while index < DiagnosticOwner::ALL.len() {
+        assert!(DiagnosticOwner::ALL[index].position() == index);
+        index += 1;
+    }
+};
 
 /// What a batch was derived from.
 ///
@@ -661,6 +690,19 @@ impl DiagnosticStore {
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(memo);
+    }
+
+    /// What the store holds for one run's failures, as (subject, message),
+    /// for the controller's tests: the controller sits below the shell and
+    /// cannot name a batch.
+    #[cfg(test)]
+    pub(crate) fn published_run_failures(&self, run_sequence: u64) -> Vec<(String, String)> {
+        self.batches
+            .values()
+            .filter(|batch| batch.inputs == DiagnosticInputs::Run { run_sequence })
+            .flat_map(|batch| batch.records.iter())
+            .map(|record| (record.subject.object.clone(), record.message.clone()))
+            .collect()
     }
 
     pub(in crate::workbench) fn request_route(&mut self, route: DiagnosticRoute) {
@@ -967,12 +1009,6 @@ fn screaming_variant(violation_type: rspice_design::drc::DrcViolationType) -> St
 mod tests {
     use super::*;
 
-    fn completed_result() -> rspice_design::drc::DrcResult {
-        let mut result = rspice_design::drc::DrcResult::new();
-        result.completed = true;
-        result
-    }
-
     #[test]
     fn a_rule_code_is_derived_from_its_variant() {
         use rspice_design::drc::DrcViolationType;
@@ -991,35 +1027,123 @@ mod tests {
         );
     }
 
-    /// Currency is the digest and nothing else, for every producer.
-    #[test]
-    fn an_input_change_stales_a_published_batch() {
-        let mut state = AppState::default();
-        state
-            .publish_active_design_check_result(completed_result())
-            .expect("the fixture publishes a receipt");
-        let inputs = DiagnosticInputs::DesignCheck {
-            subject: state.workspace.content.active_schematic_reference(),
+    /// A symbol view whose pins the checks can read: `work/amp/symbol`, with
+    /// one pin, beside a schematic that declares the matching port.
+    fn open_symbol_view(state: &mut AppState) -> crate::state::CellViewRef {
+        use crate::state::{
+            Cell, CellViewRef, ComponentType, Library, Point, PortDirection, SchematicState,
+            SymbolDocument, SymbolPin, View, ViewType,
         };
-        state
-            .publish_diagnostics(inputs.clone(), Vec::new())
-            .expect("an empty batch still records that the checks ran");
 
-        let batch = state
-            .diagnostics
-            .batches()
-            .find(|batch| batch.inputs == inputs)
-            .expect("the batch was just published")
-            .clone();
-        assert!(state.diagnostic_batch_standing(&batch).is_current());
-
-        state.workspace.content.connectivity.policy.width_mismatch =
-            crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
-
-        assert_eq!(
-            state.diagnostic_batch_standing(&batch),
-            BatchStanding::Stale,
+        let mut library = Library::new("work");
+        let mut amp = Cell::new("amp");
+        amp.add_view(View::new("schematic", ViewType::Schematic));
+        amp.add_view(View::new("symbol", ViewType::Symbol));
+        library.add_cell(amp);
+        state.library_manager.add_library(library);
+        let mut schematic = SchematicState::default();
+        let port = schematic.add_component(ComponentType::Port, Point::new(0, 0));
+        schematic
+            .document_mut_for_test()
+            .components
+            .iter_mut()
+            .find(|component| component.id == port)
+            .expect("the fixture just placed this port")
+            .value = "IN".to_owned();
+        state.workspace.insert_schematic_editor(
+            CellViewRef::new("work", "amp", "schematic").key(),
+            schematic,
         );
+        let symbol = CellViewRef::new("work", "amp", "symbol");
+        state.open_workspace_view(symbol.clone());
+        state
+            .store_active_symbol_document(&SymbolDocument {
+                pins: vec![SymbolPin::new("IN", PortDirection::In, None)],
+                ..SymbolDocument::default()
+            })
+            .expect("the fixture stores its symbol");
+        symbol
+    }
+
+    /// Currency is the digest and nothing else, for every producer: each
+    /// owner's batch is current as published, and stale once an input its
+    /// digest covers moves. Walks every owner, so a new one cannot be added
+    /// without saying here what stales it.
+    #[test]
+    fn an_input_change_stales_a_published_batch_for_every_owner() {
+        for owner in DiagnosticOwner::ALL {
+            let mut state = AppState::default();
+            let inputs = match owner {
+                DiagnosticOwner::DesignRules => DiagnosticInputs::DesignCheck {
+                    subject: state.workspace.content.active_schematic_reference(),
+                },
+                DiagnosticOwner::SymbolPins => DiagnosticInputs::SymbolPins {
+                    subject: open_symbol_view(&mut state),
+                },
+                DiagnosticOwner::Dispatch => DiagnosticInputs::Dispatch,
+                DiagnosticOwner::Run => {
+                    state.simulation.retained.runs =
+                        vec![crate::state::SimulationRun::new(3)].into();
+                    DiagnosticInputs::Run { run_sequence: 3 }
+                }
+            };
+            state
+                .publish_diagnostics(inputs.clone(), Vec::new())
+                .expect("an empty batch still records that the checks ran");
+            let batch = state
+                .diagnostics
+                .batches()
+                .find(|batch| batch.inputs == inputs)
+                .expect("the batch was just published")
+                .clone();
+            assert!(
+                state.diagnostic_batch_standing(&batch).is_current(),
+                "{owner:?} is current as published"
+            );
+
+            match owner {
+                DiagnosticOwner::DesignRules => {
+                    state.workspace.content.connectivity.policy.width_mismatch =
+                        crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+                }
+                DiagnosticOwner::SymbolPins => {
+                    // The artwork the pins are drawn on.
+                    let mut symbol = state
+                        .load_active_symbol_document()
+                        .expect("the fixture symbol loads");
+                    symbol.pins.push(crate::state::SymbolPin::new(
+                        "OUT",
+                        crate::state::PortDirection::Out,
+                        None,
+                    ));
+                    state
+                        .store_active_symbol_document(&symbol)
+                        .expect("the edited symbol stores");
+                }
+                DiagnosticOwner::Dispatch => {
+                    let plan = state
+                        .sim_setup
+                        .stable_analysis_plan_mut()
+                        .expect("the fixture owns a stable plan");
+                    let instance = plan.instances()[0].id();
+                    plan.edit(instance, |_| ())
+                        .expect("an analysis edit advances the plan revision");
+                }
+                DiagnosticOwner::Run => {
+                    // The configured design the failure's names were read off.
+                    state.schematic.add_component(
+                        crate::state::ComponentType::Resistor,
+                        crate::state::Point::new(0, 0),
+                    );
+                }
+            }
+
+            assert_eq!(
+                state.diagnostic_batch_standing(&batch),
+                BatchStanding::Stale,
+                "{owner:?} stales when an input it was derived from moves"
+            );
+        }
     }
 
     fn test_record(state: &AppState, message: &str) -> DiagnosticRecord {

@@ -12,21 +12,17 @@ use rspice_design::drc::DrcResult;
 /// Every producer the store holds evidence for puts a real finding on the
 /// page, with a code, a subject and somewhere to go.
 ///
-/// The match is exhaustive on purpose: a new producer cannot be added to
-/// [`DiagnosticOwner`] without this test refusing to compile until its
-/// failure path is driven here. Before the canonical store, a producer
-/// "reported" a failure by writing a console line, which meant a user-visible
-/// failure could ship with nothing on this page at all — and several did.
+/// The owners are the store's own list of them rather than a list written
+/// here, and the match is exhaustive: a new producer cannot be added to
+/// [`DiagnosticOwner`] without this test driving its failure path. Before the
+/// canonical store, a producer "reported" a failure by writing a console
+/// line, which meant a user-visible failure could ship with nothing on this
+/// page at all — and several did.
 #[test]
 fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
     use rspice_design::drc::{DrcLocation, DrcViolation, DrcViolationType};
 
-    for owner in [
-        DiagnosticOwner::DesignRules,
-        DiagnosticOwner::SymbolPins,
-        DiagnosticOwner::Dispatch,
-        DiagnosticOwner::Run,
-    ] {
+    for owner in DiagnosticOwner::ALL {
         let mut app = RSpiceApp::test_instance();
         app.state.project_lifecycle.authority.open_session();
         match owner {
