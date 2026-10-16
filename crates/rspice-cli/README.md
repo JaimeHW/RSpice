@@ -1,50 +1,536 @@
 # rspice-cli
 
-The `rspice` command-line interface: scripted runs, batch simulation,
-regression testing, and CI pipelines over the same `rspice-core` engine every
-other RSpice surface uses.
+The `rspice` command-line simulator. It runs SPICE decks and typed studies,
+sweeps corners and Monte Carlo populations, and compares results against golden
+references, over the same `rspice-core` engine as every other RSpice surface;
+its exit status is a verification verdict that automation can branch on. This
+document is the reference for the shipped binary: commands, flags, output
+files, configuration and exit codes. `rspice <command> --help` lists the same
+flags.
 
 ```bash
-cargo build --release -p rspice-cli
-./target/release/rspice --help
+cargo build --release -p rspice-cli      # target/release/rspice
+cargo install --path crates/rspice-cli   # puts rspice on PATH
 ```
-
-`cargo install --path crates/rspice-cli` puts `rspice` on your `PATH`.
 
 ## Commands
 
 | Command | Purpose |
 | :--- | :--- |
-| `run` | Execute the analyses a netlist requests, or one requested from the command line |
-| `study` | Check, inspect, and execute a typed study with explicit task dependencies |
-| `check` | Validate netlist and control syntax, analysis requests, output symbols, topology, and native/XSPICE/Verilog-A construction |
+| `run` | Execute the analyses a netlist requests, or one requested on the command line |
+| `study` | `check`, `plan` or `run` a typed JSON study with explicit task dependencies |
+| `check` | Validate syntax, analysis requests, output symbols, topology and device construction without simulating |
 | `info` | Summarize a netlist without simulating it |
 | `models` | List the shipped SPICE model packs and look up parts in them |
 | `compare` | Compare a result against a golden reference |
-| `convert` | Convert between result formats |
+| `convert` | Convert a result between file formats |
 | `compile-va` | Compile a Verilog-A model and report its interface |
-| `health` | Probe backend liveness or numerical readiness |
-| `capabilities` | Describe execution routes, control coverage, result mappings, and unsupported workflows |
-| `completions` | Emit a shell completion script for bash, zsh, fish, powershell, or elvish |
+| `health` | Probe liveness or numerical readiness |
+| `capabilities` | Report this build's execution routes, control-script coverage, result mappings and unsupported workflows |
+| `completions` | Print a shell completion script for `bash`, `zsh`, `fish`, `powershell` or `elvish` |
 
-`run`, `check`, and `info` share `-I`, `-D`, dialect, parameter-redefinition,
-and configured include/library search options. Root `-D` values are applied
-before conditional parsing and expression evaluation; local subcircuit
-parameters retain their own scope. All three commands accept `-` to read the netlist from stdin, where
-includes resolve against the working directory. Every flag is in
-`rspice <command> --help`; what follows is the behaviour a flag list does not
-show.
+### Global options
 
-## Preparing a structured study
+| Option | Effect |
+| :--- | :--- |
+| `-v`, `--verbose` | More console detail, and debug logging unless `--log-level` is set |
+| `-q`, `--quiet` | Suppress all non-error output |
+| `--config FILE` | Use this configuration file instead of the user and project files |
+| `--log-level LEVEL` | `off`, `error`, `warn`, `info`, `debug` or `trace`; overrides `--verbose` and `RUST_LOG` |
+| `--log-format FORMAT` | `text` (default) or `json` log records on stderr |
+| `--error-format FORMAT` | `text` (default) or `json` diagnostics on stderr; `json` also selects JSON logs |
 
-`rspice study check study.json` validates a version-1 JSON study, its captured
-circuit sources, typed settings, and dependency graph without running a solver.
-`rspice study plan study.json --json` additionally reports the prepared task order,
-stable instance IDs, configuration digests, source digest, and snapshot digest.
-Both commands support `--json` and `--timeout SECONDS`; an explicit JSON request
-still produces output under `--quiet`. A validation failure returns a nonzero
-status and a `valid: false` document. Parser diagnostics retain included-file
-paths and line numbers; legacy syntax errors carry the file path in their message.
+### Netlist options
+
+`run`, `check` and `info` share these options:
+
+| Option | Effect |
+| :--- | :--- |
+| `-I`, `--include DIR` | Extra search directory for `.include` and `.lib` (repeatable) |
+| `-D`, `--define NAME=VALUE` | Override or define a root-scope parameter (repeatable) |
+| `--spice-dialect DIALECT` | Compatibility dialect, applied to parsing and simulation alike |
+| `--redefined-params MODE` | What a `.PARAM` defined twice in one scope means |
+
+| Dialect | Semantics |
+| :--- | :--- |
+| `best` | RSpice's most accurate available device evaluator, with ngspice expression syntax |
+| `ngspice` | ngspice-compatible expression and device semantics |
+| `xyce` | Xyce-compatible expression, measurement and device semantics |
+
+`--redefined-params` follows Xyce: `ignore` or `usefirst` keeps the first
+definition silently, `warning` (or `warn`) and `usefirstwarn` keep it with a
+warning, `uselast` and `uselastwarn` keep the last definition silently or with
+a warning, and `error` rejects the redefinition.
+
+Pass `-` as the netlist path to read the deck from stdin; includes then resolve
+against the working directory. `-D` values apply before conditional parsing and
+expression evaluation, and subcircuit-local parameters keep their own scope.
+Numeric flag values accept SPICE magnitude suffixes (`--pss-freq 2.4G`,
+`--max-step 1u`, `-D RLOAD=4.7k`); `--temp` and `--sens-value` also take a
+negative value as a separate word (`--temp -40`). A node named on the command
+line is an authored node name, never a solver index.
+
+## Running a deck
+
+`rspice run DECK` parses the deck, expands its variants and run axes, executes
+its analyses and publishes what they produce. Every `run` option is in the flag
+reference at the end of this section.
+
+### Analysis cards
+
+Without a `.control` block, `run` executes every physical analysis card in
+authored order and then the transient post-processors. A deck that authors no
+analysis runs a DC operating point.
+
+| Card | Executes |
+| :--- | :--- |
+| `.OP` | DC operating point |
+| `.DC` | DC sweep, with an optional second source |
+| `.TRAN`, `.TR` | Transient, including transient noise |
+| `.AC`, `.NOISE` | Small-signal AC and noise over a generated sweep, or over the frequencies of a `.DATA` table with `DATA=<table>` |
+| `.DISTO` | Harmonic or two-tone distortion |
+| `.TF`, `.PZ`, `.SENS` | Transfer function, pole-zero, and DC or AC sensitivity |
+| `.SP` | S-parameters over ports declared by `portnum=` source annotations or named on the card; `DONOISE` adds port noise |
+| `.STB` | Loop stability |
+| `.DCMATCH` | DC mismatch |
+| `.PSS`, `.HB` | Periodic carriers: shooting steady state and harmonic balance |
+| `.PAC`, `.PXF`, `.PNOISE` | Periodic AC, transfer function and noise around the nearest preceding `.PSS` or `.HB`; `FROM=` pins the family |
+| `.PSTB` | Periodic stability around the nearest preceding `.PSS` |
+| `.ENVELOPE` | Envelope following from the nearest preceding `.HB` |
+| `.QPSS` | Quasi-periodic steady state |
+| `.QPAC`, `.QPXF`, `.QPNOISE` | Quasi-periodic AC, transfer function and noise around the nearest preceding `.QPSS` |
+| `.MC` | Monte Carlo |
+| `.FOUR`, `.FOURIER` | Fourier analysis of the transient authored before the card, or of the first transient when none precedes it |
+| `.FFT` | FFT of the deck's first transient |
+| `.STEP`, `.TEMP` | Run axes: the other cards run at every coordinate |
+| `.LIN SPARCALC=0` | Accepted; the deck's ordinary `.AC` runs. Every other `.LIN` form is refused |
+
+`.AC`, `.NOISE`, `.TF`, `.SP`, `.STB`, `.PZ`, `.SENS` and `.DISTO` cards that
+end in `ACTIMES=` or `CHECKPOINT=` linearize around a transient state instead
+of the operating point.
+
+The carrier a periodic or quasi-periodic card binds to is decided by the
+canonical deck plan, the same binding the Python, browser and engine-adapter
+surfaces use. A dependent card whose carrier is missing, such as `.PSTB` with no
+preceding `.PSS` or `.ENVELOPE` with no preceding `.HB`, refuses the deck before
+anything is solved. Each carrier is solved once, and every card bound to it
+reuses its exact numerical state.
+
+### Control scripts
+
+With `.control` regions, including those reached through `.include` and `-I`,
+`run` executes their commands in order instead of the declarative cards:
+
+- **Analyses:** `op`, `dc`, `ac`, `noise`, `tran`, `tf`, `pz`, `sens`, `disto`,
+  `stb` and `dcmatch`. `run` executes the deck's declarative cards, including
+  the AC and noise `DATA=` forms; a card of any other kind, or a small-signal
+  card carrying `ACTIMES=` or `CHECKPOINT=`, fails the command.
+- **Circuit and options:** `alter`; `option` or `options` for `reltol`,
+  `abstol`, `vntol`, `gmin`, `chgtol`, `eventfluxtol`, `trtol`, `xmu`, `method`,
+  `itl1`, `itl2`, `itl4`, `temp` and `tnom`, each applied atomically to later
+  analyses; and `set`, which accepts `num_threads=N` to cap later parallel work
+  and `noinit` to suppress the initial listing.
+- **Flow:** `let`, `if`/`else`/`end`, `foreach`, `repeat`, `while`, `dowhile`,
+  `break` and `continue` over scalars.
+- **Presentation:** `print`, `plot` and `settype`.
+
+Any other command fails with its source location. Each completed analysis is a
+named dataset (`ac1`, `tf1`, `pz1`, `disto1`, …) with its own output artifact
+(`results.ac-001.csv`, `results.ac-002.csv`), and a qualified expression such
+as `abs(ac1.v(out))` reads an earlier one. Transfer-function datasets expose
+`transfer_function`, `input_impedance` and `output_impedance`; pole-zero
+datasets expose one-based `pole(i)` and `zero(i)` and the `dc_gain` and
+`hf_gain` scalars; distortion datasets select a product with
+`disto("2f1",i(V1))` or `disto("f1+f2",v(out))`, and `disto("2f1",frequency)`
+is that product's physical frequency.
+
+`print` writes complex samples to stdout, including under `--quiet`; with
+`--summary -` the data goes instead to a companion `*.control-NNN.json` listed
+in the summary's `outputs`. `plot` writes an SVG and a companion
+`*.control-NNN.json` holding the exact samples, units and axes, beside `-o` or
+else beside the deck. SVG plots need real expressions, so apply `real()` or
+`abs()` to complex data. A failed script publishes none of its files.
+
+Scripts run independently at every `.STEP` or `.TEMP` coordinate. Their
+transients honour `--checkpoint`, `--resume`, `--tran-stop`, `.OPTIONS RESTART`
+and `--compress` exactly as `.TRAN` cards do, and the deck's `.FOUR` and `.FFT`
+cards post-process the transients a script runs.
+
+### Analyses requested on the command line
+
+Each of these flags replaces the deck's analysis cards with one analysis. They
+are mutually exclusive, and none combines with a `.STEP` or `.TEMP` axis.
+Because the deck's cards do not run, an authored `.PAC`, `.PXF`, `.PNOISE` or
+`.ENVELOPE` cannot use a mode's carrier; author the `.PSS` or `.HB` in the deck
+when a dependent card needs one.
+
+| Flag | Runs | Related flags |
+| :--- | :--- | :--- |
+| `--monte-carlo N` | N Monte Carlo trials | `--mc-distribution`, `--mc-spread`, `--mc-param`, `--seed` |
+| `--pss-freq F` | Periodic steady state at fundamental F; refused beside an authored `.PSS` | `--pss-harmonics N` (default 9), `--pss-tstab TIME` |
+| `--hb-freq F` | Harmonic balance at fundamental F | `--hb-harmonics N` (default 9) |
+| `--pz-input NODE --pz-output NODE` | Pole-zero between two nodes | `--pz-transfer voltage` (default) or `current` |
+| `--sens-output NODE --sens-param NAME` | DC sensitivity of `V(NODE)` to one `.PARAM` | `--sens-value VALUE`, the nominal value (default: the deck's) |
+| `--sparam "P1+,P1-,P2+,P2-"` | Two-port S-parameters over the deck's first `.AC` sweep; `0` names ground | `--sparam-z0 OHMS` (default 50) |
+
+`--monte-carlo` samples parameters from `--mc-distribution` (`gaussian` by
+default, `uniform` or `worst-case`) with relative spread `--mc-spread` (the
+sigma for gaussian, the tolerance otherwise; default `0.01`, and `0` gives
+deterministic nominal samples), optionally only the parameters named by
+repeated `--mc-param`. Trials run in parallel within
+`resources.max_parallel_workers` rather than `-j`, and sampling is seed-stable,
+so the statistics match a serial run exactly. Non-converging trials are dropped
+from the statistics and counted; all trials failing is an error.
+
+`--seed N` sets the seed of `--monte-carlo` (default 1), or overrides the seed
+of every authored Monte Carlo card while keeping each card's run count, starting
+trial, distribution, parameter selection and confidence settings. It is refused
+before execution unless every run executes a Monte Carlo analysis.
+
+### Process corners
+
+`--corners tt,ss,ff` runs the deck's own analyses once per corner. With
+`--corner-lib FILE`, each corner's deck gains `.lib "FILE" <corner>` after its
+title line; without it every corner runs the nominal models and the sweep only
+checks convergence. Corner names are letters, digits, `_` and `-`, unique
+without regard to case. Outputs are tagged per corner (`res.csv` becomes
+`res.tt.csv`), measurement names gain a `<corner>:` prefix, each corner keeps
+its own report entry and failure category, and the run exits nonzero if any
+corner fails. `-j` runs corners in parallel. `--corners` does not combine with
+the analysis modes above or with a `.STEP` or `.TEMP` axis.
+
+### Decks that expand into several runs
+
+HSPICE `.ALTER` blocks and textual `.DATA` variants expand into a plan of
+concrete decks, each parsed and solved independently. Each run tags its own
+artifacts: `.ALTER` runs are named `base` and then by block title, `.DATA` runs
+by table row, reduced to a file-safe tag (`out.csv` becomes `out.base.csv`,
+`out.hot.csv`, `out.tbl_row_1.csv`). `-j N` runs the plan on N workers, and
+`-j 0` on every core up to `resources.max_parallel_workers`; an explicit request
+above that ceiling is refused rather than clamped, and with more than one worker
+the console shows one status line per run. A failing run does not stop the
+rest, as in HSPICE: every run lands in the reports, and the exit status
+reflects the whole plan. `resources.max_batch_runs` bounds the plan, counting
+every variant, corner and run-axis coordinate.
+
+`.PREPROCESS ADDRESISTORS` writes its derived Xyce-compatible deck beside the
+input as `<input file name>_xyce.cir`. It needs a file-backed deck, and it is
+refused in an `.ALTER`, `.DATA`, corner or `.STEP` deck, where one sibling file
+cannot represent several rewritten decks.
+
+### Measurements and the exit status
+
+`.MEAS` and `.MEASURE` statements evaluate against every analysis that produces
+data:
+
+- **TRAN:** node voltages, branch currents as `I(name)`, and time as `TIME`, so
+  `FIND TIME WHEN V(out)=...` works
+- **DC:** the sweep, with the swept value as the abscissa
+- **AC:** `V(x)`/`VM(x)` magnitude, `VDB(x)`, `VP(x)` phase in degrees, `VR(x)`,
+  `VI(x)` and the matching `I…` forms, with frequency addressable as
+  `FREQUENCY`, `FREQ` or `TIME`
+- **NOISE:** the `ONOISE` and `INOISE` spectral densities (also `*_SPECTRUM`)
+
+`GOAL=value [TOL=value]` turns a measurement into a check; `TOL` defaults to
+`max(1% of |goal|, 1e-12)`. Under `--spice-dialect xyce`, the continuous
+measurements `TRAN_CONT`, `DC_CONT`, `AC_CONT` and `NOISE_CONT` accept
+`FAILVALUE=value`: a record fails when `abs(raw_value) >= FAILVALUE`, a
+non-finite value or threshold fails closed, and the stream passes only when it
+produced at least one record and every record passed. Each record is reported
+on its own, with its raw value, threshold, verdict and event or trigger/target
+coordinates; JUnit and TAP name it `name[record N]`. With `--compress`,
+measurements still read the exact accepted samples.
+
+A failed measurement fails the run with exit 3, whether it missed its goal, did
+not evaluate, or belongs to an analysis that never ran. `--allow-failed-meas`
+restores exit 0 while every report keeps the individual verdicts. Results
+containing NaN or Inf fail the run with exit 80 unless `--allow-nonfinite` is
+given. `--meas` prints the results; `--meas-file FILE` writes them as JSON, or
+as CSV with `--meas-format csv`, to enough digits to recover every stored value
+exactly.
+
+### HDL designs
+
+For a deck that instantiates Verilog designs:
+
+| Option | Effect |
+| :--- | :--- |
+| `+PLUSARG …` | Plusargs after the netlist (`rspice run tb.cir +VERBOSE +N=4`) for `$test$plusargs` and `$value$plusargs`; they precede the deck's `.options hdl_plusargs`, and the first match wins |
+| `--hdl-run-dir DIR` | Directory that relative HDL file paths resolve against (default: the deck's directory) |
+| `--hdl-unrestricted-io` | Let HDL file writes leave the run directory |
+| `--hdl-delay-select WHICH` | `typ` (default); `min` and `max` are refused with capability `hdl.option.delay_select`, because every HDL delay uses its typical value |
+
+A positional argument after the netlist that does not begin with `+` is a usage
+error. An HDL `$error` or `$fatal` fails the run with exit 3. With `-o`, the
+designs' console transcript is also written as `<output stem>.hdl.log`; when
+`--summary -` reserves stdout, design text goes to stderr.
+
+### `run` flag reference
+
+Output and reports:
+
+| Flag | Effect |
+| :--- | :--- |
+| `-o`, `--output FILE` | Result file; see Output files below |
+| `-f`, `--format FORMAT` | `raw`, `ascii`, `csv`, `tsv`, `json`, `hdf5` or `vcd` (default: `output.format`, else `raw`) |
+| `--save SIGNAL` | Export only these signals, replacing the deck's `.SAVE`, `.PROBE`, `.PRINT` and `.PLOT` selection (repeatable; `V(out)`, `V(a,b)`, `I(v1)`, `@m1[id]`, `all`) |
+| `--expand-buses` | With `-f vcd`, write each digital-bus member as its own one-bit `$var` |
+| `--compress`, `--compress-tol TOL` | Decimate the published transient waveform within TOL (default `1e-4`) |
+| `--meas` | Print `.MEAS` results |
+| `--meas-file FILE`, `--meas-format FORMAT` | Write `.MEAS` results as `json` (default) or `csv` |
+| `--report-file FILE`, `--report-format FORMAT` | Write a `junit` or `tap` CI report; each flag requires the other |
+| `--summary FILE` | Write a JSON run summary, or print it to stdout with `-` |
+| `--allow-failed-meas` | Exit 0 when only measurements fail |
+| `--allow-nonfinite` | Export results containing NaN or Inf instead of failing |
+| `--progress` | Show a progress bar during transient analysis |
+
+Execution:
+
+| Flag | Effect |
+| :--- | :--- |
+| `--timeout SECONDS` | Abort after this long (exit 124); transient and DC sweeps stop at the next safe point |
+| `-j`, `--jobs N` | Workers for `.ALTER`/`.DATA` variants and corners (default 1; `0` for every core) |
+| `--temp CELSIUS` | Simulation temperature; refused beside a `.TEMP` or `.STEP TEMP` axis |
+
+Solver:
+
+| Flag | Effect |
+| :--- | :--- |
+| `--maxiter N` | Newton-Raphson iteration limit |
+| `--reltol TOL` | Relative tolerance |
+| `--abstol TOL` | Absolute tolerance for both node voltages and branch currents |
+| `--voltage-abstol TOL`, `--current-abstol TOL` | Voltage (`VNTOL`) or current absolute tolerance alone; each takes precedence over `--abstol` |
+| `--charge-abstol TOL` | Charge tolerance (`CHGTOL`) |
+| `--event-flux-abstol TOL` | Flux-linkage conservation tolerance at physical transient events, in weber-turns (`EVENTFLUXTOL`, default `1e-24`) |
+| `--residual-reltol TOL` | Relative residual tolerance for equation convergence checks |
+| `--gmin G` | Initial GMIN for convergence aids |
+| `--trtol TOL` | Transient truncation-error tolerance (`TRTOL`) |
+| `--min-step TIME`, `--max-step TIME` | Transient timestep bounds |
+| `--integration-method METHOD` | `trap`, `gear`, `euler` or `trapgear` (the default, which switches automatically) |
+| `--convergence MODE` | DC convergence preset: `fast`, `default` or `robust` |
+
+Transient state:
+
+| Flag | Effect |
+| :--- | :--- |
+| `--tran-stop TIME` | Override the `.TRAN` stop time without editing the deck |
+| `--checkpoint FILE` | Save the transient integrator state when the run completes |
+| `--resume FILE` | Continue a transient from a checkpoint; the deck must be byte-identical to the one that wrote it |
+
+The analysis-mode, corner and HDL flags are described above. Command-line
+values override the deck's `.OPTIONS`, which override the configuration file;
+`--convergence` replaces the deck's stepping and damping controls, and without
+it the configured `convergence_mode` is the base those controls refine.
+Tolerances, timesteps and `--timeout` must be positive and finite, `--gmin` and
+`--mc-spread` non-negative, and `--min-step` no larger than `--max-step`.
+
+## Output files
+
+With `-o FILE`, `run` publishes machine-readable results in the `-f` format:
+`raw` (binary SPICE rawfile), `ascii` (ASCII rawfile), `csv`, `tsv`, `json`,
+`hdf5` or `vcd`. A relative `-o` path lands in `output.output_directory` when
+the configuration sets one.
+
+### Artifact naming
+
+Every artifact is namespaced by the canonical identity the planner minted for
+the analysis that produced it, so nothing a deck publishes can overwrite
+anything else it publishes:
+
+```
+<output stem>[.<run label>][.<coordinate>].<analysis id>.<extension>
+```
+
+- `<analysis id>` is `<family>-<NNN>`, one-based in authored source order:
+  `op-001`, `tran-001`, `ac-001`, `ac-002`, `four-001`, `pss-001`, `pac-001`,
+  `pxf-001`, `pnoise-001`, `env-001`. A deck with exactly one analysis and no
+  run axis writes to the `-o` path unchanged.
+- `<coordinate>` appears only under a `.STEP`, `.TEMP` or `.DATA` axis. It is
+  the deterministic coordinate identity `run_<32 hex>_<NNN>`, derived from the
+  coordinate's semantic axis assignment, so it does not change when the
+  authored order of the axis values does.
+- `<run label>` appears only for an outer `.ALTER` or textual `.DATA` variant.
+
+`.FOUR` publishes one artifact per operand, because it evaluates one spectrum
+per operand: `.FOUR 1k V(out) I(V1)` writes `four-001` and `four-002`.
+
+### `json`: the shared typed result document
+
+`-f json` publishes the shared `rspice-analysis-result` document, the typed
+result the Python, browser and engine-adapter surfaces also publish. It carries
+the analysis instance, the coordinate and topology fingerprint it was produced
+at, typed axes, one series per signal with a descriptor (canonical name, display
+spelling, kind, unit, value type and owner), family-specific scalars and a
+per-family payload. A sample that does not exist is encoded as absent, never as
+zero, and a channel the output selection did not retain keeps its descriptor
+and says so.
+
+- `.SP DONOISE` writes the scattering sweep and, beside it, a port-noise
+  document under the same analysis identity (`out.json` and
+  `out.port-noise.json`, or `out.sp-001.json` and `out.sp-001.port-noise.json`
+  in a multi-analysis deck). It carries the noise covariance, its reference
+  temperature and the `4kT` thermal reference, and for a two-port the `Rn`, `F`,
+  `Fmin` and `Sopt` figures at every frequency.
+- `.PAC`, `.PXF`, `.PNOISE`, `.PSTB` and `.ENVELOPE` documents name the `.PSS`
+  or `.HB` instance they were computed around as their parent analysis. The flat
+  formats carry that pairing only in the artifact names.
+- `.SENS` attributes each derivative to the parameter rather than to a device,
+  with its nominal value and normalized derivative. A card's specifications are
+  one filter list: a glob selects a device, one owner's parameter (`M1:W`,
+  `RMOD:*`) or a vector, and only `PARAM:<glob>` selects design parameters,
+  whose rows are named `PARAM:<NAME>`; `--sens-param` uses the same
+  `PARAM:<NAME>` identity. A specification that selects nothing is refused by
+  name.
+- `.FFT` publishes its own bundle (`schema_version: 3`) beside its parent
+  transient, with the transform settings and a status per request: `"complete"`
+  for a computed spectrum, or `"incomplete-history"`, with the available time
+  range and no bins, when the transient finished before the requested window.
+  CSV, TSV, RAW and HDF5 carry the same status contract.
+
+### `csv`, `tsv`, `raw`, `ascii`: the flat authored projection
+
+These formats carry the columns the deck's `.PRINT`, `.PLOT` and `.SAVE` cards
+select, in authored order and exactly as authored, including a column a card
+deliberately repeats. They cannot represent an absent sample, so the
+coordinate-set manifest below carries missingness for them.
+
+| Mode | Contents |
+| :--- | :--- |
+| `.OP` | `signal,value` rows |
+| `.DC`, `.TRAN`, `.AC`, `.NOISE` | Node and branch columns over the family's own scale |
+| Aggregated axis sweep | One row per coordinate, node voltages as columns |
+| `.FOUR` | One row per harmonic: frequency, magnitude, phase, DC component, THD |
+| `.MC`, `--monte-carlo` | Per-trial samples over `trial_index`, statistics, histograms, confidence states and campaign context |
+| `.PSS`, `--pss-freq` | One period of the steady-state waveforms |
+| `.HB`, `--hb-freq` | Complex spectrum per node over the harmonic frequencies |
+| `.PAC` | Complex node and branch columns per retained sideband (`V(out):sb0`), scaled by `PACMAG`, over the offset frequency, then the fundamental and each sideband's frequency in Hz; `INCLUDEDC=NO` omits sideband zero |
+| `.PXF` | Complex transfer columns `<signal>:sb<in>->sb<out>` over the offset frequency |
+| `.PNOISE` | Real densities over the offset frequency: `output_noise` (V²/Hz) and each source's `contribution:<label>` around a driven carrier, `phase_noise` (dBc/Hz) around an autonomous one |
+| `.PSTB` | One row per Floquet mode: multiplier magnitude and phase, stability margin, damping, frequency and probe participation |
+| `.ENVELOPE` | The continued slow-time trajectory, shaped like a transient table |
+| `.QPSS`, `.QPAC`, `.QPXF`, `.QPNOISE` | The primary result series; selecting an unavailable sample fails, and JSON keeps the full evidence |
+| `.STB` | Complex `loopgain`, `loopgain_mag_db`, `loopgain_phase_deg` and the `stb:` evidence columns |
+| `.TF` | Gain, input impedance, output impedance |
+| `.PZ`, `--pz-input` | `pole(i)`/`zero(i)` complex columns, `dc_gain`, `high_frequency_gain` and the `pz:` evidence columns |
+| `.SENS`, `--sens-output` | `dV/d(param)` columns: one point for DC, a series over frequency for AC |
+| `.DCMATCH` | Output statistics and per-contributor `sigma_parameter(…)`, `sensitivity(…)`, `contribution(…)` and `share(…)` columns, each named `<scope>:<instance>/<parameter>` |
+| `.DISTO` | `peak(<product>:<signal>)` phasors and each product's `frequency(<product>)` |
+| `.SP` | `S_i_j` complex columns and `Z0(port)` reference impedances in ohms; Touchstone instead when `-o` ends in `.sNp`, `.snp` or `.ts` |
+| `--sparam` | `S11`, `S21`, `S12`, `S22` and `Z0(1)`, `Z0(2)`; Touchstone instead when `-o` ends in `.s2p`, `.snp` or `.ts` |
+
+A numbered `.sNp` name writes Touchstone version 1 and must match the
+network's port count; `.snp` and `.ts` write Touchstone 2.0, which also carries
+unequal port reference impedances. Touchstone cannot hold `.SP DONOISE`
+covariance, so noise results need another format. TF, pole-zero, sensitivity,
+DC-mismatch and periodic-stability results reach HDF5 through a general
+`table` section that keeps the analysis identity, the coordinate and each
+column's quantity type.
+
+### `vcd`
+
+A Value Change Dump of the transient's event timelines: one `wire` per XSPICE
+digital node and one `real` per real event node under `$scope module events`,
+at the times the events happened rather than on the analysis grid. The
+`$timescale` is the coarsest period that keeps every event time an exact
+integer tick, so a run whose edges land on nanoseconds is written `1 ns`. A
+time that is not a whole number of femtoseconds, event times that would merge
+on the tick grid, and a duration that no exact timescale can span are refused
+rather than quantised. VCD has four bit states and no drive strength, so the
+level survives and the XSPICE strength band does not.
+
+A declared digital bus, such as a vector discrete port of a mixed Verilog-AMS
+module, is written as one `$var wire N` named `bus [msb:lsb]`, bits most
+significant first and `x` for a member not yet stated, with no member scalars
+beside it. `--expand-buses` writes the members as N one-bit `$var`s instead,
+and every other format refuses that flag. It is the same dump
+`TransientResult.to_vcd()` in Python and `WasmResultHandle.toVcd()` in the
+browser write, and the one `convert --to vcd` builds from the same run's
+rawfile or typed document.
+
+Only a transient captures events, so every other analysis refuses `-f vcd`. A
+transient that captured no event node publishes an empty dump and says so on
+stderr.
+
+### `hdf5`
+
+One document per analysis, whose section group is named by the analysis
+identity rather than by the result family, so repeated cards cannot collide.
+The group declares its family in its own `section_type` attribute, and the root
+carries `analysis_id` plus, for an axis coordinate, `coordinate_id`,
+`coordinate_tag`, `coordinate_assignment`, and `topology_fingerprint`.
+
+### Coordinate sets
+
+`.STEP`, `.TEMP` and `.DATA` axes publish one artifact per coordinate and
+analysis, plus two manifests:
+
+- `<output stem>.step_schema.json` (version 3) groups by analysis instance. It
+  records the union of the coordinates' signal schemas and, for each
+  coordinate, its ID, topology fingerprint, artifact filename and a validity
+  bitmap over the union. A signal a conditional removed is omitted from that
+  coordinate's artifact and marked invalid; it is never inferred from another
+  coordinate or written as zero.
+- `<output stem>.run_set.json` is published last and names every artifact of
+  the complete set, so a reader that finds it can load everything it names.
+
+The set is one transaction: a failed or cancelled run leaves either the
+previous complete set or nothing. An implicit axis sweep whose topology and
+signal schema are identical at every coordinate keeps a single aggregated table
+instead.
+
+Every analysis family runs under a run axis. An authored `.MC` card under
+`.STEP` or `.TEMP` runs at every coordinate, with its random stream derived from
+the authored seed and the coordinate's identity, so each coordinate reproduces
+exactly whatever else ran and no two coordinates draw the same variation vector.
+`.MC N START n` (or `START=n`) runs the batch that begins at zero-based trial
+index `n`: `.MC 100 START 1000 SEED 42` runs trials 1000 to 1099, and the same
+deck, seed, distribution and coordinate replay the same samples. Exports keep
+the original `trial_index`, with gaps where trials failed.
+
+### Checkpoints and compression
+
+`--checkpoint`, `--resume` and `--tran-stop` need an executed `.TRAN`. When a
+run holds more than one transient, coordinate, variant or corner, the checkpoint
+base gains the same identity components as the result artifacts (for example
+`state.tran-001.chk` or `state.tt.chk`), so no run overwrites or resumes another
+run's state; pass the same base to `--resume`. Scheduled `.OPTIONS RESTART`
+files keep these names too. Resume inputs are reserved before anything is
+published, so results and reports cannot replace them even when a run fails. To
+renew a checkpoint in place, pass the same base to both `--resume` and
+`--checkpoint` with a separate result destination.
+
+`--compress` decimates only the published transient waveform and prints the
+worst reconstruction error it accepted beside the compression ratio. `.MEASURE`,
+`.FOUR` and `.FFT` are evaluated on the exact accepted trajectory first, so
+their artifacts are identical with and without the flag; every sample an
+authored `.OPTIONS OUTPUT INITIAL_INTERVAL` lattice names is kept exactly, and
+`.OPTIONS RESTART` files are written from the accepted trajectory.
+
+### Reserved columns
+
+Flat exports and `convert` keep typed evidence in reserved, dimensionless
+columns, so a CSV or RAW file keeps what the JSON document states:
+
+| Column | Meaning |
+| :--- | :--- |
+| `<name>:unavailable(<reason>)` | `1` beside a missing scalar whose absence is proven: `positive_infinity`, `negative_infinity`, `no_crossover` or `empty_domain` |
+| `<name>:sensitivity_status` | Per sample: `0` available, `1` zero output, `2` nondifferentiable magnitude, `3` outside the representable range |
+| `<name>:monte_carlo_status` | A missing statistic: `1` empty population, `2` insufficient samples, `3` unrepresentable result |
+| `mc:identity:…` | Exact text, integer and unit identities of a Monte Carlo report, text hex-encoded as UTF-8 |
+| `stb:pole(N)`, `stb:completed(…)`, `stb:circuit_stability(…)`, `stb:circuit_poles(…)` | STB natural poles in rad/s, and the completion, stability and pole-spectrum verdicts |
+| `pz:…` | Qualification of a pole-zero root set |
+
+A CSV or TSV file whose layout cannot be inferred from its headers ends with one
+metadata record: `# RSpiceTableLayoutV1` marks each column as real or as the
+real or imaginary part of a complex signal, and `# RSpiceTableLayoutV2` declares
+the analysis, title and each column's name, kind, quantity and unit. Other table
+readers should skip that record. RAW files carry the same metadata in numbered,
+hex-encoded `Option:` chunks.
+
+## Structured studies (`study`)
+
+A study is a version-1 JSON document naming a circuit and a graph of typed
+analysis tasks:
 
 ```json
 {
@@ -69,1237 +555,343 @@ paths and line numbers; legacy syntax errors carry the file path in their messag
 }
 ```
 
-The nonzero study UUID namespaces task identities. Keep it and each task's `id`
-when editing settings or labels. Task names are case-sensitive and contain
-1–128 ASCII letters, digits, dots, underscores, or hyphens. Dependencies name
-tasks explicitly. Array order breaks ties between independent tasks; prerequisites
-always precede consumers. Unknown fields, repeated task names, missing or cyclic
-dependencies, and unhonorable task-specific numerical settings are errors.
-
-`circuit.path` is relative to the study file; optional
-`circuit.include_search_paths` entries are relative to the circuit directory.
-Configured include/library paths also participate. Study input must be a file,
-so there is an explicit base for relative paths. The circuit contains devices,
-models, options, measurements, and save directives; analysis cards and control
-scripts are rejected because the study owns the task graph. Includes and library
-sections are captured during preparation. The study's `numeric` defaults apply
-to analyses that consume them, and each task's `numeric` record overrides them.
-Study requests and circuit options own solver settings; `.rspicerc` simulation
-defaults belong to the existing `run` command. Resource configuration bounds
-study/source ingestion and preparation.
-
-Run the prepared study with
-`rspice study run study.json --output study-results.json --json`.
-`--progress-json` emits versioned task-start, progress, and completion records on
-stderr; it also selects JSON logs and errors so stderr remains machine-readable.
-The final `rspice.study.run` summary is separate on stdout. Ctrl-C and
-`--timeout` cancel through the shared runner and preserve exit codes 130 and 124.
-Solver failures and failed authored measurements return nonzero statuses.
-STB margins unavailable within the swept band remain explicitly unavailable in
-the saved result; their absence alone does not fail the study or establish a
-stability verdict. Result
-publication happens only after every task and result validation succeeds;
-failures leave an existing output unchanged. Output may not replace the study,
-circuit, include files, or configuration files.
-
-The version-1 `rspice.study.results` JSON artifact embeds the typed study,
-preparation report, exact executed task netlists, and the shared versioned
-retained-results representation under `results`. This retains native payloads,
-complex samples, units, result digests, and the prepared-run receipt. An explicit
-`save_policy.maximum_storage_bytes` bounds both retained evidence and the final
-serialized document. A successful invocation produces one dataset; it does not
-maintain or prune a historical result directory. Waveform live delivery and
-partial failure datasets are not published by this command.
-
-The typed analysis representation is shared with application execution.
-PAC/PXF/PNOISE/PSTB additionally require a matching `periodic` object containing
-`kind` and complete typed `settings`. Structured sweep settings, external compiled
-model binding, and conversion of saved study artifacts are not exposed yet.
-Execution limits are captured in the prepared snapshot and enforced for OP, DC,
-AC (including AC data), transient (including transient noise), noise, pole-zero,
-sensitivity, STB, S-parameter (including port noise), transfer-function, distortion,
-DC-mismatch, SOA, shooting PSS (including its spectrum), HB, QPSS, QPAC, QPXF,
-QPNOISE, PAC, PXF, PNOISE, PSTB, PSP, HBSP, HBNOISE, Fourier, recorded FFT, Envelope, and optimization analyses.
-Recorded FFT checks the selected spectrum's retained bin and scalar counts,
-including numeric convergence evidence; the producing transient enforces the
-transform's execution limits. Publishing the spectrum does not repeat the solve.
-Fourier reserves the full set of selected harmonic outputs and bounds source
-waveform/window copies and impulse traces before decomposition.
-Envelope applies the captured limits to periodic initialization, transient or
-multirate solving, reporting schedules, projection workspace, and retained
-results. Full-waveform projection also retains its separate dense-work ceiling.
-Optimization preserves the captured limits through candidate materialization,
-operating-point or selected-study objectives, nested postprocessing, candidate
-counts, iteration histories, and final result publication.
-SOA reserves room for every stress trace and up to
-one violation per rule per observation before building its histories. Remaining
-advanced routes explicitly refuse custom execution limits until they enforce
-the same policy. The seven source limits (`max_netlist_bytes`, `max_netlist_lines`,
-`max_expanded_source_bytes`, `max_dependency_source_bytes`, `max_include_depth`,
-`max_hierarchy_depth`, and `max_flattened_elements`) remain configurable.
-Successful preparation is not evidence of convergence or numerical qualification.
-
-## Inspecting a netlist
-
-`info --models` includes each model's type and parameters, preserving numeric,
-expression, string, and vector values. `info --hierarchy` shows root instances,
-their connections and parameter overrides, and subcircuit definitions with
-their ports, defaults, local parameters, and instance references. Nested
-definitions retain the parser's qualified names and appear under their owning
-scope. References are not recursively expanded, so repeated or recursive
-instances remain finite to inspect. This is a view of the parsed deck; use
-`check` to validate it and `run` to elaborate and simulate it.
-
-The version-1 `rspice.info` JSON envelope retains its summary fields, including
-the `models` and `subcircuits` name lists. `--models --json` adds
-`model_definitions`; `--hierarchy --json` adds `hierarchy`, whose `instances` and
-`definitions` describe each scope. Each parameter entry carries `name`, `kind`,
-and `value`. Optional reports are `null` when their flags are absent. Text and
-JSON output report write failures through the normal CLI I/O diagnostics.
-
-`--detailed` adds element names, node connections, and typed device/source
-specifications in either format. JSON exposes these as `element_details`;
-combine it with `--hierarchy` to include each definition's elements. Device
-values that require expression or model evaluation are `null`, accompanied by
-their expression or model reference. Waveform arguments that depend on analysis
-defaults are the string `"default"`; infinite waveform limits are `"unbounded"`
-or `"negative_infinity"`. Finite numbers retain their parsed values in core
-units. The inspection does not evaluate a subcircuit for a particular instance.
-
-`--params` lists effective root bindings, including strings, complex values,
-and expressions that depend on the active analysis. Ordinary parameters retain
-precedence over same-name global parameters. JSON `parameter_definitions`
-contains the complete typed list; the compatibility `params` list contains
-real numeric projections only. Inspection does not evaluate retained expressions
-or consume statistical samples to produce these reports.
-
-## Supported-feature boundaries
-
-`rspice capabilities` lists the current CLI routes. `rspice capabilities --json`
-emits a version-1 `rspice.capabilities` document, including under `--quiet`,
-without parsing a netlist or running the solver. It names every canonical
-analysis, including analyses unavailable through this CLI, and distinguishes
-execution from control-script support. Fourier/FFT control support is partial:
-authored post-processing runs with `tran`/`run`, without a direct command.
-
-`result_document.families` reports the existing shared typed JSON mappings for
-scalar, STEP, and temperature runs. Format names describe command-level input
-and output options; they do not imply that every format can preserve every
-result family. The document also includes build identity and explicit workflow
-gaps. These declarations describe adapters, not circuit admission or numerical
-qualification. Existing global configuration and diagnostic policies apply.
-
-The CLI is an adapter over the core engine. An engine entry point does not
-imply that the CLI has a complete export or orchestration adapter for it.
-These combinations remain explicitly unsupported:
-
-| Feature | CLI boundary |
+| Command | Effect |
 | :--- | :--- |
-| Strict Verilog-A LRM checking | `compile-va --strict` returns an unsupported-capability error until strict checking is implemented |
-| Partial-spectrum conversion | `convert --variables`/`--start`/`--stop` cannot represent a complete typed transform and are rejected |
-| SOA and optimization studies | Typed `study run` routes exist; declarative-run adapters and dedicated verdict/report options remain incomplete |
-| PSP, HBSP, and dedicated HB-noise studies | Typed `study run` retains native evidence; declarative-run and flat-format adapters remain incomplete |
-| Advanced control-script execution | The control host accepts fewer analyses than declarative decks; inspect `capabilities` for each route |
-| Saved-result post-processing | Conversion and comparison exist; standalone remeasurement, expressions, FFT computation, and plotting do not |
-| Persistent campaigns | Parallel variants/corners exist; durable multi-netlist manifests and selective retry do not |
-| Monte Carlo continuation/aggregation | Indexed `START` batches exist; checkpoint continuation and aggregation are not exposed by the CLI |
+| `rspice study check STUDY` | Validate the study, its captured circuit sources, typed settings and dependency graph without solving |
+| `rspice study plan STUDY` | Also report the prepared task order, stable instance IDs, configuration digests, and source and snapshot digests |
+| `rspice study run STUDY -o RESULTS` | Execute the graph and publish one `rspice.study.results` document |
 
-These are feature gaps, not a claim of parity with other commercial simulators.
-Passing crate tests does not qualify every device model or platform. Desktop,
-browser and tablet release qualification must include numerical reference
-comparisons, performance and memory budgets, packaging, and application tests.
+All three take `--timeout SECONDS` and `--json`, which prints one versioned
+document even under `--quiet`; a validation failure prints `valid: false` and
+exits nonzero. `study run --progress-json` writes versioned task-start, progress
+and completion records to stderr and switches logs and errors to JSON, so
+stderr stays machine-readable.
 
-## How analyses are selected
+- The study `id` is a nonzero UUID that namespaces task identities; keep it
+  and each task's `id` when editing settings or labels. Task names are
+  case-sensitive and hold 1 to 128 ASCII letters, digits, dots, underscores or
+  hyphens. `depends_on` names prerequisites explicitly, and array order breaks
+  ties between independent tasks.
+- Unknown fields, repeated task names, missing or cyclic dependencies and
+  task-specific numeric settings an analysis cannot honour are errors.
+- `circuit.path` is relative to the study file, so a study cannot come from
+  stdin, and `circuit.include_search_paths` are relative to the circuit's
+  directory; configured include and library paths also apply. The circuit
+  supplies devices, models, options, measurements and saves. Analysis cards and
+  control scripts in it are refused, because the study owns the task graph.
+- `analysis` uses the typed representation the RSpice application executes.
+  `Pac`, `Pxf`, `Pnoise` and `Pstb` tasks also need a matching `periodic` object
+  with `kind` and complete `settings`. Monte Carlo, parametric and corner tasks
+  are refused with capability `study.structured_sweeps`. SOA, optimization,
+  PSP, HBSP and HB-noise analyses are available in the CLI only as study tasks.
+- The study's `numeric` defaults apply to the tasks that consume them, and each
+  task's `numeric` overrides them; the configuration's `[simulation]` settings
+  belong to `run`. `[resources]` limits are captured in the prepared snapshot
+  and enforced during execution, and a task whose analysis cannot enforce
+  custom limits is refused with capability `study.execution_resource_overrides`.
 
-Without a control script, `rspice run` executes every analysis card found in the netlist, in order:
+The results document embeds the typed study, the preparation report, the exact
+netlist each task executed, and the retained typed results with their native
+payloads, complex samples, units, result digests and the prepared-run receipt.
+It is published only after every task and its results validate, so a failure
+leaves an existing output unchanged, and it may not replace the study, circuit,
+include or configuration files. `save_policy.maximum_storage_bytes` bounds the
+retained evidence and the final document. Ctrl-C and `--timeout` cancel the run
+(exit 130 and 124), and solver failures and failed authored measurements exit
+nonzero. STB margins that fall outside the swept band are recorded as
+unavailable without failing the study. Successful preparation is not evidence
+of convergence.
 
-`.OP`, `.DC`, `.TRAN`, `.AC`, `.HB`, `.SP`, `.STB`, `.DISTO`, `.NOISE`, `.TF`,
-`.SENS`, `.PZ`, `.PSS`, `.PAC`, `.PXF`, `.PNOISE`, `.ENVELOPE`,
-`.QPSS`, `.QPAC`, `.QPXF`, `.QPNOISE`, `.STEP`,
-`.FOUR`, `.TEMP`, and Monte Carlo cards. `.AC` and `.NOISE` additionally accept
-the `DATA=<table>` form, sweeping the frequencies listed in a `.DATA` table
-instead of a generated sweep. If the netlist contains no analysis cards, a DC
-operating point is run by default.
+## Checking a deck (`check`)
 
-With `.control` regions, `run` executes their commands in order, including
-regions loaded through `.include` and `-I` search paths. The current control
-host supports scalar assignments and nested loops/conditionals, `alter`,
-`op`, `dc`, `ac`, `noise`, `disto`, `tf`, `pz`, `sens`, `tran`, `run`, `print`, `plot`, and `settype`. A control
-`run` executes the deck's declarative OP, DC, AC, noise, DISTO, TF, PZ, sensitivity and transient analyses,
-including AC/noise `DATA=<table>` forms. Unsupported commands fail with their source location.
+`rspice check DECK` validates without simulating. It expands every `.ALTER` and
+`.DATA` variant and every `.STEP` or `.TEMP` coordinate, and for each one:
 
-Transfer-function datasets (`tf1`, `tf2`, ...) retain gain, input/output impedance
-and probe identity. Gain units are dimensionless, ohms or siemens according to
-the actual output/input quantities; typed JSON and unit-bearing table formats
-preserve them. `print transfer_function input_impedance output_impedance` reads
-the current TF dataset, and qualified names access earlier runs. Infinite
-impedances print as `inf`/`-inf` and retain typed scalar determinations in version 2
-control-presentation JSON. Its `scalars[].position` preserves authored ordering
-among scalar entries and finite traces; ordinary finite presentations remain
-version 1. Plotting requires finite samples.
-`let`, `if` and loop conditions can read finite TF scalars, for example
-`let resistance = tf1.input_impedance`. Reading an infinite impedance in a scalar
-expression reports an error; an unselected `if` branch remains unevaluated.
-Pole-zero datasets (`pz1`, `pz2`, ...) expose one-based `pole(index)` and
-`zero(index)` functions and `dc_gain`/`hf_gain` scalars. Qualified references such
-as `pz1.pole(2)` read earlier runs. Complex roots retain rad/s and gains retain
-their physical units in typed results and control presentations. Missing roots
-or gains with no finite value report an error when evaluated.
-An explicit command-line analysis mode continues to supersede authored cards.
+- validates every analysis request, including AC and noise `DATA=` tables,
+  which must exist, hold one frequency column of finite rows, and fit the
+  configured limits;
+- resolves every output symbol `.PRINT`, `.PLOT`, `.SAVE` and `.PROBE` name, so
+  an undefined `V(x)` or `I(rbogus)` is an error;
+- reports a loop of ideal voltage sources or inductors as an error, and a node
+  connected only to current sources as a warning;
+- builds the circuit with external runtimes stubbed out, under the selected
+  dialect, the configured settings and the coordinate's own options and
+  temperature, so native, XSPICE and Verilog-A construction errors fail
+  validation;
+- reports parser diagnostics and Verilog-A compiler warnings, with their
+  original source locations, as warnings.
 
-Distortion datasets (`disto1`, `disto2`, ...) retain complex sinusoidal peak phasors.
-Unqualified `v(out)` and `i(V1)` select the F1 response. Use
-`disto("2f1",i(V1))` to select a harmonic, or `disto("f1+f2",i(V1))` for a mixing
-product. Harmonic runs provide `f1`, `2f1` and `3f1`; two-tone runs provide `f1`,
-`f2`, `f1+f2`, `f1-f2` and `2f1-f2`. F2 remains fixed throughout the F1 sweep.
-Qualify the signal to read earlier runs, for example `disto("2f1",disto1.i(V1))`.
-Expressions such as `abs(disto("2f1",i(V1)))` retain the signal's units.
-The default horizontal axis is swept F1; `disto("2f1",frequency)` returns the
-product's physical frequency and can be used after `vs` in a plot or print.
-Unavailable spectra report an error, including for ground probes. Direct and
-scripted DISTO use the same result exporters, preserving all recorded products.
-
-Frequency tables retain authored row order, including repeated or decreasing
-frequencies. Typed JSON documents carry each column's parameter/device binding,
-physical coordinate axis, requested row count and any model-requested early finish.
-CSV, TSV, RAW and HDF5 tables include non-frequency coordinates as `data(column)`
-columns. `TEMP` states degrees Celsius, other bindings have unstated units, and
-the frequency scale is in hertz. HDF5 uses its general
-`table` section for these studies. Conversion, clipping and comparison retain the
-coordinate columns alongside the computed signals. Flat formats preserve numeric
-rows; typed JSON also preserves the binding and completion metadata.
-Noise band totals require at least two strictly increasing frequencies with all
-other table coordinates constant. Other tables publish spectra with an explicit
-notice that band integration is unavailable.
-
-Control `option`/`options` commands change `reltol`, `abstol`, `vntol`,
-`gmin`, `chgtol`, `eventfluxtol`, `trtol`, `xmu`, `method`, `itl1`, `itl2`, `itl4`, `temp`
-and `tnom` for subsequent analyses. Each command applies atomically, using
-the ordinary option grammar and validation. Earlier datasets retain their
-original results. `set num_threads=N` caps subsequent parallel work within
-the caller's resource policy. `set noinit` suppresses the initial listing;
-it does not select UIC or skip electrical startup. Other settings currently
-report a source-located error.
-
-RSpice's `EVENTFLUXTOL` sets the absolute flux-linkage conservation tolerance
-at physical transient events, in weber-turns. It must be finite and positive;
-the default is `1e-24`. Set it with `.options eventfluxtol=1e-24` or
-`--event-flux-abstol 1e-24`. The CLI value takes precedence over the deck;
-later control commands apply to subsequent runs. This setting is independent
-of `CHGTOL` and ordinary inductor timestep truncation. It does not enable
-currently guarded device capabilities. Checkpoints bind the resolved setting;
-checkpoints with the preceding configuration identity require a fresh run.
-
-Each completed script dataset gets its own output identity, for example
-`results.ac-001.csv` and `results.ac-002.csv`. Qualified expressions such as
-`abs(ac1.v(out))` select the named run. Separate plot traces keep their own
-time/frequency grids; arithmetic or `vs` pairing across different grids is
-rejected. `print` writes full complex sample pairs to stdout, including under
-`--quiet`. With `--summary -`, stdout is reserved for the summary: print data
-is preserved in a companion `*.control-NNN.json` artifact listed in its
-`outputs` manifest. `plot` writes an SVG and a companion `*.control-NNN.json` file
-containing exact complex samples, units, axes, and current impulse observations
-and coverage. The JSON is written beside `-o`, or beside the input deck when
-no output path was selected. SVG plots require real expressions; use `real`
-or `abs` for complex data. Nonpositive samples remain in JSON and are omitted
-from logarithmic drawings. A failed script publishes none of its staged files.
-
-Control scripts run independently at every declarative STEP/TEMP coordinate,
-with separate circuit state and datasets. Their transient commands use the same
-`--checkpoint`, `--resume`, `--tran-stop`, `.OPTIONS RESTART`, and compression
-policy as ordinary `.TRAN` cards. A checkpoint base such as `state.chk` becomes
-`state.tran-001.chk`, with an additional coordinate/run label when applicable;
-pass the same base to `--resume`. Scheduled restart logical names also carry
-the run label and transient identity. Failed scripts and incomplete coordinate
-sets roll back staged checkpoints together with their result files.
-
-A control `run` preserves the deck planner's Fourier/FFT parent bindings.
-An explicit control `tran` applies the deck's post-processing cards to that
-new trajectory, including when there is no declarative `.TRAN` card. Repeated
-commands allocate distinct transient and post-process identities. Compression
-evaluates FFT, Fourier and measurements on the accepted trajectory before
-reducing the published waveform. Print/plot commands see the retained dataset.
-Other vector functions and general ngspice command compatibility remain under
-development.
-
-Quasiperiodic analyses bind each `.QPAC`, `.QPXF`, or `.QPNOISE` card to the
-exact preceding `.QPSS` instance. JSON retains the authenticated carrier,
-independent-tone indices, complete solves, noise covariance, unavailable
-measurements, and run-coordinate identity in the shared core result document.
-CSV, TSV, RAW, and HDF5 expose its primary result series. `.SAVE` selects
-supported probes; QPSS exports always retain frequency and independent-tone
-indices. A flat export that selects an unavailable sample fails explicitly;
-use JSON to retain its reason and the complete numerical evidence. The CLI
-adapter does not imply QP support in the Python, WebAssembly, or engine-adapter
-deck runners; their capability declarations remain explicit.
-
-Periodic large-signal notes (the card grammar is in the
-[core README](../rspice-core/README.md)):
-
-- `.PSS` and `.HB` are *carriers*: each solves a periodic large-signal
-  operating point and publishes its own result.
-- `.PAC`, `.PXF`, `.PNOISE`, and `.ENVELOPE` linearize or continue around a
-  carrier. Which carrier is decided by the canonical deck plan, the same
-  binding RSpice's Python, browser, and engine-adapter surfaces use, so a deck
-  with two carriers attaches each dependent card to the same one everywhere.
-  Each dependent document names its carrier as its parent analysis. The carrier
-  is solved once and its exact numerical state is reused, never re-solved per
-  dependent card.
-- A `.PAC`/`.PNOISE` sideband span wider than the carrier's harmonic capacity
-  is refused rather than truncated, and a `.ENVELOPE` card bound to a shooting
-  `.PSS` carrier is refused rather than converted: envelope following continues
-  a harmonic-balance carrier.
-- `.PNOISE` around a driven carrier publishes an absolute output noise PSD in
-  V²/Hz with each source's own contribution beside it; around an autonomous
-  carrier it publishes single-sideband phase noise in dBc/Hz. There is no
-  carrier to normalize a driven run against, so none is invented.
-
-Frequency-domain notes:
-
-- `.DISTO` runs the third-order Volterra solver in harmonic or two-tone mode
-  and exports each physical product (`2f1`, `3f1`, `f1+f2`, `f1-f2`, or
-  `2f1-f2`) as an actual sinusoidal peak phasor with magnitude, phase, product
-  frequency, and an explicit magnitude ratio to the F1 response. Two-tone cards
-  use the SPICE ratio contract `0 < f2/f1 < 1`, with F2 fixed relative to the
-  first swept F1 point.
-- `.SP` exports dimensionless S-parameters and each port's reference impedance.
-  It needs voltage sources annotated `portnum=<n> [z0=<ohms>]`, numbered densely
-  from 1. `DONOISE` also exports the current-noise covariance, temperature,
-  thermal normalization, and two-port noise parameters when applicable.
-  Noise results require CSV, TSV, raw, ASCII, JSON, or HDF5 output; Touchstone
-  output cannot retain the complete covariance and normalization provenance.
-
-A handful of analyses can instead be requested from the command line. When one
-of these flags is present it runs **instead of** the netlist's analysis cards;
-if several are given, the first match in this order wins:
-
-| Mode | Trigger |
+| Option | Effect |
 | :--- | :--- |
-| Monte Carlo | `--monte-carlo N` |
-| Periodic steady state | `--pss-freq F` |
-| Harmonic balance | `--hb-freq F` |
-| Pole-zero | `--pz-input NODE --pz-output NODE` |
-| DC sensitivity | `--sens-output NODE --sens-param NAME` |
-| Two-port S-parameters | `--sparam "P1+,P1-,P2+,P2-"` (needs a `.AC` card for the sweep) |
-| Process corners | `--corners tt,ss,ff` |
+| `--connectivity` | Also warn about nodes with one device terminal (`TOPOLOGY_ONE_DEVICE_TERMINAL`) or no DC path to ground (`TOPOLOGY_NO_DC_PATH`) |
+| `--models` | Also warn about undefined model references |
+| `--strict` | Fail on any warning (exit 2) |
+| `--json` | Print one `rspice.check` document: `valid` follows the non-strict verdict, and `strict_valid` is false whenever there are warnings |
 
-`--pss-freq` and an authored `.PSS` card both request a periodic steady state,
-so combining them is an explicit error rather than one route silently winning.
-Because a command-line mode supersedes the deck's cards, its carrier is not
-available to an authored `.PAC`/`.PXF`/`.PNOISE`/`.ENVELOPE`; author
-`.PSS`/`.HB` in the deck when a dependent card needs it.
+Validation errors exit 65, and the process error lists every issue, so the cause
+survives a redirected stdout. Control scripts are checked without running them:
+every command needs a handler, and literal OP, AC and TRAN requests are
+validated in every branch. Arguments built with `$` substitution get a
+`CONTROL_DYNAMIC_ANALYSIS` warning, because their values exist only at run time.
 
-Numeric flag values accept SPICE magnitude suffixes everywhere:
-`--pss-freq 2.4G`, `--max-step 1u`, `-D RLOAD=4.7k`.
+## Inspecting a netlist (`info`)
 
-### Decks that expand into several runs
+`rspice info DECK` summarizes the parsed deck without elaborating or simulating
+it: title, element counts by kind, analysis and measurement counts, and parser
+diagnostics.
 
-HSPICE `.ALTER` and `.DATA` constructs expand into a plan of concrete decks,
-each parsed and solved independently. Every run tags its own output files so a
-later run cannot overwrite an earlier one: `.ALTER` runs are named `base` and
-then by block title, `.DATA` runs by table row, each reduced to a file-safe tag
-(`out.csv` becomes `out.base.csv`, `out.hot.csv`, `out.tbl_row_1.csv`). `-j`
-spreads the plan across workers, and a request above
-`resources.max_parallel_workers` is rejected rather than silently clamped. A
-failing run does not abort the rest, which is HSPICE semantics, so each one
-lands in the reports and the process exit status reflects the whole plan.
-This also applies to simulation failures from command-line analysis modes
-such as `--pz-input/--pz-output`, `--pss-freq`, and `--monte-carlo`.
-`resources.max_batch_runs` bounds how large a plan may get.
-
-Corner runs write per-corner tagged outputs (`res.csv` becomes `res.tt.csv`,
-`res.ss.csv`) and exit nonzero if any corner fails. Each corner has its own
-summary/CI report with the original failure category and measurements.
-Corner names are unique without regard to case and contain letters, digits,
-underscores or hyphens. The batch budget includes every corner of every ALTER
-variant; nested scheduling shares the configured worker ceiling. Without `--corner-lib`,
-every corner runs nominal models and the sweep only checks convergence.
-
-`--monte-carlo` runs solve in parallel across cores automatically, bounded by
-`resources.max_parallel_workers` rather than by `-j`, with seed-stable
-sampling, so statistics match a serial sweep exactly. Non-converging runs are
-dropped from the statistics and counted; all runs failing is an error.
-
-`--seed N` overrides the sampling seed of `--monte-carlo` or every authored
-Monte Carlo card while preserving each card's run count, starting trial,
-distribution, parameter selection, and confidence settings. A seed override
-requires an executed Monte Carlo analysis in every run; it is rejected before
-execution if another mode or a retained control script replaces those cards.
-Under a run axis, the override supplies the seed from which each coordinate's
-random stream is derived.
-
-`.PREPROCESS ADDRESISTORS` writes its derived Xyce-compatible deck alongside
-the input as `<input>_xyce.cir`. It needs a file-backed netlist, and it is
-rejected in a multi-run deck, where one sibling name cannot represent several
-rewritten decks.
-
-`--redefined-params <MODE>` chooses what a redefined `.PARAM` means: `ignore`,
-`warning`, `usefirst`, `usefirstwarn`, `uselast`, `uselastwarn`, or `error`.
-
-### Measurements and the exit status
-
-`.MEAS` statements evaluate for every analysis that produces data:
-
-- **TRAN** against the transient result: node voltages, branch currents as
-  `I(name)`, and the time axis as `TIME`, so `FIND TIME WHEN V(out)=...` works
-- **DC** against the sweep, with the swept value as the abscissa
-- **AC** against the derived real series (`V(x)`/`VM(x)` magnitude, `VDB(x)`,
-  `VP(x)` phase in degrees, `VR(x)`/`VI(x)`, and the matching `I…` forms for
-  branch currents) with the frequency axis addressable as `FREQUENCY`, `FREQ`,
-  or `TIME`
-- **NOISE** against the spectral densities `ONOISE`/`INOISE` (also
-  `*_SPECTRUM`)
-
-Any statement may add `GOAL=value [TOL=value]`: a computed value that misses
-its goal fails the measurement, with `TOL` defaulting to
-`max(1% of |goal|, 1e-12)`. Results print under `--meas` and are always
-collected for report files.
-
-Xyce `TRAN_CONT`, `DC_CONT`, `AC_CONT`, and `NOISE_CONT` measurements may add
-`FAILVALUE=value` when the run selects `--spice-dialect xyce`. The threshold is
-checked independently for every retained record with the exact inclusive
-contract `abs(raw_value) >= FAILVALUE`. A non-finite raw value or threshold
-fails closed. The stream passes only when evaluation succeeds, produces at
-least one record, and every record passes; failed records remain in the stream
-instead of being replaced by a single aggregate failure.
-
-`NOISE_CONT` evaluates against the same noise signals as scalar `NOISE`
-measurements, including ordinary sweeps, `.DATA` frequency tables, and analyses
-launched by `.CONTROL` commands.
-
-For frequency tables, scalar and continuous measurements use the resolved
-parameters from each accepted row, including complex values and dependent
-parameters used by user functions. Final `PARAM` expressions use the last
-accepted row and retain named measurement results as their higher-priority
-bindings. The compact parameter snapshots count toward the result-value budget.
-
-Continuous rows are serialized additively. Measurement JSON, CSV, and
-`--summary` JSON retain `record_index`, raw value, threshold, per-record verdict,
-event or trigger/target coordinates, and
-`aggregate_policy=all_records_must_pass`. Measurement CSV retains enough
-digits to recover every stored finite `f64` value exactly. JUnit and TAP emit one named case
-per row (`name[record N]`) and include the same contract metadata in their
-diagnostics. `--allow-failed-meas` permits a successful process exit and overall
-summary verdict when only measurements fail. Individual measurement and
-per-run verdicts remain unchanged in every report format.
-
-With `--compress`, both scalar and continuous transient measurements use the
-original accepted samples. Waveform compression cannot change event coordinates,
-record values, or verification verdicts.
-
-TAP report names escape directive markers and line breaks so authored text
-cannot change a test's verdict or add test records. YAML diagnostics preserve
-the original messages, including quotes and control characters.
-JUnit reports preserve tabs and line endings through XML character references;
-characters forbidden by XML 1.0 are displayed as Unicode escapes.
-
-**A failed measurement fails the run with exit code 3**, whether from a missed
-`GOAL`, an unevaluated statement, or a measurement whose analysis never ran.
-Pass `--allow-failed-meas` to restore exit 0. Results containing NaN or Inf are
-a simulation failure (exit 80) unless `--allow-nonfinite` is given.
-
-## Output files
-
-With `-o`, every run mode writes machine-readable results in the format
-`-f` selects: `raw`, `ascii`, `csv`, `json`, `tsv`, `hdf5`, or `vcd`.
-
-### Artifact naming
-
-Every artifact is namespaced by the canonical identity RSpice's planner minted
-for the analysis that produced it, so nothing a deck publishes can overwrite
-anything else it publishes:
-
-```
-<output stem>[.<run label>][.<coordinate>].<analysis id>.<extension>
-```
-
-- `<analysis id>` is `<family>-<NNN>`, one-based in authored source order:
-  `op-001`, `tran-001`, `ac-001`, `ac-002`, `four-001`, `pss-001`, `pac-001`,
-  `pxf-001`, `pnoise-001`, `env-001`. A deck with exactly one analysis and no
-  run axis keeps the exact `-o` path you asked for.
-- `<coordinate>` appears only under a `.STEP`, `.TEMP`, or `.DATA` axis and is
-  the deterministic coordinate identity, `run_<32 hex>_<NNN>`. It is derived
-  from the coordinate's semantic axis assignment, so it does not change when
-  the authored order of the axis values changes.
-- `<run label>` appears only for an outer `.ALTER` or textual `.DATA` variant.
-- A complete coordinate set is described by `<output stem>.run_set.json`,
-  published last, so a reader that finds the manifest is guaranteed every
-  artifact it names is present and complete. A coordinate that failed publishes
-  nothing, and the whole set, manifests included, is discarded rather than
-  leaving a manifest that names artifacts a reader cannot load.
-
-The `.FOUR` family publishes one artifact per resolved operand, because RSpice
-evaluates one spectrum per operand: `.FOUR 1k V(out) I(V1)` writes `four-001`
-and `four-002`. Each operand's identity, and the transient it post-processes,
-come from the canonical plan, so a deck with two `.TRAN` cards attaches each
-`.FOUR` card to the transient that precedes it rather than to whichever ran
-last. Command-line analysis modes are single by construction and publish under
-their bare mode tag.
-
-### `json`: the shared typed result document
-
-`-f json` publishes the shared `rspice-analysis-result` document, the same
-typed result RSpice's Python, browser, and engine-adapter surfaces publish. It
-carries the analysis instance, the coordinate and topology fingerprint it was
-produced at, its artifact namespaces, typed axes, one series per signal with a
-descriptor giving that signal's canonical name, display spelling, kind, unit,
-value type and owner, family-specific scalars, and a per-family payload. A
-sample that does not exist is encoded as absent, never as zero, and a channel
-the authored output projection did not retain keeps its descriptor and declares
-that it was not retained.
-
-A card whose result is more than one document publishes them all. `.SP DONOISE`
-writes the scattering sweep and, beside it, the port-noise sweep under the same
-analysis identity, at the scattering artifact's own path with `port-noise`
-composed into it (`out.json` and `out.port-noise.json`, or `out.sp-001.json`
-and `out.sp-001.port-noise.json` in a multi-analysis deck). The port-noise
-document carries the covariance matrix together with the reference temperature
-it was evaluated at, the `4kT` thermal reference it is measured against, and,
-for a two-port, the `Rn`/`F`/`Fmin`/`Sopt` figures at every frequency. The flat
-formats keep both in one table, because they have no per-family payload to
-separate.
-
-A document produced around a carrier names it. `.PAC`, `.PXF`, `.PNOISE`, and
-`.ENVELOPE` each publish under their own analysis identity and declare the
-`.PSS` or `.HB` instance they linearized or continued as their parent analysis,
-so a reader can pair a sideband sweep with the exact large-signal state it came
-from. The flat formats have no nested identity to carry that in, so the pairing
-is in the artifact names.
-
-Both forms of `.SENS` publish the shared document too: a DC card fills the
-per-element operating-point derivatives, an AC card fills the complex
-derivative traces sampled on the document's own frequency axis, and the
-`--sens-param` probe fills a single parameter entry. A `.PARAM` may drive
-several elements, so the derivative is attributed to the parameter rather than
-to any one device, and the entry carries the parameter's nominal value together
-with the normalized derivative against the operating point the same deck
-settles at. A card's device specifications are one filter list over one
-variable universe: a glob selects a device, one owner's parameter (`M1:W`,
-`RMOD:*`) or a vector name, while `PARAM:<glob>` — and only that spelling —
-selects the deck's design parameters, whose rows are named `PARAM:<NAME>` and
-tagged `parameter`. No specification at all still means every device and model
-parameter and no design parameter, and a specification that selects nothing is
-refused by name rather than silently dropped.
-
-`.FFT` keeps its own versioned bundle (`schema_version: 3`) with instance and
-coordinate identity, the transform configuration, and completion status. It
-publishes atomically alongside its parent transient. If a model finishes before
-all requested samples are available, the waveform and every FFT request remain
-present. A request with `status.kind: "incomplete-history"` records the available
-time range and has no bins or metrics; `"complete"` identifies a computed
-spectrum. The requested FFT window is preserved, including an implicit stop.
-CSV/TSV retain incomplete requests as `unavailable` records. RAW metadata and
-the HDF5 FFT section use the same version 3 status contract and permit zero
-spectral rows when all requests lack history.
-
-`convert` reads and writes these typed FFT bundles in JSON, CSV, TSV, binary
-RAW, ASCII RAW, and HDF5. Conversion retains every request, its source and run
-identity, sampling and window settings, complex bins, ranked harmonics,
-metrics, and incomplete-history evidence. It validates the whole input before
-publishing the destination. Gaussian and Kaiser windows retain their `ALFA`
-parameters. FFT bundles require whole-transform conversion; waveform clipping,
-variable selection and VCD output are refused.
-
-FFT comparison accepts all six FFT encodings and compares each request by its
-canonical identity. It checks sampling, normalization, window, physical quantity,
-coordinate, and source contracts before comparing bins and metrics using the
-requested tolerances. `--variables` selects signal names or canonical FFT request
-IDs. Incomplete spectra cannot pass a numerical comparison, even against another
-incomplete spectrum. Discrete FFT grids cannot use waveform interpolation.
-Cartesian coefficients carry phase comparison; derived phase angles do not
-create false differences at wrap boundaries or at effectively zero amplitude.
-
-### `csv`, `tsv`, `raw`, `ascii`: the flat authored projection
-
-These formats publish the columns the deck's `.PRINT`/`.PLOT`/`.SAVE` cards
-selected, in authored order, exactly as authored, including a column a card
-deliberately repeats. They have no representation for an absent sample, so the
-per-coordinate policy below is what carries missingness. Family-specific
-shapes:
-
-| Mode | Contents |
+| Option | Adds |
 | :--- | :--- |
-| `.OP` | `signal,value` rows |
-| `.DC`, `.TRAN`, `.AC`, `.NOISE` | node/branch tables over the family's own scale |
-| Aggregated axis sweep | One row per coordinate, node voltages as columns |
-| `.FOUR` | One row per harmonic: frequency, magnitude, phase, DC component, THD |
-| Monte Carlo | Per-trial samples, statistics, histograms, confidence states, and campaign context |
-| PSS | One period of the steady-state waveforms (time domain) |
-| HB | Complex spectrum per node over the harmonic frequencies |
-| `.PAC` | Complex node and branch columns per retained sideband (`V(out):sb0`), scaled by `PACMAG`, over the offset frequency. `.PRINT`/`.SAVE` selects signals at each retained sideband; `INCLUDEDC=NO` omits sideband zero. Flat exports append the fundamental and each sideband's physical frequency in Hz |
-| `.PXF` | Complex transfer columns from the probed input sideband to the output sideband, over the offset frequency |
-| `.PNOISE` | Real density columns over the offset frequency: `output_noise` and each source's `contribution:<label>` for a driven carrier, `phase_noise` for an autonomous one |
-| `.ENVELOPE` | The continued slow-time trajectory, in the transient's own table shape |
-| `.STB` | Complex `loopgain` plus `loopgain_mag_db` and `loopgain_phase_deg` |
-| `.TF` | Gain, input impedance, output impedance |
-| Pole-zero | `pole(i)`/`zero(i)` complex columns |
-| `.SENS` | `dV/d(param)` columns (DC: single point; AC: series over frequency) |
-| `.SP` | Dimensionless `S_i_j` complex columns and `Z0(port)` reference impedances in ohms for the deck's N ports (Touchstone instead when `-o` ends in a matching `.sNp`, `.snp`, or `.ts`) |
-| `--sparam` | Dimensionless `S11`/`S21`/`S12`/`S22` complex columns over frequency and `Z0(1)`/`Z0(2)` in ohms (Touchstone instead when `-o` ends in `.s2p`, `.snp`, or `.ts`) |
+| `-d`, `--detailed` | Each element's nodes and typed device or source specification |
+| `--models` | Each model's type and parameters |
+| `--hierarchy` | Root instances with their connections and overrides, and each subcircuit definition with its ports, defaults, local parameters and instance references, by scope |
+| `--params` | Effective root parameter bindings, including strings, complex values and analysis-dependent expressions |
+| `--json` | Print one `rspice.info` document |
 
-TF, pole-zero, sensitivity, DCMATCH and periodic stability support HDF5
-through a general `table` section. The group retains its analysis identity,
-coordinate name and type, and each column's quantity type. Complex columns
-carry paired `complex_real:<type>` / `complex_imag:<type>` markers. Conversion
-uses the same section for arbitrary coordinates, preserving an index as an
-index and a time coordinate as time. JSON tables likewise retain these types;
-readers continue to accept older JSON tables that did not declare them.
+In JSON the reports are `element_details`, `models` and `model_definitions`,
+`subcircuits` and `hierarchy`, and `params` and `parameter_definitions`; a
+report whose flag is absent is `null`. `params` holds real numeric values only,
+while `parameter_definitions` is the complete typed list. A value that needs
+expression or model evaluation is `null` beside its expression or model
+reference: `info` evaluates nothing for a particular instance, does not expand
+references recursively, and draws no statistical sample.
 
-### `vcd`
+## Comparing results (`compare`)
 
-A Value Change Dump of the transient's event timelines: one `wire` per XSPICE
-digital node, one `real` per real event node, under a single
-`$scope module events`, at the times the events happened rather than on the
-analysis grid. The `$timescale` is the coarsest period that keeps every event
-time an exact integer tick, so a run whose edges land on nanoseconds is written
-`1 ns`; a time that is not a whole number of femtoseconds is refused by name
-rather than quantised. VCD has four bit states and no drive strength, so the
-level survives and the XSPICE strength band does not. Floating-point roundoff
-is tolerated only when distinct recorded times stay distinct on the tick grid;
-an export that would merge event times is refused, even across separate signals.
-Long runs use the full 64-bit tick range at the chosen period. A combination of
-duration and event spacing that cannot share an exact timescale is refused;
-the converter does not wrap the timeline or silently coarsen its resolution.
-VCD clipping keeps `--start` and `--stop` as exact decimal values, including
-SPICE suffixes. Integer ticks above 2^53 remain selectable without losing digits.
-The start must lie on a supported tick grid; a fractional stop includes only
-ticks at or before that boundary.
+`rspice compare RESULT GOLDEN` reads either side in any supported format,
+detected by extension (`.csv`, `.tsv`, `.json`, `.h5` or `.hdf5`, `.vcd`, and
+Touchstone `.sNp`, `.snp` or `.ts`; anything else is read as a rawfile), so a
+binary rawfile can be checked against a CSV golden. The golden defines the
+contract:
 
-A **declared digital bus**, today a vector discrete boundary port of a mixed
-Verilog-AMS module, is written as one `$var wire N` named `bus [msb:lsb]`, with
-a `b…` change at every time one of its members changes, bits most significant
-first in declaration order and `x` for a member the run has not stated yet. The
-member scalars are *not* written beside it: their content is in the vector bit
-for bit, and a scalar `$var` carried no strength either. This is the same dump
-`TransientResult.to_vcd()` and `WasmResultHandle.toVcd()` write, byte for byte,
-and the same one `convert --to vcd` builds from that run's rawfile or typed
-document.
+- a golden variable missing from the result fails, unless `--ignore-missing`;
+- a point-count mismatch fails, so a truncated result cannot pass on its
+  overlap, unless `--allow-truncated`;
+- a finite sample passes when its absolute error is at most `--abstol`
+  (default `1e-9`) or its error relative to the golden value is at most
+  `--reltol` (default `1e-6`); against a golden zero only `--abstol` applies;
+- NaN never matches, undefined samples must sit at the same positions on both
+  sides, and every compared signal needs at least one pair of defined samples;
+- units must match exactly, including the case of SI prefixes (`mV` is not
+  `MV`), and no unit conversion is performed;
+- complex data compares as separate `Re(..)` and `Im(..)` series, and a `.vcd`
+  file compares through the table `convert` builds from it.
 
-`--expand-buses` writes the members as N one-bit `$var`s and no vector, for a
-reader that cannot take one; it applies to `-f vcd` only and every other format
-refuses it by name.
+| Option | Effect |
+| :--- | :--- |
+| `--variables VAR` | Compare only these signals (repeatable; see `convert`) |
+| `--interpolate` | Resample the result onto the golden's scale: analog signals linearly, digital and real event signals by holding their last value. The result must cover the golden range, within four ULPs at the endpoints; nothing is extrapolated |
+| `--fail-fast` | Stop at the first difference |
+| `--json` | Print one `rspice.comparison` document |
+| `--section NAME_OR_INDEX` | Select one result from a RAW, HDF5 or Touchstone container (see `convert`) |
+| `--bless` | Accept the result as the new golden |
 
-Only a transient captures events. Every other analysis refuses `-f vcd` with a
-clear error. A transient that captured no event node publishes a dump with no
-declarations and no changes, and says so on stderr.
+Reports keep exact mismatch counts and maximum errors, and show the first ten
+differences in JSON and five in text. Mismatches exit 3. `--bless` first checks
+that the result satisfies the requested selection and options, then writes the
+exact bytes it validated; with no golden yet it creates one. It needs the result
+and golden to share a file format, does not combine with `--section`, and
+refuses a Touchstone destination name that would change the decoded network,
+such as a two-port `.s2p` renamed `.s1p`.
 
-### `hdf5`
+Typed results compare by identity. FFT bundles compare request by request and
+cannot be interpolated, and an incomplete spectrum never passes. STB,
+pole-zero, Monte Carlo, sensitivity and DC-mismatch results include their
+reserved evidence columns, so a changed verdict fails whatever the tolerances.
+An older flat baseline without those columns verifies only what it retains;
+regenerate it for a complete comparison.
 
-One document per analysis, whose section group is named by the analysis
-identity rather than by the result family, so repeated cards cannot collide.
-The group declares its family in its own `section_type` attribute, and the root
-carries `analysis_id` plus, for an axis coordinate, `coordinate_id`,
-`coordinate_tag`, `coordinate_assignment`, and `topology_fingerprint`.
+## Converting results (`convert`)
 
-### Coordinate sets and missingness
+`rspice convert INPUT OUTPUT --to FORMAT` converts a result to `raw`, `ascii`,
+`csv`, `tsv`, `json`, `hdf5` or `vcd`; Touchstone is read but not written. The
+input format is detected by extension, as for `compare`, unless `--from` names
+it. Complex AC data survives every round trip (`Re(..)`/`Im(..)` column pairs
+in CSV and TSV, `Flags: complex` in rawfiles, real and imaginary arrays in JSON
+and HDF5), declared signal and coordinate units are preserved, and RAW and HDF5
+keep an explicit validity mask, so an undefined sample stays distinct from
+zero. An operating point is a one-sample result and converts like any other; an
+empty coordinate is refused when the file is read.
 
-`.STEP`, `.TEMP`, and `.DATA` publish one artifact per coordinate and analysis,
-plus `<output stem>.step_schema.json`. That manifest groups by analysis
-instance; each entry records the union of the coordinates' signal schemas and,
-for every coordinate, its deterministic coordinate ID, its topology
-fingerprint, its artifact filename, and a validity bitmap over the union
-columns. A signal a conditional removed is omitted from that coordinate's
-artifact and marked invalid in the bitmap; it is never inferred from another
-coordinate or fabricated as zero. The whole set, every coordinate artifact plus
-the schema manifest and the set manifest, is published as one transaction, so a
-cancelled or failed run leaves either the previous complete set or nothing.
+| Option | Effect |
+| :--- | :--- |
+| `--variables VAR` | Keep only these signals (repeatable). Names match without regard to case; a qualified name such as `V(out)` or `D(clk)` selects exactly that signal, and a bare name must be unambiguous |
+| `--start VALUE`, `--stop VALUE` | Clip the scale; `--start` must not exceed `--stop` |
+| `--section NAME_OR_INDEX` | Select one result from a RAW, HDF5 or Touchstone input that holds several: an exact plot or group name, or a one-based index from the list the diagnostic prints. Required when there are several; refused for a single-document input |
+| `--expand-buses` | With `--to vcd`, write each bus member as its own one-bit `$var` |
 
-Manifest version 3 describes one sample per series, so different point counts
-across coordinates do not change signal identity. For JSON, its inventory comes
-from each published document, including sideband and distortion qualifiers.
-Entries identify both `analysis_id` and `result_kind`, so `.SP DONOISE` publishes
-separate scattering and port-noise schemas under the same authored analysis.
-Flat artifacts use a null `result_kind` because a table may combine families.
-Each coordinate's `source_signal_indices` maps union descriptors to indices in
-that document's `signals` array; a null index means the series is absent. The
-validity bit is false when a series has no retained samples, even if its
-descriptor is present. Flat formats retain their exported column schema and
-set `source_signal_indices` to null. Scalar metrics and family payloads remain
-in the result document, outside this series manifest.
+FFT bundles convert whole: `--variables`, `--start` and `--stop` are refused
+for them, and so is VCD output. Typed periodic, distortion, STB, pole-zero,
+Monte Carlo, sensitivity and DC-mismatch results keep their response identities
+(`<signal>:sb<index>`, `<signal>:sb<in>->sb<out>`, `peak(<product>:<signal>)`)
+and reserved columns. Inputs must be regular files (a symlink to one is
+accepted); each is validated in full against `max_external_data_bytes` and the
+value budgets before anything is selected or written, and a refused conversion
+leaves an existing destination unchanged.
 
-For VCD, the schema describes the dump's digital and real event declarations,
-including folded buses as vectors. It does not list sampled analog columns;
-an event-free dump has an empty schema. Real event units remain unspecified,
-as they are in the dump itself.
+For example,
+`convert mixed.raw grid.csv --to csv --section "Transient Analysis"` takes the
+sampled grid of a mixed-signal result, and
+`convert mixed.raw events.vcd --to vcd` keeps its complete event timelines.
 
-Touchstone coordinate artifacts also register their complex, dimensionless
-S-matrix series. Their reference impedances remain in the Touchstone header.
+Touchstone input (`--from touchstone` for another extension) reads version 1
+and 2.0 files with RI, magnitude/angle or dB/angle data, full or triangular
+matrices, and LF, CRLF or CR line endings. Omitted option fields default to GHz,
+S, magnitude/angle and 50 ohms, and only the first option line counts, as the
+specification requires. Reference impedances stay numeric `Z0(port)` columns, so
+equal coefficients with unequal references do not compare equal. A file with
+noise data has a `network` and a `noise` section.
 
-An implicit axis sweep whose topology and complete signal schema are identical
-at every coordinate keeps the single wide aggregated table instead.
-
-Every analysis family runs under a run axis, including the periodic
-large-signal cards and Monte Carlo. An authored Monte Carlo card inside a
-`.STEP` or `.TEMP` sweep runs once per coordinate, and its random stream is
-derived from the authored seed together with the coordinate's own stable
-identity. Coordinate *k* therefore reproduces byte for byte no matter what else
-ran or in what order, and two coordinates never draw the same variation vector,
-which is what makes a parametric Monte Carlo study a study rather than one
-sample repeated. A deck with no run axis has no coordinate and keeps its
-authored seed unchanged.
-
-Monte Carlo cards accept `START n` (or `START=n`) to run a batch beginning at
-original zero-based trial index `n`. For example, `.MC 100 START 1000 SEED 42`
-runs indices 1000 through 1099. Keep the deck, seed, distribution, and run-axis
-coordinate unchanged to replay the same samples. Only the requested batch is
-solved; its statistics are independent of previous batches. Generic parameter
-streams advance preceding random draws without solving preceding circuits.
-CSV and HDF5 use the original zero-based `trial_index` axis, retaining gaps for
-failed trials. Shared JSON includes `successfulTrialIndices` aligned with the
-samples and a `first_trial` scalar for a nonzero starting index.
-
-For a stepped transient, `--checkpoint state.chk` and `--resume state.chk`
-resolve one state file per coordinate and per authored transient, tagged with
-the same identities. Outer `.ALTER` and textual `.DATA` labels are composed
-into the same filename, so no run can overwrite or resume another run's solver
-state. Checkpoint options on a `.STEP` deck without an authored `.TRAN` are
-rejected before execution.
-
-Corner checkpoint names include the validated corner spelling exactly once:
-`--corners tt-fast,tt_fast --checkpoint state.chk` writes `state.tt-fast.chk`
-and `state.tt_fast.chk` for a single transient. Adding or removing `-o` does
-not change checkpoint names. Scheduled `.OPTIONS RESTART` files and default
-control presentation files also retain distinct corner names.
-
-Resume inputs are reserved before publication, including inputs belonging to
-later runs. Results and reports cannot replace them, even when a simulation
-fails. To explicitly renew a CLI checkpoint in place, pass the same base to
-both `--resume` and `--checkpoint` and choose a separate result destination.
-
-`--compress` decimates the published transient waveform, and the run prints the
-worst reconstruction error it accepted beside the compression ratio. It changes
-nothing else: `.MEASURE`, `.FOUR`, and `.FFT` are evaluated on the exact
-accepted trajectory before any decimation, so their artifacts are
-byte-identical with and without the flag. An authored
-`.OPTIONS OUTPUT INITIAL_INTERVAL` lattice and an authored `.OPTIONS RESTART`
-schedule both compose with it: every sample the lattice names is retained
-exactly, and every restart file is written from the accepted trajectory and
-stays byte-identical.
-
-## Per-command behaviour
-
-**`check`** validates analysis requests before any flag is considered. Parse diagnostics
-from the netlist reader are reported as warnings; output symbols referenced by
-`.PRINT`/`.PLOT`/`.SAVE`/`.PROBE` must resolve, so an undefined `V(x)` or
-`I(rbogus)` is an error; a loop of ideal voltage sources or inductors is an
-error and a node connected only to current sources warns about its undefined
-voltage. Every deck is built into a circuit, with external runtimes stubbed out,
-so native, XSPICE, and Verilog-A model construction errors fail validation.
-Real-valued model parameters reject nonzero imaginary results, including deferred
-expressions; `RE()`, `IMG()`, and `MAG()` permit explicit projection. Construction uses the selected dialect, configured
-simulation settings, and each materialized coordinate's deck options and
-temperature. `--strict` turns a warning-only deck
-into a usage failure, which exits 2. The JSON document reports both verdicts
-separately: `valid` tracks the non-strict exit status, and `strict_valid` stays
-false whenever there are warnings.
-AC/noise `DATA` preflight uses the same borrowed-table admission checks as
-execution: the table must exist, have one frequency column and finite rows,
-and fit the point, batch and coordinate-value limits. AC permits zero frequency;
-noise requires positive frequencies. Control scripts validate requests they
-author or invoke through `run`; unused declarative cards may be replaced.
-Verilog-A compiler warnings include their original source locations and count
-toward `--strict`; JSON warning records retain this metadata in `diagnostic`.
-Failed checks also include every validation issue in the process error, preserving
-the cause when stdout is redirected. With `--error-format json`, compiler findings
-remain structured in `error.diagnostics`, including warnings that fail strict mode.
-The `run` command emits the same compiler findings using `--error-format`,
-including on cache hits. Rebuilding a model for multiple analyses on one engine
-does not repeat its findings. `--quiet` suppresses their console presentation.
-Validation applies the current Verilog-A source byte, expansion and include-depth
-limits even when a compiled model is cached. Exceeding a source budget reports
-the resource, requested amount and limit, and exits 75.
-Fatal compiler findings also retain original include paths, lines, columns and
-UTF-8 byte ranges when the compiler knows them. `run` keeps these findings in
-JSON errors and run summaries; `check --json` includes them in each error's
-`diagnostic`. Preprocessing failures retain their file and line without inventing
-unknown columns or byte ranges.
-These locations also survive runtime code generation; expression-lowering
-failures identify the innermost offending expression in the prepared source
-snapshot, including when it came from an included file or macro invocation.
-
-Control scripts are checked without executing them. Every authored host command
-must have a handler, and literal OP/AC/TRAN requests are validated in all branches.
-`run` checks the declarative analyses it would execute; a script that replaces
-them with explicit commands may leave those unused cards alone. Arguments using
-`$` substitution receive a `CONTROL_DYNAMIC_ANALYSIS` warning because their
-numeric validation must wait for execution. Circuit changes, control-flow
-conditions and presentation results are not evaluated by this static check.
-
-**`compare`** reads either side in any supported result format, auto-detected
-by extension, so a binary rawfile result can be checked directly against a CSV
-golden and an event dump against another dump. Complex AC data compares
-value-for-value as `Re(..)`/`Im(..)` series, and a `.vcd` file is compared
-through the table form `convert` builds from it, on its own event ticks. The
-golden file defines the contract: golden variables missing from the result
-fail, point-count mismatches fail (a result truncated by a crashed run cannot
-pass on the overlap it wrote), and NaN never matches anything. `--bless`
-accepts the result as the new reference after verifying that it satisfies the
-requested variable selection and comparison options. An invalid selection
-cannot create or replace a baseline. Promotion writes the exact bounded snapshot
-that was validated, even if the source changes during comparison. The result and
-golden must use the same format. Touchstone destination names must also preserve
-the decoded network: changing a two-port `.s2p` file to `.s1p`, or to an ambiguous
-`.ts` name, is rejected before the golden is created or replaced.
-Reports retain exact mismatch counts and
-maximum errors; JSON shows the first ten differences, and text shows five.
-Undefined samples must occur at the same positions on both sides; an undefined
-sample versus a value is a structural mismatch, regardless of numeric tolerances.
-Every compared signal must have at least one pair of defined samples. Linear
-interpolation requires two defined endpoints; held event signals retain their
-undefined state until the first recorded value.
-
-JSON, HDF5, RSpice RAW and CSV/TSV table conversion preserve explicitly declared signal
-and coordinate units. Comparison requires matching units, including the case
-of SI prefixes (`mV` differs from `MV`); it does not perform unit conversion.
-Legacy files without unit metadata use their declared quantity types when
-available. CSV/TSV retain numbers, column names and real/complex representation.
-Adjacent `Re(x)`/`Im(x)` headers
-normally identify one complex signal. When those names instead identify
-independent real signals, exports append a final `# RSpiceTableLayoutV1` record
-with one `real`, `complex_real` or `complex_imag` cell per signal column.
-When units, quantities, analysis labels or titles cannot be inferred from the
-headers, exports instead append `# RSpiceTableLayoutV2`. Its second cell contains
-CSV-escaped JSON with `analysis`, `title` and `columns`; each physical column
-declares its exact `name`, `kind`, `quantity` and `unit`, coordinate first.
-Remaining cells are empty. This metadata preserves literal unit symbols and
-sample values, including absent units, without interpreting unit-like signal names.
-RSpice validates the metadata against the headers and requires a unique final
-record. Other numeric-table readers should skip these metadata records. Simple
-time/frequency exports whose metadata is fully inferable retain their plain
-header-and-samples layout. Labels containing unit-like brackets or surrounding
-whitespace, and other coordinate names, always receive explicit metadata.
-Application imports normalize declared coordinate units to their canonical units;
-explicit signal units and values retain their original numeric representation.
-RAW tables preserve exact plot titles, scale names, signal names and variable
-types in versioned RSpice metadata when those labels need escaping. Their header
-declarations escape whitespace, control characters and literal percent signs so
-distinct names remain distinct for readers that ignore that metadata. Ordinary
-labels retain their existing declarations.
-Table exports also declare that their first variable is the independent
-coordinate. This layout takes precedence over display titles such as
-`DC Operating Point`, `Transient FFT`, or an event plot name, so conversion does
-not invent an extra coordinate or reinterpret a table as another result format.
-Legacy RAW operating points and event/FFT carriers retain their existing layouts;
-unsupported RSpice table-metadata versions are rejected.
-Table and FFT metadata are stored in numbered, hex-encoded `Option:` chunks so
-RAW readers do not execute them as a `Command:`. Older RSpice `Command:` metadata
-remains readable. Incomplete, reordered, conflicting or malformed chunks are
-rejected before conversion or comparison can replace an existing artifact.
-
-Quoted CSV/TSV fields preserve empty labels, delimiters, escaped quotes,
-surrounding whitespace and embedded line endings. Waveform tables, operating-point reports and FFT
-tables share these rules; malformed quotes are rejected, with data-row errors
-located by physical source line. A UTF-8 byte-order mark at the start of a file
-is accepted; quoted field contents remain unchanged. Blank, separator-free lines
-are skipped; empty fields in data rows remain subject to numeric validation.
-Numeric tables may use FFT envelope column names such as `schema_version` and
-`analysis`; FFT report detection also checks the nonnumeric analysis field.
-Legacy table and FFT JSON objects must use unique field names. Repeated fields,
-including escaped spellings of the same key, fail with a source line and column
-before selection, conversion, comparison or golden-file promotion.
-Optional table labels and quantity types accept strings or null; malformed
-declarations are rejected instead of falling back to inferred quantities.
-`--interpolate` resamples analog signals linearly and holds digital and real
-event signals until their next transition. A digital quantity type or `logic`
-unit on either input preserves those transitions when the other input has no
-type metadata, as with legacy unannotated CSV/TSV. It never extrapolates or resamples between
-differently declared coordinate units.
-
-RAW and HDF5 inputs are validated in full before any section is selected.
-RAW table coordinates must be real: complex-encoded axes may have zero imaginary
-components, but nonzero imaginary coordinates are rejected instead of discarded.
-Legacy RAW operating points, pole-zero results, transfer functions, integrated
-noise and DC sensitivity results keep every signal on an ordinal axis. AC
-sensitivity retains its frequency coordinate. Explicit RSpice table layouts
-and older `point`/`index` coordinate declarations take precedence over these
-legacy plot titles.
-When they contain multiple results, `compare` and tabular `convert` require
-`--section NAME_OR_INDEX`: an exact RAW plot name or HDF5 group name, or a
-one-based index from the available-section list in the diagnostic. This
-selector applies to container inputs; a CSV or other single-table reference
-still supplies its sole result. Repeated RAW plot names require an index.
-`--section` is rejected when no input supports sections, including conversion
-of a single CSV, TSV, JSON or VCD document.
-Comparison JSON identifies the selected section. Section selection cannot
-be combined with `--bless`, which replaces an entire reference file.
-
-For example, `convert mixed.raw grid.csv --to csv --section "Transient Analysis"`
-selects the sampled grid of a mixed-signal result. `convert mixed.raw events.vcd
---to vcd` preserves its complete event timelines. RAW numeric admission limits
-cover all plots together, including plots outside the selection.
-With `--to vcd --section`, a RAW event or bus plot keeps its event encoding and
-bus declaration; an ordinary analysis plot uses its sampled `D(node)`/`E(node)`
-columns. Bus expansion, variable selection, and clipping apply in either case.
-
-Touchstone `.sNp`, `.snp`, and `.ts` inputs are auto-detected; `convert --from touchstone`
-selects the parser for another extension. RI, magnitude/angle and dB/angle
-values become complex coefficients on a hertz coordinate. Option fields may be
-omitted or reordered; their defaults are GHz, S, magnitude/angle, and 50 ohms.
-Only the first option line defines the data, as required by the Touchstone
-specification. Conflicting fields within that line are rejected. Port references
-remain numeric `Z0(port)` columns, so two equal coefficient arrays with
-unequal reference impedances do not compare equal. Typed `.SP` JSON conversion
-also retains these reference columns; direct flat `.SP` and `--sparam` output
-appends them after the coefficient and noise columns. Formats with quantity
-metadata retain dimensionless scattering coefficients, covariance in A²/Hz,
-temperature in K, thermal normalization in J, and noise resistance in ohms.
-For `.SP` and `--sparam`, a numbered `.sNp` output writes Touchstone v1 and must
-match the network's port count. Generic `.snp` and `.ts` outputs write
-[Touchstone 2.0](https://www.ibis.org/touchstone_ver2.0/touchstone_ver2_0.pdf),
-including explicit matrix dimensions, frequency count, and per-port references.
-These generic names therefore also support unequal port reference impedances.
-Touchstone import and export preserve valid DC (0 Hz) samples. Frequency grids
-must be finite, non-negative, and strictly increasing; references must be finite
-and positive. Import applies frequency units before decimal rounding and rejects
-nonzero values or finite dB coefficients that would underflow to zero. Authored
-zero and representable subnormal samples remain supported. Export rejects
-nonfinite coefficients or an encoding that would
-overflow or collapse distinct frequency coordinates. Invalid numbered port-count
-extensions in v1 inputs or simulation outputs are rejected before an existing
-destination is replaced. V2 imports use the required `[Number of Ports]`
-declaration, which overrides the filename. V2 files must also declare their
-frequency count and two-port ordering; duplicate declarations and incomplete
-per-port reference lists are rejected instead of guessing their meaning.
-Both full and triangular matrices are supported, including either two-port
-ordering declaration. LF, CRLF, and CR line endings preserve the same samples.
-If a Touchstone file carries noise,
-select `--section network` or `--section noise`: the latter keeps its own
-frequency grid, noise resistance in ohms, optimum complex reflection, and
-reference temperature. All sections are parsed and bounded before selection.
-
-Typed periodic and distortion JSON keeps response identities when converted
-or compared: PAC columns use `<signal>:sb<index>`, distortion phasors use
-`peak(<tone-or-product>:<signal>)`, and PXF transfers use
-`<signal>:sb<input>->sb<output>`. Each response remains separately selectable
-with `--variables`. Ambiguous names that would collide after projection are
-rejected before an output file is replaced.
-PAC conversion also retains `fundamental_frequency`, `frequency(sb<index>)`,
-and each normalized `conversion(sb<input>->sb<output>)` matrix response.
-Sparse matrix entries keep explicit missing samples. Distortion conversion
-retains each `frequency(<product>)` column and the fixed F2 frequency and
-authored F2/F1 ratio for two-tone runs. Expanded payload columns count toward
-both external-data and result-value limits.
-
-STB conversion and direct flat output retain circuit stability independently
-of the return-ratio curve. `stb:pole(N)` columns carry the finite natural poles
-in rad/s, sorted by real then imaginary part; finite/infinite counts,
-descriptor order, backward error, and qualification tolerance accompany them.
-The `stb:completed(...)`, `stb:circuit_stability(...)`, and
-`stb:circuit_poles(...)` columns identify completion, stability, and spectrum
-availability/qualification. These reserved categorical indicators contain
-exactly `1` in every row; contradictory indicators fail comparison regardless
-of tolerances or signal selection. An explicitly incomplete STB run cannot
-pass comparison or be blessed. Full comparisons include the pole evidence;
-an explicit `--variables` selection may restrict comparison to the requested
-curve. Older flat artifacts without these columns provide only their retained
-curve evidence. Warning text and detailed extraction diagnostics remain in
-typed JSON. Expanded pole columns obey the same table resource limits.
-Typed STB imports also validate positive, increasing frequency coordinates,
-Bode units and derived values, and retained Nyquist samples. When the complete
-complex response is retained, its crossings must reproduce the stated margins
-and crossover count. Partial projections keep missing samples explicitly and
-are checked against the source evidence that remains.
-
-Pole-zero exports and JSON conversion retain `dc_gain`, `high_frequency_gain`, complex
-`pole(N)`/`zero(N)` columns, input/output identities, and root-set qualification
-and certificate values. Roots are ordered by real then imaginary part so a
-reordered spectrum still compares equally. `pz:` evidence indicators distinguish
-qualified, approximate, unrequested, and legacy unknown root sets independently
-of numeric tolerances. Missing gains remain missing; they cannot establish
-numerical agreement. Use an explicit `--variables 'pole(1)'` selection when
-only that retained root is the intended comparison. Older documents without
-units keep those units unstated. Older root-only flat exports can verify only
-their retained roots; regenerate those baselines to check gains and evidence.
-
-Monte Carlo exports and JSON conversion use the recorded zero-based `trial_index` and
-retains every output sample, statistic, histogram bin and edge, confidence state,
-and campaign scalar. Summary values repeat alongside the trial rows. Conversion
-checks the expanded table against the configured resource limits before writing.
-Legacy populations without trial identities use `sample_index` and explicitly
-mark those identities as unknown. Trial coordinates compare exactly and cannot be
-interpolated. Native JSON retains integer trial indices without binary64 rounding;
-flat formats reject indices that cannot be represented exactly. Output units remain
-explicit where known by the producing analysis, and unstated in legacy populations.
-
-Histogram intervals include their lower edge; the final interval also includes
-its upper edge. Native histograms retain the exact sample extrema and collapse
-coincident rounded boundaries. JSON report admission checks histogram totals,
-ordered edges, per-bin membership, and extrema against the retained samples.
-Contradictory reports cannot be converted, compared, or blessed as baselines.
-
-`mc:identity:` columns preserve text, integer values, units, and variable identities
-as exact named indicators. Text uses UTF-8 hexadecimal encoding so case-sensitive
-metadata cannot alias in case-insensitive file formats. Large integer seeds remain
-exact in these indicators even when they cannot also be shown as binary64 numeric
-columns. Missing confidence bounds retain their reason in `:monte_carlo_status`
-columns (1: empty population, 2: insufficient samples, 3: unrepresentable result).
-Unknown missing values remain unknown. An empty or unretained population cannot
-pass verification. Older aggregate-only converted baselines must be regenerated
-to verify the trial data.
-
-Imported reports must have consistent run counts, convergence flags, trial ranges,
-and confidence bounds, states, and units. These checks apply before conversion or
-comparison, including selective comparisons and baseline replacement. Flat-table
-integer and boolean columns must agree with their exact metadata indicators.
-
-DC mismatch exports and JSON conversion retain each contributor's scope, instance,
-parameter, parameter sigma, sensitivity, signed contribution, and variance share.
-It also retains the output probe, sigma multiplier, evaluated and retained
-contributor counts, and applied correlation counts. Contributor quantities use
-scope-qualified names such as `contribution(mismatch:R1/RVALUE)`. Output
-contributions keep the output's stated unit; parameter sigma and sensitivity
-units remain unspecified because the payload does not declare parameter units.
-Identity fields containing delimiters use percent encoding. Changed contributors
-therefore fail comparison even when total spread is unchanged; older aggregate-only
-converted baselines must be regenerated to check these details.
-Older native contributor headers omitted statistical scope; regenerate those
-baselines to use the scoped names and complete contributor inventory.
-Direct exports use the same complete projection and publish each quantity's unit
-in stepped report manifests. Mismatch covariance retains its exponent range
-through standard-deviation and share calculations; representable small spreads
-are not rounded to zero by squaring, and large spreads do not require a finite
-binary64 variance. An unrepresentable final quantity is reported as an error.
-Imported reports must have consistent output scalars, nonnegative sigmas,
-distinct contributor identities, and displacements matching their retained
-sensitivities and parameter sigmas. Independent scope totals and shares are checked against
-the retained contributors, allowing for explicitly trimmed tables. Correlated
-shares retain their signs; the report does not contain the covariance matrix
-needed to reconstruct them independently.
-
-Sensitivity exports and JSON conversion retain each parameter's nominal value, absolute
-and normalized derivatives, and AC magnitude and phase derivatives. Normalized
-values are dimensionless; absolute derivatives use the analysis's native
-parameter units, which the payload does not explicitly identify. Phase
-derivatives use radians per native parameter unit. `sens:output(...)` and
-`sens:parameter(...)` indicators retain the probe and parameter identities.
-When a derived quantity has missing values, its `:sensitivity_status` column
-records each sample: `0` available, `1` zero output, `2` nondifferentiable
-magnitude, or `3` outside the representable range. These codes are checked
-against sample validity and compared exactly, even with loose numeric
-tolerances. Known matching determinations can be compared; uncomputed gaps
-cannot establish agreement. Interpolation never invents a determination
-between retained samples.
-Typed sensitivity documents must also have unique parameter vectors and derived
-values consistent with their retained nominal output and absolute derivatives.
-Malformed documents are rejected before conversion or baseline replacement.
-The `--sens-param` shortcut uses the same `PARAM:<NAME>` identity as authored
-parameter probes; for example, `dV(out)/d(PARAM:RTOP)`. Older derivative-only
-flat baselines cannot verify the nominal operating point, normalized derivatives,
-or parameter context; regenerate those baselines for complete comparisons.
-
-**`convert`** preserves complex AC data across every round trip
-(`Re(..)`/`Im(..)` column pairs in CSV and TSV, `Flags: complex` in rawfiles,
-real/imag arrays in JSON and HDF5). One sample is a result: an operating point
-is a single point by construction, so every table format `run` writes it in is
-one `convert` reads it back from. An *empty* coordinate is not a result and is
-refused when the file is read, naming the coordinate rather than blaming a flag
-that was not given.
-
-Result inputs for `convert` and `compare` must be regular files; symlinks to
-regular files are accepted. Directories, devices, and FIFOs are rejected with
-an input I/O diagnostic. Readers enforce `max_external_data_bytes` before
-decoding and while reading, including files that grow after their size was
-checked. HDF5 decoding uses the same bounded, owned input bytes.
-Typed JSON imports validate the declared schema, version, and full retained
-payload before selecting or converting data. Value budgets include event
-histories and other retained evidence omitted from the selected output.
-Legacy JSON table signals use either `values` or both `real` and `imag` arrays;
-mixing these representations is rejected. Their real coordinates use `values`
-only. Real samples may be `null`; complex samples use `null` in both component
-arrays at the same position. CSV/TSV use two empty component fields for an
-undefined complex sample. RAW and HDF5 retain an explicit validity mask, so
-undefined samples remain distinct from zero through conversion, clipping and
-comparison. Entirely undefined numeric signals are retained. Validation covers
-all signals before variable selection.
-Typed real and complex scalars retain missing values as well. A scalar with a
-proven absence also exports a dimensionless indicator named
-`<name>:unavailable(<reason>)`, containing `1` at every row, beside its null
-metric column. Reasons are `positive_infinity`, `negative_infinity`,
-`no_crossover`, and `empty_domain`; uncomputed values have no such indicator.
-This preserves the distinction through CSV, TSV, JSON, RAW, and HDF5 and keeps
-different determinations distinguishable in comparisons.
-Matching determinations can pass comparison without numeric metric samples;
-matching uncomputed gaps still cannot. Indicator names use this reserved
-convention: exactly one reason, a wholly missing metric, dimensionless units,
-and values exactly equal to `1` are required. Tolerances never waive these checks.
-Legacy JSON table integer samples must be exactly representable as binary64;
-large exact integers remain supported, but rounded integer samples are refused.
-Decimal floating-point samples use correctly rounded binary64 values. Legacy
-table and FFT JSON reject nonzero decimals that underflow to zero, while
-preserving authored signed zero and representable subnormal values. These
-checks precede conversion, comparison, and replacement of a blessed baseline.
-Typed core JSON applies the same precision checks to coordinates, signal
-components, scalars, and retained analysis payloads. Integer metadata retains
-its native integer range. FFT JSON spectra and FFT metadata embedded in RAW
-apply the same checks to every floating-point field, including transform
-settings, metrics, and incomplete-history bounds.
-For tables, `max_result_values` counts coordinate values and both components
-of complex samples. RAW FFT imports also charge all numeric metadata fields
-against both value budgets, in addition to the file's sample storage, before
-decoding the typed metadata. The budgets cover every plot before selection,
-including empty spectra. ASCII RAW imports enforce both value limits as rows
-are read, including plots whose point count is inferred from their data. A
-refusal reports the first point that would exceed the remaining file budget.
-FFT JSON uses the same admission scanner without retaining an extra untyped
-payload tree. HDF5 readers admit the combined dataset and measurement value
-count before decoding any section, including sections not selected.
-FFT JSON and delimited imports apply both value limits to numeric source
-fields, including metadata repeated in CSV/TSV records, before assembling spectra.
-Legacy table and FFT JSON value limits are enforced during decoding, before an
-oversized numeric array can be materialized. A refusal reports the first excess
-value (`limit + 1`); it does not scan the remaining values to compute a total.
-
-`convert --variables` matches names without case sensitivity. A qualified name
-such as `V(out)` or `D(clk)` selects that exact signal. Bare aliases must be
-unambiguous: if both `V(out)` and `I(out)` exist, use their full names instead
-of `out`. The same rule applies to VCD signals sharing a short name across
-scopes. VCD scalar aliases accept full or relative scopes with the matching
-`D(...)` or `E(...)` qualifier. Repeat `--variables` to select multiple signals.
-Invalid selections
-leave an existing destination unchanged, including in-place conversions.
+### VCD conversion
 
 `--to vcd` writes an event dump rather than a table. A rawfile carrying event
-plots and a typed JSON result document both hold the timelines themselves and
+plots and a typed JSON result document hold the timelines themselves and
 convert exactly, producing the file `run -f vcd` publishes. Any other source is
-converted from its grid `D(node)`/`E(node)` columns, which is lossy: `0`, `1`
-and `0.5` become `0`, `1` and `x`, one change per level held rather than one
-per grid point, and the drive strength those columns already dropped is not
-recovered. A source with neither event timelines nor such columns is refused.
-Complex event columns and undefined digital samples are rejected before
-publication, so an unsupported trace cannot disappear from a successful dump.
-Real event columns may remain undefined until their first recorded value,
-including a signal that never receives a value. A real signal cannot return to
-undefined after that first value; such gaps are rejected before publication.
-Version 1 RAW event plots require real columns and a time coordinate in seconds.
-Conflicting unit metadata, complex components, malformed rows, and invalid times
-are rejected before selection or publication, including in redundant bus plots.
-Sampled columns must have a time coordinate. Explicit `s`, `ms`, `us` (also
-`µs`/`μs`), `ns`, `ps`, and `fs` units are converted to seconds; a time coordinate
-without a unit already denotes seconds. Frequency, index, and other non-time
-coordinates are refused. Every sampled time is checked for non-negative,
-nondecreasing order before unchanged levels are removed. VCD `--start` and
-`--stop` bounds are always in seconds, including when the source uses another unit.
+converted from its grid `D(node)` and `E(node)` columns, which is lossy: `0`,
+`1` and `0.5` become `0`, `1` and `x`, with one change per level held, and the
+drive strength those columns already dropped is not recovered. Sampled time
+coordinates in `s`, `ms`, `us`, `ns`, `ps` or `fs` are converted to seconds,
+and `--start` and `--stop` are always in seconds; clipping keeps the held value
+of every selected signal at `--start`. A bus selector accepts the bus name, its
+declared range or one bit (`D(top.data[7:0])`, `D(top.data[3])`); without
+`--expand-buses`, selecting one bit keeps the whole vector and prints a note.
 
-VCD bus selectors accept scoped names, full declared ranges, and bit names,
-including qualified forms such as `D(top.data[7:0])` and `D(top.data[3])`.
-Without `--expand-buses`, selecting one bit keeps the whole vector and reports
-a note. With expansion, a bus selector keeps all members and a bit selector
-keeps only that member. Expansion preserves VCD scopes and aliases; RAW and
-JSON inputs retain their authored member node names, which also remain usable
-as selectors. Ambiguous names are rejected before publishing the output.
+Converting from `vcd` builds a table whose rows are the dump's distinct ticks:
+each signal holds its last value, `x` and `z` become `0.5` in a digital column,
+a vector becomes one `D(bus[k])` column per bit, and a real signal stays
+undefined until its first value. VCD-to-VCD conversion keeps the original
+integer timeline.
 
-VCD clipping preserves the held value of every selected signal at `--start`,
-including signals that remain constant throughout the window. The timescale is
-refined when necessary to represent the boundary without changing existing event
-times; unrepresentable boundaries and tick overflow are refused. Changes after
-`--stop` are removed. Range bounds must be finite, and `--start` must not exceed
-`--stop` for every conversion format.
+## Verilog-A models (`compile-va`)
 
-Converting **from** `vcd` builds a table whose rows are the dump's distinct
-ticks: time is tick times `$timescale`, each signal holds its last value, and
-`x` and `z` become `0.5` in a `digital` column. A vector variable becomes one
-column per bit. A tick that cannot survive conversion to binary64 seconds is
-refused before table publication or comparison; VCD-to-VCD conversion keeps
-the original integer timeline. Bit columns are named `D(bus[k])` down the
-declared range, the same shape the
-members of a run's bus reach a table in, because a table has no place for a
-declaration saying that N of its columns are one word. Columns are named
-`D(node)` and `E(node)`, dropping the scope levels every signal shares. Before
-its first change a logic signal reads `0.5`; a real signal remains undefined.
-All table formats preserve those undefined real samples, and comparison checks
-their availability as well as the recorded values.
+`rspice compile-va MODEL.va` compiles a Verilog-A source and prints its
+interface table unless `--quiet` is set.
 
-**`compile-va`** resolves includes relative to the including source first,
-then searches source directories discovered by preprocessing, `-I` directories,
-and config `paths.veriloga_includes`. Built-in standard headers are the fallback.
-Unreadable entries and broken links stop include resolution instead of selecting
-a different source. File read failures retain their I/O category and source path
-in machine-readable diagnostics.
-Compiler failures identify the original source file, line, and column after
-include and macro expansion. JSON errors retain each compiler diagnostic's code,
-phase, and original UTF-8 byte range in `error.diagnostics`; macro expansions
-select the complete invocation line when an exact token range is unavailable.
-Successful compilations report compiler warnings on stderr using the selected
-`--error-format`. The interface JSON retains these warnings in `diagnostics`,
-including when `--quiet` suppresses their console presentation.
-Use `--module NAME` to select a module in a multi-module source. Root bytes and
-lines, total dependency bytes, include depth, and expanded bytes obey the
-configured resource limits; compilation supports Ctrl-C cancellation.
-Filesystem sources must be regular files (symlinks to regular files are
-supported). Byte and dependency budgets are checked before allocation; root
-line limits are checked during reading, before UTF-8 decoding.
-The interface table prints unless `--quiet` is set. Quiet also suppresses
-`--detailed` and `--show-usage` text, while `-o FILE` still writes a versioned
-JSON interface summary. Usage examples include the absolute source path and
-explicit module selection so they can be pasted into a netlist in another
-directory. `--strict` returns an unsupported-capability error:
-strict LRM compliance checking is not yet implemented.
+| Option | Effect |
+| :--- | :--- |
+| `-o`, `--output FILE` | Write a versioned `rspice.compile_va` JSON summary: source, model, terminals, internal nodes, parameters with defaults and bounds, and compiler warnings |
+| `-I`, `--include DIR` | Extra include directory (repeatable) |
+| `--module NAME` | Select one module of a multi-module source |
+| `--detailed` | Also print per-branch stamp and Jacobian entry counts |
+| `--show-usage` | Print an example netlist instantiation, with the absolute source path and module selection |
+| `--strict` | Refused with capability `veriloga.strict_lrm` (exit 69): strict LRM checking is not implemented |
 
-**`health`** is a deployment probe. The default readiness mode validates the
-effective engine configuration and executes a deterministic, bounded in-memory
-circuit through parsing, construction, matrix assembly, and a linear DC solve,
-performing no filesystem or network I/O. `--mode liveness` deliberately skips
-the synthetic workload so an intentionally narrow admission policy does not
-make the process appear dead. The versioned JSON response includes `status`,
-`ready`, probe duration, build and runtime identity, a per-check verdict, and
-the process `run_id`.
+Includes resolve against the including file first, then the directories
+preprocessing discovered, `-I` directories, configured
+`paths.veriloga_includes`, and finally the built-in standard headers; an
+unreadable entry or broken link stops resolution rather than selecting another
+file. Diagnostics name the original file, line and column after include and
+macro expansion, and under `--error-format json` carry their code, phase and
+UTF-8 byte range in `error.diagnostics`. `run` and `check` report the same
+compiler findings. The `[resources]` source, dependency and include-depth
+budgets apply, and Ctrl-C cancels compilation.
 
-**`models`** reads the shipped model tree, or the one `--models-dir` names, or
-the one `RSPICE_MODELS_DIR` points at. `--part` reports every pack that defines
-one exact part name; `--device` lists every definition of a canonical device
-class; `--search` matches on substring; `--shippable-only` restricts the
-listing to packs whose metadata says redistributable. Browse queries are capped
-so a bare `--device diode` does not spool tens of thousands of lines.
-Malformed pack statistics, inconsistent top-level counts, and overflowing
-totals are rejected with the index filename and line number.
-Invalid catalog records encountered during a query stop it with their file
-and line location. Older catalogs without restriction or scope columns default
-to unrestricted, top-level definitions. Present flags must be `0` or `1`, and
-scope must be `top` or `nested`.
-Pack IDs must be unique and catalog rows must name a known pack. Index paths
-use forward slashes relative to their pack or model root; absolute paths,
-parent traversal, and Windows drive or stream syntax are rejected.
+## Model packs (`models`)
+
+`rspice models` lists the SPICE model packs shipped beside the binary, or the
+tree `--models-dir DIR` or `RSPICE_MODELS_DIR` names: a directory holding
+`PACKS.tsv` and `CATALOG.tsv`. The foundation library is compiled in, so
+simulation does not need this tree; only this command does.
+
+| Option | Effect |
+| :--- | :--- |
+| `--part NAME` | Every pack that defines this exact part name, ignoring case |
+| `--device CLASS` | Every definition of a canonical device class, such as `diode` or `jfet-n` |
+| `--search TEXT` | Definitions whose name contains the text, ignoring case |
+| `--shippable-only` | Only redistributable packs and unrestricted definitions, applied before results are limited |
+
+`--part` excludes `--device` and `--search`, and `--device` excludes
+`--search`. `--device` and `--search` print at most 200 rows. A malformed index
+or catalog record stops the query with its file and line.
+
+## Health and capabilities
+
+`rspice health` is a deployment probe. The default `--mode readiness` validates
+the effective configuration and runs a small built-in circuit through parsing,
+construction, matrix assembly and a DC solve, with no filesystem or network
+I/O. `--mode liveness` skips that workload, so a deliberately narrow admission
+policy cannot make the process look dead. `--json` prints a versioned document
+with `status`, `ready`, the probe duration, build and runtime identity,
+per-check verdicts and the `run_id`.
+
+`rspice capabilities` reports, for every canonical analysis kind, whether this
+CLI executes it, whether the control-script host runs it and which typed result
+family it maps to, followed by the workflows the CLI does not offer. `--json`
+prints the `rspice.capabilities` document, also under `--quiet`, without
+reading a netlist; it adds the result-document schema and version, the format
+names and the build identity. These declarations describe adapters, not whether
+a particular circuit is admitted or numerically qualified. The CLI does not
+offer:
+
+- standalone remeasurement, transformation or plotting of a saved result
+  (`convert` and `compare` exist);
+- durable multi-netlist job manifests with selective retry (variants and
+  corners run in parallel within one invocation);
+- Monte Carlo checkpoint continuation or population aggregation (indexed
+  `START` batches exist);
+- conversion of a subset of an FFT spectrum;
+- strict Verilog-A LRM checking;
+- SOA, optimization, PSP, HBSP and HB-noise analyses through `run` or the flat
+  formats; they run as `study run` tasks.
 
 ## Observability
 
 Logging uses `--log-level` first, then debug logging for `--verbose`, then
 `RUST_LOG`, and finally `warn`. `RUST_LOG` supports module directives and
 message regexes, such as `rspice=info/Loading`. `RUST_LOG_STYLE` accepts `auto`,
-`always`, or `never`; JSON logs remain free of terminal color codes. Invalid
-active logging settings fail with configuration exit code 78 in the selected
-diagnostic format. `--quiet` skips logging and its environment settings.
+`always` or `never`; JSON logs never carry terminal colour codes. An invalid
+active logging setting exits 78. `--quiet` skips logging and its environment
+settings.
 
-`rspice --version` reports the crate version, build target, profile, and exact
-source commit. The same commit appears in health documents, structured fatal
-diagnostics, and run summaries so operators can correlate an installed binary
-with its release provenance. The commit is read from `git rev-parse HEAD` at
-build time; set `RSPICE_BUILD_COMMIT` to a full 40-character hash to stamp
-provenance when building from a source archive with no git checkout.
+`rspice --version` reports the version, build target, profile and exact source
+commit; the same commit appears in health documents, fatal diagnostics and run
+summaries, so an installed binary can be traced to its release. The commit is
+read from `git rev-parse HEAD` at build time; set `RSPICE_BUILD_COMMIT` to a
+full 40-character hash to stamp it when building from a source archive.
 
-Every JSON document the CLI emits, whether from `health`, a fatal diagnostic,
-`--summary`, or `--log-format json`, carries the process `run_id`, so one run's
-logs, failure, and summary can be correlated after the fact.
-`--error-format json` emits a versioned diagnostic (`schema_version: 2`) with a
+Every JSON document the CLI writes, from `health`, a fatal diagnostic,
+`--summary` or `--log-format json`, carries the process `run_id`, so one run's
+logs, failure and summary can be correlated afterwards. The documents below
+also carry the tool identity, a `schema` name and `schema_version` 1:
+
+| Schema | Written by |
+| :--- | :--- |
+| `rspice.check` | `check --json` |
+| `rspice.info` | `info --json` |
+| `rspice.comparison` | `compare --json` |
+| `rspice.compile_va` | `compile-va -o` |
+| `rspice.capabilities` | `capabilities --json` |
+| `rspice.measurements` | `run --meas-file` in JSON |
+| `rspice.diagnostic` | Nonfatal stderr diagnostics under `--error-format json` |
+| `rspice.study.check`, `rspice.study.plan`, `rspice.study.run` | `study check`, `plan` and `run` with `--json` |
+| `rspice.study.progress` | `study run --progress-json`, on stderr |
+| `rspice.study.results` | `study run -o` |
+
+`--error-format json` writes the fatal diagnostic (`schema_version: 2`) with a
 stable code and category, retry policy, exit code, the failing analysis and
-run-coordinate ids, the deck path and line, the refused capability token, and
-numeric resource or convergence details.
+run-coordinate IDs, the deck path and line, the refused capability token, and
+numeric resource or convergence details; it also covers argument-parsing and
+timeout failures. `check --json`, `compare --json` and `run --summary -`
+reserve stdout for one JSON document without needing `--quiet`.
 
 ## Configuration file
 
-Configuration is loaded and merged in order of increasing priority: built-in
-defaults, user config (`~/.config/rspice/config.toml`, falling back to
-`~/.rspicerc`), project config (`./.rspicerc`), environment variables, then
-command-line arguments. `--config <FILE>` replaces the user and project layers
-with that single file. Only absent default config files are skipped; unreadable
-files and broken config symlinks fail with the path and filesystem reason.
-Scalar keys override the layer below; the `[paths]`
-lists accumulate, so a project file adds search directories rather than
-discarding the user's.
+Configuration merges, in increasing priority: built-in defaults, the user
+file, the project file `./.rspicerc`, environment variables, and command-line
+flags. The user file is `rspice/config.toml` in the platform configuration
+directory (`$XDG_CONFIG_HOME` or `~/.config` on Linux,
+`~/Library/Application Support` on macOS, `%APPDATA%` on Windows), falling back
+to `~/.rspicerc`. `--config FILE` replaces the user and project files with that
+one file. Only an absent default file is skipped; an unreadable file or a broken
+symlink fails with its path and the filesystem reason. Scalar keys override the
+layer below, while the `[paths]` lists accumulate, so a project file adds search
+directories rather than discarding the user's. For simulation settings, a
+deck's `.OPTIONS` sit between the configuration and the command line.
 
-All files use TOML. Unknown keys are rejected rather than ignored, and every
-value is range-checked on load (`min_timestep <= max_timestep`, positive
-tolerances, known enum names), so a bad file or environment override exits 78
-naming the offending key. The full set of recognized keys, with their defaults:
+Files are TOML. Unknown keys are rejected rather than ignored, and values are
+validated on load (positive tolerances and timesteps,
+`min_timestep <= max_timestep`, known enum names), so a bad file or environment
+override exits 78 naming the key. Every recognized key, with its default:
 
 ```toml
 [simulation]
@@ -1343,31 +935,18 @@ max_parallel_workers = 64               # cap batch/analysis worker fan-out
 max_batch_runs = 10000
 ```
 
-The configured `convergence_mode` supplies the base convergence policy for
-`run`, `check`, and `health`. Authored `.OPTIONS` convergence controls override
-that base in `run` and `check`. An explicit `run --convergence MODE` takes
-precedence over the deck's stepping and damping controls; numeric tolerances
-retain their own configuration, deck, and command-line precedence.
+The configured `convergence_mode` is the base convergence policy for `run`,
+`check` and `health`; a deck's `.OPTIONS` convergence controls refine it, and
+`run --convergence` replaces both.
 
-Retained measurement/report collections also obey `max_result_values`, including
-the aggregate across steps, variants, corners, and control datasets. Each stored
-floating-point field counts, including raw values, goals, thresholds, coordinates,
-and run durations. An empty failure row costs at least one value. Parallel batch
-workers share admission before their reports enter the aggregate collection;
-exceeding the budget exits 75 even with `--allow-failed-meas`.
-
-Continuous measurements admit selected records before allocation. Intermediate
-expression waveforms and sweep projections are also capped by
-`max_result_values`; these preparation buffers and the retained event records
-are checked separately. Event searches and derived waveform evaluation poll
-cancellation even when no event matches. Compressed transient runs apply the
-same controls while measuring the accepted trajectory before decimation.
-
-The same resource policy is applied consistently to `run`, `check`, and `info`,
-including stdin, include expansion, `.ALTER`/`.DATA` materialization, derived
-corner and S-parameter decks, circuit construction, and result retention. The
-worker ceiling also bounds automatic `--jobs 0` fan-out. Lower these ceilings
-for a service with a fixed CPU or memory budget.
+`[resources]` applies to every command that reads a deck, a study or a result
+file, including stdin, include expansion, `.ALTER` and `.DATA` materialization,
+derived corner and S-parameter decks, circuit construction and result
+retention; the worker ceiling also bounds `-j 0`. Retained measurement and
+report records count against `max_result_values` across every step, variant,
+corner and control dataset, and exceeding it exits 75 even with
+`--allow-failed-meas`. Lower the ceilings for a service with a fixed CPU or
+memory budget.
 
 Environment variable overrides:
 
@@ -1385,7 +964,11 @@ Environment variable overrides:
 The exit status is the verification contract: a deck whose measurements fail,
 or whose results are non-finite, does not exit 0.
 
-Every nonzero code is derived from one **failure category**, and for anything the engine produced that category is the engine's own (`rspice_core::SimulationErrorCategory`), so the exit status, the `--error-format json` `category` field, and the `--summary` report always agree. Automation can branch on the number alone:
+Every nonzero code is derived from one failure category, and for anything the
+engine produced that category is the engine's own
+(`rspice_core::SimulationErrorCategory`), so the exit status, the
+`--error-format json` `category` field and the `--summary` report always agree.
+Automation can branch on the number alone:
 
 | Code | Category | Meaning |
 | :--- | :--- | :--- |
@@ -1411,26 +994,30 @@ Every nonzero code is derived from one **failure category**, and for anything th
 | 124 | `timeout` | Run exceeded `--timeout` |
 | 130 | `cancellation` | Interrupted (Ctrl-C) |
 
-65-78 keep their `sysexits.h` meanings; 80-85 are an RSpice block for engine-domain outcomes `sysexits` has no name for. No engine category exits 1, so a `1` means only the two frontend failures listed above.
+65-78 keep their `sysexits.h` meanings; 80-85 are an RSpice block for
+engine-domain outcomes `sysexits` has no name for. No engine category exits 1,
+so a `1` means only the two frontend failures listed above.
 
 ## CI integration
 
-`--report-format junit` writes JUnit XML that most CI systems ingest directly
-as test results: one test suite per run, holding a `simulation` case plus one
-case per `.MEAS` statement, so a missed goal shows up as a named failing test
-rather than a log line. `--report-format tap` reports the same content as TAP.
-Publish the file as a build artifact and the analog checks appear alongside the
-software tests.
+`--report-format junit` writes JUnit XML that CI systems ingest as test
+results: one test suite per run, holding a `simulation` case and one case per
+`.MEAS` statement, so a missed goal shows up as a named failing test rather than
+a log line. `--report-format tap` reports the same content as TAP. The
+`--summary` JSON carries the run's verdict, per-run status, the full
+measurement records (the same fields as `--meas-file` JSON), the resource
+limits in force and an `outputs` list naming only the artifacts this invocation
+published.
 
 A typical verification pipeline:
 
 ```bash
-# 1. Validate the netlist (syntax + singular-topology checks)
+# 1. Validate the deck, treating connectivity warnings as failures (exit 2)
 rspice check circuit.sp --connectivity --strict
 
 # 2. Run with a time budget; failed .MEAS checks exit 3, non-finite results 80
 rspice run circuit.sp -q -o results.csv -f csv --timeout 600 \
-        --summary summary.json
+        --summary summary.json --report-format junit --report-file junit.xml
 
 # 3. Compare against the golden reference (mismatches exit 3)
 rspice compare results.csv golden.csv --abstol 1e-9
@@ -1439,37 +1026,7 @@ rspice compare results.csv golden.csv --abstol 1e-9
 rspice compare results.csv golden.csv --bless
 ```
 
-Because every failure category maps to a documented nonzero exit code,
-`rspice run deck.sp && deploy` is safe without parsing any output. The
-`--summary` JSON carries the same verdict plus the full measurement records for
-archiving, using the same measurement fields as `--meas-file` JSON.
-Its `outputs` list names artifacts successfully published by this invocation;
-a failed replacement does not count an older destination file as new output.
+Every failure category maps to a documented nonzero exit code, so a pipeline
+step can gate on the exit status alone.
 
 Licensed under the [RSpice Personal Use License](../../LICENSE).
-
-### Automation and input contracts
-
-`check --json`, `compare --json`, and `run --summary -` reserve stdout for one
-JSON document without requiring `--quiet`. `--error-format json` also covers
-argument parsing and timeout failures. A timeout interrupts an idle stdin pipe;
-unrepresentable durations are usage errors. Signed temperatures accept the
-usual separated spelling, such as `--temp -40`.
-
-Alternative command-line analysis modes are mutually exclusive. Checkpoint,
-resume and transient-stop options require an analysis that actually executes a
-transient. Numeric node strings always mean authored node names, not internal
-solver indices.
-
-Comparison keeps voltage, current and real/imaginary components distinct.
-For finite values, a sample passes when its absolute error is no greater than
-`abstol` or its error relative to the golden value is no greater than `reltol`.
-Against zero, only the absolute threshold can admit a nonzero value.
-Interpolation refuses uncovered golden samples except for endpoint rounding
-within four ULPs. Blessing requires matching file formats, including bootstrap
-creation. Result readers preserve typed scalar quantities and every OP signal;
-unsupported projections fail instead of comparing an empty coordinate.
-
-`models --shippable-only` applies to pack listings and to part, device and
-search queries. The filter excludes restricted definitions and packs whose
-metadata does not mark them redistributable before limiting displayed results.
