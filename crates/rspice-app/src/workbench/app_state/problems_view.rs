@@ -189,6 +189,45 @@ impl ProblemsView {
         self.sort.is_none() && !self.grouping.is_grouped() && !self.is_filtered()
     }
 
+    /// Whether arranging the rows under this position reads what a row says
+    /// — its subject, location or message — rather than only what its facet
+    /// states. Those are the arrangements that cost a spelled-out row each.
+    pub(in crate::workbench) fn reads_row_text(&self) -> bool {
+        !self.text.is_empty()
+            || self.grouping == ProblemGrouping::Subject
+            || matches!(
+                self.sort,
+                Some(ProblemColumn::Subject | ProblemColumn::Location | ProblemColumn::Message)
+            )
+    }
+
+    /// Whether two positions list the same rows, in the same order and the
+    /// same groups. Everything but the detail region's own state.
+    ///
+    /// Destructured rather than compared field by field, so a field added
+    /// here has to be placed on one side of that line or the other.
+    pub(in crate::workbench) fn arranges_like(&self, other: &Self) -> bool {
+        let Self {
+            sort,
+            descending,
+            severities,
+            producer,
+            text,
+            waived,
+            grouping,
+            collapsed,
+            explain: _,
+        } = self;
+        *sort == other.sort
+            && *descending == other.descending
+            && *severities == other.severities
+            && *producer == other.producer
+            && *text == other.text
+            && *waived == other.waived
+            && *grouping == other.grouping
+            && *collapsed == other.collapsed
+    }
+
     pub(in crate::workbench) fn collapse(&mut self, group: &str, collapsed: bool) {
         if collapsed {
             self.collapsed.insert(group.to_owned());

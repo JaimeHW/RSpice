@@ -45,6 +45,16 @@ pub(super) struct DetailActions {
     pub(super) related: Option<DiagnosticRoute>,
 }
 
+/// What the copy-everything verb copies.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Listed {
+    /// The findings the filters admit.
+    pub(super) count: usize,
+    /// Whether some of them are in collapsed groups, and so are copied
+    /// without being printed.
+    pub(super) collapsed: bool,
+}
+
 /// How tall the detail region is in a page of `available` height.
 pub(super) fn height(available: f32) -> f32 {
     let lines = (available * DETAIL_SHARE / CONSOLE_ROW_MIN_HEIGHT)
@@ -56,13 +66,13 @@ pub(super) fn height(available: f32) -> f32 {
 /// Draw the region for the current finding.
 ///
 /// `refusal` is why its route cannot be followed, where the page checked and
-/// found one; `listed` is how many rows the filters are listing, which is what
-/// the copy-everything verb promises to copy.
+/// found one; `listed` is what the filters are listing, which is what the
+/// copy-everything verb promises to copy.
 pub(super) fn detail(
     ui: &mut Ui,
     row: &DiagnosticRow<'_>,
     explaining: bool,
-    listed: usize,
+    listed: Listed,
     refusal: Option<&str>,
 ) -> DetailActions {
     let tokens = Tokens::get(ui.ctx());
@@ -86,11 +96,24 @@ pub(super) fn detail(
                     .clicked();
             }
             actions.copy_row = Button::new("Copy row").compact().show(ui).clicked();
-            actions.copy_listed = Button::new(&format!("Copy {listed} listed"))
+            // The count is what the filters list, collapsed groups included,
+            // and that is what is copied; where a collapsed group keeps some
+            // of it off screen, the verb says so.
+            let copies = if listed.collapsed {
+                "Copy every listed finding, collapsed groups included"
+            } else {
+                "Copy every listed finding"
+            };
+            let copy = Button::new(&format!("Copy {} listed", listed.count))
                 .compact()
-                .accessible_label("Copy every listed finding")
-                .show(ui)
-                .clicked();
+                .accessible_label(copies)
+                .show(ui);
+            actions.copy_listed = if listed.collapsed {
+                copy.on_hover_text(copies)
+            } else {
+                copy
+            }
+            .clicked();
             if !row.rule.is_empty() {
                 actions.explain = Button::new(if explaining { "Hide rule" } else { "Explain" })
                     .compact()
@@ -149,12 +172,9 @@ pub(super) fn detail(
                     FontWeight::Medium,
                 );
             }
-            line(
-                ui,
-                &standing(row),
-                tokens.color.text_faint,
-                FontWeight::Medium,
-            );
+            if let Some(standing) = standing(row) {
+                line(ui, &standing, tokens.color.text_faint, FontWeight::Medium);
+            }
             if let Some(refusal) = refusal {
                 line(ui, refusal, tokens.color.text_faint, FontWeight::Medium);
             }
@@ -168,14 +188,16 @@ pub(super) fn detail(
     actions
 }
 
-/// Where the current finding's batch stands, and what moved where it is not
-/// current. "Stale" alone left the reader to guess what to re-run.
-fn standing(row: &DiagnosticRow<'_>) -> String {
+/// Where the current finding's batch stands, where that is not simply current,
+/// and what moved. "Stale" alone left the reader to guess what to re-run; a
+/// current finding is the normal case and says nothing, so the line appears
+/// only when it has something to say.
+fn standing(row: &DiagnosticRow<'_>) -> Option<String> {
     use crate::workbench::app_state::diagnostic_store::listing::RowStanding;
     match &row.standing {
-        RowStanding::Current => "Current".to_owned(),
-        RowStanding::Stale(moved) => format!("Stale · {moved} moved"),
-        RowStanding::Unavailable(reason) => format!("Cannot be evaluated · {reason}"),
+        RowStanding::Current => None,
+        RowStanding::Stale(moved) => Some(format!("Stale · {moved} moved")),
+        RowStanding::Unavailable(reason) => Some(format!("Cannot be evaluated · {reason}")),
     }
 }
 

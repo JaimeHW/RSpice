@@ -24,11 +24,58 @@ use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType}
 const WIDTH: f32 = 900.0;
 const HEIGHT: f32 = 420.0;
 
+fn open_state() -> AppState {
+    let mut state = AppState::default();
+    state.project_lifecycle.authority.open_session();
+    state
+}
+
+/// One finding from the test producer, about one node, saying `message`.
+fn record(state: &AppState, code: &str, level: DiagnosticLevel, message: &str) -> DiagnosticRecord {
+    DiagnosticRecord::new(
+        rspice_app_types::diagnostics::CanonicalDiagnosticMetadata::current(
+            "rspice.test",
+            code,
+            "doc",
+            None,
+            0,
+            "validation",
+            message,
+        ),
+        level,
+        DiagnosticSubject::new(state.workspace.content.project.id(), "Node 'n1'"),
+        message,
+    )
+}
+
+fn publish(state: &mut AppState, records: Vec<DiagnosticRecord>) {
+    state
+        .publish_diagnostics(DiagnosticInputs::Dispatch, records)
+        .expect("the dispatch digest is available");
+}
+
+/// `count` findings with nowhere to go, reported in the order of their
+/// messages: "finding 00", "finding 01", and on.
+fn state_with_findings(count: usize) -> AppState {
+    let mut state = open_state();
+    let records = (0..count)
+        .map(|index| {
+            record(
+                &state,
+                &format!("T-{index:02}"),
+                DiagnosticLevel::Warning,
+                &format!("finding {index:02}"),
+            )
+        })
+        .collect();
+    publish(&mut state, records);
+    state
+}
+
 /// One finding each from two rules of the live drawing: an error on an object
 /// the drawing carries, and a warning on a wire.
 fn state_with_design_findings() -> AppState {
-    let mut state = AppState::default();
-    state.project_lifecycle.authority.open_session();
+    let mut state = open_state();
     let resistor = state
         .schematic
         .add_component(ComponentType::Resistor, Point::new(40, 40));
@@ -73,7 +120,17 @@ fn netlist_finding_with_a_fix(state: &mut AppState) {
     );
 }
 
-/// One node of the access tree, in the three terms these tests read.
+/// The listed findings' identities, in the order their producers reported
+/// them.
+fn reported(state: &AppState) -> Vec<uuid::Uuid> {
+    let listed = listing(state);
+    (0..listed.len())
+        .filter_map(|index| listed.facet(index))
+        .map(|facet| facet.id)
+        .collect()
+}
+
+/// One node of the access tree, in the terms these tests read.
 ///
 /// egui puts a label widget's text in the node's *value* and a control's in
 /// its name, and reports a selection as a toggle rather than as a selection,
@@ -83,6 +140,7 @@ struct Announced {
     label: Option<String>,
     value: Option<String>,
     toggled: Option<egui::accesskit::Toggled>,
+    expanded: Option<bool>,
 }
 
 impl Announced {
@@ -97,27 +155,35 @@ impl Announced {
 
 /// Everything one frame put on the screen, in the forms these tests measure.
 struct Render {
-    texts: Vec<(String, egui::Pos2)>,
+    /// Every painted text, with the rectangle its laid-out galley covers.
+    texts: Vec<(String, egui::Rect)>,
     /// Filled rectangles, with the colour they were filled in.
     fills: Vec<(egui::Rect, egui::Color32)>,
     /// Three-point paths: the painted direction and chevron marks.
     triangles: Vec<Vec<egui::Pos2>>,
+    /// Straight strokes, with their colour: the strokes of a problem mark
+    /// among them.
+    segments: Vec<([egui::Pos2; 2], egui::Color32)>,
     nodes: Vec<Announced>,
 }
 
 impl Render {
-    fn text(&self, needle: &str) -> Option<egui::Pos2> {
+    fn cell(&self, needle: &str) -> Option<egui::Rect> {
         self.texts
             .iter()
             .find(|(text, _)| text.contains(needle))
-            .map(|(_, pos)| *pos)
+            .map(|(_, rect)| *rect)
+    }
+
+    fn text(&self, needle: &str) -> Option<egui::Pos2> {
+        self.cell(needle).map(|rect| rect.min)
     }
 
     fn exact(&self, text: &str) -> Option<egui::Pos2> {
         self.texts
             .iter()
             .find(|(painted, _)| painted == text)
-            .map(|(_, pos)| *pos)
+            .map(|(_, rect)| rect.min)
     }
 
     fn has(&self, needle: &str) -> bool {
@@ -129,24 +195,48 @@ impl Render {
     /// Two points of tolerance, not none: the subject column is printed in a
     /// heavier weight than its neighbours and a face's line height is its
     /// own. Rows are a row height apart, so it cannot reach the next one.
-    fn row_at(&self, y: f32) -> Vec<(String, egui::Pos2)> {
-        let mut row: Vec<(String, egui::Pos2)> = self
+    fn row_at(&self, y: f32) -> Vec<(String, egui::Rect)> {
+        let mut row: Vec<(String, egui::Rect)> = self
             .texts
             .iter()
-            .filter(|(_, pos)| (pos.y - y).abs() < 2.0)
+            .filter(|(_, rect)| (rect.min.y - y).abs() < 2.0)
             .cloned()
             .collect();
-        row.sort_by(|left, right| left.1.x.total_cmp(&right.1.x));
+        row.sort_by(|left, right| left.1.min.x.total_cmp(&right.1.min.x));
         row
     }
+
+    fn node(&self, says: &str) -> Option<&Announced> {
+        self.nodes.iter().find(|node| node.says() == Some(says))
+    }
+
+    /// The band the header paints, which spans the page's content width: the
+    /// widest fill of the header's height, which no control in the strip
+    /// above it is.
+    fn header_band(&self) -> egui::Rect {
+        self.fills
+            .iter()
+            .filter(|(rect, _)| (rect.height() - grid::HEADER_HEIGHT).abs() < 0.5)
+            .map(|(rect, _)| *rect)
+            .max_by(|left, right| left.width().total_cmp(&right.width()))
+            .expect("the header paints its band")
+    }
+}
+
+/// The row a printed cell sits in: a row height, centred on the cell.
+fn row_of(cell: egui::Rect) -> egui::Rect {
+    egui::Rect::from_center_size(
+        cell.center(),
+        egui::vec2(cell.width(), CONSOLE_ROW_MIN_HEIGHT),
+    )
 }
 
 /// One egui context, held across frames.
 ///
-/// Focus, scroll position and the row identities the keyboard reads all live
-/// in the context, so a test that clicks a row and then keys it has to send
-/// both through the same one. A fresh context per frame would have no focus
-/// to key against, and the keyboard tests would pass by doing nothing.
+/// Focus, scroll position and the arrangement the page keeps between frames
+/// all live in the context, so a test that clicks a row and then keys it has
+/// to send both through the same one. A fresh context per frame would have no
+/// focus to key against, and the keyboard tests would pass by doing nothing.
 struct Harness {
     ctx: egui::Context,
 }
@@ -160,16 +250,44 @@ impl Harness {
     }
 
     fn frame(&self, state: &mut AppState, input: egui::RawInput) -> Render {
-        let output = self.ctx.run_ui(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| problems(ui, state));
+        let output = self.ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| problems(ui, state));
         });
         collect(output)
     }
 
     /// Draw a frame with nothing happening, which is what settles the sizing
-    /// and leaves the rows in memory to be keyed.
+    /// and the scroll position a previous frame asked for.
     fn settle(&self, state: &mut AppState) {
         let _ = self.frame(state, sized(egui::RawInput::default()));
+    }
+
+    /// Give the table keyboard focus, as Tab does.
+    fn focus_table(&self) {
+        self.ctx
+            .memory_mut(|memory| memory.request_focus(grid::body_id()));
+    }
+
+    fn focused(&self) -> Option<egui::Id> {
+        self.ctx.memory(|memory| memory.focused())
+    }
+
+    /// Where the table's rows are shown, between the header and whatever is
+    /// under the body.
+    fn table(&self) -> egui::Rect {
+        self.ctx
+            .read_response(grid::body_id())
+            .expect("the table was drawn")
+            .rect
+    }
+
+    /// Whether the row printing `message` is shown whole in the table.
+    fn shows_whole(&self, render: &Render, message: &str) -> bool {
+        let table = self.table();
+        render.cell(message).is_some_and(|cell| {
+            let row = row_of(cell);
+            row.top() >= table.top() - 0.5 && row.bottom() <= table.bottom() + 0.5
+        })
     }
 }
 
@@ -182,14 +300,18 @@ fn render(state: &mut AppState, input: egui::RawInput) -> Render {
 fn collect(output: egui::FullOutput) -> Render {
     fn walk(shape: &egui::epaint::Shape, render: &mut Render) {
         match shape {
-            egui::epaint::Shape::Text(text) => {
-                render.texts.push((text.galley.job.text.clone(), text.pos))
-            }
+            egui::epaint::Shape::Text(text) => render.texts.push((
+                text.galley.job.text.clone(),
+                egui::Rect::from_min_size(text.pos, text.galley.size()),
+            )),
             egui::epaint::Shape::Rect(rect) => {
                 render.fills.push((rect.rect, rect.fill));
             }
             egui::epaint::Shape::Path(path) if path.points.len() == 3 => {
                 render.triangles.push(path.points.clone());
+            }
+            egui::epaint::Shape::LineSegment { points, stroke } => {
+                render.segments.push((*points, stroke.color));
             }
             egui::epaint::Shape::Vec(shapes) => {
                 for shape in shapes {
@@ -204,6 +326,7 @@ fn collect(output: egui::FullOutput) -> Render {
         texts: Vec::new(),
         fills: Vec::new(),
         triangles: Vec::new(),
+        segments: Vec::new(),
         nodes: Vec::new(),
     };
     for clipped in &output.shapes {
@@ -218,6 +341,7 @@ fn collect(output: egui::FullOutput) -> Render {
                 label: node.label().map(str::to_owned),
                 value: node.value().map(str::to_owned),
                 toggled: node.toggled(),
+                expanded: node.is_expanded(),
             })
             .collect();
     }
@@ -234,17 +358,22 @@ fn sized(input: egui::RawInput) -> egui::RawInput {
     }
 }
 
-fn keyed(key: egui::Key) -> egui::RawInput {
+fn keyed_with(key: egui::Key, modifiers: egui::Modifiers) -> egui::RawInput {
     sized(egui::RawInput {
         events: vec![egui::Event::Key {
             key,
             physical_key: Some(key),
             pressed: true,
             repeat: false,
-            modifiers: egui::Modifiers::NONE,
+            modifiers,
         }],
+        modifiers,
         ..Default::default()
     })
+}
+
+fn keyed(key: egui::Key) -> egui::RawInput {
+    keyed_with(key, egui::Modifiers::NONE)
 }
 
 fn clicked(pos: egui::Pos2) -> egui::RawInput {
@@ -268,13 +397,21 @@ fn clicked(pos: egui::Pos2) -> egui::RawInput {
     })
 }
 
-/// Every cell sits under its own heading, and no cell starts before the column
-/// in front of it has had its gap.
+/// A click on the middle of the printed cell that says `message`.
+fn click_on(render: &Render, message: &str) -> egui::RawInput {
+    let cell = render
+        .cell(message)
+        .unwrap_or_else(|| panic!("{message:?} is printed"));
+    clicked(cell.center())
+}
+
+/// Every cell sits under its own heading, fits the column it is printed in,
+/// and is printed whole where the column has room for it.
 ///
 /// This is the assertion the first version of this page could not have passed:
 /// it fixed two columns at 58 px and 62 px and painted the rest over them.
 #[test]
-fn every_cell_is_painted_under_its_own_heading() {
+fn every_cell_is_painted_under_its_own_heading_and_fits_its_column() {
     let mut state = state_with_design_findings();
     let render = render(&mut state, sized(egui::RawInput::default()));
 
@@ -286,14 +423,6 @@ fn every_cell_is_painted_under_its_own_heading() {
                 .unwrap_or_else(|| panic!("the {} heading is painted", column.label()))
         })
         .collect();
-    for pair in headings.windows(2) {
-        assert!(
-            pair[1].x - pair[0].x >= CONSOLE_COLUMN_GAP,
-            "headings at {} and {} are closer than one gap",
-            pair[0].x,
-            pair[1].x,
-        );
-    }
     let header_y = headings[0].y;
     assert!(
         headings.iter().all(|pos| (pos.y - header_y).abs() < 1.0),
@@ -310,13 +439,31 @@ fn every_cell_is_painted_under_its_own_heading() {
         ProblemColumn::ALL.len(),
         "every column of the row is painted: {row:?}",
     );
-    for (cell, heading) in row.iter().zip(&headings) {
+    let scroll = harness_scrollbar();
+    let row_end = render.header_band().right() - scroll;
+    for (index, (cell, heading)) in row.iter().zip(&headings).enumerate() {
         assert!(
-            (cell.1.x - heading.x).abs() < 0.5,
+            (cell.1.min.x - heading.x).abs() < 0.5,
             "the cell {:?} at {} is not under its heading at {}",
             cell.0,
-            cell.1.x,
+            cell.1.min.x,
             heading.x,
+        );
+        // A column ends one gap short of the next heading; the last one ends
+        // where the scrollbar's allowance begins.
+        let column_end = headings
+            .get(index + 1)
+            .map_or(row_end, |next| next.x - CONSOLE_COLUMN_GAP);
+        assert!(
+            cell.1.right() <= column_end + 0.5,
+            "the cell {:?} ends at {} past its column's end at {column_end}",
+            cell.0,
+            cell.1.right(),
+        );
+        assert!(
+            !cell.0.contains('…'),
+            "{:?} fits its column at {WIDTH} px and is printed whole",
+            cell.0,
         );
     }
     assert_eq!(row[0].0, "Error", "the severity cell leads the row");
@@ -332,8 +479,76 @@ fn every_cell_is_painted_under_its_own_heading() {
         row[3].0,
     );
     assert!(
-        row[0].1.x >= CONSOLE_MARK_GUTTER,
+        row[0].1.min.x >= render.header_band().left() + CONSOLE_MARK_GUTTER - 0.5,
         "the severity cell clears the mark gutter",
+    );
+}
+
+/// The scrollbar allowance the column measurement makes, read from the style
+/// the page is drawn in.
+fn harness_scrollbar() -> f32 {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let style = ctx.global_style();
+    style.spacing.scroll.bar_width + style.spacing.scroll.bar_inner_margin
+}
+
+/// With more findings than the body can show, its scrollbar is drawn — and the
+/// rows still line up under the header drawn outside the scrolled area, and a
+/// message too long for its column is cut short of the bar rather than
+/// printed under it.
+#[test]
+fn with_a_scrollbar_the_rows_still_line_up_and_stop_short_of_it() {
+    let mut state = open_state();
+    let mut records: Vec<DiagnosticRecord> = (0..40)
+        .map(|index| {
+            record(
+                &state,
+                &format!("T-{index:02}"),
+                DiagnosticLevel::Warning,
+                &format!("finding {index:02}"),
+            )
+        })
+        .collect();
+    let long = "a message long enough that no column on a nine hundred point page \
+                could print it whole, so the grid has to cut it where its column ends";
+    records.insert(0, record(&state, "T-LONG", DiagnosticLevel::Error, long));
+    publish(&mut state, records);
+
+    let harness = Harness::new();
+    harness.settle(&mut state);
+    let render = harness.frame(&mut state, sized(egui::RawInput::default()));
+    assert!(
+        !harness.shows_whole(&render, "finding 39"),
+        "precondition: the list is longer than the body, so the body scrolls",
+    );
+
+    let message_heading = render
+        .exact(ProblemColumn::Message.label())
+        .expect("the message heading is painted");
+    let severity_heading = render
+        .exact(ProblemColumn::Severity.label())
+        .expect("the severity heading is painted");
+    let cut = render
+        .texts
+        .iter()
+        .find(|(text, _)| text.starts_with("a message long enough"))
+        .expect("the long message is printed");
+    assert!(cut.0.ends_with('…'), "it is cut, and says so: {:?}", cut.0);
+    assert!(
+        (cut.1.min.x - message_heading.x).abs() < 0.5,
+        "with the bar drawn, the message still starts under its heading",
+    );
+    let bar_left = render.header_band().right() - harness_scrollbar();
+    assert!(
+        cut.1.right() <= bar_left + 0.5,
+        "the cut message ends at {} under the scrollbar starting at {bar_left}",
+        cut.1.right(),
+    );
+    let first = render.row_at(cut.1.min.y);
+    assert!(
+        (first[0].1.min.x - severity_heading.x).abs() < 0.5,
+        "and every row's severity is under its heading: {first:?}",
     );
 }
 
@@ -399,47 +614,116 @@ fn the_ordered_column_says_which_way_and_draws_its_mark() {
 }
 
 /// Ordering by severity puts the worst finding first, and reversing it puts it
-/// last. The fixture's error and warning are reported in the other order.
+/// last. The fixture reports the warning first, so an unsorted page would
+/// fail the first assertion.
 #[test]
 fn ordering_by_severity_lists_the_worst_finding_first() {
-    let mut state = state_with_design_findings();
-    state.problems_view.sort = Some(ProblemColumn::Severity);
+    let mut state = open_state();
+    let warning = record(&state, "T-WARN", DiagnosticLevel::Warning, "the warning");
+    let error = record(&state, "T-ERROR", DiagnosticLevel::Error, "the error");
+    publish(&mut state, vec![warning, error]);
+    let positions = |render: &Render| {
+        (
+            render.text("the error").expect("the error is listed").y,
+            render.text("the warning").expect("the warning is listed").y,
+        )
+    };
 
-    let worst_first = render(&mut state, sized(egui::RawInput::default()));
-    let error = worst_first
-        .text("R1 has no resistance")
-        .expect("the error is listed");
-    let warning = worst_first
-        .text("Wire ends open")
-        .expect("the warning is listed");
+    let as_reported = render(&mut state, sized(egui::RawInput::default()));
+    let (error, warning) = positions(&as_reported);
     assert!(
-        error.y < warning.y,
-        "the error at {} must be listed above the warning at {}",
-        error.y,
-        warning.y,
+        warning < error,
+        "precondition: the producer reported the warning first",
+    );
+
+    state.problems_view.sort = Some(ProblemColumn::Severity);
+    let (error, warning) = positions(&render(&mut state, sized(egui::RawInput::default())));
+    assert!(
+        error < warning,
+        "the error at {error} must be listed above the warning at {warning}",
     );
 
     state.problems_view.descending = true;
-    let least_first = render(&mut state, sized(egui::RawInput::default()));
-    let error = least_first.text("R1 has no resistance").expect("listed");
-    let warning = least_first.text("Wire ends open").expect("listed");
-    assert!(warning.y < error.y, "reversing the order reverses the rows",);
+    let (error, warning) = positions(&render(&mut state, sized(egui::RawInput::default())));
+    assert!(warning < error, "reversing the order reverses the rows");
+}
+
+/// Findings with equal keys keep the order their producer reported them in,
+/// whichever way the column is read.
+#[test]
+fn findings_with_equal_keys_keep_their_reported_order_either_way() {
+    let mut state = open_state();
+    let records = vec![
+        record(&state, "T-B", DiagnosticLevel::Warning, "b reported first"),
+        record(&state, "T-A", DiagnosticLevel::Warning, "a reported first"),
+        record(&state, "T-B", DiagnosticLevel::Warning, "b reported second"),
+        record(&state, "T-A", DiagnosticLevel::Warning, "a reported second"),
+    ];
+    publish(&mut state, records);
+
+    let messages = |descending: bool| {
+        let mut view = state.problems_view.clone();
+        view.sort = Some(ProblemColumn::Code);
+        view.descending = descending;
+        let listed = listing(&state);
+        let arrangement = Arrangement::build(&listed, &view);
+        arrangement
+            .rows()
+            .filter_map(|index| listed.row(index).map(|row| row.message.to_owned()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        messages(false),
+        [
+            "a reported first",
+            "a reported second",
+            "b reported first",
+            "b reported second"
+        ],
+    );
+    assert_eq!(
+        messages(true),
+        [
+            "b reported first",
+            "b reported second",
+            "a reported first",
+            "a reported second"
+        ],
+    );
+}
+
+/// The location column orders by line and then column, as numbers: line 9
+/// comes before line 10.
+#[test]
+fn locations_order_by_line_number_not_by_spelling() {
+    let mut state = open_state();
+    let tenth = Diagnostic::error("on the tenth line").with_line(Some(9));
+    let ninth = Diagnostic::error("on the ninth line").with_line(Some(8));
+    state.ui.netlist.diagnostics = Arc::new(
+        NetlistDiagnosticCollection::try_new(vec![tenth, ninth], "")
+            .expect("the fixture collection is well formed"),
+    );
+    state.problems_view.sort = Some(ProblemColumn::Location);
+
+    let render = render(&mut state, sized(egui::RawInput::default()));
+    let ninth = render.text("on the ninth line").expect("listed").y;
+    let tenth = render.text("on the tenth line").expect("listed").y;
+    assert!(
+        ninth < tenth,
+        "line 9 at {ninth} is listed above line 10 at {tenth}",
+    );
 }
 
 /// A count beside a toggle describes what that toggle would list under the
 /// other filters, not what the whole list holds.
 #[test]
 fn a_severity_count_describes_what_its_toggle_would_list() {
-    use super::arrange::Arrangement;
-    use crate::workbench::app_state::diagnostic_store::DiagnosticLevel;
-    use crate::workbench::app_state::diagnostic_store::listing::listing;
-
     let mut state = state_with_design_findings();
     netlist_finding_with_a_fix(&mut state);
 
     let view = state.problems_view.clone();
     let listed = listing(&state);
-    let arrangement = Arrangement::build(&listed, &view, None);
+    let arrangement = Arrangement::build(&listed, &view);
     assert_eq!(
         arrangement.tally.severity(DiagnosticLevel::Error),
         2,
@@ -454,13 +738,102 @@ fn a_severity_count_describes_what_its_toggle_would_list() {
     state.problems_view.producer = Some("rspice.design.rules".to_owned());
     let view = state.problems_view.clone();
     let listed = listing(&state);
-    let arrangement = Arrangement::build(&listed, &view, None);
+    let arrangement = Arrangement::build(&listed, &view);
     assert_eq!(arrangement.tally.severity(DiagnosticLevel::Error), 1);
     assert_eq!(arrangement.listed, 2);
     assert_eq!(
         arrangement.tally.producers.len(),
         2,
         "the producer control still offers every producer present",
+    );
+}
+
+/// The waiver toggle says how many waived findings it would list under the
+/// other filters, and keeps saying so while it is hiding them.
+#[test]
+fn the_waiver_toggle_counts_what_it_would_list() {
+    let mut state = open_state();
+    let mut waived = record(
+        &state,
+        "T-WAIVED",
+        DiagnosticLevel::Error,
+        "a waived finding",
+    );
+    waived.canonical.suppression = Some(rspice_app_types::diagnostics::DiagnosticSuppression {
+        rule: "T-WAIVED".to_owned(),
+        scope: "cell".to_owned(),
+        justification_required: false,
+    });
+    let open = record(
+        &state,
+        "T-OPEN",
+        DiagnosticLevel::Warning,
+        "an open finding",
+    );
+    publish(&mut state, vec![waived, open]);
+
+    let listed = render(&mut state, sized(egui::RawInput::default()));
+    assert!(listed.exact("Waived 1").is_some(), "{:?}", listed.texts);
+    assert!(listed.has("a waived finding"));
+
+    state.problems_view.waived = false;
+    let hidden = render(&mut state, sized(egui::RawInput::default()));
+    assert!(
+        hidden.exact("Waived 1").is_some(),
+        "hiding waived findings leaves the toggle saying what it would list",
+    );
+    assert!(!hidden.has("a waived finding"));
+
+    state
+        .problems_view
+        .severities
+        .toggle(DiagnosticLevel::Error);
+    let narrowed = render(&mut state, sized(egui::RawInput::default()));
+    assert!(
+        narrowed.exact("Waived 0").is_some(),
+        "with errors hidden too, the toggle would list nothing: {:?}",
+        narrowed.texts,
+    );
+}
+
+/// A waived current error keeps the shape of its mark without its colour:
+/// it is not counted against the design, and a red cross would say it is.
+#[test]
+fn a_waived_error_is_marked_without_the_failure_colour() {
+    let mut state = open_state();
+    let mut waived = record(&state, "T-WAIVED", DiagnosticLevel::Error, "a waived error");
+    waived.canonical.suppression = Some(rspice_app_types::diagnostics::DiagnosticSuppression {
+        rule: "T-WAIVED".to_owned(),
+        scope: "cell".to_owned(),
+        justification_required: false,
+    });
+    publish(&mut state, vec![waived]);
+    let palette = crate::ui::tokens::Tokens::default().color;
+
+    let render = render(&mut state, sized(egui::RawInput::default()));
+    let row = row_of(render.cell("a waived error").expect("listed"));
+    let gutter_end = render.header_band().left() + CONSOLE_MARK_GUTTER;
+    let marked = |color: egui::Color32| {
+        render
+            .segments
+            .iter()
+            .filter(|(points, stroke)| {
+                *stroke == color
+                    && points.iter().all(|point| {
+                        point.y >= row.top() && point.y <= row.bottom() && point.x <= gutter_end
+                    })
+            })
+            .count()
+    };
+    assert_eq!(
+        marked(palette.err),
+        0,
+        "no failure cross in the error colour"
+    );
+    assert_eq!(
+        marked(palette.text_faint),
+        2,
+        "the cross's two strokes, in the faint ink",
     );
 }
 
@@ -483,32 +856,85 @@ fn the_text_filter_lists_only_what_it_matches() {
     );
 }
 
-/// Grouping prints one header per group, with the group's own counts, and the
-/// header collapses it.
+/// Grouping prints one header per group, announced with the group's own
+/// counts and whether it is expanded, and the header collapses it.
 #[test]
 fn grouping_prints_a_header_that_carries_its_counts_and_collapses() {
     let mut state = state_with_design_findings();
     netlist_finding_with_a_fix(&mut state);
     state.problems_view.grouping = ProblemGrouping::Producer;
+    let header = "rspice.design.rules · 1 error · 1 advisory";
 
     let grouped = render(&mut state, sized(egui::RawInput::default()));
-    assert!(grouped.has("rspice.design.rules"));
-    assert!(
-        grouped.has("1 error · 1 advisory"),
-        "the group header states what it holds: {:?}",
-        grouped.texts,
+    let node = grouped
+        .node(header)
+        .unwrap_or_else(|| panic!("the group header is announced as {header:?}"));
+    assert_eq!(node.role, Role::Button);
+    assert_eq!(
+        node.expanded,
+        Some(true),
+        "an open group says it is expanded"
     );
+    assert_eq!(node.toggled, None, "and not that it is a toggle pressed");
     assert!(grouped.has("R1 has no resistance"));
 
     state.problems_view.collapse("rspice.design.rules", true);
     let collapsed = render(&mut state, sized(egui::RawInput::default()));
-    assert!(
-        collapsed.has("1 error · 1 advisory"),
-        "a collapsed group still states what it holds",
-    );
+    let node = collapsed
+        .node(header)
+        .expect("a collapsed group still states what it holds");
+    assert_eq!(node.expanded, Some(false));
     assert!(
         !collapsed.has("R1 has no resistance"),
         "a collapsed group lists none of its rows",
+    );
+}
+
+/// Copy copies what the count on it says: every listed finding, a collapsed
+/// group's included.
+#[test]
+fn copying_what_is_listed_includes_collapsed_groups() {
+    let mut state = state_with_design_findings();
+    netlist_finding_with_a_fix(&mut state);
+    state.problems_view.grouping = ProblemGrouping::Producer;
+    state.problems_view.collapse("rspice.design.rules", true);
+
+    let listed = listing(&state);
+    let arrangement = Arrangement::build(&listed, &state.problems_view);
+    assert_eq!(arrangement.listed, 3);
+    assert!(
+        arrangement.rows().count() < arrangement.listed,
+        "precondition: the collapsed group's findings are not printed",
+    );
+    let copied = copy_of_listed(&listed, &arrangement);
+    assert_eq!(
+        copied.lines().count(),
+        arrangement.listed + 1,
+        "a heading and one line per listed finding: {copied}",
+    );
+    assert!(copied.contains("R1 has no resistance"));
+    assert!(copied.contains("Wire ends open"));
+}
+
+/// A message holding a tab, a line break and quotes stays one cell when it is
+/// pasted into a sheet: the field is quoted and its quotes doubled.
+#[test]
+fn a_copied_row_keeps_tabs_and_line_breaks_inside_their_cell() {
+    let mut state = open_state();
+    publish(
+        &mut state,
+        vec![record(
+            &state,
+            "T-1",
+            DiagnosticLevel::Error,
+            "two\tcolumns\nand \"two\" lines",
+        )],
+    );
+    let listed = listing(&state);
+    let row = listed.row(0).expect("listed");
+    assert_eq!(
+        copy_of(&row),
+        "Error\tT-1\tNode 'n1'\trspice.test\t\t\"two\tcolumns\nand \"\"two\"\" lines\"",
     );
 }
 
@@ -533,8 +959,8 @@ fn the_canvas_tour_and_the_grid_stand_on_one_finding() {
 
     let render = render(&mut state, sized(egui::RawInput::default()));
     // The rows, told apart from the detail region's own lines by the selection
-    // state only a row and a group header carry, and from the strip's toggles
-    // by the message only a row prints.
+    // state only a row carries, and from the strip's toggles by the message
+    // only a row prints.
     let rows: Vec<&Announced> = render
         .nodes
         .iter()
@@ -582,59 +1008,136 @@ fn the_canvas_tour_and_the_grid_stand_on_one_finding() {
     );
 }
 
-/// Clicking a row makes it current, Down moves it, Enter follows it and
-/// Escape clears it — all of them moving the one shared selection.
+/// Clicking a row that leads somewhere follows it and hands the keyboard on:
+/// the table does not keep focus, so the shortcuts of the surface the route
+/// lands on are not held off by it. Next finding is the one checked; it is
+/// suppressed whenever anything outside the canvas holds focus.
 #[test]
-fn the_keyboard_moves_follows_and_clears_the_current_finding() {
-    let mut state = state_with_design_findings();
-    let listed = crate::workbench::app_state::diagnostic_store::listing::listing(&state);
-    let order: Vec<uuid::Uuid> = (0..listed.len())
-        .filter_map(|index| listed.facet(index))
-        .map(|facet| facet.id)
-        .collect();
-    drop(listed);
-    assert_eq!(order.len(), 2, "the fixture publishes two findings");
+fn following_a_row_with_a_click_leaves_the_shortcuts_working() {
+    use crate::workbench::app_state::session::shortcuts::{
+        ShortcutEnvironment, ShortcutInputSnapshot, runtime_command_platform,
+    };
+    use crate::workbench::commands::vocabulary::Command;
 
+    let mut state = state_with_design_findings();
     let harness = Harness::new();
     harness.settle(&mut state);
-    let first = harness.frame(&mut state, sized(egui::RawInput::default()));
-    let row = first
-        .text("R1 has no resistance")
-        .expect("the first finding is listed");
-
-    let _ = harness.frame(&mut state, clicked(egui::pos2(row.x + 4.0, row.y + 4.0)));
-    assert_eq!(
-        state.diagnostics.current_finding(),
-        Some(order[0]),
-        "clicking the first row makes that finding current",
+    let render = harness.frame(&mut state, sized(egui::RawInput::default()));
+    let _ = harness.frame(&mut state, click_on(&render, "R1 has no resistance"));
+    assert!(
+        state.diagnostics.take_pending_route().is_some(),
+        "precondition: the click followed the finding",
     );
-    // Clicking a row that can be followed also follows it, which is the
-    // behaviour this page has always had.
-    assert!(state.diagnostics.take_pending_route().is_some());
+    harness.settle(&mut state);
+    assert_eq!(harness.focused(), None, "nothing on the page kept focus");
+
+    // The frame loop resolves shortcuts before it draws, with "something
+    // other than the canvas has focus" read exactly as here.
+    let next_finding = |harness: &Harness, state: &mut AppState| {
+        let mut command = None;
+        let _ = harness.ctx.run_ui(keyed(egui::Key::CloseBracket), |ui| {
+            let ctx = ui.ctx().clone();
+            let non_canvas_focus = ctx.memory(|memory| memory.focused().is_some());
+            let snapshot =
+                ctx.input(|input| ShortcutInputSnapshot::from_input_state(input, non_canvas_focus));
+            let profile = state.ui.preferences.shortcuts().clone();
+            command = state
+                .shortcut_resolver
+                .resolve(
+                    &snapshot,
+                    &profile,
+                    runtime_command_platform(&ctx),
+                    ShortcutEnvironment {
+                        workspace: crate::workbench::state::Workspace::Design,
+                        active_view: crate::state::ViewType::Schematic,
+                        canvas_focus: false,
+                        source_editor_focus: false,
+                    },
+                    std::time::Duration::from_secs(1),
+                    |_| true,
+                )
+                .command;
+            egui::CentralPanel::default().show(ui, |ui| problems(ui, state));
+        });
+        command
+    };
+    assert_eq!(
+        next_finding(&harness, &mut state),
+        Some(Command::NextViolation),
+        "the next-finding shortcut works straight after the click",
+    );
+
+    // The same key while the table holds focus is held off, which is why the
+    // table must not keep it.
+    harness.focus_table();
+    harness.settle(&mut state);
+    assert_eq!(next_finding(&harness, &mut state), None);
+}
+
+/// A row with nowhere to go keeps the reader in the table: the click makes it
+/// current and gives the table the keyboard, so the arrows go on from it.
+#[test]
+fn clicking_a_row_with_nowhere_to_go_keeps_the_keyboard_in_the_table() {
+    let mut state = state_with_findings(4);
+    let order = reported(&state);
+    let harness = Harness::new();
+    harness.settle(&mut state);
+    let render = harness.frame(&mut state, sized(egui::RawInput::default()));
+    let _ = harness.frame(&mut state, click_on(&render, "finding 01"));
+    assert_eq!(state.diagnostics.current_finding(), Some(order[1]));
+    assert_eq!(harness.focused(), Some(grid::body_id()));
+    assert!(state.diagnostics.take_pending_route().is_none());
 
     harness.settle(&mut state);
     let _ = harness.frame(&mut state, keyed(egui::Key::ArrowDown));
-    assert_eq!(
-        state.diagnostics.current_finding(),
-        Some(order[1]),
-        "Down moves to the next listed finding",
-    );
+    assert_eq!(state.diagnostics.current_finding(), Some(order[2]));
+}
 
+/// The arrows move the one shared selection, Enter follows the current row —
+/// the row the keys moved to, not the one first clicked — and Escape clears
+/// it.
+#[test]
+fn the_keyboard_moves_follows_and_clears_the_current_finding() {
+    let mut state = state_with_design_findings();
+    let order = reported(&state);
+    assert_eq!(order.len(), 2, "the fixture publishes two findings");
+    let route_of = |state: &AppState, finding: uuid::Uuid| {
+        let listed = listing(state);
+        (0..listed.len())
+            .filter_map(|index| listed.row(index))
+            .find(|row| row.id == finding)
+            .and_then(|row| row.route)
+    };
+    let second_route = route_of(&state, order[1]).expect("the wire finding leads somewhere");
+
+    let harness = Harness::new();
     harness.settle(&mut state);
-    let _ = harness.frame(&mut state, keyed(egui::Key::ArrowUp));
+    harness.focus_table();
+    let _ = harness.frame(&mut state, keyed(egui::Key::ArrowDown));
     assert_eq!(
         state.diagnostics.current_finding(),
         Some(order[0]),
-        "Up moves it back",
+        "Down from nothing current stands on the first listed finding",
     );
+    let _ = harness.frame(&mut state, keyed(egui::Key::ArrowDown));
+    assert_eq!(state.diagnostics.current_finding(), Some(order[1]));
+    let _ = harness.frame(&mut state, keyed(egui::Key::ArrowUp));
+    assert_eq!(state.diagnostics.current_finding(), Some(order[0]));
+    let _ = harness.frame(&mut state, keyed(egui::Key::ArrowDown));
 
-    harness.settle(&mut state);
     let _ = harness.frame(&mut state, keyed(egui::Key::Enter));
-    assert!(
-        state.diagnostics.take_pending_route().is_some(),
-        "Enter follows the current finding's route",
+    assert_eq!(
+        state.diagnostics.take_pending_route(),
+        Some(second_route),
+        "Enter follows the finding the keys stand on",
+    );
+    assert_eq!(
+        harness.focused(),
+        None,
+        "and hands the keyboard to where it leads",
     );
 
+    harness.focus_table();
     harness.settle(&mut state);
     let _ = harness.frame(&mut state, keyed(egui::Key::Escape));
     assert_eq!(
@@ -642,31 +1145,253 @@ fn the_keyboard_moves_follows_and_clears_the_current_finding() {
         None,
         "Escape clears the current finding",
     );
+    assert_eq!(harness.focused(), None, "and lets the table go");
+}
+
+/// Escape on the very first frame the table holds focus still clears the
+/// row, though egui lets go of focus on that frame before the page runs.
+#[test]
+fn escape_straight_after_focusing_the_table_clears_the_row() {
+    let mut state = state_with_findings(3);
+    let order = reported(&state);
+    state.diagnostics.set_current_finding(Some(order[1]));
+    let harness = Harness::new();
+    harness.settle(&mut state);
+    harness.focus_table();
+    let _ = harness.frame(&mut state, keyed(egui::Key::Escape));
+    assert_eq!(state.diagnostics.current_finding(), None);
+}
+
+/// Arrows on consecutive frames, the first of them on the frame the table
+/// gained focus, each move exactly one row, and the table keeps focus
+/// throughout: egui's own focus never moves past a row.
+#[test]
+fn arrows_on_consecutive_frames_move_one_row_each() {
+    let mut state = state_with_findings(6);
+    let order = reported(&state);
+    let harness = Harness::new();
+    harness.settle(&mut state);
+    harness.focus_table();
+    for expected in &order[..4] {
+        let _ = harness.frame(&mut state, keyed(egui::Key::ArrowDown));
+        assert_eq!(state.diagnostics.current_finding(), Some(*expected));
+        assert_eq!(harness.focused(), Some(grid::body_id()));
+    }
+}
+
+/// Home and End go to the ends of the list; the page keys move by what the
+/// body shows and stop at the ends rather than wrapping.
+#[test]
+fn home_end_and_the_page_keys_move_through_the_list() {
+    let mut state = state_with_findings(60);
+    let order = reported(&state);
+    let harness = Harness::new();
+    harness.settle(&mut state);
+    harness.focus_table();
+
+    let _ = harness.frame(&mut state, keyed(egui::Key::End));
+    assert_eq!(state.diagnostics.current_finding(), order.last().copied());
+    let _ = harness.frame(&mut state, keyed(egui::Key::PageDown));
+    assert_eq!(
+        state.diagnostics.current_finding(),
+        order.last().copied(),
+        "a page key stops at the end of the list",
+    );
+    let _ = harness.frame(&mut state, keyed(egui::Key::Home));
+    assert_eq!(state.diagnostics.current_finding(), Some(order[0]));
+    let _ = harness.frame(&mut state, keyed(egui::Key::PageUp));
+    assert_eq!(state.diagnostics.current_finding(), Some(order[0]));
+
+    let _ = harness.frame(&mut state, keyed(egui::Key::PageDown));
+    let paged = order
+        .iter()
+        .position(|finding| state.diagnostics.current_finding() == Some(*finding))
+        .expect("a listed finding is current");
+    assert!(
+        paged > 1 && paged < order.len() - 1,
+        "a page moves by more than a row and less than the list: {paged}",
+    );
+    let render = harness.frame(&mut state, sized(egui::RawInput::default()));
+    assert!(
+        harness.shows_whole(&render, &format!("finding {paged:02}")),
+        "and the row it lands on is shown",
+    );
+}
+
+/// With the table unfocused the page takes no keys: a reader typing in the
+/// canvas does not move the findings list.
+#[test]
+fn the_table_takes_no_keys_while_it_is_unfocused() {
+    let mut state = state_with_design_findings();
+    let order = reported(&state);
+    state.diagnostics.set_current_finding(Some(order[0]));
+    let harness = Harness::new();
+    harness.settle(&mut state);
+    for key in [
+        egui::Key::ArrowDown,
+        egui::Key::End,
+        egui::Key::Enter,
+        egui::Key::Escape,
+    ] {
+        let _ = harness.frame(&mut state, keyed(key));
+        assert_eq!(
+            state.diagnostics.current_finding(),
+            Some(order[0]),
+            "{key:?}"
+        );
+    }
+    assert!(state.diagnostics.take_pending_route().is_none());
+}
+
+/// The table is one Tab stop. Tab from the last heading lands on it, the next
+/// Tab leaves it, and neither changes the current finding — Tab moves the
+/// keyboard, not the selection the canvas shares.
+#[test]
+fn the_table_is_one_tab_stop() {
+    let mut state = state_with_findings(5);
+    let order = reported(&state);
+    state.diagnostics.set_current_finding(Some(order[2]));
+    let harness = Harness::new();
+    harness.settle(&mut state);
+    let last_heading = egui::Id::new(("workbench.problems.header", ProblemColumn::Message.label()));
+    harness
+        .ctx
+        .memory_mut(|memory| memory.request_focus(last_heading));
+    harness.settle(&mut state);
+
+    let _ = harness.frame(&mut state, keyed(egui::Key::Tab));
+    assert_eq!(harness.focused(), Some(grid::body_id()));
+    assert_eq!(state.diagnostics.current_finding(), Some(order[2]));
+
+    harness.settle(&mut state);
+    let _ = harness.frame(&mut state, keyed(egui::Key::Tab));
+    let after = harness.focused();
+    assert_ne!(
+        after,
+        Some(grid::body_id()),
+        "the next Tab leaves the table"
+    );
+    assert!(
+        order
+            .iter()
+            .all(|finding| after != Some(grid::row_id(*finding))),
+        "and does not stop on a row",
+    );
+    assert_eq!(state.diagnostics.current_finding(), Some(order[2]));
+
+    harness.settle(&mut state);
+    let _ = harness.frame(
+        &mut state,
+        keyed_with(egui::Key::Tab, egui::Modifiers::SHIFT),
+    );
+    // egui hands focus back a frame later, so `gained_focus` can fire.
+    harness.settle(&mut state);
+    assert_eq!(
+        harness.focused(),
+        Some(grid::body_id()),
+        "Shift+Tab comes back to it",
+    );
+}
+
+/// A finding the canvas tour makes current is brought into view, as one the
+/// keys move to is.
+#[test]
+fn a_finding_made_current_elsewhere_is_scrolled_into_view() {
+    let mut state = state_with_findings(60);
+    let order = reported(&state);
+    let harness = Harness::new();
+    harness.settle(&mut state);
+    let render = harness.frame(&mut state, sized(egui::RawInput::default()));
+    assert!(
+        !harness.shows_whole(&render, "finding 45"),
+        "precondition: the finding starts out of view",
+    );
+
+    state.diagnostics.set_current_finding(Some(order[45]));
+    harness.settle(&mut state);
+    let render = harness.frame(&mut state, sized(egui::RawInput::default()));
+    assert!(harness.shows_whole(&render, "finding 45"));
+}
+
+/// A row the body's edge cuts in half is out of view: made current, it is
+/// scrolled until it shows whole.
+#[test]
+fn a_half_shown_row_made_current_is_scrolled_whole() {
+    let mut state = state_with_findings(60);
+    let order = reported(&state);
+    let harness = Harness::new();
+    // Stand on a finding far down, which leaves the body scrolled to wherever
+    // that finding's bottom edge put it.
+    state.diagnostics.set_current_finding(Some(order[45]));
+    harness.settle(&mut state);
+    harness.settle(&mut state);
+    let render = harness.frame(&mut state, sized(egui::RawInput::default()));
+    let table = harness.table();
+    let cut = (0..order.len())
+        .map(|index| format!("finding {index:02}"))
+        .find(|message| {
+            render.cell(message).is_some_and(|cell| {
+                let row = row_of(cell);
+                row.top() < table.top() - 0.5 && row.bottom() > table.top() + 0.5
+            })
+        })
+        .expect("precondition: the body's top edge cuts a row");
+
+    let index: usize = cut["finding ".len()..].parse().expect("a numbered finding");
+    state.diagnostics.set_current_finding(Some(order[index]));
+    harness.settle(&mut state);
+    let render = harness.frame(&mut state, sized(egui::RawInput::default()));
+    assert!(harness.shows_whole(&render, &cut), "{cut} shows whole");
+}
+
+/// Clicking a row low in a full body opens the detail region under it, which
+/// takes height from the body. The clicked row stays in view, and the table
+/// keeps the keyboard it gave it.
+#[test]
+fn a_clicked_row_stays_in_view_when_the_detail_region_opens() {
+    let mut state = state_with_findings(60);
+    let harness = Harness::new();
+    harness.settle(&mut state);
+    let render = harness.frame(&mut state, sized(egui::RawInput::default()));
+    let table = harness.table();
+    let lowest = render
+        .texts
+        .iter()
+        .filter(|(text, cell)| {
+            text.starts_with("finding ") && row_of(*cell).bottom() <= table.bottom() + 0.5
+        })
+        .max_by(|left, right| left.1.min.y.total_cmp(&right.1.min.y))
+        .map(|(text, _)| text.clone())
+        .expect("rows are shown");
+
+    let _ = harness.frame(&mut state, click_on(&render, &lowest));
+    harness.settle(&mut state);
+    let render = harness.frame(&mut state, sized(egui::RawInput::default()));
+    assert!(
+        harness.table().height() < table.height(),
+        "precondition: the detail region took height from the body",
+    );
+    assert!(
+        harness.shows_whole(&render, &lowest),
+        "{lowest} stays in view"
+    );
+    assert_eq!(harness.focused(), Some(grid::body_id()));
 }
 
 /// A row with nowhere to go is still a row: it can be read and selected, and
 /// it does not announce itself as something that can be pressed.
 #[test]
 fn a_finding_with_nowhere_to_go_announces_as_text() {
-    let mut state = AppState::default();
-    state.project_lifecycle.authority.open_session();
-    let record = DiagnosticRecord::new(
-        rspice_app_types::diagnostics::CanonicalDiagnosticMetadata::current(
-            "rspice.test",
+    let mut state = open_state();
+    publish(
+        &mut state,
+        vec![record(
+            &state,
             "TEST-NOWHERE",
-            "doc",
-            None,
-            0,
-            "validation",
+            DiagnosticLevel::Error,
             "a finding with nowhere to go",
-        ),
-        crate::workbench::app_state::diagnostic_store::DiagnosticLevel::Error,
-        DiagnosticSubject::new(state.workspace.content.project.id(), "Node 'n1'"),
-        "a finding with nowhere to go",
+        )],
     );
-    state
-        .publish_diagnostics(DiagnosticInputs::Dispatch, vec![record])
-        .expect("the dispatch digest is available");
 
     let render = render(&mut state, sized(egui::RawInput::default()));
     let row = render
@@ -697,10 +1422,9 @@ fn a_finding_with_nowhere_to_go_announces_as_text() {
 #[test]
 fn explain_is_offered_only_where_the_rule_has_words() {
     let mut state = state_with_design_findings();
-    let listing = crate::workbench::app_state::diagnostic_store::listing::listing(&state);
-    let finding = listing.facet(0).expect("the first finding is listed").id;
-    drop(listing);
-    state.diagnostics.set_current_finding(Some(finding));
+    state
+        .diagnostics
+        .set_current_finding(reported(&state).first().copied());
 
     let unopened = render(&mut state, sized(egui::RawInput::default()));
     assert!(
@@ -718,13 +1442,10 @@ fn explain_is_offered_only_where_the_rule_has_words() {
 
     // A failed run is not an instance of a rule, so there is nothing to state
     // and no control that says there is.
-    let mut run = AppState::default();
-    run.project_lifecycle.authority.open_session();
+    let mut run = open_state();
     run.publish_run_failure("Transient", "Analysis failed: no convergence", None, 1);
-    let listing = crate::workbench::app_state::diagnostic_store::listing::listing(&run);
-    let finding = listing.facet(0).expect("the failure is listed").id;
-    drop(listing);
-    run.diagnostics.set_current_finding(Some(finding));
+    run.diagnostics
+        .set_current_finding(reported(&run).first().copied());
     let rendered = render(&mut run, sized(egui::RawInput::default()));
     assert!(
         rendered.has("Analysis failed: no convergence"),
@@ -740,13 +1461,11 @@ fn explain_is_offered_only_where_the_rule_has_words() {
 /// with the fix's own words.
 #[test]
 fn a_fix_is_offered_only_where_the_producer_offered_edits() {
-    let mut state = AppState::default();
-    state.project_lifecycle.authority.open_session();
+    let mut state = open_state();
     netlist_finding_with_a_fix(&mut state);
-    let listing = crate::workbench::app_state::diagnostic_store::listing::listing(&state);
-    let finding = listing.facet(0).expect("the netlist finding is listed").id;
-    drop(listing);
-    state.diagnostics.set_current_finding(Some(finding));
+    state
+        .diagnostics
+        .set_current_finding(reported(&state).first().copied());
     let offered = render(&mut state, sized(egui::RawInput::default()));
     assert!(
         offered.has("Replace with nch"),
@@ -755,10 +1474,9 @@ fn a_fix_is_offered_only_where_the_producer_offered_edits() {
     );
 
     let mut rules = state_with_design_findings();
-    let listing = crate::workbench::app_state::diagnostic_store::listing::listing(&rules);
-    let finding = listing.facet(0).expect("listed").id;
-    drop(listing);
-    rules.diagnostics.set_current_finding(Some(finding));
+    rules
+        .diagnostics
+        .set_current_finding(reported(&rules).first().copied());
     let unoffered = render(&mut rules, sized(egui::RawInput::default()));
     assert!(
         !unoffered.has("Replace with"),
@@ -766,20 +1484,24 @@ fn a_fix_is_offered_only_where_the_producer_offered_edits() {
     );
 }
 
-/// The detail region says where the finding's batch stands, and what moved
-/// when it no longer describes the design.
+/// The detail region says where the finding's batch stands only where that
+/// is news: a current finding states nothing, and a stale one says what moved.
 #[test]
-fn the_detail_region_states_where_the_batch_stands() {
+fn the_detail_region_states_where_the_batch_stands_only_when_it_is_not_current() {
     let mut state = state_with_design_findings();
-    let listing = crate::workbench::app_state::diagnostic_store::listing::listing(&state);
-    let finding = listing.facet(0).expect("listed").id;
-    drop(listing);
-    state.diagnostics.set_current_finding(Some(finding));
+    state
+        .diagnostics
+        .set_current_finding(reported(&state).first().copied());
 
     let current = render(&mut state, sized(egui::RawInput::default()));
     assert!(
-        current.has("Current"),
-        "a current finding says so: {:?}",
+        current.has("R1 has no resistance") && current.has("Rule DRC-MISSING"),
+        "precondition: the detail region is drawn: {:?}",
+        current.texts,
+    );
+    assert!(
+        current.exact("Current").is_none() && !current.has("Stale"),
+        "a current finding has no standing line: {:?}",
         current.texts,
     );
 
@@ -804,8 +1526,7 @@ fn the_detail_region_states_where_the_batch_stands() {
 /// drawing, which no document route addresses, so they are stated.
 #[test]
 fn a_related_place_is_stated_even_where_it_cannot_be_followed() {
-    let mut state = AppState::default();
-    state.project_lifecycle.authority.open_session();
+    let mut state = open_state();
     let mut canonical = rspice_app_types::diagnostics::CanonicalDiagnosticMetadata::current(
         "rspice.test",
         "TEST-RELATED",
@@ -822,17 +1543,14 @@ fn a_related_place_is_stated_even_where_it_cannot_be_followed() {
     }];
     let record = DiagnosticRecord::new(
         canonical,
-        crate::workbench::app_state::diagnostic_store::DiagnosticLevel::Error,
+        DiagnosticLevel::Error,
         DiagnosticSubject::new(state.workspace.content.project.id(), "Net 'out'"),
         "two outputs drive this net",
     );
+    publish(&mut state, vec![record]);
     state
-        .publish_diagnostics(DiagnosticInputs::Dispatch, vec![record])
-        .expect("the dispatch digest is available");
-    let listing = crate::workbench::app_state::diagnostic_store::listing::listing(&state);
-    let finding = listing.facet(0).expect("the finding is listed").id;
-    drop(listing);
-    state.diagnostics.set_current_finding(Some(finding));
+        .diagnostics
+        .set_current_finding(reported(&state).first().copied());
 
     let render = render(&mut state, sized(egui::RawInput::default()));
     assert!(
@@ -853,8 +1571,7 @@ fn a_related_place_is_stated_even_where_it_cannot_be_followed() {
 /// as a permanent problem — about 715 refusal sites' worth.
 #[test]
 fn a_logged_failure_is_not_a_problem() {
-    let mut state = AppState::default();
-    state.project_lifecycle.authority.open_session();
+    let mut state = open_state();
     state.log_buffer.log(
         crate::diagnostics::LogSeverity::Error,
         crate::diagnostics::LogSource::Engine,
@@ -885,7 +1602,6 @@ fn counts_name_their_severities_separately() {
 /// measured against.
 #[test]
 fn every_severity_cell_fits_the_widest_measured_cell() {
-    use crate::workbench::app_state::diagnostic_store::DiagnosticLevel;
     use crate::workbench::app_state::diagnostic_store::listing::{DiagnosticRow, RowStanding};
 
     let mut widest = String::new();
@@ -933,4 +1649,48 @@ fn every_severity_cell_fits_the_widest_measured_cell() {
         grid::WIDEST_SEVERITY_CELL.chars().count(),
         "the measured cell must be the longest one the page can print",
     );
+}
+
+/// A frame whose listing and reading position match the last one reuses the
+/// arrangement built for it, and a change to either rebuilds it.
+#[test]
+fn the_arrangement_is_rebuilt_only_when_what_it_was_built_from_changes() {
+    let mut state = state_with_findings(5);
+    state.problems_view.sort = Some(ProblemColumn::Message);
+    let ctx = egui::Context::default();
+    let arranged = |state: &AppState| {
+        let listed = listing(state);
+        arrange::arrange(&ctx, &listed, &state.problems_view, None).0
+    };
+
+    let first = arranged(&state);
+    assert!(
+        Arc::ptr_eq(&first, &arranged(&state)),
+        "an unchanged frame reuses the arrangement",
+    );
+
+    state.problems_view.explain = true;
+    assert!(
+        Arc::ptr_eq(&first, &arranged(&state)),
+        "the detail region's own state arranges nothing",
+    );
+
+    state.problems_view.descending = true;
+    let reversed = arranged(&state);
+    assert!(!Arc::ptr_eq(&first, &reversed), "a new order rebuilds it");
+
+    let extra = record(&state, "T-99", DiagnosticLevel::Error, "finding 99");
+    let mut records: Vec<DiagnosticRecord> = state
+        .diagnostics
+        .batches()
+        .flat_map(|batch| batch.records.iter().cloned())
+        .collect();
+    records.push(extra);
+    publish(&mut state, records);
+    let republished = arranged(&state);
+    assert!(
+        !Arc::ptr_eq(&reversed, &republished),
+        "a republished list rebuilds it",
+    );
+    assert_eq!(republished.listed, 6);
 }

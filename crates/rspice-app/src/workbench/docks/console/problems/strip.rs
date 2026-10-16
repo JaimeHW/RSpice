@@ -34,7 +34,7 @@ const PRODUCER_CHARACTERS: f32 = 22.0;
 const GROUPING_CHARACTERS: f32 = 13.0;
 
 /// Draw the strip, editing the reading position it is drawn from.
-pub(super) fn filter_strip(ui: &mut Ui, view: &mut ProblemsView, tally: &Tally<'_>) {
+pub(super) fn filter_strip(ui: &mut Ui, view: &mut ProblemsView, tally: &Tally) {
     let advance = character_width(ui);
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
@@ -91,7 +91,7 @@ pub(super) fn filter_strip(ui: &mut Ui, view: &mut ProblemsView, tally: &Tally<'
             view.producer = picked
                 .checked_sub(1)
                 .and_then(|index| tally.producers.get(index))
-                .map(|(producer, _)| (*producer).to_owned());
+                .map(|(producer, _)| producer.clone());
         }
 
         let response = ui.add_sized(

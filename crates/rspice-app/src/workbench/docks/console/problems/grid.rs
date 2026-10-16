@@ -11,12 +11,12 @@
 use egui::{Sense, Stroke, Ui, Vec2};
 
 use super::super::{
-    CONSOLE_COLUMN_GAP, CONSOLE_FONT_SIZE, CONSOLE_MARK_GUTTER, CONSOLE_ROW_MIN_HEIGHT,
-    announced_row, paint_row_mark,
+    CONSOLE_COLUMN_GAP, CONSOLE_FONT_SIZE, CONSOLE_MARK_GUTTER, CONSOLE_MARK_SIDE,
+    CONSOLE_ROW_MIN_HEIGHT, announced_row, paint_row_mark,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
-use crate::ui::widgets::Problem;
+use crate::ui::widgets::{Problem, paint_status_mark};
 use crate::workbench::app_state::problems_view::{ProblemColumn, ProblemsView};
 
 use super::arrange::Group;
@@ -252,9 +252,19 @@ fn paint_sort_direction(ui: &Ui, center: egui::Pos2, descending: bool, color: eg
     ));
 }
 
+/// What a row's gutter carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RowMark {
+    None,
+    /// A problem that counts against the design, in its own colour.
+    Problem(Problem),
+    /// A problem a waiver covers: its shape, without its colour.
+    Waived(Problem),
+}
+
 /// One finding, as the grid prints it.
 pub(super) struct RowCells<'a> {
-    pub(super) problem: Option<Problem>,
+    pub(super) mark: RowMark,
     pub(super) severity: &'a str,
     pub(super) code: &'a str,
     pub(super) subject: &'a str,
@@ -269,10 +279,76 @@ pub(super) struct RowCells<'a> {
     pub(super) selected: bool,
 }
 
-/// The identity a row is addressed by, so focus and selection survive the
-/// table being sorted, filtered or regrouped under them.
+/// The identity a row is addressed by, so the current row survives the table
+/// being sorted, filtered or regrouped under it.
 pub(super) fn row_id(finding: uuid::Uuid) -> egui::Id {
     egui::Id::new(("workbench.problems.row", finding))
+}
+
+/// The identity of the table's one keyboard stop.
+pub(super) fn body_id() -> egui::Id {
+    egui::Id::new("workbench.problems.grid")
+}
+
+/// The table's one keyboard stop, laid over the body's `rect`.
+///
+/// One stop rather than one per row: a reader tabbing through the page passes
+/// the table in one press, not one per finding, and moving through it is what
+/// the arrows are for. Holding focus here rather than on a row also keeps the
+/// lock filter in force from row to row — egui applies a filter only to a
+/// widget that held focus the frame before, so a filter set on each row as
+/// the arrows reached it arrived a frame late, and a quick second arrow moved
+/// egui's own focus past a row.
+///
+/// `current` is the current row's identity and rectangle, where it is drawn:
+/// it is announced as the focused list's active row, and it carries the focus
+/// ring that Tab shows.
+pub(super) fn body(
+    ui: &mut Ui,
+    rect: egui::Rect,
+    current: Option<(egui::Id, egui::Rect)>,
+) -> egui::Response {
+    let id = body_id();
+    let response = ui.interact(rect, id, Sense::FOCUSABLE);
+    // The table owns the arrows and Escape while it holds focus. Without this
+    // egui takes them first — it reads the arrows as a request to move focus
+    // to the widget beside, above or below, and Escape as a request to
+    // surrender it, both at the start of the pass and therefore before this
+    // page can see them. Tab is deliberately left to egui, because Tab is how
+    // a reader leaves the table.
+    if response.has_focus() {
+        ui.memory_mut(|memory| {
+            memory.set_focus_lock_filter(
+                id,
+                egui::EventFilter {
+                    tab: false,
+                    horizontal_arrows: true,
+                    vertical_arrows: true,
+                    escape: true,
+                },
+            );
+        });
+    }
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Other, ui.is_enabled(), "Findings")
+    });
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.set_role(egui::accesskit::Role::ListBox);
+        if let Some((row, _)) = current {
+            node.set_active_descendant(row.accesskit_id());
+        }
+    });
+    // Focus a pointer press gave must not frame anything; focus Tab gave
+    // frames the row the keys will move, or the body while none is current.
+    // A row the body's edge cuts is framed where it shows.
+    if theme::focus_is_visible(ui.ctx(), &response) {
+        let framed = current
+            .map(|(_, row)| row.intersect(rect))
+            .filter(|row| row.is_positive())
+            .unwrap_or(rect);
+        theme::paint_focus_ring(ui, &response, framed);
+    }
+    response
 }
 
 /// Paint one finding and return its response.
@@ -293,31 +369,17 @@ pub(super) fn row(
         (tokens.color.text_faint, tokens.color.text_faint)
     };
     let (_, rect) = ui.allocate_space(Vec2::new(ui.available_width(), CONSOLE_ROW_MIN_HEIGHT));
-    // Every row senses a click because every row can become the current row.
+    // Every row senses a click because every row can become the current row,
+    // and none takes focus: the table is one keyboard stop, held by `body`.
     // What a row that cannot be followed does not do is *look* like a jump: it
     // announces as text rather than as a button and leaves the pointer alone.
-    let response = ui.interact(rect, id, Sense::click());
-    // The grid owns Up, Down and Escape while a row holds focus. Without this
-    // egui takes them first — it reads the arrows as a request to move focus
-    // to the widget above or below, and Escape as a request to surrender it,
-    // both at the start of the pass and therefore before this page can see
-    // them. Tab is deliberately left to egui, because Tab is how a reader
-    // leaves the grid.
-    if response.has_focus() {
-        ui.memory_mut(|memory| {
-            memory.set_focus_lock_filter(
-                id,
-                egui::EventFilter {
-                    tab: false,
-                    horizontal_arrows: false,
-                    vertical_arrows: true,
-                    escape: true,
-                },
-            );
-        });
-    }
+    let response = ui.interact(rect, id, Sense::CLICK);
+    let announced = match cells.mark {
+        RowMark::Problem(problem) => Some(problem),
+        RowMark::Waived(_) | RowMark::None => None,
+    };
     let label = announced_row(
-        cells.problem,
+        announced,
         &[
             cells.severity,
             cells.code,
@@ -353,7 +415,22 @@ pub(super) fn row(
     } else if response.hovered() {
         ui.painter().rect_filled(rect, 0.0, tokens.color.bg_hover);
     }
-    paint_row_mark(ui, rect.left(), rect.top(), cells.problem);
+    match cells.mark {
+        RowMark::Problem(problem) => paint_row_mark(ui, rect.left(), rect.top(), Some(problem)),
+        RowMark::Waived(problem) => paint_status_mark(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                egui::pos2(
+                    rect.left() + CONSOLE_MARK_SIDE * 0.5,
+                    rect.top() + CONSOLE_ROW_MIN_HEIGHT * 0.5,
+                ),
+                Vec2::splat(CONSOLE_MARK_SIDE),
+            ),
+            problem.mark(),
+            tokens.color.text_faint,
+        ),
+        RowMark::None => {}
+    }
     let center_y = rect.center().y;
     for (column, text, weight) in [
         (ProblemColumn::Severity, cells.severity, FontWeight::Regular),
@@ -390,11 +467,6 @@ pub(super) fn row(
             },
         );
     }
-    // Focus a pointer press moved here must not frame the row for as long as
-    // anyone reads it; focus Tab moved here must show.
-    if theme::focus_is_visible(ui.ctx(), &response) {
-        theme::paint_focus_ring(ui, &response, rect);
-    }
     if cells.target {
         return response.on_hover_cursor(egui::CursorIcon::PointingHand);
     }
@@ -403,27 +475,32 @@ pub(super) fn row(
 
 /// A group's own header: what it groups on, what it holds, and whether it is
 /// open. Returns true when the reader asked to collapse or expand it.
+///
+/// Like a row it is not a keyboard stop of its own; from the keyboard, Left
+/// and Right close and open the current finding's group.
 pub(super) fn group_header(ui: &mut Ui, columns: &Columns, group: &Group) -> bool {
     let tokens = Tokens::get(ui.ctx());
     let (_, rect) = ui.allocate_space(Vec2::new(ui.available_width(), CONSOLE_ROW_MIN_HEIGHT));
     let response = ui.interact(
         rect,
         egui::Id::new(("workbench.problems.group", group.label.as_str())),
-        Sense::click(),
+        Sense::CLICK,
     );
     let summary = group.counts.summary();
     let announcement = format!("{} · {summary}", group.label);
-    let collapsed = group.collapsed;
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(
+        egui::WidgetInfo::labeled(
             egui::WidgetType::Button,
             ui.is_enabled(),
             announcement.clone(),
-        );
-        // Open or closed is the state the control carries, and a reader who
-        // cannot see the chevron has nothing else to hear it from.
-        info.selected = Some(!collapsed);
-        info
+        )
+    });
+    // Open or closed is the state the control carries, and a reader who
+    // cannot see the chevron has nothing else to hear it from. It is stated as
+    // expanded or collapsed, which is what it is, rather than as a toggle
+    // pressed or not.
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_expanded(!group.collapsed);
     });
     ui.painter().rect_filled(rect, 0.0, tokens.color.bg_panel_2);
     if response.hovered() {
@@ -457,9 +534,6 @@ pub(super) fn group_header(ui: &mut Ui, columns: &Columns, group: &Group) -> boo
         theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular),
         tokens.color.text_dim,
     );
-    if theme::focus_is_visible(ui.ctx(), &response) {
-        theme::paint_focus_ring(ui, &response, rect);
-    }
     response.clicked()
 }
 
@@ -580,20 +654,91 @@ mod tests {
         assert_eq!(elide_tail("Component M1", 3.0, &columns()), "…");
     }
 
-    /// Each column starts after the one in front of it, by exactly that
-    /// column's width plus the gap between them.
+    /// What [`Columns::measure`] decides at one page width, in the face the
+    /// page prints in, with the room it was measured against.
+    struct Measured {
+        columns: Columns,
+        /// The page's width less the scrollbar it allows for.
+        room: f32,
+        advance: f32,
+        code_heading: f32,
+    }
+
+    fn measured(width: f32, widest_code: usize, widest_producer: usize) -> Measured {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut measured = None;
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(width, 300.0),
+            )),
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let scrollbar =
+                    ui.spacing().scroll.bar_width + ui.spacing().scroll.bar_inner_margin;
+                measured = Some(Measured {
+                    columns: Columns::measure(ui, widest_code, widest_producer),
+                    room: ui.available_width() - scrollbar,
+                    advance: text_width(ui, "M", FontWeight::Regular),
+                    code_heading: text_width(ui, ProblemColumn::Code.label(), FontWeight::SemiBold),
+                });
+            });
+        });
+        measured.expect("the panel ran")
+    }
+
+    /// At every width, the six columns and their gaps end exactly where the
+    /// scrollbar's allowance begins: nothing runs under the bar, and nothing
+    /// is left over at the end of the row.
     #[test]
-    fn every_column_starts_after_the_one_in_front_of_it() {
-        let columns = columns();
-        let mut expected = CONSOLE_MARK_GUTTER;
-        for column in ProblemColumn::ALL {
+    fn the_columns_fill_the_row_short_of_the_scrollbar() {
+        for width in [640.0, 900.0, 1400.0] {
+            let measured = measured(width, 12, 18);
+            let columns = &measured.columns;
+            let end =
+                columns.offset(ProblemColumn::Message) + columns.width(ProblemColumn::Message);
             assert!(
-                (columns.offset(column) - expected).abs() < f32::EPSILON,
-                "{} starts at {} rather than {expected}",
-                column.label(),
-                columns.offset(column),
+                (end - measured.room).abs() < 0.5,
+                "at {width} px the row ends at {end} rather than at {}",
+                measured.room,
             );
-            expected += columns.width(column) + CONSOLE_COLUMN_GAP;
+            for pair in ProblemColumn::ALL.windows(2) {
+                let gap =
+                    columns.offset(pair[1]) - (columns.offset(pair[0]) + columns.width(pair[0]));
+                assert!(
+                    (gap - CONSOLE_COLUMN_GAP).abs() < 0.01,
+                    "{} and {} are {gap} apart at {width} px",
+                    pair[0].label(),
+                    pair[1].label(),
+                );
+            }
+            assert!(
+                columns.width(ProblemColumn::Code) + 0.01 >= measured.code_heading,
+                "the rule column prints its own heading at {width} px",
+            );
         }
+    }
+
+    /// With room to spare the identity columns print their widest cell whole;
+    /// on a narrow page they stop at their share and the prose columns keep
+    /// room to say something.
+    #[test]
+    fn identity_columns_fit_their_widest_cell_until_room_runs_out() {
+        let wide = measured(1400.0, 12, 18);
+        assert!(wide.columns.width(ProblemColumn::Code) + 0.01 >= 12.0 * wide.advance);
+        assert!(wide.columns.width(ProblemColumn::Producer) + 0.01 >= 18.0 * wide.advance);
+
+        let narrow = measured(640.0, 40, 40);
+        assert!(
+            narrow.columns.width(ProblemColumn::Producer) < 40.0 * narrow.advance,
+            "a producer identity wider than its share is cut, not given the row",
+        );
+        assert!(
+            narrow.columns.width(ProblemColumn::Message) >= 10.0 * narrow.advance,
+            "the message keeps room for ten characters at 640 px",
+        );
     }
 }
