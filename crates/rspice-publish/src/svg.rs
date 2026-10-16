@@ -50,12 +50,20 @@ fn role_token(role: PaintRole) -> String {
     }
 }
 
-fn rgba_css([r, g, b, a]: [u8; 4]) -> String {
-    if a == 255 {
-        format!("rgb({r} {g} {b})")
-    } else {
-        format!("rgb({r} {g} {b} / {})", fmt_f64(f64::from(a) / 255.0))
+/// An explicit colour as SVG 1.1 writes it: `#rrggbb`, plus the matching
+/// `*-opacity` attribute when translucent. CSS Color 4's `rgb(r g b / a)`
+/// reads correctly in a browser but paints solid black in resvg and other
+/// readers a downloaded figure is opened in.
+fn rgba_attributes(property: &str, [r, g, b, a]: [u8; 4]) -> String {
+    let mut markup = format!(" {property}=\"#{r:02x}{g:02x}{b:02x}\"");
+    if a != 255 {
+        let _ = write!(
+            markup,
+            " {property}-opacity=\"{}\"",
+            fmt_f64(f64::from(a) / 255.0)
+        );
     }
+    markup
 }
 
 /// Accumulates one element's class list and explicit presentation
@@ -70,9 +78,7 @@ impl Presentation {
     fn stroke(&mut self, stroke: &Stroke) {
         match stroke.paint {
             Paint::Role(role) => self.classes.push(format!("s-{}", role_token(role))),
-            Paint::Rgba(color) => {
-                let _ = write!(self.attributes, " stroke=\"{}\"", rgba_css(color));
-            }
+            Paint::Rgba(color) => self.attributes.push_str(&rgba_attributes("stroke", color)),
         }
         let _ = write!(
             self.attributes,
@@ -107,18 +113,14 @@ impl Presentation {
         match fill {
             None => self.attributes.push_str(" fill=\"none\""),
             Some(Paint::Role(role)) => self.classes.push(format!("f-{}", role_token(*role))),
-            Some(Paint::Rgba(color)) => {
-                let _ = write!(self.attributes, " fill=\"{}\"", rgba_css(*color));
-            }
+            Some(Paint::Rgba(color)) => self.attributes.push_str(&rgba_attributes("fill", *color)),
         }
     }
 
     fn text_paint(&mut self, paint: Paint) {
         match paint {
             Paint::Role(role) => self.classes.push(format!("t-{}", role_token(role))),
-            Paint::Rgba(color) => {
-                let _ = write!(self.attributes, " fill=\"{}\"", rgba_css(color));
-            }
+            Paint::Rgba(color) => self.attributes.push_str(&rgba_attributes("fill", color)),
         }
     }
 
@@ -348,5 +350,26 @@ mod tests {
         }
         assert!(!regular.contains("font-weight"));
         assert!(medium.contains(" font-weight=\"500\""));
+    }
+
+    #[test]
+    fn explicit_colours_are_written_in_syntax_every_svg_reader_parses() {
+        let mut translucent = Presentation::default();
+        translucent.stroke(&Stroke {
+            width_um: 254,
+            paint: Paint::Rgba([214, 138, 42, 255]),
+            pattern: StrokePattern::Solid,
+        });
+        translucent.fill(Some(&Paint::Rgba([214, 138, 42, 24])));
+        assert_eq!(
+            translucent.markup(),
+            format!(
+                " stroke=\"#d68a2a\" stroke-width=\"254\" fill=\"#d68a2a\" fill-opacity=\"{}\"",
+                24.0 / 255.0
+            )
+        );
+        let mut text = Presentation::default();
+        text.text_paint(Paint::Rgba([0, 9, 255, 0]));
+        assert_eq!(text.markup(), " fill=\"#0009ff\" fill-opacity=\"0\"");
     }
 }
