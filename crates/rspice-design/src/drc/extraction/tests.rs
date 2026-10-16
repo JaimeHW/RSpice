@@ -1195,7 +1195,7 @@ fn sources_across_one_pair_of_globals_in_two_occurrences_are_a_loop() {
     assert!(
         loops[0]
             .message
-            .starts_with("Global node 'vdd!' and ground are joined by 2 voltage sources"),
+            .starts_with("2 voltage sources form a closed loop through global node 'vdd!'"),
         "{}",
         loops[0].message
     );
@@ -1404,6 +1404,97 @@ fn only_a_conflict_on_one_global_across_occurrences_is_a_hierarchy_finding() {
         placed(&result, DrcViolationType::SourceToSource),
         vec![("/X1".to_owned(), Some("work/pair/schematic".to_owned()))],
         "the cell's own rule states it, and the hierarchy rule does not repeat it"
+    );
+}
+
+/// Across the hierarchy, as within one cellview, sources conflict only where
+/// they close a loop: sharing a global is an ordinary circuit, a ring through
+/// three cellviews is a loop, and so is a path through a cell's own node once
+/// the cell is placed twice.
+#[test]
+fn cross_cellview_sources_conflict_only_where_they_close_a_loop() {
+    let source = |id: u64, plus: &'static str, minus: &'static str| {
+        (
+            part(id, ComponentType::VoltageSource, &format!("V{id}")),
+            vec![("+", plus), ("-", minus)],
+        )
+    };
+    let libraries = LibraryCatalog::default();
+    let contract = crate::connectivity_contract::ConnectivityContract::default();
+    let check = |views: &HashMap<String, SchematicDocument>, top: SchematicDocument| {
+        let hierarchy =
+            HierarchySource::from_workspace(&libraries, views).with_connectivity(&contract);
+        run_check_with_hierarchy(&top, &hierarchy, DrcConfig::default())
+    };
+    let cells = |instances: Vec<Component>| SchematicDocument {
+        components: instances,
+        ..SchematicDocument::default()
+    };
+
+    // V1 holds vdd! against ground; the other cell's V1 hangs a local node
+    // off vdd!. The engine solves that.
+    let views = buffers([
+        ("supply", labelled(vec![source(1, "vdd!", "0")])),
+        ("offset", labelled(vec![source(1, "vb", "vdd!")])),
+    ]);
+    let result = check(
+        &views,
+        cells(vec![
+            instance(1, "XS", "supply"),
+            instance(2, "XO", "offset"),
+        ]),
+    );
+    assert!(
+        of_type(&result, DrcViolationType::SourceToSource).is_empty(),
+        "{:?}",
+        result.violations()
+    );
+
+    // vdd! to vss! in one cell, vss! to ground in another, and ground back to
+    // vdd! in the top: one loop, stated in the top, which draws part of it.
+    let views = buffers([
+        ("upper", labelled(vec![source(1, "vdd!", "vss!")])),
+        ("lower", labelled(vec![source(1, "vss!", "0")])),
+    ]);
+    let mut top = labelled(vec![source(3, "0", "vdd!")]);
+    top.components.push(instance(1, "XU", "upper"));
+    top.components.push(instance(2, "XL", "lower"));
+    let result = check(&views, top);
+    let loops = of_type(&result, DrcViolationType::SourceToSource);
+    assert_eq!(loops.len(), 1, "{:?}", result.violations());
+    assert!(
+        loops[0]
+            .message
+            .starts_with("3 voltage sources form a closed loop through global node 'vdd!'"),
+        "{}",
+        loops[0].message
+    );
+    assert_eq!(
+        placed(&result, DrcViolationType::SourceToSource),
+        vec![("/".to_owned(), None)]
+    );
+
+    // A cell that holds vdd! against ground through a node of its own is
+    // one path; placed twice, the two copies are a loop.
+    let views = buffers([(
+        "chain",
+        labelled(vec![source(1, "vdd!", "mid"), source(2, "mid", "0")]),
+    )]);
+    let once = check(&views, cells(vec![instance(1, "X1", "chain")]));
+    assert!(
+        of_type(&once, DrcViolationType::SourceToSource).is_empty(),
+        "{:?}",
+        once.violations()
+    );
+    let twice = check(
+        &views,
+        cells(vec![instance(1, "X1", "chain"), instance(2, "X2", "chain")]),
+    );
+    let loops = of_type(&twice, DrcViolationType::SourceToSource);
+    assert_eq!(loops.len(), 1, "{:?}", twice.violations());
+    assert_eq!(
+        loops[0].related_items,
+        ["/X1/V1", "/X2/V1", "/X1/V2", "/X2/V2"].map(str::to_owned)
     );
 }
 

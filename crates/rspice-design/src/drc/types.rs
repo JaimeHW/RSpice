@@ -83,7 +83,8 @@ pub enum DrcViolationType {
     ShortedOutputs,
     /// Missing ground/reference node
     MissingGround,
-    /// Voltage source directly connected to another voltage source
+    /// Independent voltage sources that close a loop among themselves, which
+    /// leaves the loop's current undetermined.
     SourceToSource,
 
     //-------------------------------------------------------------------------
@@ -241,7 +242,7 @@ impl DrcViolationType {
             Self::ShortedOutputs => "Multiple declared outputs connected to the same net",
             Self::RecursiveInstantiation => "Cellview reaches itself through its instances",
             Self::MissingGround => "Circuit has no ground reference (node 0)",
-            Self::SourceToSource => "Voltage source outputs directly connected",
+            Self::SourceToSource => "Voltage sources form a closed loop",
             Self::DuplicateName => "Multiple components have the same name",
             Self::EmptyName => "Component has no reference designator",
             Self::InvalidName => "Component name contains invalid characters",
@@ -284,7 +285,9 @@ impl DrcViolationType {
                 "Remove the instance that reaches its own cellview, or bind it to another view"
             }
             Self::MissingGround => "Add a ground symbol (GND) to the circuit",
-            Self::SourceToSource => "Add a resistor between voltage sources",
+            Self::SourceToSource => {
+                "Put a series element in the loop, or remove one of its sources"
+            }
             Self::DuplicateName => "Rename components to have unique identifiers",
             Self::EmptyName => "Assign a reference designator to the component",
             Self::InvalidName => "Use only alphanumeric characters and underscores",

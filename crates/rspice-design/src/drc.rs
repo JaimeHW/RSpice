@@ -4,6 +4,7 @@ mod checker;
 mod extraction;
 mod input;
 mod net;
+mod source_loops;
 mod types;
 
 pub use checker::{DrcChecker, DrcConfig};

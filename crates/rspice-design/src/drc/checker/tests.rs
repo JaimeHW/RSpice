@@ -372,24 +372,87 @@ fn min_connections_config_is_honored() {
 }
 
 #[test]
-fn two_voltage_sources_on_one_net_are_source_to_source() {
+fn two_voltage_sources_across_one_pair_are_source_to_source() {
+    // The second source is drawn the other way round, and ground is spelled
+    // differently: neither changes the pair of nodes the engine sees.
     let components = vec![
         vsource(0, "V1", "vin", "0"),
-        vsource(1, "V2", "vin", "0"),
+        vsource(1, "V2", "GND", "vin"),
         resistor(2, "R1", vec![pin("1", "vin"), pin("2", "0")]),
     ];
     let result = check(&components, DrcConfig::default());
     let shorted = of_type(&result, DrcViolationType::SourceToSource);
-    assert_eq!(shorted.len(), 1);
+    assert_eq!(shorted.len(), 1, "{:?}", result.violations());
     assert_eq!(
         shorted[0].location,
         DrcLocation::Node {
             net_name: "vin".to_string()
         }
     );
-    let mut related = shorted[0].related_items.clone();
-    related.sort();
-    assert_eq!(related, vec!["V1".to_string(), "V2".to_string()]);
+    assert_eq!(
+        shorted[0].related_items,
+        vec!["V1".to_string(), "V2".to_string()]
+    );
+}
+
+/// Sources that share a node are an ordinary circuit: the engine solves V1
+/// from `vin` to ground beside V2 from `vin` to `vb`, so the check must not
+/// refuse it.
+#[test]
+fn sources_sharing_a_drive_node_are_not_a_loop() {
+    let components = vec![
+        vsource(0, "V1", "vin", "0"),
+        vsource(1, "V2", "vin", "vb"),
+        resistor(2, "R1", vec![pin("1", "vb"), pin("2", "0")]),
+        resistor(3, "R2", vec![pin("1", "vin"), pin("2", "0")]),
+    ];
+    let result = check(&components, DrcConfig::default());
+    assert!(
+        of_type(&result, DrcViolationType::SourceToSource).is_empty(),
+        "{:?}",
+        result.violations()
+    );
+    assert!(result.passed(), "{:?}", result.violations());
+}
+
+/// A ring of sources is a loop however long it is. It is named by the source
+/// that closes it, after the sources it runs through, in the order the ring
+/// visits them.
+#[test]
+fn a_ring_of_three_sources_is_one_loop() {
+    let components = vec![
+        vsource(0, "V1", "a", "b"),
+        vsource(1, "V2", "b", "0"),
+        vsource(2, "V3", "0", "a"),
+        resistor(3, "R1", vec![pin("1", "a"), pin("2", "0")]),
+        resistor(4, "R2", vec![pin("1", "b"), pin("2", "0")]),
+    ];
+    let result = check(&components, DrcConfig::default());
+    let loops = of_type(&result, DrcViolationType::SourceToSource);
+    assert_eq!(loops.len(), 1, "{:?}", result.violations());
+    assert_eq!(loops[0].severity, DrcSeverity::Error);
+    assert_eq!(
+        loops[0].related_items,
+        vec!["V2".to_string(), "V1".to_string(), "V3".to_string()]
+    );
+    assert_eq!(
+        loops[0].location,
+        DrcLocation::Node {
+            net_name: "a".to_string()
+        }
+    );
+
+    // A source across one node is a loop of its own.
+    let result = check(
+        &[
+            vsource(0, "V1", "a", "a"),
+            resistor(1, "R1", vec![pin("1", "a"), pin("2", "0")]),
+        ],
+        DrcConfig::default(),
+    );
+    let loops = of_type(&result, DrcViolationType::SourceToSource);
+    assert_eq!(loops.len(), 1, "{:?}", result.violations());
+    assert_eq!(loops[0].related_items, vec!["V1".to_string()]);
 }
 
 #[test]

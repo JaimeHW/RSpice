@@ -9,6 +9,7 @@ use super::checker::{
     append_vector_width_violations, component_identity, diagnostic_location,
 };
 use super::input::{BrokenReference, ComponentInfo, ParameterRangeIssue, PinInfo};
+use super::source_loops::{self, GROUND_KEY};
 use super::types::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
 use crate::connectivity::{ConnectivityDiagnosticKind, ExtractedConnectivity};
 use crate::hierarchy::{ConfigurationExecutionBinding, HierarchySource};
@@ -904,30 +905,45 @@ fn check_one_view(
 /// Drivers on the deck's global nodes, gathered across the whole walk.
 ///
 /// A global is one node in the deck however many cellviews name it, and every
-/// occurrence of a cellview places its drivers on it again. Two ideal sources
-/// across the same pair of global nodes, or two declared outputs on one global,
+/// occurrence of a cellview places its drivers on it again. Ideal sources that
+/// close a loop through global nodes, or two declared outputs on one global,
 /// conflict wherever they are drawn — and the per-cellview rules cannot see the
-/// conflict when the two sit in different cellviews, or in two occurrences of
-/// one.
+/// conflict when its parts sit in different cellviews, or in two occurrences
+/// of one.
 ///
 /// Ground is node 0 everywhere, but it is the reference, not a contested net:
 /// an output tied to ground in a cell placed twice is not two outputs fighting
-/// over one node, and ground is never a conflict by itself. A source from a
-/// global to ground is still one side of a loop, keyed on the pair, because two
-/// such sources hold the same global against the same reference.
+/// over one node. For sources it is a node like any other, as it is in the
+/// engine's graph: a source from a global to ground in a cell placed twice is
+/// a loop through the global and ground.
 #[derive(Default)]
 struct GlobalDrives {
-    /// Voltage sources whose two terminals both stand on global nodes or
-    /// ground, at least one of them a global, by the unordered pair of folded
-    /// node names.
-    sources: BTreeMap<(String, String), GlobalDriven>,
+    /// Every independent voltage source in the walk, in walk order.
+    sources: Vec<SourceBranch>,
     /// Declared outputs standing on a global node other than ground, by folded
     /// node name.
     outputs: BTreeMap<String, GlobalDriven>,
 }
 
-/// The key ground takes in a pair of global nodes.
-const GROUND_KEY: &str = "0";
+/// One independent voltage source, as a branch of the deck's source graph.
+struct SourceBranch {
+    view: usize,
+    identity: String,
+    /// Its `+` and `-` nodes as the cellview spells them.
+    nodes: [String; 2],
+    /// For each of the two, the folded name of the node every cellview shares
+    /// — a global, or ground — or `None` for a node of the cellview's own.
+    shared: [Option<String>; 2],
+}
+
+/// A node of the deck's source graph.
+#[derive(PartialEq, Eq, Hash)]
+enum SourceNode<'a> {
+    /// A global or ground: one node across the whole design.
+    Shared(&'a str),
+    /// A node of one copy of one cellview.
+    Own { view: usize, copy: u8, net: &'a str },
+}
 
 /// Terminals on each global node, counted across the whole walk.
 ///
@@ -1034,7 +1050,7 @@ struct GlobalDriver {
 impl GlobalDrives {
     fn collect(&mut self, view: usize, components: &[ComponentInfo], globals: &HashSet<String>) {
         let global = |net: &str| {
-            if crate::schematic::ground_names::is_ground_reference(net) {
+            if source_loops::node_key(net) == GROUND_KEY {
                 Some(GROUND_KEY.to_owned())
             } else {
                 let folded = net.to_ascii_lowercase();
@@ -1054,35 +1070,12 @@ impl GlobalDrives {
                 let (Some(plus), Some(minus)) = (terminal("+"), terminal("-")) else {
                     continue;
                 };
-                let (Some(plus_key), Some(minus_key)) = (global(plus), global(minus)) else {
-                    continue;
-                };
-                if plus_key == GROUND_KEY && minus_key == GROUND_KEY {
-                    continue;
-                }
-                // The global is named first, so a source held against ground
-                // is stated at the node it actually fixes.
-                let (key, nodes) = if plus_key <= minus_key {
-                    ((plus_key, minus_key), [plus, minus])
-                } else {
-                    ((minus_key, plus_key), [minus, plus])
-                };
-                let nodes = if key.0 == GROUND_KEY {
-                    [nodes[1], nodes[0]]
-                } else {
-                    nodes
-                };
-                self.sources
-                    .entry(key)
-                    .or_insert_with(|| GlobalDriven {
-                        nodes: nodes.map(str::to_owned).to_vec(),
-                        drivers: Vec::new(),
-                    })
-                    .drivers
-                    .push(GlobalDriver {
-                        view,
-                        identity: identity.clone(),
-                    });
+                self.sources.push(SourceBranch {
+                    view,
+                    identity,
+                    nodes: [plus.to_owned(), minus.to_owned()],
+                    shared: [global(plus), global(minus)],
+                });
                 continue;
             }
             // One driver per component and node, as the cellview's own rule
@@ -1119,32 +1112,7 @@ impl GlobalDrives {
         occurrences: &[Occurrences],
         views: &[ReachedView<'_>],
     ) -> Vec<DrcViolation> {
-        let mut findings = Vec::new();
-        for ((first, second), driven) in &self.sources {
-            let Some((total, listed)) = conflict(&driven.drivers, occurrences) else {
-                continue;
-            };
-            let across = if first == GROUND_KEY || second == GROUND_KEY {
-                format!("Global node '{}' and ground", driven.nodes[0])
-            } else {
-                format!(
-                    "Global nodes '{}' and '{}'",
-                    driven.nodes[0], driven.nodes[1]
-                )
-            };
-            findings.push(
-                DrcViolation::new(
-                    0,
-                    DrcViolationType::SourceToSource,
-                    format!(
-                        "{across} are joined by {total} voltage sources across the hierarchy: {}",
-                        listed.join(", ")
-                    ),
-                    driven.location(occurrences, views),
-                )
-                .with_related(listed),
-            );
-        }
+        let mut findings = self.source_loops(occurrences, views);
         for driven in self.outputs.values() {
             let Some((total, listed)) = conflict(&driven.drivers, occurrences) else {
                 continue;
@@ -1156,6 +1124,108 @@ impl GlobalDrives {
                     format!(
                         "Global node '{}' has {total} declared output drivers across the \
                          hierarchy: {}",
+                        driven.nodes[0],
+                        listed.join(", ")
+                    ),
+                    driven.location(occurrences, views),
+                )
+                .with_related(listed),
+            );
+        }
+        findings
+    }
+
+    /// The loops the walk's sources close that no one cellview's rule sees.
+    ///
+    /// A cellview placed more than once puts its sources in the deck once per
+    /// occurrence, each copy on nodes of its own except the shared ones. Two
+    /// copies show every loop the repetition closes, because every further
+    /// copy joins the shared nodes exactly as the second does; `conflict`
+    /// then counts and lists all of them. A loop inside one copy of one
+    /// cellview is that cellview's own rule's, and is stated there.
+    fn source_loops(
+        &self,
+        occurrences: &[Occurrences],
+        views: &[ReachedView<'_>],
+    ) -> Vec<DrcViolation> {
+        let mut copies = Vec::new();
+        let mut branches = Vec::new();
+        for (index, source) in self.sources.iter().enumerate() {
+            let repeated = occurrences[source.view].count > 1;
+            for copy in 0..=u8::from(repeated) {
+                copies.push((index, copy));
+                branches.push([0, 1].map(|end| match &source.shared[end] {
+                    Some(key) => SourceNode::Shared(key),
+                    None => SourceNode::Own {
+                        view: source.view,
+                        copy,
+                        net: &source.nodes[end],
+                    },
+                }));
+            }
+        }
+
+        let mut findings = Vec::new();
+        let mut stated = HashSet::new();
+        for members in source_loops::closed_loops(&branches) {
+            let (first, first_copy) = copies[members[0]];
+            let first_view = self.sources[first].view;
+            if members.iter().all(|&member| {
+                let (source, copy) = copies[member];
+                self.sources[source].view == first_view && copy == first_copy
+            }) {
+                continue;
+            }
+            // Further copies close the same loop again through the same
+            // sources, and `conflict` already lists every occurrence of each.
+            let mut sources = members
+                .iter()
+                .map(|&member| copies[member].0)
+                .collect::<Vec<_>>();
+            sources.sort_by_key(|&source| (self.sources[source].view, source));
+            sources.dedup();
+            if !stated.insert(sources.clone()) {
+                continue;
+            }
+            let drivers = sources
+                .iter()
+                .map(|&source| GlobalDriver {
+                    view: self.sources[source].view,
+                    identity: self.sources[source].identity.clone(),
+                })
+                .collect::<Vec<_>>();
+            let Some((total, listed)) = conflict(&drivers, occurrences) else {
+                continue;
+            };
+            // The loop is stated at a global the stated cellview's sources
+            // stand on: it is a node that cellview draws, and the one the loop
+            // leaves the cellview through.
+            let global = sources
+                .iter()
+                .map(|&source| &self.sources[source])
+                .filter(|source| source.view == drivers[0].view)
+                .flat_map(|source| source.nodes.iter().zip(&source.shared))
+                .find_map(|(node, shared)| {
+                    shared
+                        .as_deref()
+                        .is_some_and(|key| key != GROUND_KEY)
+                        .then_some(node)
+                });
+            let (through, node) = match global {
+                Some(node) => ("global node", node.clone()),
+                None => ("node", self.sources[sources[0]].nodes[0].clone()),
+            };
+            let driven = GlobalDriven {
+                nodes: vec![node],
+                drivers,
+            };
+            findings.push(
+                DrcViolation::new(
+                    0,
+                    DrcViolationType::SourceToSource,
+                    format!(
+                        "{total} voltage sources form a closed loop through {through} '{}' \
+                         across the hierarchy: {}",
                         driven.nodes[0],
                         listed.join(", ")
                     ),

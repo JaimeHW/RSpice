@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use super::input::ComponentInfo;
 use super::net::{NetInfo, fold_nets};
+use super::source_loops;
 use super::types::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
 use crate::connectivity::{ConnectivityAnchor, ConnectivityDiagnosticKind, ExtractedConnectivity};
 use crate::schematic::port::PortDirection;
@@ -179,7 +180,7 @@ impl DrcChecker {
 
         // Check mutually exclusive driver contracts on the resolved net map.
         if self.config.check_shorted_outputs {
-            self.check_source_to_source(&net_map, &mut result);
+            self.check_source_to_source(components, &mut result);
             self.check_shorted_outputs(&net_map, &mut result);
             self.check_duplicate_bus_member_drivers(&net_map, &mut result);
         }
@@ -690,42 +691,73 @@ impl DrcChecker {
         }
     }
 
-    /// Check for directly connected independent voltage-source outputs.
-    fn check_source_to_source(
-        &mut self,
-        net_map: &HashMap<String, NetInfo>,
-        result: &mut DrcResult,
-    ) {
-        let mut names = net_map.keys().collect::<Vec<_>>();
-        names.sort();
-        for net_name in names {
-            let net = &net_map[net_name];
-            let mut sources = net
-                .voltage_source_drivers
+    /// Report each loop the independent voltage sources close.
+    ///
+    /// Sources that share a node are an ordinary circuit. Only a loop made of
+    /// sources alone leaves its current undetermined, and that is exactly
+    /// what the engine refuses (see [`source_loops`]). Each source that
+    /// closes a loop is one finding, as it is one refusal there: it names the
+    /// sources the loop runs through and stands at the node the closing source
+    /// holds against the rest.
+    fn check_source_to_source(&mut self, components: &[ComponentInfo], result: &mut DrcResult) {
+        let mut sources = components
+            .iter()
+            .filter(|component| component.is_voltage_source)
+            .filter_map(|component| {
+                let terminal = |name: &str| {
+                    component
+                        .pins
+                        .iter()
+                        .find(|pin| pin.name == name)
+                        .map(|pin| pin.net_name.as_str())
+                };
+                Some((component, [terminal("+")?, terminal("-")?]))
+            })
+            .collect::<Vec<_>>();
+        sources.sort_by_key(|(component, _)| component.id);
+        let branches = sources
+            .iter()
+            .map(|(_, nodes)| nodes.map(source_loops::node_key))
+            .collect::<Vec<_>>();
+
+        for members in source_loops::closed_loops(&branches) {
+            let closing = *members
+                .last()
+                .expect("a loop has the source that closes it");
+            let (_, [plus, minus]) = sources[closing];
+            let node = if source_loops::node_key(plus) == source_loops::GROUND_KEY {
+                minus
+            } else {
+                plus
+            };
+            let names = members
                 .iter()
-                .cloned()
+                .map(|&member| component_identity(sources[member].0))
                 .collect::<Vec<_>>();
-            sources.sort();
-            if sources.len() > 1 {
-                let id = self.next_id();
-                self.add_violation(
-                    result,
-                    DrcViolation::new(
-                        id,
-                        DrcViolationType::SourceToSource,
-                        format!(
-                            "Net '{}' directly connects {} voltage-source outputs: {}",
-                            net_name,
-                            sources.len(),
-                            sources.join(", ")
-                        ),
-                        DrcLocation::Node {
-                            net_name: net_name.clone(),
-                        },
-                    )
-                    .with_related(sources),
-                );
-            }
+            let message = if names.len() == 1 {
+                format!(
+                    "Voltage source {} has both terminals on node '{node}'",
+                    names[0]
+                )
+            } else {
+                format!(
+                    "Voltage sources {} form a closed loop through node '{node}'",
+                    names.join(", ")
+                )
+            };
+            let id = self.next_id();
+            self.add_violation(
+                result,
+                DrcViolation::new(
+                    id,
+                    DrcViolationType::SourceToSource,
+                    message,
+                    DrcLocation::Node {
+                        net_name: node.to_owned(),
+                    },
+                )
+                .with_related(names),
+            );
         }
     }
 

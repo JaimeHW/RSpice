@@ -39,7 +39,6 @@ pub(super) struct NetInfo {
     pub(super) is_ground: bool,
     pub(super) connected_components: Vec<String>,
     pub(super) output_drivers: HashSet<String>,
-    pub(super) voltage_source_drivers: HashSet<String>,
     pub(super) declared_output_drivers: HashSet<String>,
     pub(super) wire_ids: Vec<u64>,
     /// A typed bus tap binds this node: a real electrical endpoint that no
@@ -96,9 +95,10 @@ pub(super) fn fold_nets(
             }
             if pin.drives() {
                 entry.output_drivers.insert(identity.clone());
-                if component.is_voltage_source {
-                    entry.voltage_source_drivers.insert(identity.clone());
-                } else {
+                // A source's drive terminal is not a declared output: what
+                // makes sources conflict is a loop among them, which the
+                // source rule finds over their branches rather than per node.
+                if !component.is_voltage_source {
                     entry.declared_output_drivers.insert(identity.clone());
                 }
             }
