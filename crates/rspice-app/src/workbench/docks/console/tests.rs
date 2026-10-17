@@ -981,7 +981,6 @@ fn console_page_review_renders() {
         let canvas = crate::ui::raster::render(size, |ui, _| super::show(ui, app, layout));
         let path = directory.join(format!("console-{name}.png"));
         std::fs::write(&path, canvas.png(size.y as usize)).expect("the review render is written");
-        eprintln!("{}", path.display());
     };
     render("session", &mut app);
 
