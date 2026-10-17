@@ -1,9 +1,11 @@
 //! Schematic Export
 //!
 //! Export schematic diagrams to SVG format for documentation and printing.
-//! Produces clean, scalable vector graphics suitable for professional
-//! circuit documentation.
+//! The page is paper: the active sheet only, in the light print palette,
+//! with the canvas's nominal stroke widths and its world-unit type, every
+//! label placed by the canvas's own layout functions.
 
+use std::borrow::Cow;
 use std::fmt::Write;
 
 use rspice_design::{
@@ -14,10 +16,13 @@ use rspice_design::{
     },
     symbol_resolver::SymbolResolver,
 };
+use rspice_design_model::design_management::SheetCatalog;
 
 mod block_symbols;
 mod config;
 mod geometry;
+#[cfg(test)]
+mod parity_tests;
 
 pub use self::config::{SvgColor, SvgColorParseError, SvgExportConfig};
 
@@ -25,13 +30,16 @@ use self::block_symbols::{
     catalog_asset_world_bounds, write_artwork_lead_extensions, write_catalog_asset_symbol,
 };
 use self::geometry::{
-    estimated_text_width, include_bus_bounds, include_design_note_bounds,
-    include_documentation_shape_bounds, include_junction_bounds, write_bus, write_bus_tap,
-    write_design_note, write_documentation_shape, write_junction, write_wire,
+    Extent, estimated_text_width, include_bus_bounds, include_design_note_bounds,
+    include_documentation_shape_bounds, include_junction_bounds, include_net_label_bounds,
+    include_probe_bounds, write_bus, write_bus_tap, write_conductor, write_design_note,
+    write_documentation_shape, write_junction, write_net_label, write_probe,
 };
+use super::view::design_view::object_is_on_active_sheet;
+use super::view::drawing::{chain_conductors, compute_label_layout};
+use super::view::lod::{StrokeRole, nominal_wu};
 use super::view::resolved_symbol_render::{
-    InstanceLabel, resolved_symbol_world_bounds, write_instance_label_svg,
-    write_resolved_symbol_svg,
+    InstanceLabel, resolved_symbol_world_bounds, write_resolved_symbol_svg, write_text_svg,
 };
 
 #[derive(Clone)]
@@ -46,14 +54,87 @@ struct ResolvedSymbolExportEntry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SvgDesignContext<'a> {
     pub view_path: &'a str,
+    /// The view's sheets: only the active one is exported, as only it is on
+    /// the canvas. `None`, or a catalog with no active sheet, is one sheet.
+    pub sheet_catalog: Option<&'a SheetCatalog>,
 }
 
 impl Default for SvgDesignContext<'static> {
     fn default() -> Self {
         Self {
             view_path: "schematic",
+            sheet_catalog: None,
         }
     }
+}
+
+/// What the active sheet draws: every drawn object whose sheet is the active
+/// one. A document with no sheets to choose between is borrowed whole.
+fn active_sheet<'a>(
+    document: &'a SchematicDocument,
+    catalog: Option<&SheetCatalog>,
+) -> Cow<'a, SchematicDocument> {
+    if catalog.is_none_or(|catalog| catalog.active_sheet_id().is_none()) {
+        return Cow::Borrowed(document);
+    }
+    let on = |id: u64| object_is_on_active_sheet(catalog, id);
+    Cow::Owned(SchematicDocument {
+        components: document
+            .components
+            .iter()
+            .filter(|item| on(item.id))
+            .cloned()
+            .collect(),
+        wires: document
+            .wires
+            .iter()
+            .filter(|item| on(item.id))
+            .cloned()
+            .collect(),
+        buses: document
+            .buses
+            .iter()
+            .filter(|item| on(item.id))
+            .cloned()
+            .collect(),
+        bus_taps: document
+            .bus_taps
+            .iter()
+            .filter(|item| on(item.id))
+            .cloned()
+            .collect(),
+        design_notes: document
+            .design_notes
+            .iter()
+            .filter(|item| on(item.id))
+            .cloned()
+            .collect(),
+        documentation_shapes: document
+            .documentation_shapes
+            .iter()
+            .filter(|item| on(item.id))
+            .cloned()
+            .collect(),
+        probes: document
+            .probes
+            .iter()
+            .filter(|item| on(item.id))
+            .cloned()
+            .collect(),
+        net_labels: document
+            .net_labels
+            .iter()
+            .filter(|item| on(item.id))
+            .cloned()
+            .collect(),
+        junctions: document
+            .junctions
+            .iter()
+            .filter(|item| on(item.id))
+            .cloned()
+            .collect(),
+        ..SchematicDocument::default()
+    })
 }
 
 /// Export a schematic to SVG format
@@ -143,10 +224,13 @@ fn export_to_svg_with_resolved_symbol_entries(
     let symbol_library = crate::SymbolLibrary::load_embedded()
         .map_err(|error| log::error!("Cannot load embedded symbols for SVG export: {error}"))
         .ok();
+    let sheet = active_sheet(document, context.sheet_catalog);
+    let sheet = sheet.as_ref();
 
     // Calculate bounds
     let (min_x, min_y, max_x, max_y) = calculate_bounds_with_resolved_symbols(
         document,
+        sheet,
         config,
         resolved_symbols,
         symbol_library.as_ref(),
@@ -155,33 +239,14 @@ fn export_to_svg_with_resolved_symbol_entries(
     let width = max_x - min_x + 2.0 * config.margin;
     let height = max_y - min_y + 2.0 * config.margin;
 
-    // SVG header
     let _ = writeln!(
         svg,
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
-<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"{vx} {vy} {width} {height}\">\n\
-<style>\n\
-  .wire {{ stroke: {wire_color}; stroke-width: {wire_width}; fill: none; stroke-linecap: square; stroke-linejoin: miter; }}\n\
-  .bus {{ stroke: {wire_color}; stroke-width: {bus_width}; fill: none; stroke-linecap: square; stroke-linejoin: miter; }}\n\
-  .bus-tap {{ stroke: {wire_color}; stroke-width: {tap_width}; fill: none; stroke-linecap: round; }}\n\
-  .junction {{ fill: {wire_color}; stroke: none; }}\n\
-  .component {{ stroke: {comp_color}; stroke-width: {comp_width}; fill: none; }}\n\
-  .text {{ font-family: monospace; font-size: {font_size}px; fill: {text_color}; }}\n\
-  .design-note-anchor {{ fill: {text_color}; stroke: none; }}\n\
-  .design-note-requirement-link .text {{ text-decoration: underline; }}\n\
-  .documentation-shape {{ stroke: {text_color}; stroke-width: {comp_width}; fill: none; stroke-linecap: round; stroke-linejoin: round; }}\n\
-</style>",
+<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"{vx} {vy} {width} {height}\">",
         vx = min_x - config.margin,
         vy = min_y - config.margin,
-        wire_color = config.wire_color,
-        wire_width = config.wire_stroke_width,
-        bus_width = config.wire_stroke_width * 0.6,
-        tap_width = config.wire_stroke_width,
-        comp_color = config.component_color,
-        comp_width = config.component_stroke_width,
-        font_size = config.font_size,
-        text_color = config.text_color
     );
+    write_style(&mut svg, config);
 
     if let Some(background_color) = config.background_color.as_ref() {
         let _ = writeln!(
@@ -192,27 +257,27 @@ fn export_to_svg_with_resolved_symbol_entries(
         );
     }
 
-    // Export wires
-    for wire in &document.wires {
-        write_wire(&mut svg, wire, config);
+    // Wires as the canvas joins them: one path a chain, so a corner is a
+    // mitered join rather than two butt ends.
+    for chain in chain_conductors(sheet.wires.iter().map(|wire| wire.points.as_slice())) {
+        write_conductor(&mut svg, &chain, config);
     }
 
-    for bus in &document.buses {
+    for bus in &sheet.buses {
         write_bus(&mut svg, bus, config);
     }
 
-    for tap in &document.bus_taps {
+    for tap in &sheet.bus_taps {
         write_bus_tap(&mut svg, tap, config);
     }
 
     // Junction dots encode explicit connectivity and are document content,
     // not a transient canvas decoration.
-    for junction in &document.junctions {
+    for junction in &sheet.junctions {
         write_junction(&mut svg, junction, config);
     }
 
-    // Export components
-    for component in &document.components {
+    for component in &sheet.components {
         write_component(
             &mut svg,
             component,
@@ -222,11 +287,20 @@ fn export_to_svg_with_resolved_symbol_entries(
         );
     }
 
-    for note in &document.design_notes {
+    for label in &sheet.net_labels {
+        write_net_label(&mut svg, label, config);
+    }
+
+    for probe in &sheet.probes {
+        write_probe(&mut svg, probe, config);
+    }
+
+    // A note's properties read the whole document, as on the canvas.
+    for note in &sheet.design_notes {
         write_design_note(&mut svg, document, note, config, context.view_path);
     }
 
-    for shape in &document.documentation_shapes {
+    for shape in &sheet.documentation_shapes {
         write_documentation_shape(&mut svg, shape, config);
     }
 
@@ -236,68 +310,111 @@ fn export_to_svg_with_resolved_symbol_entries(
     svg
 }
 
+/// Font stacks for the two families the canvas sets type in.
+const SANS: &str = "'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif";
+const MONO: &str = "'IBM Plex Mono', 'DejaVu Sans Mono', Consolas, monospace";
+
+/// The page's classes: D1 section 11's inks, nominal stroke widths and
+/// world-unit type. Conductors end square to their points (butt) and join
+/// mitered; symbols and documentation round, the vector form of the
+/// canvas's corner dots.
+fn write_style(svg: &mut String, config: &SvgExportConfig) {
+    let stroke = |role| geometry::world(nominal_wu(role), config);
+    let size = |world: f32| geometry::world(world, config);
+    let wire = config.wire_color;
+    let symbol = config.symbol_color;
+    let name = config.name_color;
+    let text = config.text_color;
+    let net = config.net_label_color;
+    let paper = config
+        .background_color
+        .map_or_else(|| "none".to_owned(), |color| color.to_string());
+    let _ = writeln!(
+        svg,
+        "<style>\n\
+  .wire {{ stroke: {wire}; stroke-width: {wire_width}; fill: none; stroke-linecap: butt; stroke-linejoin: miter; stroke-miterlimit: 4; }}\n\
+  .bus {{ stroke: {wire}; stroke-width: {bus_width}; fill: none; stroke-linecap: butt; stroke-linejoin: miter; stroke-miterlimit: 4; }}\n\
+  .tap {{ stroke: {wire}; stroke-width: {tap_width}; fill: none; stroke-linecap: butt; }}\n\
+  .junction {{ fill: {wire}; stroke: none; }}\n\
+  .symbol {{ stroke: {symbol}; stroke-width: {symbol_width}; fill: none; stroke-linecap: round; stroke-linejoin: round; }}\n\
+  .symbol-text {{ font-family: {MONO}; font-weight: 400; fill: {symbol}; }}\n\
+  .name {{ font-family: {SANS}; font-size: {name_size}px; font-weight: 500; fill: {name}; }}\n\
+  .value {{ font-family: {SANS}; font-size: {value_size}px; font-weight: 400; fill: {text}; }}\n\
+  .pin {{ font-family: {MONO}; font-size: {pin_size}px; font-weight: 400; fill: {text}; }}\n\
+  .net-mark {{ fill: {net}; stroke: none; }}\n\
+  .net-name {{ font-family: {MONO}; font-size: {net_size}px; font-weight: 500; fill: {net}; }}\n\
+  .net-tab {{ stroke: {net}; fill: none; stroke-linecap: round; stroke-linejoin: round; }}\n\
+  .slice {{ font-family: {MONO}; font-size: {slice_size}px; font-weight: 500; fill: {net}; }}\n\
+  .probe {{ stroke: {text}; stroke-width: {probe_width}; fill: none; stroke-linecap: butt; }}\n\
+  .probe circle {{ fill: {paper}; }}\n\
+  .probe-label {{ font-family: {MONO}; font-size: {slice_size}px; font-weight: 500; fill: {text}; stroke: none; }}\n\
+  .note {{ font-family: {MONO}; font-size: {note_size}px; font-weight: 400; fill: {text}; }}\n\
+  .design-note-anchor {{ fill: {text}; stroke: none; }}\n\
+  .design-note-requirement-link .note {{ text-decoration: underline; }}\n\
+  .documentation-shape {{ stroke: {text}; stroke-width: {shape_width}; fill: none; stroke-linecap: round; stroke-linejoin: round; }}\n\
+</style>",
+        wire_width = stroke(StrokeRole::Wire),
+        bus_width = stroke(StrokeRole::BusStrand),
+        tap_width = stroke(StrokeRole::BusTap),
+        symbol_width = stroke(StrokeRole::Symbol),
+        probe_width = stroke(StrokeRole::Probe),
+        shape_width = stroke(StrokeRole::Documentation),
+        name_size = InstanceLabel::Name.size(config),
+        value_size = InstanceLabel::Value.size(config),
+        pin_size = size(rspice_design::symbol_generation::GENERATED_PIN_LABEL_SIZE),
+        net_size = size(crate::view::net_labels::LABEL_FONT_WORLD_SIZE),
+        slice_size = size(crate::view::drawing::SMALL_TEXT_WORLD),
+        note_size = size(crate::view::design_notes::FONT_WORLD_SIZE),
+    );
+}
+
+/// `document` is the whole document, which a note's properties read;
+/// `sheet` is what the active sheet draws.
 fn calculate_bounds_with_resolved_symbols(
     document: &SchematicDocument,
+    sheet: &SchematicDocument,
     config: &SvgExportConfig,
     resolved_symbols: &[ResolvedSymbolExportEntry],
     symbol_library: Option<&crate::SymbolLibrary>,
     context: SvgDesignContext<'_>,
 ) -> (f64, f64, f64, f64) {
-    let mut min_x = f64::MAX;
-    let mut min_y = f64::MAX;
-    let mut max_x = f64::MIN;
-    let mut max_y = f64::MIN;
+    let mut extent = Extent::default();
 
-    for component in &document.components {
-        let (comp_min_x, comp_min_y, comp_max_x, comp_max_y) = component_export_world_bounds(
-            component,
-            find_resolved_symbol(component, resolved_symbols),
-            symbol_library,
-            config,
-        );
-        min_x = min_x.min(comp_min_x * config.grid_size);
-        min_y = min_y.min(comp_min_y * config.grid_size);
-        max_x = max_x.max(comp_max_x * config.grid_size);
-        max_y = max_y.max(comp_max_y * config.grid_size);
-    }
-
-    for wire in &document.wires {
-        for point in &wire.points {
-            let x = point.x as f64 * config.grid_size;
-            let y = point.y as f64 * config.grid_size;
-            min_x = min_x.min(x);
-            min_y = min_y.min(y);
-            max_x = max_x.max(x);
-            max_y = max_y.max(y);
+    for component in &sheet.components {
+        let resolved = find_resolved_symbol(component, resolved_symbols);
+        let (min_x, min_y, max_x, max_y) =
+            component_export_world_bounds(component, resolved, symbol_library, config);
+        let unit = config.units_per_world;
+        extent.include_box((min_x * unit, min_y * unit, max_x * unit, max_y * unit));
+        if !symbol_writes_labels(component, resolved, symbol_library) {
+            include_primitive_label_bounds(component, config, &mut extent);
         }
     }
 
-    include_bus_bounds(
-        document, config, &mut min_x, &mut min_y, &mut max_x, &mut max_y,
-    );
+    for wire in &sheet.wires {
+        for point in &wire.points {
+            let (x, y) = geometry::page(*point, config);
+            extent.include(x, y);
+        }
+    }
 
-    include_junction_bounds(
-        document, config, &mut min_x, &mut min_y, &mut max_x, &mut max_y,
-    );
-
+    include_bus_bounds(&sheet.buses, &sheet.bus_taps, config, &mut extent);
+    include_junction_bounds(&sheet.junctions, config, &mut extent);
+    include_net_label_bounds(&sheet.net_labels, config, &mut extent);
+    include_probe_bounds(&sheet.probes, config, &mut extent);
     include_design_note_bounds(
         document,
+        &sheet.design_notes,
         config,
         context.view_path,
-        &mut min_x,
-        &mut min_y,
-        &mut max_x,
-        &mut max_y,
+        &mut extent,
     );
+    include_documentation_shape_bounds(sheet, config, &mut extent);
 
-    include_documentation_shape_bounds(
-        document, config, &mut min_x, &mut min_y, &mut max_x, &mut max_y,
-    );
-
-    if min_x == f64::MAX {
+    if extent.is_empty() {
         (0.0, 0.0, 100.0, 100.0)
     } else {
-        (min_x, min_y, max_x, max_y)
+        (extent.min_x, extent.min_y, extent.max_x, extent.max_y)
     }
 }
 
@@ -413,17 +530,16 @@ fn symbol_resolution_error_world_bounds(
     let x = f64::from(component.pos.x);
     let y = f64::from(component.pos.y);
     let diagnostic = symbol_resolution_error_label(component);
-    let grid_size = config.grid_size.max(f64::EPSILON);
-    let text_half_width = (estimated_text_width(&diagnostic, config)
-        + 2.0 * TEXT_HORIZONTAL_PADDING)
-        / grid_size
-        / 2.0;
-    let text_descent = config.font_size * 0.35 / grid_size;
+    let unit = config.units_per_world.max(f64::EPSILON);
+    // In world units: the label is value type, hung below the box.
+    let size = InstanceLabel::Value.size(config) / unit;
+    let text_half_width =
+        (estimated_text_width(&diagnostic, size) + 2.0 * TEXT_HORIZONTAL_PADDING) / 2.0;
     (
         x - HALF_SIZE.max(text_half_width),
         y - HALF_SIZE,
         x + HALF_SIZE.max(text_half_width),
-        y + HALF_SIZE + config.font_size / grid_size + text_descent,
+        y + HALF_SIZE + 1.3 * size,
     )
 }
 
@@ -454,8 +570,6 @@ fn write_component(
     resolved_symbol: Option<&ResolvedCellSymbol>,
     symbol_library: Option<&crate::SymbolLibrary>,
 ) {
-    let cx = component.pos.x as f64 * config.grid_size;
-    let cy = component.pos.y as f64 * config.grid_size;
     let mut symbol_wrote_labels = false;
 
     svg.push_str("<g>\n");
@@ -494,9 +608,7 @@ fn write_component(
         )
     }) {
         let port_stroke_width = if component.kind == ComponentType::Port {
-            component
-                .port_spec()
-                .and_then(|port| port.vector().map(|_| config.wire_stroke_width * 0.6))
+            vector_port_stroke_width(component, config)
         } else {
             None
         };
@@ -526,45 +638,103 @@ fn write_component(
         write_symbol_resolution_error(svg, component, config, "missing canonical SVG");
     }
 
-    // A primitive's name and value sit where the canvas puts them, through
-    // the canvas's own layout evaluated in SVG units, and turn with it.
-    if !symbol_wrote_labels && component.kind != ComponentType::Ground {
-        let layout = crate::view::drawing::compute_label_layout(
-            egui::Pos2::new(cx as f32, cy as f32),
-            config.grid_size as f32,
-            component,
-        );
-        let at = |position: egui::Pos2| (f64::from(position.x), f64::from(position.y));
-        if component
-            .display_mode
-            .show_name(SchematicParameterLabelVisibility::NamesAndValues)
-            && !component.name.is_empty()
-        {
-            write_instance_label_svg(
-                svg,
-                at(layout.name_pos),
-                &component.name,
-                layout.name_align,
-                InstanceLabel::Name.size(config),
-            );
-        }
-        let value = crate::source_labels::component_value_label_cached(component);
-        if component
-            .display_mode
-            .show_value(SchematicParameterLabelVisibility::NamesAndValues)
-            && !value.is_empty()
-        {
-            write_instance_label_svg(
-                svg,
-                at(layout.value_pos),
-                value.as_ref(),
-                layout.value_align,
-                InstanceLabel::Value.size(config),
-            );
+    if !symbol_wrote_labels {
+        for label in primitive_labels(component, config) {
+            label
+                .kind
+                .write(svg, label.at, &label.text, label.align, config);
         }
     }
 
     svg.push_str("</g>\n");
+}
+
+/// A vector port's body, at bus weight, as the canvas draws it.
+fn vector_port_stroke_width(component: &Component, config: &SvgExportConfig) -> Option<f64> {
+    component.port_spec().and_then(|port| {
+        port.vector()
+            .map(|_| geometry::world(nominal_wu(StrokeRole::VectorPort), config))
+    })
+}
+
+/// One instance label as the page sets it.
+struct PrimitiveLabel {
+    kind: InstanceLabel,
+    at: (f64, f64),
+    align: egui::Align2,
+    text: String,
+}
+
+/// A primitive's name and value where the canvas puts them, through the
+/// canvas's own layout evaluated in SVG units, turned with the instance. A
+/// cell's labels are its symbol's; ground has none.
+fn primitive_labels(component: &Component, config: &SvgExportConfig) -> Vec<PrimitiveLabel> {
+    if component.kind == ComponentType::Ground {
+        return Vec::new();
+    }
+    let (cx, cy) = geometry::page(component.pos, config);
+    let layout = compute_label_layout(
+        egui::Pos2::new(cx as f32, cy as f32),
+        config.units_per_world as f32,
+        component,
+    );
+    let at = |position: egui::Pos2| (f64::from(position.x), f64::from(position.y));
+    let mut labels = Vec::new();
+    if component
+        .display_mode
+        .show_name(SchematicParameterLabelVisibility::NamesAndValues)
+        && !component.name.is_empty()
+    {
+        labels.push(PrimitiveLabel {
+            kind: InstanceLabel::Name,
+            at: at(layout.name_pos),
+            align: layout.name_align,
+            text: component.name.clone(),
+        });
+    }
+    let value = crate::source_labels::component_value_label_cached(component);
+    if component
+        .display_mode
+        .show_value(SchematicParameterLabelVisibility::NamesAndValues)
+        && !value.is_empty()
+    {
+        labels.push(PrimitiveLabel {
+            kind: InstanceLabel::Value,
+            at: at(layout.value_pos),
+            align: layout.value_align,
+            text: value.to_string(),
+        });
+    }
+    labels
+}
+
+/// Whether the instance's authored symbol letters its own name and value,
+/// which is the branch [`write_component`] takes for a cell it can draw.
+fn symbol_writes_labels(
+    component: &Component,
+    resolved_symbol: Option<&ResolvedCellSymbol>,
+    symbol_library: Option<&crate::SymbolLibrary>,
+) -> bool {
+    component.kind == ComponentType::CellInstance
+        && symbol_library
+            .and_then(|library| compatible_builtin_xspice_symbol(component, library))
+            .is_none()
+        && resolved_symbol.is_some_and(|symbol| {
+            symbol.source() == ResolvedSymbolSource::Authored
+                && resolved_symbol_world_bounds(component, symbol).is_some()
+        })
+}
+
+/// The page box a primitive's labels take, so a value below a part is
+/// never cut off at the sheet's edge.
+fn include_primitive_label_bounds(
+    component: &Component,
+    config: &SvgExportConfig,
+    extent: &mut Extent,
+) {
+    for label in primitive_labels(component, config) {
+        extent.include_text(label.at, label.align, &label.text, label.kind.size(config));
+    }
 }
 
 fn write_port_direction_overlay(
@@ -574,8 +744,7 @@ fn write_port_direction_overlay(
     direction: rspice_design_model::port::PortDirection,
     config: &SvgExportConfig,
 ) {
-    let cx = f64::from(component.pos.x) * config.grid_size;
-    let cy = f64::from(component.pos.y) * config.grid_size;
+    let (cx, cy) = geometry::page(component.pos, config);
     let point = |point| {
         let point = crate::port_overlay::transform_point(
             point,
@@ -584,8 +753,8 @@ fn write_port_direction_overlay(
             component.mirror_v,
         );
         (
-            cx + f64::from(point.x) * config.grid_size,
-            cy + f64::from(point.y) * config.grid_size,
+            cx + f64::from(point.x) * config.units_per_world,
+            cy + f64::from(point.y) * config.units_per_world,
         )
     };
     writeln!(
@@ -594,18 +763,15 @@ fn write_port_direction_overlay(
         direction.keyword()
     )
     .unwrap();
-    let style = component
-        .port_spec()
-        .and_then(|port| port.vector())
-        .map_or_else(String::new, |_| {
-            format!(" style=\"stroke-width:{}\"", config.wire_stroke_width * 0.6)
-        });
+    let style = vector_port_stroke_width(component, config).map_or_else(String::new, |width| {
+        format!(" style=\"stroke-width:{width}\"")
+    });
     for segment in crate::port_overlay::direction_segments(direction) {
         let start = point(segment.start);
         let end = point(segment.end);
         writeln!(
             svg,
-            "<line class=\"component\" x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"{style}/>",
+            "<line class=\"symbol\" x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"{style}/>",
             start.0, start.1, end.0, end.1
         )
         .unwrap();
@@ -619,25 +785,26 @@ fn write_symbol_resolution_error(
     config: &SvgExportConfig,
     reason: &str,
 ) {
-    let cx = f64::from(component.pos.x) * config.grid_size;
-    let cy = f64::from(component.pos.y) * config.grid_size;
-    let half = 12.0 * config.grid_size;
+    let (cx, cy) = geometry::page(component.pos, config);
+    let half = 12.0 * config.units_per_world;
     let x = cx - half;
     let y = cy - half;
     let size = half * 2.0;
     let kind = escape_xml(component.kind.display_name());
     let reason = escape_xml(reason);
-    let label = escape_xml(&symbol_resolution_error_label(component));
-    // The group carries the ink the drawing is in, which its children
-    // inherit: a placeholder is part of the drawing, and an exported
-    // schematic has no second colour to spend on an alarm. The label's own
-    // class gives it back the fill the group takes away.
+    // The marks take the ink the drawing is in: a placeholder is part of the
+    // drawing, and an exported schematic has no second colour to spend on an
+    // alarm. The label sits outside the marks, in the value type.
     writeln!(
         svg,
-        "<g class=\"symbol-resolution-error\" data-component-kind=\"{kind}\" data-error=\"{reason}\" \
-         stroke=\"{stroke}\" stroke-width=\"{width}\" fill=\"none\">",
-        stroke = config.component_color,
-        width = config.component_stroke_width
+        "<g class=\"symbol-resolution-error\" data-component-kind=\"{kind}\" data-error=\"{reason}\">"
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        "<g stroke=\"{stroke}\" stroke-width=\"{width}\" fill=\"none\">",
+        stroke = config.symbol_color,
+        width = geometry::world(nominal_wu(StrokeRole::Symbol), config)
     )
     .unwrap();
     writeln!(
@@ -654,12 +821,15 @@ fn write_symbol_resolution_error(
         y + size
     )
     .unwrap();
-    writeln!(
+    svg.push_str("</g>\n");
+    write_text_svg(
         svg,
-        "<text class=\"text\" x=\"{cx}\" y=\"{}\" text-anchor=\"middle\">{label}</text>",
-        y + size + config.font_size
-    )
-    .unwrap();
+        InstanceLabel::Value.class(),
+        (cx, y + size),
+        &symbol_resolution_error_label(component),
+        egui::Align2::CENTER_TOP,
+        InstanceLabel::Value.size(config),
+    );
     svg.push_str("</g>\n");
 }
 
@@ -728,6 +898,7 @@ mod tests {
             &[],
             SvgDesignContext {
                 view_path: "user/top/schematic",
+                ..SvgDesignContext::default()
             },
         );
 
@@ -789,7 +960,7 @@ mod tests {
 
         assert!(!svg.contains("symbol-resolution-error"));
         assert_eq!(
-            svg.matches(r#"<path class="component""#).count(),
+            svg.matches(r#"<path class="symbol""#).count(),
             expected_paths
         );
     }
@@ -807,7 +978,7 @@ mod tests {
         );
         assert!(missing_library.contains("symbol-resolution-error"));
         assert!(missing_library.contains("missing canonical SVG"));
-        assert!(!missing_library.contains(r#"<path class="component""#));
+        assert!(!missing_library.contains(r#"<path class="symbol""#));
 
         let mut unknown_variant = Schematic::default();
         let mut diode = Component::new(2, ComponentType::Diode, Point::origin());
@@ -839,16 +1010,17 @@ mod tests {
         let mut schematic = Schematic::default();
         schematic.document_mut_for_test().components.push(component);
         let config = SvgExportConfig {
-            grid_size: 1.0,
+            units_per_world: 1.0,
             margin: 0.0,
             ..SvgExportConfig::default()
         };
-        let bounds = calculate_bounds_with_resolved_symbols(
-            schematic.document(),
-            &config,
-            &[],
+        // The symbol's own box: since C-10 the page's bounds also hold the
+        // instance's labels, which this transform says nothing about.
+        let bounds = component_export_world_bounds(
+            &schematic.document().components[0],
+            None,
             Some(&library),
-            SvgDesignContext::default(),
+            &config,
         );
         let half_width = f64::from(symbol.target_height) / 2.0;
         let half_height = f64::from(symbol.target_width) / 2.0;
@@ -882,7 +1054,7 @@ mod tests {
                 Point::origin(),
             ));
         let config = SvgExportConfig {
-            grid_size: 1.0,
+            units_per_world: 1.0,
             margin: 0.0,
             ..SvgExportConfig::default()
         };
@@ -895,6 +1067,7 @@ mod tests {
         let expected = symbol_resolution_error_world_bounds(component, &config, "unresolved cell");
         let bounds = calculate_bounds_with_resolved_symbols(
             schematic.document(),
+            schematic.document(),
             &config,
             &[],
             Some(&library),
@@ -903,7 +1076,7 @@ mod tests {
 
         assert_eq!(bounds, expected);
         assert!(bounds.0 < -12.0 && bounds.2 > 12.0);
-        assert!(bounds.3 > 12.0 + config.font_size);
+        assert!(bounds.3 > 12.0 + InstanceLabel::Value.size(&config));
     }
 
     #[test]
@@ -914,7 +1087,7 @@ mod tests {
         let mut schematic = Schematic::default();
         schematic.document_mut_for_test().components.push(component);
         let config = SvgExportConfig {
-            grid_size: 1.0,
+            units_per_world: 1.0,
             margin: 0.0,
             ..SvgExportConfig::default()
         };
@@ -931,8 +1104,8 @@ mod tests {
         let width = expected.2 - expected.0;
         let height = expected.3 - expected.1;
 
-        assert!(width >= estimated_text_width(diagnostic, &config));
-        assert!(expected.3 > -300.0 + 12.0 + config.font_size);
+        assert!(width >= estimated_text_width(diagnostic, InstanceLabel::Value.size(&config)));
+        assert!(expected.3 > -300.0 + 12.0 + InstanceLabel::Value.size(&config));
         assert!(svg.contains(&format!(
             "viewBox=\"{} {} {width} {height}\"",
             expected.0, expected.1
@@ -973,7 +1146,7 @@ mod tests {
     #[test]
     fn svg_port_uses_canonical_body_and_transformed_direction_overlay() {
         let config = SvgExportConfig {
-            grid_size: 1.0,
+            units_per_world: 1.0,
             ..SvgExportConfig::default()
         };
         let component = Component::new(1, ComponentType::Port, Point::new(100, 80))
@@ -990,7 +1163,7 @@ mod tests {
             write_port_direction_overlay(&mut overlay, &component, 90, direction, &config);
             assert!(overlay.contains(&format!("data-direction=\"{}\"", direction.keyword())));
             assert_eq!(
-                overlay.matches(r#"<line class="component""#).count(),
+                overlay.matches(r#"<line class="symbol""#).count(),
                 segment_count
             );
         }
@@ -1088,18 +1261,18 @@ mod tests {
         );
 
         assert!(
-            svg.contains(r#"<path class="component" d="M 900 900 L 1100 900 L 1100 1100"/>"#),
+            svg.contains(r#"<path class="symbol" d="M 900 900 L 1100 900 L 1100 1100"/>"#),
             "authored body polyline should be exported"
         );
         // The anchors are (800, 700) and (800, 1300); an unturned run starts
         // there, centred on it: the baseline sits 0.375 em below.
         assert!(
-            svg.contains(r#"<text class="text" x="800" y="737.5" text-anchor="start""#)
+            svg.contains(r#"<text class="name" x="800" y="737.5" text-anchor="start""#)
                 && svg.contains(">XAMP</text>"),
             "instance name should use the authored name anchor: {svg}"
         );
         assert!(
-            svg.contains(r#"<text class="text" x="800" y="1333.75" text-anchor="start""#)
+            svg.contains(r#"<text class="value" x="800" y="1333.75" text-anchor="start""#)
                 && svg.contains(">gain_stage</text>"),
             "instance value should use the authored value anchor: {svg}"
         );
@@ -1175,11 +1348,11 @@ mod tests {
         // Each lead runs from the saved terminal all the way to the body it
         // belongs to, so neither instance exports a pin left floating.
         assert!(
-            svg.contains(r#"<line class="component" x1="600" y1="1000" x2="900" y2="1000"/>"#),
+            svg.contains(r#"<line class="symbol" x1="600" y1="1000" x2="900" y2="1000"/>"#),
             "first instance should export its saved IN terminal"
         );
         assert!(
-            svg.contains(r#"<line class="component" x1="2400" y1="1000" x2="2100" y2="1000"/>"#),
+            svg.contains(r#"<line class="symbol" x1="2400" y1="1000" x2="2100" y2="1000"/>"#),
             "second instance should export its saved OUT terminal, not reuse the first interface"
         );
     }
@@ -1222,7 +1395,7 @@ mod tests {
             write_component(&mut svg, &resistor, &config, None, None);
             let layout = crate::view::drawing::compute_label_layout(
                 egui::Pos2::new(1000.0, 1000.0),
-                config.grid_size as f32,
+                config.units_per_world as f32,
                 &resistor,
             );
             let line = svg
@@ -1242,9 +1415,11 @@ mod tests {
             )),
             "the name stands on the canvas's anchor above the body: {flat}"
         );
+        assert!(flat.starts_with(r#"<text class="name""#), "{flat}");
+        let svg = export_to_svg(&SchematicDocument::default(), &config);
         assert!(
-            flat.contains("font-size: 100px; font-weight: 500"),
-            "{flat}"
+            svg.contains(".name { font-family: 'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif; font-size: 100px; font-weight: 500;"),
+            "the name class carries the instance type in world units: {svg}"
         );
         let (turned, _) = name_line(Rotation::R90);
         assert!(turned.contains(r#"text-anchor="end""#), "{turned}");
@@ -1253,7 +1428,18 @@ mod tests {
     #[test]
     fn svg_export_background_is_explicit_and_can_be_transparent() {
         let schematic = Schematic::default();
-        let dark = export_to_svg(schematic.document(), &SvgExportConfig::default());
+        let paper = export_to_svg(schematic.document(), &SvgExportConfig::default());
+        assert!(
+            paper.contains("fill=\"#FFFFFF\""),
+            "the default page is paper"
+        );
+        let dark = export_to_svg(
+            schematic.document(),
+            &SvgExportConfig {
+                background_color: Some(SvgColor::rgb(0x1A, 0x1A, 0x1A)),
+                ..SvgExportConfig::default()
+            },
+        );
         assert!(dark.contains("fill=\"#1A1A1A\""));
 
         let transparent = export_to_svg(
@@ -1289,9 +1475,11 @@ mod tests {
 
         let svg = export_to_svg(schematic.document(), &config);
 
-        assert!(svg.contains(r#".junction { fill: #00FF00; stroke: none; }"#));
-        assert!(svg.contains(r#"<circle class="junction" cx="70" cy="110" r="3"/>"#));
-        assert!(svg.contains(r#"width="6" height="6" viewBox="67 107 6 6""#));
+        // D1 section 11: the light wire ink, and a dot of radius 1.5 world
+        // units (2.7 wires across).
+        assert!(svg.contains(r#".junction { fill: #4E3400; stroke: none; }"#));
+        assert!(svg.contains(r#"<circle class="junction" cx="70" cy="110" r="15"/>"#));
+        assert!(svg.contains(r#"width="30" height="30" viewBox="55 95 30 30""#));
     }
 
     #[test]
@@ -1318,6 +1506,7 @@ mod tests {
         let svg = export_to_svg(schematic.document(), &config);
         let (min_x, min_y, max_x, max_y) = calculate_bounds_with_resolved_symbols(
             schematic.document(),
+            schematic.document(),
             &config,
             &[],
             None,
@@ -1325,7 +1514,7 @@ mod tests {
         );
 
         assert_eq!(svg.matches(r#"<path class="bus""#).count(), 3);
-        assert!(svg.contains(r#"<path class="bus-tap" d="M 100 0 L 100 100"/>"#));
+        assert!(svg.contains(r#"<path class="tap" d="M 100 0 L 100 100"/>"#));
         assert!(svg.contains(r#">DATA[7:0]</text>"#));
         assert!(svg.contains(r#">DATA[3]</text>"#));
         assert!(min_x <= -4.0 && min_y <= -20.0);

@@ -23,7 +23,7 @@ use super::drawing::{ConductorInk, draw_hover_outline};
 use super::lod::{self, TextClass, TextLod};
 use super::viewport::Viewport;
 
-const LABEL_FONT_WORLD_SIZE: f32 = 11.0;
+pub(crate) const LABEL_FONT_WORLD_SIZE: f32 = 11.0;
 const LABEL_OFFSET_X_WORLD: f32 = 7.0;
 const LABEL_OFFSET_Y_WORLD: f32 = -5.0;
 const LABEL_LINE_HEIGHT_WORLD: f32 = 13.0;
@@ -62,11 +62,65 @@ struct NetLabelScreenLayout {
     attachment_hit_rect: Rect,
 }
 
+fn label_pos(label: &NetLabel) -> Pos2 {
+    Pos2::new(label.pos.x as f32, label.pos.y as f32)
+}
+
 fn display_name(label: &NetLabel) -> &str {
     if label.name.trim().is_empty() {
         INVALID_LABEL_PLACEHOLDER
     } else {
         &label.name
+    }
+}
+
+/// A net label in world units, as a zoomless drawing (the SVG) places it.
+pub(crate) struct NetLabelWorldLayout<'a> {
+    /// What the label reads: its name, or the placeholder for a blank one.
+    pub(crate) name: &'a str,
+    pub(crate) font_size: f32,
+    /// The bottom-left corner of the name's text box.
+    pub(crate) corner: Pos2,
+    /// Half the diagonal of the attachment diamond.
+    pub(crate) diamond_half: f32,
+    /// An off-sheet connector's tab after a name of the estimated width.
+    pub(crate) tab: Option<(Rect, CrossSheetPortDirection)>,
+}
+
+/// The world corner a label's name stands on: the canvas hangs the shaped
+/// name above it at every zoom, and the SVG sets its baseline from it.
+fn name_corner_world(label: &NetLabel) -> Pos2 {
+    Pos2::new(
+        label.pos.x as f32 + LABEL_OFFSET_X_WORLD,
+        label.pos.y as f32 + LABEL_OFFSET_Y_WORLD,
+    )
+}
+
+/// One em of the name's line box: Plex's ascent plus descent.
+const LINE_BOX_EM: f32 = 1.3;
+
+pub(crate) fn world_layout(label: &NetLabel) -> NetLabelWorldLayout<'_> {
+    let name = display_name(label);
+    let corner = name_corner_world(label);
+    let height = LABEL_FONT_WORLD_SIZE * LINE_BOX_EM;
+    let tab = label.kind.off_sheet_direction().map(|direction| {
+        let left = corner.x
+            + name.chars().count() as f32 * LABEL_GLYPH_WIDTH_WORLD
+            + CONNECTOR_TAB_GAP_WORLD;
+        (
+            Rect::from_min_size(
+                Pos2::new(left, corner.y - height),
+                vec2(CONNECTOR_TAB_WIDTH_WORLD, height),
+            ),
+            direction,
+        )
+    });
+    NetLabelWorldLayout {
+        name,
+        font_size: LABEL_FONT_WORLD_SIZE,
+        corner,
+        diamond_half: lod::DIAMOND_HALF_WU,
+        tab,
     }
 }
 
@@ -82,6 +136,7 @@ fn screen_layout(
     let ppp = ctx.pixels_per_point();
     let zoom = viewport.zoom;
     let anchor = viewport.schematic_to_screen(label.pos);
+    let corner = anchor + (name_corner_world(label) - label_pos(label)) * zoom;
     let name = display_name(label);
     let (text, text_rect) =
         match lod::text_lod(LABEL_FONT_WORLD_SIZE, zoom, ppp, TextClass::Electrical) {
@@ -93,11 +148,7 @@ fn screen_layout(
                         color,
                     )
                 });
-                let text_min = anchor
-                    + vec2(
-                        LABEL_OFFSET_X_WORLD * zoom,
-                        LABEL_OFFSET_Y_WORLD * zoom - galley.size().y,
-                    );
+                let text_min = corner - vec2(0.0, galley.size().y);
                 let rect = Rect::from_min_size(text_min, galley.size());
                 (LabelText::Shaped(galley), rect)
             }
@@ -109,11 +160,7 @@ fn screen_layout(
                     TextLod::Draw(_) | TextLod::Hide => 1.0 / ppp.max(f32::EPSILON),
                 };
                 let box_height = LABEL_LINE_HEIGHT_WORLD * zoom;
-                let text_min = anchor
-                    + vec2(
-                        LABEL_OFFSET_X_WORLD * zoom,
-                        LABEL_OFFSET_Y_WORLD * zoom - box_height,
-                    );
+                let text_min = corner - vec2(0.0, box_height);
                 let width = lod::greek_bar_width_pt(
                     name.chars().count(),
                     LABEL_GLYPH_WIDTH_WORLD,
@@ -172,9 +219,24 @@ fn paint_connector_tab(
     direction: CrossSheetPortDirection,
     color: Color32,
 ) {
-    let stroke = Stroke::new((rect.height() * 0.085).clamp(0.8, 1.6), color);
+    let stroke = Stroke::new(
+        (rect.height() * CONNECTOR_TAB_STROKE_PER_HEIGHT).clamp(0.8, 1.6),
+        color,
+    );
     painter.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
+    for segment in connector_tab_marks(rect, direction) {
+        painter.line_segment(segment, stroke);
+    }
+}
 
+/// A connector tab's stroke, as a fraction of its height.
+pub(crate) const CONNECTOR_TAB_STROKE_PER_HEIGHT: f32 = 0.085;
+
+/// The marks inside a connector tab, in whatever space `rect` is in.
+pub(crate) fn connector_tab_marks(
+    rect: Rect,
+    direction: CrossSheetPortDirection,
+) -> Vec<[Pos2; 2]> {
     let center = rect.center();
     let reach = rect.width() * 0.28;
     let head = rect.width() * 0.16;
@@ -183,38 +245,34 @@ fn paint_connector_tab(
     let right = Pos2::new(center.x + reach, center.y);
 
     if matches!(direction, CrossSheetPortDirection::Supply) {
-        painter.line_segment(
+        return vec![
             [
                 Pos2::new(left.x, center.y - rise),
                 Pos2::new(right.x, center.y - rise),
             ],
-            stroke,
-        );
-        painter.line_segment(
             [
                 Pos2::new(center.x, center.y - rise),
                 Pos2::new(center.x, center.y + rise),
             ],
-            stroke,
-        );
-        return;
+        ];
     }
 
-    painter.line_segment([left, right], stroke);
+    let mut marks = vec![[left, right]];
     if matches!(
         direction,
         CrossSheetPortDirection::Input | CrossSheetPortDirection::InOut
     ) {
-        painter.line_segment([left, Pos2::new(left.x + head, center.y - rise)], stroke);
-        painter.line_segment([left, Pos2::new(left.x + head, center.y + rise)], stroke);
+        marks.push([left, Pos2::new(left.x + head, center.y - rise)]);
+        marks.push([left, Pos2::new(left.x + head, center.y + rise)]);
     }
     if matches!(
         direction,
         CrossSheetPortDirection::Output | CrossSheetPortDirection::InOut
     ) {
-        painter.line_segment([right, Pos2::new(right.x - head, center.y - rise)], stroke);
-        painter.line_segment([right, Pos2::new(right.x - head, center.y + rise)], stroke);
+        marks.push([right, Pos2::new(right.x - head, center.y - rise)]);
+        marks.push([right, Pos2::new(right.x - head, center.y + rise)]);
     }
+    marks
 }
 
 pub fn draw_net_label(

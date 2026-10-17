@@ -375,7 +375,7 @@ fn write_symbol_body_svg(
                 if points.is_empty() {
                     continue;
                 }
-                svg.push_str(r#"<path class="component" d=""#);
+                svg.push_str(r#"<path class="symbol" d=""#);
                 for (index, point) in points.iter().enumerate() {
                     let (x, y) = to_svg_symbol(component, symbol, *point, config);
                     if index == 0 {
@@ -391,10 +391,10 @@ fn write_symbol_body_svg(
             }
             SymbolShape::Circle { center, radius } => {
                 let (cx, cy) = to_svg_symbol(component, symbol, *center, config);
-                let radius = *radius as f64 * config.grid_size;
+                let radius = *radius as f64 * config.units_per_world;
                 writeln!(
                     svg,
-                    r#"<circle class="component" cx="{cx}" cy="{cy}" r="{radius}"/>"#
+                    r#"<circle class="symbol" cx="{cx}" cy="{cy}" r="{radius}"/>"#
                 )
                 .unwrap();
             }
@@ -408,7 +408,7 @@ fn write_symbol_body_svg(
                 if points.is_empty() {
                     continue;
                 }
-                svg.push_str(r#"<path class="component" d=""#);
+                svg.push_str(r#"<path class="symbol" d=""#);
                 for (index, point) in points.into_iter().enumerate() {
                     let (x, y) = to_svg_symbol(component, symbol, point, config);
                     if index == 0 {
@@ -433,11 +433,11 @@ fn write_symbol_body_svg(
             }
             SymbolShape::Dot { center, radius } => {
                 let (cx, cy) = to_svg_symbol(component, symbol, *center, config);
-                let radius = *radius as f64 * config.grid_size;
+                let radius = *radius as f64 * config.units_per_world;
                 writeln!(
                     svg,
                     r#"<circle cx="{cx}" cy="{cy}" r="{radius}" fill="{fill}" stroke="none"/>"#,
-                    fill = config.component_color
+                    fill = config.symbol_color
                 )
                 .unwrap();
             }
@@ -447,16 +447,9 @@ fn write_symbol_body_svg(
                 size,
                 align,
             } => {
-                let (x, y) = to_svg_symbol(component, symbol, *anchor, config);
-                let height = f64::from(size.height()) * config.grid_size;
-                write_sized_text_svg(
-                    svg,
-                    x,
-                    y,
-                    height,
-                    text,
-                    symbol_text_align(component, *align),
-                );
+                let at = to_svg_symbol(component, symbol, *anchor, config);
+                let height = f64::from(size.height()) * config.units_per_world;
+                write_body_text_svg(svg, at, text, symbol_text_align(component, *align), height);
             }
         }
     }
@@ -474,17 +467,17 @@ fn write_symbol_pins_svg(
         let (x2, y2) = to_svg(component, symbol.pin_lead_inner(pin), config);
         writeln!(
             svg,
-            r#"<line class="component" x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}"/>"#
+            r#"<line class="symbol" x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}"/>"#
         )
         .unwrap();
         write_direction_mark_svg(svg, (x1, y1), (x2, y2), pin.direction, config);
-        let (tx, ty) = to_svg(component, symbol.pin_label_anchor(pin), config);
-        write_anchored_text_svg(
+        write_text_svg(
             svg,
-            tx,
-            ty,
+            "pin",
+            to_svg(component, symbol.pin_label_anchor(pin), config),
             &fit_pin_name(&pin.name),
             pin_label_align(component, pin.side),
+            f64::from(GENERATED_PIN_LABEL_SIZE) * config.units_per_world,
         );
     }
 }
@@ -506,7 +499,7 @@ fn write_direction_mark_svg(
         return;
     }
     let inward = (lead.0 / span, lead.1 / span);
-    let length = (f64::from(MARK_LENGTH) * config.grid_size).min(span * 0.5);
+    let length = (f64::from(MARK_LENGTH) * config.units_per_world).min(span * 0.5);
     let base_offset = (span - length) * 0.5;
     let at = |distance: f64| {
         (
@@ -520,8 +513,8 @@ fn write_direction_mark_svg(
         (at(base_offset), at(base_offset + length))
     };
     let across = (
-        -inward.1 * f64::from(MARK_HALF_WIDTH) * config.grid_size,
-        inward.0 * f64::from(MARK_HALF_WIDTH) * config.grid_size,
+        -inward.1 * f64::from(MARK_HALF_WIDTH) * config.units_per_world,
+        inward.0 * f64::from(MARK_HALF_WIDTH) * config.units_per_world,
     );
     writeln!(
         svg,
@@ -532,7 +525,7 @@ fn write_direction_mark_svg(
         base.1 + across.1,
         base.0 - across.0,
         base.1 - across.1,
-        fill = config.component_color
+        fill = config.symbol_color
     )
     .unwrap();
 }
@@ -549,13 +542,12 @@ fn write_symbol_labels_svg(
         .show_name(SchematicParameterLabelVisibility::NamesAndValues)
         && !component.name.is_empty()
     {
-        let (x, y) = to_svg_symbol(component, symbol, name_anchor, config);
-        write_instance_label_svg(
+        InstanceLabel::Name.write(
             svg,
-            (x, y),
+            to_svg_symbol(component, symbol, name_anchor, config),
             &component.name,
             instance_label_align(component, symbol, name_anchor),
-            InstanceLabel::Name.size(config),
+            config,
         );
     }
     let value = instance_value(component);
@@ -565,13 +557,12 @@ fn write_symbol_labels_svg(
         .show_value(SchematicParameterLabelVisibility::NamesAndValues)
         && !value.is_empty()
     {
-        let (x, y) = to_svg_symbol(component, symbol, value_anchor, config);
-        write_instance_label_svg(
+        InstanceLabel::Value.write(
             svg,
-            (x, y),
+            to_svg_symbol(component, symbol, value_anchor, config),
             value,
             instance_label_align(component, symbol, value_anchor),
-            InstanceLabel::Value.size(config),
+            config,
         );
     }
 }
@@ -584,38 +575,72 @@ pub(crate) enum InstanceLabel {
 }
 
 impl InstanceLabel {
-    /// The label's size and weight in SVG units: the canvas's world size
-    /// times the export's units per world unit.
-    pub(crate) fn size(self, config: &SvgExportConfig) -> (f64, u16) {
+    /// The label's size in SVG units: the canvas's world size times the
+    /// export's units per world unit.
+    pub(crate) fn size(self, config: &SvgExportConfig) -> f64 {
         use super::drawing::{INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD};
+        let world = match self {
+            Self::Name => INSTANCE_NAME_WORLD,
+            Self::Value => INSTANCE_VALUE_WORLD,
+        };
+        f64::from(world) * config.units_per_world
+    }
+
+    /// The style class that carries the label's type and ink.
+    pub(crate) const fn class(self) -> &'static str {
         match self {
-            Self::Name => (f64::from(INSTANCE_NAME_WORLD) * config.grid_size, 500),
-            Self::Value => (f64::from(INSTANCE_VALUE_WORLD) * config.grid_size, 400),
+            Self::Name => "name",
+            Self::Value => "value",
         }
+    }
+
+    /// The label hung off `at` as the canvas hangs it.
+    pub(crate) fn write(
+        self,
+        svg: &mut String,
+        at: (f64, f64),
+        text: &str,
+        align: Align2,
+        config: &SvgExportConfig,
+    ) {
+        write_text_svg(svg, self.class(), at, text, align, self.size(config));
     }
 }
 
-/// An instance name or value in the SVG, hung off its anchor as the canvas
-/// hangs it: `text-anchor` from the horizontal justification, and the
-/// baseline set from Plex's metrics (ascent 1.025 em, descent 0.275 em, a
-/// 1.3 em line) rather than `dominant-baseline`, which renderers disagree
-/// on. The type is inline, so it is not the sheet's monospace text class.
-pub(crate) fn write_instance_label_svg(
+/// Plex's ascent and descent, in em: a line box is 1.3 em, its baseline
+/// sits 1.025 em below its top, and so 0.375 em below its middle.
+const ASCENT_EM: f64 = 1.025;
+const DESCENT_EM: f64 = 0.275;
+const BASELINE_BELOW_MIDDLE_EM: f64 = 0.375;
+
+/// The baseline of a run of `size` hung off `y` the way egui's vertical
+/// alignment hangs a galley off its anchor.
+pub(crate) fn svg_text_baseline(y: f64, align: Align, size: f64) -> f64 {
+    match align {
+        Align::Min => y + ASCENT_EM * size,
+        Align::Center => y + BASELINE_BELOW_MIDDLE_EM * size,
+        Align::Max => y - DESCENT_EM * size,
+    }
+}
+
+/// A run of SVG text hung off its anchor as the canvas hangs it:
+/// `text-anchor` from the horizontal justification, and the baseline set
+/// from Plex's metrics rather than `dominant-baseline`, which renderers
+/// disagree on. The class carries the family, weight, ink and size; `size`
+/// only places the baseline.
+pub(crate) fn write_text_svg(
     svg: &mut String,
+    class: &str,
     (x, y): (f64, f64),
     text: &str,
     align: Align2,
-    (size, weight): (f64, u16),
+    size: f64,
 ) {
-    let (anchor, _) = svg_text_anchor(align);
-    let baseline = match align.y() {
-        Align::Min => y + 1.025 * size,
-        Align::Center => y + 0.375 * size,
-        Align::Max => y - 0.275 * size,
-    };
     writeln!(
         svg,
-        r#"<text class="text" x="{x}" y="{baseline}" text-anchor="{anchor}" style="font-family: 'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif; font-size: {size}px; font-weight: {weight}">{}</text>"#,
+        r#"<text class="{class}" x="{x}" y="{}" text-anchor="{}">{}</text>"#,
+        svg_text_baseline(y, align.y(), size),
+        svg_text_anchor(align.x()),
         escape_xml(text)
     )
     .unwrap();
@@ -639,49 +664,31 @@ fn write_polygon_svg(
     writeln!(
         svg,
         r#"" fill="{fill}" stroke="none"/>"#,
-        fill = config.component_color
-    )
-    .unwrap();
-}
-
-/// Write text that hangs off its anchor point the same way the canvas draws
-/// it, so an exported sheet places a pin name exactly where the screen does.
-fn write_anchored_text_svg(svg: &mut String, x: f64, y: f64, text: &str, align: Align2) {
-    let (anchor, baseline) = svg_text_anchor(align);
-    writeln!(
-        svg,
-        r#"<text class="text" x="{x}" y="{y}" text-anchor="{anchor}" dominant-baseline="{baseline}">{}</text>"#,
-        escape_xml(text)
+        fill = config.symbol_color
     )
     .unwrap();
 }
 
 /// Authored body text, whose size is part of the artwork rather than the
 /// sheet's type scale, so it carries its own.
-fn write_sized_text_svg(svg: &mut String, x: f64, y: f64, height: f64, text: &str, align: Align2) {
-    let (anchor, baseline) = svg_text_anchor(align);
+fn write_body_text_svg(svg: &mut String, (x, y): (f64, f64), text: &str, align: Align2, size: f64) {
     writeln!(
         svg,
-        r#"<text class="text" x="{x}" y="{y}" font-size="{height}" text-anchor="{anchor}" dominant-baseline="{baseline}">{}</text>"#,
+        r#"<text class="symbol-text" x="{x}" y="{}" font-size="{size}" text-anchor="{}">{}</text>"#,
+        svg_text_baseline(y, align.y(), size),
+        svg_text_anchor(align.x()),
         escape_xml(text)
     )
     .unwrap();
 }
 
-/// SVG's spelling of an [`Align2`]: the attribute pair that hangs a run off
-/// its anchor where egui's alignment would put it.
-fn svg_text_anchor(align: Align2) -> (&'static str, &'static str) {
-    let anchor = match align.x() {
+/// SVG's spelling of a horizontal justification.
+pub(crate) const fn svg_text_anchor(align: Align) -> &'static str {
+    match align {
         Align::Min => "start",
         Align::Center => "middle",
         Align::Max => "end",
-    };
-    let baseline = match align.y() {
-        Align::Min => "hanging",
-        Align::Center => "central",
-        Align::Max => "text-after-edge",
-    };
-    (anchor, baseline)
+    }
 }
 
 fn to_screen(origin: Pos2, scale: f32, component: &Component, point: Point) -> Pos2 {
@@ -702,8 +709,8 @@ fn to_screen_symbol(
 fn to_svg(component: &Component, point: Point, config: &SvgExportConfig) -> (f64, f64) {
     let transformed = component.pos + component.transform_point(point);
     (
-        transformed.x as f64 * config.grid_size,
-        transformed.y as f64 * config.grid_size,
+        transformed.x as f64 * config.units_per_world,
+        transformed.y as f64 * config.units_per_world,
     )
 }
 
@@ -1026,21 +1033,21 @@ mod tests {
         let component = Component::new(1, ComponentType::CellInstance, Point::new(100, 50));
         let mut svg = String::new();
         let config = SvgExportConfig {
-            grid_size: 1.0,
+            units_per_world: 1.0,
             ..SvgExportConfig::default()
         };
 
         write_resolved_symbol_svg(&mut svg, &component, &symbol, &config);
 
         assert!(
-            svg.contains(r#"<path class="component" d="M 100 50 L 130 60"/>"#),
+            svg.contains(r#"<path class="symbol" d="M 100 50 L 130 60"/>"#),
             "svg must place authored body points relative to the symbol origin: {svg}"
         );
         // The terminal stands 20 off the body's right edge, and the lead
         // spans all of it: a pin that stops short of the artwork reads as an
         // unconnected pin.
         assert!(
-            svg.contains(r#"<line class="component" x1="150" y1="50" x2="130" y2="50"/>"#),
+            svg.contains(r#"<line class="symbol" x1="150" y1="50" x2="130" y2="50"/>"#),
             "svg must run authored pin leads to the body, relative to the symbol origin: {svg}"
         );
         assert!(
@@ -1139,7 +1146,7 @@ mod tests {
         component.rotation = Rotation::R90;
         let mut svg = String::new();
         let config = SvgExportConfig {
-            grid_size: 1.0,
+            units_per_world: 1.0,
             ..SvgExportConfig::default()
         };
         write_resolved_symbol_svg(&mut svg, &component, &symbol, &config);
@@ -1157,13 +1164,11 @@ mod tests {
             name.contains(&format!(r#"x="{name_x}" y="{}""#, name_y + 1.025 * 10.0)),
             "the name hangs below its anchor by the Plex ascent: {name}"
         );
-        assert!(name.contains("font-size: 10px; font-weight: 500"), "{name}");
+        // The type is the page's name and value classes (C-10).
+        assert!(name.starts_with(r#"<text class="name""#), "{name}");
         let value = line("ota");
         assert!(value.contains(r#"text-anchor="end""#), "{value}");
-        assert!(
-            value.contains("font-size: 9px; font-weight: 400"),
-            "{value}"
-        );
+        assert!(value.starts_with(r#"<text class="value""#), "{value}");
         assert!(!name.contains("dominant-baseline"), "{name}");
     }
 
@@ -1180,7 +1185,7 @@ mod tests {
             &component,
             &symbol,
             &SvgExportConfig {
-                grid_size: 1.0,
+                units_per_world: 1.0,
                 ..SvgExportConfig::default()
             },
         );
@@ -1362,7 +1367,7 @@ mod tests {
         component.mirror_h = true;
         let mut svg = String::new();
         let config = SvgExportConfig {
-            grid_size: 1.0,
+            units_per_world: 1.0,
             ..SvgExportConfig::default()
         };
 
@@ -1375,7 +1380,10 @@ mod tests {
         );
         assert!(
             svg.contains(
-                r#"<text class="text" x="80" y="60" font-size="9" text-anchor="end" dominant-baseline="central">AMP</text>"#
+                // C-10: the baseline is set from Plex's metrics, 0.375 em
+                // below the anchor a centred run hangs off, as every page
+                // label's is, not left to `dominant-baseline`.
+                r#"<text class="symbol-text" x="80" y="63.375" font-size="9" text-anchor="end">AMP</text>"#
             ),
             "the run must export at the mirrored anchor, hanging off the other side: {svg}"
         );

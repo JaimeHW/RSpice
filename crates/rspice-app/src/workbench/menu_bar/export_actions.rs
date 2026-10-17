@@ -20,12 +20,19 @@ pub(super) fn action_export_svg_with_io(
         &state.workspace.content.schematic_buffers,
     );
     let view_path = state.workspace.content.active_view.display_path();
+    let sheet_key = state.workspace.content.active_schematic_reference().key();
     let svg_content = export_to_svg_with_symbol_resolver_and_context(
         state.schematic.document(),
         &config,
         &resolver,
         SvgDesignContext {
             view_path: &view_path,
+            // What the canvas shows: the active sheet.
+            sheet_catalog: state
+                .workspace
+                .content
+                .design_management
+                .sheet_catalog(&sheet_key),
         },
     );
 

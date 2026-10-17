@@ -117,40 +117,50 @@ impl fmt::Display for SvgColorParseError {
 
 impl Error for SvgColorParseError {}
 
+impl From<egui::Color32> for SvgColor {
+    fn from(color: egui::Color32) -> Self {
+        Self::rgba(color.r(), color.g(), color.b(), color.a())
+    }
+}
+
 /// Configuration for SVG export.
+///
+/// An exported sheet is paper: one light print palette whatever the screen
+/// theme, in the canvas's nominal stroke widths and world-unit type, all
+/// scaled by `units_per_world`.
 #[derive(Debug, Clone)]
 pub struct SvgExportConfig {
-    /// Grid size in SVG units
-    pub grid_size: f64,
-    /// Stroke width for wires
-    pub wire_stroke_width: f64,
-    /// Stroke width for components
-    pub component_stroke_width: f64,
-    /// Wire color
+    /// SVG units per schematic world unit.
+    pub units_per_world: f64,
+    /// Wires, buses, taps and junction dots.
     pub wire_color: SvgColor,
-    /// Component color
-    pub component_color: SvgColor,
-    /// Text color
+    /// Symbol strokes, pin leads and symbol body text.
+    pub symbol_color: SvgColor,
+    /// Instance names.
+    pub name_color: SvgColor,
+    /// Values, pin names, notes, documentation shapes and probes.
     pub text_color: SvgColor,
+    /// Net labels, connectors, bus declarations, tap slices and attachment
+    /// diamonds.
+    pub net_label_color: SvgColor,
     /// Page background color. `None` preserves a transparent SVG page.
     pub background_color: Option<SvgColor>,
-    /// Font size for labels
-    pub font_size: f64,
     /// Margin around content
     pub margin: f64,
 }
 
 impl Default for SvgExportConfig {
+    /// The light screen tokens on white paper.
     fn default() -> Self {
+        let ink = rspice_ui_kit::palette::INSTRUMENT_LIGHT;
         Self {
-            grid_size: 10.0,
-            wire_stroke_width: 2.0,
-            component_stroke_width: 2.0,
-            wire_color: SvgColor::rgb(0x00, 0xFF, 0x00),
-            component_color: SvgColor::rgb(0xFF, 0xFF, 0xFF),
-            text_color: SvgColor::rgb(0xAA, 0xAA, 0xAA),
-            background_color: Some(SvgColor::rgb(0x1A, 0x1A, 0x1A)),
-            font_size: 12.0,
+            units_per_world: 10.0,
+            wire_color: ink.wire.into(),
+            symbol_color: ink.symbol.into(),
+            name_color: ink.text.into(),
+            text_color: ink.text_dim.into(),
+            net_label_color: ink.net_label.into(),
+            background_color: Some(SvgColor::rgb(0xFF, 0xFF, 0xFF)),
             margin: 50.0,
         }
     }
@@ -184,5 +194,26 @@ mod tests {
             SvgColor::try_from("#12GG00").unwrap_err(),
             SvgColorParseError::InvalidHexDigit
         );
+    }
+
+    /// C-10: the default export is the print palette of D1 section 11, the
+    /// light screen tokens on white, not neon on near-black.
+    #[test]
+    fn the_default_export_inks_are_the_light_tokens_on_white() {
+        let config = SvgExportConfig::default();
+        for (ink, expected) in [
+            (config.wire_color, "#4E3400"),
+            (config.symbol_color, "#2C3135"),
+            (config.name_color, "#1F2528"),
+            (config.text_color, "#53595D"),
+            (config.net_label_color, "#7D5200"),
+        ] {
+            assert_eq!(ink.to_string(), expected);
+        }
+        assert_eq!(
+            config.background_color,
+            Some(SvgColor::rgb(0xFF, 0xFF, 0xFF))
+        );
+        assert_eq!(config.units_per_world, 10.0);
     }
 }
