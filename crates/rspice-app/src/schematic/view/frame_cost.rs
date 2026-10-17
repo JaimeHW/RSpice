@@ -17,7 +17,8 @@ use crate::state::{
     PortDirection, PortSpec, SchematicAnnotationVisibility, SimulationRun, SymbolDocument,
     SymbolPin, SymbolShape, Tool, View, ViewType, Wire,
 };
-use crate::workbench::app_state::AppState;
+
+use super::AppState;
 
 /// Components per sheet, laid out as a lattice of this many columns.
 const COLUMNS: usize = 40;

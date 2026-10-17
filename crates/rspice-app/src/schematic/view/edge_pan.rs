@@ -3,7 +3,7 @@
 //! paste. Every reference editor does this; without it a part cannot be
 //! carried past what is on screen.
 
-use crate::workbench::app_state::AppState;
+use super::AppState;
 use egui::{Popup, Rect, Response, Ui};
 use rspice_schematic_editor::view::navigation::apply_edge_pan;
 

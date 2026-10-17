@@ -7,11 +7,10 @@
 //! command is one undo step, and the cell view's other sheets are out of
 //! reach while the wiring is carried and tidied.
 
-use super::SchematicSymbolContext;
 use super::sheet_visibility::{retain_selection_on_active_sheet, with_active_wire_topology};
+use super::{AppState, SchematicSymbolContext};
 use crate::state::{MoveSelectionMode, Point, Selection};
 use crate::workbench::app::on_grid;
-use crate::workbench::app_state::AppState;
 
 /// One object and the step that lands its anchor on the grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

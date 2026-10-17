@@ -6,10 +6,9 @@ use super::super::symbols::SymbolLibrary;
 use super::preview::{preview_view, transform_preview_style};
 use super::sheet_visibility::with_active_wire_topology_in;
 use super::snap_resolution::resolve_grid_pointer;
-use super::{SchematicSymbolContext, viewport::Viewport};
+use super::{AppState, SchematicSymbolContext, viewport::Viewport};
 use crate::state::Point;
 use crate::workbench::app::{cancel_floating_paste, floating_paste_scope, on_grid};
-use crate::workbench::app_state::AppState;
 use egui::{Key, Modifiers, Painter, PointerButton, Response, Ui};
 use rspice_schematic_editor::view::preview;
 
