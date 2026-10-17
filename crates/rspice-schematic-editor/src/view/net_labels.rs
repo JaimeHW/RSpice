@@ -15,27 +15,24 @@ use std::sync::Arc;
 
 use egui::{Color32, Context, Galley, Painter, Pos2, Rect, Stroke, vec2};
 
-use rspice_design::schematic::net_label::NetLabel;
+use rspice_design::schematic::{
+    label_layout::{
+        self, CONNECTOR_TAB_GAP_WORLD, CONNECTOR_TAB_WIDTH_WORLD, LayoutPoint, LayoutRect,
+        NET_LABEL_GLYPH_WIDTH_WORLD as LABEL_GLYPH_WIDTH_WORLD,
+    },
+    net_label::NetLabel,
+};
 use rspice_design_model::{Point, design_management::CrossSheetPortDirection};
 use rspice_ui_kit::theme::{self, FontWeight};
 
-use super::drawing::{ConductorInk, draw_hover_outline};
+use super::drawing::{ConductorInk, draw_hover_outline, layout_pos};
 use super::lod::{self, TextClass, TextLod};
 use super::viewport::Viewport;
 
-pub(crate) const LABEL_FONT_WORLD_SIZE: f32 = 11.0;
-const LABEL_OFFSET_X_WORLD: f32 = 7.0;
-const LABEL_OFFSET_Y_WORLD: f32 = -5.0;
+pub(crate) const LABEL_FONT_WORLD_SIZE: f32 = label_layout::NET_LABEL_FONT_WORLD;
 const LABEL_LINE_HEIGHT_WORLD: f32 = 13.0;
-const LABEL_GLYPH_WIDTH_WORLD: f32 = 6.7;
 const POINTER_SLOP: f32 = 2.5;
 const PREVIEW_ALPHA: f32 = 0.55;
-const INVALID_LABEL_PLACEHOLDER: &str = "<unnamed>";
-/// Gap between the shaped name and the connector tab, in world units.
-const CONNECTOR_TAB_GAP_WORLD: f32 = 3.0;
-/// Width of the connector tab, in world units. The height follows the name so
-/// the pair reads as one object at every zoom.
-const CONNECTOR_TAB_WIDTH_WORLD: f32 = 12.0;
 
 /// What stands where the name is drawn.
 #[derive(Clone)]
@@ -67,11 +64,7 @@ fn label_pos(label: &NetLabel) -> Pos2 {
 }
 
 fn display_name(label: &NetLabel) -> &str {
-    if label.name.trim().is_empty() {
-        INVALID_LABEL_PLACEHOLDER
-    } else {
-        &label.name
-    }
+    label_layout::net_label_display_name(label)
 }
 
 /// A net label in world units, as a zoomless drawing (the SVG) places it.
@@ -87,40 +80,28 @@ pub(crate) struct NetLabelWorldLayout<'a> {
     pub(crate) tab: Option<(Rect, CrossSheetPortDirection)>,
 }
 
+fn layout_rect(rect: LayoutRect) -> Rect {
+    Rect::from_min_max(layout_pos(rect.min), layout_pos(rect.max))
+}
+
 /// The world corner a label's name stands on: the canvas hangs the shaped
 /// name above it at every zoom, and the SVG sets its baseline from it.
 fn name_corner_world(label: &NetLabel) -> Pos2 {
-    Pos2::new(
-        label.pos.x as f32 + LABEL_OFFSET_X_WORLD,
-        label.pos.y as f32 + LABEL_OFFSET_Y_WORLD,
-    )
+    layout_pos(label_layout::net_label_name_corner(label))
 }
 
-/// One em of the name's line box: Plex's ascent plus descent.
-const LINE_BOX_EM: f32 = 1.3;
-
+/// The shared net-label layout (`label_layout::net_label_layout`) in egui
+/// types.
 pub(crate) fn world_layout(label: &NetLabel) -> NetLabelWorldLayout<'_> {
-    let name = display_name(label);
-    let corner = name_corner_world(label);
-    let height = LABEL_FONT_WORLD_SIZE * LINE_BOX_EM;
-    let tab = label.kind.off_sheet_direction().map(|direction| {
-        let left = corner.x
-            + name.chars().count() as f32 * LABEL_GLYPH_WIDTH_WORLD
-            + CONNECTOR_TAB_GAP_WORLD;
-        (
-            Rect::from_min_size(
-                Pos2::new(left, corner.y - height),
-                vec2(CONNECTOR_TAB_WIDTH_WORLD, height),
-            ),
-            direction,
-        )
-    });
+    let layout = label_layout::net_label_layout(label);
     NetLabelWorldLayout {
-        name,
-        font_size: LABEL_FONT_WORLD_SIZE,
-        corner,
-        diamond_half: lod::DIAMOND_HALF_WU,
-        tab,
+        name: layout.name,
+        font_size: layout.font_size,
+        corner: layout_pos(layout.corner),
+        diamond_half: layout.diamond_half,
+        tab: layout
+            .tab
+            .map(|(rect, direction)| (layout_rect(rect), direction)),
     }
 }
 
@@ -229,50 +210,23 @@ fn paint_connector_tab(
     }
 }
 
-/// A connector tab's stroke, as a fraction of its height.
-pub(crate) const CONNECTOR_TAB_STROKE_PER_HEIGHT: f32 = 0.085;
+pub(crate) const CONNECTOR_TAB_STROKE_PER_HEIGHT: f32 =
+    label_layout::CONNECTOR_TAB_STROKE_PER_HEIGHT;
 
-/// The marks inside a connector tab, in whatever space `rect` is in.
+/// The shared connector-tab marks (`label_layout::connector_tab_marks`), in
+/// whatever space `rect` is in.
 pub(crate) fn connector_tab_marks(
     rect: Rect,
     direction: CrossSheetPortDirection,
 ) -> Vec<[Pos2; 2]> {
-    let center = rect.center();
-    let reach = rect.width() * 0.28;
-    let head = rect.width() * 0.16;
-    let rise = rect.height() * 0.20;
-    let left = Pos2::new(center.x - reach, center.y);
-    let right = Pos2::new(center.x + reach, center.y);
-
-    if matches!(direction, CrossSheetPortDirection::Supply) {
-        return vec![
-            [
-                Pos2::new(left.x, center.y - rise),
-                Pos2::new(right.x, center.y - rise),
-            ],
-            [
-                Pos2::new(center.x, center.y - rise),
-                Pos2::new(center.x, center.y + rise),
-            ],
-        ];
-    }
-
-    let mut marks = vec![[left, right]];
-    if matches!(
-        direction,
-        CrossSheetPortDirection::Input | CrossSheetPortDirection::InOut
-    ) {
-        marks.push([left, Pos2::new(left.x + head, center.y - rise)]);
-        marks.push([left, Pos2::new(left.x + head, center.y + rise)]);
-    }
-    if matches!(
-        direction,
-        CrossSheetPortDirection::Output | CrossSheetPortDirection::InOut
-    ) {
-        marks.push([right, Pos2::new(right.x - head, center.y - rise)]);
-        marks.push([right, Pos2::new(right.x - head, center.y + rise)]);
-    }
-    marks
+    let rect = LayoutRect {
+        min: LayoutPoint::new(rect.min.x, rect.min.y),
+        max: LayoutPoint::new(rect.max.x, rect.max.y),
+    };
+    label_layout::connector_tab_marks(rect, direction)
+        .into_iter()
+        .map(|[start, end]| [layout_pos(start), layout_pos(end)])
+        .collect()
 }
 
 pub fn draw_net_label(
@@ -421,7 +375,8 @@ pub fn hit_bounds(ctx: &Context, viewport: &Viewport, label: &NetLabel) -> Optio
 /// Pointer hit testing deliberately uses the exact shaped screen galley above.
 pub fn world_bounds(label: &NetLabel) -> (Point, Point) {
     let glyphs = display_name(label).chars().count() as f32;
-    let text_min_x = label.pos.x as f32 + LABEL_OFFSET_X_WORLD;
+    let corner = name_corner_world(label);
+    let text_min_x = corner.x;
     let min_x = label.pos.x as f32;
     let tab_width = if label.kind.off_sheet_direction().is_some() {
         CONNECTOR_TAB_GAP_WORLD + CONNECTOR_TAB_WIDTH_WORLD
@@ -429,7 +384,7 @@ pub fn world_bounds(label: &NetLabel) -> (Point, Point) {
         0.0
     };
     let max_x = text_min_x + glyphs * LABEL_GLYPH_WIDTH_WORLD + tab_width;
-    let text_max_y = label.pos.y as f32 + LABEL_OFFSET_Y_WORLD;
+    let text_max_y = corner.y;
     let max_y = label.pos.y as f32;
     let min_y = text_max_y - LABEL_LINE_HEIGHT_WORLD;
     (

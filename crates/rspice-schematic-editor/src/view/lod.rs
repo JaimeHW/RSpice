@@ -132,7 +132,8 @@ fn mark_pt(size_wu: f32, floor_pt: f32, ceiling_pt: f32, zoom: f32) -> f32 {
 /// A junction dot's nominal radius, in world units.
 pub const JUNCTION_RADIUS_WU: f32 = 1.5;
 /// Half the diagonal of a net label's attachment diamond, in world units.
-pub const DIAMOND_HALF_WU: f32 = 2.25;
+pub const DIAMOND_HALF_WU: f32 =
+    rspice_design::schematic::label_layout::NET_LABEL_DIAMOND_HALF_WORLD;
 
 /// A junction dot's radius in points. Never less than 1.25 times the drawn
 /// width of the thickest conductor it sits on, so its diameter is always at

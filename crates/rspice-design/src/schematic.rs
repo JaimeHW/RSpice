@@ -27,6 +27,7 @@ pub mod identity;
 pub mod interface_repair;
 pub mod junction_candidates;
 pub mod junction_edit;
+pub mod label_layout;
 pub mod label_position;
 pub mod movement;
 pub mod net_label;
