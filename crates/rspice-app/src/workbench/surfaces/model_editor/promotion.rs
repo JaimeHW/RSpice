@@ -93,7 +93,7 @@ pub(super) fn promotion_review_dialog(
         "Close"
     };
     let choice = Dialog::new("Model promotion review", primary)
-    .description("Review the exact source-bound checklist and create one immutable release plus its audit record only when every gate passes.")
+    .description("Review the checklist for this source revision. The release and its audit record are created only when every gate passes.")
     .size(DialogSize::Transaction)
     .fixed_height(740.0)
     .primary_enabled(if promotable {
@@ -109,7 +109,7 @@ pub(super) fn promotion_review_dialog(
             if exact_candidate_count > 1 {
                 blocker_note(
                     ui,
-                    "More than one release candidate is retained for this exact model source. Promotion fails closed until the project qualification record is repaired to one unambiguous candidate.",
+                    "More than one release candidate is saved for this model source. Promotion stays blocked until the project's qualification record is repaired to one candidate.",
                 );
             } else {
                 promotion_candidate_authoring_form(ui, app, project_writable);
@@ -122,7 +122,7 @@ pub(super) fn promotion_review_dialog(
         const COLUMNS: [(&str, f32); 2] = [("Promotion gate", 0.70), ("State", 0.30)];
         let checklist = &candidate.checklist;
         let rows = [
-            ("Source evidence binding", checklist.source_evidence_bound),
+            ("Results bound to this source", checklist.source_evidence_bound),
             ("Qualification", checklist.qualification_passed),
             ("Desktop qualification", checklist.desktop_passed),
             ("WebAssembly parity", checklist.webassembly_passed),
@@ -158,10 +158,10 @@ pub(super) fn promotion_review_dialog(
             promotion_note(
                 ui,
                 None,
-                "This exact candidate has already produced an immutable release and promotion audit record. Create a new model source revision for further changes.",
+                "This candidate has already produced a release and promotion audit record. Create a new model source revision for further changes.",
             );
         } else if checklist.is_complete() {
-            dialog_subheading(ui, "Immutable release identity");
+            dialog_subheading(ui, "Release identity");
             let [promotion, release, version] = qualification_three_rects(ui);
             let editor = &mut app.state.workbench.model_editor;
             qualification_text_field(
@@ -192,7 +192,7 @@ pub(super) fn promotion_review_dialog(
                 ui,
                 editor.promotion_error.as_deref(),
                 if project_writable {
-                    "Promotion adds the immutable release and audit record to this candidate. Save model revision then publishes the guarded, undoable project transaction."
+                    "Promotion adds the release and audit record to this candidate. Save model revision then saves it as one undoable project change."
                 } else {
                     "Promotion is unavailable while the project is read-only or qualification execution is active."
                 },
@@ -201,7 +201,7 @@ pub(super) fn promotion_review_dialog(
             promotion_note(
                 ui,
                 None,
-                "Promotion remains blocked. Correct the explicitly failed governance fields below; qualification and platform evidence remain bound to the exact retained source revision.",
+                "Promotion remains blocked. Correct the failed fields below; qualification and platform results stay tied to the saved source revision.",
             );
             promotion_candidate_authoring_form(ui, app, project_writable);
         }
@@ -235,13 +235,13 @@ fn promotion_unavailable_dialog(
     let mut open_plan = false;
     let mut review_disposition = false;
     let choice = Dialog::new("Model promotion unavailable", "Close")
-    .description("Promotion is disabled because the exact current model source does not yet have complete passing qualification evidence. Opening this review never converts a failed or missing vector into a pass.")
+    .description("Promotion is disabled because the current model source does not yet pass every qualification vector. Opening this review never turns a failed or missing vector into a pass.")
     .size(DialogSize::Transaction)
     .fixed_height(560.0)
     .show(ctx, |ui| {
         blocker_note(
             ui,
-            "Correct and rerun every unresolved exact-source vector, or record a bounded disposition that preserves the failure and its consumer impact. Promotion remains blocked until the retained qualification contract is satisfied.",
+            "Correct and rerun every unresolved vector for this source, or record a disposition that keeps the failure and its consumer impact. Promotion remains blocked until the qualification plan passes.",
         );
         render_table(
             ui,
@@ -254,7 +254,7 @@ fn promotion_unavailable_dialog(
                 ("Owner", 0.18),
             ],
             &rows,
-            "No exact-source qualification contract is retained.",
+            "No qualification plan is saved for this source.",
         );
         ui.add_space(8.0);
         ui.columns(2, |columns| {
@@ -264,7 +264,7 @@ fn promotion_unavailable_dialog(
             );
             columns[0].label(
                 egui::RichText::new(
-                    "Inspect, correct, and rerun the exact qualification plan before promotion.",
+                    "Inspect, correct, and rerun the qualification plan before promotion.",
                 )
                 .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                 .color(Tokens::get(columns[0].ctx()).color.text_dim),
@@ -282,7 +282,7 @@ fn promotion_unavailable_dialog(
             );
             columns[1].label(
                 egui::RichText::new(
-                    "A disposition preserves the failed observation; it cannot fabricate passing evidence.",
+                    "A disposition keeps the failed observation; it cannot turn it into a pass.",
                 )
                 .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                 .color(Tokens::get(columns[1].ctx()).color.text_dim),
@@ -302,10 +302,10 @@ fn promotion_unavailable_dialog(
             .workbench
             .model_editor
             .qualification_execution_notice = Some(if review_disposition {
-            "Select the unresolved exact-source vector and review its bounded disposition contract. The retained failure remains visible and cannot satisfy a passing-evidence gate."
+            "Select the unresolved vector and review its disposition. The failure stays visible and cannot count as a pass."
                 .to_owned()
         } else {
-            "Review and rerun the exact-source qualification plan before returning to promotion."
+            "Review and rerun the qualification plan for this source before returning to promotion."
                 .to_owned()
         });
     } else if matches!(choice, DialogChoice::Primary | DialogChoice::Cancelled) {
@@ -395,7 +395,7 @@ fn promotion_gate_rows(app: &RSpiceApp, records: &PersistedModelRecords) -> Vec<
     };
     vec![
         row(
-            "Exact qualification plan",
+            "Qualification plan",
             "at least one suite".to_owned(),
             format!("{} suite(s)", exact_suites.len()),
             !exact_suites.is_empty(),
@@ -416,7 +416,7 @@ fn promotion_gate_rows(app: &RSpiceApp, records: &PersistedModelRecords) -> Vec<
             "WebAssembly runtime",
         ),
         row(
-            "Cross-platform evidence",
+            "Cross-platform results",
             "one complete retained record".to_owned(),
             format!("{evidence_count} passing"),
             evidence_count > 0,
@@ -436,7 +436,7 @@ fn promotion_candidate_authoring_form(ui: &mut Ui, app: &mut RSpiceApp, writable
     ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
     let fields = &mut app.state.workbench.model_editor.promotion_candidate;
 
-    dialog_subheading(ui, "Candidate and exact qualification evidence");
+    dialog_subheading(ui, "Candidate and qualification record");
     let [candidate_id, candidate_version] = qualification_pair_rects(ui);
     qualification_text_field(
         ui,
@@ -466,7 +466,7 @@ fn promotion_candidate_authoring_form(ui: &mut Ui, app: &mut RSpiceApp, writable
     qualification_text_field(
         ui,
         evidence,
-        "Qualification evidence ID",
+        "Qualification record ID",
         &mut fields.evidence_id,
         true,
         writable,
@@ -716,7 +716,7 @@ fn compatibility_authoring_row(
     qualification_text_field(
         ui,
         id,
-        &format!("{platform} evidence ID"),
+        &format!("{platform} record ID"),
         evidence_id,
         true,
         writable,
@@ -724,7 +724,7 @@ fn compatibility_authoring_row(
     qualification_text_field(
         ui,
         digest,
-        &format!("{platform} evidence SHA-256"),
+        &format!("{platform} record SHA-256"),
         evidence_digest,
         true,
         writable,

@@ -83,9 +83,19 @@ pub(super) fn append_typed_metadata_comparison_rows(
         |value| &value.group,
         |value| {
             format!(
-                "{} variables · exact coefficients {:?}",
+                "{} variables · coefficients {}",
                 value.variables.len(),
-                value.coefficients
+                value
+                    .coefficients
+                    .iter()
+                    .map(|row| {
+                        row.iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ")
             )
         },
     );
@@ -159,7 +169,7 @@ pub(super) fn append_named_contract_rows<T, Key, Summary>(
             item: format!("{category}s"),
             released: released.len().to_string(),
             candidate: candidate.len().to_string(),
-            effect: "exact contracts unchanged".to_owned(),
+            effect: "unchanged".to_owned(),
             disposition: ModelComparisonDisposition::Unchanged,
         });
     }
@@ -182,7 +192,7 @@ pub(super) fn append_numerical_evidence_rows(
         let after = candidate_values.get(&key);
         let (effect, disposition) = match (before, after) {
             (Some(before), Some(after)) if before == after => (
-                "exact result unchanged".to_owned(),
+                "result unchanged".to_owned(),
                 ModelComparisonDisposition::Unchanged,
             ),
             (Some(before), Some(after)) => {
@@ -245,8 +255,10 @@ pub(super) fn evidence_numerical_values(
             for reference in &platform.references {
                 values.insert(
                     format!(
-                        "{} / {:?} / {}",
-                        vector.vector_id, platform.platform, reference.quantity
+                        "{} / {} / {}",
+                        vector.vector_id,
+                        qualification_platform_label(platform.platform),
+                        reference.quantity
                     ),
                     NumericalEvidenceValue {
                         observed: reference.observed_value.get(),
@@ -283,7 +295,7 @@ pub(super) fn build_release_candidate(
         .find(|evidence| evidence.id.eq_ignore_ascii_case(fields.evidence_id.trim()))
         .ok_or_else(|| {
             format!(
-                "Qualification evidence '{}' does not exist",
+                "Qualification record '{}' does not exist",
                 fields.evidence_id.trim()
             )
         })?;
@@ -295,12 +307,17 @@ pub(super) fn build_release_candidate(
         || evidence.source.source_digest != draft.base_source_digest
         || evidence.source.source_revision != draft.base_source_revision
     {
-        return Err("Selected evidence is not bound to the open model source revision".to_owned());
+        return Err(
+            "The selected qualification record is not for the open model source revision"
+                .to_owned(),
+        );
     }
     if !evidence.suite_id.eq_ignore_ascii_case(&suite.id)
         || evidence.suite_revision != suite.revision
     {
-        return Err("Selected evidence is not bound to the selected suite revision".to_owned());
+        return Err(
+            "The selected qualification record is not for the selected suite revision".to_owned(),
+        );
     }
 
     let documentation = DocumentationSet::try_new(vec![
@@ -374,7 +391,7 @@ pub(super) fn build_release_candidate(
                 platform: QualificationPlatform::Desktop,
                 disposition: fields.desktop_compatibility,
                 evidence: document_reference(
-                    "Desktop compatibility evidence",
+                    "Desktop compatibility record",
                     &fields.desktop_evidence_id,
                     &fields.desktop_evidence_digest,
                 )?,
@@ -383,7 +400,7 @@ pub(super) fn build_release_candidate(
                 platform: QualificationPlatform::WebAssembly,
                 disposition: fields.webassembly_compatibility,
                 evidence: document_reference(
-                    "WebAssembly compatibility evidence",
+                    "WebAssembly compatibility record",
                     &fields.webassembly_evidence_id,
                     &fields.webassembly_evidence_digest,
                 )?,

@@ -14,7 +14,7 @@ pub(super) fn parse_frequency_axis(value: &str) -> Result<Vec<FiniteValue>, Stri
         .filter(|token| !token.is_empty())
         .collect::<Vec<_>>();
     if tokens.is_empty() {
-        return Err("Frequency axis requires at least one exact frequency in hertz".to_owned());
+        return Err("Frequency axis requires at least one frequency in hertz".to_owned());
     }
     tokens
         .into_iter()
@@ -303,9 +303,7 @@ pub(super) fn start_qualification_execution_for(
         return Err("Qualification cannot run while the project is read-only".to_owned());
     }
     if !validate_open_candidate(app) {
-        return Err(
-            "Qualification cannot run until the exact model candidate validates".to_owned(),
-        );
+        return Err("Qualification cannot run until the model candidate validates".to_owned());
     }
     let editor = &mut app.state.workbench.model_editor;
     if editor.qualification_execution.is_some() {
@@ -316,10 +314,7 @@ pub(super) fn start_qualification_execution_for(
         .as_ref()
         .ok_or_else(|| "No project-owned model candidate is open".to_owned())?;
     if draft.definition_is_dirty() {
-        return Err(
-            "Save the model definition before producing source-bound qualification evidence"
-                .to_owned(),
-        );
+        return Err("Save the model definition before running qualification".to_owned());
     }
     draft
         .qualification
@@ -343,7 +338,7 @@ pub(super) fn start_qualification_execution_for(
             .find(|suite| suite.id.eq_ignore_ascii_case(suite_id))
             .ok_or_else(|| {
                 format!(
-                    "Qualification suite {suite_id:?} is missing or is not bound to the current model source revision"
+                    "Qualification suite '{suite_id}' is missing or is not bound to the current model source revision"
                 )
             })?;
         vec![suite]
@@ -475,7 +470,7 @@ pub fn advance_qualification_execution(app: &mut RSpiceApp) {
                     .workbench
                     .model_editor
                     .qualification_execution_notice = Some(format!(
-                    "Qualification stopped without publishing partial evidence: {error}"
+                    "Qualification stopped without keeping partial results: {error}"
                 ));
                 return;
             }
@@ -525,7 +520,7 @@ pub fn advance_qualification_execution(app: &mut RSpiceApp) {
                     .workbench
                     .model_editor
                     .qualification_execution_notice = Some(format!(
-                    "{platform} qualification completed for {} suite(s); {} exact Desktop/WebAssembly evidence record(s) were assembled. Save the qualification revision to retain the results.",
+                    "{platform} qualification completed for {} suite(s); {} Desktop/WebAssembly result record(s) were assembled. Save the qualification revision to keep the results.",
                     execution.total_suites(),
                     execution.assembled_evidence,
                 ));

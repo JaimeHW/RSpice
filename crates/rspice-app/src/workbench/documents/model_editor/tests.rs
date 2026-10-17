@@ -1649,7 +1649,7 @@ fn a_canonical_card_repeated_in_its_source_is_still_rejected() {
     let error = resolve_project_model_in_closure(library, "multi-owned", "nch_owned", &closure)
         .expect_err("a card occurring twice is ambiguous and must not resolve");
     assert!(
-        error.contains("must occur exactly once"),
+        error.contains("must appear exactly once"),
         "unexpected failure: {error}"
     );
 }

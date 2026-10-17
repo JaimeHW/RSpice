@@ -617,7 +617,7 @@ pub(crate) fn resolve_project_model_in_closure(
     let occurrences = occurrences_up_to_two(source_bytes, &canonical);
     if occurrences != 1 {
         return Err(format!(
-            "Model '{model_name}' canonical revision must occur exactly once in retained source '{}' (found {})",
+            "Model '{model_name}' definition must appear exactly once in source '{}' (found {})",
             source_path.display(),
             if occurrences < 2 {
                 occurrences.to_string()
@@ -1139,13 +1139,13 @@ impl ModelEditorDraft {
             .ok_or_else(|| format!("Model release '{release_id}' does not exist"))?;
         if release.definition_source.is_empty() {
             return Err(format!(
-                "Release '{}' predates retained definition snapshots and cannot support an exact numerical comparison",
+                "Release '{}' has no saved copy of its definition, so its values cannot be compared",
                 release.identity.id
             ));
         }
         let released_metadata = release.definition_metadata.as_ref().ok_or_else(|| {
             format!(
-                "Release '{}' predates retained typed definition metadata and cannot support an exact semantic comparison",
+                "Release '{}' has no saved definition details, so its parameters cannot be compared",
                 release.identity.id
             )
         })?;
@@ -1193,7 +1193,7 @@ impl ModelEditorDraft {
                 self.base_source_digest
             ),
             effect: if release_source_matches {
-                "exact source match".to_owned()
+                "same source".to_owned()
             } else {
                 "source revision changed".to_owned()
             },
@@ -2030,10 +2030,8 @@ impl ModelEditorState {
                         .eq_ignore_ascii_case(&qualification.candidates[*index].identity.id)
                 }) =>
             {
-                self.promotion_candidate.error = Some(
-                    "The retained release candidate has already been promoted and is immutable"
-                        .to_owned(),
-                );
+                self.promotion_candidate.error =
+                    Some("This release candidate is already promoted and cannot change".to_owned());
                 return false;
             }
             [index]
@@ -2046,7 +2044,7 @@ impl ModelEditorState {
             }
             [..] => {
                 self.promotion_candidate.error = Some(
-                    "This exact model source already has a different or ambiguous release candidate identity; repair the retained qualification record before continuing"
+                    "This model source already has a different or ambiguous release candidate; repair the qualification record before continuing"
                         .to_owned(),
                 );
                 return false;
@@ -2111,9 +2109,8 @@ impl ModelEditorState {
         ) {
             Ok(source) => source,
             Err(error) => {
-                self.promotion_error = Some(format!(
-                    "Model promotion cannot authenticate its exact source binding: {error}"
-                ));
+                self.promotion_error =
+                    Some(format!("Model promotion cannot verify its source: {error}"));
                 return false;
             }
         };
@@ -2176,7 +2173,7 @@ impl ModelEditorState {
                 self.promotion_review_open = false;
                 self.promotion_error = None;
                 self.qualification_execution_notice = Some(
-                    "Model release promoted in the candidate. Save the qualification revision to retain the immutable release and audit record."
+                    "Model release promoted in the candidate. Save the qualification revision to keep the release and its audit record."
                         .to_owned(),
                 );
                 true
@@ -2213,7 +2210,7 @@ impl ModelEditorState {
             let existing = qualification.suites[existing_index].clone();
             if existing.name != suite.name {
                 self.qualification_authoring.error = Some(format!(
-                    "Suite ID '{}' already belongs to '{}'; use the exact retained suite name when adding a vector",
+                    "Suite ID '{}' already belongs to '{}'; use that suite's name when adding a vector",
                     existing.id, existing.name
                 ));
                 return false;
@@ -2228,7 +2225,7 @@ impl ModelEditorState {
                     .any(|candidate| candidate.suite_id.eq_ignore_ascii_case(&existing.id))
             {
                 self.qualification_authoring.error = Some(format!(
-                    "Suite '{}' has retained evidence or release candidates and is immutable; create a new suite identity",
+                    "Suite '{}' has recorded runs or release candidates and cannot change; create a suite with a new ID",
                     existing.id
                 ));
                 return false;
@@ -2302,7 +2299,7 @@ impl ModelEditorState {
             .replace_vector_atomically(suite_id, vector_id, replacement)
             .map_err(|error| error.to_string())?;
         self.qualification_execution_notice = Some(format!(
-            "Qualification vector {vector_id:?} was replaced atomically; prior uncommitted suite runs were invalidated."
+            "Qualification vector '{vector_id}' was replaced; earlier unsaved runs of its suite were invalidated."
         ));
         Ok(())
     }
@@ -2318,7 +2315,7 @@ impl ModelEditorState {
             .delete_vector_atomically(suite_id, vector_id)
             .map_err(|error| error.to_string())?;
         self.qualification_execution_notice = Some(format!(
-            "Qualification vector {vector_id:?} was retired from suite {suite_id:?}."
+            "Qualification vector '{vector_id}' was retired from suite '{suite_id}'."
         ));
         Ok(())
     }
@@ -2330,7 +2327,7 @@ impl ModelEditorState {
             .delete_suite_atomically(suite_id)
             .map_err(|error| error.to_string())?;
         self.qualification_execution_notice = Some(format!(
-            "Editable qualification suite {suite_id:?} was deleted; evidence and release lineage were unchanged."
+            "Qualification suite '{suite_id}' was deleted; recorded runs and releases are unchanged."
         ));
         Ok(())
     }
@@ -2367,7 +2364,7 @@ impl ModelEditorState {
             )
             .map_err(|error| error.to_string())?;
         self.qualification_execution_notice = Some(format!(
-            "Vector disposition {:?} was retained as a blocking, non-waiving qualification record.",
+            "Vector disposition '{}' was recorded; it blocks release and does not waive the failure.",
             disposition.id
         ));
         Ok(disposition)
@@ -2383,7 +2380,7 @@ impl ModelEditorState {
             .resolve_vector_disposition_by_rerun_atomically(disposition_id)
             .map_err(|error| error.to_string())?;
         self.qualification_execution_notice = Some(format!(
-            "Vector disposition {disposition_id:?} was closed by exact passing Desktop and WebAssembly rerun evidence."
+            "Vector disposition '{disposition_id}' was closed by passing Desktop and WebAssembly reruns."
         ));
         Ok(())
     }
