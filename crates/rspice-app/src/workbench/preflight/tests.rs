@@ -992,6 +992,70 @@ fn a_voltage_source_loop_is_stated_once_by_the_rule_that_owns_it() {
     assert_eq!(loop_rows.len(), 1, "the loop is listed once: {loop_rows:?}");
 }
 
+/// A loop probe placed across a voltage source closes a loop of two voltage
+/// sources in the deck, the probe's own 0 V card among them, which every DC
+/// solve refuses. The design rule counts the drawing's independent sources,
+/// and a probe is not one, so the rule does not see the loop: the engine's
+/// refusal is the one row that states it, and the run is not authorized.
+#[test]
+fn a_source_loop_the_design_rule_does_not_see_is_the_engines_refusal() {
+    use crate::state::{ComponentType, Point};
+
+    let (mut app, root) = app_with_an_open_root(
+        &[
+            (ComponentType::Ground, Point::new(0, 40)),
+            (ComponentType::VoltageSource, Point::new(0, 10)),
+            (ComponentType::LoopProbe, Point::new(100, -10)),
+        ],
+        &[
+            (Point::new(0, -10), Point::new(80, -10)),
+            (Point::new(120, -10), Point::new(120, 30)),
+            (Point::new(120, 30), Point::new(0, 30)),
+        ],
+        true,
+    );
+
+    run(&mut app);
+    app.settle_preflight();
+
+    let report = app
+        .state
+        .workbench
+        .preflight
+        .report
+        .as_ref()
+        .expect("the pass retains its report");
+    assert!(
+        report.prepared.is_none(),
+        "a run the engine refuses is not authorized: {:?}",
+        report.blockers
+    );
+    let loops: Vec<&PreflightIssue> = report
+        .blockers
+        .iter()
+        .filter(|issue| issue.check == "Voltage-source loops")
+        .collect();
+    assert_eq!(loops.len(), 1, "{:?}", report.blockers);
+    assert!(
+        loops[0].observed.starts_with("Voltage sources ")
+            && !loops[0].observed.contains("inductor")
+            && loops[0].observed.contains("Operating point"),
+        "{:?}",
+        loops[0]
+    );
+    let PreflightRemediation::Drawing { cell_view, .. } = &loops[0].remediation else {
+        panic!("the finding is located on the drawing: {:?}", loops[0]);
+    };
+    assert_eq!(cell_view, &root);
+    let rows = crate::workbench::app_state::diagnostic_store::listing::listing(&app.state);
+    let loop_rows: Vec<String> = (0..rows.len())
+        .filter_map(|index| rows.row(index))
+        .map(|row| row.message.to_owned())
+        .filter(|message| message.contains("closed loop"))
+        .collect();
+    assert_eq!(loop_rows.len(), 1, "the loop is listed once: {loop_rows:?}");
+}
+
 /// Every preparation stage is repaired where the thing it failed on lives.
 #[test]
 fn a_preparation_failure_names_the_destination_that_repairs_it() {
