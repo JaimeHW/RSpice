@@ -649,7 +649,7 @@ fn schematic(ui: &mut Ui, state: &mut AppState) {
         state,
         TogglePreference::HierarchicalEditInPlace,
         "Edit-in-place hierarchy",
-        "Parent context is read-only and visually subdued while a child view is edited.",
+        "Descending opens the child in its occurrence; off opens the master on its own.",
         "Enable hierarchical edit in place",
     );
     choice_row(

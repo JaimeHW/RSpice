@@ -351,9 +351,9 @@ fn crumb_width(ui: &Ui, text: &str, weight: FontWeight) -> f32 {
         .x
 }
 
+/// The whole occurrence path, library first; a row too narrow for it elides
+/// the middle rather than any choice dropping levels.
 fn hierarchy_breadcrumb_segments(state: &AppState) -> Vec<BreadcrumbCrumb> {
-    use crate::state::SchematicHierarchyVisibility;
-
     let active = &state.workspace.content.active_view;
     let occurrence = state
         .workspace
@@ -361,34 +361,14 @@ fn hierarchy_breadcrumb_segments(state: &AppState) -> Vec<BreadcrumbCrumb> {
         .active_occurrence()
         .cloned()
         .unwrap_or_else(|| DocumentOccurrence::rooted(active.clone()));
-    let visibility = if matches!(
-        state.workspace.content.active_view_type(),
-        ViewType::Schematic | ViewType::Testbench
-    ) {
-        state.ui.schematic_visibility.hierarchy
-    } else {
-        SchematicHierarchyVisibility::FullVisibleHierarchy
-    };
     let deepest = occurrence.depth() - 1;
     let mut crumbs = Vec::with_capacity(occurrence.depth() + 2);
-    match visibility {
-        SchematicHierarchyVisibility::ActiveOnly => {
-            crumbs.push(occurrence_level_crumb(&occurrence, deepest));
-        }
-        SchematicHierarchyVisibility::ActiveAndParent => {
-            for level in deepest.saturating_sub(1)..=deepest {
-                crumbs.push(occurrence_level_crumb(&occurrence, level));
-            }
-        }
-        // The root cellview is a crumb because the canvas names what is open,
-        // but it is not a path segment: the occurrence below it comes from the
-        // path type, whose root is implicit.
-        SchematicHierarchyVisibility::FullVisibleHierarchy => {
-            crumbs.push(BreadcrumbCrumb::label_only(occurrence.root.library.clone()));
-            for level in 0..=deepest {
-                crumbs.push(occurrence_level_crumb(&occurrence, level));
-            }
-        }
+    // The root cellview is a crumb because the canvas names what is open,
+    // but it is not a path segment: the occurrence below it comes from the
+    // path type, whose root is implicit.
+    crumbs.push(BreadcrumbCrumb::label_only(occurrence.root.library.clone()));
+    for level in 0..=deepest {
+        crumbs.push(occurrence_level_crumb(&occurrence, level));
     }
     crumbs.push(BreadcrumbCrumb::label_only(active.view.clone()));
     crumbs
@@ -562,35 +542,8 @@ mod tests {
     }
 
     #[test]
-    fn hierarchy_visibility_changes_only_the_canvas_context_breadcrumb() {
-        let mut state = AppState::default();
-        descended(&mut state, "XAMP", "amp");
-        descended(&mut state, "XBIAS", "bias");
-
-        state.ui.schematic_visibility.hierarchy =
-            crate::state::SchematicHierarchyVisibility::ActiveOnly;
-        assert_eq!(
-            crumb_labels(&state),
-            vec!["XBIAS \u{b7} bias".to_owned(), "schematic".to_owned()]
-        );
-
-        state.ui.schematic_visibility.hierarchy =
-            crate::state::SchematicHierarchyVisibility::ActiveAndParent;
-        assert_eq!(
-            crumb_labels(&state),
-            vec![
-                "XAMP \u{b7} amp".to_owned(),
-                "XBIAS \u{b7} bias".to_owned(),
-                "schematic".to_owned(),
-            ]
-        );
-    }
-
-    #[test]
     fn the_full_breadcrumb_names_the_root_cellview_then_the_occurrence_below_it() {
         let mut state = AppState::default();
-        state.ui.schematic_visibility.hierarchy =
-            crate::state::SchematicHierarchyVisibility::FullVisibleHierarchy;
         assert_eq!(
             crumb_labels(&state),
             vec!["user".to_owned(), "top".to_owned(), "schematic".to_owned()],
@@ -630,8 +583,6 @@ mod tests {
     #[test]
     fn a_breadcrumb_level_opens_the_occurrence_it_names() {
         let mut app = RSpiceApp::test_instance();
-        app.state.ui.schematic_visibility.hierarchy =
-            crate::state::SchematicHierarchyVisibility::FullVisibleHierarchy;
         descended(&mut app.state, "XAFE", "afe_core");
         descended(&mut app.state, "XBIAS", "bias");
 
@@ -675,8 +626,6 @@ mod tests {
     fn breadcrumb_segments_render_instance_and_master() {
         fn render(instance: &str, master: &str) -> crate::ui::raster::Canvas {
             let mut app = RSpiceApp::test_instance();
-            app.state.ui.schematic_visibility.hierarchy =
-                crate::state::SchematicHierarchyVisibility::FullVisibleHierarchy;
             descended(&mut app.state, instance, master);
             crate::ui::raster::render(RASTER_VIEWPORT, |ui, _| {
                 breadcrumb(

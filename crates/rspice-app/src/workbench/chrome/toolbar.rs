@@ -627,7 +627,7 @@ fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         Command::VisibilityOptions,
         WorkbenchIcon::Visibility,
         false,
-        "Hierarchy and annotation visibility",
+        "Schematic visibility",
         layout,
     );
     toolbar_text_command(

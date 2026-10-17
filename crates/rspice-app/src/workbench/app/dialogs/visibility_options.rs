@@ -1,7 +1,7 @@
-//! Device-local schematic hierarchy and annotation visibility workflow.
+//! Device-local schematic visibility workflow.
 //!
 //! The mockup defines this as a display-only transaction. The dialog edits an
-//! isolated copy and publishes all seven choices together; neither opening,
+//! isolated copy and publishes all six choices together; neither opening,
 //! cancelling, nor applying can create a schematic undo record or modify
 //! project-owned design data.
 
@@ -9,9 +9,9 @@ use egui::{Context, Frame, Margin, Stroke, Ui, vec2};
 
 use crate::state::WireRoutingMode;
 use crate::state::{
-    SchematicAnnotationVisibility, SchematicBackAnnotationContent, SchematicHierarchyVisibility,
-    SchematicNetHighlighting, SchematicParameterLabelVisibility, SchematicReviewMarkerVisibility,
-    SchematicVisibilityPolicy, SchematicWireRoutingStyle,
+    SchematicAnnotationVisibility, SchematicBackAnnotationContent, SchematicNetHighlighting,
+    SchematicParameterLabelVisibility, SchematicReviewMarkerVisibility, SchematicVisibilityPolicy,
+    SchematicWireRoutingStyle,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -22,9 +22,9 @@ use crate::ui::widgets::{
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 
-const TITLE: &str = "Hierarchy and annotation visibility";
+const TITLE: &str = "Schematic visibility";
 const PRIMARY: &str = "Apply visibility";
-const BODY: &str = "Control hierarchy context, operating-point annotations, net names, probes, comments, and physical markers without changing design data.";
+const BODY: &str = "Control operating-point annotations, labels, routing, net highlighting, and review markers without changing design data.";
 
 pub(crate) fn open_schematic_visibility_options(state: &mut AppState) -> bool {
     if state.dialogs.schematic_visibility.open {
@@ -189,26 +189,6 @@ fn routing_mode_for(style: SchematicWireRoutingStyle, current: WireRoutingMode) 
 fn visibility_body(ui: &mut Ui, draft: &mut SchematicVisibilityPolicy) -> egui::Id {
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
 
-    let first = enum_row(
-        ui,
-        "Hierarchy",
-        "Visible edit context around the active cell view.",
-        "schematic-visibility-hierarchy",
-        hierarchy_label(draft.hierarchy),
-        &[
-            "Active + one parent level",
-            "Active only",
-            "Full visible hierarchy",
-        ],
-    );
-    if let Some(index) = first.0 {
-        draft.hierarchy = match index {
-            1 => SchematicHierarchyVisibility::ActiveOnly,
-            2 => SchematicHierarchyVisibility::FullVisibleHierarchy,
-            _ => SchematicHierarchyVisibility::ActiveAndParent,
-        };
-    }
-
     let annotation = enum_row(
         ui,
         "Annotations",
@@ -313,7 +293,7 @@ fn visibility_body(ui: &mut Ui, draft: &mut SchematicVisibilityPolicy) -> egui::
         };
     }
 
-    first.1
+    annotation.1
 }
 
 fn enum_row(
@@ -380,14 +360,6 @@ fn setting_copy(ui: &mut Ui, title: &str, detail: &str) {
             .font(theme::sans(tokens::FS_0, FontWeight::Regular))
             .color(t.color.text_dim),
     );
-}
-
-const fn hierarchy_label(value: SchematicHierarchyVisibility) -> &'static str {
-    match value {
-        SchematicHierarchyVisibility::ActiveAndParent => "Active + one parent level",
-        SchematicHierarchyVisibility::ActiveOnly => "Active only",
-        SchematicHierarchyVisibility::FullVisibleHierarchy => "Full visible hierarchy",
-    }
 }
 
 const fn annotation_label(value: SchematicAnnotationVisibility) -> &'static str {

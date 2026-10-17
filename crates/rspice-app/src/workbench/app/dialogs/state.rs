@@ -472,12 +472,6 @@ impl NetLabelPlacementDialogState {
     }
 }
 
-/// Isolated draft for the View ▸ Hierarchy and annotation visibility
-/// transaction.
-///
-/// The draft is device-local presentation state. Apply publishes all seven
-/// controls atomically; Cancel discards them without touching schematic
-/// history, topology, project serialization, or retained result data.
 /// Governed snap-spacing choices shown by the upgraded schematic toolbar
 /// transaction. `Free` disables snapping without replacing the document's
 /// retained pitch.
@@ -579,6 +573,11 @@ impl GridSnapRoutingDialogState {
     }
 }
 
+/// Isolated draft for the View ▸ Schematic visibility transaction.
+///
+/// The draft is device-local presentation state. Apply publishes all six
+/// controls atomically; Cancel discards them without touching schematic
+/// history, topology, project serialization, or retained result data.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SchematicVisibilityDialogState {
     pub(crate) open: bool,
@@ -631,14 +630,6 @@ pub(crate) enum HierarchyDescendEditMode {
     ReadOnlyReference,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum HierarchyParentContext {
-    #[default]
-    ShowOneLevel,
-    ShowFullHierarchy,
-    HideParent,
-}
-
 /// Isolated task draft for Design ▸ Descend into selected instance.
 ///
 /// Direct toolbar, inspector, double-click, and Shift+E gestures use the
@@ -650,7 +641,6 @@ pub(crate) struct DescendHierarchyDialogState {
     pub(crate) instance_name: String,
     pub(crate) reference: Option<crate::state::CellViewRef>,
     pub(crate) edit_mode: HierarchyDescendEditMode,
-    pub(crate) parent_context: HierarchyParentContext,
     pub(crate) authority: Option<SchematicEditAuthority>,
     pub(crate) parent_dirty: bool,
     pub(crate) validation_error: Option<String>,
@@ -670,7 +660,6 @@ impl DescendHierarchyDialogState {
             instance_name,
             reference: Some(reference),
             edit_mode: preferred_edit_mode,
-            parent_context: HierarchyParentContext::ShowOneLevel,
             authority: Some(authority),
             parent_dirty,
             validation_error: None,

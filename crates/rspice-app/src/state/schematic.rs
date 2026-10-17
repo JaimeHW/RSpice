@@ -139,8 +139,7 @@ pub use validated_revision::{
 };
 pub use visibility::{
     DrawingSheetLayerVisibility, GridStyle, SchematicAnnotationVisibility,
-    SchematicBackAnnotationContent, SchematicHierarchyVisibility, SchematicNetHighlighting,
-    SchematicParameterLabelVisibility, SchematicReviewMarkerVisibility, SchematicVisibilityPolicy,
-    SchematicWireRoutingStyle,
+    SchematicBackAnnotationContent, SchematicNetHighlighting, SchematicParameterLabelVisibility,
+    SchematicReviewMarkerVisibility, SchematicVisibilityPolicy, SchematicWireRoutingStyle,
 };
 pub use wire::{Wire, WireRoutingMode, WireSegment};

@@ -2,20 +2,17 @@
 //!
 //! Toolbar, inspector, double-click, and Shift+E gestures follow the user's
 //! edit-in-place preference. The menu workflow exposes the upgraded mockup's
-//! target, explicit edit mode, parent context, and working-checkpoint contract.
+//! target, explicit edit mode, and working-checkpoint contract.
 
 use egui::{Context, Frame, Margin, Stroke, Ui, vec2};
 
-use crate::state::SchematicHierarchyVisibility;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, select_mono_with_response,
 };
 
-use crate::workbench::app::{
-    HierarchyDescendEditMode, HierarchyParentContext, RSpiceApp, SchematicEditAuthority,
-};
+use crate::workbench::app::{HierarchyDescendEditMode, RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
 const TITLE: &str = "Descend into hierarchy";
@@ -126,19 +123,6 @@ fn commit_descend_context(state: &mut AppState) -> Result<(), String> {
         );
     }
 
-    state.ui.schematic_visibility.hierarchy = match draft.edit_mode {
-        HierarchyDescendEditMode::EditInPlace => match draft.parent_context {
-            HierarchyParentContext::ShowOneLevel => SchematicHierarchyVisibility::ActiveAndParent,
-            HierarchyParentContext::ShowFullHierarchy => {
-                SchematicHierarchyVisibility::FullVisibleHierarchy
-            }
-            HierarchyParentContext::HideParent => SchematicHierarchyVisibility::ActiveOnly,
-        },
-        HierarchyDescendEditMode::OpenIsolated | HierarchyDescendEditMode::ReadOnlyReference => {
-            SchematicHierarchyVisibility::ActiveOnly
-        }
-    };
-
     match draft.edit_mode {
         HierarchyDescendEditMode::EditInPlace => {
             state.descend_into_instance(Some(draft.instance_name), reference);
@@ -168,7 +152,7 @@ fn descend_body(
     let edit_mode = setting_row(
         ui,
         "Edit mode",
-        "Controls ownership and parent-context visibility.",
+        "Controls who owns the opened cell view.",
         "descend-hierarchy-edit-mode",
         edit_mode_label(draft.edit_mode),
         &[
@@ -176,40 +160,12 @@ fn descend_body(
             "Open isolated cell view",
             "Read-only reference",
         ],
-        true,
     );
     if let Some(index) = edit_mode.0 {
         draft.edit_mode = match index {
             1 => HierarchyDescendEditMode::OpenIsolated,
             2 => HierarchyDescendEditMode::ReadOnlyReference,
             _ => HierarchyDescendEditMode::EditInPlace,
-        };
-        draft.validation_error = None;
-    }
-
-    let parent_enabled = draft.edit_mode == HierarchyDescendEditMode::EditInPlace;
-    let parent_context = setting_row(
-        ui,
-        "Parent context",
-        if parent_enabled {
-            "Dimmed parent connectivity remains available for cross-probing."
-        } else {
-            "Isolated and reference modes intentionally hide occurrence context."
-        },
-        "descend-hierarchy-parent-context",
-        parent_context_label(draft.parent_context),
-        &[
-            "Show one level",
-            "Show full hierarchy",
-            "Hide parent context",
-        ],
-        parent_enabled,
-    );
-    if let Some(index) = parent_context.0 {
-        draft.parent_context = match index {
-            1 => HierarchyParentContext::ShowFullHierarchy,
-            2 => HierarchyParentContext::HideParent,
-            _ => HierarchyParentContext::ShowOneLevel,
         };
         draft.validation_error = None;
     }
@@ -268,7 +224,6 @@ fn setting_row(
     id: &str,
     selected: &str,
     options: &[&str],
-    enabled: bool,
 ) -> (Option<usize>, egui::Id) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width();
@@ -285,10 +240,7 @@ fn setting_row(
                 setting_copy(ui, title, detail);
                 ui.add_space(7.0);
                 let control_width = ui.available_width();
-                ui.add_enabled_ui(enabled, |ui| {
-                    select_mono_with_response(ui, id, title, selected, &options, control_width)
-                })
-                .inner
+                select_mono_with_response(ui, id, title, selected, &options, control_width)
             } else {
                 ui.horizontal_top(|ui| {
                     let copy_width = (ui.available_width() * 0.43).clamp(190.0, 270.0);
@@ -299,10 +251,7 @@ fn setting_row(
                     );
                     ui.add_space(12.0);
                     let control_width = ui.available_width();
-                    ui.add_enabled_ui(enabled, |ui| {
-                        select_mono_with_response(ui, id, title, selected, &options, control_width)
-                    })
-                    .inner
+                    select_mono_with_response(ui, id, title, selected, &options, control_width)
                 })
                 .inner
             }
@@ -423,14 +372,6 @@ const fn edit_mode_label(mode: HierarchyDescendEditMode) -> &'static str {
     }
 }
 
-const fn parent_context_label(context: HierarchyParentContext) -> &'static str {
-    match context {
-        HierarchyParentContext::ShowOneLevel => "Show one level",
-        HierarchyParentContext::ShowFullHierarchy => "Show full hierarchy",
-        HierarchyParentContext::HideParent => "Hide parent context",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -485,10 +426,6 @@ mod tests {
             edit_mode_label(HierarchyDescendEditMode::ReadOnlyReference),
             "Read-only reference"
         );
-        assert_eq!(
-            parent_context_label(HierarchyParentContext::ShowFullHierarchy),
-            "Show full hierarchy"
-        );
     }
 
     #[test]
@@ -526,17 +463,11 @@ mod tests {
     #[test]
     fn direct_gesture_descends_in_place_without_opening_the_menu_dialog() {
         let (mut state, _, child) = hierarchy_state();
-        state.ui.schematic_visibility.hierarchy =
-            SchematicHierarchyVisibility::FullVisibleHierarchy;
         state.open_selected_instance_master();
         assert_eq!(state.workspace.content.active_view, child);
         assert_eq!(
             state.workspace.content.occurrence_labels().last().unwrap(),
             "XAFE"
-        );
-        assert_eq!(
-            state.ui.schematic_visibility.hierarchy,
-            SchematicHierarchyVisibility::FullVisibleHierarchy
         );
         assert!(!state.dialogs.descend_hierarchy.open);
     }
@@ -571,17 +502,12 @@ mod tests {
         );
 
         state.dialogs.descend_hierarchy.edit_mode = HierarchyDescendEditMode::EditInPlace;
-        state.dialogs.descend_hierarchy.parent_context = HierarchyParentContext::ShowFullHierarchy;
         commit_descend_context(&mut state).expect("explicit edit-in-place choice remains valid");
 
         assert_eq!(state.workspace.content.active_view, child);
         assert_eq!(
             state.workspace.content.occurrence_labels().last().unwrap(),
             "XAFE"
-        );
-        assert_eq!(
-            state.ui.schematic_visibility.hierarchy,
-            SchematicHierarchyVisibility::FullVisibleHierarchy
         );
     }
 
