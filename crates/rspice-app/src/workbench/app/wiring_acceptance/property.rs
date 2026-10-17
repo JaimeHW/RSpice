@@ -367,7 +367,7 @@ fn generate(bench: &Bench, rng: &mut Rng) -> Step {
                 Turn::MirrorHorizontal,
                 Turn::MirrorVertical,
             ][rng.below(4)];
-            (!picks.is_empty()).then(|| Step::Transform(picks, turn))
+            (!picks.is_empty()).then_some(Step::Transform(picks, turn))
         }
         54..=61 => {
             let at = sheet.interior(rng).unwrap_or_else(|| rng.point());
@@ -383,7 +383,7 @@ fn generate(bench: &Bench, rng: &mut Rng) -> Step {
         }
         68..=71 => {
             let picks = sheet.picks(rng);
-            (!picks.is_empty()).then(|| Step::Copy(picks))
+            (!picks.is_empty()).then_some(Step::Copy(picks))
         }
         72..=76 => Some(Step::Paste(rng.point())),
         77..=81 => Some(Step::Sheet),
@@ -531,7 +531,7 @@ impl World {
         for junction in &document.junctions {
             sheets[bench.sheet_of(junction.id)]
                 .junctions
-                .push(junction.clone());
+                .push(*junction);
         }
         for sheet in &mut sheets {
             sheet.parts.sort_by_key(|part| part.id);
