@@ -75,6 +75,7 @@ mod live_transient;
 mod manual_deck_tests;
 mod monte_carlo_checkpoint;
 pub(crate) mod prepared_run;
+mod run_inputs;
 #[cfg(test)]
 mod projection_ratchet;
 mod results_convert;
@@ -218,6 +219,9 @@ pub struct SimulationController {
     design_execution_epoch: u64,
     /// Retained preflight and generation-safe dispatch authority.
     run_authorization: crate::simulation::execution::PreparedRunAuthorization,
+    /// What the retained run set was prepared from, which its dispatch
+    /// checks. Set and dropped with the retained run.
+    retained_run_inputs: Option<run_inputs::RetainedRunInputs>,
     /// Moves whenever the retained run is dropped or replaced, so a preflight
     /// pipeline can tell whether the run it prepared is still wanted.
     retained_run_generation: u64,
@@ -271,6 +275,7 @@ impl SimulationController {
             transient_post: transient_post::TransientPostCoordinator::default(),
             design_execution_epoch: 0,
             run_authorization: crate::simulation::execution::PreparedRunAuthorization::default(),
+            retained_run_inputs: None,
             retained_run_generation: 0,
             preflight: None,
             #[cfg(test)]
@@ -454,7 +459,13 @@ impl SimulationController {
                     state.workbench.preflight.invalidate();
                 }
                 state.push_sim_message(ConsoleMessage::warning(error.to_string()));
-                state.simulation.execution.status = "Run blocked".to_owned();
+                state.simulation.execution.status =
+                    if error.message().starts_with(run_inputs::DESIGN_CHANGED_SINCE_CHECK) {
+                        run_inputs::DESIGN_CHANGED_SINCE_CHECK
+                    } else {
+                        "Run blocked"
+                    }
+                    .to_owned();
                 return;
             }
         };

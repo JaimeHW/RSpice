@@ -210,6 +210,193 @@ fn an_edit_during_preparation_queues_nothing_and_stales_what_the_pass_found() {
     assert!(stated(&app, "Preflight stale"), "the staleness is stated");
 }
 
+/// Press Run and let the pass authorize and queue the run, as the frames
+/// before the one that dispatches it would. Returns the digest it authorized.
+fn queued_by_its_check(app: &mut RSpiceApp) -> crate::product::ContentDigest {
+    run_and_queue(app);
+    app.settle_preflight();
+    assert!(
+        app.state.simulation.execution.trigger_simulation,
+        "the pass queues the run it authorized"
+    );
+    app.state
+        .workbench
+        .preflight
+        .report
+        .as_ref()
+        .and_then(|report| report.prepared.as_ref())
+        .expect("the pass authorizes the run")
+        .snapshot_digest
+}
+
+/// The frame that dispatches a queued run, with the preparations it ran.
+fn dispatch_frame(
+    app: &mut RSpiceApp,
+) -> Vec<crate::simulation::execution::SimulationRunIntent> {
+    use crate::simulation::controller::prepared_run::thread_preparations;
+
+    let earlier = thread_preparations::take();
+    assert!(
+        earlier.is_empty(),
+        "nothing is prepared on the UI thread before the dispatch: {earlier:?}"
+    );
+    app.simulation_controller
+        .update(&mut app.state, &*app.export_workflow_io);
+    thread_preparations::take()
+}
+
+/// Stop the run a dispatch started and wait for the engine to let it go.
+fn stop_the_run(app: &mut RSpiceApp) {
+    app.simulation_controller.abort();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
+    while app.simulation_controller.is_running() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the run did not stop"
+        );
+        app.simulation_controller
+            .update(&mut app.state, &*app.export_workflow_io);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+const DESIGN_CHANGED: &str = "The design changed after it was checked; run again";
+
+/// What a refused dispatch leaves: no run, the stated reason, the input that
+/// moved named on the Console, and no report left to queue it again.
+fn assert_refused_for(app: &RSpiceApp, moved: &str) {
+    assert!(!app.state.simulation.execution.has_active_execution());
+    assert!(app.state.simulation.retained.runs.is_empty());
+    assert_eq!(app.state.simulation.execution.status, DESIGN_CHANGED);
+    let stated = format!("{DESIGN_CHANGED} · {moved} changed");
+    assert!(
+        stated_exactly(app, &stated),
+        "the Console names what moved: {stated}"
+    );
+    assert!(app.state.workbench.preflight.report.is_none());
+    assert!(app.simulation_controller.retained_run_deck().is_none());
+}
+
+fn stated_exactly(app: &RSpiceApp, message: &str) -> bool {
+    app.state
+        .log_buffer
+        .entries()
+        .any(|entry| entry.message == message)
+}
+
+/// The frame that dispatches a checked run prepares nothing: the run the
+/// pass prepared on its worker and authorized is the run that starts, with
+/// the digest the pass reported.
+#[test]
+fn the_dispatch_frame_runs_the_checked_snapshot_and_prepares_nothing() {
+    let mut app = inverter_over_a_run_set();
+    let authorized = queued_by_its_check(&mut app);
+
+    let prepared = dispatch_frame(&mut app);
+
+    assert!(
+        prepared.is_empty(),
+        "the dispatch frame prepares nothing: {prepared:?}"
+    );
+    assert!(app.state.simulation.execution.has_active_execution());
+    let dispatched = app
+        .state
+        .simulation
+        .retained
+        .runs
+        .first()
+        .and_then(|run| run.prepared_receipt())
+        .expect("the dispatch starts a run with its receipt")
+        .prepared_snapshot_digest();
+    assert_eq!(dispatched, authorized, "the run is the snapshot the pass authorized");
+    stop_the_run(&mut app);
+}
+
+/// An edit between the verdict and the dispatch refuses the run in the frame
+/// that would have started it. The edit here is one no commit boundary
+/// reported, which the dispatch check exists for; nothing is prepared to
+/// find it.
+#[test]
+fn an_edit_after_the_check_refuses_the_dispatch() {
+    let mut app = inverter_over_a_run_set();
+    queued_by_its_check(&mut app);
+    app.state.schematic.document_mut_for_test().components[0]
+        .value
+        .push('0');
+
+    let prepared = dispatch_frame(&mut app);
+
+    assert!(prepared.is_empty(), "the refusal prepares nothing: {prepared:?}");
+    assert_refused_for(&app, "the design");
+}
+
+/// A change to either library after the check refuses the dispatch: the
+/// cell library a hierarchy binds its masters through, and the model library
+/// the decks seal their cards from.
+#[test]
+fn a_library_change_after_the_check_refuses_the_dispatch() {
+    let mut cells = inverter_over_a_run_set();
+    queued_by_its_check(&mut cells);
+    cells
+        .state
+        .library_manager
+        .add_library(rspice_design::library::Library::new("scratch"));
+    assert!(dispatch_frame(&mut cells).is_empty());
+    assert_refused_for(&cells, "the design");
+
+    let mut models = inverter_over_a_run_set();
+    queued_by_its_check(&mut models);
+    models
+        .state
+        .model_library_manager
+        .add_library(rspice_model_library::ModelLibrary {
+            name: "scratch".to_owned(),
+            ..Default::default()
+        });
+    assert!(dispatch_frame(&mut models).is_empty());
+    assert_refused_for(&models, "the model library");
+}
+
+/// The operating point reads the selection only for the devices it reports
+/// in detail. Selecting a symbol that writes no card while the check runs
+/// moves nothing it reads, so the run still starts, as the one checked.
+#[test]
+fn a_selection_the_run_does_not_read_does_not_refuse_it() {
+    let mut app = inverter_over_a_run_set();
+    let authorized = queued_by_its_check(&mut app);
+    let symbol = app
+        .state
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.kind.spice_prefix().is_empty())
+        .expect("the inverter draws a symbol that writes no card")
+        .id;
+    app.state
+        .schematic
+        .session
+        .editor
+        .selection
+        .components
+        .insert(symbol);
+
+    assert!(dispatch_frame(&mut app).is_empty());
+
+    assert!(app.state.simulation.execution.has_active_execution());
+    assert_eq!(
+        app.state
+            .simulation
+            .retained
+            .runs
+            .first()
+            .and_then(|run| run.prepared_receipt())
+            .map(|receipt| receipt.prepared_snapshot_digest()),
+        Some(authorized)
+    );
+    stop_the_run(&mut app);
+}
+
 /// The run the worker prepares from the inputs frozen at the press is the run
 /// the frame would have prepared from the live state: the same snapshot, by
 /// digest, and the same deck, byte for byte. One example runs a single point;

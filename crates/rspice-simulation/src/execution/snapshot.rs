@@ -1568,6 +1568,12 @@ impl PreparedRunSnapshot {
         self.intent
     }
 
+    /// Every host source the deck's includes were read from, as it was read:
+    /// the bytes and the search chain that found it.
+    pub fn sealed_source_dependencies(&self) -> &[rspice_core::netlist::ResolvedIncludeDependency] {
+        &self.sealed_source_dependencies
+    }
+
     pub fn metadata(&self) -> PreparedRunMetadata {
         PreparedRunMetadata {
             snapshot_digest: self.digest,

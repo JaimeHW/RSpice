@@ -69,7 +69,15 @@ type RunPreparationInputs<'a> = crate::simulation::execution::preparation::RunPr
     crate::state::AnalysisResult,
 >;
 
-fn run_preparation_inputs(state: &AppState) -> RunPreparationInputs<'_> {
+pub(super) fn run_preparation_inputs(state: &AppState) -> RunPreparationInputs<'_> {
+    run_preparation_inputs_reading(state, &crate::simulation::table_route::SourceFiles)
+}
+
+/// [`run_preparation_inputs`], with the data files read through `files`.
+fn run_preparation_inputs_reading<'a>(
+    state: &'a AppState,
+    files: &'a dyn rspice_simulation::netlist_gen::NetlistSourceHost,
+) -> RunPreparationInputs<'a> {
     let schematic =
         rspice_design::projection::ProjectionSource::projection_source(&state.schematic);
     RunPreparationInputs {
@@ -79,7 +87,10 @@ fn run_preparation_inputs(state: &AppState) -> RunPreparationInputs<'_> {
         project_sources: &state.workspace.content.project_sources,
         design_management: &state.workspace.content.design_management,
         configuration_sets: &state.workspace.content.configuration_sets,
-        source_data: project_netlist_source_data(state),
+        source_data: rspice_simulation::netlist_gen::NetlistSourceData {
+            files,
+            ..project_netlist_source_data(state)
+        },
         schematic_file: schematic.current_file,
         schematic_topology_revision: schematic.schematic.topology_version(),
         imported_checkpoints: &state.simulation.retained.imported_monte_carlo_checkpoints,
@@ -139,6 +150,9 @@ struct FrozenRunInputs {
     max_parallel_workers: Option<usize>,
     compilation: Option<rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt>,
     design_checks: rspice_design::drc::DrcConfig,
+    /// The data-file host, which the worker reads as it is when it reads,
+    /// recording what it answered so dispatch can ask again.
+    source_files: super::run_inputs::RecordingSourceFiles,
 }
 
 impl FrozenRunPreparation {
@@ -207,25 +221,29 @@ impl FrozenRunPreparation {
                     .as_ref()
                     .map(|receipt| receipt.compilation.clone()),
                 design_checks: state.configured_root_design_check_config(),
+                source_files: Default::default(),
             },
         })
     }
 
     /// Prepare the run set from what was frozen: the work
     /// [`SimulationController::prepare_run_set_for_preflight`] does, stopping
-    /// between stages once `abort` is raised.
-    pub(crate) fn prepare(
+    /// between stages once `abort` is raised. Returns, beside the run, what
+    /// the data-file host answered while it was prepared.
+    pub(super) fn prepare(
         self,
         abort: &dyn rspice_core::abort_signal::AbortSignal,
         progress: &dyn Fn(crate::simulation::execution::PreparationProgress),
-    ) -> Result<PreparedRunSnapshot, PreparationError> {
+    ) -> Result<(PreparedRunSnapshot, super::run_inputs::SourceFileAnswers), PreparationError> {
         let Self { projection, inputs } = self;
-        crate::simulation::execution::preparation::build_prepared_run_set_reporting(
-            &inputs.view(),
-            projection,
-            abort,
-            progress,
-        )
+        let snapshot =
+            crate::simulation::execution::preparation::build_prepared_run_set_reporting(
+                &inputs.view(),
+                projection,
+                abort,
+                progress,
+            )?;
+        Ok((snapshot, inputs.source_files.into_answers()))
     }
 }
 
@@ -260,7 +278,7 @@ impl FrozenRunInputs {
             design_management: &self.design_management,
             configuration_sets: &self.configuration_sets,
             source_data: rspice_simulation::netlist_gen::NetlistSourceData {
-                files: &crate::simulation::table_route::SourceFiles,
+                files: &self.source_files,
                 data_root: self.project.data_root(),
                 stimulus_library: Some(&self.stimulus_library),
             },
@@ -559,7 +577,7 @@ impl SimulationController {
         self.clear_prepared_run();
         let snapshot = Self::build_prepared_snapshot(state, SimulationRunIntent::ManualDeck)?;
         let metadata = snapshot.metadata();
-        self.retain_prepared_run(snapshot)?;
+        self.retain_prepared_run(snapshot, None)?;
         Ok(metadata)
     }
 
@@ -567,23 +585,41 @@ impl SimulationController {
     /// authorizes, in the caller's frame. The caller runs DRC immediately
     /// before this method. Preflight itself prepares off the UI thread; see
     /// [`Self::start_preflight`].
+    ///
+    /// Automation and tuning prepare their runs here. The identity of the
+    /// state the run is prepared from is retained with it, and the frame that
+    /// dispatches it checks that identity, as it checks a Run press's.
     pub(crate) fn prepare_run_set_for_preflight(
         &mut self,
         state: &AppState,
     ) -> Result<PreparedRunMetadata, PreparationError> {
-        let snapshot = Self::build_prepared_snapshot(state, SimulationRunIntent::SimulateRunSet)?;
+        let identity = super::run_inputs::RunInputIdentity::capture(state);
+        let files = super::run_inputs::RecordingSourceFiles::default();
+        let snapshot = Self::build_prepared_run_set_reading(state, &files)?;
         let metadata = snapshot.metadata();
-        self.retain_prepared_run(snapshot)?;
+        self.retain_prepared_run(
+            snapshot,
+            Some(super::run_inputs::RetainedRunInputs {
+                identity,
+                source_files: files.into_answers(),
+            }),
+        )?;
         Ok(metadata)
     }
 
     /// Retain `snapshot` for dispatch, replacing whatever was retained.
+    /// A run set is retained with what it was prepared from, which its
+    /// dispatch checks; a manual deck is prepared again when it dispatches.
     pub(super) fn retain_prepared_run(
         &mut self,
         snapshot: PreparedRunSnapshot,
+        inputs: Option<super::run_inputs::RetainedRunInputs>,
     ) -> Result<(), PreparationError> {
         self.retained_run_generation = self.retained_run_generation.wrapping_add(1);
-        self.run_authorization.retain(snapshot)
+        self.retained_run_inputs = None;
+        self.run_authorization.retain(snapshot)?;
+        self.retained_run_inputs = inputs;
+        Ok(())
     }
 
     /// Freeze and start a declared-order campaign of independent simulation
@@ -841,6 +877,7 @@ impl SimulationController {
 
     pub(crate) fn clear_prepared_run(&mut self) {
         self.retained_run_generation = self.retained_run_generation.wrapping_add(1);
+        self.retained_run_inputs = None;
         self.run_authorization.clear();
     }
 
@@ -860,13 +897,34 @@ impl SimulationController {
     /// collaborative approval, Automation, and tuning all prepare through an
     /// owning workflow before they request dispatch; the controller never
     /// manufactures hidden authorization at this final boundary.
+    ///
+    /// A run set dispatches the very snapshot its preparation authorized,
+    /// once nothing it was prepared from has moved, and nothing is prepared
+    /// here. A manual deck is prepared again and must match.
     pub(super) fn consume_snapshot_for_dispatch(
         &mut self,
         state: &AppState,
     ) -> Result<AuthorizedRunDispatch, PreparationError> {
         let intent = state.simulation.execution.run_intent;
-        self.run_authorization
-            .consume(intent, || Self::build_prepared_snapshot(state, intent))
+        let inputs = self.retained_run_inputs.take();
+        match intent {
+            SimulationRunIntent::SimulateRunSet => {
+                self.run_authorization
+                    .consume_retained(intent, |snapshot| {
+                        inputs
+                            .ok_or_else(|| {
+                                PreparationError::new(
+                                    PreparationStage::Authorization,
+                                    "The prepared run does not say what it was prepared from; run again",
+                                )
+                            })?
+                            .still_current(state, snapshot)
+                    })
+            }
+            SimulationRunIntent::ManualDeck => self
+                .run_authorization
+                .consume(intent, || Self::build_prepared_snapshot(state, intent)),
+        }
     }
 
     fn build_prepared_snapshot(
@@ -880,6 +938,17 @@ impl SimulationController {
     }
 
     fn build_prepared_run_set(state: &AppState) -> Result<PreparedRunSnapshot, PreparationError> {
+        Self::build_prepared_run_set_reading(state, &crate::simulation::table_route::SourceFiles)
+    }
+
+    /// [`Self::build_prepared_run_set`], with the data files read through
+    /// `files`.
+    fn build_prepared_run_set_reading(
+        state: &AppState,
+        files: &dyn rspice_simulation::netlist_gen::NetlistSourceHost,
+    ) -> Result<PreparedRunSnapshot, PreparationError> {
+        #[cfg(test)]
+        thread_preparations::record(SimulationRunIntent::SimulateRunSet);
         let execution_projection = state
             .workspace
             .configuration_execution_projection(
@@ -891,7 +960,7 @@ impl SimulationController {
                 PreparationError::new(PreparationStage::DesignChecks, error.to_string())
             })?;
         crate::simulation::execution::preparation::build_prepared_run_set(
-            &run_preparation_inputs(state),
+            &run_preparation_inputs_reading(state, files),
             execution_projection,
         )
     }
@@ -899,6 +968,8 @@ impl SimulationController {
     fn build_prepared_manual_deck(
         state: &AppState,
     ) -> Result<PreparedRunSnapshot, PreparationError> {
+        #[cfg(test)]
+        thread_preparations::record(SimulationRunIntent::ManualDeck);
         if state.ui.netlist.active_document_initialized
             && state.ui.netlist.active_document
                 == crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
@@ -1005,6 +1076,50 @@ fn reject_deferred_external_sources(netlist: &str) -> Result<(), PreparationErro
         &Default::default(),
     )?;
     validated_executable_hierarchy(netlist).map(|_| ())
+}
+
+#[cfg(test)]
+impl SimulationController {
+    /// Retain a snapshot a test prepared from `state` as a preparation does:
+    /// a run set with the identity of `state`'s inputs, which its dispatch
+    /// checks. The test prepared it with the plain data-file host, so no
+    /// data-file answer is held for dispatch to ask again.
+    pub(in crate::simulation::controller) fn retain_prepared_from(
+        &mut self,
+        state: &AppState,
+        snapshot: PreparedRunSnapshot,
+    ) -> Result<(), PreparationError> {
+        let inputs = (snapshot.intent() == SimulationRunIntent::SimulateRunSet).then(|| {
+            super::run_inputs::RetainedRunInputs {
+                identity: super::run_inputs::RunInputIdentity::capture(state),
+                source_files: Default::default(),
+            }
+        });
+        self.retain_prepared_run(snapshot, inputs)
+    }
+}
+
+/// Test-only record of every preparation run on the calling thread, so a test
+/// can state that a frame prepared nothing.
+#[cfg(test)]
+pub(crate) mod thread_preparations {
+    use std::cell::RefCell;
+
+    use crate::simulation::execution::SimulationRunIntent;
+
+    thread_local! {
+        static PREPARED: RefCell<Vec<SimulationRunIntent>> = const { RefCell::new(Vec::new()) };
+    }
+
+    pub(super) fn record(intent: SimulationRunIntent) {
+        PREPARED.with(|prepared| prepared.borrow_mut().push(intent));
+    }
+
+    /// The preparations this thread ran since the last call, which forgets
+    /// them.
+    pub(crate) fn take() -> Vec<SimulationRunIntent> {
+        PREPARED.with(|prepared| std::mem::take(&mut *prepared.borrow_mut()))
+    }
 }
 
 #[cfg(test)]

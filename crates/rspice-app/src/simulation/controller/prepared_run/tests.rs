@@ -247,8 +247,7 @@ fn prepared_project_run_materializes_exact_signed_pdk_reference_models() {
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
             .expect("project run seals signed PDK model sources");
     controller
-        .run_authorization
-        .retain(snapshot)
+        .retain_prepared_from(&state, snapshot)
         .expect("authorize exact project snapshot");
     let dispatch = controller
         .consume_snapshot_for_dispatch(&state)
@@ -803,7 +802,13 @@ fn dispatch_rejects_mutation_after_explicit_preflight() {
         .consume_snapshot_for_dispatch(&state)
         .expect_err("changed input must fail closed");
     assert_eq!(error.stage(), PreparationStage::Authorization);
-    assert!(error.message().contains("expired"));
+    assert_eq!(
+        error.message(),
+        format!(
+            "{} · the simulation setup changed",
+            crate::simulation::controller::run_inputs::DESIGN_CHANGED_SINCE_CHECK
+        )
+    );
 }
 
 #[test]
@@ -1521,8 +1526,7 @@ fn repeated_authorize_and_dispatch_cycles_never_expire_an_unchanged_run() {
         )
         .expect("project run seals signed PDK model sources");
         controller
-            .run_authorization
-            .retain(snapshot)
+            .retain_prepared_from(&state, snapshot)
             .expect("authorize exact project snapshot");
         controller
             .consume_snapshot_for_dispatch(&state)

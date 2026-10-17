@@ -334,8 +334,8 @@ fn show_blockers(state: &mut AppState) {
 
 /// Run the same governed preflight used by the explicit Preflight command and
 /// queue only the exact immutable snapshot it authorizes. A retained current
-/// report is reusable; the controller still rebuilds and digest-compares the
-/// live contract when it consumes the one-shot permit.
+/// report is reusable; when it consumes the one-shot permit, the controller
+/// still refuses the snapshot if anything it was prepared from has moved.
 ///
 /// While the engine builds the decks, the run is queued when [`poll`] finds
 /// that they authorize it, and not before.

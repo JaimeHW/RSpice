@@ -16,12 +16,15 @@
 //! The prepared run is retained for dispatch when the pipeline ends, and only
 //! when nothing has dropped or replaced the retained run since the press: an
 //! edit drops it at its own commit boundary, so a verdict that lands after one
-//! describes inputs nobody will dispatch.
+//! describes inputs nobody will dispatch. It is retained with the identity of
+//! the inputs frozen at the press, and dispatch runs this very run once that
+//! identity still holds; see `run_inputs`.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 
 use super::prepared_run::FrozenRunPreparation;
+use super::run_inputs::{RetainedRunInputs, RunInputIdentity, SourceFileAnswers};
 use super::*;
 use crate::simulation::execution::{
     DeckBuildProgress, EngineRefusal, PreparationError, PreparationProgress, PreparedRunMetadata,
@@ -44,6 +47,7 @@ enum WorkerVerdict {
     Checked {
         snapshot: Box<PreparedRunSnapshot>,
         refusals: Vec<EngineRefusal>,
+        source_files: SourceFileAnswers,
     },
 }
 
@@ -54,6 +58,9 @@ pub(super) struct PendingPreflight {
     stage: Arc<Mutex<PreflightStage>>,
     /// The retained-run generation at the press.
     generation: u64,
+    /// The identity of the inputs frozen at the press, which the prepared
+    /// run is retained with and its dispatch checks.
+    identity: RunInputIdentity,
 }
 
 /// How a pipeline ended.
@@ -105,6 +112,7 @@ impl SimulationController {
             cancel: Arc::clone(&cancel),
             stage: Arc::clone(&stage),
             generation: self.retained_run_generation,
+            identity: RunInputIdentity::capture(state),
         };
         #[cfg(test)]
         let hooks = self.preflight_test_hooks.take_for_worker();
@@ -119,7 +127,7 @@ impl SimulationController {
             }
             let verdict = match prepared {
                 Err(error) => WorkerVerdict::NotPrepared(error),
-                Ok(snapshot) => {
+                Ok((snapshot, source_files)) => {
                     set_stage(
                         &stage,
                         PreflightStage::EngineChecking(DeckBuildProgress::default()),
@@ -132,6 +140,7 @@ impl SimulationController {
                     WorkerVerdict::Checked {
                         snapshot: Box::new(snapshot),
                         refusals,
+                        source_files,
                     }
                 }
             };
@@ -185,10 +194,20 @@ impl SimulationController {
                 )),
             },
             Some(WorkerVerdict::NotPrepared(error)) => PreflightVerdict::NotPrepared(error),
-            Some(WorkerVerdict::Checked { snapshot, refusals }) => {
+            Some(WorkerVerdict::Checked {
+                snapshot,
+                refusals,
+                source_files,
+            }) => {
                 let metadata = Box::new(snapshot.metadata());
                 let retained = if current {
-                    self.retain_prepared_run(*snapshot)
+                    self.retain_prepared_run(
+                        *snapshot,
+                        Some(RetainedRunInputs {
+                            identity: pending.identity,
+                            source_files,
+                        }),
+                    )
                 } else {
                     Ok(())
                 };

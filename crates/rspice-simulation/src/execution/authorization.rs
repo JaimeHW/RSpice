@@ -10,8 +10,10 @@ struct PendingPreparedRun {
 }
 
 /// Owns both the retained snapshot and the authority that can consume it.
-/// Preparation stays with the owning workflow; this boundary compares its
-/// freshly rebuilt snapshot before releasing a dispatch.
+/// Preparation stays with the owning workflow. Before releasing a dispatch
+/// this boundary either compares a freshly rebuilt snapshot with the retained
+/// one ([`Self::consume`]) or has the owner confirm that nothing the retained
+/// one was prepared from has moved ([`Self::consume_retained`]).
 #[derive(Default)]
 pub struct PreparedRunAuthorization {
     pending: Option<PendingPreparedRun>,
@@ -46,35 +48,7 @@ impl PreparedRunAuthorization {
         intent: SimulationRunIntent,
         rebuild: impl FnOnce() -> Result<PreparedRunSnapshot, PreparationError>,
     ) -> Result<AuthorizedRunDispatch, PreparationError> {
-        if self
-            .pending
-            .as_ref()
-            .is_some_and(|pending| pending.snapshot.intent() != intent)
-        {
-            self.clear();
-        }
-
-        if self.pending.is_none() {
-            let message = match intent {
-                SimulationRunIntent::ManualDeck => {
-                    "Validate the exact current netlist before running; manual decks are never auto-authorized"
-                }
-                SimulationRunIntent::SimulateRunSet => {
-                    "Run Simulation preflight before dispatch; Studio runs are never auto-authorized"
-                }
-            };
-            return Err(PreparationError::new(
-                PreparationStage::Authorization,
-                message,
-            ));
-        }
-
-        let pending = self.pending.take().ok_or_else(|| {
-            PreparationError::new(
-                PreparationStage::Authorization,
-                "No authorized prepared run is available",
-            )
-        })?;
+        let pending = self.take_pending(intent)?;
 
         let current = match rebuild() {
             Ok(snapshot) => snapshot,
@@ -98,6 +72,76 @@ impl PreparedRunAuthorization {
             }
         };
         pending.snapshot.authorize_dispatch(proof)
+    }
+
+    /// Dispatch the retained snapshot itself, without preparing it again.
+    ///
+    /// For a snapshot whose own preparation is the authorization: it was
+    /// prepared from inputs frozen at one instant and checked, and the owner
+    /// retained the identity of those inputs beside it. `verify` confirms
+    /// that nothing the snapshot was prepared from has moved since. When it
+    /// refuses, the retained snapshot and its permit are spent and nothing is
+    /// dispatched, exactly as when a rebuilt snapshot's digest differs.
+    pub fn consume_retained(
+        &mut self,
+        intent: SimulationRunIntent,
+        verify: impl FnOnce(&PreparedRunSnapshot) -> Result<(), PreparationError>,
+    ) -> Result<AuthorizedRunDispatch, PreparationError> {
+        let pending = self.take_pending(intent)?;
+        if let Err(error) = verify(&pending.snapshot) {
+            let _ = self.permits.invalidate();
+            return Err(error);
+        }
+        let digest = pending.snapshot.digest();
+        let proof = match pending.permit.consume(digest, digest) {
+            Ok(proof) => proof,
+            Err(error) => {
+                let _ = self.permits.invalidate();
+                return Err(PreparationError::new(
+                    PreparationStage::Authorization,
+                    format!("Prepared run could not be dispatched ({error})"),
+                ));
+            }
+        };
+        pending.snapshot.authorize_dispatch(proof)
+    }
+
+    /// Take the retained run for `intent`, or say why there is none. A run
+    /// retained for the other intent is dropped: it can never be dispatched
+    /// as this one.
+    fn take_pending(
+        &mut self,
+        intent: SimulationRunIntent,
+    ) -> Result<PendingPreparedRun, PreparationError> {
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.snapshot.intent() != intent)
+        {
+            self.clear();
+        }
+
+        if self.pending.is_none() {
+            let message = match intent {
+                SimulationRunIntent::ManualDeck => {
+                    "Validate the exact current netlist before running; manual decks are never auto-authorized"
+                }
+                SimulationRunIntent::SimulateRunSet => {
+                    "Run Simulation preflight before dispatch; Studio runs are never auto-authorized"
+                }
+            };
+            return Err(PreparationError::new(
+                PreparationStage::Authorization,
+                message,
+            ));
+        }
+
+        self.pending.take().ok_or_else(|| {
+            PreparationError::new(
+                PreparationStage::Authorization,
+                "No authorized prepared run is available",
+            )
+        })
     }
 
     /// Campaign members were completely prepared together before the first

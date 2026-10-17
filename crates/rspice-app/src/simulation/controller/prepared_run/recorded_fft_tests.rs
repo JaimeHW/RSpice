@@ -94,8 +94,7 @@ fn dispatch_tasks(state: &mut AppState, intent: SimulationRunIntent) -> Vec<Disp
     let snapshot =
         SimulationController::build_prepared_snapshot(state, intent).expect("the plan prepares");
     controller
-        .run_authorization
-        .retain(snapshot)
+        .retain_prepared_from(state, snapshot)
         .expect("the prepared snapshot authorizes");
     let dispatch = controller
         .consume_snapshot_for_dispatch(state)
