@@ -64,6 +64,12 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         label: "Mirror",
         shortcut_command: Some(Command::MirrorSelectionHorizontal),
     }),
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::MirrorVertical,
+        icon: ContextIcon::MirrorVertical,
+        label: "Mirror vertically",
+        shortcut_command: Some(Command::MirrorSelectionVertical),
+    }),
     // The stimulus-library group, which exists only in a placed source's menu
     // and states the verbs that source's standing with the library calls for;
     // see `stimulus`.
@@ -94,10 +100,24 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
     }),
     ContextEntry::Separator,
     ContextEntry::Command(ContextCommand {
+        action: ContextAction::Cut,
+        icon: ContextIcon::Copy,
+        label: "Cut selection",
+        shortcut_command: Some(Command::Cut),
+    }),
+    ContextEntry::Command(ContextCommand {
         action: ContextAction::Copy,
         icon: ContextIcon::Copy,
         label: "Copy selection",
         shortcut_command: Some(Command::Copy),
+    }),
+    // Where the menu was opened, which is the point a reader right-clicks
+    // to say "here".
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::Paste,
+        icon: ContextIcon::Copy,
+        label: "Paste here",
+        shortcut_command: Some(Command::Paste),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Duplicate,
@@ -892,7 +912,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             crate::workbench::app::selected_object_properties_available(state),
             "Select one editable component, bus, bus tap, net label, design note, or documentation shape to open its properties",
         ),
-        ContextAction::Rotate | ContextAction::Mirror => (
+        ContextAction::Rotate | ContextAction::Mirror | ContextAction::MirrorVertical => (
             writable && has_copyable_object,
             "Select at least one editable object",
         ),
@@ -900,9 +920,17 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         | ContextAction::ReadoptStimulus
         | ContextAction::SaveStimulus
         | ContextAction::OpenStimulusDefinition => stimulus::availability(action, state),
+        ContextAction::Cut => (
+            writable && copyable_objects_only,
+            "Select at least one editable component, wire, bus, tap, junction, net label, probe, design note, or documentation shape",
+        ),
         ContextAction::Copy => (
             copyable_objects_only,
             "Select at least one component, wire, bus, tap, junction, net label, probe, design note, or documentation shape",
+        ),
+        ContextAction::Paste => (
+            writable && !state.ui.schematic_clipboard.is_empty(),
+            "Copy or cut something to paste first",
         ),
         ContextAction::Duplicate => (
             writable && duplicable_objects_only,
@@ -1014,12 +1042,32 @@ fn execute_context_action(
                 SelectionTransform::MirrorHorizontal,
             );
         }
+        ContextAction::MirrorVertical => {
+            transform_selection_on_active_sheet(
+                state,
+                symbol_context,
+                SelectionTransform::MirrorVertical,
+            );
+        }
         ContextAction::AdoptStimulus
         | ContextAction::ReadoptStimulus
         | ContextAction::SaveStimulus
         | ContextAction::OpenStimulusDefinition => stimulus::execute(action, state),
+        ContextAction::Cut => {
+            state.cut_schematic_selection();
+        }
         ContextAction::Copy => {
             state.copy_active_schematic_selection();
+        }
+        ContextAction::Paste => {
+            let refusal = match state.paste_schematic_clipboard_at(click_pos) {
+                Ok(true) => None,
+                Ok(false) => Some("Nothing was pasted.".to_owned()),
+                Err(reason) => Some(reason),
+            };
+            if let Some(refusal) = refusal {
+                state.push_user_message(ConsoleMessage::warning(refusal));
+            }
         }
         ContextAction::Duplicate => {
             let step = state.schematic_grid_step();

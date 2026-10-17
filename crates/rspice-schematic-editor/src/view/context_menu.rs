@@ -17,11 +17,11 @@ use rspice_ui_kit::{
 
 const DESKTOP_WIDTH: f32 = 286.0;
 /// Tall enough for the tallest menu there is without a scroller: a placed
-/// source's, at sixteen rows and five separators — 526 px with the header and
+/// source's, at nineteen rows and five separators — 607 px with the header and
 /// the border. An instance's or a wire's menu is one separator shorter, and
 /// the empty canvas's two rows shorter again, its one verb standing in the
 /// slot an instance's three master rows take.
-const DESKTOP_MAX_HEIGHT: f32 = 528.0;
+const DESKTOP_MAX_HEIGHT: f32 = 608.0;
 const DESKTOP_VIEWPORT_INSET: f32 = 6.0;
 /// The mockup's `.menu-item { min-height: 27px }`. The row was drawn three
 /// pixels taller here, which cost the surface a row's worth of height for no
@@ -54,11 +54,15 @@ pub enum ContextAction {
     Properties,
     Rotate,
     Mirror,
+    MirrorVertical,
     AdoptStimulus,
     ReadoptStimulus,
     SaveStimulus,
     OpenStimulusDefinition,
+    Cut,
     Copy,
+    /// Paste the clipboard where the menu was opened.
+    Paste,
     Duplicate,
     Delete,
     DescendHierarchy,
@@ -83,6 +87,7 @@ pub enum ContextIcon {
     Sliders,
     Rotate,
     Mirror,
+    MirrorVertical,
     Copy,
     Trash,
     Hierarchy,
@@ -659,6 +664,7 @@ impl ContextIcon {
             Self::Sliders => WorkbenchIcon::Sliders.paint(painter, rect, color),
             Self::Rotate => WorkbenchIcon::Rotate.paint(painter, rect, color),
             Self::Mirror => WorkbenchIcon::Mirror.paint(painter, rect, color),
+            Self::MirrorVertical => WorkbenchIcon::MirrorVertical.paint(painter, rect, color),
             Self::Copy => paint_copy_icon(painter, rect, color),
             Self::Trash => Icon::Trash.paint(painter, rect, color),
             Self::Hierarchy => WorkbenchIcon::Instance.paint(painter, rect, color),

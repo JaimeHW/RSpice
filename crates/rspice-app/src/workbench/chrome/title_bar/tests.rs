@@ -733,6 +733,135 @@ fn design_edit_menu_matches_the_upgraded_authoring_group() {
     );
 }
 
+/// One frame of the full menu bar, returning the labels of the menu items
+/// the platform sees and the label of the one with the keyboard focus.
+#[cfg(not(target_arch = "wasm32"))]
+fn menu_items_after_frame(
+    ctx: &Context,
+    app: &mut RSpiceApp,
+    events: Vec<egui::Event>,
+) -> (Vec<String>, Option<String>) {
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1_440.0, 900.0),
+            )),
+            events,
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                menus(ui, app, MenuProjection::All, false, 35.0);
+            });
+        },
+    );
+    let update = output
+        .platform_output
+        .accesskit_update
+        .expect("AccessKit menu tree");
+    let label_of = |id| {
+        update
+            .nodes
+            .iter()
+            .find(|(node_id, _)| *node_id == id)
+            .and_then(|(_, node)| node.label().map(str::to_owned))
+    };
+    let items = update
+        .nodes
+        .iter()
+        .filter(|(_, node)| node.role() == egui::accesskit::Role::MenuItem)
+        .filter_map(|(_, node)| node.label().map(str::to_owned))
+        .collect();
+    (items, label_of(update.focus))
+}
+
+/// Rotate, Mirror, Align and Distribute were reachable only from the command
+/// palette: no menu listed them (audit E-9, G-13). The Design menu's Arrange
+/// row opens a submenu of all twelve. Right arrow walks into it with its
+/// first row focused, Down steps one row, Enter runs the row, and Left arrow
+/// walks back out onto Arrange.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_design_menu_arrange_submenu_reaches_every_arrange_command() {
+    use crate::state::{Component, ComponentType, Point};
+
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut app = title_test_app();
+    app.state.workbench.activate(Workspace::Design);
+    let document = app.state.schematic.document_mut_for_test();
+    document.components = vec![
+        Component::new(1, ComponentType::Resistor, Point::new(0, 0)),
+        Component::new(2, ComponentType::Resistor, Point::new(200, 100)),
+    ];
+    let selection = &mut app.state.schematic.session.editor.selection;
+    selection.select_component(1);
+    selection.select_component(2);
+    let arrange = Id::new(ARRANGE_ROW_ID);
+    let design_menu = Id::new((
+        "workbench.title_menu.trigger",
+        MenuTriggerKey::Application(ApplicationMenu::Design),
+    ))
+    .with("popup");
+    let arrange_labels: Vec<&str> = ARRANGE_GROUPS
+        .iter()
+        .flat_map(|group| group.iter())
+        .map(|command| command.spec().label)
+        .collect();
+    assert_eq!(arrange_labels.len(), 12);
+
+    Popup::open_id(&ctx, design_menu);
+    let (items, _) = menu_items_after_frame(&ctx, &mut app, Vec::new());
+    assert!(items.iter().any(|label| label == "Arrange"), "{items:?}");
+    assert!(
+        !items.iter().any(|label| label == "Align left"),
+        "the submenu waits to be opened"
+    );
+
+    ctx.memory_mut(|memory| memory.request_focus(arrange));
+    let _ = menu_items_after_frame(&ctx, &mut app, Vec::new());
+    let _ = menu_items_after_frame(&ctx, &mut app, vec![title_key_event(Key::ArrowRight)]);
+    let (items, focused) = menu_items_after_frame(&ctx, &mut app, Vec::new());
+    for label in &arrange_labels {
+        assert!(
+            items.iter().any(|item| item == label),
+            "{label} in {items:?}"
+        );
+    }
+    assert_eq!(focused.as_deref(), Some("Rotate clockwise"));
+
+    let _ = menu_items_after_frame(&ctx, &mut app, vec![title_key_event(Key::ArrowDown)]);
+    let (_, focused) = menu_items_after_frame(&ctx, &mut app, Vec::new());
+    assert_eq!(focused.as_deref(), Some("Rotate counter-clockwise"));
+
+    let _ = menu_items_after_frame(&ctx, &mut app, vec![title_key_event(Key::ArrowLeft)]);
+    let (items, focused) = menu_items_after_frame(&ctx, &mut app, Vec::new());
+    assert_eq!(focused.as_deref(), Some("Arrange"));
+    assert!(
+        !items.iter().any(|label| label == "Align left"),
+        "Left arrow closes the submenu"
+    );
+    assert!(
+        Popup::is_id_open(&ctx, design_menu),
+        "the Design menu stays"
+    );
+
+    // Enter on a submenu row runs its command and closes the menus.
+    let before = app.state.schematic.document().components[1].pos;
+    let _ = menu_items_after_frame(&ctx, &mut app, vec![title_key_event(Key::ArrowRight)]);
+    let _ = menu_items_after_frame(&ctx, &mut app, Vec::new());
+    let _ = menu_items_after_frame(&ctx, &mut app, vec![title_key_event(Key::Enter)]);
+    assert_ne!(
+        app.state.schematic.document().components[1].pos,
+        before,
+        "Rotate clockwise turned the selection"
+    );
+    let _ = menu_items_after_frame(&ctx, &mut app, Vec::new());
+    assert!(!Popup::is_id_open(&ctx, design_menu));
+}
+
 #[test]
 fn design_management_menu_matches_the_upgraded_governed_group() {
     assert_eq!(
