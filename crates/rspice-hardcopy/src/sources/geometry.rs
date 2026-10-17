@@ -179,14 +179,9 @@ pub fn schematic_bounds(
     }
     for label in &schematic.net_labels {
         bounds.include(label.pos);
-        bounds.include_i64(
-            i64::from(label.pos.x).saturating_add(
-                i64::try_from(label.name.len())
-                    .unwrap_or(i64::MAX)
-                    .saturating_mul(2),
-            ),
-            i64::from(label.pos.y),
-        );
+        for rect in super::net_label_bounds(label).into_iter().flatten() {
+            bounds.include_layout_rect(rect);
+        }
     }
     for note in &schematic.design_notes {
         bounds.include(note.pos);

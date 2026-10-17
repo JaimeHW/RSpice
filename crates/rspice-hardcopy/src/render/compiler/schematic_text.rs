@@ -26,7 +26,7 @@ impl SchematicTextClass {
         match self {
             Self::Name => SceneFont::SansSemibold,
             Self::Value => SceneFont::Sans,
-            Self::Slice => SceneFont::MonospaceMedium,
+            Self::Slice | Self::NetName => SceneFont::MonospaceMedium,
         }
     }
 
@@ -34,7 +34,7 @@ impl SchematicTextClass {
         match self {
             Self::Name => NAME_INK,
             Self::Value => VALUE_INK,
-            Self::Slice => NET_INK,
+            Self::Slice | Self::NetName => NET_INK,
         }
     }
 }

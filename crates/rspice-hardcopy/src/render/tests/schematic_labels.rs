@@ -1,5 +1,7 @@
 //! A printed schematic letters every name and value where the canvas does,
-//! clear of the part's body for every turn and mirror (U-4).
+//! clear of the part's body for every turn and mirror, and draws the buses,
+//! taps, net-label marks, connector tabs and port arrows that say which nets
+//! are joined (U-4).
 
 use super::*;
 use crate::sources::{SemanticComponent, SemanticSymbolSource, schematic_bounds};
@@ -8,10 +10,11 @@ use rspice_design::schematic::{
     bus_route,
     component_type::ComponentType,
     net_label::{Junction, NetLabel},
+    port_overlay,
     rotation::Rotation,
     wire::Wire,
 };
-use rspice_design_model::design_management::CrossSheetPortDirection;
+use rspice_design_model::{design_management::CrossSheetPortDirection, port::PortDirection};
 
 const UM: i64 = SCHEMATIC_UNIT_UM;
 
@@ -378,6 +381,119 @@ fn a_printed_bus_reads_as_the_canvas_draws_it() {
         );
         assert_eq!(compiled.text(bit), (x, y, TextAnchor::Start, 2_250));
     }
+}
+
+/// Every straight line drawn at `width`, as scene-micrometre endpoints.
+fn lines_at(compiled: &Compiled, width: u64) -> Vec<[(i64, i64); 2]> {
+    let at = |point: &ScenePoint| (point.x.micrometres() as i64, point.y.micrometres() as i64);
+    compiled
+        .primitives
+        .iter()
+        .filter_map(|primitive| match primitive {
+            ScenePrimitive::Line { from, to, stroke } if stroke.width.micrometres() == width => {
+                Some([at(from), at(to)])
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_printed_net_label_carries_its_mark_and_a_connector_its_tab() {
+    let compiled = compile(&review_sheet());
+
+    // VOUT's attachment diamond, 2.25 wu to each point, filled, on (40, 60).
+    let diamond = vec![
+        compiled.at(40.0, 57.75),
+        compiled.at(42.25, 60.0),
+        compiled.at(40.0, 62.25),
+        compiled.at(37.75, 60.0),
+    ];
+    let filled = compiled
+        .primitives
+        .iter()
+        .filter_map(|primitive| match primitive {
+            ScenePrimitive::Polyline {
+                points,
+                closed: true,
+                fill: Some(_),
+                ..
+            } => Some(
+                points
+                    .iter()
+                    .map(|point| (point.x.micrometres() as i64, point.y.micrometres() as i64))
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(filled.contains(&diamond), "{diamond:?} in {filled:?}");
+
+    // Its name stands on the corner 7 wu right of and 5 wu above the mark,
+    // in Plex Mono Medium 11 wu: one line box up, Plex's ascent down.
+    let (x, y) = compiled.at(47.0, 55.0 - 14.3 + 11.275);
+    assert_eq!(compiled.text("VOUT"), (x, y, TextAnchor::Start, 2_750));
+
+    // CLK's tab: 3 wu after three 6.7-wu glyphs, 12 wu wide and one line
+    // box tall, stroked at 0.085 of its height.
+    let tab = vec![
+        compiled.at(230.1, 220.7),
+        compiled.at(242.1, 220.7),
+        compiled.at(242.1, 235.0),
+        compiled.at(230.1, 235.0),
+    ];
+    let outlines = polylines_at(&compiled, 304);
+    assert!(outlines.contains(&tab), "{tab:?} in {outlines:?}");
+    assert_eq!(outlines.len(), 2, "one tab per connector");
+
+    // Each tab holds a stem and a two-stroke head, at the end the signal
+    // travels toward: right for CLK's output, left for RST's input.
+    let marks = lines_at(&compiled, 304);
+    assert_eq!(marks.len(), 6);
+    for (left, right, head_right) in [(230.1, 242.1, true), (350.1, 362.1, false)] {
+        let (left, right) = (compiled.at(left, 0.0).0, compiled.at(right, 0.0).0);
+        let inside = marks
+            .iter()
+            .filter(|[a, b]| (left..=right).contains(&a.0) && (left..=right).contains(&b.0))
+            .collect::<Vec<_>>();
+        assert_eq!(inside.len(), 3);
+        let tip = inside[1][0];
+        assert!(inside[1..].iter().all(|mark| mark[0] == tip), "{inside:?}");
+        assert_eq!(tip.0 > (left + right) / 2, head_right, "{inside:?}");
+    }
+}
+
+#[test]
+fn a_printed_port_shows_which_way_its_signal_goes() {
+    let sheet = review_sheet();
+    let compiled = compile(&sheet);
+    let marks = lines_at(&compiled, 250);
+
+    // P1, an input, upright at (0, 120): the arrow points into the body.
+    let p1 = [
+        [compiled.at(-1.5, 120.0), compiled.at(5.0, 120.0)],
+        [compiled.at(5.0, 120.0), compiled.at(2.0, 117.5)],
+        [compiled.at(5.0, 120.0), compiled.at(2.0, 122.5)],
+    ];
+    for mark in &p1 {
+        assert!(marks.contains(mark), "{mark:?} in {marks:?}");
+    }
+
+    // P2, an output turned a half, through the turn its body was drawn at.
+    let library = SymbolLibrary::load_embedded().unwrap();
+    let port = &sheet.components[7].component;
+    let (_, rotation) = library
+        .get_with_rotation_variant(port.kind, port.rotation.degrees(), None)
+        .unwrap();
+    let place = |point| {
+        let point = port_overlay::transform_point(point, rotation, false, false);
+        compiled.at(480.0 + f64::from(point.x), 120.0 + f64::from(point.y))
+    };
+    for segment in port_overlay::direction_segments(PortDirection::Out) {
+        let mark = [place(segment.start), place(segment.end)];
+        assert!(marks.contains(&mark), "{mark:?} in {marks:?}");
+    }
+    assert_eq!(marks.len(), 6, "three strokes for each port");
 }
 
 /// The review sheet as a PNG, for a person to look at.

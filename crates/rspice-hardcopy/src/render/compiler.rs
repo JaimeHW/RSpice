@@ -7,7 +7,7 @@
 //! truncated value on a printed page is indistinguishable from a real one.
 
 use super::*;
-use rspice_design::schematic::bus_route;
+use rspice_design::schematic::{bus_route, component_type::ComponentType};
 
 pub(super) struct SemanticSceneCompiler<'a> {
     pub(super) bounds: SemanticBounds,
@@ -428,13 +428,7 @@ impl<'a> SemanticSceneCompiler<'a> {
             });
         }
         for label in &schematic.net_labels {
-            self.add_text(
-                self.schematic_point(label.pos)?,
-                &label.name,
-                SceneFont::SansSemibold,
-                2_800,
-                wire_stroke.color,
-            )?;
+            self.schematic_net_label(label)?;
         }
 
         let library = SymbolLibrary::load_embedded()
@@ -449,6 +443,9 @@ impl<'a> SemanticSceneCompiler<'a> {
                     component_stroke,
                     component_fill,
                 )?;
+                if semantic.component.kind == ComponentType::Port {
+                    self.port_direction_marks(&library, &semantic.component, component_stroke)?;
+                }
             }
             self.instance_labels(semantic)?;
         }

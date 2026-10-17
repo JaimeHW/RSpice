@@ -20,7 +20,8 @@ mod visualization;
 
 pub(crate) use geometry::authored_sheet_bounds;
 pub(crate) use schematic_text::{
-    SchematicText, SchematicTextClass, bus_declaration_text, instance_texts, tap_slice_text,
+    SchematicText, SchematicTextClass, bus_declaration_text, instance_texts, net_label_bounds,
+    net_label_text, tap_slice_text,
 };
 
 pub use aggregation::resolve_hardcopy_source_set_with;

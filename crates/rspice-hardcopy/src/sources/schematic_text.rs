@@ -10,7 +10,8 @@ use rspice_design::schematic::{
     bus::{Bus, BusTap},
     component_display::SchematicParameterLabelVisibility,
     component_type::ComponentType,
-    label_layout::{self, LayoutPoint, LayoutRect, PlacedText},
+    label_layout::{self, LayoutPoint, LayoutRect, PlacedText, TextEdge},
+    net_label::NetLabel,
     value_label::{cell_instance_value, component_value_label},
 };
 
@@ -25,6 +26,9 @@ pub enum SchematicTextClass {
     Value,
     /// A bus declaration or a tap's bit slice: Plex Mono Medium, 9 wu.
     Slice,
+    /// A net label's or an off-sheet connector's name: Plex Mono Medium,
+    /// 11 wu.
+    NetName,
 }
 
 impl SchematicTextClass {
@@ -34,6 +38,7 @@ impl SchematicTextClass {
             Self::Name => label_layout::INSTANCE_NAME_WORLD,
             Self::Value => label_layout::INSTANCE_VALUE_WORLD,
             Self::Slice => label_layout::SMALL_TEXT_WORLD,
+            Self::NetName => label_layout::NET_LABEL_FONT_WORLD,
         }
     }
 }
@@ -109,6 +114,37 @@ pub fn bus_declaration_text(bus: &Bus) -> Option<SchematicText> {
         placed: label_layout::bus_declaration_placement(bus)?,
         text: bus.declaration.as_ref()?.to_string(),
     })
+}
+
+/// A net label's name standing on its corner, up and right of the
+/// attachment mark, as the canvas hangs it.
+pub fn net_label_text(label: &NetLabel) -> SchematicText {
+    let layout = label_layout::net_label_layout(label);
+    SchematicText {
+        class: SchematicTextClass::NetName,
+        placed: PlacedText {
+            anchor: layout.corner,
+            horizontal: TextEdge::Start,
+            vertical: TextEdge::End,
+        },
+        text: layout.name.to_owned(),
+    }
+}
+
+/// Everything a net label draws, in world units: its attachment diamond,
+/// its name and an off-sheet connector's tab.
+pub fn net_label_bounds(label: &NetLabel) -> [Option<LayoutRect>; 3] {
+    let layout = label_layout::net_label_layout(label);
+    let (x, y) = (label.pos.x as f32, label.pos.y as f32);
+    let half = layout.diamond_half;
+    [
+        Some(LayoutRect {
+            min: LayoutPoint::new(x - half, y - half),
+            max: LayoutPoint::new(x + half, y + half),
+        }),
+        Some(net_label_text(label).bounds()),
+        layout.tab.map(|(tab, _)| tab),
+    ]
 }
 
 /// A tap's bit slice beside its connection point, so the page says which
