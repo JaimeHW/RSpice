@@ -335,7 +335,7 @@ fn prepare_browser_pdk_snapshot(
 ) -> Result<PreparedBrowserPdkSnapshot, ConfigError> {
     if generation == 0 || generation > MAX_BROWSER_PDK_GENERATION {
         return Err(ConfigError::Serialize(format!(
-            "browser PDK generation {generation} is outside the exact integer range"
+            "browser PDK generation {generation} is outside the supported range"
         )));
     }
 
@@ -406,7 +406,7 @@ fn validate_browser_pdk_head(
     }
     if head.generation == 0 || head.generation > MAX_BROWSER_PDK_GENERATION {
         return Err(ConfigError::Parse(format!(
-            "browser PDK generation {} is outside the exact integer range",
+            "browser PDK generation {} is outside the supported range",
             head.generation
         )));
     }

@@ -383,7 +383,7 @@ fn display_profile_editor_is_accessible_at_phone_width_and_package_bound() {
     assert!(labels.contains(&"PDK technology administration"));
     assert!(labels.contains(&"New from signed defaults"));
     assert!(labels.contains(&"Reset draft to signed colors"));
-    assert!(labels.contains(&"Save and activate immutable display-profile revision"));
+    assert!(labels.contains(&"Save and activate display-profile revision"));
     assert!(labels.iter().any(|label| label.starts_with("Visible ")));
     assert!(labels.iter().any(|label| label.starts_with("Selectable ")));
     assert!(
@@ -544,7 +544,7 @@ fn revision_comparison_table_is_complete_and_accessible_at_phone_width() {
             .count()
             >= 18
     );
-    assert!(labels.contains(&"Copy exact signed PDK revision comparison as JSON"));
+    assert!(labels.contains(&"Copy signed PDK revision comparison as JSON"));
     assert!(labels.contains(&"active"));
     assert!(labels.contains(&"signed archive digest"));
 }
@@ -606,7 +606,7 @@ fn project_callback_workflow_executes_exact_pin_and_exposes_durable_receipt() {
 
     assert!(labels.iter().any(|label| {
         label.contains("Run callback derive-device")
-            && label.contains("exact attached project revision")
+            && label.contains("for the attached project revision")
     }));
     // A receipt that did not verify is never listed, so the row says what it
     // is — sequence and callback — and nothing about its own validity.
@@ -619,6 +619,6 @@ fn project_callback_workflow_executes_exact_pin_and_exposes_durable_receipt() {
     assert!(
         labels
             .iter()
-            .any(|label| { label.contains("Copy exact project callback receipt 1 as JSON") })
+            .any(|label| { label.contains("Copy project callback record 1 as JSON") })
     );
 }

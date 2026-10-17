@@ -645,7 +645,7 @@ fn administration_controls(
     action: &mut Option<AdminAction>,
 ) {
     panel(ui, "Administrative transaction", |ui| {
-        ui.label("Identity and reason are recorded in the immutable hash-chained receipt.");
+        ui.label("Identity and reason are recorded in the audit history, which cannot be edited.");
         ui.add(
             egui::TextEdit::singleline(&mut view.actor_id)
                 .hint_text("Actor ID")
@@ -740,7 +740,7 @@ fn administration_controls(
         let response = Button::new(label)
             .enabled(enabled)
             .accessible_label(if active {
-                "Activate selected revision. Unavailable: this exact revision is already active"
+                "Activate selected revision. Unavailable: this revision is already active"
             } else if !has_authority {
                 "Activate selected revision. Unavailable: actor, authority, and reason are required"
             } else if !snapshot.validation_errors.is_empty() {
@@ -779,7 +779,7 @@ fn technology_draft_controls(
         .is_some_and(|draft| draft.baseline.binding == binding);
     if view.technology_draft.is_none() {
         ui.small(
-            "Fork the selected immutable revision into one persisted unsigned draft. Activation still requires an externally signed package import.",
+            "Fork the selected revision into one saved, unsigned draft. Activation still requires importing an externally signed package.",
         );
         if Button::new("Fork selected revision into draft")
             .show(ui)
@@ -877,7 +877,7 @@ fn section_contents(
     }
     let Some(package) = selected_package(snapshot, view) else {
         panel(ui, view.section.label(), |ui| {
-            ui.label("Select a trusted installed revision to inspect its exact contents.");
+            ui.label("Select a trusted installed revision to inspect its contents.");
         });
         return;
     };
@@ -901,9 +901,9 @@ fn compare_section(
     snapshot: &RegistrySnapshot,
     view: &mut AdminViewState,
 ) {
-    panel(ui, "Exact signed-revision comparison", |ui| {
+    panel(ui, "Signed revision comparison", |ui| {
         ui.label(
-            "Compare authenticated package contracts before explicit project migration. No project binding or design data is changed here.",
+            "Compare the signed packages before migrating a project. No project binding or design data is changed here.",
         );
         let alternatives = snapshot
             .packages
@@ -1028,8 +1028,8 @@ fn compare_section(
         );
         match serde_json::to_string_pretty(&diff) {
             Ok(json) => {
-                if Button::new("Copy exact comparison JSON")
-                    .accessible_label("Copy exact signed PDK revision comparison as JSON")
+                if Button::new("Copy comparison JSON")
+                    .accessible_label("Copy signed PDK revision comparison as JSON")
                     .show(ui)
                     .clicked()
                 {
@@ -1211,7 +1211,7 @@ fn diff_table_cell(
     });
 }
 
-const fn diff_area_label(area: PdkTechnologyDiffArea) -> &'static str {
+pub(super) const fn diff_area_label(area: PdkTechnologyDiffArea) -> &'static str {
     match area {
         PdkTechnologyDiffArea::Identity => "Identity",
         PdkTechnologyDiffArea::Compatibility => "Compatibility",
@@ -1235,7 +1235,7 @@ const fn diff_kind_label(kind: PdkTechnologyDiffKind) -> &'static str {
     }
 }
 
-const fn diff_impact_label(impact: PdkTechnologyDiffImpact) -> &'static str {
+pub(super) const fn diff_impact_label(impact: PdkTechnologyDiffImpact) -> &'static str {
     match impact {
         PdkTechnologyDiffImpact::Informational => "Information",
         PdkTechnologyDiffImpact::ReviewRequired => "Review",
@@ -1559,7 +1559,7 @@ fn display_section(
                 });
 
             ui.horizontal_wrapped(|ui| {
-                let publish = Button::new("Save & activate immutable revision")
+                let publish = Button::new("Save & activate revision")
                     .accent()
                     .enabled(administrative_ready && view.display_draft_dirty)
                     .accessible_label(if !administrative_ready {
@@ -1567,7 +1567,7 @@ fn display_section(
                 } else if !view.display_draft_dirty {
                     "Save and activate display profile. Unavailable: the draft has no changes"
                 } else {
-                    "Save and activate immutable display-profile revision"
+                    "Save and activate display-profile revision"
                 })
                 .show(ui);
             if publish.clicked() {
@@ -1600,7 +1600,7 @@ fn display_section(
                         .accessible_label(if !administrative_ready {
                             "Activate selected display profile. Unavailable: actor, authority, and reason are required"
                         } else if is_active {
-                            "Activate selected display profile. Unavailable: this exact revision is already active"
+                            "Activate selected display profile. Unavailable: this revision is already active"
                         } else {
                             label
                         })
@@ -1614,7 +1614,7 @@ fn display_section(
                 }
         });
             ui.small(
-            "Actor and authority are operator-provided local audit fields. This surface does not claim connected organization authentication or remote authorization.",
+            "Actor and authority are typed in locally for the audit record. RSpice does not check them against your organization's sign-in or permissions.",
         );
         },
     );
@@ -2354,7 +2354,7 @@ fn stream_section(ui: &mut Ui, package: &ValidatedPdkTechnologyPackage, view: &m
     if draft_matches_package(view, package) {
         panel(ui, "Draft GDSII and OASIS stream mapping", |ui| {
             ui.small(
-                "Every canonical layer-purpose remains explicitly mapped. Layer-purpose edits add and remove rows here deterministically.",
+                "Every layer purpose stays mapped. Adding or removing a layer purpose adds or removes its row here.",
             );
             let draft = view
                 .technology_draft
@@ -2815,7 +2815,7 @@ fn recognition_section(
 fn editable_recognition_section(ui: &mut Ui, view: &mut AdminViewState) {
     panel(ui, "Draft device-recognition contracts", |ui| {
         ui.small(
-            "Contracts bind editable device and terminal mappings to immutable source-package rule and qualification artifacts.",
+            "Contracts tie the editable device and terminal mappings to the source package's rule and qualification files.",
         );
         let draft = view
             .technology_draft
@@ -3089,7 +3089,7 @@ fn extraction_section(
                 }
             });
         ui.small(
-            "Package validation does not execute or qualify extraction. Release and sign-off remain blocked until a registered producer supplies source-bound evidence.",
+            "Package validation does not run or qualify extraction. Release and sign-off stay blocked until a registered producer supplies results for this source package.",
         );
     });
 }
@@ -3097,7 +3097,7 @@ fn extraction_section(
 fn editable_extraction_section(ui: &mut Ui, view: &mut AdminViewState) {
     panel(ui, "Draft parasitic-extraction contracts", |ui| {
         ui.small(
-            "Mappings select exact immutable rule, layout-vector, and reference artifacts from the source package.",
+            "Mappings select rule, layout-vector, and reference files from the source package.",
         );
         let draft = view
             .technology_draft
@@ -3452,7 +3452,7 @@ fn resources_section(
             } else {
                 ui.label(RichText::new("Executable model-source contract").strong());
                 ui.small(
-                    "Simulation resolves these exact signed artifacts and package-relative dependencies through an in-memory content-addressed bundle. No model search path is inferred.",
+                    "Simulation reads these signed files and their package-relative dependencies from the package itself. No model search path is guessed.",
                 );
                 Grid::new("pdk-model-source-grid")
                     .striped(true)
@@ -3491,7 +3491,7 @@ fn resources_section(
                             callback
                                 .capabilities
                                 .iter()
-                                .map(|capability| format!("{capability:?}"))
+                                .map(|capability| callback_capability_label(*capability))
                                 .collect::<Vec<_>>()
                                 .join(", ")
                         ))
@@ -3509,7 +3509,7 @@ fn resources_section(
                         && administrative_fields_ready(view);
                     let accessible_label = if !selected_is_project_pin {
                         format!(
-                            "Run callback {} for the attached project. Unavailable: the selected signed revision is not the project's exact pin",
+                            "Run callback {} for the attached project. Unavailable: the selected signed revision is not the one the project is pinned to",
                             callback.callback_id
                         )
                     } else if let Some(blocker) = &snapshot.project_callback_blocker {
@@ -3524,7 +3524,7 @@ fn resources_section(
                         )
                     } else {
                         format!(
-                            "Run callback {} for the exact attached project revision",
+                            "Run callback {} for the attached project revision",
                             callback.callback_id
                         )
                     };
@@ -3540,11 +3540,11 @@ fn resources_section(
                     }
                 }
                 ui.small(
-                    "Each signed module is ABI-validated at installation. Project execution uses only the exact project pin and canonical active-plan variables, is deterministic, fuel-metered and memory-bounded, exposes only declared RSpice host capabilities, and commits derived metadata in a project-owned receipt. WASI and network access are absent.",
+                    "Each signed module is checked against the callback interface when it is installed. A run uses only the project's pinned revision and the active plan's variables, gives the same result every time, is limited in steps and memory, can call only the RSpice functions it declares, and saves what it derives in the project. It has no WASI or network access.",
                 );
             }
             ui.separator();
-            ui.label(RichText::new("Project callback evidence").strong());
+            ui.label(RichText::new("Project callback runs").strong());
             let receipts = snapshot
                 .project_callback_receipts
                 .iter()
@@ -3554,7 +3554,7 @@ fn resources_section(
                 })
                 .collect::<Vec<_>>();
             if receipts.is_empty() {
-                ui.small("No callback execution receipt for this exact signed revision is retained by the project.");
+                ui.small("The project has no callback runs recorded for this signed revision.");
             } else {
                 ScrollArea::vertical()
                     .id_salt("pdk-project-callback-receipts")
@@ -3620,10 +3620,10 @@ fn resources_section(
                                         }
                                     }
                                     let copy_label = format!(
-                                        "Copy exact project callback receipt {} as JSON",
+                                        "Copy project callback record {} as JSON",
                                         receipt.sequence
                                     );
-                                    if Button::new("Copy exact callback receipt as JSON")
+                                    if Button::new("Copy callback record as JSON")
                                         .accessible_label(&copy_label)
                                         .show(ui)
                                         .clicked()
@@ -3642,6 +3642,18 @@ fn resources_section(
             }
         },
     );
+}
+
+fn callback_capability_label(
+    capability: rspice_model_library::pdk::contracts::PdkCallbackCapability,
+) -> &'static str {
+    use rspice_model_library::pdk::contracts::PdkCallbackCapability;
+    match capability {
+        PdkCallbackCapability::ReadPackage => "read package",
+        PdkCallbackCapability::ReadProjectParameters => "read project parameters",
+        PdkCallbackCapability::WriteDerivedMetadata => "write derived metadata",
+        PdkCallbackCapability::Network => "network",
+    }
 }
 
 fn trust_audit_section(
@@ -3761,89 +3773,85 @@ fn trust_audit_section(
     });
 
     ui.add_space(10.0);
-    panel(
-        ui,
-        "Immutable trust and package transaction history",
-        |ui| {
-            ui.label("Trust-root receipts");
-            for receipt in snapshot.trust_audit.iter().rev() {
-                ui.group(|ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(RichText::new(format!("#{}", receipt.sequence)).strong());
-                        ui.label(trust_audit_action_label(receipt.action));
-                        ui.monospace(format!("{}/{}", receipt.publisher_id, receipt.key_id));
-                    });
-                    ui.small(format!(
-                        "{} · {} · {}",
-                        receipt.actor_id, receipt.authority_id, receipt.reason
-                    ));
-                    ui.monospace(short_digest(receipt.receipt_digest));
+    panel(ui, "Trust and package history", |ui| {
+        ui.label("Trust-root receipts");
+        for receipt in snapshot.trust_audit.iter().rev() {
+            ui.group(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(format!("#{}", receipt.sequence)).strong());
+                    ui.label(trust_audit_action_label(receipt.action));
+                    ui.monospace(format!("{}/{}", receipt.publisher_id, receipt.key_id));
                 });
-            }
-            if snapshot.trust_audit.is_empty() {
-                ui.label("No governed trust-root transaction has been recorded.");
-            }
-            ui.separator();
-            ui.label("Technology package receipts");
-            ScrollArea::vertical()
-                .id_salt("pdk-audit-table")
-                .max_height(360.0)
-                .show(ui, |ui| {
-                    for receipt in snapshot.audit.iter().rev() {
-                        ui.group(|ui| {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label(RichText::new(format!("#{}", receipt.sequence)).strong());
-                                ui.label(audit_action_label(receipt.action));
-                                ui.monospace(format!(
-                                    "{} {}",
-                                    receipt.target.package_id, receipt.target.revision
-                                ));
-                            });
-                            ui.small(format!(
-                                "{} · {} · {}",
-                                receipt.actor_id, receipt.authority_id, receipt.reason
+                ui.small(format!(
+                    "{} · {} · {}",
+                    receipt.actor_id, receipt.authority_id, receipt.reason
+                ));
+                ui.monospace(short_digest(receipt.receipt_digest));
+            });
+        }
+        if snapshot.trust_audit.is_empty() {
+            ui.label("No governed trust-root transaction has been recorded.");
+        }
+        ui.separator();
+        ui.label("Technology package receipts");
+        ScrollArea::vertical()
+            .id_salt("pdk-audit-table")
+            .max_height(360.0)
+            .show(ui, |ui| {
+                for receipt in snapshot.audit.iter().rev() {
+                    ui.group(|ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new(format!("#{}", receipt.sequence)).strong());
+                            ui.label(audit_action_label(receipt.action));
+                            ui.monospace(format!(
+                                "{} {}",
+                                receipt.target.package_id, receipt.target.revision
                             ));
-                            ui.monospace(short_digest(receipt.receipt_digest));
                         });
-                    }
-                });
-            if snapshot.audit.is_empty() {
-                ui.label("No package transaction has been recorded.");
-            }
-            ui.separator();
-            ui.label("Display-profile receipts");
-            for receipt in snapshot.display_audit.iter().rev() {
-                ui.group(|ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(RichText::new(format!("#{}", receipt.sequence)).strong());
-                        ui.label(display_audit_action_label(receipt.action));
-                        ui.monospace(format!(
-                            "{} r{}",
-                            receipt.target.profile_id, receipt.target.revision
+                        ui.small(format!(
+                            "{} · {} · {}",
+                            receipt.actor_id, receipt.authority_id, receipt.reason
                         ));
+                        ui.monospace(short_digest(receipt.receipt_digest));
                     });
-                    ui.small(format!(
-                        "{} \u{00b7} {} \u{00b7} {}",
-                        receipt.actor_id, receipt.authority_id, receipt.reason
-                    ));
-                    ui.monospace(short_digest(receipt.receipt_digest));
-                });
-            }
-            if snapshot.display_audit.is_empty() {
-                ui.label("No display-profile transaction has been recorded.");
-            }
-            if Button::new("Copy complete audit JSON").show(ui).clicked() {
-                let value = serde_json::json!({
-                    "trust_root_receipts": snapshot.trust_audit,
-                    "technology_package_receipts": snapshot.audit,
-                    "display_profile_receipts": snapshot.display_audit,
-                });
-                if let Ok(json) = serde_json::to_string_pretty(&value) {
-                    ui.ctx().copy_text(json);
                 }
+            });
+        if snapshot.audit.is_empty() {
+            ui.label("No package transaction has been recorded.");
+        }
+        ui.separator();
+        ui.label("Display-profile receipts");
+        for receipt in snapshot.display_audit.iter().rev() {
+            ui.group(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(format!("#{}", receipt.sequence)).strong());
+                    ui.label(display_audit_action_label(receipt.action));
+                    ui.monospace(format!(
+                        "{} r{}",
+                        receipt.target.profile_id, receipt.target.revision
+                    ));
+                });
+                ui.small(format!(
+                    "{} \u{00b7} {} \u{00b7} {}",
+                    receipt.actor_id, receipt.authority_id, receipt.reason
+                ));
+                ui.monospace(short_digest(receipt.receipt_digest));
+            });
+        }
+        if snapshot.display_audit.is_empty() {
+            ui.label("No display-profile transaction has been recorded.");
+        }
+        if Button::new("Copy complete audit JSON").show(ui).clicked() {
+            let value = serde_json::json!({
+                "trust_root_receipts": snapshot.trust_audit,
+                "technology_package_receipts": snapshot.audit,
+                "display_profile_receipts": snapshot.display_audit,
+            });
+            if let Ok(json) = serde_json::to_string_pretty(&value) {
+                ui.ctx().copy_text(json);
             }
-        },
-    );
+        }
+    });
 }
 
 fn panel(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) {
