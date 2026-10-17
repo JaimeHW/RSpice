@@ -911,8 +911,10 @@ mod tests {
         for (case, left, right, touching) in cases {
             let left = Bus::new(1, left, declared("DATA[7:0]")).unwrap();
             let right = Bus::new(2, right, declared("ADDR[7:0]")).unwrap();
-            let mut document = SchematicDocument::default();
-            document.buses = vec![left.clone(), right.clone()];
+            let document = SchematicDocument {
+                buses: vec![left.clone(), right.clone()],
+                ..SchematicDocument::default()
+            };
             assert_eq!(has_range_conflict(&document), touching, "{case}: extractor");
             assert_eq!(buses_touch(&left, &right), touching, "{case}: rename");
             assert_eq!(
