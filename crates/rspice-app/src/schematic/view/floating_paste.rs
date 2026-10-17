@@ -107,9 +107,12 @@ pub(super) fn draw_floating_paste_preview(
                 );
             });
         }
-        let candidate = candidate.document().clone();
+        let diff = preview::TransformCandidateDiff::between(
+            state.schematic.document(),
+            candidate.document(),
+        );
         if let Some(floating) = state.dialogs.floating_paste.as_mut() {
-            floating.remember_preview(content_version, candidate, result);
+            floating.remember_preview(content_version, diff, result);
         }
     }
     let Some(floating) = state.dialogs.floating_paste.as_ref() else {
@@ -131,11 +134,11 @@ pub(super) fn draw_floating_paste_preview(
         Err(error) => (false, error.clone()),
     };
     if valid {
-        preview::draw_move_candidate(
+        preview::draw_move_diff(
             painter,
             viewport,
             &preview_view(state),
-            &preview_state.candidate,
+            &preview_state.diff,
             &transform_preview_style(state, symbol_context, symbol_library),
             || state.workspace.content.active_view.display_path(),
         );

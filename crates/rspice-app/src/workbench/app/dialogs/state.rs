@@ -843,7 +843,9 @@ impl FloatingPaste {
 pub(crate) struct FloatingPastePreview {
     pub(crate) at: crate::state::Point,
     pub(crate) content_version: u64,
-    pub(crate) candidate: rspice_design::schematic::document::SchematicDocument,
+    /// What the placement would change, taken once when the preview is
+    /// worked out rather than searched for on every repaint.
+    pub(crate) diff: rspice_schematic_editor::view::preview::TransformCandidateDiff,
     pub(crate) result: Result<bool, String>,
 }
 

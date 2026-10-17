@@ -154,13 +154,13 @@ impl FloatingPaste {
     pub(crate) fn remember_preview(
         &mut self,
         content_version: u64,
-        candidate: rspice_design::schematic::document::SchematicDocument,
+        diff: rspice_schematic_editor::view::preview::TransformCandidateDiff,
         result: Result<bool, String>,
     ) {
         self.preview = Some(FloatingPastePreview {
             at: self.at(),
             content_version,
-            candidate,
+            diff,
             result,
         });
     }
