@@ -989,6 +989,10 @@ pub struct NetlistSourceMap {
     pub value_spans: Vec<NetlistValueSpan>,
     /// `.FUNC` definitions, in source order.
     pub functions: Vec<NetlistFunctionDefinition>,
+    /// Whether the text holds a `.if` block or an inline `.lib` section,
+    /// whose lines only a parse can say are read. Without one,
+    /// [`source_map_for_editor`] already counts what a parse would.
+    pub decided_by_parse: bool,
 }
 
 impl NetlistSourceMap {
@@ -1348,6 +1352,7 @@ fn process_logical_line(line: &MappedLine, scopes: &mut Vec<String>, map: &mut N
     };
     let head = &line.text[first.clone()];
     let scope = current_scope(scopes);
+    map.decided_by_parse |= bounds_lines_a_parse_decides(head);
 
     if head.eq_ignore_ascii_case(".subckt") {
         if let Some(name) = tokens.get(1)
@@ -1393,6 +1398,16 @@ fn process_logical_line(line: &MappedLine, scopes: &mut Vec<String>, map: &mut N
     if let Some(reference) = reference_from_element_line(line, &tokens, scope) {
         map.references.push(reference);
     }
+}
+
+/// Whether a card opens, divides or closes lines that only a parse can say
+/// are read: a branch of a `.if` block, or an inline `.lib` section, which
+/// every `.endl` closes. Recognizing the card decides nothing about it.
+fn bounds_lines_a_parse_decides(head: &str) -> bool {
+    let keyword = head.split('(').next().unwrap_or_default();
+    [".if", ".elseif", ".else", ".endif", ".endl"]
+        .iter()
+        .any(|directive| keyword.eq_ignore_ascii_case(directive))
 }
 
 /// Whether a directive's assignments bind parameter names the rest of the deck
@@ -2495,6 +2510,24 @@ M1 d g s b nonly\n\
             vec!["nonly"],
             "the reference on a read line stays"
         );
+    }
+
+    #[test]
+    fn the_map_says_when_only_a_parse_can_tell_which_lines_are_read() {
+        assert!(
+            !source_map_for_editor("deck\n.param a=1\n.lib 'x.lib' tt\n.end\n").decided_by_parse
+        );
+        for block in [
+            ".if (a==1)\n.param b=1\n.endif",
+            ".IF(a)\n.ELSE\n.ENDIF",
+            ".lib tt\n.param b=1\n.endl tt",
+        ] {
+            assert!(
+                source_map_for_editor(&format!("deck\n.param a=1\n{block}\n.end\n"))
+                    .decided_by_parse,
+                "{block}"
+            );
+        }
     }
 
     /// A library file's inline sections read only as the `.lib` card that
