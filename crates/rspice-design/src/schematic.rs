@@ -34,6 +34,7 @@ pub mod movement;
 pub mod net_label;
 pub mod owned;
 pub mod port;
+pub mod port_overlay;
 pub mod probe;
 pub mod replacement;
 pub mod replacement_edit;
