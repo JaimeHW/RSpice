@@ -568,7 +568,7 @@ fn apply_governed_sheet_setup(
     }
     if preset_saved {
         effects.push(if personal_saved {
-            "personal custom size plus exact project snapshot".to_owned()
+            "personal custom size plus a project copy".to_owned()
         } else {
             "project custom-size preset".to_owned()
         });

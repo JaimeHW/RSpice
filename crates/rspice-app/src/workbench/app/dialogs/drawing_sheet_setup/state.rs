@@ -330,7 +330,7 @@ impl PageSetupScope {
 
     pub(crate) const fn detail(self) -> &'static str {
         match self {
-            Self::CurrentSheet => "Write only the exact active drawing-sheet record.",
+            Self::CurrentSheet => "Write only the active sheet's drawing-sheet record.",
             Self::Document => "Write every governed sheet in the active cell/view.",
             Self::CurrentSheetAndDefault => {
                 "Write this sheet and seed future sheets with the same format."

@@ -484,7 +484,7 @@ impl RSpiceApp {
         );
         let title = format!("Delete '{name}'?");
         let detail = if used_by == 0 {
-            "This removes the reusable definition. Existing authored sheets retain their exact embedded snapshots."
+            "This removes the reusable definition. Sheets that already use it keep their own copy."
                 .to_owned()
         } else {
             format!(
