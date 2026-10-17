@@ -20,7 +20,7 @@ pub(super) fn prepare(
             Some(AnalysisResultPayload::Qpnoise { .. })
         ) {
             prepare_typed_result_csv(analysis)
-                .ok_or("QPNOISE evidence cannot be exported")?
+                .ok_or("QPNOISE results cannot be exported")?
                 .contents
         } else {
             crate::workbench::documents::result_document::export_noise_contribution_csv(
@@ -38,10 +38,7 @@ pub(super) fn prepare(
     Ok(PreparedTypedResultCsv {
         default_name: "rspice-noise-results.csv",
         contents,
-        detail: format!(
-            "{count} noise spectrum and evidence rows across {} analyses",
-            indices.len()
-        ),
+        detail: format!("{count} noise rows across {} analyses", indices.len()),
     })
 }
 

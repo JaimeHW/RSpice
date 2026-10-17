@@ -2004,7 +2004,7 @@ fn a_dc_mismatch_result_exports_one_exact_row_per_contributor() {
     );
     let csv = prepare_typed_result_csv(&analysis).expect("a DC mismatch result exports a table");
     assert_eq!(csv.default_name, "dc-mismatch.csv");
-    assert_eq!(csv.detail, "2 of 6 exact DC mismatch contributors");
+    assert_eq!(csv.detail, "2 of 6 DC mismatch contributors");
 
     let rows: Vec<Vec<&str>> = csv
         .contents

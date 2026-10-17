@@ -28,13 +28,13 @@ pub(super) fn prepare_typed_result_csv(
         } => (
             "dc-mismatch.csv",
             format!(
-                "{} of {} exact DC mismatch contributors",
+                "{} of {} DC mismatch contributors",
                 retained_contributors, evaluated_contributors
             ),
         ),
         TypedCsvSummary::OperatingPoint => (
             "operating-point-contract.csv",
-            "exact operating-point execution and retention contract".to_owned(),
+            "operating-point solve settings and saved quantities".to_owned(),
         ),
         TypedCsvSummary::PoleZero {
             pole_count,
@@ -63,7 +63,7 @@ pub(super) fn prepare_typed_result_csv(
         } => (
             "pss-floquet-evidence.csv",
             format!(
-                "{} with retained qualification evidence",
+                "{} with qualification results",
                 floquet_export_count_label(multiplier_count, complete, "PSS Floquet multipliers")
             ),
         ),
@@ -73,21 +73,20 @@ pub(super) fn prepare_typed_result_csv(
         } => (
             "pstb-floquet-evidence.csv",
             format!(
-                "{} with retained qualification and stability evidence",
+                "{} with qualification and stability results",
                 floquet_export_count_label(mode_count, complete, "PSTB Floquet modes")
             ),
         ),
-        TypedCsvSummary::Sensitivity { row_count } => (
-            "sensitivity.csv",
-            format!("{} exact sensitivity rows", row_count),
-        ),
+        TypedCsvSummary::Sensitivity { row_count } => {
+            ("sensitivity.csv", format!("{} sensitivity rows", row_count))
+        }
         TypedCsvSummary::Scalars { value_count } => (
             "scalar-results.csv",
-            format!("{} exact scalar values", value_count),
+            format!("{} scalar values", value_count),
         ),
         TypedCsvSummary::TransferFunction { value_count } => (
             "transfer-function.csv",
-            format!("{value_count} exact transfer-function values"),
+            format!("{value_count} transfer-function values"),
         ),
         TypedCsvSummary::Soa {
             rule_count,

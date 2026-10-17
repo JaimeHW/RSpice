@@ -188,9 +188,9 @@ pub(crate) fn action_export_result_selection_with_io(
         .collect::<String>();
     let default_name = format!("rspice-{slug}.txt");
     let export = match io.show_save_dialog(SaveDialogConfig {
-        title: "Export Exact Result Evidence",
+        title: "Export Result Values",
         default_name: &default_name,
-        filter_name: "Text Evidence",
+        filter_name: "Text",
         filter_extensions: &["txt"],
     }) {
         Ok(Some(mut path)) => {
@@ -203,7 +203,7 @@ pub(crate) fn action_export_result_selection_with_io(
     };
     match export {
         Ok(()) => {
-            note_result_export_success(state, "Exact-result text");
+            note_result_export_success(state, "Result text");
             let count = keys.len();
             state.record(
                 LogSeverity::Info,
