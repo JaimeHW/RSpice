@@ -215,7 +215,7 @@ fn rules_edited_during_a_pass_authorize_nothing() {
 /// design under the rules as they stand, and its run is queued.
 #[test]
 fn a_run_press_after_the_rules_change_in_flight_restarts_the_pass() {
-    let demote = |state: &mut AppState| {
+    let demoted = run_again_with_the_rules_edited_in_flight(|state| {
         state
             .workspace
             .content
@@ -224,27 +224,14 @@ fn a_run_press_after_the_rules_change_in_flight_restarts_the_pass() {
             .expect("an orphan label may be set as a note");
         // As applying the Rule Setup dialog does.
         state.workbench.preflight.invalidate();
-    };
-    let waive = |state: &mut AppState| {
+    });
+    let waived = run_again_with_the_rules_edited_in_flight(|state| {
         let target = page_waiver_target(state, DrcViolationType::OrphanNetLabel);
         state
             .waive_finding(&target, "a spare label")
             .expect("the finding is waived");
-    };
-    let edits: [(&str, &dyn Fn(&mut AppState)); 2] = [("deck", &demote), ("waiver", &waive)];
-    for (edit, apply) in edits {
-        let mut app = runnable_app();
-        app.state
-            .schematic
-            .add_net_label(Point::new(600, 600), "spare".to_owned());
-        app.state.sync_active_schematic_to_workspace();
-        let release = app.simulation_controller.hold_next_preflight_worker();
-        run_and_queue(&mut app);
-        apply(&mut app.state);
-        run_and_queue(&mut app);
-        release.send(()).expect("the stale worker waits to prepare");
-        app.settle_preflight();
-
+    });
+    for (edit, app) in [("deck", demoted), ("waiver", waived)] {
         assert!(
             app.state
                 .log_buffer
@@ -261,6 +248,24 @@ fn a_run_press_after_the_rules_change_in_flight_restarts_the_pass() {
             "{edit}: the run under the edited rules is authorized"
         );
     }
+}
+
+/// Press Run on the divider with a label on nothing, change what the rules
+/// say about it with `edit` while the worker prepares the run, press Run
+/// again, and finish whatever pass that leaves.
+fn run_again_with_the_rules_edited_in_flight(edit: impl FnOnce(&mut AppState)) -> RSpiceApp {
+    let mut app = runnable_app();
+    app.state
+        .schematic
+        .add_net_label(Point::new(600, 600), "spare".to_owned());
+    app.state.sync_active_schematic_to_workspace();
+    let release = app.simulation_controller.hold_next_preflight_worker();
+    run_and_queue(&mut app);
+    edit(&mut app.state);
+    run_and_queue(&mut app);
+    release.send(()).expect("the stale worker waits to prepare");
+    app.settle_preflight();
+    app
 }
 
 /// What waives the page's finding of `rule`, as its row offers it.
