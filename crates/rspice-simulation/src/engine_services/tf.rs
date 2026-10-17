@@ -404,7 +404,7 @@ pub fn infer_tf_run_config(netlist: &rspice_core::Netlist) -> Result<TfRunConfig
             .elements
             .iter()
             .flat_map(|element| element.nodes.iter())
-            .filter(|node| !is_ground_like(node))
+            .filter(|node| !is_ground_like(netlist, node))
     };
     let output_node = mentioned()
         .rfind(|node| {

@@ -283,7 +283,7 @@ impl AppState {
 /// A campaign's members are dispatched one after another and their outcomes
 /// stand together, so each member is its own place; a plain run's outcome is
 /// superseded by the next run's, so every plain run is the same place.
-fn run_scope(state: &AppState, run_sequence: u64) -> String {
+pub(super) fn run_scope(state: &AppState, run_sequence: u64) -> String {
     state
         .simulation
         .retained

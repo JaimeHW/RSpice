@@ -405,6 +405,7 @@ mod browser {
             "progress" => handle_progress_message(state, &data),
             "transientSample" => handle_transient_sample_message(state, &data),
             "engineLog" => handle_engine_log_message(state, &data),
+            "engineNotices" => handle_engine_notices_message(state, &data),
             "monteCarloCheckpoint" => handle_checkpoint_message(state, worker, &data, false),
             "transientCheckpoint" => handle_checkpoint_message(state, worker, &data, true),
             "result" => handle_result_message(state, &data),
@@ -653,6 +654,39 @@ mod browser {
             return;
         };
         crate::engine_log::lock_queue(&engine_log).push(line);
+    }
+
+    /// Keep what the worker's run raised, for the controller to take with the
+    /// result that follows. Stale and malformed messages are refused as an
+    /// engine line is.
+    fn handle_engine_notices_message(state: &Rc<RefCell<WorkerState>>, data: &JsValue) {
+        let id = numeric_property(data, "id").unwrap_or(0);
+        let engine_log = {
+            let state = state.borrow();
+            if stale_result(state.active_request_id, id) {
+                web_sys::console::warn_1(&JsValue::from_str(&format!(
+                    "Ignoring stale simulation worker notices id {id}"
+                )));
+                return;
+            }
+            state.active_engine_log.as_ref().cloned()
+        };
+        let Some(engine_log) = engine_log else {
+            return;
+        };
+        let notices = Reflect::get(data, &JsValue::from_str("notices"))
+            .map_err(js_error_message)
+            .and_then(|value| {
+                serde_wasm_bindgen::from_value::<Vec<rspice_core::notice::RecordedNotice>>(value)
+                    .map_err(|error| error.to_string())
+            });
+        let Ok(notices) = notices else {
+            web_sys::console::warn_1(&JsValue::from_str(
+                "Ignoring malformed simulation worker notices message",
+            ));
+            return;
+        };
+        crate::engine_log::lock_queue(&engine_log).record_notices(notices);
     }
 
     fn handle_error_message(state: &Rc<RefCell<WorkerState>>, data: &JsValue) {

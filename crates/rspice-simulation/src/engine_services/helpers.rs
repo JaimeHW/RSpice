@@ -39,21 +39,30 @@ pub(crate) fn parse_runner_netlist_with_statistical_sampling_and_abort(
     )
 }
 
-pub(super) fn build_voltage_output_expr(output_node: &str, output_ref: Option<&str>) -> String {
+pub(super) fn build_voltage_output_expr(
+    netlist: &rspice_core::Netlist,
+    output_node: &str,
+    output_ref: Option<&str>,
+) -> String {
     let output_node = output_node.trim();
     let output_ref = output_ref
         .map(str::trim)
-        .filter(|name| !name.is_empty() && !is_ground_like(name));
+        .filter(|name| !name.is_empty() && !is_ground_like(netlist, name));
     match output_ref {
         Some(reference) => format!("V({},{})", output_node, reference),
         None => format!("V({})", output_node),
     }
 }
 
-/// The runner asks the same question the editor does, and gets the same answer
-/// from the same authority: a node the engine folds onto `0` is ground here.
-pub(super) fn is_ground_like(name: &str) -> bool {
-    rspice_design::schematic::ground_names::is_ground_reference(name)
+/// Whether `name` is node 0 in the deck being run.
+///
+/// The deck's own dialect decides, as it does for the engine that solves it:
+/// ngspice folds `GND` onto `0` but keeps `GND!` as a node of its own, and an
+/// output measured against `GND!` there is measured against that node. The
+/// editor's alias list is the union over every dialect, which is the right
+/// question for a drawing and the wrong one for a parsed deck.
+pub(super) fn is_ground_like(netlist: &rspice_core::Netlist, name: &str) -> bool {
+    netlist.ground_policy().is_ground(name)
 }
 
 pub(crate) fn netlist_has_independent_source_named_with_abort(

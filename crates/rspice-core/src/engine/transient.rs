@@ -7158,6 +7158,9 @@ impl Engine {
                 {
                     let floor = timestep.hard_min_dt();
                     let activation = circuit.veriloga_scheduled_activation(t);
+                    let element = activation
+                        .and_then(|(instance, _)| instance)
+                        .map(|owner| owner.name().to_owned());
                     let subject = activation
                         .and_then(|(instance, _)| instance)
                         .map_or_else(
@@ -7257,6 +7260,13 @@ impl Engine {
                             next_activation
                         );
                     }
+                    crate::notice::record(crate::notice::EngineNotice::TimestepFloor(
+                        crate::notice::TimestepFloor {
+                            element,
+                            floor,
+                            time: t,
+                        },
+                    ));
                 }
             };
         }

@@ -595,6 +595,7 @@ impl Engine {
         type RunOutcome<T> = Result<Option<T>, SimulationError>;
         let evaluate_run = |engine: &Engine, offset: usize| -> RunOutcome<T> {
             let index = first_trial + offset;
+            let _point = crate::notice::point(format!("Monte Carlo trial {}", index + 1));
             if let Some(outcome) = journal
                 .as_ref()
                 .and_then(|journal| (journal.restore)(index))
@@ -643,10 +644,16 @@ impl Engine {
             // worker budget. Keep each child engine serial so the selected
             // analysis and its prerequisites cannot multiply the thread count.
             worker_config.resource_limits.max_parallel_workers = 1;
+            // A trial a worker solves is the run's trial all the same, so
+            // what it raises is recorded where the run's other notices are.
+            let notices = crate::notice::NoticeCollector::current();
 
             std::thread::scope(|scope| {
                 for _ in 0..workers {
                     scope.spawn(|| {
+                        let _notices = notices
+                            .as_ref()
+                            .map(crate::notice::NoticeCollector::install);
                         let engine = Self::new(worker_config.clone());
                         loop {
                             if stopped.load(Ordering::Acquire) || abort.is_aborted() {

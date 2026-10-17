@@ -153,8 +153,16 @@ use rspice_core::analysis::harmonic_balance::{
 // The census was 5,703.
 // `netlist::lexer::is_xyce_device_name` adds one: the design crate's DRC
 // extraction (`drc/extraction.rs`) judges a card's name by the parser's own
-// rule rather than a copy of it. The census is 5,704, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5704;
+// rule rather than a copy of it.
+// Twelve statements for the notices a run raises and completes with, read
+// by the simulation service's run sink and the Problems page:
+// `notice::EngineNotice` and the three types its variants carry
+// (`ParameterReplacement`, `ParameterScope`, `TimestepFloor`); the
+// `RecordedNotice` a run delivers; and the `NoticeCollector`, its
+// `CollectorGuard` and its four methods (`new`, `install`, `current`,
+// `take`), which the run sink installs on the solving thread and drains when
+// the run ends. The census is 5,716, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5716;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

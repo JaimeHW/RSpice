@@ -11,6 +11,21 @@
 use super::*;
 use crate::analysis::error::{ContinuationAid, ContinuationFailure, ContinuationStage};
 
+/// Report that `aid` reached the circuit's own operating point, and pass its
+/// outcome on.
+///
+/// Reported where the aid answers rather than where the ladder tries it, so a
+/// rung that fails says nothing here: its failure is the run's to report.
+fn recorded_aid(
+    aid: ContinuationAid,
+    solved: Result<Vec<Value>, SimulationError>,
+) -> Result<Vec<Value>, SimulationError> {
+    if solved.is_ok() {
+        crate::notice::record(crate::notice::EngineNotice::ConvergenceAid(aid));
+    }
+    solved
+}
+
 /// Controls the predictor step used by monotonic source continuation.
 ///
 /// Keeping this policy separate from the corrector makes explicit LOCA runs
@@ -235,7 +250,7 @@ impl Engine {
             }
         }
         match solve_stage(own, circuit, matrix, &mut solution)? {
-            Ok(()) => Ok(solution),
+            Ok(()) => recorded_aid(aid, Ok(solution)),
             Err(error) => Err(self.linear_continuation_failure(
                 circuit,
                 matrix,
@@ -280,6 +295,20 @@ impl Engine {
     /// can run before direct Newton while ordinary solves retain their existing
     /// direct-Newton-first fallback sequence.
     pub(crate) fn source_stepping_nonlinear_with_policy_and_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: &[Value],
+        policy: SourceContinuationPolicy,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        recorded_aid(
+            ContinuationAid::SourceStepping,
+            self.walk_source_stepping_nonlinear(circuit, matrix, initial_guess, policy, abort),
+        )
+    }
+
+    fn walk_source_stepping_nonlinear(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
@@ -450,6 +479,19 @@ impl Engine {
     /// itself. The walk ends with one Newton solve of the unmodified circuit
     /// from its last stage, and fails if that does not converge.
     pub(crate) fn pseudo_transient_nonlinear_with_guess_and_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        recorded_aid(
+            ContinuationAid::PseudoTransient,
+            self.walk_pseudo_transient_nonlinear(circuit, matrix, initial_guess, abort),
+        )
+    }
+
+    fn walk_pseudo_transient_nonlinear(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
@@ -743,6 +785,19 @@ impl Engine {
         initial_guess: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
+        recorded_aid(
+            ContinuationAid::GateGenerationStepping,
+            self.walk_gate_generation_stepping_nonlinear(circuit, matrix, initial_guess, abort),
+        )
+    }
+
+    fn walk_gate_generation_stepping_nonlinear(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
         if !circuit.has_jfet_gate_generation_branches() {
             return Err(SimulationError::ConvergenceFailed(0));
         }
@@ -913,6 +968,19 @@ impl Engine {
     /// tests. A walk that cannot get there fails; it never answers with a
     /// stage above the floor.
     pub(crate) fn gmin_stepping_nonlinear_with_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        recorded_aid(
+            ContinuationAid::GminStepping,
+            self.walk_gmin_stepping_nonlinear(circuit, matrix, initial_guess, abort),
+        )
+    }
+
+    fn walk_gmin_stepping_nonlinear(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,

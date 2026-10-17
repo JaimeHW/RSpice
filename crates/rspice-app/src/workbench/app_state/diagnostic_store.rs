@@ -24,6 +24,7 @@
 mod current;
 pub(in crate::workbench) mod listing;
 mod producers;
+mod run_notices;
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -766,6 +767,10 @@ pub(crate) struct DiagnosticStore {
     /// the run was dispatched. A batch is opened only once the run fails
     /// something, so a run that fails nothing costs the list nothing.
     run_baselines: BTreeMap<u64, ContentDigest>,
+    /// What each retained run's analyses raised and went on past, in the
+    /// order they reported it: the facts its notice records are rebuilt from
+    /// as each further analysis reports, so one condition stays one record.
+    run_notices: BTreeMap<u64, run_notices::RunNoticeFacts>,
     /// Moves on every publication and withdrawal, so a memo taken over the
     /// store's batches can tell it is describing a different store.
     generation: u64,
@@ -961,6 +966,7 @@ impl DiagnosticStore {
         self.source_anchor = None;
         self.unresolved = None;
         self.run_baselines.clear();
+        self.run_notices.clear();
         self.generation = self.generation.wrapping_add(1);
     }
 

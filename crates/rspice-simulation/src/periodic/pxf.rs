@@ -1,6 +1,5 @@
 use super::normalize_pac_node_name;
 use rspice_core::Value;
-use rspice_design::schematic::ground_names::is_ground_reference as is_ground_like;
 use rspice_simulation_contract::periodic_carrier::PeriodicCarrier;
 
 /// Frequency sweep type for periodic transfer-function analysis.
@@ -108,11 +107,14 @@ impl PxfRunConfig {
                 self.output_sideband, self.max_sideband
             ));
         }
+        // A node measured against itself is zero in every dialect, so this
+        // needs no ruling on which names the deck folds onto node 0; the deck
+        // is not in hand here, and the engine asks its own policy.
         if let Some(reference) = self
             .output_ref
             .as_deref()
             .map(str::trim)
-            .filter(|node| !node.is_empty() && !is_ground_like(node))
+            .filter(|node| !node.is_empty())
             && reference.eq_ignore_ascii_case(self.output_node.trim())
         {
             return Err("PXF output node and output reference cannot be the same node".to_string());

@@ -3,7 +3,7 @@
 //! Compares simulated device stress against the configured limits,
 //! and reports every violation with the instance and the margin.
 
-use super::{is_ground_like, normalize_voltage_signal_name};
+use super::normalize_voltage_signal_name;
 use crate::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use crate::soa_duration::finalize_soa_durations;
 use rspice_core::Value;
@@ -442,6 +442,7 @@ pub fn run_soa_analysis_with_context(
 
     let node_waveforms =
         build_transient_node_lookup(&transient.voltages, transient.time.len(), abort)?;
+    let ground = netlist.ground_policy();
     let mut violation_count = Vec::with_capacity(transient.time.len());
 
     for (idx, &time) in transient.time.iter().enumerate() {
@@ -464,8 +465,13 @@ pub fn run_soa_analysis_with_context(
                             element.name
                         )));
                     }
-                    sample_node_waveform(&node_waveforms, &element.nodes[positive], idx)?
-                        - sample_node_waveform(&node_waveforms, &element.nodes[reference], idx)?
+                    sample_node_waveform(&node_waveforms, ground, &element.nodes[positive], idx)?
+                        - sample_node_waveform(
+                            &node_waveforms,
+                            ground,
+                            &element.nodes[reference],
+                            idx,
+                        )?
                 } else {
                     observations
                         .get(&(
@@ -504,9 +510,17 @@ pub fn run_soa_analysis_with_context(
                                     "SOA current curve has no voltage terminal pair".into(),
                                 )
                             })?;
-                    let voltage =
-                        sample_node_waveform(&node_waveforms, &element.nodes[positive], idx)?
-                            - sample_node_waveform(&node_waveforms, &element.nodes[negative], idx)?;
+                    let voltage = sample_node_waveform(
+                        &node_waveforms,
+                        ground,
+                        &element.nodes[positive],
+                        idx,
+                    )? - sample_node_waveform(
+                        &node_waveforms,
+                        ground,
+                        &element.nodes[negative],
+                        idx,
+                    )?;
                     curve_voltages.insert((element.name.clone(), limit.parameter), voltage.abs());
                 }
             }
@@ -670,18 +684,20 @@ fn build_transient_node_lookup(
             )));
         }
     }
-    map.insert("0".to_string(), Vec::new());
-    map.insert("GND".to_string(), Vec::new());
     ensure_not_aborted(abort)?;
     Ok(map)
 }
 
+/// A terminal's voltage at sample `idx`: zero on node 0 as the deck's dialect
+/// names it, the retained trace everywhere else — `GND` included, where the
+/// dialect keeps it as a node of its own.
 fn sample_node_waveform(
     waveforms: &HashMap<String, Vec<Value>>,
+    ground: rspice_core::netlist::GroundPolicy,
     node_name: &str,
     idx: usize,
 ) -> ServiceRunResult<Value> {
-    if is_ground_like(node_name) {
+    if ground.is_ground(node_name) {
         return Ok(0.0);
     }
     let key = node_name.trim().to_ascii_uppercase();
@@ -972,19 +988,41 @@ mod tests {
                 .contains("expected 2")
         );
 
+        let ngspice = rspice_core::netlist::GroundPolicy::NgspiceGnd;
         let traces = HashMap::from([("OUT".to_owned(), vec![0.0, 1.0])]);
         assert!(
-            sample_node_waveform(&traces, "missing", 0)
+            sample_node_waveform(&traces, ngspice, "missing", 0)
                 .expect_err("missing node must fail closed")
                 .to_string()
                 .contains("required node")
         );
         assert!(
-            sample_node_waveform(&traces, "out", 2)
+            sample_node_waveform(&traces, ngspice, "out", 2)
                 .expect_err("missing sample must fail closed")
                 .to_string()
                 .contains("sample 2")
         );
+    }
+
+    /// A terminal reads zero only on node 0 as the deck's dialect names it.
+    /// `GND!` is a node of its own to ngspice, and `GND` is one to Xyce
+    /// without `REPLACEGROUND`; both are read off their traces.
+    #[test]
+    fn a_terminal_reads_zero_only_on_the_dialects_own_ground() {
+        use rspice_core::netlist::GroundPolicy;
+
+        let voltages = vec![
+            ("V(GND!)".to_owned(), vec![0.5, 0.75]),
+            ("V(GND)".to_owned(), vec![0.25, 0.125]),
+        ];
+        let traces = build_transient_node_lookup(&voltages, 2, &NoAbort).unwrap();
+        let sample = |ground, node| sample_node_waveform(&traces, ground, node, 1).unwrap();
+
+        assert_eq!(sample(GroundPolicy::NgspiceGnd, "gnd!"), 0.75);
+        assert_eq!(sample(GroundPolicy::NgspiceGnd, "gnd"), 0.0);
+        assert_eq!(sample(GroundPolicy::OnlyZero, "GND"), 0.125);
+        assert_eq!(sample(GroundPolicy::XyceReplace, "GND!"), 0.0);
+        assert_eq!(sample(GroundPolicy::OnlyZero, "0"), 0.0);
     }
 
     #[test]

@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rspice_app_types::diagnostics::LogSeverity;
+use rspice_core::notice::{CollectorGuard, NoticeCollector, RecordedNotice};
 
 /// Lines one run's Console log keeps before it starts counting instead.
 ///
@@ -40,6 +41,10 @@ pub struct EngineLogLine {
 #[derive(Debug, Default)]
 pub struct EngineLogQueue {
     lines: VecDeque<EngineLogLine>,
+    /// What the run raised, in the shape the Problems page reads, delivered
+    /// once when the run ends. Not bounded by the line cap: the notices are
+    /// already one per condition, however often the run raised each.
+    notices: Vec<RecordedNotice>,
     /// Lines kept so far in this run, which is not `lines.len()`: the
     /// controller drains every frame, so the queue's length says nothing about
     /// how much of the run has already been shown.
@@ -86,6 +91,7 @@ impl EngineLogQueue {
 
     pub fn clear(&mut self) {
         self.lines.clear();
+        self.notices.clear();
         self.kept = 0;
         self.withheld = 0;
         self.sealed = false;
@@ -93,6 +99,17 @@ impl EngineLogQueue {
 
     pub fn drain(&mut self) -> Vec<EngineLogLine> {
         self.lines.drain(..).collect()
+    }
+
+    /// Keep what a finished run raised, for the controller to take with its
+    /// result. Reached as lines are: from a native run's guard, and from the
+    /// message a browser worker's run posts.
+    pub fn record_notices(&mut self, notices: Vec<RecordedNotice>) {
+        self.notices.extend(notices);
+    }
+
+    pub fn drain_notices(&mut self) -> Vec<RecordedNotice> {
+        std::mem::take(&mut self.notices)
     }
 }
 
@@ -104,11 +121,15 @@ impl EngineLogQueue {
 /// observer, and for the same reason.
 pub type EngineLogObserver = fn(&EngineLogLine);
 
+/// Where a browser worker run's notices go: one message, when the run ends.
+pub type EngineNoticeObserver = fn(&[RecordedNotice]);
+
 /// Where one run's engine lines go, and how deep it asked to see.
 #[derive(Clone)]
 pub struct RunLogSink {
     queue: Option<Arc<Mutex<EngineLogQueue>>>,
     observer: Option<EngineLogObserver>,
+    notice_observer: Option<EngineNoticeObserver>,
     verbose: bool,
 }
 
@@ -118,6 +139,7 @@ impl RunLogSink {
         Self {
             queue: Some(queue),
             observer: None,
+            notice_observer: None,
             verbose,
         }
     }
@@ -130,8 +152,17 @@ impl RunLogSink {
         Self {
             queue: None,
             observer: Some(observer),
+            notice_observer: None,
             verbose,
         }
+    }
+
+    /// Post the run's notices across the worker contract when it ends.
+    #[cfg(any(target_arch = "wasm32", test))]
+    #[must_use]
+    pub fn observing_notices(mut self, observer: EngineNoticeObserver) -> Self {
+        self.notice_observer = Some(observer);
+        self
     }
 
     fn admits(&self, severity: LogSeverity) -> bool {
@@ -144,6 +175,18 @@ impl RunLogSink {
         }
         if let Some(observer) = self.observer {
             observer(&line);
+        }
+    }
+
+    fn deliver_notices(&self, notices: Vec<RecordedNotice>) {
+        if notices.is_empty() {
+            return;
+        }
+        if let Some(observer) = self.notice_observer {
+            observer(&notices);
+        }
+        if let Some(queue) = &self.queue {
+            lock_queue(queue).record_notices(notices);
         }
     }
 
@@ -184,6 +227,10 @@ static STDERR_LEVEL: AtomicUsize = AtomicUsize::new(0);
 /// The guard restores whatever sink was there before, on every exit path
 /// including a panic unwinding out of the solver, and seals the run's queue as
 /// it goes.
+///
+/// The run's notices are collected on the same thread for the same span, and
+/// delivered to the same sink when the guard drops: the structured account of
+/// the advisories whose prose the lines carry.
 #[must_use]
 pub fn install(sink: RunLogSink) -> RunSinkGuard {
     let verbose = sink.verbose;
@@ -194,9 +241,13 @@ pub fn install(sink: RunLogSink) -> RunSinkGuard {
         VERBOSE_RUNS.fetch_add(1, Ordering::SeqCst);
         apply_max_level();
     }
+    let notices = NoticeCollector::new();
+    let collecting = notices.install();
     RunSinkGuard {
         previous,
         verbose,
+        notices,
+        _collecting: collecting,
         _thread_bound: std::marker::PhantomData,
     }
 }
@@ -205,6 +256,8 @@ pub fn install(sink: RunLogSink) -> RunSinkGuard {
 pub struct RunSinkGuard {
     previous: Option<RunLogSink>,
     verbose: bool,
+    notices: NoticeCollector,
+    _collecting: CollectorGuard,
     // Dropping a guard restores thread-local state, so it must stay on its thread.
     _thread_bound: std::marker::PhantomData<std::rc::Rc<()>>,
 }
@@ -215,6 +268,7 @@ impl Drop for RunSinkGuard {
             .try_with(|cell| std::mem::replace(&mut *cell.borrow_mut(), self.previous.take()))
             .unwrap_or(None);
         if let Some(sink) = sink {
+            sink.deliver_notices(self.notices.take());
             sink.seal();
         }
         if self.verbose {

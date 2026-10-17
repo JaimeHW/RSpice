@@ -236,6 +236,15 @@ impl SimulationRunner {
         crate::engine_log::lock_queue(&self.engine_log).drain()
     }
 
+    /// Take what the finished task raised and went on to complete with.
+    ///
+    /// Delivered when the task's solving thread ends, before its result can
+    /// be polled, so the controller takes them with the result they belong
+    /// to.
+    pub fn drain_engine_notices(&self) -> Vec<rspice_core::notice::RecordedNotice> {
+        crate::engine_log::lock_queue(&self.engine_log).drain_notices()
+    }
+
     /// Latest complete journal, available independently of terminal success.
     pub fn take_monte_carlo_checkpoint(&self) -> Option<Arc<[u8]>> {
         self.monte_carlo_checkpoint
@@ -1105,6 +1114,13 @@ mod tests {
     /// side.
     #[cfg(not(target_arch = "wasm32"))]
     fn engine_log_of_run(spec: AnalysisSpec, netlist: &str) -> Vec<EngineLogLine> {
+        crate::engine_log::lock_queue(&sink_of_run(spec, netlist)).drain()
+    }
+
+    /// Run one specification through the real runner and return the queue
+    /// its sink delivered to, lines and notices both.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn sink_of_run(spec: AnalysisSpec, netlist: &str) -> Arc<Mutex<EngineLogQueue>> {
         struct CaptureLogger;
         impl log::Log for CaptureLogger {
             fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
@@ -1158,7 +1174,44 @@ mod tests {
             },
         );
         result.expect("the specification reaches the engine and converges");
-        crate::engine_log::lock_queue(&queue).drain()
+        queue
+    }
+
+    /// The runner hands over what a run raised as well as what it logged:
+    /// the clamp of the card's `pbs` arrives as a notice naming the card and
+    /// the element that bound it, delivered once the run has ended.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_run_delivers_the_notices_it_raised_with_its_lines() {
+        use rspice_core::notice::{EngineNotice, ParameterScope};
+
+        let queue = sink_of_run(
+            AnalysisSpec::dc_op(),
+            "BSIM4 clamp\nVD d 0 1\nVG g 0 1\nM1 d g 0 0 nch L=1u W=10u\n\
+             .model nch nmos level=54 version=4.8 pbs=0.05\n.op\n.end\n",
+        );
+        let notices = crate::engine_log::lock_queue(&queue).drain_notices();
+        let pbs = notices
+            .iter()
+            .find_map(|recorded| match &recorded.notice {
+                EngineNotice::ParameterReplaced(replacement) if replacement.parameter == "pbs" => {
+                    Some(replacement)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("the pbs clamp is delivered: {notices:#?}"));
+        assert_eq!(pbs.scope, ParameterScope::Model);
+        assert!(
+            pbs.element
+                .as_deref()
+                .is_some_and(|element| element.eq_ignore_ascii_case("M1"))
+        );
+        assert!(
+            crate::engine_log::lock_queue(&queue)
+                .drain_notices()
+                .is_empty(),
+            "a notice is delivered once"
+        );
     }
 
     /// The receipt names numbers that exist nowhere else.
