@@ -698,3 +698,6 @@ fn live_object_ids(
 }
 
 mod tests;
+
+#[cfg(test)]
+mod check_currency_tests;

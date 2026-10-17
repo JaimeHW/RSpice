@@ -687,9 +687,6 @@ fn design_check_input_digest(
 }
 
 #[cfg(test)]
-mod currency_tests;
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use rspice_design::drc::DrcLocation;

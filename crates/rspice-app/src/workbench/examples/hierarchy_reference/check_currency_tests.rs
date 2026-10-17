@@ -5,8 +5,9 @@
 //! else leaves it current; and asking whether it is current costs nothing
 //! while nothing it read has moved, so a frame with no edit digests nothing.
 
-use super::*;
-use crate::state::{Library, Point};
+use crate::state::{CellViewRef, Library, Point, ViewType};
+use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::design_checks::DesignCheckStatus;
 use crate::workbench::app_state::diagnostic_store::digest_memo::{
     computed_digests, reset_computed_digests,
 };
@@ -19,9 +20,14 @@ use rspice_design::projection::{document_digest_counts, reset_document_digest_co
 /// from its configured root.
 fn checked_reference() -> (HierarchyReference, CellViewRef) {
     let mut reference = hierarchy_reference::build();
-    assert_eq!(
-        owner_key(&reference.state.workspace.content.active_view),
-        owner_key(&reference.top),
+    assert!(
+        reference
+            .state
+            .workspace
+            .content
+            .active_view
+            .key()
+            .eq_ignore_ascii_case(&reference.top.key()),
         "precondition: the root is the view in front of the reader"
     );
     let spare = CellViewRef::new(&reference.top.library, "spare", "schematic");
