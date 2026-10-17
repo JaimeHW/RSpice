@@ -1097,10 +1097,6 @@ impl AppState {
         self.record(severity, source, message.message);
     }
 
-    pub fn push_user_message(&mut self, message: ConsoleMessage) {
-        self.push_console_message_with_source(crate::diagnostics::LogSource::Studio, message);
-    }
-
     /// Announce a committed plan command on the lifecycle status line and
     /// record it in the Console.
     ///

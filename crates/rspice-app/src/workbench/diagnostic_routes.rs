@@ -21,7 +21,6 @@
 
 use egui::Context;
 
-use crate::diagnostics::ConsoleMessage;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use crate::workbench::commands::vocabulary::Command;
@@ -48,7 +47,7 @@ pub(crate) fn apply_pending(ctx: &Context, app: &mut RSpiceApp) {
                     diagnostic_id,
                 )
             {
-                app.state.push_user_message(ConsoleMessage::warning(error));
+                app.state.prompt(error);
             }
         }
         DiagnosticRoute::CodeDocument {
@@ -88,9 +87,9 @@ fn open_code_document(
         .get_bundle(bundle)
         .map(|bundle| bundle.owner().clone());
     let Some(owner) = owner else {
-        app.state.push_user_message(ConsoleMessage::warning(format!(
+        app.state.prompt(format!(
             "The source bundle that reported {logical_path} is no longer part of this project."
-        )));
+        ));
         return;
     };
     let language = match &owner {
@@ -112,9 +111,9 @@ fn open_code_document(
     let active = code_workspace::active_source_bundle(&app.state.workspace, language)
         .map(crate::state::ProjectSourceBundle::id);
     if active != Some(bundle) {
-        app.state.push_user_message(ConsoleMessage::warning(format!(
+        app.state.prompt(format!(
             "{logical_path} was not opened: the editor that owns it could not be brought forward."
-        )));
+        ));
         return;
     }
     if code_workspace::select_source_document(
@@ -125,9 +124,9 @@ fn open_code_document(
     )
     .is_none()
     {
-        app.state.push_user_message(ConsoleMessage::warning(format!(
+        app.state.prompt(format!(
             "{logical_path} is no longer the source this editor holds."
-        )));
+        ));
         return;
     }
     if let Some(line) = line {
@@ -175,9 +174,9 @@ pub(in crate::workbench) fn apply_remediation(
                 if held {
                     app.state.workbench.active_analysis_instance = Some(analysis);
                 } else {
-                    app.state.push_user_message(ConsoleMessage::warning(
+                    app.state.prompt(
                         "The analysis this finding names is no longer in the simulation plan.",
-                    ));
+                    );
                 }
             }
             Command::SimulationPage(SimulationPage::Analyses).execute(app);
@@ -218,9 +217,9 @@ pub(in crate::workbench) fn apply_remediation(
             if app.state.ui.netlist.generated_document.is_some() {
                 netlist_document::open_generated_primary(&mut app.state);
             } else {
-                app.state.push_user_message(ConsoleMessage::warning(
+                app.state.prompt(
                     "No generated netlist is retained yet; the Netlist workspace opens on the source it holds.",
-                ));
+                );
             }
             // The parser numbers the deck from 1 and the buffer indexes it
             // from 0, so a line that survived from the failure is converted
@@ -229,7 +228,7 @@ pub(in crate::workbench) fn apply_remediation(
             let cursor = line.and_then(|line| line.checked_sub(1));
             if let Err(error) = netlist_document::open_source_location(&mut app.state, None, cursor)
             {
-                app.state.push_user_message(ConsoleMessage::warning(error));
+                app.state.prompt(error);
             }
         }
     }

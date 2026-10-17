@@ -70,14 +70,7 @@ fn a_source_route_to_a_departed_bundle_states_its_refusal() {
         app.state.workbench.workspace, before,
         "a route that cannot resolve must not move the reader"
     );
-    let refusal = app
-        .state
-        .log_buffer
-        .entries()
-        .last()
-        .expect("the refusal is stated")
-        .message
-        .clone();
+    let refusal = app.state.prompt_text().expect("the refusal is stated");
     assert!(
         refusal.contains("amp.va") && refusal.contains("no longer part of this project"),
         "{refusal}"
@@ -146,14 +139,9 @@ fn a_netlist_route_to_a_retired_record_states_its_refusal() {
 
     apply_pending(&context(), &mut app);
 
-    // The editor's own refusal, not any warning that happened to be logged:
-    // the session logs warnings of its own, and a test that accepted one of
-    // those would pass with the route deleted.
-    assert!(
-        app.state.log_buffer.entries().any(|entry| {
-            entry.severity == crate::diagnostics::LogSeverity::Warning
-                && entry.message == "The selected diagnostic is no longer available."
-        }),
+    assert_eq!(
+        app.state.prompt_text(),
+        Some("The selected diagnostic is no longer available."),
         "an unresolvable record must say so rather than opening nothing silently"
     );
 }

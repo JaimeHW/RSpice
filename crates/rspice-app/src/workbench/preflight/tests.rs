@@ -1198,13 +1198,7 @@ fn a_plan_route_to_a_departed_analysis_states_its_refusal() {
         Some(operating_point),
         "a departed analysis leaves the selection where it was"
     );
-    let refusal = &app
-        .state
-        .log_buffer
-        .entries()
-        .last()
-        .expect("the refusal is stated")
-        .message;
+    let refusal = app.state.prompt_text().expect("the refusal is stated");
     assert!(
         refusal.contains("no longer in the simulation plan"),
         "{refusal}"

@@ -1088,8 +1088,7 @@ impl RSpiceApp {
                 recent.truncate(MAX_RECENT);
             }
             if let Err(error) = entry.execute(self) {
-                self.state
-                    .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+                self.state.prompt(error);
             }
         }
     }

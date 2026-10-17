@@ -18,7 +18,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::io::schematic_io::{load_schematic_text, serialize_schematic_for_wire};
 use crate::services::cloud_account::{
     CloudAccountService, LiveFrame, LiveFrameClass, LiveRelayPort, LiveSessionState,
@@ -243,9 +243,11 @@ impl LiveSessionEngine {
                 // The close-to-mirror transaction outlived its session. Its
                 // close already left the no-project landing in place, and a
                 // closed project never raises the project launcher.
-                state.push_user_message(ConsoleMessage::warning(
+                state.record(
+                    LogSeverity::Warning,
+                    LogSource::Studio,
                     "The live session ended before the host's project arrived.",
-                ));
+                );
             }
             // Ports minted for a session that no longer renders are dead
             // credentials' leftovers; drop them.
@@ -260,9 +262,9 @@ impl LiveSessionEngine {
                 .strip_prefix(SCHEMATIC_DOC_PREFIX)
                 .unwrap_or(&doc)
                 .to_owned();
-            state.push_user_message(ConsoleMessage::warning(format!(
+            state.prompt(format!(
                 "{holder} holds the write lease on {doc}; ask again once it is released."
-            )));
+            ));
         }
         self.flush_pending_project(state);
         self.broadcast_local_changes(state);
@@ -442,9 +444,11 @@ impl LiveSessionEngine {
         for mirror in guest.mirror_docs.values_mut() {
             mirror.digest.clear();
         }
-        state.push_user_message(ConsoleMessage::info(
+        state.record(
+            LogSeverity::Info,
+            LogSource::Studio,
             "Joined the live session; the host's project opens when its snapshot arrives.",
-        ));
+        );
         if let Some(identity) = self.connection.as_ref().map(|c| c.identity) {
             self.send(&LiveMessage::Document(DocumentMessage::SyncRequest {
                 sender: identity,
@@ -501,9 +505,11 @@ impl LiveSessionEngine {
                 guest.pending_project = Some(pending);
             }
             LiveProjectApply::Rejected => {
-                state.push_user_message(ConsoleMessage::warning(
-                    "The host's project snapshot could not be mirrored on this build.",
-                ));
+                state.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    "The host's project could not be mirrored on this build.",
+                );
             }
         }
     }
@@ -614,20 +620,28 @@ impl LiveSessionEngine {
     /// the policy allows, otherwise close it out of this install.
     fn retire_mirror(&mut self, state: &mut AppState, save_copy_allowed: bool) {
         if save_copy_allowed {
-            state.push_user_message(ConsoleMessage::info(
+            state.record(
+                LogSeverity::Info,
+                LogSource::Studio,
                 "The live session ended. The mirrored project stays open; save it to keep a copy.",
-            ));
+            );
             return;
         }
-        state.push_user_message(ConsoleMessage::info(
-            "The live session ended; its policy does not allow keeping a copy, \
-             so the mirrored project is closing.",
-        ));
+        state.record(
+            LogSeverity::Warning,
+            LogSource::Studio,
+            "The live session ended; its policy does not allow keeping a copy, so the mirrored \
+             project is closing.",
+        );
         if state.simulation.execution.has_active_execution() {
             if state.simulation.can_request_abort_active_run()
                 && let Err(error) = state.simulation.request_abort_active_run()
             {
-                state.push_sim_message(ConsoleMessage::warning(error));
+                state.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    format!("The mirrored project's run could not be stopped: {error}"),
+                );
             }
             self.mirror_discard_pending = true;
             return;
@@ -737,10 +751,14 @@ impl LiveSessionEngine {
                 Err(LiveProtocolError::UnsupportedVersion(version)) => {
                     if !self.incompatible_peer {
                         self.incompatible_peer = true;
-                        state.push_user_message(ConsoleMessage::warning(format!(
-                            "A participant runs an incompatible RSpice build \
-                             (live protocol {version}); their changes cannot be shared."
-                        )));
+                        state.record(
+                            LogSeverity::Warning,
+                            LogSource::Studio,
+                            format!(
+                                "A participant runs an incompatible RSpice build \
+                                 (live protocol {version}); their changes cannot be shared."
+                            ),
+                        );
                     }
                 }
                 Err(LiveProtocolError::Malformed) => {
@@ -861,9 +879,13 @@ impl LiveSessionEngine {
                     && self.pending_run_requests.len() < MAX_PENDING_RUN_REQUESTS
                 {
                     let requester = self.display_name(&payload.sender);
-                    state.push_user_message(ConsoleMessage::info(format!(
-                        "{requester} requested a run. Review it in the Live session dialog."
-                    )));
+                    state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        format!(
+                            "{requester} requested a run. Review it in the Live session dialog."
+                        ),
+                    );
                     self.pending_run_requests.push(PendingRunRequest {
                         sender: payload.sender,
                         requested_at: Instant::now(),

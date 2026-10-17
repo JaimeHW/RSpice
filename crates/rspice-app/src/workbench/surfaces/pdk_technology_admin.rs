@@ -4320,52 +4320,46 @@ fn persist_candidate(
     #[cfg(target_arch = "wasm32")]
     {
         let _ = view;
-        app.start_browser_pdk_administration_publication(
-            ctx,
-            candidate,
-            "PDK technology updated",
-            message,
-            move |ctx| {
-                ctx.data_mut(|data| {
-                    let id = egui::Id::new(VIEW_STATE_ID);
-                    let mut view = data.get_temp::<AdminViewState>(id).unwrap_or_default();
-                    match effect {
-                        AdminCommitEffect::None => {}
-                        AdminCommitEffect::ClearTrustDraft {
-                            publisher_id,
-                            key_id,
-                        } => {
-                            if view.trust_publisher_id.trim() == publisher_id
-                                && view.trust_key_id.trim() == key_id
-                            {
-                                view.trust_publisher_id.clear();
-                                view.trust_key_id.clear();
-                                view.trust_key_base64.clear();
-                            }
-                        }
-                        AdminCommitEffect::SelectDisplayProfile {
-                            profile_id,
-                            revision,
-                        } => {
-                            view.selected_display_profile = Some((profile_id, revision));
-                            view.display_draft_dirty = false;
-                        }
-                        AdminCommitEffect::TechnologyDraftSaved => {
-                            view.technology_draft_dirty = false;
-                            view.discard_technology_draft_armed = false;
-                            view.technology_draft_error = None;
-                        }
-                        AdminCommitEffect::TechnologyDraftDiscarded => {
-                            view.technology_draft = None;
-                            view.technology_draft_dirty = false;
-                            view.discard_technology_draft_armed = false;
-                            view.technology_draft_error = None;
+        app.start_browser_pdk_administration_publication(ctx, candidate, message, move |ctx| {
+            ctx.data_mut(|data| {
+                let id = egui::Id::new(VIEW_STATE_ID);
+                let mut view = data.get_temp::<AdminViewState>(id).unwrap_or_default();
+                match effect {
+                    AdminCommitEffect::None => {}
+                    AdminCommitEffect::ClearTrustDraft {
+                        publisher_id,
+                        key_id,
+                    } => {
+                        if view.trust_publisher_id.trim() == publisher_id
+                            && view.trust_key_id.trim() == key_id
+                        {
+                            view.trust_publisher_id.clear();
+                            view.trust_key_id.clear();
+                            view.trust_key_base64.clear();
                         }
                     }
-                    data.insert_temp(id, view);
-                });
-            },
-        )?;
+                    AdminCommitEffect::SelectDisplayProfile {
+                        profile_id,
+                        revision,
+                    } => {
+                        view.selected_display_profile = Some((profile_id, revision));
+                        view.display_draft_dirty = false;
+                    }
+                    AdminCommitEffect::TechnologyDraftSaved => {
+                        view.technology_draft_dirty = false;
+                        view.discard_technology_draft_armed = false;
+                        view.technology_draft_error = None;
+                    }
+                    AdminCommitEffect::TechnologyDraftDiscarded => {
+                        view.technology_draft = None;
+                        view.technology_draft_dirty = false;
+                        view.discard_technology_draft_armed = false;
+                        view.technology_draft_error = None;
+                    }
+                }
+                data.insert_temp(id, view);
+            });
+        })?;
         Ok(None)
     }
 }

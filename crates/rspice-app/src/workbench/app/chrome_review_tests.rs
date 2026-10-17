@@ -75,8 +75,11 @@ fn seeded_app() -> RSpiceApp {
     failed
         .finish_lifecycle(crate::state::SimulationRunLifecycle::Failed)
         .expect("the failed run ends");
-    app.state
-        .push_sim_message(crate::diagnostics::ConsoleMessage::error(error));
+    app.state.record(
+        crate::diagnostics::LogSeverity::Error,
+        crate::diagnostics::LogSource::Run,
+        error,
+    );
 
     let live = app.state.simulation.start_run();
     live.mark_running().expect("the live run started");

@@ -21,7 +21,7 @@
 
 use egui::Context;
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::model_hub::durable::{PersistedHubState, start_browser_pack_restore};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::state::ModelsOperationalState;
@@ -57,10 +57,11 @@ impl RSpiceApp {
                 // standing this failure recorded, so the console carries the
                 // reason and the workspace is not put into a failure state
                 // over something no reader asked for.
-                self.state
-                    .push_user_message(ConsoleMessage::warning(format!(
-                        "Installed model packs cannot be kept between sessions: {error}"
-                    )));
+                self.state.record(
+                    LogSeverity::Warning,
+                    LogSource::Studio,
+                    format!("Installed model packs cannot be kept between sessions: {error}"),
+                );
             }
         }
     }
@@ -73,15 +74,14 @@ impl RSpiceApp {
             return;
         }
         if report.restored > 0 {
-            let packs = if report.restored == 1 {
-                "1 model pack".to_owned()
-            } else {
-                format!("{} model packs", report.restored)
-            };
-            self.state.push_user_message(ConsoleMessage::info(format!(
-                "{packs} kept by this browser were re-proved under this build's signing key and \
-                 are installed."
-            )));
+            self.state.record(
+                LogSeverity::Info,
+                LogSource::Studio,
+                format!(
+                    "Restored {} kept by this browser; each signature was verified.",
+                    crate::ui::accessibility::counted(report.restored, "model pack", "model packs")
+                ),
+            );
         }
         // A discarded archive is a real refusal and is depicted as one: the
         // bytes claimed to be a pack, did not prove, and were dropped. It goes
@@ -101,7 +101,7 @@ impl RSpiceApp {
             self.state.workbench.models_view.operational_state =
                 ModelsOperationalState::from_failure(&refusal);
             self.state
-                .push_user_message(ConsoleMessage::warning(refusal));
+                .record(LogSeverity::Warning, LogSource::Studio, refusal);
         }
     }
 }

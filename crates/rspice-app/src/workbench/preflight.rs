@@ -15,7 +15,7 @@
 
 mod topology;
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 
@@ -50,9 +50,11 @@ pub(crate) fn run(app: &mut RSpiceApp) {
             .state
             .publish_configured_root_design_check_result(result)
     {
-        app.state.push_user_message(ConsoleMessage::warning(format!(
-            "Design-rule findings could not be recorded: {error}"
-        )));
+        app.state.record(
+            LogSeverity::Error,
+            LogSource::Studio,
+            format!("Design-rule check findings could not be published: {error}"),
+        );
     }
     if report.blockers.is_empty() {
         match app
@@ -132,11 +134,12 @@ pub(crate) fn run(app: &mut RSpiceApp) {
     // An event, at the severity of the pass rather than of its findings: the
     // findings are records on the Problems page, and this says the pass ran
     // and what it decided.
-    app.state.push_user_message(if blocked {
-        ConsoleMessage::warning(message)
+    let severity = if blocked {
+        LogSeverity::Warning
     } else {
-        ConsoleMessage::info(message)
-    });
+        LogSeverity::Info
+    };
+    app.state.record(severity, LogSource::Studio, message);
 
     if blocked {
         show_blockers(&mut app.state);
@@ -160,9 +163,8 @@ pub(crate) fn run_and_queue(app: &mut RSpiceApp) {
     if app.state.simulation.execution.has_active_execution()
         || app.state.simulation.execution.trigger_simulation
     {
-        app.state.push_user_message(ConsoleMessage::warning(
-            "A simulation is already running or waiting to start".to_owned(),
-        ));
+        app.state
+            .prompt("A simulation is already running or waiting to start.");
         return;
     }
 
