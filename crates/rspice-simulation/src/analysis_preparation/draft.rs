@@ -307,6 +307,16 @@ fn spell_references_as_the_deck(spec: &mut AnalysisSpec) {
         | AnalysisSpec::Qpac { output_ref, .. }
         | AnalysisSpec::Qpnoise { output_ref, .. }
         | AnalysisSpec::Qpxf { output_ref, .. } => spell_as_the_deck(output_ref),
+        // Both terminals: a port names the drawn ground on either side, and
+        // a terminal the deck lacks is a port to a node nothing is wired to.
+        AnalysisSpec::SParameter { ports, .. }
+        | AnalysisSpec::Psp { ports, .. }
+        | AnalysisSpec::Hbsp { ports, .. } => {
+            for port in ports {
+                spell_as_the_deck(&mut port.node_pos);
+                spell_as_the_deck(&mut port.node_neg);
+            }
+        }
         _ => {}
     }
 }

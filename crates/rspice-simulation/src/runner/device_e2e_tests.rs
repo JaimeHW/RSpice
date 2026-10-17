@@ -1202,3 +1202,162 @@ fn an_output_reference_naming_the_drawn_ground_is_measured_against_node_zero() {
         "{refused}"
     );
 }
+
+/// An S-parameter port the form states against the drawn ground, by the
+/// `GND!` its labels name it, is a port to node 0, in the run and in the
+/// `.sp` card the deck carries. A port to a node named `GND!` would be a port
+/// to a node nothing else is wired to, and would measure an open.
+#[test]
+fn an_sp_port_against_the_drawn_ground_is_a_port_to_node_zero() {
+    use crate::analysis_preparation::{
+        AnalysisInputs, analysis_draft_spec, analysis_spec_to_spice_line,
+    };
+    use rspice_results::analysis_result::AnalysisResult;
+    use rspice_results::run::SimulationRun;
+    use rspice_simulation_contract::analysis_draft::AnalysisDraft;
+    use rspice_simulation_contract::sp_config::{SpConfig, SpPortConfig, SpSweepType};
+    use rspice_simulation_contract::sp_draft::{SpDialogState, SpPortSource};
+
+    let mut bench = Bench::new();
+    let r1 = bench.place(ComponentType::Resistor, 0, 0, "R1", "100", "");
+    bench.label((r1, 0), "in");
+    bench.label((r1, 1), "GND!");
+    let netlist = bench.netlist();
+    assert!(!netlist.to_ascii_uppercase().contains("GND!"), "{netlist}");
+
+    let mut form = SpDialogState::from_config(&SpConfig {
+        start_freq: 1e6,
+        stop_freq: 1e6,
+        num_points: 1,
+        sweep_type: SpSweepType::Linear,
+        ports: vec![SpPortConfig::differential(1, "in", "GND!")],
+        ..SpConfig::default()
+    });
+    form.port_source_idx = Some(SpPortSource::AdHoc.index());
+    let draft = AnalysisDraft::SParameter(form);
+    let inputs: AnalysisInputs<'_, SimulationRun, AnalysisResult> = AnalysisInputs {
+        sim_setup: &Default::default(),
+        schematic: &Default::default(),
+        selected_components: &Default::default(),
+        selection_occurrence: None,
+        runs: &[],
+        active_run: None,
+        project_revision: rspice_app_types::product::ObjectRevision::INITIAL,
+        plan_payloads: &[],
+    };
+    let spec = analysis_draft_spec(&inputs, &draft).expect("the form builds a request");
+    let card = analysis_spec_to_spice_line(&inputs, &draft, &spec).expect("the form writes a card");
+
+    let result = run_spec_request(
+        &EngineBridge::new(),
+        spec,
+        SpecExecutionOptions::default(),
+        &netlist,
+        None,
+        &ResolvedExecutionDependencies::default(),
+        &rspice_core::abort_signal::NoAbort,
+    );
+    let Ok(crate::results::SimulationResult::Ac { waveforms, .. }) = &result else {
+        panic!("{result:?}");
+    };
+    // S11 = (100 - 50) / (100 + 50).
+    let s11 = waveforms["S11"].y_values[0];
+    assert!((s11 - 1.0 / 3.0).abs() < 1e-9, "S11 = {s11}");
+    assert!(card.contains("PORT1=(IN,0,50)"), "{card}");
+}
+
+/// PSP and HBSP bind the ports their producer's deck declares, and a drawn
+/// RF Port is declared against node 0 however its labels name the ground.
+/// A form whose ports name that ground `GND!` names the same ports, rather
+/// than ports the deck does not declare.
+#[test]
+fn periodic_ports_against_the_drawn_ground_bind_the_drawn_rf_ports() {
+    use super::spec::tests::{transferred_hb_dependencies, transferred_pss_dependencies};
+    use crate::analysis_preparation::{AnalysisInputs, analysis_draft_spec};
+    use rspice_results::analysis_result::AnalysisResult;
+    use rspice_results::run::SimulationRun;
+    use rspice_simulation_contract::analysis_draft::AnalysisDraft;
+    use rspice_simulation_contract::drafts::FrequencySweepDraft;
+    use rspice_simulation_contract::periodic_network_draft::{
+        NetworkPortDraft, PeriodicNetworkDraft,
+    };
+
+    let mut bench = Bench::new();
+    let p1 = bench.place(ComponentType::RfPort, 0, 0, "P1", "", "port=1 z0=50");
+    let r1 = bench.place(ComponentType::Resistor, 200, 0, "R1", "50", "");
+    let p2 = bench.place(ComponentType::RfPort, 400, 0, "P2", "", "port=2 z0=50");
+    for (at, net) in [
+        ((p1, 0), "p1"),
+        ((r1, 0), "p1"),
+        ((r1, 1), "p2"),
+        ((p2, 0), "p2"),
+        ((p1, 1), "GND!"),
+        ((p2, 1), "GND!"),
+    ] {
+        bench.label(at, net);
+    }
+    let netlist = bench.netlist();
+    assert!(!netlist.to_ascii_uppercase().contains("GND!"), "{netlist}");
+
+    let form = PeriodicNetworkDraft {
+        sweep: FrequencySweepDraft {
+            start: "10k".to_owned(),
+            stop: "10k".to_owned(),
+            points: "1".to_owned(),
+            sweep: 2,
+        },
+        ports: ["p1", "p2"]
+            .map(|node| NetworkPortDraft {
+                node_pos: node.to_owned(),
+                node_neg: "GND!".to_owned(),
+                z0: "50".to_owned(),
+            })
+            .to_vec(),
+        max_sideband: "1".to_owned(),
+        ..PeriodicNetworkDraft::default()
+    };
+    let inputs: AnalysisInputs<'_, SimulationRun, AnalysisResult> = AnalysisInputs {
+        sim_setup: &Default::default(),
+        schematic: &Default::default(),
+        selected_components: &Default::default(),
+        selection_occurrence: None,
+        runs: &[],
+        active_run: None,
+        project_revision: rspice_app_types::product::ObjectRevision::INITIAL,
+        plan_payloads: &[],
+    };
+    for (analysis, draft, dependencies) in [
+        (
+            "PSP",
+            AnalysisDraft::Psp(form.clone()),
+            transferred_pss_dependencies(&netlist),
+        ),
+        (
+            "HBSP",
+            AnalysisDraft::Hbsp(form),
+            transferred_hb_dependencies(&netlist),
+        ),
+    ] {
+        let spec = analysis_draft_spec(&inputs, &draft).expect("the form builds a request");
+        let result = run_spec_request(
+            &EngineBridge::new(),
+            spec,
+            SpecExecutionOptions::default(),
+            &netlist,
+            None,
+            &dependencies,
+            &rspice_core::abort_signal::NoAbort,
+        );
+        let Ok(crate::results::SimulationResult::Ac { waveforms, .. }) = &result else {
+            panic!("{analysis}: {result:?}");
+        };
+        // A 50 ohm series arm between two 50 ohm ports.
+        for (parameter, expected) in [("S11", 1.0 / 3.0), ("S21", 2.0 / 3.0)] {
+            let measured = waveforms[parameter].y_values[0];
+            assert!(
+                (measured - expected).abs() < 1e-6,
+                "{analysis}: {parameter} = {measured}"
+            );
+        }
+    }
+}

@@ -470,7 +470,7 @@ fn spec_variant_name(spec: &AnalysisSpec) -> &'static str {
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::runner) mod tests {
     mod hb_handoff;
     mod multirate_envelope;
     mod periodic_port_noise;
@@ -559,7 +559,9 @@ mod tests {
         }
     }
 
-    fn transferred_hb_dependencies(netlist: &str) -> ResolvedExecutionDependencies {
+    pub(in crate::runner) fn transferred_hb_dependencies(
+        netlist: &str,
+    ) -> ResolvedExecutionDependencies {
         let producer_spec = hb_producer_spec();
         let temperature =
             svc_runner::parse_runner_netlist_with_abort(netlist, None, &rspice_core::NoAbort)
@@ -649,7 +651,9 @@ mod tests {
         }
     }
 
-    fn transferred_pss_dependencies(netlist: &str) -> ResolvedExecutionDependencies {
+    pub(in crate::runner) fn transferred_pss_dependencies(
+        netlist: &str,
+    ) -> ResolvedExecutionDependencies {
         let producer_spec = pss_producer_spec();
         let produced = svc_runner::run_pss_analysis_with_source_path_and_abort(
             netlist,
