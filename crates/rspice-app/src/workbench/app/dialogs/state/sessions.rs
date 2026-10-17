@@ -489,6 +489,10 @@ pub struct DialogState {
     /// Find and replace on names, net labels and values.
     pub(crate) find_replace: crate::workbench::app::dialogs::find_replace::FindReplaceDialogState,
 
+    /// One property form over several selected instances.
+    pub(crate) shared_properties:
+        crate::workbench::app::dialogs::selection::shared_properties::SharedPropertiesDialogState,
+
     /// Project-owned technology attachment transaction.
     pub(crate) technology_attachment: TechnologyAttachmentDialogState,
 
@@ -582,6 +586,7 @@ impl DialogState {
             || self.object_properties.open
             || self.rename_selection.open
             || self.find_replace.open
+            || self.shared_properties.open
             || self.technology_attachment.open
             || self.confirmation_dialog.visible
             || self.project_review_dialog.request.is_some()

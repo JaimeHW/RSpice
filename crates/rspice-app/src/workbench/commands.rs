@@ -684,7 +684,8 @@ impl Command {
                     selection.pins.len() + selection.shapes.len() == 1
                 } else {
                     active_schematic_editor(app)
-                        && crate::workbench::app::selected_object_properties_available(state)
+                        && (crate::workbench::app::selected_object_properties_available(state)
+                            || crate::workbench::app::shared_properties_available(state))
                 }
             }
             Self::ZoomFit => {
@@ -1370,6 +1371,9 @@ impl Command {
                 if active_symbol_editor(app) {
                     app.state.workbench.inspector_visible = true;
                     app.state.workbench.drawer = Some(super::state::Drawer::Inspector);
+                } else if crate::workbench::app::shared_properties_available(&app.state) {
+                    // Several instances: one form for what they share.
+                    crate::workbench::app::open_shared_properties(&mut app.state);
                 } else {
                     crate::workbench::app::open_selected_object_properties(&mut app.state);
                 }

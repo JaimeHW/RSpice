@@ -241,6 +241,9 @@ pub(crate) use dialogs::selection::commands::floating::{
 pub(crate) use dialogs::selection::move_selection::{
     arm_move_selection, armed_move_selection_authority, cancel_armed_move_selection,
 };
+pub(crate) use dialogs::selection::shared_properties::{
+    open_shared_properties, shared_properties_available,
+};
 pub(crate) use dialogs::selection::stretch::{
     arm_stretch_selection, armed_stretch_selection_authority, cancel_armed_stretch_selection,
 };
@@ -943,6 +946,7 @@ impl RSpiceApp {
         self.render_object_properties_dialog(ctx);
         self.render_rename_selection_dialog(ctx);
         self.render_find_replace_dialog(ctx);
+        self.render_shared_properties_dialog(ctx);
         self.render_window_session_dialog(ctx);
         self.render_help_center_dialog(ctx);
         self.render_about_dialog(ctx);
