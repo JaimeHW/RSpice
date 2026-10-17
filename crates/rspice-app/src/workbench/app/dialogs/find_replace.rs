@@ -232,11 +232,11 @@ impl RSpiceApp {
         });
         let summary = match &found {
             Ok(found) if count > 0 => Ok(Some(match found.len() {
-                1 => format!("{count} {}.", plural(count, "match", "matches")),
-                documents => format!("{count} matches in {documents} cell views."),
+                1 => format!("{count} {}", plural(count, "match", "matches")),
+                documents => format!("{count} matches in {documents} cell views"),
             })),
             Ok(_) if self.state.dialogs.find_replace.find.is_empty() => Ok(None),
-            Ok(_) => Ok(Some("Nothing matches.".to_owned())),
+            Ok(_) => Ok(Some("No matches".to_owned())),
             Err(reason) => Err(reason.clone()),
         };
         let status = match &summary {
@@ -339,14 +339,9 @@ mod tests {
                     open_find_replace(&mut app.state);
                     app.state.dialogs.find_replace.options.regex = regex;
                     ask(&mut app.state, find, "22k", FindScope::CellView);
-                    let canvas = crate::ui::raster::render_themed(
-                        crate::ui::Theme {
-                            mode,
-                            ..crate::ui::Theme::default()
-                        },
-                        size,
-                        |ui, _background| app.render_find_replace_dialog(ui.ctx()),
-                    );
+                    let canvas = super::super::render_settled_form(mode, size, |ctx| {
+                        app.render_find_replace_dialog(ctx);
+                    });
                     let height = canvas.content_height().max(1);
                     let path =
                         directory.join(format!("find-replace-{stem}-{size_stem}-{mode_stem}.png"));
