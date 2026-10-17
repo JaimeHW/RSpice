@@ -4,6 +4,7 @@ pub mod array;
 pub mod array_edit;
 pub mod bus;
 pub mod bus_edit;
+pub mod bus_route;
 pub mod clipboard;
 pub mod clipboard_edit;
 pub mod component;

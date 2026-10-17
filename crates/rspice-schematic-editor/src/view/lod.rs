@@ -17,6 +17,8 @@
 //! legibility floor an electrical name becomes a bar where the text would be
 //! rather than disappearing with its anchor.
 
+use rspice_design::schematic::bus_route;
+
 /// What a stroke draws, which fixes its nominal world width and its limits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StrokeRole {
@@ -62,9 +64,9 @@ const CRISP_BELOW_DPX: f32 = 6.0;
 const fn limits(role: StrokeRole) -> StrokeLimits {
     let (nominal_wu, floor_pt, ceiling_pt) = match role {
         StrokeRole::Wire => (1.1, 1.0, 3.0),
-        StrokeRole::BusStrand => (1.2, 1.0, 2.5),
+        StrokeRole::BusStrand => (bus_route::BUS_STRAND_WIDTH_WORLD, 1.0, 2.5),
         StrokeRole::BusCollapsed => (0.0, 3.0, 3.0),
-        StrokeRole::BusTap => (2.0, 2.0, 4.0),
+        StrokeRole::BusTap => (bus_route::BUS_TAP_WIDTH_WORLD, 2.0, 4.0),
         StrokeRole::Symbol => (1.0, 1.0, 2.5),
         StrokeRole::VectorPort => (1.2, 1.0, 2.5),
         StrokeRole::Documentation => (0.8, 1.0, 2.0),
@@ -115,7 +117,7 @@ pub fn stroke_pt(role: StrokeRole, zoom: f32, ppp: f32, emphasis: Emphasis) -> f
 }
 
 /// Centre-to-centre spacing of a bus's strands, in world units.
-pub const BUS_STRAND_OFFSET_WU: f32 = 4.0;
+pub const BUS_STRAND_OFFSET_WU: f32 = bus_route::BUS_STRAND_OFFSET_WORLD;
 
 /// Whether a bus draws as one stroke: its strands would leave less than one
 /// device pixel of clear canvas between them.

@@ -9,6 +9,7 @@ use std::fmt::Write;
 use egui::{Align, Align2};
 use rspice_design::schematic::{
     bus::{Bus, BusTap},
+    bus_route,
     design_note::{DesignNote, DesignNoteKind, DesignNoteRenderContext},
     document::SchematicDocument,
     documentation_shape::{DocumentationShape, DocumentationShapeGeometry, arc_parameters},
@@ -420,7 +421,7 @@ pub(super) fn write_bus(svg: &mut String, bus: &Bus, config: &SvgExportConfig) {
         .collect();
     let offset = world(lod::BUS_STRAND_OFFSET_WU, config);
     for offset in [-offset, 0.0, offset] {
-        write_svg_path(svg, "bus", &offset_svg_polyline(&centerline, offset));
+        write_svg_path(svg, "bus", &bus_route::offset_polyline(&centerline, offset));
     }
     if let (Some(declaration), Some(corner)) =
         (&bus.declaration, bus_declaration_corner(bus, config))
@@ -465,41 +466,6 @@ fn write_svg_path(svg: &mut String, class: &str, points: &[(f64, f64)]) {
         }
     }
     svg.push_str("\"/>\n");
-}
-
-fn offset_svg_polyline(points: &[(f64, f64)], offset: f64) -> Vec<(f64, f64)> {
-    if points.len() < 2 || offset == 0.0 {
-        return points.to_vec();
-    }
-    let normal = |start: (f64, f64), end: (f64, f64)| {
-        let (dx, dy) = (end.0 - start.0, end.1 - start.1);
-        let length = (dx * dx + dy * dy).sqrt().max(f64::EPSILON);
-        (-dy / length, dx / length)
-    };
-    points
-        .iter()
-        .enumerate()
-        .map(|(index, &point)| {
-            let vector = if index == 0 {
-                normal(points[0], points[1])
-            } else if index + 1 == points.len() {
-                normal(points[index - 1], points[index])
-            } else {
-                let previous = normal(points[index - 1], points[index]);
-                let next = normal(points[index], points[index + 1]);
-                let sum = (previous.0 + next.0, previous.1 + next.1);
-                let length = (sum.0 * sum.0 + sum.1 * sum.1).sqrt();
-                if length <= f64::EPSILON {
-                    next
-                } else {
-                    let miter = (sum.0 / length, sum.1 / length);
-                    let denominator = (miter.0 * next.0 + miter.1 * next.1).abs().max(0.25);
-                    (miter.0 / denominator, miter.1 / denominator)
-                }
-            };
-            (point.0 + vector.0 * offset, point.1 + vector.1 * offset)
-        })
-        .collect()
 }
 
 /// A run's advance, estimated at 0.62 em a glyph: wide enough for Plex Mono
