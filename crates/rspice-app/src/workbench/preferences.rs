@@ -581,10 +581,13 @@ pub enum ChoicePreference {
     DataResidency,
     ExtensionPolicy,
     ExtensionUpdates,
+    /// The schematic canvas's cursor under a mouse: the tool's own cursor,
+    /// or a full-screen crosshair (D1 section 5).
+    SchematicCursor,
 }
 
 impl ChoicePreference {
-    pub(crate) const ALL: [Self; 49] = [
+    pub(crate) const ALL: [Self; 50] = [
         Self::LegacyWorkspacePreset,
         Self::LegacyConsoleOnLaunch,
         Self::LegacySchematicGrid,
@@ -634,6 +637,7 @@ impl ChoicePreference {
         Self::DataResidency,
         Self::ExtensionPolicy,
         Self::ExtensionUpdates,
+        Self::SchematicCursor,
     ];
 
     pub const fn stable_id(self) -> &'static str {
@@ -687,6 +691,7 @@ impl ChoicePreference {
             Self::DataResidency => "data-residency",
             Self::ExtensionPolicy => "extension-policy",
             Self::ExtensionUpdates => "extension-updates",
+            Self::SchematicCursor => "schematic-cursor",
         }
     }
 
@@ -738,7 +743,8 @@ impl ChoicePreference {
             | Self::PreemptionTimeout
             | Self::CertificateTrust
             | Self::LocalProjectEncryption
-            | Self::DataResidency => 1,
+            | Self::DataResidency
+            | Self::SchematicCursor => 1,
             Self::InterfaceScale | Self::DefaultSolverPreset => 3,
         }
     }
@@ -1019,6 +1025,20 @@ impl UserPreferences {
                 .filter(|value| *value <= key.max_value())
                 .unwrap_or_default(),
         )
+    }
+
+    /// Whether a mouse over the schematic canvas gets the full-screen
+    /// crosshair in place of the tool's cursor (D1 section 5). Off unless
+    /// chosen.
+    #[must_use]
+    pub fn schematic_full_crosshair(&self) -> bool {
+        self.choice(ChoicePreference::SchematicCursor) == 1
+    }
+
+    #[cfg(test)]
+    pub(crate) fn choose_schematic_full_crosshair(&mut self, on: bool) {
+        self.set_choice(ChoicePreference::SchematicCursor, usize::from(on))
+            .expect("the cursor choice has two options");
     }
 
     pub fn set_choice(&mut self, key: ChoicePreference, value: usize) -> Result<(), &'static str> {

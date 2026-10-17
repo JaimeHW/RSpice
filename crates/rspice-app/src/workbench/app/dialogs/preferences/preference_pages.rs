@@ -595,6 +595,31 @@ fn schematic(ui: &mut Ui, state: &mut AppState) {
             });
         },
     );
+    preference_row(
+        ui,
+        "Cursor",
+        "A full-screen crosshair follows the mouse over the canvas.",
+        |ui| {
+            value_column(ui, |ui| {
+                let mut selected = state
+                    .ui
+                    .preferences
+                    .choice(ChoicePreference::SchematicCursor);
+                if segmented(
+                    ui,
+                    "preferences.schematic.cursor",
+                    &["Tool cursors", "Full-screen crosshair"],
+                    &mut selected,
+                ) {
+                    state
+                        .ui
+                        .preferences
+                        .set_choice(ChoicePreference::SchematicCursor, selected)
+                        .expect("schematic-cursor segments define the complete domain");
+                }
+            });
+        },
+    );
     choice_row(
         ui,
         state,
@@ -948,6 +973,7 @@ pub(super) fn restore_defaults(category: PreferenceCategory, state: &mut AppStat
         PreferenceCategory::Schematic => preferences.restore_defaults(
             &[
                 ChoicePreference::SchematicGrid,
+                ChoicePreference::SchematicCursor,
                 ChoicePreference::OperatingPointAnnotation,
                 ChoicePreference::WireJunctionBehavior,
                 ChoicePreference::SelectionCrossingPolicy,

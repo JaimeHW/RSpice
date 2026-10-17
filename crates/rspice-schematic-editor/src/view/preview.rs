@@ -13,6 +13,7 @@ use super::{
     viewport::Viewport,
 };
 use crate::session::{EditorSession, tool::Tool};
+use egui::emath::GuiRounding as _;
 use egui::{Painter, Rect, Response, Stroke};
 use rspice_design::schematic::{
     bus::{Bus, BusTap},
@@ -28,6 +29,24 @@ pub use component::{
     ShelfPreview, draw_component_preview, draw_shelf_drag_preview, pending_library_cell_component,
 };
 pub use wire::{draw_wire_preview, resolve_wire_preview_snap};
+
+/// The full-screen crosshair cursor (D1 section 5): one horizontal and one
+/// vertical hairline through `at` across the whole canvas and clipped to it,
+/// one device pixel wide, in `text_faint` at 55 % alpha. The caller paints
+/// it over the scene and under the interaction previews.
+pub fn draw_full_crosshair(painter: &Painter, canvas: Rect, at: egui::Pos2) {
+    let pixels_per_point = painter.pixels_per_point();
+    let ink = rspice_ui_kit::tokens::Tokens::get(painter.ctx())
+        .color
+        .text_faint
+        .gamma_multiply(0.55);
+    let stroke = Stroke::new(1.0 / pixels_per_point, ink);
+    let painter = painter.with_clip_rect(canvas);
+    let x = at.x.round_to_pixel_center(pixels_per_point);
+    let y = at.y.round_to_pixel_center(pixels_per_point);
+    painter.hline(canvas.x_range(), y, stroke);
+    painter.vline(x, canvas.y_range(), stroke);
+}
 
 /// Application permissions are evaluated by the caller for this frame.
 #[derive(Clone, Copy)]

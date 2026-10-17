@@ -328,6 +328,37 @@ fn set_canvas_cursor(
     ui.ctx().set_cursor_icon(context.cursor());
 }
 
+/// Where the full-screen crosshair crosses this frame, when it is chosen
+/// (D1 section 5): over the canvas under a mouse, never on touch, and not
+/// while a pan is live or armed, whose hand cursors it would hide. A drawing
+/// tool's lines cross at the grid point the click lands on, Select's at the
+/// pointer. The OS cursor gives way to the lines.
+fn full_crosshair_at(
+    ui: &Ui,
+    response: &egui::Response,
+    state: &AppState,
+    viewport: &viewport::Viewport,
+) -> Option<egui::Pos2> {
+    if !state.ui.preferences.schematic_full_crosshair()
+        || !response.hovered()
+        || rspice_schematic_editor::view::pointer_target::canvas_touch_mode(ui.ctx())
+        || ui.input(|input| input.pointer.middle_down())
+        || navigation::primary_pan_modifier_down(ui)
+    {
+        return None;
+    }
+    let pointer = response.hover_pos()?;
+    ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+    Some(
+        if state.schematic.session.editor.tool.cursor() == egui::CursorIcon::Crosshair {
+            let snapped = snap_resolution::resolve_grid_pointer(state, viewport, pointer);
+            viewport.schematic_to_screen(snapped.snapped_position)
+        } else {
+            pointer
+        },
+    )
+}
+
 pub fn render_schematic_view(
     ui: &mut Ui,
     state: &mut AppState,
@@ -479,6 +510,7 @@ pub fn render_schematic_view(
     );
     handle_keyboard_object_navigation(&response, state, &symbol_context);
     set_canvas_cursor(ui, &response, state, shelf_drop);
+    let crosshair = full_crosshair_at(ui, &response, state, &viewport);
     refresh_symbol_context_after_interactions(state, &mut symbol_context);
 
     // Refresh the frame-coherent canvas cache (culling bounds + hover
@@ -504,6 +536,9 @@ pub fn render_schematic_view(
         &symbol_context,
         &drawing_sheet,
     );
+    if let Some(at) = crosshair {
+        rspice_schematic_editor::view::preview::draw_full_crosshair(&painter, available, at);
+    }
     draw_interaction_previews(
         &painter,
         &response,
@@ -1022,5 +1057,100 @@ mod tests {
             .map(|(_, node)| node)
             .expect("concise schematic selection status node");
         assert_eq!(status.live(), Some(egui::accesskit::Live::Polite));
+    }
+
+    /// Two frames of a mouse resting at `at` over the bare canvas, with
+    /// `buttons` held: the cursor the frame asked for, and the canvas-wide
+    /// horizontal and vertical hairlines it painted, by position.
+    fn rest_mouse(
+        ctx: &egui::Context,
+        state: &mut AppState,
+        at: egui::Pos2,
+        buttons: &[egui::PointerButton],
+    ) -> (egui::CursorIcon, Vec<f32>, Vec<f32>) {
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let mut canvas = egui::Rect::NOTHING;
+        let mut output = None;
+        for frame in 0..2 {
+            let mut events = vec![egui::Event::PointerMoved(at)];
+            if frame == 0 {
+                events.extend(buttons.iter().map(|button| egui::Event::PointerButton {
+                    pos: at,
+                    button: *button,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                }));
+            }
+            output = Some(ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    canvas = ui.available_rect_before_wrap();
+                    render_schematic_view(ui, state, None);
+                },
+            ));
+        }
+        let output = output.expect("two frames ran");
+        let (mut rows, mut columns) = (Vec::new(), Vec::new());
+        for clipped in &output.shapes {
+            if let egui::Shape::LineSegment { points: [a, b], .. } = clipped.shape {
+                if a.y == b.y && a.x <= canvas.left() && b.x >= canvas.right() {
+                    rows.push(a.y);
+                } else if a.x == b.x && a.y <= canvas.top() && b.y >= canvas.bottom() {
+                    columns.push(a.x);
+                }
+            }
+        }
+        (output.platform_output.cursor_icon, rows, columns)
+    }
+
+    /// C-16, D1 section 5: the full-screen crosshair is a preference, off by
+    /// default. When on, a mouse over the canvas loses the OS cursor to two
+    /// canvas-wide hairlines: through the pointer in Select, through the
+    /// snapped point a click lands on in a drawing tool. Panning hides them.
+    #[test]
+    fn the_full_screen_crosshair_follows_a_mouse_when_chosen() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut state = AppState::default();
+        state.ui.grid = crate::state::GridStyle::Off;
+        let editor = &mut state.schematic.session.editor;
+        (editor.needs_fit, editor.needs_drawing_sheet_fit) = (false, false);
+        (editor.pan, editor.zoom) = ((0.0, 0.0), 1.0);
+        state.schematic.document_mut_for_test().grid_size = 10;
+        let at = egui::pos2(203.3, 151.7);
+
+        let (cursor, rows, columns) = rest_mouse(&ctx, &mut state, at, &[]);
+        assert_eq!(cursor, egui::CursorIcon::Default);
+        assert!(rows.is_empty() && columns.is_empty(), "off by default");
+
+        state.ui.preferences.choose_schematic_full_crosshair(true);
+        let (cursor, rows, columns) = rest_mouse(&ctx, &mut state, at, &[]);
+        assert_eq!(cursor, egui::CursorIcon::None);
+        assert_eq!(
+            (rows, columns),
+            (vec![151.5], vec![203.5]),
+            "through the pointer"
+        );
+
+        state.schematic.arm_tool(crate::state::Tool::Wire);
+        let (cursor, rows, columns) = rest_mouse(&ctx, &mut state, at, &[]);
+        assert_eq!(cursor, egui::CursorIcon::None);
+        assert_eq!(
+            (rows, columns),
+            (vec![150.5], vec![200.5]),
+            "through the grid point the click lands on"
+        );
+
+        let (cursor, rows, columns) =
+            rest_mouse(&ctx, &mut state, at, &[egui::PointerButton::Middle]);
+        assert_eq!(cursor, egui::CursorIcon::Grabbing);
+        assert!(
+            rows.is_empty() && columns.is_empty(),
+            "hidden while panning"
+        );
     }
 }
