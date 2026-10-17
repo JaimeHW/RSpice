@@ -1995,7 +1995,11 @@ fn shorted_parts(top: &SchematicDocument) -> Vec<DrcViolation> {
 #[test]
 fn a_part_with_one_wire_running_through_both_pins_is_shorted() {
     let (mut top, before, _, _, after) = capacitor_on_its_own_line();
-    assert_eq!(shorted_parts(&top), Vec::new(), "a part on its own is not shorted");
+    assert_eq!(
+        shorted_parts(&top),
+        Vec::new(),
+        "a part on its own is not shorted"
+    );
 
     top.wires.push(Wire::segment(20, before, after));
     let shorted = shorted_parts(&top);
@@ -2020,7 +2024,11 @@ fn the_piece_of_a_split_wire_between_the_pins_shorts_the_part() {
         Wire::segment(20, before, first),
         Wire::segment(21, second, after),
     ]);
-    assert_eq!(shorted_parts(&top), Vec::new(), "a wire on each pin is a wired part");
+    assert_eq!(
+        shorted_parts(&top),
+        Vec::new(),
+        "a wire on each pin is a wired part"
+    );
 
     top.wires.push(Wire::segment(22, first, second));
 

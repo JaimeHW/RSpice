@@ -649,7 +649,10 @@ mod tests {
         assert_eq!(wires.len(), 2, "{wires:?}");
         assert_eq!(wires.iter().find(|wire| wire.id == 3), Some(&hidden));
         assert_eq!(
-            wires.iter().find(|wire| wire.id == 1).map(|wire| &wire.points),
+            wires
+                .iter()
+                .find(|wire| wire.id == 1)
+                .map(|wire| &wire.points),
             Some(&vec![Point::new(0, 0), Point::new(100, 0)])
         );
     }

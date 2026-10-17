@@ -157,8 +157,13 @@ impl ToolPointerView<'_> {
                     viewport,
                     position,
                 );
-                let target =
-                    resolve_target_pointer(&self.design, self.snap_engine, symbols, viewport, position);
+                let target = resolve_target_pointer(
+                    &self.design,
+                    self.snap_engine,
+                    symbols,
+                    viewport,
+                    position,
+                );
                 let on_pin = matches!(target.target_type(), Some(SnapTargetType::Terminal { .. }));
                 // A visual conductor owns the click. An unrepresentable exact
                 // attachment must not fall back to a disconnected grid point.
