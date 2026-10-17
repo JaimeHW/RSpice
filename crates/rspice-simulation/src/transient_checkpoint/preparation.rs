@@ -46,7 +46,16 @@ pub(crate) fn request_from_draft(
     }))
 }
 
-pub(crate) fn selected_images<'a, W: 'a>(
+/// The images a transient's checkpoint draft resumes from, as preparing it
+/// resolves them, in digest order: each selected image from the imported
+/// library or from a retained result that holds it, every such result
+/// checked as one the image can be resumed against. The reason instead when
+/// an image is selected twice, is held nowhere, is held by a result it
+/// cannot be resumed against, or when together they exceed the byte limit.
+///
+/// What a run prepared to resume from checkpoints resumes from: the same
+/// answer, asked again, says whether it still does.
+pub fn selected_images<'a, W: 'a>(
     analyses: impl Iterator<Item = &'a rspice_results::analysis_result::AnalysisResult<W>>,
     imported: &TransientCheckpointLibrary,
     draft: Option<&TranCheckpointDraft>,

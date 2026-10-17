@@ -24,6 +24,7 @@ pub(crate) fn check_limit(
 
 pub use rspice_results::transient_checkpoint::checkpoint_digest;
 pub(crate) mod preparation;
+pub use preparation::selected_images;
 
 fn translate_checkpoint_error(
     error: rspice_results::transient_checkpoint::TransientCheckpointError,

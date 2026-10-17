@@ -401,6 +401,9 @@ fn dispatch_matching_requires_exact_project_and_plan_revisions() {
             .prepared_receipt()
             .expect("prepared run")
             .source_content_digest(),
+        prepared_inputs: crate::simulation::controller::PreparedRunSetInputs::of_unprepared(
+            &RSpiceApp::test_instance().state,
+        ),
         plan_name: "Plan".to_owned(),
         plan_payload: SimulationPlanPayload::default(),
         project_sources: ProjectSourceRegistry::default(),

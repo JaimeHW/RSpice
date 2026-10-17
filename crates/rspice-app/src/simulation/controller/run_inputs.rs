@@ -24,6 +24,15 @@
 //! about it. Automation and tuning prepare in their own frame from the live
 //! session, and retain the identity of the state they prepared from, so their
 //! runs are held to the same check.
+//!
+//! Automation also publishes evidence from the run it dispatched, and only
+//! while the session still holds what that run was prepared from. It used to
+//! decide so by preparing the whole run again and comparing digests, seconds
+//! of the frame on a large design, each frame it waited on the dispatch and
+//! again when it published, and a second judgement of currency that could
+//! disagree with the dispatch's. It now keeps [`PreparedRunSetInputs`], the
+//! very inputs its run was retained with, past the dispatch that spends them,
+//! and asks of them the question the dispatch asks.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -37,6 +46,13 @@ use crate::product::ContentDigest;
 use crate::simulation::execution::{PreparationError, PreparationStage, PreparedRunSnapshot};
 use crate::simulation::plan::AnalysisDraft;
 use crate::state::stimulus_library::definition::RetainedPwlFile;
+use crate::state::{AnalysisResultFamilyMetadata, MonteCarloCheckpointEvidence};
+use rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointValidationRef;
+use rspice_results::result_import::ResultImportSource;
+use rspice_results::transient_checkpoint::TransientCheckpointEvidence;
+use rspice_simulation::monte_carlo_checkpoint::preparation::{
+    SelectedCheckpoint, selected_checkpoints,
+};
 use rspice_simulation::netlist_gen::{NetlistSourceHost, TableRoute};
 
 /// The status a run set's dispatch refused for moved inputs leaves, and the
@@ -98,9 +114,12 @@ pub(super) fn unaccounted_run() -> PreparationError {
 ///   run set's analyses that report on them: an operating point names the
 ///   selected devices, and may start from a retained solution or report
 ///   against the active run's violations; a Monte Carlo or transient that
-///   resumes from a checkpoint reads the runs that hold it. Those reads are
-///   what is held, so selecting something or opening an older run while a
-///   check runs does not expire a run that never reads it.
+///   resumes from a checkpoint reads the results that hold it. Those reads
+///   are what is held, so selecting something or opening an older run while a
+///   check runs does not expire a run that never reads it. Neither does a
+///   run added to the history that changes nothing a checkpoint resumes
+///   from: the run's own, which joins the history from its dispatch on,
+///   among them.
 ///
 /// Held on the heap: the controller holds one beside its retained run and
 /// another beside a press's pipeline, and the application holds the
@@ -138,7 +157,7 @@ struct RunSetReads {
     imported_transient_checkpoints:
         rspice_results::transient_checkpoint::TransientCheckpointLibrary,
     operating_points: Vec<Result<AnalysisSpec, String>>,
-    checkpoint_runs: Option<rspice_results::run_history::RunHistoryRevision>,
+    checkpoint_resumes: Vec<CheckpointResume>,
     display_waveform_cache_samples: usize,
     design_checks: ContentDigest,
 }
@@ -271,7 +290,10 @@ impl RunInputIdentity {
             imported_checkpoints: live.imported_checkpoints.clone(),
             imported_transient_checkpoints: live.imported_transient_checkpoints.clone(),
             operating_points: operating_point_reads(state),
-            checkpoint_runs: checkpoint_run_reads(state),
+            checkpoint_resumes: checkpoint_resume_reads(state, &live)
+                .into_iter()
+                .map(CheckpointResume::held)
+                .collect(),
             display_waveform_cache_samples: live.display_waveform_cache_samples,
             design_checks: design_check_digest(&live.design_checks),
         }));
@@ -439,7 +461,10 @@ impl RunSetReads {
                 "the devices or results the operating point reports",
             ),
             (
-                self.checkpoint_runs == checkpoint_run_reads(state),
+                CheckpointResume::all_resume_as(
+                    &self.checkpoint_resumes,
+                    &checkpoint_resume_reads(state, live),
+                ),
                 "the retained runs a checkpoint resumes from",
             ),
             (
@@ -555,24 +580,214 @@ fn operating_point_reads(state: &AppState) -> Vec<Result<AnalysisSpec, String>> 
         .collect()
 }
 
-/// The revision of the retained runs, when an analysis in the plan resumes
-/// from a checkpoint they may hold; `None` when none does, because then
-/// nothing but an operating point reads them.
-fn checkpoint_run_reads(
-    state: &AppState,
-) -> Option<rspice_results::run_history::RunHistoryRevision> {
-    let plan = state.sim_setup.analysis_plan.as_ref()?;
+/// What every analysis in the plan that resumes from checkpoints resumes
+/// from, in plan order, read as its preparation reads it.
+///
+/// Preparation looks retained results up only for the checkpoints a draft
+/// resumes from, and asks of them only what is read here: for a transient,
+/// the images its selection resolves, each checked against every result that
+/// holds it; for a Monte Carlo, each checkpoint beside the result its
+/// selection takes it from, which preparation checks it against. Capturing
+/// checkpoints reads no retained result. A run added to the history moves
+/// nothing here unless it holds a checkpoint a draft resumes from, so a run
+/// prepared to resume is not expired by the run its own dispatch starts,
+/// though that run captures checkpoints of its own.
+fn checkpoint_resume_reads<'a>(state: &'a AppState, live: &LiveInputs<'a>) -> Vec<ResumeRead<'a>> {
+    let Some(plan) = state.sim_setup.analysis_plan.as_ref() else {
+        return Vec::new();
+    };
+    // Every retained result, newest run first, as preparation offers them.
+    let runs = &state.simulation.retained.runs;
+    let results = || {
+        runs.iter()
+            .flat_map(|run| run.analyses.iter().map(|analysis| &analysis.data))
+    };
     plan.instances()
         .iter()
-        .any(|instance| match instance.draft() {
-            // A draft that does not lower prepares no run at all.
-            AnalysisDraft::MonteCarlo(draft) => {
-                !matches!(draft.to_config(), Ok(config) if config.checkpoint.is_none())
+        .filter_map(|instance| match instance.draft() {
+            AnalysisDraft::Transient(draft) => {
+                let checkpoint = draft
+                    .checkpoint
+                    .as_ref()
+                    .filter(|checkpoint| !checkpoint.resume.is_empty())?;
+                Some(ResumeRead::Transient(
+                    rspice_simulation::transient_checkpoint::selected_images(
+                        results(),
+                        live.imported_transient_checkpoints,
+                        Some(checkpoint),
+                    )
+                    .map(|images| {
+                        images
+                            .iter()
+                            .map(TransientCheckpointEvidence::digest)
+                            .collect()
+                    }),
+                ))
             }
-            AnalysisDraft::Transient(draft) => draft.checkpoint.is_some(),
-            _ => false,
+            // A draft that does not lower prepares no run, and reads no
+            // retained result to find so.
+            AnalysisDraft::MonteCarlo(draft) => {
+                let checkpoint = draft
+                    .to_config()
+                    .ok()?
+                    .checkpoint
+                    .filter(|checkpoint| !checkpoint.resume.is_empty())?;
+                Some(ResumeRead::MonteCarlo(selected_checkpoints(
+                    results(),
+                    live.imported_checkpoints,
+                    Some(&checkpoint),
+                )))
+            }
+            _ => None,
         })
-        .then(|| state.simulation.retained.runs.revision())
+        .collect()
+}
+
+/// What one analysis that resumes from checkpoints resumes from, read from
+/// the session.
+enum ResumeRead<'a> {
+    /// A transient's images, by digest, or why they do not resolve.
+    Transient(Result<Vec<ContentDigest>, String>),
+    /// A Monte Carlo's checkpoints, each beside the result it is taken from,
+    /// or why they do not resolve.
+    MonteCarlo(Result<Vec<SelectedCheckpoint<'a, WaveformData>>, String>),
+}
+
+/// What one analysis that resumes from checkpoints resumed from, held past
+/// the frame it was read in.
+enum CheckpointResume {
+    Transient(Result<Vec<ContentDigest>, String>),
+    MonteCarlo(Result<Vec<MonteCarloResume>, String>),
+}
+
+impl CheckpointResume {
+    fn held(read: ResumeRead<'_>) -> Self {
+        match read {
+            ResumeRead::Transient(images) => Self::Transient(images),
+            ResumeRead::MonteCarlo(selected) => Self::MonteCarlo(selected.map(|selected| {
+                selected
+                    .into_iter()
+                    .map(|(holder, image)| MonteCarloResume {
+                        image: image.clone(),
+                        holder: holder.map(|holder| CheckpointHolder::of(holder.into())),
+                    })
+                    .collect()
+            })),
+        }
+    }
+
+    /// Whether every analysis `live` reads resumes from what the one held
+    /// beside it resumed from.
+    fn all_resume_as(held: &[Self], live: &[ResumeRead<'_>]) -> bool {
+        held.len() == live.len()
+            && held
+                .iter()
+                .zip(live)
+                .all(|(held, live)| held.resumes_as(live))
+    }
+
+    fn resumes_as(&self, live: &ResumeRead<'_>) -> bool {
+        match (self, live) {
+            (Self::Transient(held), ResumeRead::Transient(live)) => held == live,
+            (Self::MonteCarlo(Ok(held)), ResumeRead::MonteCarlo(Ok(live))) => {
+                held.len() == live.len()
+                    && held
+                        .iter()
+                        .zip(live)
+                        .all(|(held, &live)| held.resumes_as(live))
+            }
+            (Self::MonteCarlo(Err(held)), ResumeRead::MonteCarlo(Err(live))) => held == live,
+            _ => false,
+        }
+    }
+}
+
+/// A checkpoint a Monte Carlo resumed from, and what checking it read of the
+/// result it was taken from; `None` when it was taken from the imported
+/// library, where it is not checked.
+struct MonteCarloResume {
+    image: MonteCarloCheckpointEvidence,
+    holder: Option<CheckpointHolder>,
+}
+
+impl MonteCarloResume {
+    /// Whether `live`, the same checkpoint selected again, resumes alike: the
+    /// same image, checked alike against what it is taken from.
+    ///
+    /// Mostly it is taken from the same result, read alike, and nothing is
+    /// checked. Taken from another result, as when a newer run holds the same
+    /// image, or from the library instead of a result, it resumes alike when
+    /// it checks alike against each, which reads the image.
+    fn resumes_as(&self, (holder, image): SelectedCheckpoint<'_, WaveformData>) -> bool {
+        if self.image.digest() != image.digest() {
+            return false;
+        }
+        match (&self.holder, holder) {
+            (None, None) => true,
+            (Some(held), Some(live)) if held.reads_as(live.into()) => true,
+            (held, live) => {
+                held.as_ref()
+                    .map_or(Ok(()), |held| self.image.validate_for(held.read()))
+                    == live.map_or(Ok(()), |live| image.validate_for(live.into()))
+            }
+        }
+    }
+}
+
+/// What checking a Monte Carlo checkpoint reads of the retained result it is
+/// taken from, held by value.
+struct CheckpointHolder {
+    analysis_type: AnalysisType,
+    provenance: Option<AnalysisResultProvenance>,
+    import_source: Option<ResultImportSource>,
+    success: bool,
+    family_metadata: Option<AnalysisResultFamilyMetadata>,
+}
+
+impl CheckpointHolder {
+    fn of(result: MonteCarloCheckpointValidationRef<'_>) -> Self {
+        let MonteCarloCheckpointValidationRef {
+            analysis_type,
+            provenance,
+            import_source,
+            success,
+            family_metadata,
+        } = result;
+        Self {
+            analysis_type,
+            provenance: provenance.cloned(),
+            import_source: import_source.cloned(),
+            success,
+            family_metadata: family_metadata.cloned(),
+        }
+    }
+
+    fn read(&self) -> MonteCarloCheckpointValidationRef<'_> {
+        MonteCarloCheckpointValidationRef {
+            analysis_type: self.analysis_type,
+            provenance: self.provenance.as_ref(),
+            import_source: self.import_source.as_ref(),
+            success: self.success,
+            family_metadata: self.family_metadata.as_ref(),
+        }
+    }
+
+    /// Whether checking a checkpoint against `result` reads what it read of
+    /// this one.
+    fn reads_as(&self, result: MonteCarloCheckpointValidationRef<'_>) -> bool {
+        let MonteCarloCheckpointValidationRef {
+            analysis_type,
+            provenance,
+            import_source,
+            success,
+            family_metadata,
+        } = result;
+        self.analysis_type == analysis_type
+            && self.provenance.as_ref() == provenance
+            && self.import_source.as_ref() == import_source
+            && self.success == success
+            && self.family_metadata.as_ref() == family_metadata
+    }
 }
 
 /// SHA-256 over `value`'s `Debug` text, streamed into the hash rather than
@@ -759,7 +974,8 @@ impl SourceFileAnswers {
 }
 
 /// What a retained run was prepared from, held beside it until it is
-/// dispatched or dropped.
+/// dispatched or dropped, and by a workflow that keeps it longer; see
+/// [`PreparedRunSetInputs`].
 pub(super) struct RetainedRunInputs {
     pub(super) identity: RunInputIdentity,
     pub(super) source_files: SourceFileAnswers,
@@ -782,11 +998,28 @@ impl RetainedRunInputs {
         if !self.identity.describes(snapshot) {
             return Err(unaccounted_run());
         }
+        self.refused_if_moved(
+            state,
+            self.identity.moved_in(state, snapshot),
+            snapshot.sealed_source_dependencies(),
+        )
+    }
+
+    /// Refuse when `moved` names a session input that moved, or when a host
+    /// file the run was prepared from has: the external model files its seal
+    /// read, `dependencies`, the files its includes spliced in, and the data
+    /// files its sources were routed to.
+    fn refused_if_moved(
+        &self,
+        state: &AppState,
+        moved: Option<&'static str>,
+        dependencies: &[rspice_core::netlist::ResolvedIncludeDependency],
+    ) -> Result<(), PreparationError> {
         let refused = self.identity.refusal();
         let refuse = |stage: PreparationStage, what: &str| {
             Err(PreparationError::new(stage, format!("{refused} · {what}")))
         };
-        if let Some(input) = self.identity.moved_in(state, snapshot) {
+        if let Some(input) = moved {
             return refuse(PreparationStage::Authorization, &format!("{input} changed"));
         }
         if let Err(error) = rspice_simulation::model_sources::verify_plan_external_model_sources(
@@ -797,7 +1030,7 @@ impl RetainedRunInputs {
         }
         if let Err(error) =
             rspice_simulation::netlist_preparation::dependencies::verify_host_dependencies(
-                snapshot.sealed_source_dependencies(),
+                dependencies,
             )
         {
             return refuse(PreparationStage::Authorization, &error);
@@ -811,3 +1044,78 @@ impl RetainedRunInputs {
         Ok(())
     }
 }
+
+/// What a run set was prepared from, kept past its dispatch by the workflow
+/// that publishes the run's results.
+///
+/// Dispatch spends the retained run and what it was prepared from. Automation
+/// publishes the evidence of the run it dispatched only while the session
+/// still holds what that run was prepared from: it asks on each frame it
+/// waits for the dispatch, and again when it publishes. These are the inputs
+/// the run was retained with, shared, not a second capture, and the question
+/// asked of them is the one its dispatch asks, refused in the same words. The
+/// two cannot disagree, and neither prepares anything.
+#[derive(Clone)]
+pub(crate) struct PreparedRunSetInputs {
+    inputs: Arc<RetainedRunInputs>,
+    /// The host sources the run's includes were read from, as they were read.
+    sealed_source_dependencies: Arc<[rspice_core::netlist::ResolvedIncludeDependency]>,
+}
+
+impl PreparedRunSetInputs {
+    /// What the run set `snapshot` was retained with; `None` when `inputs`
+    /// are not a run set's, or not `snapshot`'s.
+    pub(super) fn of(
+        inputs: &Arc<RetainedRunInputs>,
+        snapshot: &PreparedRunSnapshot,
+    ) -> Option<Self> {
+        (snapshot.intent() == SimulationRunIntent::SimulateRunSet
+            && inputs.identity.describes(snapshot))
+        .then(|| Self {
+            inputs: Arc::clone(inputs),
+            sealed_source_dependencies: snapshot.sealed_source_dependencies().into(),
+        })
+    }
+
+    /// Refuse unless nothing the run set was prepared from has moved, as its
+    /// dispatch refuses it, whether or not it has been dispatched since.
+    /// Nothing is prepared.
+    pub(crate) fn still_current(&self, state: &AppState) -> Result<(), PreparationError> {
+        self.inputs.refused_if_moved(
+            state,
+            self.inputs.identity.run_set_moved_in(state),
+            &self.sealed_source_dependencies,
+        )
+    }
+}
+
+impl std::fmt::Debug for PreparedRunSetInputs {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PreparedRunSetInputs")
+            .field(
+                "sealed_source_dependencies",
+                &self.sealed_source_dependencies.len(),
+            )
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+impl PreparedRunSetInputs {
+    /// What a run set prepared from `state` would be retained with, for a
+    /// test that builds a workflow's dispatch record and prepares no run. It
+    /// holds no host file.
+    pub(crate) fn of_unprepared(state: &AppState) -> Self {
+        Self {
+            inputs: Arc::new(RetainedRunInputs {
+                identity: RunInputIdentity::of_run_set(state),
+                source_files: SourceFileAnswers::default(),
+            }),
+            sealed_source_dependencies: Arc::from([]),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;
