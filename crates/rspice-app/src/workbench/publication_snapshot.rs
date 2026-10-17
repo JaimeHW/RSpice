@@ -589,10 +589,13 @@ fn collect_scenes(
     let mut sheets = Vec::new();
     let mut plots = Vec::new();
     for descriptor in enumerate_retained_hardcopy_sources(state) {
-        let scope = if descriptor
-            .allowed_scopes
-            .contains(&HardcopyScope::CurrentSheet)
-        {
+        let scope = if descriptor.supports_scope(&HardcopyScope::CurrentSheet) {
+            // A cell view that offers "All sheets" lists each of its sheets
+            // as a source of its own; publishing the cell view as well would
+            // print its active sheet a second time.
+            if descriptor.supports_scope(&HardcopyScope::AllSheetsOrPanes) {
+                continue;
+            }
             HardcopyScope::CurrentSheet
         } else if descriptor
             .allowed_scopes
@@ -1849,6 +1852,63 @@ mod tests {
             ),
             Err(PublicationBuildError::NothingToPublish)
         ));
+    }
+
+    #[test]
+    fn a_multi_sheet_cell_view_publishes_each_sheet_once() {
+        use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate, Wire};
+        use crate::workbench::state::WorkspaceDocumentId;
+
+        let mut state = AppState::default();
+        // Both sheets draw their only wire at the same coordinates, so a page
+        // that ignored the sheet partition would show them overlaid.
+        for wire_id in [11, 22] {
+            state
+                .schematic
+                .document_mut_for_test()
+                .wires
+                .push(Wire::segment(
+                    wire_id,
+                    crate::state::Point::new(0, 0),
+                    crate::state::Point::new(20, 0),
+                ));
+        }
+        let reference = state.workspace.content.active_view.clone();
+        state
+            .workbench
+            .documents
+            .activate(WorkspaceDocumentId::CellView(reference));
+        let active_key = state.workspace.content.active_key();
+        let design_management = &mut state.workspace.content.design_management;
+        let first = design_management
+            .bootstrap_for_cell_view(&active_key, "First", [11])
+            .unwrap();
+        let catalog = design_management.sheet_catalog_mut(&active_key).unwrap();
+        let second = catalog
+            .create_sheet(
+                SheetDefinition {
+                    name: "Second".to_owned(),
+                    template: SheetTemplate::AnalogSchematic,
+                    port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                    explicit_page_number: None,
+                },
+                Some(first),
+            )
+            .unwrap();
+        catalog
+            .assign_objects(catalog.revision(), second, [22])
+            .unwrap();
+
+        let (sheets, plots) = collect_scenes(&state).unwrap();
+        let path = state.workspace.content.active_display_path();
+        assert_eq!(
+            sheets
+                .iter()
+                .map(|sheet| sheet.name.as_str())
+                .collect::<Vec<_>>(),
+            [format!("{path} · First"), format!("{path} · Second")]
+        );
+        assert!(plots.is_empty());
     }
 
     #[test]
