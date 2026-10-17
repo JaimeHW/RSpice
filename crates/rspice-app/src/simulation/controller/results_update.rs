@@ -7,44 +7,43 @@
 
 use super::*;
 
-/// Echo evaluated `.MEAS` results to the console, the way the CLI prints
-/// them — value lines for successes, warnings for failures.
-fn echo_measurements(state: &mut AppState, measurements: &[rspice_core::MeasureResult]) {
-    if measurements.is_empty() {
-        return;
-    }
-    state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-        "Measurements ({}):",
-        measurements.len()
-    )));
-    for m in measurements {
-        match (m.value, m.passed) {
-            (Some(value), true) => {
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "  {} = {:.6e}",
-                    m.name, value
-                )));
-            }
-            (Some(value), false) => {
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                    "  {} = {:.6e} FAILED ({})",
-                    m.name,
-                    value,
-                    m.error.as_deref().unwrap_or("verification contract failed")
-                )));
-            }
-            (None, _) => {
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                    "  {} = FAILED ({})",
-                    m.name,
-                    m.error.as_deref().unwrap_or("unknown")
-                )));
-            }
+impl SimulationController {
+    /// Echo evaluated `.MEAS` results into the run's log, the way the CLI
+    /// prints them — value lines for successes, warnings for failures.
+    fn echo_measurements(&self, state: &mut AppState, measurements: &[rspice_core::MeasureResult]) {
+        if measurements.is_empty() {
+            return;
+        }
+        self.run_line(
+            state,
+            LogSeverity::Info,
+            format!("Measurements ({}):", measurements.len()),
+        );
+        for m in measurements {
+            let (severity, line) = match (m.value, m.passed) {
+                (Some(value), true) => (LogSeverity::Info, format!("  {} = {:.6e}", m.name, value)),
+                (Some(value), false) => (
+                    LogSeverity::Warning,
+                    format!(
+                        "  {} = {:.6e} FAILED ({})",
+                        m.name,
+                        value,
+                        m.error.as_deref().unwrap_or("verification contract failed")
+                    ),
+                ),
+                (None, _) => (
+                    LogSeverity::Warning,
+                    format!(
+                        "  {} = FAILED ({})",
+                        m.name,
+                        m.error.as_deref().unwrap_or("unknown")
+                    ),
+                ),
+            };
+            self.run_line(state, severity, line);
         }
     }
-}
 
-impl SimulationController {
     pub(super) fn apply_result_side_effects(
         &mut self,
         state: &mut AppState,
@@ -56,7 +55,7 @@ impl SimulationController {
             SimulationResult::Transient { measurements, .. } => {
                 self.invalidate_transient_post_views(state);
                 self.prime_transient_fft_source_selection(state);
-                echo_measurements(state, measurements);
+                self.echo_measurements(state, measurements);
             }
             SimulationResult::Stb {
                 response,
@@ -66,16 +65,12 @@ impl SimulationController {
                     response.bode_points.iter().map(|p| p.frequency).collect();
                 match SimulationResult::stb_waveforms(response) {
                     Ok(waveforms) => self.populate_ac_post_views(state, &frequencies, &waveforms),
-                    Err(error) => {
-                        state.push_sim_message(crate::diagnostics::ConsoleMessage::error(error))
-                    }
+                    Err(error) => self.run_line(state, LogSeverity::Error, error),
                 }
                 for warning in &response.warnings {
-                    state.push_sim_message(crate::diagnostics::ConsoleMessage::warning(
-                        warning.clone(),
-                    ));
+                    self.run_line(state, LogSeverity::Warning, warning.clone());
                 }
-                echo_measurements(state, measurements);
+                self.echo_measurements(state, measurements);
             }
             SimulationResult::Ac {
                 frequencies,
@@ -90,7 +85,7 @@ impl SimulationController {
                 ..
             } => {
                 self.populate_ac_post_views(state, frequencies, waveforms);
-                echo_measurements(state, measurements);
+                self.echo_measurements(state, measurements);
             }
             SimulationResult::Qpnoise {
                 frequencies,
@@ -114,7 +109,7 @@ impl SimulationController {
             } => self.populate_ac_post_views(state, frequencies, waveforms),
             SimulationResult::DcSweep { measurements, .. }
             | SimulationResult::Noise { measurements, .. } => {
-                echo_measurements(state, measurements);
+                self.echo_measurements(state, measurements);
             }
             SimulationResult::DcOp(_)
             | SimulationResult::Pstb { .. }

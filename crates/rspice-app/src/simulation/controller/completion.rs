@@ -33,15 +33,23 @@ impl SimulationController {
                             .map(|config| self.analysis_name(config).to_owned())
                     })
                     .unwrap_or_else(|| "Analysis".to_owned());
+                let figures = super::run_lines::analysis_figures(
+                    &current_label,
+                    self.current_task_started
+                        .take()
+                        .map(|started| started.elapsed()),
+                    &sim_result,
+                );
+                self.run_line(state, LogSeverity::Info, figures);
 
                 // A short FFT record is a successful result with no
-                // spectrum. It is stated on the Console as well as on the
+                // spectrum. It is stated in the run's log as well as on the
                 // sheet, because the reader is looking at the run here.
                 if let crate::simulation::SimulationResult::Fft { spectrum, .. } = &sim_result
                     && let Some(notice) =
                         rspice_simulation::result_conversion::incomplete_history_notice(spectrum)
                 {
-                    state.push_sim_message(ConsoleMessage::warning(notice));
+                    self.run_line(state, LogSeverity::Warning, notice);
                 }
 
                 // Convert SimulationResult to AnalysisResult and add to run
@@ -62,13 +70,12 @@ impl SimulationController {
                         producer.capture(&sim_result, &self.pending_analyses)
                     })
                     .map_err(|error| format!(
-                        "Result could not produce its authenticated dependency artifact: {error}"
+                        "{current_label}: the result could not be passed to the analyses that depend on it: {error}"
                     ));
                 let (produced_artifact, artifact_failure) = match produced_artifact {
                     Ok(artifact) => (artifact, None),
                     Err(message) => {
-                        log::error!("{message}");
-                        state.push_sim_message(ConsoleMessage::error(message.clone()));
+                        self.run_line(state, LogSeverity::Error, message.clone());
                         (None, Some(message))
                     }
                 };
@@ -81,9 +88,11 @@ impl SimulationController {
                     match self.prepare_touchstone_export(&sim_result, run_id) {
                         Ok(prepared) => prepared,
                         Err(error) => {
-                            state.push_sim_message(ConsoleMessage::warning(format!(
-                                "Touchstone export skipped: {error}"
-                            )));
+                            self.run_line(
+                                state,
+                                LogSeverity::Warning,
+                                format!("Touchstone export skipped: {error}"),
+                            );
                             None
                         }
                     }
@@ -110,9 +119,13 @@ impl SimulationController {
                 if let Some(quality) = sim_result.transient_convergence()
                     && quality.has_lte_exceptions()
                 {
-                    state.push_sim_message(ConsoleMessage::warning(format!(
-                        "{current_label}: accepted points exceeded the local truncation-error criterion. Review convergence details in the result inspector."
-                    )));
+                    self.run_line(
+                        state,
+                        LogSeverity::Warning,
+                        format!(
+                            "{current_label}: accepted points exceeded the local truncation-error criterion. Review convergence details in the result inspector."
+                        ),
+                    );
                 }
 
                 let mut analysis_result = if let Some(config) = &self.current_config {
@@ -133,6 +146,7 @@ impl SimulationController {
                     *effective_source_content_digest =
                         self.current_op_effective_source_content_digest;
                 }
+                let artifact_failed = artifact_failure.is_some();
                 if let Some(message) = artifact_failure {
                     analysis_result.success = false;
                     analysis_result.error_message = Some(message);
@@ -156,7 +170,7 @@ impl SimulationController {
                                     .insert(completed_instance, artifact);
                             }
                             if let Some(prepared) = prepared_touchstone_export.take() {
-                                Self::commit_touchstone_export(state, export_io, prepared);
+                                self.commit_touchstone_export(state, export_io, prepared);
                             }
                             if let Some((yield_results, provenance)) =
                                 prepared_yield_evidence.take()
@@ -165,39 +179,42 @@ impl SimulationController {
                                     .simulation
                                     .replace_yield_evidence(yield_results, provenance);
                             }
-                            if self.total_analyses > 1 {
-                                state.push_sim_message(ConsoleMessage::info(format!(
-                                    "{} completed ({}/{})",
-                                    current_label, self.current_analysis_idx, self.total_analyses
-                                )));
-                            }
                         }
+                        // The artifact failure has its own line above.
+                        Ok(false) if artifact_failed => {}
                         Ok(false) => {
-                            state.push_sim_message(ConsoleMessage::error(format!(
-                                "{} result retention failed: {}",
-                                current_label,
-                                retention_error
-                                    .as_deref()
-                                    .unwrap_or("unknown retention error")
-                            )));
+                            self.run_line(
+                                state,
+                                LogSeverity::Error,
+                                format!(
+                                    "{current_label} failed: {}",
+                                    retention_error
+                                        .as_deref()
+                                        .unwrap_or("its result was not kept")
+                                ),
+                            );
                         }
                         Err(error) => {
-                            log::error!("{error}");
-                            state.push_sim_message(ConsoleMessage::error(error));
+                            self.run_line(
+                                state,
+                                LogSeverity::Error,
+                                format!("{current_label}: the result was not kept: {error}"),
+                            );
                             let errors = self.seal_failed_run(state, target_run_id, None, None);
-                            Self::report_seal_errors(state, errors);
+                            self.report_seal_errors(state, errors);
                             self.pending_analyses.clear();
                         }
                     }
                 } else {
-                    let message = format!(
-                        "Internal error: completed {} has no prepared-task provenance",
-                        current_label
+                    self.run_line(
+                        state,
+                        LogSeverity::Error,
+                        format!(
+                            "{current_label} finished without the task it belongs to; its result was not kept"
+                        ),
                     );
-                    log::error!("{message}");
-                    state.push_sim_message(ConsoleMessage::error(message));
                     let errors = self.seal_failed_run(state, target_run_id, None, None);
-                    Self::report_seal_errors(state, errors);
+                    self.report_seal_errors(state, errors);
                 }
 
                 // Display the just-completed analysis without rebuilding waveform buffers.
@@ -266,6 +283,9 @@ impl SimulationController {
                     analysis
                 });
                 self.seal_aborted_run(state, partial.take());
+                if let Some(run_sequence) = self.current_run_id {
+                    super::run_lines::announce_run_end(state, run_sequence);
+                }
                 self.pending_analyses.clear();
                 self.successful_analysis_instances.clear();
                 self.execution_artifacts.clear();
@@ -296,9 +316,6 @@ impl SimulationController {
                 state.ui.netlist.pending_manual_run_id = None;
                 state.ui.netlist.pending_run_buffer = None;
                 state.simulation.execution.status = "Aborted".to_string();
-                state.push_sim_message(ConsoleMessage::warning(
-                    "Simulation aborted by user".to_owned(),
-                ));
                 self.complete_campaign_member(state, false);
             }
             Err(e) => {
@@ -320,7 +337,7 @@ impl SimulationController {
                     })
                     .unwrap_or_else(|| "Analysis".to_owned());
                 let console_line = Self::refusal_console_line(&failed_label, &e)
-                    .unwrap_or_else(|| format!("Analysis failed: {e}"));
+                    .unwrap_or_else(|| format!("{failed_label} failed: {e}"));
                 Self::report_failed_analysis(
                     state,
                     &failed_label,
@@ -356,13 +373,17 @@ impl SimulationController {
                     self.materialize_current_saved_outputs(&mut analysis);
                     Some(analysis)
                 } else {
-                    let message = "Internal error: failed analysis has no prepared-task provenance";
-                    log::error!("{message}");
-                    state.push_sim_message(ConsoleMessage::error(message.to_owned()));
+                    self.run_line(
+                        state,
+                        LogSeverity::Error,
+                        format!(
+                            "{failed_label} finished without the task it belongs to; its result was not kept"
+                        ),
+                    );
                     None
                 };
                 let errors = self.seal_failed_run(state, target_run_id, failed_analysis, None);
-                Self::report_seal_errors(state, errors);
+                self.report_seal_errors(state, errors);
 
                 // Continue with remaining analyses (commercial behavior: don't abort batch)
                 if !self.pending_analyses.is_empty() {

@@ -796,9 +796,11 @@ fn stale_cancellation_request_never_mutates_run_lifecycle() {
     assert!(state.simulation.execution.abort_request.is_none());
     assert!(
         state
-            .log_buffer
-            .entries()
-            .any(|entry| entry.message.contains("stale or unbound"))
+            .workbench
+            .prompt
+            .as_ref()
+            .is_some_and(|prompt| prompt.text.starts_with("Nothing to cancel")),
+        "a stale request is answered on the status bar, not logged"
     );
 }
 
@@ -1199,7 +1201,7 @@ fn failed_prerequisite_skips_dependent_prepared_task_with_exact_provenance() {
         skipped
             .error_message
             .as_deref()
-            .is_some_and(|message| message.contains("prerequisite analysis result"))
+            .is_some_and(|message| message.contains("which did not complete"))
     );
     assert_eq!(
         skipped

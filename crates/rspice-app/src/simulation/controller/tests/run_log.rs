@@ -69,3 +69,71 @@ fn a_tasks_last_engine_lines_land_in_its_run_before_the_next_task_dispatches() {
     assert!(!controller.has_active_batch());
     assert_eq!(inventory_lines(&state, run_sequence), 2);
 }
+
+/// The session's log holds the run's start and its end, both anchored to it;
+/// the run's own log opens with its header, has a line per analysis, and
+/// closes with the same summary the session's end line states.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_run_writes_its_start_and_end_in_the_session_and_its_account_in_its_own_log() {
+    let export_io = MockExportWorkflowIo::default();
+    let (mut state, mut controller) = start_manual_batch(TWO_ANALYSES);
+    let run_sequence = controller.current_run_id.expect("the batch has a run");
+    while controller.has_active_batch() {
+        test_execution::wait_until_finished_unpolled(&controller.runner);
+        controller.update(&mut state, &export_io);
+    }
+
+    let session: Vec<_> = state.log_buffer.entries().collect();
+    assert_eq!(session.len(), 2, "{session:?}");
+    for entry in &session {
+        assert_eq!(entry.source, LogSource::Run);
+        assert_eq!(
+            entry.anchor,
+            Some(crate::diagnostics::LogAnchor::ResultRun { run_sequence })
+        );
+    }
+    let analyses = [
+        SimulationController::analysis_name_for_spec(&AnalysisSpec::dc_op()),
+        "DC Sweep",
+    ];
+    assert_eq!(
+        session[0].message,
+        format!("Run {run_sequence} started: {}", analyses.join(", "))
+    );
+
+    let run = state
+        .simulation
+        .retained
+        .run_by_sequence(run_sequence)
+        .expect("the run is retained");
+    assert_eq!(run.lifecycle, SimulationRunLifecycle::Completed);
+    let lines = run.log.lines();
+    let header = &lines[0].message;
+    assert!(
+        header.starts_with(&format!("Run {run_sequence} \u{b7} RSpice "))
+            && header.ends_with(" \u{b7} desktop"),
+        "{header}"
+    );
+    assert_eq!(run.analyses.len(), 2);
+    for analysis in &run.analyses {
+        assert!(
+            lines.iter().any(|line| line.source == LogSource::Run
+                && line.message.starts_with(&format!("{}: ", analysis.label))
+                && line.message.ends_with(" s")),
+            "a line with {}'s time: {lines:?}",
+            analysis.label
+        );
+    }
+    let summary = lines.last().expect("the log closes with its summary");
+    assert_eq!(summary.severity, crate::diagnostics::LogSeverity::Info);
+    assert!(
+        summary
+            .message
+            .starts_with(&format!("Run {run_sequence} completed in ")),
+        "{}",
+        summary.message
+    );
+    assert_eq!(session[1].message, summary.message);
+    assert_eq!(session[1].severity, summary.severity);
+}

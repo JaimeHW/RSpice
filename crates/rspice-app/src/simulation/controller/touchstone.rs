@@ -4,7 +4,6 @@
 //! format when the run configuration asked for an export.
 
 use super::*;
-use crate::diagnostics::ConsoleMessage;
 use rspice_formats::{WaveformDataset, WaveformFormat, WaveformWriter};
 
 pub(super) struct PreparedTouchstoneExport {
@@ -59,18 +58,22 @@ impl SimulationController {
     }
 
     pub(super) fn commit_touchstone_export(
+        &self,
         state: &mut AppState,
         export_io: &(impl crate::workbench::workflows::export_workflow::ExportWorkflowIo + ?Sized),
         prepared: PreparedTouchstoneExport,
     ) {
         match export_io.write_new_text_file(&prepared.path, &prepared.contents) {
-            Ok(()) => state.push_sim_message(ConsoleMessage::info(
+            Ok(()) => self.run_line(
+                state,
+                LogSeverity::Info,
                 Self::touchstone_export_completed_message(&prepared.path),
-            )),
-            Err(e) => state.push_sim_message(ConsoleMessage::warning(format!(
-                "Touchstone export failed: {}",
-                e
-            ))),
+            ),
+            Err(error) => self.run_line(
+                state,
+                LogSeverity::Warning,
+                format!("Touchstone export failed: {error}"),
+            ),
         }
     }
 

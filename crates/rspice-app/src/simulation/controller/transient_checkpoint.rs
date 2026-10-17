@@ -32,7 +32,7 @@ impl SimulationController {
             self.runner.abort();
             let message = format!("Could not retain transient checkpoint: {error}");
             self.current_transient_checkpoint_error = Some(message.clone());
-            state.push_sim_message(ConsoleMessage::error(message));
+            self.run_line(state, LogSeverity::Error, message);
         }
     }
 
