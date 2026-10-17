@@ -15,6 +15,7 @@
 //! lines carry: `sample 12`.
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use crate::ContinuationAid;
@@ -117,19 +118,30 @@ pub struct RecordedNotice {
     pub unnamed_points: usize,
 }
 
-impl RecordedNotice {
+/// One notice as the collector keeps it while the run raises it.
+#[derive(Debug)]
+struct Entry {
+    recorded: RecordedNotice,
+    /// The points past the named ones it was raised at, so a point that
+    /// raises it twice, as a sample solved in two analyses does, is counted
+    /// once.
+    unnamed: HashSet<String>,
+}
+
+impl Entry {
     fn count_at(&mut self, point: Option<&str>) {
-        self.occurrences = self.occurrences.saturating_add(1);
+        let recorded = &mut self.recorded;
+        recorded.occurrences = recorded.occurrences.saturating_add(1);
         let Some(point) = point else {
             return;
         };
-        if self.points.iter().any(|named| named == point) {
+        if recorded.points.iter().any(|named| named == point) {
             return;
         }
-        if self.points.len() < MAX_NAMED_POINTS {
-            self.points.push(point.to_owned());
-        } else {
-            self.unnamed_points = self.unnamed_points.saturating_add(1);
+        if recorded.points.len() < MAX_NAMED_POINTS {
+            recorded.points.push(point.to_owned());
+        } else if self.unnamed.insert(point.to_owned()) {
+            recorded.unnamed_points = self.unnamed.len();
         }
     }
 }
@@ -140,7 +152,7 @@ impl RecordedNotice {
 /// evaluates its samples on workers, and a parallel sweep its chunks, each
 /// inside the run's log scope.
 #[derive(Debug, Clone, Default)]
-pub struct NoticeCollector(Arc<Mutex<Vec<RecordedNotice>>>);
+pub struct NoticeCollector(Arc<Mutex<Vec<Entry>>>);
 
 impl NoticeCollector {
     pub fn new() -> Self {
@@ -163,9 +175,12 @@ impl NoticeCollector {
     /// collector empty.
     pub fn take(&self) -> Vec<RecordedNotice> {
         std::mem::take(&mut *self.lock())
+            .into_iter()
+            .map(|entry| entry.recorded)
+            .collect()
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<RecordedNotice>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Entry>> {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -173,21 +188,24 @@ impl NoticeCollector {
 
     fn record(&self, notice: EngineNotice, point: Option<&str>) {
         let mut ledger = self.lock();
-        if let Some(recorded) = ledger
+        if let Some(entry) = ledger
             .iter_mut()
-            .find(|recorded| recorded.notice.same_as(&notice))
+            .find(|entry| entry.recorded.notice.same_as(&notice))
         {
-            recorded.count_at(point);
+            entry.count_at(point);
             return;
         }
-        let mut recorded = RecordedNotice {
-            notice,
-            occurrences: 0,
-            points: Vec::new(),
-            unnamed_points: 0,
+        let mut entry = Entry {
+            recorded: RecordedNotice {
+                notice,
+                occurrences: 0,
+                points: Vec::new(),
+                unnamed_points: 0,
+            },
+            unnamed: HashSet::new(),
         };
-        recorded.count_at(point);
-        ledger.push(recorded);
+        entry.count_at(point);
+        ledger.push(entry);
     }
 }
 
@@ -331,6 +349,26 @@ mod tests {
         assert_eq!(recorded[1].occurrences, 1);
         assert!(recorded[1].points.is_empty(), "raised outside any point");
         assert!(collector.take().is_empty(), "taking empties the collector");
+    }
+
+    /// A point that raises a notice again — a sample solved in two analyses
+    /// binds its card twice — is one point, named or not.
+    #[test]
+    fn a_point_that_raises_a_notice_twice_is_counted_once() {
+        let collector = NoticeCollector::new();
+        let _installed = collector.install();
+        for _ in 0..2 {
+            for index in 0..12 {
+                let _point = log_scope::enter_point(|| format!("sample {}", index + 1));
+                let _binding = binding("M1", Some("nch"));
+                clamp("pbs");
+            }
+        }
+        let recorded = collector.take();
+        assert_eq!(recorded.len(), 1, "{recorded:#?}");
+        assert_eq!(recorded[0].occurrences, 24);
+        assert_eq!(recorded[0].points.len(), MAX_NAMED_POINTS);
+        assert_eq!(recorded[0].unnamed_points, 12 - MAX_NAMED_POINTS);
     }
 
     /// A worker the run hands work to records into the run's collector once
