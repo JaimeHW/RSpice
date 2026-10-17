@@ -676,12 +676,27 @@ fn console_chrome_and_grid_geometry_match_the_mockup() {
     assert_eq!(CONSOLE_BODY_PADDING_TOP, 7.0);
     assert_eq!(CONSOLE_BODY_PADDING_BOTTOM, 7.0);
     assert_eq!(CONSOLE_BODY_PADDING_X, 10.0);
-    assert_eq!(CONSOLE_TIME_WIDTH, 58.0);
-    assert_eq!(CONSOLE_SOURCE_WIDTH, 62.0);
     assert_eq!(CONSOLE_COLUMN_GAP, 9.0);
     assert_eq!(CONSOLE_ROW_MIN_HEIGHT, 16.0);
     assert_eq!(CONSOLE_FONT_SIZE, 12.0);
     assert_eq!(CONSOLE_FONT_SIZE, tokens::FS_1);
+}
+
+/// The task log's status column is as wide as its widest status, measured in
+/// its own font. A 58 px constant clipped "INTERRUPTED".
+#[test]
+fn the_task_status_column_fits_every_status() {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let column = widest_status_width(ui);
+            for status in ["INTERRUPTED", "CANCELLING", "CANCELLED", "RUNNING"] {
+                let width = task_text_width(ui, status, FontWeight::Regular);
+                assert!(width <= column, "{status} is {width} px in a {column} px column");
+            }
+        });
+    });
 }
 
 #[test]

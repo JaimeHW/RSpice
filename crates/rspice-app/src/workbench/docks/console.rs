@@ -32,8 +32,6 @@ const CONSOLE_BODY_PADDING_TOP: f32 = 7.0;
 const CONSOLE_BODY_PADDING_BOTTOM: f32 = 7.0;
 const CONSOLE_BODY_PADDING_X: f32 = 10.0;
 const CONSOLE_ROW_MIN_HEIGHT: f32 = 16.0;
-const CONSOLE_TIME_WIDTH: f32 = 58.0;
-const CONSOLE_SOURCE_WIDTH: f32 = 62.0;
 const CONSOLE_COLUMN_GAP: f32 = 9.0;
 /// Space between the tabs and the Console page's controls beside them.
 const CONSOLE_TOOLBAR_GAP: f32 = 12.0;
@@ -519,7 +517,7 @@ fn measurements(ui: &mut Ui, app: &mut RSpiceApp) {
         .state
         .simulation
         .active_run()
-        .map(|run| format!("Run {} · immutable dataset", run.id));
+        .map(|run| run.label.clone());
     let mut add_measurement = false;
     ScrollArea::vertical()
         .id_salt("workbench.measurements")
@@ -603,6 +601,21 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
                     "Queued, active, cancelled, and completed simulation tasks will appear here.",
                 );
             }
+            // Both columns fit their widest text, measured in the row's own
+            // font: the status over every state a run can be in, so a row
+            // does not shift when its run finishes, and the label over the
+            // runs listed.
+            let columns = TaskColumns {
+                status: widest_status_width(ui),
+                label: app
+                    .state
+                    .simulation
+                    .retained
+                    .runs
+                    .iter()
+                    .map(|run| task_text_width(ui, &run.label, FontWeight::Medium))
+                    .fold(0.0, f32::max),
+            };
             for run in &app.state.simulation.retained.runs {
                 let active = app.state.simulation.execution.active_execution
                     == run.execution_identity()
@@ -620,14 +633,16 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
                     || "revision unavailable".to_owned(),
                     |receipt| format!("revision {}", receipt.project_revision().get()),
                 );
+                let analyses = run.analyses.len();
                 let row = issue_row(
                     ui,
+                    columns,
                     problem,
                     status,
                     &run.label,
                     &format!(
-                        "{} analyses · {:.3} s{progress} · {revision}",
-                        run.analyses.len(),
+                        "{analyses} {} · {:.3} s{progress} · {revision}",
+                        if analyses == 1 { "analysis" } else { "analyses" },
                         run.elapsed_time
                     ),
                 );
@@ -1084,22 +1099,66 @@ fn run_lifecycle_presentation(
 /// press so it can carry a context menu, and takes no focus.
 fn issue_row(
     ui: &mut Ui,
+    columns: TaskColumns,
     problem: Option<Problem>,
     status: &str,
-    source: &str,
+    label: &str,
     message: &str,
 ) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     row_with_sense(
         ui,
+        columns,
         problem,
         status,
-        source,
+        label,
         message,
         t.color.text_dim,
         t.color.text,
         Sense::CLICK,
     )
+}
+
+/// The widths of a task row's status and label columns.
+#[derive(Debug, Clone, Copy)]
+struct TaskColumns {
+    status: f32,
+    label: f32,
+}
+
+/// The width of the widest status a run can show.
+fn widest_status_width(ui: &Ui) -> f32 {
+    use crate::state::SimulationRunLifecycle as Lifecycle;
+    [
+        Lifecycle::LegacyUnknown,
+        Lifecycle::Preparing,
+        Lifecycle::Running,
+        Lifecycle::Cancelling,
+        Lifecycle::Completed,
+        Lifecycle::Failed,
+        Lifecycle::Aborted,
+        Lifecycle::Interrupted,
+    ]
+    .into_iter()
+    .map(|lifecycle| {
+        task_text_width(
+            ui,
+            run_lifecycle_presentation(lifecycle).0,
+            FontWeight::Regular,
+        )
+    })
+    .fold(0.0, f32::max)
+}
+
+fn task_text_width(ui: &Ui, text: &str, weight: FontWeight) -> f32 {
+    ui.painter()
+        .layout_no_wrap(
+            text.to_owned(),
+            theme::mono(CONSOLE_FONT_SIZE, weight),
+            egui::Color32::PLACEHOLDER,
+        )
+        .size()
+        .x
 }
 
 fn log_problem(severity: LogSeverity) -> Option<Problem> {
@@ -1172,19 +1231,20 @@ fn console_clear_action(page: ConsolePage, console_has_output: bool) -> ConsoleC
 /// figures columns. Severity is the mark's alone; the columns are neutral.
 fn row_with_sense(
     ui: &mut Ui,
+    columns: TaskColumns,
     problem: Option<Problem>,
-    time: &str,
-    source: &str,
+    status: &str,
+    label: &str,
     message: &str,
-    source_color: egui::Color32,
+    label_color: egui::Color32,
     message_color: egui::Color32,
     sense: egui::Sense,
 ) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let message_x_offset = CONSOLE_MARK_GUTTER
-        + CONSOLE_TIME_WIDTH
+        + columns.status
         + CONSOLE_COLUMN_GAP
-        + CONSOLE_SOURCE_WIDTH
+        + columns.label
         + CONSOLE_COLUMN_GAP;
     let message_width = (ui.available_width() - message_x_offset).max(1.0);
     let message_galley = ui.painter().layout(
@@ -1199,7 +1259,7 @@ fn row_with_sense(
     // All three columns are painted galleys. Without this the row is
     // invisible to a screen reader, and a row a focusable sense turns into a
     // tab stop would take focus with nothing announced and nothing drawn.
-    let label = announced_row(problem, &[time, source, message]);
+    let announcement = announced_row(problem, &[status, label, message]);
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
             if sense.is_focusable() {
@@ -1208,7 +1268,7 @@ fn row_with_sense(
                 egui::WidgetType::Label
             },
             ui.is_enabled(),
-            label.clone(),
+            announcement.clone(),
         )
     });
     // A row that can be clicked says so under the pointer. Painted before the
@@ -1217,30 +1277,22 @@ fn row_with_sense(
         ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
     }
     paint_row_mark(ui, rect.left(), rect.top(), problem);
-    let time_x = rect.left() + CONSOLE_MARK_GUTTER;
-    let source_x = time_x + CONSOLE_TIME_WIDTH + CONSOLE_COLUMN_GAP;
-    let message_x = source_x + CONSOLE_SOURCE_WIDTH + CONSOLE_COLUMN_GAP;
-    let time_clip = egui::Rect::from_min_max(
-        egui::pos2(time_x, rect.top()),
-        egui::pos2(time_x + CONSOLE_TIME_WIDTH, rect.bottom()),
-    );
-    ui.painter().with_clip_rect(time_clip).text(
-        egui::pos2(time_x, rect.top() + CONSOLE_ROW_MIN_HEIGHT * 0.5),
+    let status_x = rect.left() + CONSOLE_MARK_GUTTER;
+    let label_x = status_x + columns.status + CONSOLE_COLUMN_GAP;
+    let message_x = label_x + columns.label + CONSOLE_COLUMN_GAP;
+    ui.painter().text(
+        egui::pos2(status_x, rect.top() + CONSOLE_ROW_MIN_HEIGHT * 0.5),
         egui::Align2::LEFT_CENTER,
-        time,
+        status,
         theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular),
         t.color.text_faint,
     );
-    let source_clip = egui::Rect::from_min_max(
-        egui::pos2(source_x, rect.top()),
-        egui::pos2(source_x + CONSOLE_SOURCE_WIDTH, rect.bottom()),
-    );
-    ui.painter().with_clip_rect(source_clip).text(
-        egui::pos2(source_x, rect.top() + CONSOLE_ROW_MIN_HEIGHT * 0.5),
+    ui.painter().text(
+        egui::pos2(label_x, rect.top() + CONSOLE_ROW_MIN_HEIGHT * 0.5),
         egui::Align2::LEFT_CENTER,
-        source,
+        label,
         theme::mono(CONSOLE_FONT_SIZE, FontWeight::Medium),
-        source_color,
+        label_color,
     );
     let message_clip = egui::Rect::from_min_max(
         egui::pos2(message_x, rect.top()),
