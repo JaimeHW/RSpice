@@ -122,8 +122,8 @@ struct CapturedInputs {
 }
 
 enum KindReads {
-    RunSet(RunSetReads),
-    ManualDeck(ManualDeckReads),
+    RunSet(Box<RunSetReads>),
+    ManualDeck(Box<ManualDeckReads>),
 }
 
 /// What only preparing a run set reads.
@@ -261,7 +261,7 @@ impl RunInputIdentity {
     /// it now.
     pub(super) fn of_run_set(state: &AppState) -> Self {
         let live = LiveInputs::of(state);
-        let reads = KindReads::RunSet(RunSetReads {
+        let reads = KindReads::RunSet(Box::new(RunSetReads {
             projection: projection_key(state),
             topology: topology_revisions(state, live.schematic_topology_revision),
             design_management: live.design_management.clone(),
@@ -273,7 +273,7 @@ impl RunInputIdentity {
             checkpoint_runs: checkpoint_run_reads(state),
             display_waveform_cache_samples: live.display_waveform_cache_samples,
             design_checks: design_check_digest(&live.design_checks),
-        });
+        }));
         Self::holding(live, reads)
     }
 
@@ -285,7 +285,7 @@ impl RunInputIdentity {
     ) -> Result<Self, PreparationError> {
         let live = LiveInputs::of(state);
         let deck = super::prepared_run::manual_source_inputs(state)?;
-        let reads = KindReads::ManualDeck(ManualDeckReads {
+        let reads = KindReads::ManualDeck(Box::new(ManualDeckReads {
             descriptor: deck.descriptor.cloned(),
             generated_artifact: deck.generated_artifact.cloned(),
             owned: deck.owned,
@@ -295,7 +295,7 @@ impl RunInputIdentity {
             rf_ports: snapshot
                 .solves_s_parameters()
                 .then(|| rspice_design::rf_ports::rf_ports(live.schematic)),
-        });
+        }));
         Ok(Self::holding(live, reads))
     }
 
