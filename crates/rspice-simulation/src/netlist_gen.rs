@@ -2234,4 +2234,75 @@ mod tests {
         assert_eq!(result.nets.len(), 1, "{:?}", result.nets);
         assert!(result.nets.contains_key("VDD!"), "{:?}", result.nets);
     }
+
+    /// A net labelled by any ground name is written as node 0, flat and in a
+    /// hierarchical deck, beside the net a ground symbol names; a supply rail
+    /// is written under its own name.
+    #[test]
+    fn every_ground_name_is_written_as_node_zero() {
+        let libraries = LibraryCatalog::default();
+        for (ground, node) in [
+            ("0", "0"),
+            ("GND", "0"),
+            ("gnd", "0"),
+            ("GND!", "0"),
+            ("gnd!", "0"),
+            ("GROUND", "0"),
+            ("ground", "0"),
+            ("VSS", "VSS"),
+        ] {
+            let mut schematic = Schematic::default();
+            let source = Component::new(1, ComponentType::VoltageSource, Point::new(0, 0))
+                .with_name_value("V1", "1");
+            let load = Component::new(2, ComponentType::Resistor, Point::new(200, 0))
+                .with_name_value("R1", "1k");
+            let tie = Component::new(3, ComponentType::Resistor, Point::new(400, 0))
+                .with_name_value("R2", "2k");
+            let symbol = Component::new(4, ComponentType::Ground, Point::new(600, 0));
+            let mut labels = Vec::new();
+            for (component, nodes) in [
+                (&source, ["in", ground]),
+                (&load, ["in", ground]),
+                (&tie, ["in", "gsym"]),
+            ] {
+                for ((_, point), node) in component.terminal_positions().into_iter().zip(nodes) {
+                    labels.push(NetLabel::new(labels.len() as u64 + 10, point, node));
+                }
+            }
+            labels.push(NetLabel::new(99, symbol.terminal_positions()[0].1, "gsym"));
+            let document = schematic.document_mut_for_test();
+            document.components = vec![source, load, tie, symbol];
+            document.net_labels = labels;
+            let mut buffers = HashMap::new();
+            buffers.insert("user/top/schematic".to_owned(), schematic.clone());
+            let contract = ConnectivityContract::default();
+            let hierarchy =
+                HierarchySource::from_workspace(&libraries, &buffers).with_connectivity(&contract);
+            let hierarchical = generate_netlist_hierarchical(
+                &schematic,
+                &[],
+                &hierarchy,
+                &crate::netlist_gen::NetlistSourceData::new(
+                    &crate::netlist_gen::FixtureSourceFiles,
+                ),
+            );
+
+            for result in [generate_netlist(&schematic), hierarchical] {
+                assert!(result.errors.is_empty(), "{ground}: {:?}", result.errors);
+                let returned_to = |card: &str| {
+                    result
+                        .netlist
+                        .lines()
+                        .find(|line| line.split_whitespace().next() == Some(card))
+                        .and_then(|line| line.split_whitespace().nth(2))
+                };
+                assert_eq!(
+                    [returned_to("V1"), returned_to("R1"), returned_to("R2")],
+                    [Some(node), Some(node), Some("0")],
+                    "{ground}:\n{}",
+                    result.netlist
+                );
+            }
+        }
+    }
 }
