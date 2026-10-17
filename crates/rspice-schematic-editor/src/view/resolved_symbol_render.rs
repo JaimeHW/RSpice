@@ -297,6 +297,20 @@ fn draw_symbol_labels(
     }
 }
 
+/// Where a cell instance's name stands, in world units, and how it hangs off
+/// that point: for whatever must keep clear of it.
+pub(crate) fn instance_name_anchor(
+    component: &Component,
+    symbol: &ResolvedCellSymbol,
+) -> (Pos2, Align2) {
+    let anchor = symbol.document().name_anchor;
+    let world = component.pos + component.transform_point(symbol.effective_point(anchor));
+    (
+        Pos2::new(world.x as f32, world.y as f32),
+        instance_label_align(component, symbol, anchor),
+    )
+}
+
 /// The value a cell instance shows: its own, else the cell it places.
 fn instance_value(component: &Component) -> &str {
     if component.value.is_empty() {

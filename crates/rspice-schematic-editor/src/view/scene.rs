@@ -33,7 +33,7 @@ mod annotations;
 mod empty;
 mod focus;
 mod parent;
-pub use annotations::OperatingPointCanvasAnnotation;
+pub use annotations::{BadgeSubject, OperatingPointCanvasAnnotation};
 use annotations::draw_operating_point_annotations;
 pub use empty::draw_empty_hint;
 pub use focus::{draw_keyboard_focus, keyboard_focus_matches_selection};
@@ -294,7 +294,14 @@ pub fn draw_content(
         );
     }
 
-    draw_operating_point_annotations(painter, available, viewport, overlays.operating_point);
+    draw_operating_point_annotations(
+        painter,
+        available,
+        viewport,
+        &view.design,
+        symbol_context,
+        &overlays.operating_point,
+    );
 
     // Presentation geometry is a background documentation layer. It remains
     // selectable, but is intentionally painted below authored text and names.

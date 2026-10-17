@@ -484,6 +484,130 @@ fn render_open_pin_review() {
     }
 }
 
+/// Operating-point badges at zoom 1, 2 and 4: a named net's value after its
+/// label, an unnamed net's name and value, and the selected resistor's
+/// current and power as one block.
+#[test]
+#[ignore = "writes review PNGs to RSPICE_RASTER_DIR"]
+fn render_operating_point_review() {
+    use crate::session::{
+        EditorSession,
+        selection::SchematicSelectionFilter,
+        visibility::{SchematicNetHighlighting, SchematicReviewMarkerVisibility},
+    };
+    use crate::view::{
+        design_view::DesignView,
+        scene::{
+            BadgeSubject, OperatingPointCanvasAnnotation, SceneOverlays, SceneSymbols, SceneView,
+            draw_content,
+        },
+    };
+    use rspice_design::schematic::{document::SchematicDocument, wire::Wire};
+    let library = SymbolLibrary::load_embedded().expect("symbol library");
+    let context = SchematicSymbolContext::default();
+    let mut resistor = Component::new(1, ComponentType::Resistor, Point::new(60, 40));
+    resistor.name = "R1".to_owned();
+    resistor.value = "10k".to_owned();
+    resistor.rotation = rspice_design::schematic::rotation::Rotation::R90;
+    let document = SchematicDocument {
+        components: vec![resistor],
+        wires: vec![
+            Wire::segment(2, Point::new(-40, 0), Point::new(60, 0)),
+            Wire::segment(3, Point::new(-40, 80), Point::new(60, 80)),
+        ],
+        net_labels: vec![NetLabel::new(5, Point::new(-30, 0), "VOUT")],
+        ..SchematicDocument::default()
+    };
+    let annotations = vec![
+        OperatingPointCanvasAnnotation {
+            subject: BadgeSubject::Net {
+                anchor: Point::new(-40, 0),
+                label: Some(5),
+            },
+            lines: vec!["912.4 mV".to_owned()],
+            class: 1,
+            key: "vout".to_owned(),
+            selected_current: false,
+        },
+        OperatingPointCanvasAnnotation {
+            subject: BadgeSubject::Net {
+                anchor: Point::new(-40, 80),
+                label: None,
+            },
+            lines: vec!["n3 1.8 V".to_owned()],
+            class: 3,
+            key: "n3".to_owned(),
+            selected_current: false,
+        },
+        OperatingPointCanvasAnnotation {
+            subject: BadgeSubject::Device { component: 1 },
+            lines: vec!["I(r1) = 91.2 \u{03bc}A".to_owned(), "P(r1) = 83.2 \u{00b5}W".to_owned()],
+            class: 0,
+            key: "r1".to_owned(),
+            selected_current: true,
+        },
+    ];
+    let zooms = [1.0, 2.0, 4.0];
+    let cell = Vec2::new(360.0, 300.0);
+    for (mode, theme) in themes() {
+        let canvas = rspice_ui_kit::raster::render_themed(
+            theme,
+            Vec2::new(cell.x * zooms.len() as f32, cell.y),
+            |ui, _| {
+                let palette = rspice_ui_kit::tokens::active_palette();
+                for (index, zoom) in zooms.into_iter().enumerate() {
+                    let bounds = Rect::from_min_size(Pos2::new(index as f32 * cell.x, 0.0), cell);
+                    let viewport = Viewport {
+                        offset: Pos2::new(cell.x * 0.45 - 10.0 * zoom, cell.y * 0.5 - 40.0 * zoom),
+                        zoom,
+                        bounds,
+                    };
+                    let painter = ui.painter().with_clip_rect(bounds.shrink(1.0));
+                    painter.rect_filled(bounds.shrink(1.0), 0.0, palette.canvas_bg);
+                    let mut editor = EditorSession::default();
+                    editor.selection.components.insert(1);
+                    draw_content(
+                        &painter,
+                        bounds,
+                        &viewport,
+                        &SceneView {
+                            design: DesignView {
+                                document: &document,
+                                canvas_cache: None,
+                                sheet_catalog: None,
+                                review_markers: SchematicReviewMarkerVisibility::All,
+                            },
+                            editor: &editor,
+                            net_highlighting: SchematicNetHighlighting::Off,
+                            parameter_labels: SchematicParameterLabelVisibility::NamesAndValues,
+                            hover_wire_vertex: None,
+                            selection_filter: SchematicSelectionFilter::default(),
+                            hover: None,
+                        },
+                        SceneSymbols {
+                            library: Some(&library),
+                            context: &context,
+                        },
+                        SceneOverlays {
+                            net_class_colors: std::collections::HashMap::new(),
+                            operating_point: annotations.clone(),
+                            probe_status: &|_| ProbeVisualStatus::Materialized,
+                            selected_trace_expression: &|| None,
+                            open_pins: &std::collections::HashMap::new(),
+                        },
+                        String::new,
+                    );
+                }
+            },
+        );
+        write_png(
+            &format!("badges-{mode}-{}", review_stage()),
+            &canvas,
+            cell.y as usize,
+        );
+    }
+}
+
 /// A generated cell, X1 / ota, at R0, R90, R180, R270 and mirrored, at zoom
 /// 2: the name and value stay upright and grow away from the body.
 #[test]
