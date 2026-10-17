@@ -382,6 +382,7 @@ fn wire_probe_resolves_from_live_connectivity_without_retained_run_data() {
             .net_at_in(
                 &state.workspace.content.active_view,
                 state.schematic.topology_version(),
+                None,
                 Point::new(40, 20),
             )
             .is_none(),

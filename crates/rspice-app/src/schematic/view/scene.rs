@@ -450,8 +450,11 @@ fn occurrence_net_points<'a>(
         None if occurrence.is_root() => std::slice::from_ref(&state.simulation.source.cross_probe),
         None => &[],
     };
+    // Only the active sheet's share of the geometry, in its own coordinates:
+    // another sheet's points mean nothing on this one.
+    let sheet = super::sheet_visibility::active_sheet_id(state);
     selected.iter().find_map(|mapping| {
-        mapping.net_to_points.iter().find_map(|(leaf, points)| {
+        mapping.on_sheet(sheet).net_to_points.iter().find_map(|(leaf, points)| {
             mapping
                 .engine_name(leaf)
                 .is_some_and(|engine: &str| engine.eq_ignore_ascii_case(engine_name))
@@ -1155,6 +1158,42 @@ mod tests {
             occurrence_net_points(&state, None, "n1"),
             None,
             "a descended tab with no receipt borrows nothing from the root"
+        );
+    }
+
+    /// Each sheet shows its own nets' voltages and no other sheet's, even
+    /// where two sheets draw a conductor at the same coordinates.
+    #[test]
+    fn each_sheet_annotates_only_the_nets_it_draws() {
+        use crate::schematic::view::frame_cost::two_sheet_operating_point;
+
+        let labels = |state: &AppState| {
+            operating_point_annotations(state)
+                .into_iter()
+                .map(|annotation| (annotation.position, annotation.label))
+                .collect::<Vec<_>>()
+        };
+        let starts = |labels: &[(Point, String)], prefix: &str| {
+            labels
+                .iter()
+                .filter(|(_, label)| label.starts_with(prefix))
+                .map(|(position, _)| *position)
+                .collect::<Vec<_>>()
+        };
+
+        let first = labels(&two_sheet_operating_point(false));
+        assert_eq!(starts(&first, "V(vout) ="), vec![Point::new(100, 0)]);
+        assert!(starts(&first, "V(bias) =").is_empty(), "{first:?}");
+
+        let second = labels(&two_sheet_operating_point(true));
+        assert_eq!(
+            starts(&second, "V(bias) ="),
+            vec![Point::new(100, 0)],
+            "Sheet 2's own net is annotated where Sheet 2 draws it: {second:?}"
+        );
+        assert!(
+            starts(&second, "V(vout) =").is_empty(),
+            "Sheet 1's voltage is not painted on Sheet 2's wire: {second:?}"
         );
     }
 

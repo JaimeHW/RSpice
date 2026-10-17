@@ -67,6 +67,29 @@ pub(crate) fn multi_sheet_catalog(state: &AppState) -> Option<&SheetCatalog> {
         .filter(|catalog| catalog.sheets().len() > 1)
 }
 
+/// The active cell view's sheet catalog, however many sheets it holds.
+pub(crate) fn active_sheet_catalog(state: &AppState) -> Option<&SheetCatalog> {
+    let key = state.workspace.content.active_schematic_reference().key();
+    state.workspace.content.design_management.sheet_catalog(&key)
+}
+
+/// The sheet the canvas is showing, as a run's net geometry keys its sheets:
+/// `None` for a cell view with no sheet catalog.
+pub(crate) fn active_sheet_id(state: &AppState) -> Option<crate::state::SheetId> {
+    active_sheet_catalog(state).and_then(SheetCatalog::active_sheet_id)
+}
+
+/// The net geometry the active sheet draws, in its own coordinates.
+pub(crate) fn active_sheet_net_geometry(
+    state: &AppState,
+) -> &rspice_simulation::netlist_gen::SheetNetGeometry {
+    state
+        .simulation
+        .source
+        .cross_probe
+        .on_sheet(active_sheet_id(state))
+}
+
 /// The reading position the docks are holding.
 ///
 /// It is session state and nothing else: a scope is how one reader is looking

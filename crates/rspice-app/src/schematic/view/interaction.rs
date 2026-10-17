@@ -1517,6 +1517,7 @@ fn retained_probe_net_name(state: &AppState, position: Point) -> Option<String> 
         .net_at_in(
             &state.workspace.content.active_view,
             state.schematic.topology_version(),
+            super::sheet_visibility::active_sheet_id(state),
             position,
         )
         .cloned()

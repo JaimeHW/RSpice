@@ -1,10 +1,12 @@
 //! Selection and highlighting from host-authorized retained conductor geometry.
 
+use super::design_view::object_is_on_active_sheet;
 use crate::session::EditorSession;
 use rspice_app_types::hierarchy_path::{InstancePath, ProbeTarget};
-use rspice_design::schematic::component::component_for_engine_device;
+use rspice_design::schematic::component::{Component, component_for_engine_device};
 use rspice_design::schematic::document::SchematicDocument;
 use rspice_design_model::Point;
+use rspice_design_model::design_management::SheetCatalog;
 use std::collections::HashMap;
 
 /// A synchronous view of the active drawing and its retained result geometry.
@@ -12,8 +14,21 @@ use std::collections::HashMap;
 /// Workspace routing and result-map ownership remain with that host.
 pub struct CrossProbeView<'a> {
     pub document: &'a SchematicDocument,
+    /// The cell view's sheets, so only what the active sheet draws is ever
+    /// selected; `None` for a cell view with no sheet catalog.
+    pub sheet_catalog: Option<&'a SheetCatalog>,
     pub occurrence: &'a InstancePath,
+    /// The active sheet's net points, in the coordinates that sheet draws.
     pub net_to_points: Option<&'a HashMap<String, Vec<Point>>>,
+}
+
+impl CrossProbeView<'_> {
+    /// The drawn instance a run's device name refers to, if the active sheet
+    /// draws it.
+    fn drawn_device(&self, device: &str) -> Option<&Component> {
+        component_for_engine_device(&self.document.components, self.occurrence, device)
+            .filter(|component| object_is_on_active_sheet(self.sheet_catalog, component.id))
+    }
 }
 
 /// The name inside a `V(...)` or `I(...)` wrapper, or `None` when the text
@@ -168,18 +183,18 @@ pub fn drawn_failure_site_count(
         .count();
     let drawn_devices = devices
         .iter()
-        .filter(|device| {
-            component_for_engine_device(&view.document.components, view.occurrence, device)
-                .is_some()
-        })
+        .filter(|device| view.drawn_device(device).is_some())
         .count();
     Ok(drawn_nets + drawn_devices)
 }
 
+/// The active sheet's wires through any of `points`. A wire on a hidden sheet
+/// can share the coordinates and is never one of them.
 fn wires_touching(view: &CrossProbeView<'_>, points: &[Point]) -> Vec<u64> {
     view.document
         .wires
         .iter()
+        .filter(|wire| object_is_on_active_sheet(view.sheet_catalog, wire.id))
         .filter(|wire| points.iter().any(|point| wire.contains_point(*point)))
         .map(|wire| wire.id)
         .collect()
@@ -244,7 +259,7 @@ pub fn select_failure_sites(
     let components: Vec<(u64, String, Point)> = devices
         .iter()
         .filter_map(|device| {
-            component_for_engine_device(&view.document.components, view.occurrence, device)
+            view.drawn_device(device)
                 .map(|component| (component.id, component.spice_instance_name(), component.pos))
                 .or_else(|| {
                     selection.unlocated.push(device.clone());
@@ -300,6 +315,7 @@ mod tests {
         let occurrence = InstancePath::root();
         let view = CrossProbeView {
             document: &document,
+            sheet_catalog: None,
             occurrence: &occurrence,
             net_to_points: Some(&points),
         };
@@ -318,6 +334,7 @@ mod tests {
         let occurrence = InstancePath::root();
         let view = CrossProbeView {
             document: &document,
+            sheet_catalog: None,
             occurrence: &occurrence,
             net_to_points: Some(&points),
         };
@@ -336,6 +353,7 @@ mod tests {
         let occurrence = InstancePath::root();
         let view = CrossProbeView {
             document: &document,
+            sheet_catalog: None,
             occurrence: &occurrence,
             net_to_points: Some(&points),
         };
@@ -356,6 +374,7 @@ mod tests {
         let occurrence = InstancePath::parse("/amp").expect("drawn occurrence");
         let view = CrossProbeView {
             document: &document,
+            sheet_catalog: None,
             occurrence: &occurrence,
             net_to_points: Some(&points),
         };
@@ -391,6 +410,7 @@ mod tests {
         let occurrence = InstancePath::parse("/amp").expect("drawn occurrence");
         let view = CrossProbeView {
             document: &document,
+            sheet_catalog: None,
             occurrence: &occurrence,
             net_to_points: Some(&points),
         };

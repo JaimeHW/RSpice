@@ -219,11 +219,15 @@ pub(crate) fn select_signal_conductor(
 ) -> Result<String, LocateSignalError> {
     let current = result_mapping_is_current(state);
     let occurrence = state.workspace.content.occurrence_path();
+    let sheet = sheet_visibility::active_sheet_id(state);
+    let key = state.workspace.content.active_schematic_reference().key();
     let (document, editor) = state.schematic.document_and_editor();
     let view = cross_probe::CrossProbeView {
         document,
+        sheet_catalog: state.workspace.content.design_management.sheet_catalog(&key),
         occurrence: &occurrence,
-        net_to_points: current.then_some(&state.simulation.source.cross_probe.net_to_points),
+        net_to_points: current
+            .then_some(&state.simulation.source.cross_probe.on_sheet(sheet).net_to_points),
     };
     cross_probe::select_signal_conductor(&view, editor, signal)
 }
@@ -237,9 +241,10 @@ pub(crate) fn drawn_failure_site_count(
     let occurrence = state.workspace.content.occurrence_path();
     let view = cross_probe::CrossProbeView {
         document: state.schematic.document(),
+        sheet_catalog: sheet_visibility::active_sheet_catalog(state),
         occurrence: &occurrence,
         net_to_points: result_mapping_is_current(state)
-            .then_some(&state.simulation.source.cross_probe.net_to_points),
+            .then_some(&sheet_visibility::active_sheet_net_geometry(state).net_to_points),
     };
     cross_probe::drawn_failure_site_count(&view, nets, devices)
 }
@@ -261,11 +266,15 @@ pub(crate) fn select_failure_sites(
 ) -> Result<FailureSiteSelection, LocateSignalError> {
     let current = result_mapping_is_current(state);
     let occurrence = state.workspace.content.occurrence_path();
+    let sheet = sheet_visibility::active_sheet_id(state);
+    let key = state.workspace.content.active_schematic_reference().key();
     let (document, editor) = state.schematic.document_and_editor();
     let view = cross_probe::CrossProbeView {
         document,
+        sheet_catalog: state.workspace.content.design_management.sheet_catalog(&key),
         occurrence: &occurrence,
-        net_to_points: current.then_some(&state.simulation.source.cross_probe.net_to_points),
+        net_to_points: current
+            .then_some(&state.simulation.source.cross_probe.on_sheet(sheet).net_to_points),
     };
     cross_probe::select_failure_sites(&view, editor, nets, devices)
 }
@@ -605,6 +614,31 @@ mod tests {
         assert_eq!(error, LocateSignalError::OtherOccurrence("/x1".to_owned()));
         assert!(error.message("V(x1.out)").contains("/x1"));
         assert!(state.schematic.session.editor.selection.is_empty());
+    }
+
+    /// Locate on a later sheet selects the conductor that sheet draws and
+    /// centres where it draws it, and never reaches a wire on a hidden sheet
+    /// that happens to share the coordinates.
+    #[test]
+    fn locate_on_a_later_sheet_reads_that_sheets_own_geometry() {
+        let mut state = frame_cost::two_sheet_operating_point(true);
+
+        let net = select_signal_conductor(&mut state, "V(bias)").expect("Sheet 2 draws BIAS");
+        assert_eq!(net, "BIAS");
+        let editor = &state.schematic.session.editor;
+        assert_eq!(
+            editor.selection.wires.iter().copied().collect::<Vec<_>>(),
+            vec![2]
+        );
+        assert_eq!(editor.center_request, Some(Point::new(100, 0)));
+
+        let error = select_signal_conductor(&mut state, "V(vout)")
+            .expect_err("VOUT is drawn only on the hidden Sheet 1");
+        assert_eq!(error, LocateSignalError::UnknownNet("vout".to_owned()));
+        assert!(
+            !state.schematic.session.editor.selection.wires.contains(&1),
+            "a wire on the hidden sheet is never selected"
+        );
     }
 
     #[test]

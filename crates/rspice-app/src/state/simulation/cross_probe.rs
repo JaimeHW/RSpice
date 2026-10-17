@@ -12,9 +12,14 @@
 //! first.
 
 use std::collections::BTreeMap;
+use std::sync::LazyLock;
 
 use super::*;
-use crate::state::{CellViewRef, InstancePath};
+use crate::state::{CellViewRef, InstancePath, SheetId};
+use rspice_simulation::netlist_gen::{SheetNetGeometries, SheetNetGeometry};
+
+/// What a sheet the run captured nothing for reads: no nets at all.
+static NO_GEOMETRY: LazyLock<SheetNetGeometry> = LazyLock::new(SheetNetGeometry::default);
 
 /// Bidirectional mapping between schematic grid points and SPICE net names.
 ///
@@ -34,17 +39,13 @@ pub struct CrossProbeMapping {
     /// `None` is the design root, where a signal is named by its leaf alone.
     pub occurrence: Option<InstancePath>,
 
-    /// Node point to net name lookup (e.g., Point(280, 200) → "NET3").
-    /// Holds net node points (vertices, terminals, junctions, labels);
-    /// probes between nodes resolve through `net_segments`.
-    pub point_to_net: HashMap<Point, String>,
-
-    /// Net name to node points lookup (e.g., "NET3" → [Point(280, 200), ...])
-    /// Enables: select waveform → highlight all connected wire segments
-    pub net_to_points: HashMap<String, Vec<Point>>,
-
-    /// Wire segments per net, for resolving probes between nodes.
-    pub net_segments: HashMap<String, Vec<(Point, Point)>>,
+    /// The run's net geometry, sheet by sheet, each in the coordinates its
+    /// own sheet draws it in; `None` keys a cell view with no sheet catalog.
+    ///
+    /// Read one sheet at a time through [`Self::on_sheet`]. Two sheets can
+    /// draw different nets at the same coordinates, so a point means nothing
+    /// without the sheet it was read on.
+    sheets: SheetNetGeometries,
 
     /// Engine spelling of every signal on this map, keyed by the folded local
     /// name.
@@ -71,16 +72,18 @@ fn on_segment(p: Point, a: Point, b: Point) -> bool {
     crate::state::WireSegment::new(a, b).contains_point(p)
 }
 
-/// The engine's name for every net that has geometry, read at `occurrence`.
+/// The engine's name for every net that has geometry on any sheet, read at
+/// `occurrence`.
 ///
 /// A net with no retained point is skipped for the same reason a probe cannot
 /// land on one: there is nothing on the drawing to name.
 fn engine_names_at(
     occurrence: &InstancePath,
-    net_to_points: &HashMap<String, Vec<Point>>,
+    sheets: &SheetNetGeometries,
 ) -> HashMap<String, String> {
-    net_to_points
-        .iter()
+    sheets
+        .values()
+        .flat_map(|sheet| &sheet.net_to_points)
         .filter(|(_, points)| !points.is_empty())
         .filter_map(|(name, _)| {
             let engine = occurrence.engine_name_for(name).ok()?;
@@ -96,12 +99,29 @@ impl CrossProbeMapping {
         Self::default()
     }
 
-    /// Update mapping from netlist generation result
+    /// Install the geometry one run captured.
     ///
     /// Generation runs at the design root, so the map it produces is the
     /// root's: its signals are named by their leaves and its engine spellings
     /// are those leaves. [`CrossProbeIndex`] is what re-reads the same geometry
     /// at an occurrence below the root.
+    pub fn install(
+        &mut self,
+        source_reference: CellViewRef,
+        sheets: SheetNetGeometries,
+        source_topology_version: u64,
+    ) {
+        self.source_reference = Some(source_reference);
+        self.occurrence = None;
+        self.engine_names = engine_names_at(&InstancePath::root(), &sheets);
+        self.sheets = sheets;
+        self.source_topology_version = Some(source_topology_version);
+        self.version += 1;
+    }
+
+    /// [`Self::install`] for a cell view with no sheet catalog, whose one
+    /// drawing is the whole geometry.
+    #[cfg(test)]
     pub fn update(
         &mut self,
         source_reference: CellViewRef,
@@ -110,26 +130,38 @@ impl CrossProbeMapping {
         net_segments: HashMap<String, Vec<(Point, Point)>>,
         source_topology_version: u64,
     ) {
-        self.source_reference = Some(source_reference);
-        self.occurrence = None;
-        self.engine_names = engine_names_at(&InstancePath::root(), &net_to_points);
-        self.point_to_net = point_to_net;
-        self.net_to_points = net_to_points;
-        self.net_segments = net_segments;
-        self.source_topology_version = Some(source_topology_version);
-        self.version += 1;
+        self.install(
+            source_reference,
+            HashMap::from([(
+                None,
+                SheetNetGeometry {
+                    point_to_net,
+                    net_to_points,
+                    net_segments,
+                },
+            )]),
+            source_topology_version,
+        );
     }
 
-    /// Look up net name for a grid point
+    /// The geometry one sheet draws, in that sheet's coordinates; `None` is
+    /// a cell view with no sheet catalog. A sheet the run captured nothing
+    /// for draws no nets.
+    pub fn on_sheet(&self, sheet: Option<SheetId>) -> &SheetNetGeometry {
+        self.sheets.get(&sheet).unwrap_or(&NO_GEOMETRY)
+    }
+
+    /// The net under a drawn point of `sheet`.
     ///
     /// Node points answer from the hash; anything else scans the net
     /// segment lists (probe clicks are rare — this is not a frame path).
     /// Returns None if the point is not on a net (e.g., empty space).
-    pub fn net_at(&self, point: Point) -> Option<&String> {
-        if let Some(name) = self.point_to_net.get(&point) {
+    pub fn net_at(&self, sheet: Option<SheetId>, point: Point) -> Option<&String> {
+        let geometry = self.on_sheet(sheet);
+        if let Some(name) = geometry.point_to_net.get(&point) {
             return Some(name);
         }
-        self.net_segments.iter().find_map(|(name, segments)| {
+        geometry.net_segments.iter().find_map(|(name, segments)| {
             segments
                 .iter()
                 .any(|&(a, b)| on_segment(point, a, b))
@@ -143,10 +175,11 @@ impl CrossProbeMapping {
         &self,
         reference: &CellViewRef,
         topology_version: u64,
+        sheet: Option<SheetId>,
         point: Point,
     ) -> Option<&String> {
         self.is_current_for(reference, topology_version)
-            .then(|| self.net_at(point))
+            .then(|| self.net_at(sheet, point))
             .flatten()
     }
 
@@ -163,7 +196,9 @@ impl CrossProbeMapping {
 
     /// Check if mapping is populated
     pub fn is_populated(&self) -> bool {
-        !self.point_to_net.is_empty()
+        self.sheets
+            .values()
+            .any(|sheet| !sheet.point_to_net.is_empty())
     }
 
     /// The engine's name for one local signal on this map.
@@ -181,7 +216,7 @@ impl CrossProbeMapping {
     fn at_occurrence(&self, occurrence: &InstancePath) -> Self {
         Self {
             occurrence: (!occurrence.is_root()).then(|| occurrence.clone()),
-            engine_names: engine_names_at(occurrence, &self.net_to_points),
+            engine_names: engine_names_at(occurrence, &self.sheets),
             ..self.clone()
         }
     }
@@ -315,11 +350,61 @@ mod tests {
         );
 
         assert_eq!(
-            mapping.net_at_in(&source, 7, point).map(String::as_str),
+            mapping
+                .net_at_in(&source, 7, None, point)
+                .map(String::as_str),
             Some("OUT")
         );
-        assert!(mapping.net_at_in(&other, 7, point).is_none());
-        assert!(mapping.net_at_in(&source, 8, point).is_none());
+        assert!(mapping.net_at_in(&other, 7, None, point).is_none());
+        assert!(mapping.net_at_in(&source, 8, None, point).is_none());
+    }
+
+    /// A point names a net only on the sheet it was read on: two sheets may
+    /// draw different nets at the same coordinates.
+    #[test]
+    fn a_drawn_point_resolves_only_on_its_own_sheet() {
+        use crate::state::{SheetCatalog, SheetDefinition, SheetPortPolicy, SheetTemplate};
+
+        let mut catalog = SheetCatalog::default();
+        let mut sheets = Vec::new();
+        for page in [1, 2] {
+            sheets.push(
+                catalog
+                    .create_sheet(
+                        SheetDefinition {
+                            name: format!("Sheet {page}"),
+                            template: SheetTemplate::AnalogSchematic,
+                            port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                            explicit_page_number: Some(page),
+                        },
+                        sheets.last().copied(),
+                    )
+                    .expect("sheet"),
+            );
+        }
+        let source = CellViewRef::new("user", "top", "schematic");
+        let drawn = Point::new(100, 0);
+        let projected = Point::new(1_000_100, 0);
+        let mut mapping = CrossProbeMapping::new();
+        mapping.install(
+            source.clone(),
+            rspice_simulation::netlist_gen::net_geometry_by_sheet(
+                Some(&catalog),
+                HashMap::from([(drawn, "VOUT".to_owned()), (projected, "BIAS".to_owned())]),
+                HashMap::from([
+                    ("VOUT".to_owned(), vec![drawn]),
+                    ("BIAS".to_owned(), vec![projected]),
+                ]),
+                HashMap::new(),
+            ),
+            3,
+        );
+
+        let net = |sheet| mapping.net_at_in(&source, 3, Some(sheet), drawn).cloned();
+        assert_eq!(net(sheets[0]).as_deref(), Some("VOUT"));
+        assert_eq!(net(sheets[1]).as_deref(), Some("BIAS"));
+        assert!(mapping.on_sheet(None).net_to_points.is_empty());
+        assert_eq!(mapping.engine_name("bias"), Some("bias"));
     }
 
     #[test]
@@ -338,11 +423,15 @@ mod tests {
         );
 
         assert_eq!(
-            mapping.net_at_in(&source, 11, interior).map(String::as_str),
+            mapping
+                .net_at_in(&source, 11, None, interior)
+                .map(String::as_str),
             Some("DIAGONAL")
         );
         assert!(
-            mapping.net_at_in(&source, 11, Point::new(0, 11)).is_none(),
+            mapping
+                .net_at_in(&source, 11, None, Point::new(0, 11))
+                .is_none(),
             "a nearby off-segment point must not alias the diagonal conductor"
         );
     }
@@ -424,7 +513,7 @@ mod tests {
         let mapping = &index.for_occurrence(&elsewhere)[0];
 
         assert_eq!(mapping.source_reference.as_ref(), Some(&other));
-        assert!(mapping.net_to_points.is_empty());
+        assert!(!mapping.is_populated());
         assert!(mapping.engine_name("n1").is_none());
     }
 
@@ -436,7 +525,7 @@ mod tests {
         assert_eq!(root.len(), 1);
         assert!(root[0].occurrence.is_none());
         assert_eq!(
-            root[0].net_at(Point::new(10, 20)).map(String::as_str),
+            root[0].net_at(None, Point::new(10, 20)).map(String::as_str),
             Some("n1")
         );
         assert_eq!(root[0].engine_name("n1"), Some("n1"));

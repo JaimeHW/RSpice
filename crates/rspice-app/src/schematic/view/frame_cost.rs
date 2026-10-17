@@ -257,6 +257,83 @@ fn cross_probe_nets(sheets: &[SheetContent; 2]) -> HashMap<String, Vec<Point>> {
     nets
 }
 
+/// Install a run's net geometry the way a run hands it over: `nets` holds
+/// every point as the netlister read it off the projected document, where the
+/// sheet at catalog index `k` lies `k * 1_000_000` along x, and the snapshot
+/// takes each point home to its sheet.
+pub(super) fn install_projected_run_geometry(
+    state: &mut AppState,
+    nets: HashMap<String, Vec<Point>>,
+) {
+    let point_to_net = nets
+        .iter()
+        .flat_map(|(net, points)| points.iter().map(move |point| (*point, net.clone())))
+        .collect();
+    let sheets = rspice_simulation::netlist_gen::net_geometry_by_sheet(
+        super::sheet_visibility::active_sheet_catalog(state),
+        point_to_net,
+        nets,
+        HashMap::new(),
+    );
+    state.simulation.source.cross_probe.install(
+        state.workspace.content.active_view.clone(),
+        sheets,
+        state.schematic.topology_version(),
+    );
+}
+
+/// The smallest drawing on which a run's geometry can land on the wrong
+/// sheet: one wire on each of two sheets at the same drawn coordinates, the
+/// first on net `VOUT` and the second on net `BIAS`, and a solved operating
+/// point naming both. `second_sheet_active` opens Sheet 2.
+pub(super) fn two_sheet_operating_point(second_sheet_active: bool) -> AppState {
+    let mut state = super::sheet_visibility::two_sheet_state(&[1], &[2]);
+    let (start, end) = (Point::new(100, 0), Point::new(200, 0));
+    let document = state.schematic.document_mut_for_test();
+    document.wires.push(Wire::segment(1, start, end));
+    document.wires.push(Wire::segment(2, start, end));
+    state.schematic.bump_topology_version();
+    let projected = |point: Point| Point::new(point.x + 1_000_000, point.y);
+    install_projected_run_geometry(
+        &mut state,
+        HashMap::from([
+            ("VOUT".to_owned(), vec![start, end]),
+            ("BIAS".to_owned(), vec![projected(start), projected(end)]),
+        ]),
+    );
+    let mut run = SimulationRun::new(1);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::DcOp, "OP").with_dc_op(DcOpResult {
+            node_voltages: [("V(vout)", 2.5), ("V(bias)", 0.7)]
+                .into_iter()
+                .map(|(name, value)| OperatingPointValue {
+                    name: name.to_owned(),
+                    value,
+                    unit: "V".to_owned(),
+                })
+                .collect(),
+            branch_currents: Vec::new(),
+            power_dissipation: Vec::new(),
+        }),
+    );
+    state.simulation.retained.runs.insert(0, run);
+    state.simulation.view.active_run_idx = Some(0);
+    state.simulation.view.active_analysis_idx = Some(0);
+    state.ui.schematic_visibility.annotations = SchematicAnnotationVisibility::OperatingPoint;
+    if second_sheet_active {
+        let key = state.workspace.content.active_schematic_reference().key();
+        let catalog = state
+            .workspace
+            .content
+            .design_management
+            .sheet_catalog_mut(&key)
+            .expect("two sheets");
+        let second = catalog.sheets()[1].id();
+        catalog.set_active(second).expect("sheet 2 opens");
+    }
+    state
+}
+
 /// A prepared run that emitted every hierarchical instance, with a solved
 /// operating point of [`OPERATING_POINT_NODES`] nodes.
 fn operating_point_run(instances: &[(String, &'static str)]) -> SimulationRun {
@@ -369,17 +446,7 @@ pub(super) fn scale_fixture() -> ScaleFixture {
     state.schematic.bump_topology_version();
     state.sync_active_schematic_to_workspace();
 
-    let point_to_net = nets
-        .iter()
-        .flat_map(|(net, points)| points.iter().map(move |point| (*point, net.clone())))
-        .collect();
-    state.simulation.source.cross_probe.update(
-        state.workspace.content.active_view.clone(),
-        point_to_net,
-        nets,
-        HashMap::new(),
-        state.schematic.topology_version(),
-    );
+    install_projected_run_geometry(&mut state, nets);
     state
         .simulation
         .retained
@@ -463,6 +530,12 @@ impl FrameTimes {
 
     fn max(&self) -> f64 {
         self.frames_ms.iter().copied().fold(0.0, f64::max)
+    }
+
+    /// The quietest frame: on a machine that is also compiling, the closest
+    /// reading of what the frame itself costs.
+    fn min(&self) -> f64 {
+        self.frames_ms.iter().copied().fold(f64::INFINITY, f64::min)
     }
 }
 
@@ -642,11 +715,12 @@ fn canvas_frame_cost_at_scale() {
         stretch_preview(),
         operating_point_overlay(),
     ];
-    println!("scenario                         median ms     max ms   budget");
+    println!("scenario                            min ms  median ms     max ms   budget");
     for scenario in &scenarios {
         println!(
-            "{:<32} {:>9.2} {:>10.2} {:>8.1}",
+            "{:<32} {:>9.2} {:>10.2} {:>10.2} {:>8.1}",
             scenario.name,
+            scenario.min(),
             scenario.median(),
             scenario.max(),
             scenario.budget_ms

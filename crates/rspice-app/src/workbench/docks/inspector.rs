@@ -1525,7 +1525,10 @@ fn schematic_cross_probe_unavailability(
         Ok(probe) => probe.leaf,
         Err(_) => net.to_owned(),
     };
-    let mut nets = map.net_to_points.iter();
+    let mut nets = map
+        .on_sheet(crate::schematic::view::sheet_visibility::active_sheet_id(state))
+        .net_to_points
+        .iter();
     let known = nets.any(|(name, points)| name.eq_ignore_ascii_case(&leaf) && !points.is_empty());
     (!known).then(|| format!("The open sheet has no conductor named {leaf}."))
 }

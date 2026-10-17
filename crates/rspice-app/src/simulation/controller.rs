@@ -549,11 +549,9 @@ impl SimulationController {
         if let Some(cross_probe) = cross_probe
             && campaign_membership.is_none()
         {
-            state.simulation.source.cross_probe.update(
+            state.simulation.source.cross_probe.install(
                 cross_probe.source_reference,
-                cross_probe.point_to_net,
-                cross_probe.nets,
-                cross_probe.net_segments,
+                cross_probe.sheets,
                 cross_probe.topology_version,
             );
         }

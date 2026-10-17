@@ -739,6 +739,7 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
                         state.simulation.source.cross_probe.net_at_in(
                             &state.workspace.content.active_view,
                             state.schematic.topology_version(),
+                            super::sheet_visibility::active_sheet_id(state),
                             *point,
                         )
                     })

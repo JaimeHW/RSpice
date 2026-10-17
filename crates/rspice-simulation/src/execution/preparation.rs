@@ -534,10 +534,18 @@ where
             advisories,
             manual_source: None,
             cross_probe: Some(CrossProbeSnapshot {
+                // The generator read the projected document; every point
+                // goes home to the sheet that draws it before the canvas
+                // compares it with anything it draws.
+                sheets: crate::netlist_gen::net_geometry_by_sheet(
+                    inputs
+                        .design_management
+                        .sheet_catalog(&root_reference.key()),
+                    generated.point_to_net,
+                    generated.nets,
+                    generated.net_segments,
+                ),
                 source_reference: root_reference,
-                point_to_net: generated.point_to_net,
-                nets: generated.nets,
-                net_segments: generated.net_segments,
                 topology_version: root_schematic.topology_version(),
                 emission_map: generated.emission_map,
             }),
