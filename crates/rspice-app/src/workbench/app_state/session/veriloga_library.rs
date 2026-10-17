@@ -70,31 +70,31 @@ struct LoadedVerilogALibrary {
     sources: Option<ProjectSourceRegistry>,
 }
 
+/// Restore the user's Verilog-A library, or say why it could not be.
 pub(in crate::workbench) fn restore_global_veriloga_library(
     library_manager: &mut LibraryManager,
     workspace: &mut ProjectWorkspace,
-) {
+) -> Result<(), String> {
     #[cfg(target_arch = "wasm32")]
     {
         let _ = (library_manager, workspace);
+        Ok(())
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
         let loaded = match load_global_veriloga_library() {
             Ok(Some(loaded)) => loaded,
-            Ok(None) => return,
+            Ok(None) => return Ok(()),
             Err(error) => {
-                log::warn!("Failed to restore global Verilog-A library: {error}");
-                return;
+                return Err(format!("The Verilog-A library could not be read: {error}"));
             }
         };
-        if let Err(error) = install_loaded_veriloga_library(
+        install_loaded_veriloga_library(
             library_manager,
             &mut workspace.content.project_sources,
             loaded,
-        ) {
-            log::warn!("Failed to install global Verilog-A library: {error}");
-        }
+        )
+        .map_err(|error| format!("The Verilog-A library could not be restored: {error}"))
     }
 }
 

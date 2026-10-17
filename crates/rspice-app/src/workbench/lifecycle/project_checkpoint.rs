@@ -236,7 +236,7 @@ fn prepare_checkpoint(
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn create(
-    state: &AppState,
+    state: &mut AppState,
     reason: ProjectCheckpointReason,
 ) -> Result<ProjectCheckpointSummary, String> {
     let (manifest, serialized) = prepare_checkpoint(state, reason)?;
@@ -244,7 +244,11 @@ pub(crate) fn create(
     // Retention runs only after the new manifest is committed and verified.
     // A cleanup failure never invalidates the newly created recovery point.
     if let Err(error) = prune_retention(state, &manifest.project_id) {
-        log::warn!("Project checkpoint committed, but retention cleanup was incomplete: {error}");
+        state.record(
+            crate::diagnostics::LogSeverity::Warning,
+            crate::diagnostics::LogSource::Studio,
+            format!("The project checkpoint was created, but older checkpoints were not all removed: {error}"),
+        );
     }
     Ok(summary)
 }
@@ -561,13 +565,23 @@ fn list_native(state: &AppState, project_id: &str) -> Result<ProjectCheckpointCa
         {
             continue;
         }
+        // A manifest that cannot be read is quarantined, as the browser store
+        // does, so the recovery page states it rather than the checkpoint
+        // silently not being there.
+        let unreadable = |reason: String| ProjectCheckpointQuarantine {
+            label: path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "checkpoint manifest".to_owned()),
+            reason,
+            artifacts: vec![path.clone()],
+        };
         let bytes = match std::fs::read(&path) {
             Ok(bytes) => bytes,
             Err(error) => {
-                log::warn!(
-                    "Could not read project checkpoint manifest '{}': {error}",
-                    path.display()
-                );
+                quarantined.push(unreadable(format!(
+                    "checkpoint manifest could not be read: {error}"
+                )));
                 continue;
             }
         };
@@ -575,10 +589,9 @@ fn list_native(state: &AppState, project_id: &str) -> Result<ProjectCheckpointCa
             Ok(manifest) if manifest.project_id == project_id => manifest,
             Ok(_) => continue,
             Err(error) => {
-                log::warn!(
-                    "Ignored invalid project checkpoint manifest '{}': {error}",
-                    path.display()
-                );
+                quarantined.push(unreadable(format!(
+                    "checkpoint manifest is invalid: {error}"
+                )));
                 continue;
             }
         };
@@ -1111,7 +1124,7 @@ mod tests {
         let source_id = state.workspace.content.project.id();
         let source_revision = state.workspace.content.project.revision();
 
-        let checkpoint = create(&state, ProjectCheckpointReason::TechnologyAttachment)
+        let checkpoint = create(&mut state, ProjectCheckpointReason::TechnologyAttachment)
             .expect("checkpoint publishes");
         assert_eq!(checkpoint.project_revision(), source_revision.get());
         #[cfg(unix)]
@@ -1172,7 +1185,7 @@ mod tests {
             .content
             .project
             .set_path(directory.join("source.rspiceproj"));
-        let checkpoint = create(&state, ProjectCheckpointReason::TechnologyAttachment)
+        let checkpoint = create(&mut state, ProjectCheckpointReason::TechnologyAttachment)
             .expect("checkpoint publishes");
         let ProjectCheckpointLocator::Native { snapshot, .. } = &checkpoint.locator;
         std::fs::write(snapshot, b"corrupt checkpoint").expect("corrupt owned snapshot");

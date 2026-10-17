@@ -28,7 +28,7 @@ use crate::workbench::state::ModelsOperationalState;
 
 thread_local! {
     /// The restore, once storage has answered. At most one ever arrives.
-    static COMPLETION: std::cell::RefCell<Option<Result<PersistedHubState, String>>> =
+    static COMPLETION: std::cell::RefCell<Option<Result<(PersistedHubState, Vec<String>), String>>> =
         const { std::cell::RefCell::new(None) };
 }
 
@@ -48,7 +48,13 @@ impl RSpiceApp {
             return;
         };
         match completion {
-            Ok(persisted) => self.apply_restored_packs(persisted),
+            Ok((persisted, unrestored)) => {
+                for reason in unrestored {
+                    self.state
+                        .record(LogSeverity::Warning, LogSource::Studio, reason);
+                }
+                self.apply_restored_packs(persisted);
+            }
             Err(error) => {
                 // Storage that will not open is not a failed operation — this
                 // session simply keeps its packs in memory, which is what it
@@ -67,9 +73,13 @@ impl RSpiceApp {
     }
 
     fn apply_restored_packs(&mut self, persisted: PersistedHubState) {
-        let Some(report) = self.model_hub.restore_persisted_packs(persisted) else {
+        let Some((report, reload_error)) = self.model_hub.restore_persisted_packs(persisted) else {
             return;
         };
+        if let Some(error) = reload_error {
+            self.state
+                .record(LogSeverity::Error, LogSource::Studio, error);
+        }
         if report.is_empty() {
             return;
         }

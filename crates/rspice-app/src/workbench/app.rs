@@ -467,7 +467,20 @@ impl RSpiceApp {
         cc.egui_ctx.set_zoom_factor(1.0);
 
         // Restore global user Verilog-A library (commercial-style user library).
-        restore_global_veriloga_library(&mut state.library_manager, &mut state.workspace);
+        let startup_faults = [
+            restore_global_veriloga_library(&mut state.library_manager, &mut state.workspace).err(),
+            state
+                .model_library_manager
+                .spice_pack_error()
+                .map(str::to_owned),
+        ];
+        for fault in startup_faults.into_iter().flatten() {
+            state.record(
+                crate::diagnostics::LogSeverity::Error,
+                crate::diagnostics::LogSource::Studio,
+                fault,
+            );
+        }
         state.restore_active_schematic_from_workspace();
         crate::workbench::lifecycle::project_lifecycle::initialize_from_session(&mut state);
         #[cfg(target_arch = "wasm32")]
@@ -500,8 +513,13 @@ impl RSpiceApp {
                 Some(lib)
             }
             Err(e) => {
-                log::error!(
-                    "Canonical symbol library unavailable; schematic components will display resolution errors: {e}"
+                state.record(
+                    crate::diagnostics::LogSeverity::Error,
+                    crate::diagnostics::LogSource::Studio,
+                    format!(
+                        "The built-in symbol library could not be loaded; schematic components \
+                         show as unresolved: {e}"
+                    ),
                 );
                 None
             }
@@ -1386,6 +1404,13 @@ impl eframe::App for RSpiceApp {
         if let Some(refusal) = self.cloud_account.take_local_error() {
             self.state.prompt(refusal);
         }
+        if let Some(failure) = self.cloud_account.take_storage_failure() {
+            self.state.record(
+                crate::diagnostics::LogSeverity::Error,
+                crate::diagnostics::LogSource::Studio,
+                failure,
+            );
+        }
         if let Some(url) = self.cloud_account.take_browser_request() {
             #[cfg(not(target_arch = "wasm32"))]
             ctx.open_url(egui::OpenUrl::new_tab(url));
@@ -1394,7 +1419,11 @@ impl eframe::App for RSpiceApp {
                 .and_then(|window| window.location().assign(&url).ok())
                 .is_none()
             {
-                log::error!("browser sign-in navigation was rejected");
+                self.state.record(
+                    crate::diagnostics::LogSeverity::Error,
+                    crate::diagnostics::LogSource::Studio,
+                    "Sign-in failed: the browser did not open the sign-in page.",
+                );
             }
         }
         self.record_publish_receipt();
@@ -1437,12 +1466,13 @@ impl eframe::App for RSpiceApp {
         self.state.sync_active_schematic_to_workspace();
         self.state.workbench.capture_authoring_recovery();
         log::debug!("save: veriloga library");
-        if let Err(err) =
+        if let Err(error) =
             save_global_veriloga_library(&self.state.library_manager, &self.state.workspace)
         {
-            log::warn!(
-                "Failed to persist global Verilog-A library during app save: {}",
-                err
+            self.state.record(
+                crate::diagnostics::LogSeverity::Error,
+                crate::diagnostics::LogSource::Studio,
+                format!("The Verilog-A library could not be saved: {error}"),
             );
         }
         log::debug!("save: serialize app state");
@@ -2433,6 +2463,24 @@ mod tests {
         assert_eq!(
             restored.schematic.document().wires,
             expected.schematic.document().wires
+        );
+        assert_eq!(restored.log_buffer.entries().count(), 0);
+
+        // A session that will not decode starts a new one, and says why.
+        eframe::Storage::set_string(&mut storage, eframe::APP_KEY, "(not a session".to_owned());
+        let replaced = AppState::restore_eframe_session(&storage).expect("a stored session");
+        let entries: Vec<_> = replaced.log_buffer.entries().collect();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].severity,
+            crate::diagnostics::LogSeverity::Warning
+        );
+        assert!(
+            entries[0].message.starts_with(
+                "The previous session could not be restored, so a new one was started: "
+            ),
+            "{}",
+            entries[0].message
         );
     }
 }

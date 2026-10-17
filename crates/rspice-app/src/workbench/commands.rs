@@ -32,22 +32,22 @@ fn model_library_rescan_diagnostic(app: &RSpiceApp) -> (String, bool) {
     let discovered_files = app.state.pdk_config.discovered_files.len();
     let scan_errors = &app.state.pdk_config.scan_errors;
     let pack_definitions = app.state.model_library_manager.pack_definition_count();
-    let summary = format!(
+    let mut summary = format!(
         "Model library rescan found {discovered_files} configured model file(s) and \
          {pack_definitions} shipped pack part(s)"
     );
-    if scan_errors.is_empty() {
-        (summary, false)
-    } else {
-        (
-            format!(
-                "{summary}; {} configured path error(s): {}",
-                scan_errors.len(),
-                scan_errors.join("; ")
-            ),
-            true,
-        )
+    let pack_error = app.state.model_library_manager.spice_pack_error();
+    if let Some(error) = pack_error {
+        summary = format!("{summary}; {error}");
     }
+    if !scan_errors.is_empty() {
+        summary = format!(
+            "{summary}; {} configured path error(s): {}",
+            scan_errors.len(),
+            scan_errors.join("; ")
+        );
+    }
+    (summary, pack_error.is_some() || !scan_errors.is_empty())
 }
 
 fn selection_layout_command(

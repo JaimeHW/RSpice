@@ -742,7 +742,7 @@ pub(super) fn attach_technology_binding(
     #[cfg(not(target_arch = "wasm32"))]
     {
         let checkpoint = crate::workbench::lifecycle::project_checkpoint::create(
-            &app.state,
+            &mut app.state,
             crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::TechnologyAttachment,
         )?;
         commit_technology_after_checkpoint(app, binding, authority, migration_evidence, &checkpoint)

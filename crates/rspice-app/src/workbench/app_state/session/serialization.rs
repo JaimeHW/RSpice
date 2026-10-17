@@ -15,11 +15,24 @@ const LEGACY_SESSION_PROJECT_ID_NAMESPACE: uuid::Uuid =
 impl AppState {
     /// Restore eframe's RON session, including receipts emitted before their
     /// writer and independently recoverable decoder shared a wire format.
+    ///
+    /// `None` only when nothing was stored. A stored session that will not
+    /// decode is replaced by a new one whose Console says so, with the cause:
+    /// otherwise the reader's project and layout vanish without a word.
     pub(crate) fn restore_eframe_session(storage: &dyn eframe::Storage) -> Option<Self> {
         let text = storage.get_string(eframe::APP_KEY)?;
-        Self::from_session_ron(&text)
-            .inspect_err(|error| log::warn!("Failed to restore RSpice session: {error}"))
-            .ok()
+        Some(Self::from_session_ron(&text).unwrap_or_else(|error| {
+            let mut state = Self::default();
+            state.record(
+                LogSeverity::Warning,
+                LogSource::Studio,
+                format!(
+                    "The previous session could not be restored, so a new one was started: \
+                     {error}"
+                ),
+            );
+            state
+        }))
     }
 
     fn from_session_ron(text: &str) -> Result<Self, ron::error::SpannedError> {

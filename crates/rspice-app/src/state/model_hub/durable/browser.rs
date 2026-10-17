@@ -157,8 +157,12 @@ fn spawn_put(key: String, bytes: Vec<u8>, operation: &'static str) {
 /// session opens is the moment a prompt is least surprising. Whatever it
 /// answers, the standing records it — the note the workspace paints is derived
 /// from that answer rather than from an assumption about it.
+///
+/// The state arrives with the reason for each stored pack that could not be
+/// read, for the Console: one unreadable pack is one pack fewer, not a failed
+/// restore.
 pub(crate) fn start_browser_pack_restore(
-    complete: impl FnOnce(Result<PersistedHubState, String>) + 'static,
+    complete: impl FnOnce(Result<(PersistedHubState, Vec<String>), String>) + 'static,
 ) {
     wasm_bindgen_futures::spawn_local(async move {
         let restored = read_persisted_state().await;
@@ -175,7 +179,7 @@ pub(crate) fn start_browser_pack_restore(
     });
 }
 
-async fn read_persisted_state() -> Result<PersistedHubState, String> {
+async fn read_persisted_state() -> Result<(PersistedHubState, Vec<String>), String> {
     let keys = all_keys().await?;
     let snapshot = get_bytes(SNAPSHOT_KEY).await?;
     let serial = get_bytes(SERIAL_KEY)
@@ -189,15 +193,16 @@ async fn read_persisted_state() -> Result<PersistedHubState, String> {
         .unwrap_or(super::super::NO_CATALOG_SERIAL);
 
     let mut archives = Vec::new();
+    let mut unrestored = Vec::new();
     for key in keys {
         let Some(digest) = key.strip_prefix(ARCHIVE_PREFIX) else {
             continue;
         };
         if archives.len() >= MAX_RESTORED_ARCHIVES {
-            log::warn!(
-                "this origin holds more than {MAX_RESTORED_ARCHIVES} stored model packs; the \
-                 remainder were not restored"
-            );
+            unrestored.push(format!(
+                "This browser holds more than {MAX_RESTORED_ARCHIVES} stored model packs; the \
+                 rest were not restored."
+            ));
             break;
         }
         // A key that has disappeared between the listing and the read is not a
@@ -213,14 +218,21 @@ async fn read_persisted_state() -> Result<PersistedHubState, String> {
                 bytes,
             }),
             Ok(None) => {}
-            Err(error) => log::warn!("a stored model pack could not be read: {error}"),
+            Err(error) => {
+                unrestored.push(format!(
+                    "A model pack kept by this browser could not be read: {error}"
+                ));
+            }
         }
     }
-    Ok(PersistedHubState {
-        serial,
-        snapshot,
-        archives,
-    })
+    Ok((
+        PersistedHubState {
+            serial,
+            snapshot,
+            archives,
+        },
+        unrestored,
+    ))
 }
 
 /// What the browser will promise about the bytes just written.

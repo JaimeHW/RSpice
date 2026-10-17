@@ -90,6 +90,12 @@ pub struct ModelLibraryManager {
     /// have been written elsewhere.
     #[serde(skip)]
     spice_packs: Option<Arc<SpiceLibraryIndex>>,
+    /// Why the shipped packs could not be read, when they could not.
+    ///
+    /// Held for whoever reports it, because discovery runs where no session
+    /// is reachable to report to.
+    #[serde(skip)]
+    spice_pack_error: Option<String>,
 }
 
 /// One definition found in the shipped packs rather than in a loaded library.
@@ -400,13 +406,20 @@ impl ModelLibraryManager {
     /// Absence is normal, not a failure: the foundation library is compiled into
     /// the binary, and the browser build has no filesystem to find packs on.
     pub fn discover_spice_packs(&mut self) {
-        self.spice_packs = match SpiceLibraryIndex::discover() {
-            Ok(index) => index.map(Arc::new),
-            Err(error) => {
-                log::warn!("shipped SPICE model packs could not be read: {error}");
-                None
-            }
+        (self.spice_packs, self.spice_pack_error) = match SpiceLibraryIndex::discover() {
+            Ok(index) => (index.map(Arc::new), None),
+            Err(error) => (
+                None,
+                Some(format!(
+                    "The shipped SPICE model packs could not be read: {error}"
+                )),
+            ),
         };
+    }
+
+    /// Why the last discovery could not read the shipped packs.
+    pub fn spice_pack_error(&self) -> Option<&str> {
+        self.spice_pack_error.as_deref()
     }
 
     /// The discovered pack index, when one is present.
