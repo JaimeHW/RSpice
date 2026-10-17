@@ -22,6 +22,8 @@ use crate::workbench::documents::netlist_document::diagnostics::DiagnosticFix;
 use crate::workbench::documents::netlist_document::{Diagnostic, NetlistDiagnosticCollection};
 use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
+mod waivers;
+
 const WIDTH: f32 = 900.0;
 const HEIGHT: f32 = 420.0;
 

@@ -9,6 +9,8 @@
 use super::*;
 #[cfg(not(target_arch = "wasm32"))]
 mod marker_history;
+#[cfg(not(target_arch = "wasm32"))]
+mod waivers;
 use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
 use crate::workbench::app_state::ActiveViewer;
 use rspice_results_ui::bode::BodeData;
