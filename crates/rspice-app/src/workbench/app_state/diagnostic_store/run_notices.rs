@@ -541,14 +541,18 @@ fn truncation_exceeded(evidence: &TransientConvergenceEvidence) -> Option<RunNot
         })
 }
 
-/// `BSIM4 pbs = 50m is below 100m; the model uses 100m`.
+/// `BSIM4 pbs = 50m is below 100m; every instance of the card uses 100m`.
+///
+/// A replacement with no bound is a value the model resets for another's
+/// sake (A1, when A2 is out of range) or because it is not positive, so it
+/// is said to be replaced and nothing more.
 fn replacement_message(replacement: &ParameterReplacement) -> String {
     let requested = engineering(replacement.requested);
     let crossing = match replacement.limit {
         Some(limit) if replacement.requested < limit => format!("is below {}", engineering(limit)),
         Some(limit) if replacement.requested > limit => format!("is above {}", engineering(limit)),
         Some(limit) => format!("is at its limit {}", engineering(limit)),
-        None => "is outside the range the model evaluates".to_owned(),
+        None => "is replaced".to_owned(),
     };
     let applied = engineering(replacement.applied);
     let parameter = &replacement.parameter;
@@ -768,6 +772,33 @@ mod tests {
         assert_eq!(standing.len(), 1, "{standing:?}");
         assert_eq!(standing[0].0, MEASURE_CODE);
         assert_eq!(standing[0].1, "tdelay");
+    }
+
+    /// A clamp states the bound the value crossed; a reset with no bound, A1
+    /// zeroed because A2 was out of range, says only that the value was
+    /// replaced, because its own value was not out of anything.
+    #[test]
+    fn a_replacement_states_its_bound_only_where_the_model_states_one() {
+        let replacement = |parameter: &str, requested: f64, applied: f64, limit: Option<f64>| {
+            replacement_message(&ParameterReplacement {
+                family: "BSIM3".to_owned(),
+                model: Some("nch".to_owned()),
+                element: Some("M1".to_owned()),
+                scope: ParameterScope::Instance,
+                parameter: parameter.to_owned(),
+                requested,
+                applied,
+                limit,
+            })
+        };
+        assert_eq!(
+            replacement("a2", 2.0, 1.0, Some(1.0)),
+            "BSIM3 a2 = 2 is above 1; the model uses 1"
+        );
+        assert_eq!(
+            replacement("a1", 0.5, 0.0, None),
+            "BSIM3 a1 = 500m is replaced; the model uses 0"
+        );
     }
 
     /// The convergence evidence of a transient whose stepper accepted the
