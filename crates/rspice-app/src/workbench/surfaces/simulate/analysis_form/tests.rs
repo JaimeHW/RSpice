@@ -923,8 +923,8 @@ fn noise_form_matches_mockup_owned_contract() {
     // The two domain rows carry no authored presets at all: everything
     // they offer is read off the elaborated design, and the only fixed
     // entry is the exact-entry escape.
-    assert_eq!(NOISE_OUTPUT_CUSTOM_CHOICE, "Exact expression\u{2026}");
-    assert_eq!(NOISE_INPUT_CUSTOM_CHOICE, "Exact source name\u{2026}");
+    assert_eq!(NOISE_OUTPUT_CUSTOM_CHOICE, "Custom expression\u{2026}");
+    assert_eq!(NOISE_INPUT_CUSTOM_CHOICE, "Custom source name\u{2026}");
     assert_eq!(
         NOISE_CONTRIBUTION_CHOICES,
         ["Top 50", "All contributors", "Top 20", "Summary only"]

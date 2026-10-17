@@ -27,7 +27,7 @@ pub(super) fn shooting_fields(ui: &mut Ui, setup: &mut QpssDraft) {
     );
     input_row(
         ui,
-        "Exact phase points (optional)",
+        "Collocation points (optional)",
         &mut setup.collocation_points,
     );
     input_row_enabled(

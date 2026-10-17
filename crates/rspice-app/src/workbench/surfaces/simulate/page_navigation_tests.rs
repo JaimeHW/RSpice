@@ -215,7 +215,7 @@ fn the_selected_limit_offers_its_evidence_and_its_producer() {
         state.workbench.selected_specification = Some("gain_dc".to_owned());
     });
     assert!(
-        without.contains("Open evidence in Results"),
+        without.contains("Open in Results"),
         "the evidence route is drawn even with no dataset, disabled:\n{without}"
     );
     assert!(
@@ -611,7 +611,7 @@ fn the_heading_the_hop_and_the_contract_card_agree_about_the_prior_run() {
         "once a result lands the hop names the run:\n{landed}"
     );
     assert!(
-        landed.contains("Run 1 retained · immutable"),
+        landed.contains("Run 1 finished"),
         "and so does the card:\n{landed}"
     );
 }

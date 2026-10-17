@@ -241,7 +241,7 @@ pub(super) fn fields(ui: &mut Ui, setup: &mut OpDialogState, op_context: OpConte
         } else {
             &[(
                 2,
-                "Run SOA checks with warning or violation evidence before selecting this policy",
+                "Run SOA checks that report warnings or violations before selecting this policy",
             )]
         },
     );

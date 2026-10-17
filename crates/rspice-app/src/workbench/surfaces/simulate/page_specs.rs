@@ -36,8 +36,8 @@ const REGISTRY_COLUMNS: [f32; 5] = [0.24, 0.26, 0.18, 0.16, 0.16];
 /// operator a limit was judged over a spread that was never evaluated, which is
 /// the one thing an acceptance page must never do.
 const REGISTRY_EVIDENCE_NOTE: &str = "A limit is evaluated against the active dataset's measurement of the same name. A \
-     specification with no matching measurement is reported as being without evidence — it is \
-     never treated as passing. Where the dataset holds several measurements of one name — a \
+     specification with no matching measurement is reported as having no result and is never \
+     treated as passing. Where the dataset holds several measurements of one name — a \
      corner or temperature run set — the result shown is the worst of them against this limit, \
      marked with the count it was chosen from. That verdict is sound for every point the dataset \
      retained; it does not speak for points the run never measured. A Monte Carlo trial set \
@@ -48,7 +48,7 @@ const REGISTRY_EVIDENCE_NOTE: &str = "A limit is evaluated against the active da
      gate rather than the worst trial alone — the same predicate the sign-off applies. A limit \
      narrowed to nominal or to named corners is answered only by measurements the executor \
      attributed to a point, so an unattributed result never satisfies one. The filter and the \
-     evidence class narrow this table only; the counts above are the whole plan's, because a \
+     requirement status narrow this table only; the counts above are the whole plan's, because a \
      sign-off cannot be produced by hiding the rows that fail. Authoring lives in the \
      specification editor, which owns the limits this page reads.";
 
@@ -320,7 +320,7 @@ impl Evidence {
                 if *clears { Tone::Dim } else { Tone::Fail },
             ),
             Self::MeasurementFailed => ("measurement failed".to_owned(), Tone::Error),
-            Self::None => ("no evidence".to_owned(), Tone::Neutral),
+            Self::None => ("no result".to_owned(), Tone::Neutral),
         }
     }
 }
@@ -581,7 +581,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     // the pass count. Reading "4 pass" when three of those were decided by one
     // point of a forty-five point sweep is exactly the false sign-off this
     // page exists to prevent.
-    let mut status = format!("{passing} pass · {failing} fail · {unmapped} without evidence");
+    let mut status = format!("{passing} pass · {failing} fail · {unmapped} without results");
     if partial > 0 {
         status.push_str(&format!(
             " · {partial} judged on the worst of several points"
@@ -645,7 +645,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                     picked_class = select(
                         ui,
                         "simulation-plan.spec-registry.scope",
-                        "Evidence class",
+                        "Requirement status",
                         class.label(),
                         &classes,
                         175.0,
@@ -855,7 +855,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
                 card_note(
                     ui,
                     "Select a row above to see the bound, the measurement that supplies its value, \
-                     and the evidence resolved from the active dataset.",
+                     and its result in the active dataset.",
                 );
             },
         );
@@ -912,7 +912,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
             })
     });
     let producing_analysis = match (producer_id, producer_position.as_deref()) {
-        (None, _) => "any exact producer of this measurement".to_owned(),
+        (None, _) => "any analysis that produces this measurement".to_owned(),
         (Some(id), None) => format!("{id} · no longer in this plan"),
         (Some(id), Some(label)) => format!("{label} · {id}"),
     };
@@ -952,10 +952,10 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     // this plan produced and no other.
     let evidence_block = if super::output_evidence::selected_plan_dataset(app).is_none() {
         Some(if app.state.simulation.active_run().is_some() {
-            "The active dataset was not produced by this plan, so it holds no evidence for this \
+            "The active dataset was not produced by this plan, so it holds no result for this \
              limit."
         } else {
-            "No run has been retained, so there is no evidence to open."
+            "No run has been retained, so there are no results to open."
         })
     } else {
         crate::workbench::documents::result_document::viewer_unavailability_reason(
@@ -1011,11 +1011,11 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
                 }),
                 None,
             );
-            rule_row(ui, "Evidence coverage", &coverage);
+            rule_row(ui, "Result coverage", &coverage);
             // The coverage row states what the dataset holds for this limit;
             // this opens exactly that, in the viewer whose whole subject is
             // specification evidence, with this measurement carried across.
-            let open = Button::new("Open evidence in Results")
+            let open = Button::new("Open in Results")
                 .enabled(evidence_block.is_none())
                 .show(ui);
             match evidence_block {
@@ -1059,7 +1059,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
                     ui,
                     &format!(
                         "This limit is scoped to {}, which the current run set does not declare, \
-                         so no run can produce evidence for it. Widen the scope or add the corner \
+                         so no run can produce a result for it. Widen the scope or add the corner \
                          to the run set.",
                         missing.join(" · ")
                     ),
@@ -1198,13 +1198,8 @@ fn evaluation_policy(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanP
             // too: this row read "NOT SIGN-OFF · 0 unqualified model(s)" for
             // one, which states the verdict and denies the cause.
             receipt.sign_off_blocker().map_or_else(
-                || format!("Run {} · this plan · immutable", run.id),
-                |blocker| {
-                    format!(
-                        "Run {} · this plan · immutable · NOT SIGN-OFF · {blocker}",
-                        run.id
-                    )
-                },
+                || format!("Run {} · this plan", run.id),
+                |blocker| format!("Run {} · this plan · NOT SIGN-OFF · {blocker}", run.id),
             )
         },
     );
@@ -1235,10 +1230,7 @@ fn evaluation_policy(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanP
         "Fail closed".to_owned(),
         "Report unmapped for review".to_owned(),
     ];
-    let regression_options = vec![
-        "Limit and waveform evidence".to_owned(),
-        "Limit evidence only".to_owned(),
-    ];
+    let regression_options = vec!["Limits and waveforms".to_owned(), "Limits only".to_owned()];
     let monte_carlo_options = [
         "Not gated".to_owned(),
         "Yield at least 95%".to_owned(),
@@ -1264,7 +1256,7 @@ fn evaluation_policy(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanP
     let mut picked_monte_carlo = None;
     card(ui, "Evaluation policy", None, |ui| {
         card_body(ui, |ui| {
-            rule_row(ui, "Evidence dataset", &dataset);
+            rule_row(ui, "Dataset", &dataset);
             rule_row(ui, "Dataset acceptance", &acceptance);
             rule_row(
                 ui,
@@ -1306,11 +1298,11 @@ fn evaluation_policy(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanP
                         width,
                     );
                 }),
-                Some(("Regression evidence", &mut |ui: &mut Ui, width: f32| {
+                Some(("Regression check", &mut |ui: &mut Ui, width: f32| {
                     picked_regression = select(
                         ui,
                         "simulation-plan.spec-policy.regression",
-                        "Regression evidence",
+                        "Regression check",
                         regression_current,
                         &regression_options,
                         width,
@@ -1321,8 +1313,8 @@ fn evaluation_policy(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanP
         card_note(
             ui,
             "This policy is plan-owned and frozen into every prepared run. Changing it creates \
-                 a new plan revision; historical verdicts continue to use the exact policy in their \
-                 immutable run receipt.",
+                 a new plan revision; earlier verdicts keep using the policy recorded with their \
+                 run.",
         );
     });
 
@@ -1375,13 +1367,12 @@ pub(super) fn commit_specification_policy(app: &mut RSpiceApp, policy: Specifica
         },
         match policy.missing_measurement {
             MissingMeasurementPolicy::FailClosed => "fails closed",
-            MissingMeasurementPolicy::ReportUnmapped => "reports unmapped evidence",
+            MissingMeasurementPolicy::ReportUnmapped => "reports unmapped for review",
         },
         monte_carlo_policy_label(&policy.monte_carlo),
         match policy.regression {
-            RegressionSpecificationPolicy::LimitAndWaveform =>
-                "requires limit and waveform evidence",
-            RegressionSpecificationPolicy::LimitOnly => "requires limit evidence",
+            RegressionSpecificationPolicy::LimitAndWaveform => "checks limits and waveforms",
+            RegressionSpecificationPolicy::LimitOnly => "checks limits only",
         }
     );
     commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {

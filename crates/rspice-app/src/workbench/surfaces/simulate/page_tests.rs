@@ -2047,7 +2047,7 @@ fn the_evidence_class_keeps_exactly_the_rows_the_head_counted() {
         "and it paints the narrowed class once one is picked:\n{failing}"
     );
     assert!(
-        failing.contains("1 fail · 1 without evidence"),
+        failing.contains("1 fail · 1 without results"),
         "the head counts one of each over the whole registry:\n{failing}"
     );
     assert!(

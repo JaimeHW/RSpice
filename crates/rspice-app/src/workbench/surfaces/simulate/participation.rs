@@ -518,7 +518,7 @@ fn picker_refusal(
     if draft.selected.is_empty() {
         return Some(
             "Select at least one run-set point; an instance that runs nowhere produces no \
-             evidence. Disable the instance instead."
+             results. Disable the instance instead."
                 .to_owned(),
         );
     }
@@ -762,9 +762,7 @@ pub(super) fn participation_row(
         if let Some(picker) = picker
             && picker
                 .show(ui)
-                .on_hover_text(
-                    "Pick the exact resolved run-set points this instance is executed at",
-                )
+                .on_hover_text("Pick the run-set points this instance runs at")
                 .clicked()
         {
             action = Some(ParticipationAction::ChoosePoints);

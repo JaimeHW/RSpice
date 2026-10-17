@@ -849,7 +849,7 @@ fn change_impact(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload) 
                 rule_row(
                     ui,
                     "Retained results",
-                    "unchanged · a committed dataset is immutable",
+                    "unchanged · a finished run's results cannot change",
                 );
             });
             card_note(

@@ -271,7 +271,7 @@ fn multirate_fields(
     sub_header(ui, "Carrier solution");
     for (label, value) in [
         ("Harmonic orders (optional)", &mut c.harmonics),
-        ("Exact phase points (optional)", &mut c.collocation_points),
+        ("Collocation points (optional)", &mut c.collocation_points),
         ("AC-only source tones", &mut c.source_tones),
     ] {
         input_row(ui, label, value);

@@ -598,7 +598,7 @@ impl ModelGate<'_> {
             (
                 3,
                 format!(
-                    "{} without evidence",
+                    "{} without results",
                     counted(self.vectors - self.evidenced_vectors, "vector", "vectors")
                 ),
                 Tone::Warn,
@@ -928,10 +928,10 @@ fn reproducibility(ui: &mut Ui, app: &RSpiceApp) {
             });
             card_note(
                 ui,
-                "A pinned closure is what makes a result reproducible from the project alone: the \
-                 exact bytes that were read, not the path they were read from. A library resolved \
-                 from a live path that has since changed would otherwise produce a different \
-                 answer under the same manifest.",
+                "Pinning a library saves the file contents that were read, not just their path, \
+                 so the project alone can reproduce a result. A library read from a path whose \
+                 file has since changed would otherwise give a different answer under the same \
+                 run settings.",
             );
         },
     );
@@ -1218,7 +1218,7 @@ mod tests {
         );
         assert_eq!(reading.findings[1].finding, "1 evidenced vector failing");
         assert_eq!(reading.findings[2].finding, "1 disposition open");
-        assert_eq!(reading.findings[3].finding, "4 vectors without evidence");
+        assert_eq!(reading.findings[3].finding, "4 vectors without results");
         assert_eq!(reading.findings[4].finding, "no qualification suite");
         assert_eq!(reading.findings[4].state, "unqualified");
     }
