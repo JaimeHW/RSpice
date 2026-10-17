@@ -573,6 +573,7 @@ fn violation_targets_net(violation: &DrcViolation, net: &DesignNet) -> bool {
         | DrcLocation::Bus { .. }
         | DrcLocation::BusTap { .. }
         | DrcLocation::Global
+        | DrcLocation::CellView { .. }
         | DrcLocation::SymbolPin { .. } => false,
     }
 }
@@ -1661,6 +1662,7 @@ fn reveal_drc_location(schematic: &mut SchematicState, location: &DrcLocation) {
         // Centring on the instance would claim it is.
         DrcLocation::InsideInstance { .. }
         | DrcLocation::Global
+        | DrcLocation::CellView { .. }
         | DrcLocation::SymbolPin { .. } => {}
     }
 }

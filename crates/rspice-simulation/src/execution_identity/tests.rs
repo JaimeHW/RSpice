@@ -1356,6 +1356,7 @@ fn drc_identity_tags_are_never_renumbered() {
         DrcViolationType::UndrivenNet => 30,
         DrcViolationType::GroundNotNodeZero => 31,
         DrcViolationType::SupplyTiedToGround => 32,
+        DrcViolationType::UnusedCellView => 33,
     };
     let types = [
         DrcViolationType::FloatingNode,
@@ -1390,6 +1391,7 @@ fn drc_identity_tags_are_never_renumbered() {
         DrcViolationType::UndrivenNet,
         DrcViolationType::GroundNotNodeZero,
         DrcViolationType::SupplyTiedToGround,
+        DrcViolationType::UnusedCellView,
     ];
     let mut seen = std::collections::BTreeSet::new();
     for violation_type in types {
@@ -1449,6 +1451,16 @@ fn drc_identity_tags_are_never_renumbered() {
             },
             10,
         ),
+        (
+            DrcLocation::CellView {
+                reference: rspice_design_model::cell_view::CellViewRef::new(
+                    "work",
+                    "spare",
+                    "schematic",
+                ),
+            },
+            11,
+        ),
     ];
     for (location, pinned) in &locations {
         // Every location kind is named here, so a new one does not compile
@@ -1464,7 +1476,8 @@ fn drc_identity_tags_are_never_renumbered() {
             | DrcLocation::Bus { .. }
             | DrcLocation::BusTap { .. }
             | DrcLocation::Terminal { .. }
-            | DrcLocation::InsideInstance { .. } => {}
+            | DrcLocation::InsideInstance { .. }
+            | DrcLocation::CellView { .. } => {}
         }
         assert_eq!(drc_location_tag(location), *pinned, "{location:?}");
     }
@@ -1627,6 +1640,21 @@ fn drc_identity_bytes_are_pinned_for_every_location_kind() {
                 text(bytes, STRING, "amp");
                 text(bytes, STRING, "schematic");
                 terminal(bytes);
+            }),
+        ),
+        (
+            DrcLocation::CellView {
+                reference: rspice_design_model::cell_view::CellViewRef::new(
+                    "work",
+                    "spare",
+                    "schematic",
+                ),
+            },
+            Box::new(|bytes: &mut Vec<u8>| {
+                location(bytes, 11);
+                text(bytes, STRING, "work");
+                text(bytes, STRING, "spare");
+                text(bytes, STRING, "schematic");
             }),
         ),
     ];

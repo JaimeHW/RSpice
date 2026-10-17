@@ -303,6 +303,7 @@ pub fn location_key(location: &DrcLocation) -> String {
             )
         }
         DrcLocation::Global => "global".to_owned(),
+        DrcLocation::CellView { reference } => format!("cellview:{}", reference.key()),
         DrcLocation::SymbolPin {
             reference,
             pin_name,
@@ -325,6 +326,8 @@ pub fn waiver_site(location: &DrcLocation) -> (Option<&CellViewRef>, String) {
             (Some(deeper), object) => (Some(deeper), object),
             (None, object) => (Some(view), object),
         },
+        // About the cellview itself, so it would be stored there.
+        DrcLocation::CellView { reference } => (Some(reference), "cellview".to_owned()),
         other => (None, location_key(other)),
     }
 }

@@ -216,6 +216,11 @@ pub struct CheckReads {
     pub bindings: Vec<String>,
     /// The deck's global node names, folded and sorted.
     pub globals: Vec<String>,
+    /// The cellviews the walk itself descended into, the subject among them,
+    /// once each in the order of their folded keys: a subset of
+    /// [`Self::cellviews`], which also holds
+    /// every cellview an instance names whether or not the walk follows it.
+    pub reached: Vec<CellViewRef>,
 }
 
 /// What a check of `reference` reads, by the walk the check itself takes.
@@ -227,9 +232,12 @@ pub fn check_reads(
     let graph = InstanceGraph::walk(schematic.as_ref(), Some(reference.clone()), hierarchy);
     let mut cellviews = std::collections::BTreeSet::new();
     let mut bindings = std::collections::BTreeSet::new();
+    let mut walked = BTreeMap::new();
     for view in &graph.views {
         if let Some(reached) = &view.reference {
-            cellviews.insert(reached.key().to_ascii_lowercase());
+            let key = reached.key().to_ascii_lowercase();
+            cellviews.insert(key.clone());
+            walked.entry(key).or_insert_with(|| reached.clone());
         }
         let instances = view
             .document
@@ -279,6 +287,54 @@ pub fn check_reads(
         cellviews: cellviews.into_iter().collect(),
         bindings: bindings.into_iter().collect(),
         globals,
+        reached: walked.into_values().collect(),
+    }
+}
+
+/// State as unused every one of `candidates` the walk behind `reads` never
+/// descended into, at the severity `config` sets for the rule.
+///
+/// The caller names the candidates — the schematics of the project's own
+/// libraries — because which libraries are the project's and which are
+/// references is the project's to say, not the check's. `root` is the
+/// cellview the walk started from, which the finding names.
+pub fn append_unused_cellviews(
+    result: &mut DrcResult,
+    root: &CellViewRef,
+    candidates: impl IntoIterator<Item = CellViewRef>,
+    reads: &CheckReads,
+    config: &DrcConfig,
+) {
+    let reached = reads
+        .reached
+        .iter()
+        .map(|reference| reference.key().to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    let unused = candidates
+        .into_iter()
+        .map(|candidate| (candidate.key().to_ascii_lowercase(), candidate))
+        .filter(|(key, _)| !reached.contains(key))
+        .collect::<BTreeMap<_, _>>();
+    let severity = config
+        .severity_overrides
+        .get(&DrcViolationType::UnusedCellView)
+        .copied();
+    for reference in unused.into_values() {
+        let message = format!(
+            "{} is not reached from {} under its configuration",
+            reference.display_path(),
+            root.display_path()
+        );
+        let mut violation = DrcViolation::new(
+            result.total_count(),
+            DrcViolationType::UnusedCellView,
+            message,
+            DrcLocation::CellView { reference },
+        );
+        if let Some(severity) = severity {
+            violation.severity = severity;
+        }
+        result.add_violation(violation);
     }
 }
 

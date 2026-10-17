@@ -319,6 +319,22 @@ impl DrcViolationType {
                 floor: ENGINE_REFUSES,
                 waivable: false,
             },
+            Self::UnusedCellView => &DrcRule {
+                code: "DRC-UNUSED-CELLVIEW",
+                title: "Unused cellview",
+                explanation: "A schematic in one of the project's own libraries that the design, \
+                    walked from the simulation root under its configuration, never reaches. \
+                    Nothing in it is simulated or checked with the design, so an edit to it \
+                    changes nothing a run reports. Reference and technology libraries are never \
+                    reported. Only Check Design reports it, because only a walk of the whole \
+                    design knows what it reached. It says something about the project's \
+                    libraries rather than about an object in a drawing, so it is a note and is \
+                    not waived: instantiate the cellview, delete it, or move it to a reference \
+                    library.",
+                default_severity: DrcSeverity::Info,
+                floor: ANY,
+                waivable: false,
+            },
             Self::DuplicateName => &DrcRule {
                 code: "DRC-DUPLICATE-NAME",
                 title: "Duplicate name",
@@ -493,6 +509,7 @@ mod tests {
             DrcViolationType::GroundNotNodeZero => "DRC-GROUND-NOT-NODE-ZERO",
             DrcViolationType::SupplyTiedToGround => "DRC-SUPPLY-TIED-TO-GROUND",
             DrcViolationType::RecursiveInstantiation => "DRC-RECURSIVE-INSTANTIATION",
+            DrcViolationType::UnusedCellView => "DRC-UNUSED-CELLVIEW",
             DrcViolationType::DuplicateName => "DRC-DUPLICATE-NAME",
             DrcViolationType::EmptyName => "DRC-EMPTY-NAME",
             DrcViolationType::InvalidName => "DRC-INVALID-NAME",

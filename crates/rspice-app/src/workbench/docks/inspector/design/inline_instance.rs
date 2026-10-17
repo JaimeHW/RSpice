@@ -1274,7 +1274,7 @@ pub(super) fn violation_targets_net(violation: &DrcViolation, net: &DesignNet) -
         DrcLocation::Terminal { .. } => false,
         // A finding inside an instantiated cellview belongs to that cellview's
         // nets, not to this one's.
-        DrcLocation::InsideInstance { .. } => false,
+        DrcLocation::InsideInstance { .. } | DrcLocation::CellView { .. } => false,
         DrcLocation::Point { .. }
         | DrcLocation::Bus { .. }
         | DrcLocation::BusTap { .. }
