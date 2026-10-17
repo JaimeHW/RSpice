@@ -15,7 +15,7 @@ use crate::state::{
 use crate::ui::accessibility::counted;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry};
-use crate::workbench::state::WorkspaceDocumentId;
+use crate::workbench::state::{SyncFailures, WorkspaceDocumentId};
 use rspice_design::symbol::generated::{
     GENERATED_SYMBOL_VIEW, is_generated_symbol, store_generated_symbol,
 };
@@ -644,20 +644,25 @@ impl AppState {
                         .unwrap_or_else(|| self.schematic.clone()),
                 )
             });
-        let receipt = match self
+        let assigned = self
             .workspace
             .content
-            .assign_unowned_objects_to_active_sheet(active, &self.schematic, &recorded)
+            .assign_unowned_objects_to_active_sheet(active, &self.schematic, &recorded);
+        // Recorded once while it stands, the way annotation recovery is: this
+        // runs on every frame's sync.
+        let failure = assigned
+            .as_ref()
+            .err()
+            .map(|error| format!("Sheet membership could not be updated: {error}"));
+        if SyncFailures::observe(
+            &mut self.workbench.recorded_sync_failures.sheet_membership,
+            failure.as_deref(),
+        ) && let Some(failure) = failure
         {
-            Ok(receipt) => receipt,
-            Err(error) => {
-                self.record(
-                    LogSeverity::Warning,
-                    LogSource::Studio,
-                    format!("Sheet membership could not be updated: {error}"),
-                );
-                return;
-            }
+            self.record(LogSeverity::Warning, LogSource::Studio, failure);
+        }
+        let Ok(receipt) = assigned else {
+            return;
         };
         let committed_revision = self.workspace.content.project.revision();
         let assignments = self
@@ -762,7 +767,11 @@ impl AppState {
                 }
             }
         };
-        if let Some(error) = symbol_error {
+        if SyncFailures::observe(
+            &mut self.workbench.recorded_sync_failures.generated_symbol,
+            symbol_error.as_deref(),
+        ) && let Some(error) = symbol_error
+        {
             self.record(LogSeverity::Warning, LogSource::Studio, error);
         }
     }

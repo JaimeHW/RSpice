@@ -858,6 +858,26 @@ impl StatusPrompt {
     }
 }
 
+/// Failures of the per-frame drawing sync that the Console already holds.
+#[derive(Debug, Clone, Default)]
+pub struct SyncFailures {
+    pub sheet_membership: Option<String>,
+    pub generated_symbol: Option<String>,
+}
+
+impl SyncFailures {
+    /// Note `failure` in `slot`, answering whether it is new and so is to be
+    /// recorded. `None` clears the slot, so the same failure returning later
+    /// is recorded again.
+    pub fn observe(slot: &mut Option<String>, failure: Option<&str>) -> bool {
+        if slot.as_deref() == failure {
+            return false;
+        }
+        *slot = failure.map(str::to_owned);
+        failure.is_some()
+    }
+}
+
 /// The last outcome any Simulation Studio plan command announced.
 ///
 /// Only the Analyses route draws this; the Console holds the record of each
@@ -1179,6 +1199,12 @@ pub struct WorkbenchState {
     /// The status bar's feedback on the gesture just made.
     #[serde(skip)]
     pub prompt: Option<StatusPrompt>,
+    /// The sheet-membership and generated-symbol failures last recorded.
+    ///
+    /// The drawing is synced every frame, so a failure that stands is
+    /// recorded when it first appears or changes, not sixty times a second.
+    #[serde(skip)]
+    pub recorded_sync_failures: SyncFailures,
     /// Active Simulation Studio transaction. Drafts are runtime-only and are
     /// committed atomically by the dialog's primary action.
     #[serde(skip)]
@@ -1448,6 +1474,7 @@ impl Default for WorkbenchState {
             simulation_surface_editor_anchor_y: None,
             analysis_lifecycle_status: AnalysisLifecycleOutcome::default(),
             prompt: None,
+            recorded_sync_failures: SyncFailures::default(),
             simulation_workflow: None,
             selected_specification: None,
             specification_editor_route_pending: false,
