@@ -176,8 +176,19 @@ impl SchematicState {
                         .or_else(|| laid.iter().copied().filter(exists).max());
                 }
 
-                // Add junction markers where 3+ wire endpoints meet.
-                schematic.update_wire_junctions(scope);
+                // Dots follow the document's junction policy, as every other
+                // cleanup does: under manual junctions the user places them.
+                if schematic
+                    .design
+                    .document()
+                    .document_policy
+                    .wire_junctions
+                    .automatic_junctions()
+                {
+                    schematic.update_wire_junctions(scope);
+                } else {
+                    schematic.remove_orphan_junctions(scope);
+                }
             });
         });
 
@@ -322,6 +333,37 @@ mod tests {
                 vec![at, Point::new(60, 0)],
             ]
         );
+    }
+
+    /// Under manual junctions the user places every dot: a drawn T still
+    /// splits the wire it lands on, but gets no dot of the tool's making.
+    /// Under automatic junctions it does.
+    #[test]
+    fn a_drawn_t_gets_a_dot_only_under_automatic_junctions() {
+        for (policy, dots) in [
+            (crate::state::WireJunctionPolicy::OrthogonalManual, 0),
+            (crate::state::WireJunctionPolicy::OrthogonalAutomatic, 1),
+            (crate::state::WireJunctionPolicy::AnyAngle, 1),
+        ] {
+            let mut schematic = SchematicState::default();
+            schematic
+                .design
+                .document_mut_for_test()
+                .document_policy
+                .wire_junctions = policy;
+            schematic.add_wire(vec![Point::new(0, 0), Point::new(40, 0)]);
+
+            schematic.start_wire(Point::new(20, 40));
+            schematic.extend_wire(Point::new(20, 0));
+            schematic.finish_wire(|_| false);
+
+            assert_eq!(schematic.design.document().wires.len(), 3, "{policy:?}");
+            assert_eq!(
+                schematic.design.document().junctions.len(),
+                dots,
+                "{policy:?}"
+            );
+        }
     }
 
     #[test]
