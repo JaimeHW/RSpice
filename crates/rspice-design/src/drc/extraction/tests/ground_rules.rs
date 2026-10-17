@@ -277,6 +277,33 @@ fn a_ground_label_whose_net_took_another_name_is_an_error() {
     );
 }
 
+/// A waiver names a lost ground label by the label's name, so no two findings
+/// of the rule in one cellview may share it. Two `GND` labels placed on two
+/// nets that `VSS` and `VEE` claimed first are one name, and labels of one
+/// name are one node: the extractor joins the two nets, and the rule states
+/// the one node it writes once.
+#[test]
+fn ground_labels_of_one_name_lose_one_node_and_are_stated_once() {
+    let mut drawing = labelled(vec![
+        two(1, ComponentType::VoltageSource, "V1", "in", "VSS"),
+        two(2, ComponentType::Resistor, "R1", "in", "0"),
+        two(3, ComponentType::VoltageSource, "V2", "in2", "VEE"),
+        two(4, ComponentType::Resistor, "R2", "in2", "0"),
+    ]);
+    let vss = drawing.net_labels[1].pos;
+    let vee = drawing.net_labels[5].pos;
+    drawing.net_labels.push(NetLabel::new(900, vss, "GND"));
+    drawing.net_labels.push(NetLabel::new(901, vee, "GND"));
+    let views = buffers([("top", drawing)]);
+    let result = checked_under(&unaliased(), &views["work/top/schematic"], &views);
+
+    let keys = of_type(&result, DrcViolationType::GroundNotNodeZero)
+        .into_iter()
+        .map(|finding| crate::drc::location_key(&finding.location))
+        .collect::<Vec<_>>();
+    assert_eq!(keys, ["label:GND"], "{:?}", result.violations());
+}
+
 /// Inside a placed cell, the label is stated at the occurrence.
 #[test]
 fn a_ground_label_below_the_subject_is_stated_inside_its_occurrence() {
