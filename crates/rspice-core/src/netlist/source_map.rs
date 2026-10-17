@@ -930,6 +930,10 @@ pub struct NetlistValueSpan {
     pub line: usize,
     /// Enclosing `.SUBCKT` scope, `None` at the top level.
     pub scope: Option<String>,
+    /// Why the parser did not read the line `span` is on, `None` when it did
+    /// or when the map was built without a parse
+    /// ([`source_map_for_editor`]).
+    pub unread: Option<UnreadSourceReason>,
 }
 
 /// A `.FUNC` definition the editor's evaluator needs before it can resolve an
@@ -946,6 +950,34 @@ pub struct NetlistFunctionDefinition {
     pub line: usize,
     /// Enclosing `.SUBCKT` scope, `None` at the top level.
     pub scope: Option<String>,
+}
+
+/// A run of physical source lines the parser skipped without reading them.
+///
+/// The parser records these as it decides them, so a reader of the source text
+/// can tell a line the engine reads from one it never sees without deciding a
+/// branch or a section a second time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnreadSourceRegion {
+    /// The source the lines are in; `None` for a deck parsed from memory.
+    pub source: Option<std::path::PathBuf>,
+    /// The first and last one-based physical line not read.
+    pub lines: std::ops::RangeInclusive<usize>,
+    /// Why the parser did not read them.
+    pub reason: UnreadSourceReason,
+}
+
+/// Why the parser did not read a run of source lines.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnreadSourceReason {
+    /// A `.if`/`.elseif`/`.else` branch the parser did not take because
+    /// `condition` evaluated to `holds`: false for a branch whose own
+    /// condition failed, true for a later branch of a chain that condition
+    /// already took. The condition is written without the parentheses
+    /// around it.
+    ConditionalBranch { condition: String, holds: bool },
+    /// An inline `.lib name` ... `.endl` section that no `.lib` card selected.
+    LibrarySection { name: String },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -1039,13 +1071,37 @@ impl NetlistSourceMap {
         })
     }
 
-    /// The parameter definitions written directly in `level`, in source order.
+    /// Where `name` is written for a reader inside `scope` that no definition
+    /// the parser read binds: the last definition on an unread line in the
+    /// innermost enclosing scope that has one. `None` when a read definition
+    /// binds the name, or when no line defines it at all.
+    pub fn unread_definition_for(
+        &self,
+        name: &str,
+        scope: Option<&str>,
+    ) -> Option<&NetlistValueSpan> {
+        if self.param_definition_for(name, scope).is_some() {
+            return None;
+        }
+        scope_levels(scope).into_iter().rev().find_map(|level| {
+            self.value_spans.iter().rev().find(|span| {
+                span.kind == NetlistValueKind::ParamDefinition
+                    && span.unread.is_some()
+                    && span.name.eq_ignore_ascii_case(name)
+                    && same_scope(span.scope.as_deref(), level)
+            })
+        })
+    }
+
+    /// The parameter definitions the parser reads written directly in
+    /// `level`, in source order.
     fn param_definitions_in<'a>(
         &'a self,
         level: Option<&str>,
     ) -> impl Iterator<Item = &'a NetlistValueSpan> {
         self.value_spans.iter().filter(move |span| {
             span.kind == NetlistValueKind::ParamDefinition
+                && span.unread.is_none()
                 && same_scope(span.scope.as_deref(), level)
         })
     }
@@ -1098,6 +1154,51 @@ fn same_scope(definition_scope: Option<&str>, level: Option<&str>) -> bool {
     }
 }
 
+/// The editor source map of `buffer` as a parse of it read it.
+///
+/// `unread` is what that parse skipped in `buffer` itself
+/// ([`Netlist::unread_root_source`]). A model, subcircuit or `.FUNC` written
+/// on an unread line is not a definition, and a model or subcircuit named
+/// there is not a reference. A value span there stays in the map, carrying
+/// the reason, so a reader pointing at it is told why it binds nothing; no
+/// parameter environment counts it.
+///
+/// [`Netlist::unread_root_source`]: super::Netlist::unread_root_source
+pub fn source_map_for_editor_as_read<'a>(
+    buffer: &str,
+    unread: impl IntoIterator<Item = &'a UnreadSourceRegion>,
+) -> NetlistSourceMap {
+    let mut map = source_map_for_editor(buffer);
+    let unread = unread.into_iter().collect::<Vec<_>>();
+    if unread.is_empty() {
+        return map;
+    }
+    let reason_on = |line: usize| {
+        unread
+            .iter()
+            .find(|region| region.lines.contains(&line))
+            .map(|region| &region.reason)
+    };
+    let line_starts = std::iter::once(0)
+        .chain(buffer.match_indices('\n').map(|(at, _)| at + 1))
+        .collect::<Vec<_>>();
+    let line_of = |byte: usize| line_starts.partition_point(|start| *start <= byte);
+    for span in &mut map.value_spans {
+        span.unread = reason_on(span.line).cloned();
+    }
+    map.functions
+        .retain(|function| reason_on(function.line).is_none());
+    map.model_defs
+        .retain(|definition| reason_on(line_of(definition.span.start)).is_none());
+    map.subckt_defs
+        .retain(|definition| reason_on(line_of(definition.span.start)).is_none());
+    map.references
+        .retain(|reference| reason_on(line_of(reference.span.start)).is_none());
+    map
+}
+
+/// The editor source map of `buffer` read lexically, every line taken as
+/// read. [`source_map_for_editor_as_read`] applies what a parse skipped.
 pub fn source_map_for_editor(buffer: &str) -> NetlistSourceMap {
     let mut map = NetlistSourceMap::default();
     let mut logical = None;
@@ -1338,6 +1439,7 @@ fn collect_value_spans(
                 expression: line.text[value.body.clone()].to_owned(),
                 line: physical,
                 scope: scope.clone(),
+                unread: None,
             });
         }
         collect_expression_spans(line, &value, scope.as_deref(), &[], map);
@@ -1360,6 +1462,7 @@ fn collect_value_spans(
             expression: line.text[token.clone()].to_owned(),
             line: physical,
             scope,
+            unread: None,
         });
     }
 }
@@ -1430,6 +1533,7 @@ fn collect_expression_spans(
                 expression: body.to_owned(),
                 line: physical,
                 scope: scope.map(str::to_owned),
+                unread: None,
             });
         }
     }
@@ -1451,6 +1555,7 @@ fn collect_expression_spans(
             expression: line.text[reference].to_owned(),
             line: physical,
             scope: scope.map(str::to_owned),
+            unread: None,
         });
     }
 }
@@ -2221,6 +2326,174 @@ X1 n 0 cell\n\
             !map.value_spans.iter().any(|span| span.name == "x"),
             "a function formal is not a deck parameter: {:?}",
             map.value_spans
+        );
+    }
+
+    /// The source map of `src` as the engine's parse of it read it.
+    fn map_as_parsed(src: &str) -> (NetlistSourceMap, Netlist) {
+        let netlist = Netlist::parse(src).expect("deck parses");
+        (
+            source_map_for_editor_as_read(src, netlist.unread_root_source()),
+            netlist,
+        )
+    }
+
+    fn branch(condition: &str, holds: bool) -> Option<UnreadSourceReason> {
+        Some(UnreadSourceReason::ConditionalBranch {
+            condition: condition.to_owned(),
+            holds,
+        })
+    }
+
+    /// The reason recorded on the definition of `name` written on `line`.
+    fn unread_on(map: &NetlistSourceMap, name: &str, line: usize) -> Option<UnreadSourceReason> {
+        map.value_spans
+            .iter()
+            .find(|span| {
+                span.kind == NetlistValueKind::ParamDefinition
+                    && span.name == name
+                    && span.line == line
+            })
+            .unwrap_or_else(|| panic!("{name} is defined on line {line}"))
+            .unread
+            .clone()
+    }
+
+    /// The parser reads only the branch it takes, so only that branch's
+    /// definition binds; the other is not a definition at all, and says why.
+    #[test]
+    fn only_the_taken_branch_of_an_if_defines_a_parameter() {
+        for (mode, binding_line, value, skipped_line, holds) in
+            [(1, 4, 0.5, 6, true), (0, 6, 0.4, 4, false)]
+        {
+            let src = format!(
+                "deck\n\
+.param mode={mode}\n\
+.if (mode==1)\n\
+.param vth=0.5\n\
+.else\n\
+.param vth=0.4\n\
+.endif\n\
+V1 a 0 {{vth}}\n\
+.end\n"
+            );
+            let (map, netlist) = map_as_parsed(&src);
+
+            assert_eq!(netlist.params.get("vth"), Some(value), "mode={mode}");
+            assert_eq!(
+                map.param_context_in(None).get("vth"),
+                Some(value),
+                "mode={mode}: the editor binds what the engine binds"
+            );
+            assert_eq!(
+                map.param_definition_for("vth", None)
+                    .map(|definition| definition.line),
+                Some(binding_line),
+                "mode={mode}"
+            );
+            assert_eq!(unread_on(&map, "vth", binding_line), None, "mode={mode}");
+            assert_eq!(
+                unread_on(&map, "vth", skipped_line),
+                branch("mode==1", holds),
+                "mode={mode}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_nested_if_reads_only_the_branch_its_own_chain_takes() {
+        let src = "deck\n\
+.param mode=1 corner=2\n\
+.if (mode==1)\n\
+.if (corner==1)\n\
+.param vth=0.1\n\
+.elseif (corner==2)\n\
+.param vth=0.2\n\
+.else\n\
+.param vth=0.3\n\
+.endif\n\
+.else\n\
+.param vth=0.9\n\
+.endif\n\
+.end\n";
+        let (map, netlist) = map_as_parsed(src);
+
+        assert_eq!(netlist.params.get("vth"), Some(0.2));
+        assert_eq!(map.param_context_in(None).get("vth"), Some(0.2));
+        assert_eq!(
+            map.param_definition_for("vth", None)
+                .map(|definition| definition.line),
+            Some(7)
+        );
+        assert_eq!(unread_on(&map, "vth", 5), branch("corner==1", false));
+        assert_eq!(unread_on(&map, "vth", 9), branch("corner==2", true));
+        assert_eq!(unread_on(&map, "vth", 12), branch("mode==1", true));
+    }
+
+    /// A definition outside the block is read wherever it is written, so the
+    /// last read definition still binds every reader, the one above the block
+    /// included, and the skipped branch stays out of the count.
+    #[test]
+    fn a_redefinition_after_the_endif_binds_every_reader() {
+        let src = "deck\n\
+.param mode=1\n\
+V2 b 0 {vth}\n\
+.if (mode==1)\n\
+.param vth=0.5\n\
+.else\n\
+.param vth=0.4\n\
+.endif\n\
+.param vth=0.7\n\
+V1 a 0 {vth}\n\
+.end\n";
+        let (map, netlist) = map_as_parsed(src);
+
+        assert_eq!(netlist.params.get("vth"), Some(0.7));
+        assert_eq!(map.param_context_in(None).get("vth"), Some(0.7));
+        assert_eq!(
+            map.param_definition_for("vth", None)
+                .map(|definition| definition.line),
+            Some(9)
+        );
+        assert_eq!(unread_on(&map, "vth", 5), None, "read, then superseded");
+        assert_eq!(unread_on(&map, "vth", 7), branch("mode==1", true));
+    }
+
+    /// A name written only in a skipped branch has no binding, and the map
+    /// says where it is written instead.
+    #[test]
+    fn a_parameter_defined_only_in_a_skipped_branch_binds_nothing() {
+        let src = "deck\n\
+.param mode=0\n\
+.if (mode==1)\n\
+.param vth=0.5\n\
+.model nonly nmos\n\
+.func twice(x) {2*x}\n\
+.endif\n\
+M1 d g s b nonly\n\
+.end\n";
+        let (map, _) = map_as_parsed(src);
+
+        assert_eq!(map.param_definition_for("vth", None), None);
+        assert_eq!(map.param_context_in(None).get("vth"), None);
+        assert_eq!(
+            map.unread_definition_for("vth", None)
+                .map(|definition| (definition.line, definition.unread.clone())),
+            Some((4, branch("mode==1", false)))
+        );
+        assert!(
+            map.model_defs.is_empty(),
+            "a skipped .model defines nothing: {:?}",
+            map.model_defs
+        );
+        assert!(map.functions.is_empty(), "{:?}", map.functions);
+        assert_eq!(
+            map.references
+                .iter()
+                .map(|reference| reference.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["nonly"],
+            "the reference on a read line stays"
         );
     }
 

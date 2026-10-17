@@ -15,6 +15,12 @@
 //! No branch of that chain emits cards, but its structure is still validated.
 //! Independent later cards can select TEMP/TNOM; the retained error prevents
 //! publication unless a fresh source pass evaluates the decision successfully.
+//!
+//! Every branch not taken is recorded as an [`UnreadSourceRegion`]: the lines
+//! between the directive that opens it and the one that closes it, with the
+//! condition that decided it. A branch inside a skipped branch is covered by
+//! the outer region. A chain left unresolved records nothing, because its
+//! retained error keeps the pass from publishing a netlist.
 
 use super::*;
 
@@ -33,6 +39,55 @@ pub(super) struct ConditionalFrame {
     else_seen: bool,
     /// Line number of the opening `.if`, for unbalanced-block diagnostics.
     pub(super) opened_at_line: usize,
+    /// The directive that opened the current branch.
+    branch_opened_at: NetlistSourceLocation,
+    /// Why this block skips the current branch, when it is this block's own
+    /// decision rather than an enclosing one.
+    skipped_because: Option<UnreadSourceReason>,
+    /// The condition of the branch this block took, as a reader writes it.
+    taken_condition: Option<String>,
+}
+
+impl ConditionalFrame {
+    /// Close the current branch at the directive `closed_at`, recording its
+    /// lines when this block skipped them.
+    fn close_branch(
+        &mut self,
+        closed_at: &NetlistSourceLocation,
+        unread: &mut Vec<UnreadSourceRegion>,
+    ) {
+        let Some(reason) = self.skipped_because.take() else {
+            return;
+        };
+        let first = self.branch_opened_at.line + 1;
+        let Some(last) = closed_at.line.checked_sub(1) else {
+            return;
+        };
+        if self.branch_opened_at.path == closed_at.path && first <= last {
+            unread.push(UnreadSourceRegion {
+                source: closed_at.path.clone(),
+                lines: first..=last,
+                reason,
+            });
+        }
+    }
+}
+
+/// A condition as a reader writes it about the deck: without the parentheses
+/// `.if (condition)` wraps it in.
+fn condition_text(condition: &str) -> String {
+    let text = condition.trim();
+    let unwrapped = text
+        .strip_prefix('(')
+        .and_then(|rest| rest.strip_suffix(')'))
+        .filter(|inner| {
+            inner.chars().try_fold(0usize, |depth, ch| match ch {
+                '(' => Some(depth + 1),
+                ')' => depth.checked_sub(1),
+                _ => Some(depth),
+            }) == Some(0)
+        });
+    unwrapped.unwrap_or(text).trim().to_owned()
 }
 
 /// Conditional directive recognized on a logical line.
@@ -41,6 +96,22 @@ pub(super) enum ConditionalDirective<'a> {
     ElseIf(&'a str),
     Else,
     EndIf,
+}
+
+/// Why a block skips a branch that follows the one it took: the taken
+/// branch's condition holds. Nothing when an enclosing block skips the whole
+/// block, or when no branch was decided.
+fn taken_branch_skips(frame: &ConditionalFrame, parent_active: bool) -> Option<UnreadSourceReason> {
+    if !parent_active || !frame.branch_taken {
+        return None;
+    }
+    frame
+        .taken_condition
+        .clone()
+        .map(|condition| UnreadSourceReason::ConditionalBranch {
+            condition,
+            holds: true,
+        })
 }
 
 /// Recognize a conditional directive, returning the condition text for
@@ -115,6 +186,7 @@ impl ParseState {
                 } else {
                     Some(false)
                 };
+                let reader_condition = condition_text(condition);
                 self.conditional_stack.push(ConditionalFrame {
                     active: parent_active && decision == Some(true),
                     // Inside a suppressed region no branch may ever fire.
@@ -122,6 +194,14 @@ impl ParseState {
                     unresolved: decision.is_none(),
                     else_seen: false,
                     opened_at_line: line_num,
+                    branch_opened_at: origin.clone(),
+                    skipped_because: (parent_active && decision == Some(false)).then(|| {
+                        UnreadSourceReason::ConditionalBranch {
+                            condition: reader_condition.clone(),
+                            holds: false,
+                        }
+                    }),
+                    taken_condition: (decision == Some(true)).then_some(reader_condition),
                 });
             }
             ConditionalDirective::ElseIf(condition) => {
@@ -144,17 +224,27 @@ impl ParseState {
                     }
                     .into());
                 }
+                frame.close_branch(origin, &mut self.unread_source);
+                frame.branch_opened_at = origin.clone();
                 if frame.branch_taken || frame.unresolved || !parent_active {
                     frame.active = false;
+                    frame.skipped_because = taken_branch_skips(frame, parent_active);
                 } else {
                     let decision = self.condition_decision(condition, line_num, origin, abort)?;
                     let frame = self
                         .conditional_stack
                         .last_mut()
                         .expect("frame checked above");
+                    let reader_condition = condition_text(condition);
                     frame.active = decision == Some(true);
                     frame.branch_taken = decision == Some(true);
                     frame.unresolved = decision.is_none();
+                    frame.skipped_because =
+                        (decision == Some(false)).then(|| UnreadSourceReason::ConditionalBranch {
+                            condition: reader_condition.clone(),
+                            holds: false,
+                        });
+                    frame.taken_condition = (decision == Some(true)).then_some(reader_condition);
                 }
             }
             ConditionalDirective::Else => {
@@ -177,17 +267,22 @@ impl ParseState {
                     }
                     .into());
                 }
+                frame.close_branch(origin, &mut self.unread_source);
+                frame.branch_opened_at = origin.clone();
                 frame.else_seen = true;
                 frame.active = parent_active && !frame.branch_taken && !frame.unresolved;
+                frame.skipped_because = taken_branch_skips(frame, parent_active);
                 frame.branch_taken = true;
             }
             ConditionalDirective::EndIf => {
-                self.conditional_stack
+                let mut frame = self
+                    .conditional_stack
                     .pop()
                     .ok_or_else(|| ParseError::Syntax {
                         line: line_num,
                         message: ".endif without a matching .if".to_string(),
                     })?;
+                frame.close_branch(origin, &mut self.unread_source);
             }
         }
         Ok(())

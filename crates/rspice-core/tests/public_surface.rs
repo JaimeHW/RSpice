@@ -177,8 +177,16 @@ use rspice_core::analysis::harmonic_balance::{
 //   `ModelBinCoverageGap` and the builder's `model_bin_coverage_gaps`.
 // - `ParameterRedefinitionPolicy::binding_definition`, one, a method of a
 //   public policy type that the parser and the source map read in this crate.
-// The census is 5,728, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5728;
+// The census was 5,728, with no slack.
+// Five statements let the netlist editor read a deck the way the parser read
+// it, for the application's value hover and reference lint
+// (`rspice-app` netlist_document language.rs and diagnostics.rs):
+// `UnreadSourceRegion` and `UnreadSourceReason`, the lines the parser skipped
+// and why; `Netlist::unread_root_source`, the ones in the deck's own text;
+// `source_map_for_editor_as_read`, the editor map with them applied; and
+// `NetlistSourceMap::unread_definition_for`, where a name nothing read binds
+// is written. The census is 5,733, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5733;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

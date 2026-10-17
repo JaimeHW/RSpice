@@ -42,6 +42,7 @@ use super::{
     poll_parse_text, validate_startup_directives_with_abort,
 };
 use super::{ElementParameterDirection, ParameterDirectionCapture};
+use super::{UnreadSourceReason, UnreadSourceRegion};
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::expr::Derivative;

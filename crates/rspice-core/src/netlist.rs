@@ -1115,6 +1115,10 @@ pub struct Netlist {
     /// Source-provider-resolved control regions for an ordered execution host.
     /// Present only when parsing explicitly requests script retention.
     pub control_script: Option<std::sync::Arc<ControlScriptSource>>,
+    /// Source lines the parser skipped without reading: an untaken
+    /// conditional branch, an unselected inline library section. Read-only
+    /// provenance for source readers; not part of electrical identity.
+    pub(crate) unread_source: Vec<UnreadSourceRegion>,
     /// Authored PSpice E/G CHEBYSHEV card count retained independently from
     /// the variable-size synthesized element realization.
     pub(crate) pspice_chebyshev_source_count: usize,
@@ -1142,6 +1146,14 @@ impl Netlist {
     /// loaded later by device elaboration. Sealed inputs retain virtual paths.
     pub fn included_source_paths(&self) -> &[PathBuf] {
         &self.included_source_paths
+    }
+
+    /// The lines of this deck's own source the parser skipped without reading
+    /// them, and why. Lines skipped in an included file are not listed.
+    pub fn unread_root_source(&self) -> impl Iterator<Item = &UnreadSourceRegion> {
+        self.unread_source
+            .iter()
+            .filter(|region| region.source == self.source_path)
     }
 
     fn retain_included_source_paths(
@@ -3750,6 +3762,7 @@ impl Default for Netlist {
             diagnostics: Vec::new(),
             control_dispositions: Vec::new(),
             control_script: None,
+            unread_source: Vec::new(),
             pspice_chebyshev_source_count: 0,
             source_text: None,
             monte_carlo_source_cards: Vec::new(),
