@@ -76,11 +76,24 @@ impl<'a> DesignView<'a> {
             .map(|junction| junction.id)
     }
 
-    /// Only visible conductors contribute explicit-junction targets. A cache
-    /// covering the whole document cannot establish active-sheet crossings.
+    /// Only visible conductors contribute explicit-junction targets, so the
+    /// crossings are found among the active sheet's conductors and held per
+    /// sheet scope; a set found across the whole document could not tell
+    /// which crossings one sheet draws.
     pub fn nearest_junction_candidate(&self, point: Point, radius: i32) -> Option<Point> {
-        let wires = self.objects_on_active_sheet(&self.document.wires, |wire| wire.id);
-        let candidates = collect_junction_candidates(wires.as_ref());
+        let find = || {
+            let wires = self.objects_on_active_sheet(&self.document.wires, |wire| wire.id);
+            collect_junction_candidates(wires.as_ref())
+        };
+        let candidates = match self.canvas_cache {
+            Some(cache) => {
+                let scope = self
+                    .sheet_catalog
+                    .map(|catalog| (catalog.active_sheet_id(), catalog.revision()));
+                cache.junction_candidates(scope, find)
+            }
+            None => std::sync::Arc::new(find()),
+        };
         nearest_junction_candidate(&candidates, point, radius)
     }
 
@@ -196,6 +209,89 @@ mod tests {
                 ..view(&document)
             }
             .nearest_junction_candidate(Point::new(20, 20), 4),
+            Some(Point::new(20, 20))
+        );
+    }
+
+    /// Crossings held by the canvas cache are found once per sheet scope, and
+    /// afresh when the scope changes: a conductor assigned to the active
+    /// sheet, or the other sheet opened.
+    #[test]
+    fn held_junction_candidates_follow_the_sheet_scope() {
+        let document = SchematicDocument {
+            wires: vec![
+                Wire::new(1, vec![Point::new(0, 20), Point::new(40, 20)]),
+                Wire::new(2, vec![Point::new(20, 0), Point::new(20, 40)]),
+                Wire::new(3, vec![Point::new(0, 0), Point::new(40, 40)]),
+            ],
+            ..Default::default()
+        };
+        let mut session = crate::session::EditorSession::default();
+        session.ensure_canvas_cache(&document, 1);
+        let cache = session.canvas_cache(1).expect("built for this topology");
+        let mut catalog = SheetCatalog::default();
+        let mut sheets = Vec::new();
+        for page in [1, 2] {
+            sheets.push(
+                catalog
+                    .create_sheet(
+                        SheetDefinition {
+                            name: format!("Sheet {page}"),
+                            template: SheetTemplate::AnalogSchematic,
+                            port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                            explicit_page_number: Some(page),
+                        },
+                        sheets.last().copied(),
+                    )
+                    .unwrap(),
+            );
+        }
+        // An unassigned conductor belongs to whichever sheet is active, so
+        // every wire is placed: Sheet 1 holds the horizontal, Sheet 2 the
+        // vertical and the diagonal.
+        catalog
+            .assign_objects(catalog.revision(), sheets[0], [1])
+            .unwrap();
+        catalog
+            .assign_objects(catalog.revision(), sheets[1], [2, 3])
+            .unwrap();
+        catalog.set_active(sheets[0]).unwrap();
+        let nearest = |catalog: &SheetCatalog| {
+            DesignView {
+                document: &document,
+                canvas_cache: Some(cache),
+                sheet_catalog: Some(catalog),
+                review_markers: SchematicReviewMarkerVisibility::All,
+            }
+            .nearest_junction_candidate(Point::new(20, 20), 4)
+        };
+
+        assert_eq!(nearest(&catalog), None);
+        let scope = Some((catalog.active_sheet_id(), catalog.revision()));
+        let _ = cache.junction_candidates(scope, || unreachable!("held for this scope"));
+
+        catalog
+            .assign_objects(catalog.revision(), sheets[0], [2])
+            .unwrap();
+        assert_eq!(nearest(&catalog), Some(Point::new(20, 20)));
+        catalog.set_active(sheets[1]).unwrap();
+        assert_eq!(nearest(&catalog), None, "Sheet 2 holds only the diagonal");
+
+        // A conductor drawn on Sheet 2 is a new topology; the cache rebuilt
+        // for it finds the new crossing rather than the scope's held set.
+        let mut grown = document.clone();
+        grown
+            .wires
+            .push(Wire::new(4, vec![Point::new(0, 20), Point::new(40, 20)]));
+        session.ensure_canvas_cache(&grown, 2);
+        let view = DesignView {
+            document: &grown,
+            canvas_cache: Some(session.canvas_cache(2).expect("rebuilt")),
+            sheet_catalog: Some(&catalog),
+            review_markers: SchematicReviewMarkerVisibility::All,
+        };
+        assert_eq!(
+            view.nearest_junction_candidate(Point::new(20, 20), 4),
             Some(Point::new(20, 20))
         );
     }

@@ -7,13 +7,20 @@
 //! rebuilds its own on first use.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use rspice_design::schematic::net_label::Junction;
 use rspice_design::schematic::wire::Wire;
 use rspice_design_model::Point;
+use rspice_design_model::design_management::SheetId;
 
 const SPATIAL_CELL: i32 = 256;
 const MAX_CELLS_PER_WIRE: i64 = 4_096;
+
+/// Which conductors a set of junction candidates was found among: the
+/// active sheet and the catalog revision that records which objects it owns,
+/// or `None` for a drawing with no sheet catalog.
+pub type JunctionCandidateScope = Option<(Option<SheetId>, u64)>;
 
 /// Cached per-frame canvas geometry, valid for one topology version.
 #[derive(Debug, Default)]
@@ -38,6 +45,12 @@ pub struct CanvasCache {
 
     /// Junction marker positions.
     pub junctions: HashSet<Point>,
+
+    /// Where the Junction tool may place a junction: crossings of the active
+    /// sheet's conductors, found once per topology and sheet scope rather
+    /// than once per hover frame. Behind a lock because the canvas reads the
+    /// cache through a shared borrow.
+    junction_candidates: Mutex<Option<(JunctionCandidateScope, Arc<Vec<Point>>)>>,
 }
 
 impl Clone for CanvasCache {
@@ -61,6 +74,10 @@ impl CanvasCache {
         self.junctions.clear();
         self.wire_cells.clear();
         self.oversized_wires.clear();
+        *self
+            .junction_candidates
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner) = None;
 
         for wire in wires {
             let mut min = Point::new(i32::MAX, i32::MAX);
@@ -142,6 +159,28 @@ impl CanvasCache {
         indices.sort_unstable();
         indices.dedup();
         indices
+    }
+
+    /// The junction candidates found among the conductors of `scope`, found
+    /// by `find` only if none are held for exactly that scope at this
+    /// topology.
+    pub fn junction_candidates(
+        &self,
+        scope: JunctionCandidateScope,
+        find: impl FnOnce() -> Vec<Point>,
+    ) -> Arc<Vec<Point>> {
+        let mut held = self
+            .junction_candidates
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some((held_scope, candidates)) = held.as_ref()
+            && *held_scope == scope
+        {
+            return Arc::clone(candidates);
+        }
+        let candidates = Arc::new(find());
+        *held = Some((scope, Arc::clone(&candidates)));
+        candidates
     }
 
     /// Sorted wire-list candidates for an exact authored grid point.
