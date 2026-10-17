@@ -41,45 +41,80 @@ const INSTANCE_NAME_WORLD: f32 = 10.0;
 const INSTANCE_VALUE_WORLD: f32 = 9.0;
 
 /// Draw a wire on the canvas
-pub fn draw_wire(
-    painter: &Painter,
-    viewport: &Viewport,
-    wire: &Wire,
-    selected: bool,
-    highlight_color: Option<egui::Color32>,
-) {
-    draw_conductor(painter, viewport, &wire.points, selected, highlight_color);
+pub fn draw_wire(painter: &Painter, viewport: &Viewport, wire: &Wire, ink: ConductorInk) {
+    draw_conductor(painter, viewport, &wire.points, ink);
+}
+
+/// The state a conductor is drawn in. Variants are in precedence order: when
+/// several apply, the later one wins, and a junction takes the ink of the
+/// most emphasized conductor it sits on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConductorInk {
+    /// The `wire` token.
+    Plain,
+    /// A net-class colour (ground, supply, clock).
+    Class(egui::Color32),
+    /// The net is highlighted.
+    Highlighted,
+    Selected,
+}
+
+impl ConductorInk {
+    /// Precedence: plain, class colour, highlighted, selected. Painting in
+    /// this order keeps emphasis on top.
+    pub const fn rank(self) -> u8 {
+        match self {
+            Self::Plain => 0,
+            Self::Class(_) => 1,
+            Self::Highlighted => 2,
+            Self::Selected => 3,
+        }
+    }
+
+    /// The more emphasized of two inks.
+    #[must_use]
+    pub fn max(self, other: Self) -> Self {
+        if other.rank() > self.rank() {
+            other
+        } else {
+            self
+        }
+    }
+
+    pub fn colour(self, palette: &rspice_ui_kit::palette::Palette) -> egui::Color32 {
+        match self {
+            Self::Plain => palette.wire,
+            Self::Class(colour) => colour,
+            Self::Highlighted => palette.canvas_net_highlight,
+            Self::Selected => palette.canvas_select,
+        }
+    }
+
+    /// Selection and a highlight raise the stroke; a class colour is a
+    /// colour, not emphasis.
+    pub const fn emphasis(self) -> Emphasis {
+        match self {
+            Self::Plain | Self::Class(_) => Emphasis::Plain,
+            Self::Highlighted | Self::Selected => Emphasis::Raised,
+        }
+    }
 }
 
 /// Draw one conductor polyline: a wire, or several wires chained end to end
 /// by [`chain_conductors`].
-pub fn draw_conductor(
-    painter: &Painter,
-    viewport: &Viewport,
-    points: &[Point],
-    selected: bool,
-    highlight_color: Option<egui::Color32>,
-) {
-    // Priority: selected > highlighted > default
+pub fn draw_conductor(painter: &Painter, viewport: &Viewport, points: &[Point], ink: ConductorInk) {
     let palette = rspice_ui_kit::tokens::active_palette();
-    let color = if selected {
-        palette.accent
-    } else if let Some(color) = highlight_color {
-        color
-    } else {
-        palette.wire
-    };
     let width = conductor_width_pt(
         viewport.zoom,
         painter.pixels_per_point(),
-        selected || highlight_color.is_some(),
+        ink.emphasis() == Emphasis::Raised,
     );
 
     let points = points
         .iter()
         .map(|point| viewport.schematic_to_screen(*point))
         .collect();
-    paint_conductor(painter, points, Stroke::new(width, color));
+    paint_conductor(painter, points, Stroke::new(width, ink.colour(&palette)));
 }
 
 /// The drawn width of a wire, in points: raised when it is selected or its
@@ -285,7 +320,7 @@ fn folds_back(a: Point, b: Point, c: Point) -> bool {
 pub fn draw_bus(painter: &Painter, viewport: &Viewport, bus: &Bus, selected: bool) {
     let palette = rspice_ui_kit::tokens::active_palette();
     let color = if selected {
-        palette.accent
+        palette.canvas_select
     } else {
         palette.wire
     };
@@ -322,11 +357,8 @@ pub fn draw_bus(painter: &Painter, viewport: &Viewport, bus: &Bus, selected: boo
             *anchor,
             Vec2::new(8.0, -8.0),
             &declaration.to_string(),
-            if selected {
-                palette.accent
-            } else {
-                palette.net_label
-            },
+            // Text never takes the selection colour.
+            palette.net_label,
         );
     }
 }
@@ -381,7 +413,7 @@ fn draw_small_electrical_text(
 pub fn draw_bus_tap(painter: &Painter, viewport: &Viewport, tap: &BusTap, selected: bool) {
     let palette = rspice_ui_kit::tokens::active_palette();
     let color = if selected {
-        palette.accent
+        palette.canvas_select
     } else {
         palette.wire
     };
@@ -403,11 +435,7 @@ pub fn draw_bus_tap(painter: &Painter, viewport: &Viewport, tap: &BusTap, select
         tap.connection_point,
         Vec2::new(5.0, -7.0),
         &tap.slice.to_string(),
-        if selected {
-            palette.accent
-        } else {
-            palette.net_label
-        },
+        palette.net_label,
     );
 }
 
@@ -463,12 +491,12 @@ pub fn draw_probe(
     );
     let crosshair = lod::stroke_pt(StrokeRole::Probe, viewport.zoom, ppp, Emphasis::Plain);
     if selected {
-        painter.circle_filled(center, radius + 4.0 * viewport.zoom, palette.accent);
+        painter.circle_filled(center, radius + 4.0 * viewport.zoom, palette.canvas_select);
     } else if hovered {
         painter.circle_stroke(
             center,
             radius + 4.0 * viewport.zoom,
-            Stroke::new(lod::mark_outline_pt(ppp), palette.accent),
+            Stroke::new(lod::mark_outline_pt(ppp), palette.canvas_select),
         );
     }
     painter.circle_filled(center, radius, palette.canvas_bg);
@@ -749,7 +777,7 @@ pub fn draw_component(
 
     let palette = rspice_ui_kit::tokens::active_palette();
     let outline_color = if selected {
-        palette.accent // Accent for selected
+        palette.canvas_select
     } else {
         palette.symbol
     };
@@ -1177,42 +1205,66 @@ fn draw_component_labels(
     }
 }
 
-/// Draw a junction (net connection point). `incident` is the state of the
-/// most emphasized conductor that meets it: the dot is sized from that
-/// conductor's drawn width, so a selected wire never swallows it.
+/// How a junction dot is painted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JunctionPaint {
+    /// The junction itself is selected: selection fill and a ring.
+    pub selected: bool,
+    pub hovered: bool,
+    /// The most emphasized conductor that meets the dot. The dot takes its
+    /// colour and is sized from its drawn width, so a selected or
+    /// highlighted wire never swallows its own junction.
+    pub incident: ConductorInk,
+}
+
+impl JunctionPaint {
+    pub const fn plain() -> Self {
+        Self {
+            selected: false,
+            hovered: false,
+            incident: ConductorInk::Plain,
+        }
+    }
+
+    /// The dot's fill: the junction's own selection, else the ink of the
+    /// conductors it joins.
+    pub fn fill(&self, palette: &rspice_ui_kit::palette::Palette) -> egui::Color32 {
+        if self.selected {
+            palette.canvas_select
+        } else {
+            self.incident.colour(palette)
+        }
+    }
+}
+
+/// Draw a junction (net connection point).
 pub fn draw_junction(
     painter: &Painter,
     viewport: &Viewport,
     position: Point,
-    is_selected: bool,
-    is_hovered: bool,
-    incident: Emphasis,
+    paint: JunctionPaint,
 ) {
     let ppp = painter.pixels_per_point();
     let pos = viewport.schematic_to_screen(position);
-    let incident_width = conductor_width_pt(viewport.zoom, ppp, incident == Emphasis::Raised);
+    let incident_width = conductor_width_pt(
+        viewport.zoom,
+        ppp,
+        paint.incident.emphasis() == Emphasis::Raised,
+    );
     let radius = lod::junction_radius_pt(viewport.zoom, incident_width);
 
     let palette = rspice_ui_kit::tokens::active_palette();
-    if is_hovered || is_selected {
-        // Draw larger highlight ring when hovered
-        let highlight_radius = radius * 2.5;
+    if paint.selected {
         painter.circle_stroke(
             pos,
-            highlight_radius,
-            Stroke::new(lod::mark_outline_pt(ppp), palette.accent),
+            radius + 2.0,
+            Stroke::new(lod::mark_outline_pt(ppp), palette.canvas_select),
         );
+    } else if paint.hovered {
+        painter.circle_stroke(pos, radius + 3.0, Stroke::new(1.5, palette.canvas_select));
     }
 
-    painter.circle_filled(
-        pos,
-        radius,
-        if is_selected {
-            palette.accent
-        } else {
-            palette.wire
-        },
-    );
+    painter.circle_filled(pos, radius, paint.fill(&palette));
 }
 
 #[cfg(test)]
@@ -1223,6 +1275,17 @@ mod tests {
     use rspice_design_model::bus::{BusDeclaration, BusSlice};
 
     fn wire_stroke_width(selected: bool, highlighted: bool, zoom: f32) -> f32 {
+        let ink = if selected {
+            ConductorInk::Selected
+        } else if highlighted {
+            ConductorInk::Highlighted
+        } else {
+            ConductorInk::Plain
+        };
+        wire_ink_width(ink, zoom)
+    }
+
+    fn wire_ink_width(ink: ConductorInk, zoom: f32) -> f32 {
         let ctx = Context::default();
         let painter = Painter::new(
             ctx,
@@ -1236,13 +1299,7 @@ mod tests {
         };
         let wire = Wire::segment(1, Point::new(0, 0), Point::new(10, 0));
 
-        draw_wire(
-            &painter,
-            &viewport,
-            &wire,
-            selected,
-            highlighted.then_some(rspice_ui_kit::tokens::active_palette().warn),
-        );
+        draw_wire(&painter, &viewport, &wire, ink);
 
         let mut widths = Vec::new();
         painter.for_each_shape(|shape| {
@@ -1268,7 +1325,91 @@ mod tests {
             assert_eq!(wire_stroke_width(false, false, zoom), plain, "zoom {zoom}");
             assert_eq!(wire_stroke_width(true, false, zoom), raised, "zoom {zoom}");
             assert_eq!(wire_stroke_width(false, true, zoom), raised, "zoom {zoom}");
+            let class = ConductorInk::Class(egui::Color32::from_rgb(1, 2, 3));
+            assert_eq!(
+                wire_ink_width(class, zoom),
+                plain,
+                "a class colour is not emphasis"
+            );
         }
+    }
+
+    /// The precedence for one conductor and for the dot on it: selected,
+    /// then highlighted, then a class colour, then the wire. The dot takes
+    /// the colour of the most emphasized conductor it joins and is sized
+    /// from its width, so a selected wire no longer swallows its junction.
+    #[test]
+    fn a_junction_takes_the_ink_and_width_of_its_most_emphasized_wire() {
+        let palette = rspice_ui_kit::palette::INSTRUMENT_DARK;
+        let class = ConductorInk::Class(palette.net_class_ground);
+        let highlighted = ConductorInk::Plain
+            .max(class)
+            .max(ConductorInk::Highlighted);
+        assert_eq!(highlighted, ConductorInk::Highlighted);
+        assert_eq!(
+            highlighted.max(ConductorInk::Selected),
+            ConductorInk::Selected
+        );
+        assert_eq!(ConductorInk::Selected.max(class), ConductorInk::Selected);
+        assert_eq!(ConductorInk::Plain.max(class), class);
+
+        let paint = |selected, incident| JunctionPaint {
+            selected,
+            hovered: false,
+            incident,
+        };
+        assert_eq!(
+            paint(true, ConductorInk::Plain).fill(&palette),
+            palette.canvas_select
+        );
+        assert_eq!(
+            paint(false, ConductorInk::Selected).fill(&palette),
+            palette.canvas_select
+        );
+        assert_eq!(
+            paint(false, ConductorInk::Highlighted).fill(&palette),
+            palette.canvas_net_highlight
+        );
+        assert_eq!(paint(false, class).fill(&palette), palette.net_class_ground);
+        assert_eq!(
+            paint(false, ConductorInk::Plain).fill(&palette),
+            palette.wire
+        );
+
+        // Painted: a dot on a selected wire at zoom 2 is 2.5 wires across.
+        let ctx = Context::default();
+        let painter = Painter::new(
+            ctx,
+            LayerId::new(Order::Foreground, Id::new("junction-paint-test")),
+            Rect::from_min_size(Pos2::ZERO, Vec2::splat(100.0)),
+        );
+        let viewport = Viewport {
+            offset: Pos2::new(50.0, 50.0),
+            zoom: 2.0,
+            bounds: Rect::from_min_size(Pos2::ZERO, Vec2::splat(100.0)),
+        };
+        draw_junction(
+            &painter,
+            &viewport,
+            Point::new(0, 0),
+            paint(false, ConductorInk::Selected),
+        );
+        let mut dots = Vec::new();
+        painter.for_each_shape(|shape| {
+            if let Shape::Circle(circle) = &shape.shape {
+                dots.push((circle.radius, circle.fill));
+            }
+        });
+        let selected_wire = wire_ink_width(ConductorInk::Selected, 2.0);
+        assert_eq!(dots.len(), 1);
+        assert!(
+            2.0 * dots[0].0 >= 2.5 * selected_wire,
+            "{dots:?} on {selected_wire}"
+        );
+        assert_eq!(
+            dots[0].1,
+            rspice_ui_kit::tokens::active_palette().canvas_select
+        );
     }
 
     #[test]

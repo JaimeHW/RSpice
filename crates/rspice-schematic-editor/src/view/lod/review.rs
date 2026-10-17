@@ -12,10 +12,10 @@ use rspice_design_model::{Point, bus::BusDeclaration};
 use crate::symbols::SymbolLibrary;
 use crate::view::{
     drawing::{
-        ProbeVisualStatus, draw_bus, draw_component, draw_conductor, draw_junction, draw_probe,
+        ConductorInk, JunctionPaint, ProbeVisualStatus, draw_bus, draw_component, draw_conductor,
+        draw_junction, draw_probe,
     },
-    lod::Emphasis,
-    net_labels::draw_net_label,
+    net_labels::{NetLabelPaint, draw_net_label, draw_net_label_attached},
     symbol_context::SchematicSymbolContext,
     viewport::Viewport,
 };
@@ -55,26 +55,20 @@ pub(crate) fn paint_circuit(painter: &egui::Painter, viewport: &Viewport) {
     let crossing = [Point::new(60, -40), Point::new(60, 60)];
     let selected = [Point::new(-60, 100), Point::new(120, 100)];
     let selected_stub = [Point::new(90, 100), Point::new(90, 150)];
-    draw_conductor(painter, viewport, &through, false, None);
-    draw_conductor(painter, viewport, &stub, false, None);
-    draw_conductor(painter, viewport, &crossing, false, None);
-    draw_conductor(painter, viewport, &selected, true, None);
-    draw_conductor(painter, viewport, &selected_stub, true, None);
-    draw_junction(
-        painter,
-        viewport,
-        Point::new(0, 0),
-        false,
-        false,
-        Emphasis::Plain,
-    );
+    draw_conductor(painter, viewport, &through, ConductorInk::Plain);
+    draw_conductor(painter, viewport, &stub, ConductorInk::Plain);
+    draw_conductor(painter, viewport, &crossing, ConductorInk::Plain);
+    draw_conductor(painter, viewport, &selected, ConductorInk::Selected);
+    draw_conductor(painter, viewport, &selected_stub, ConductorInk::Selected);
+    draw_junction(painter, viewport, Point::new(0, 0), JunctionPaint::plain());
     draw_junction(
         painter,
         viewport,
         Point::new(90, 100),
-        false,
-        false,
-        Emphasis::Raised,
+        JunctionPaint {
+            incident: ConductorInk::Selected,
+            ..JunctionPaint::plain()
+        },
     );
 
     let mut resistor = Component::new(1, ComponentType::Resistor, Point::new(0, 100));
@@ -144,6 +138,90 @@ fn render_level_of_detail_review() {
             &format!("lod-{mode}-{}", review_stage()),
             &canvas,
             CELL.y as usize,
+        );
+    }
+}
+
+/// One T-junction with a net label per cell, in each conductor state, at
+/// zoom 2: plain, a selected wire through the dot, the junction itself
+/// selected, a highlighted net, a ground-class net, and a selected label
+/// beside a selected resistor.
+#[test]
+#[ignore = "writes review PNGs to RSPICE_RASTER_DIR"]
+fn render_state_colour_review() {
+    const STATES: usize = 6;
+    let cell = Vec2::new(200.0, 160.0);
+    let library = SymbolLibrary::load_embedded().expect("symbol library");
+    let context = SchematicSymbolContext::default();
+    for (mode, theme) in themes() {
+        let canvas = rspice_ui_kit::raster::render_themed(
+            theme,
+            Vec2::new(cell.x * STATES as f32, cell.y),
+            |ui, _| {
+                let palette = rspice_ui_kit::tokens::active_palette();
+                for state in 0..STATES {
+                    let bounds = Rect::from_min_size(Pos2::new(state as f32 * cell.x, 0.0), cell);
+                    let viewport = Viewport {
+                        offset: Pos2::new(cell.x * 0.5, cell.y * 0.45),
+                        zoom: 2.0,
+                        bounds,
+                    };
+                    let painter = ui.painter().with_clip_rect(bounds.shrink(1.0));
+                    painter.rect_filled(bounds.shrink(1.0), 0.0, palette.canvas_bg);
+                    let ink = match state {
+                        1 => ConductorInk::Selected,
+                        3 => ConductorInk::Highlighted,
+                        4 => ConductorInk::Class(palette.net_class_ground),
+                        _ => ConductorInk::Plain,
+                    };
+                    let through = [Point::new(-40, 0), Point::new(40, 0)];
+                    let stub = [Point::new(0, 0), Point::new(0, 30)];
+                    draw_conductor(&painter, &viewport, &through, ink);
+                    draw_conductor(&painter, &viewport, &stub, ConductorInk::Plain.max(ink));
+                    draw_junction(
+                        &painter,
+                        &viewport,
+                        Point::new(0, 0),
+                        JunctionPaint {
+                            selected: state == 2,
+                            hovered: false,
+                            incident: ink,
+                        },
+                    );
+                    let label = NetLabel::new(1, Point::new(-30, 0), "VOUT");
+                    draw_net_label_attached(
+                        &painter,
+                        &viewport,
+                        &label,
+                        NetLabelPaint {
+                            selected: state == 5,
+                            hovered: false,
+                            preview: false,
+                            attachment: (ink != ConductorInk::Plain).then_some(ink),
+                        },
+                    );
+                    if state == 5 {
+                        let mut resistor =
+                            Component::new(2, ComponentType::Resistor, Point::new(0, 30));
+                        resistor.name = "R1".to_owned();
+                        resistor.value = "10k".to_owned();
+                        draw_component(
+                            &painter,
+                            &viewport,
+                            &resistor,
+                            true,
+                            Some(&library),
+                            &context,
+                            SchematicParameterLabelVisibility::NamesAndValues,
+                        );
+                    }
+                }
+            },
+        );
+        write_png(
+            &format!("state-{mode}-{}", review_stage()),
+            &canvas,
+            cell.y as usize,
         );
     }
 }

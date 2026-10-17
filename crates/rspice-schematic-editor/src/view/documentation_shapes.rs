@@ -26,7 +26,7 @@ pub fn draw_documentation_shape(
 ) {
     let palette = rspice_ui_kit::tokens::active_palette();
     let color = if selected {
-        palette.accent
+        palette.canvas_select
     } else if hovered {
         palette.text
     } else {
@@ -46,7 +46,7 @@ pub fn draw_documentation_shape(
         for point in shape.geometry.points() {
             let screen = viewport.schematic_to_screen(point);
             painter.circle_filled(screen, 3.0, palette.canvas_bg);
-            painter.circle_stroke(screen, 3.0, Stroke::new(1.0, palette.accent));
+            painter.circle_stroke(screen, 3.0, Stroke::new(1.0, palette.canvas_select));
         }
     }
 }
@@ -320,13 +320,28 @@ fn shape_segments(geometry: &DocumentationShapeGeometry) -> Vec<(Point, Point)> 
 
 pub fn preview_stroke(valid: bool) -> Stroke {
     let palette = rspice_ui_kit::tokens::active_palette();
-    Stroke::new(1.4, if valid { palette.accent } else { palette.err })
+    Stroke::new(
+        1.4,
+        if valid {
+            palette.canvas_select.gamma_multiply(PREVIEW_ALPHA)
+        } else {
+            palette.err
+        },
+    )
 }
 
 pub fn preview_anchor_color(valid: bool) -> Color32 {
     let palette = rspice_ui_kit::tokens::active_palette();
-    if valid { palette.accent } else { palette.err }
+    if valid {
+        palette.canvas_select.gamma_multiply(PREVIEW_ALPHA)
+    } else {
+        palette.err
+    }
 }
+
+/// Route, placement and shape previews are the selection colour, slightly
+/// held back so a committed selection still reads above them.
+const PREVIEW_ALPHA: f32 = 0.85;
 
 #[cfg(test)]
 mod tests {

@@ -3,8 +3,10 @@
 use super::super::{
     design_notes::draw_design_note,
     documentation_shapes::draw_documentation_shape,
-    drawing::{draw_bus, draw_bus_tap, draw_component, draw_junction, draw_wire},
-    lod::Emphasis,
+    drawing::{
+        ConductorInk, JunctionPaint, draw_bus, draw_bus_tap, draw_component, draw_junction,
+        draw_wire,
+    },
     net_labels::draw_net_label,
     symbol_context::SchematicSymbolContext,
     viewport::Viewport,
@@ -63,10 +65,12 @@ pub fn draw_move_candidate(
             painter,
             viewport,
             junction.pos,
-            view.editor.selection.has_junction(junction.pos),
-            style.hover_wire_vertex == Some((junction.pos.x, junction.pos.y)),
-            // A preview draws its conductors selected.
-            Emphasis::Raised,
+            JunctionPaint {
+                selected: view.editor.selection.has_junction(junction.pos),
+                hovered: style.hover_wire_vertex == Some((junction.pos.x, junction.pos.y)),
+                // A preview draws its conductors selected.
+                incident: ConductorInk::Selected,
+            },
         );
     }
     for label in candidate.net_labels.iter().filter(|candidate_label| {
@@ -118,7 +122,7 @@ pub fn draw_array_candidate(
     view_path: impl Fn() -> String,
 ) {
     for wire in preview.wires() {
-        draw_wire(painter, viewport, wire, true, None);
+        draw_wire(painter, viewport, wire, ConductorInk::Selected);
     }
     for bus in preview.buses() {
         draw_bus(painter, viewport, bus, true);
@@ -142,9 +146,11 @@ pub fn draw_array_candidate(
             painter,
             viewport,
             junction.pos,
-            view.editor.selection.has_junction(junction.pos),
-            style.hover_wire_vertex == Some((junction.pos.x, junction.pos.y)),
-            Emphasis::Raised,
+            JunctionPaint {
+                selected: view.editor.selection.has_junction(junction.pos),
+                hovered: style.hover_wire_vertex == Some((junction.pos.x, junction.pos.y)),
+                incident: ConductorInk::Selected,
+            },
         );
     }
     for label in preview.net_labels() {
@@ -178,7 +184,7 @@ fn draw_changed_conductors(
             .find(|wire| wire.id == candidate_wire.id)
             != Some(*candidate_wire)
     }) {
-        draw_wire(painter, viewport, wire, true, None);
+        draw_wire(painter, viewport, wire, ConductorInk::Selected);
     }
     for bus in candidate.buses.iter().filter(|candidate_bus| {
         source.buses.iter().find(|bus| bus.id == candidate_bus.id) != Some(*candidate_bus)

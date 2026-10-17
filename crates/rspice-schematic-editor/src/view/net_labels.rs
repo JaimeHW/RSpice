@@ -19,6 +19,7 @@ use rspice_design::schematic::net_label::NetLabel;
 use rspice_design_model::{Point, design_management::CrossSheetPortDirection};
 use rspice_ui_kit::theme::{self, FontWeight};
 
+use super::drawing::ConductorInk;
 use super::lod::{self, TextClass, TextLod};
 use super::viewport::Viewport;
 
@@ -224,24 +225,69 @@ pub fn draw_net_label(
     hovered: bool,
     preview: bool,
 ) {
+    draw_net_label_attached(
+        painter,
+        viewport,
+        label,
+        NetLabelPaint {
+            selected,
+            hovered,
+            preview,
+            attachment: None,
+        },
+    );
+}
+
+/// How a net label is painted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NetLabelPaint {
+    pub selected: bool,
+    pub hovered: bool,
+    /// A ghost of a label being placed or moved.
+    pub preview: bool,
+    /// The ink of the conductor the label attaches to, when it is drawn
+    /// other than plain: the attachment diamond takes it, as a junction
+    /// would. The text keeps its own colour.
+    pub attachment: Option<ConductorInk>,
+}
+
+/// The fill behind a selected label's text, over the canvas.
+const SELECTION_FILL_ALPHA: f32 = 0.12;
+
+pub fn draw_net_label_attached(
+    painter: &Painter,
+    viewport: &Viewport,
+    label: &NetLabel,
+    paint: NetLabelPaint,
+) {
+    let NetLabelPaint {
+        selected,
+        hovered,
+        preview,
+        attachment,
+    } = paint;
     let palette = rspice_ui_kit::tokens::active_palette();
+    // Text never takes the selection colour: a selected label keeps its
+    // text colour and gets the selection rect.
     let text_color = if label.name.trim().is_empty() {
         palette.err
     } else if preview {
         palette.net_label.gamma_multiply(PREVIEW_ALPHA)
-    } else if selected {
-        palette.accent
     } else {
         palette.net_label
     };
     let layout = screen_layout(painter.ctx(), viewport, label, text_color);
 
     if selected {
-        painter.rect_filled(layout.decoration_rect, 2.0, palette.accent_dim);
+        painter.rect_filled(
+            layout.decoration_rect,
+            2.0,
+            palette.canvas_select.gamma_multiply(SELECTION_FILL_ALPHA),
+        );
         painter.rect_stroke(
             layout.decoration_rect,
             2.0,
-            Stroke::new(1.0, palette.accent),
+            Stroke::new(1.0, palette.canvas_select),
             egui::StrokeKind::Inside,
         );
     } else if hovered && !preview {
@@ -253,6 +299,10 @@ pub fn draw_net_label(
     }
 
     let attachment_radius = layout.attachment_radius;
+    let diamond = match attachment {
+        Some(ink) if !preview => ink.colour(&palette),
+        Some(_) | None => text_color,
+    };
     painter.add(egui::Shape::convex_polygon(
         vec![
             layout.attachment + vec2(0.0, -attachment_radius),
@@ -260,7 +310,7 @@ pub fn draw_net_label(
             layout.attachment + vec2(0.0, attachment_radius),
             layout.attachment + vec2(-attachment_radius, 0.0),
         ],
-        text_color,
+        diamond,
         Stroke::NONE,
     ));
     match layout.text {

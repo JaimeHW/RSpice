@@ -10,11 +10,15 @@ use super::{
         world_bounds as documentation_shape_bounds,
     },
     drawing::{
-        ProbeVisualStatus, chain_conductors, draw_bus, draw_bus_tap, draw_component,
-        draw_conductor, draw_junction, draw_probe, probe_at_screen, probe_world_bounds,
+        ConductorInk, JunctionPaint, ProbeVisualStatus, chain_conductors, draw_bus, draw_bus_tap,
+        draw_component, draw_conductor, draw_junction, draw_probe, probe_at_screen,
+        probe_world_bounds,
     },
-    lod::{self, Emphasis},
-    net_labels::{draw_net_label, net_label_at, world_bounds as net_label_world_bounds},
+    lod,
+    net_labels::{
+        NetLabelPaint, draw_net_label_attached, net_label_at,
+        world_bounds as net_label_world_bounds,
+    },
     symbol_context::SchematicSymbolContext,
     viewport::Viewport,
 };
@@ -30,7 +34,7 @@ use egui::{Painter, Rect, Stroke};
 use rspice_design::schematic::design_note::DesignNoteRenderContext;
 use rspice_design::schematic::probe::SchematicProbe;
 use rspice_design_model::Point;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
 mod annotations;
 mod empty;
@@ -112,13 +116,14 @@ pub fn draw_content(
 
     // Wires of one style that meet end to end are painted as one path, so the
     // corner two wires form is a mitered join. Plain wires go down first,
-    // then highlighted nets, then the selection, so emphasis stays on top.
-    type ConductorStyle = (bool, Option<[u8; 4]>);
-    let mut conductor_groups: BTreeMap<ConductorStyle, (Option<egui::Color32>, Vec<&[Point]>)> =
+    // then class colours, highlighted nets and the selection, so emphasis
+    // stays on top.
+    type ConductorStyle = (u8, [u8; 4]);
+    let mut conductor_groups: BTreeMap<ConductorStyle, (ConductorInk, Vec<&[Point]>)> =
         BTreeMap::new();
-    // Wires drawn raised (selected or highlighted), so a junction on one is
-    // sized from the raised width.
-    let mut raised_wires = HashSet::new();
+    // The ink of every wire drawn other than plain, by wire index, so a
+    // junction takes the colour and the width of what it joins.
+    let mut inked_wires: HashMap<usize, ConductorInk> = HashMap::new();
     for index in visible_wire_indices {
         let Some(wire) = view.design.document.wires.get(index) else {
             continue;
@@ -143,29 +148,41 @@ pub fn draw_content(
                 .any(|p| p.x >= min_x && p.x <= max_x && p.y >= min_y && p.y <= max_y);
         }
 
-        let highlight_color = match view.net_highlighting {
-            SchematicNetHighlighting::SelectedNet => view
-                .editor
-                .net_highlight
-                .is_wire_highlighted(wire.id)
-                .then_some(rspice_ui_kit::tokens::active_palette().warn),
-            SchematicNetHighlighting::NetClassColors => {
-                overlays.net_class_colors.get(&wire.id).copied()
+        let net_ink = match view.net_highlighting {
+            SchematicNetHighlighting::SelectedNet
+                if view.editor.net_highlight.is_wire_highlighted(wire.id) =>
+            {
+                ConductorInk::Highlighted
             }
-            SchematicNetHighlighting::Off => None,
+            SchematicNetHighlighting::NetClassColors => overlays
+                .net_class_colors
+                .get(&wire.id)
+                .map_or(ConductorInk::Plain, |colour| ConductorInk::Class(*colour)),
+            SchematicNetHighlighting::SelectedNet | SchematicNetHighlighting::Off => {
+                ConductorInk::Plain
+            }
         };
-        if is_selected || highlight_color.is_some() {
-            raised_wires.insert(index);
+        let ink = if is_selected {
+            ConductorInk::Selected
+        } else {
+            net_ink
+        };
+        if ink != ConductorInk::Plain {
+            inked_wires.insert(index, ink);
         }
+        let colour_key = match ink {
+            ConductorInk::Class(colour) => colour.to_array(),
+            ConductorInk::Plain | ConductorInk::Highlighted | ConductorInk::Selected => [0; 4],
+        };
         conductor_groups
-            .entry((is_selected, highlight_color.map(|color| color.to_array())))
-            .or_insert_with(|| (highlight_color, Vec::new()))
+            .entry((ink.rank(), colour_key))
+            .or_insert_with(|| (ink, Vec::new()))
             .1
             .push(wire.points.as_slice());
     }
-    for ((is_selected, _), (highlight_color, polylines)) in conductor_groups {
+    for (_, (ink, polylines)) in conductor_groups {
         for chain in chain_conductors(polylines) {
-            draw_conductor(painter, viewport, &chain, is_selected, highlight_color);
+            draw_conductor(painter, viewport, &chain, ink);
         }
     }
 
@@ -237,26 +254,15 @@ pub fn draw_content(
         if jx < wx0 || jx > wx1 || jy < wy0 || jy > wy1 {
             continue;
         }
-        let incident_raised = !raised_wires.is_empty()
-            && cache
-                .map(|cache| cache.wire_indices_at_point(junction.pos))
-                .unwrap_or_else(|| raised_wires.iter().copied().collect())
-                .into_iter()
-                .filter(|index| raised_wires.contains(index))
-                .any(|index| {
-                    view.design
-                        .document
-                        .wires
-                        .get(index)
-                        .is_some_and(|wire| wire.contains_point(junction.pos))
-                });
         draw_junction(
             painter,
             viewport,
             junction.pos,
-            view.editor.selection.has_junction(junction.pos),
-            view.hover_wire_vertex == Some((junction.pos.x, junction.pos.y)),
-            Emphasis::raised_if(incident_raised),
+            JunctionPaint {
+                selected: view.editor.selection.has_junction(junction.pos),
+                hovered: view.hover_wire_vertex == Some((junction.pos.x, junction.pos.y)),
+                incident: incident_ink(view, cache, &inked_wires, junction.pos),
+            },
         );
     }
 
@@ -333,13 +339,23 @@ pub fn draw_content(
         if !selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
             selected = max.x >= min_x && min.x <= max_x && max.y >= min_y && min.y <= max_y;
         }
-        draw_net_label(
+        // The attachment diamond follows the junction precedence; the text
+        // keeps its own colour.
+        let attachment = if selected {
+            ConductorInk::Selected
+        } else {
+            incident_ink(view, cache, &inked_wires, label.pos)
+        };
+        draw_net_label_attached(
             painter,
             viewport,
             label,
-            selected,
-            hovered_label == Some(label.id),
-            false,
+            NetLabelPaint {
+                selected,
+                hovered: hovered_label == Some(label.id),
+                preview: false,
+                attachment: (attachment != ConductorInk::Plain).then_some(attachment),
+            },
         );
     }
 
@@ -456,11 +472,38 @@ pub fn draw_content(
                 radius,
                 Stroke::new(
                     lod::mark_outline_pt(painter.pixels_per_point()),
-                    rspice_ui_kit::tokens::active_palette().accent,
+                    rspice_ui_kit::tokens::active_palette().canvas_select,
                 ),
             );
         }
     }
+}
+
+/// The most emphasized ink among the drawn wires that pass through `point`.
+/// Candidates come from the cache's spatial bins when it is fresh.
+fn incident_ink(
+    view: &SceneView<'_>,
+    cache: Option<&crate::session::canvas_cache::CanvasCache>,
+    inked_wires: &HashMap<usize, ConductorInk>,
+    point: Point,
+) -> ConductorInk {
+    if inked_wires.is_empty() {
+        return ConductorInk::Plain;
+    }
+    let wires = &view.design.document.wires;
+    let candidates: Vec<usize> = cache.map_or_else(
+        || inked_wires.keys().copied().collect(),
+        |cache| cache.wire_indices_at_point(point),
+    );
+    candidates
+        .into_iter()
+        .filter_map(|index| inked_wires.get(&index).map(|ink| (index, *ink)))
+        .filter(|(index, _)| {
+            wires
+                .get(*index)
+                .is_some_and(|wire| wire.contains_point(point))
+        })
+        .fold(ConductorInk::Plain, |ink, (_, other)| ink.max(other))
 }
 
 fn polyline_intersects_view(points: &[Point], wx0: f32, wy0: f32, wx1: f32, wy1: f32) -> bool {
@@ -492,17 +535,17 @@ pub fn named_net_class_color(name: &str) -> egui::Color32 {
         normalized.as_str(),
         "0" | "gnd" | "ground" | "vss" | "vssa" | "vssd"
     ) {
-        return palette.ok;
+        return palette.net_class_ground;
     }
     if normalized.starts_with("vdd")
         || normalized.starts_with("vcc")
         || normalized.starts_with("vee")
         || normalized.starts_with("supply")
     {
-        return palette.warn;
+        return palette.net_class_supply;
     }
     if normalized.contains("clk") || normalized.contains("clock") {
-        return palette.info;
+        return palette.net_class_clock;
     }
     let hash = normalized.bytes().fold(0_u64, |hash, byte| {
         hash.wrapping_mul(109).wrapping_add(u64::from(byte))

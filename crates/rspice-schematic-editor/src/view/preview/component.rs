@@ -26,7 +26,7 @@ use rspice_design::{
 };
 use rspice_design_model::{Point, port::PortSpec};
 
-const COMPONENT_PREVIEW_GHOST_ALPHA: f32 = 0.55;
+const COMPONENT_PREVIEW_GHOST_ALPHA: f32 = 0.85;
 
 /// A ghost is drawn at the symbol weight it will have once placed.
 fn ghost_width(painter: &Painter, viewport: &Viewport) -> f32 {
@@ -83,11 +83,11 @@ pub fn draw_component_preview(
         .snapped_position;
         let preview_pos = viewport.schematic_to_screen(grid_pos);
 
-        // Ghost the symbol in dimmed accent until it is placed.
+        // Ghost the symbol in the held-back selection colour until it is placed.
         let preview_stroke = Stroke::new(
             ghost_width(painter, viewport),
             rspice_ui_kit::tokens::active_palette()
-                .accent
+                .canvas_select
                 .gamma_multiply(COMPONENT_PREVIEW_GHOST_ALPHA),
         );
 
@@ -234,7 +234,7 @@ pub fn draw_shelf_drag_preview(
     let preview_stroke = Stroke::new(
         ghost_width(painter, viewport),
         rspice_ui_kit::tokens::active_palette()
-            .accent
+            .canvas_select
             .gamma_multiply(COMPONENT_PREVIEW_GHOST_ALPHA),
     );
 
