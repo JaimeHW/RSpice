@@ -83,7 +83,55 @@ pub fn expand_generated_dependencies_with_sealed_sources(
     }
 }
 
-pub(crate) fn absolute_source_identity(path: &Path) -> Result<PathBuf, PreparationError> {
+/// Refuse unless every host source `dependencies` names still reads as it did.
+///
+/// Expanding a deck's includes reads the host: each directive walks its
+/// search chain, takes the first candidate that exists, and splices in what
+/// that file decodes to. A deck prepared earlier is the deck the host gives
+/// now only when every candidate a chain tried still exists or still does not,
+/// and every file a chain chose still decodes to the text that was spliced in.
+/// That is what this checks, file by file, without expanding anything. A
+/// dependency resolved through an authenticated in-memory edge examined no
+/// host path and is left alone.
+pub fn verify_host_dependencies(
+    dependencies: &[rspice_core::netlist::ResolvedIncludeDependency],
+) -> Result<(), String> {
+    use rspice_core::netlist::IncludeSearchStage;
+
+    for dependency in dependencies {
+        let resolution = dependency.resolution();
+        if resolution.stage() == IncludeSearchStage::SealedEdge {
+            continue;
+        }
+        for candidate in resolution.tried() {
+            if candidate.path().exists() != candidate.exists() {
+                return Err(format!(
+                    "'{}' {} since '{}' was resolved",
+                    candidate.path().display(),
+                    if candidate.exists() {
+                        "was removed"
+                    } else {
+                        "appeared"
+                    },
+                    dependency.requested_path()
+                ));
+            }
+        }
+        let path = dependency.resolved_path();
+        let unchanged = std::fs::read(path)
+            .ok()
+            .and_then(|bytes| rspice_core::netlist::decode_source_bytes(&bytes).ok())
+            .is_some_and(|source| source == dependency.source());
+        if !unchanged {
+            return Err(format!("'{}' changed since it was read", path.display()));
+        }
+    }
+    Ok(())
+}
+
+/// The host's identity for a deck's file: what a manual deck's receipt names
+/// and its includes are searched from, as the host resolves it now.
+pub fn absolute_source_identity(path: &Path) -> Result<PathBuf, PreparationError> {
     #[cfg(target_arch = "wasm32")]
     if rspice_model_library::is_portable_absolute_path(path) {
         return Ok(path.to_path_buf());

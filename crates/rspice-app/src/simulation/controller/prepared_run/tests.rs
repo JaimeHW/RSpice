@@ -45,8 +45,7 @@ fn exhausted_run_sequence_blocks_dispatch_without_starting_a_batch() {
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
             .expect("prepare manual run");
     controller
-        .run_authorization
-        .retain(snapshot)
+        .retain_prepared_from(&state, snapshot)
         .expect("authorize run");
 
     controller.start_authorized_snapshot(&mut state);
@@ -247,8 +246,7 @@ fn prepared_project_run_materializes_exact_signed_pdk_reference_models() {
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
             .expect("project run seals signed PDK model sources");
     controller
-        .run_authorization
-        .retain(snapshot)
+        .retain_prepared_from(&state, snapshot)
         .expect("authorize exact project snapshot");
     let dispatch = controller
         .consume_snapshot_for_dispatch(&state)
@@ -272,8 +270,7 @@ fn receipt_backed_manual_project_deck_uses_signed_pdk_models_without_host_paths(
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
             .expect("governed manual project deck seals signed PDK sources");
     controller
-        .run_authorization
-        .retain(snapshot)
+        .retain_prepared_from(&state, snapshot)
         .expect("authorize exact governed manual deck");
     let dispatch = controller
         .consume_snapshot_for_dispatch(&state)
@@ -297,8 +294,7 @@ fn governed_manual_deck_dispatches_signed_pdk_veriloga_runtime_without_host_path
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
             .expect("governed manual deck prepares the signed Verilog-A runtime");
     controller
-        .run_authorization
-        .retain(snapshot)
+        .retain_prepared_from(&state, snapshot)
         .expect("authorize exact signed Verilog-A snapshot");
     let dispatch = controller
         .consume_snapshot_for_dispatch(&state)
@@ -472,8 +468,7 @@ fn manual_touchstone_export_uses_imported_deck_origin_not_stale_schematic_path()
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
             .expect("prepare imported RF deck");
     controller
-        .run_authorization
-        .retain(snapshot)
+        .retain_prepared_from(&state, snapshot)
         .expect("authorize imported RF deck");
     let dispatch = controller
         .consume_snapshot_for_dispatch(&state)
@@ -503,8 +498,7 @@ fn manual_fourier_is_topologically_bound_to_its_exact_transient_task() {
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
             .expect("prepare manual Fourier dependency graph");
     controller
-        .run_authorization
-        .retain(snapshot)
+        .retain_prepared_from(&state, snapshot)
         .expect("authorize manual Fourier dependency graph");
     let dispatch = controller
         .consume_snapshot_for_dispatch(&state)
@@ -766,8 +760,7 @@ fn manual_periodic_analyses_are_topologically_bound_to_seed_and_pss() {
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
             .expect("prepare manual periodic dependency graph");
     controller
-        .run_authorization
-        .retain(snapshot)
+        .retain_prepared_from(&state, snapshot)
         .expect("authorize manual periodic dependency graph");
     let dispatch = controller
         .consume_snapshot_for_dispatch(&state)
@@ -803,7 +796,13 @@ fn dispatch_rejects_mutation_after_explicit_preflight() {
         .consume_snapshot_for_dispatch(&state)
         .expect_err("changed input must fail closed");
     assert_eq!(error.stage(), PreparationStage::Authorization);
-    assert!(error.message().contains("expired"));
+    assert_eq!(
+        error.message(),
+        format!(
+            "{} · the simulation setup changed",
+            crate::simulation::controller::run_inputs::DESIGN_CHANGED_SINCE_CHECK
+        )
+    );
 }
 
 #[test]
@@ -1262,8 +1261,7 @@ fn active_batch_reentry_preserves_prepared_authorization_and_batch_metadata() {
             .expect("prepare replacement request");
     let prepared_digest = snapshot.digest();
     controller
-        .run_authorization
-        .retain(snapshot)
+        .retain_prepared_from(&state, snapshot)
         .expect("authorize replacement request");
 
     let active_run_id = state.simulation.start_run().id;
@@ -1305,8 +1303,7 @@ fn unpolled_completion_reentry_does_not_consume_or_replace_authorization() {
             .expect("prepare replacement request");
     let prepared_digest = snapshot.digest();
     controller
-        .run_authorization
-        .retain(snapshot)
+        .retain_prepared_from(&state, snapshot)
         .expect("authorize replacement request");
     controller.runner = crate::simulation::controller::test_execution::start_manual_deck(
         state.workspace.content.netlist_source.as_deref().unwrap(),
@@ -1427,6 +1424,90 @@ fn dispatched_include_closure_never_reopens_mutated_source_files() {
     fs::remove_dir_all(directory).expect("remove include fixture");
 }
 
+const MANUAL_DECK: &str = "deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
+
+/// A validated deck dispatches the snapshot Validate prepared, by digest,
+/// and the dispatch prepares nothing.
+#[test]
+fn a_validated_manual_deck_dispatches_without_being_prepared_again() {
+    let state = manual_deck_state(MANUAL_DECK);
+    let mut controller = SimulationController::new();
+    let validated = controller
+        .validate_manual_deck_document(&state)
+        .expect("the deck validates");
+    assert_eq!(
+        thread_preparations::take(),
+        [SimulationRunIntent::ManualDeck],
+        "Validate prepares the deck"
+    );
+
+    let dispatch = controller
+        .consume_snapshot_for_dispatch(&state)
+        .expect("the unchanged deck dispatches");
+
+    assert!(
+        thread_preparations::take().is_empty(),
+        "the dispatch prepares nothing"
+    );
+    assert_eq!(dispatch.digest(), validated.snapshot_digest);
+}
+
+/// An edit to a validated deck's text refuses its run, and nothing is
+/// prepared to find that out.
+#[test]
+fn an_edit_to_a_validated_manual_deck_refuses_its_run() {
+    let mut state = manual_deck_state(MANUAL_DECK);
+    let mut controller = SimulationController::new();
+    controller
+        .validate_manual_deck_document(&state)
+        .expect("the deck validates");
+    thread_preparations::take();
+    state.workspace.content.netlist_source = Some(MANUAL_DECK.replace("1k", "2k"));
+
+    let error = controller
+        .consume_snapshot_for_dispatch(&state)
+        .expect_err("an edited deck is not the deck validated");
+
+    assert!(thread_preparations::take().is_empty());
+    assert_eq!(error.stage(), PreparationStage::Authorization);
+    assert_eq!(
+        error.message(),
+        format!(
+            "{} · the netlist changed",
+            crate::simulation::controller::run_inputs::NETLIST_CHANGED_SINCE_VALIDATION
+        )
+    );
+}
+
+/// A deck reads of the open schematic only the topology revision its run is
+/// recorded against and, when it solves S-parameters, the RF ports. A value
+/// edited on the schematic is neither, and leaves the validated deck to run.
+#[test]
+fn a_schematic_edit_a_manual_deck_does_not_read_leaves_it_to_run() {
+    let mut state = manual_deck_state(MANUAL_DECK);
+    load_example("Voltage Divider", &mut state.schematic);
+    let mut controller = SimulationController::new();
+    let validated = controller
+        .validate_manual_deck_document(&state)
+        .expect("the deck validates");
+    let topology = state.schematic.topology_version();
+    state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .iter_mut()
+        .find(|component| component.name == "R2")
+        .expect("the divider draws R2")
+        .value = "22k".to_owned();
+    assert_eq!(state.schematic.topology_version(), topology);
+
+    let dispatch = controller
+        .consume_snapshot_for_dispatch(&state)
+        .expect("the deck reads nothing that moved");
+
+    assert_eq!(dispatch.digest(), validated.snapshot_digest);
+}
+
 #[test]
 fn accepted_model_file_mutation_after_prepare_fails_closed() {
     let directory = fixture_dir("model-mutation");
@@ -1521,8 +1602,7 @@ fn repeated_authorize_and_dispatch_cycles_never_expire_an_unchanged_run() {
         )
         .expect("project run seals signed PDK model sources");
         controller
-            .run_authorization
-            .retain(snapshot)
+            .retain_prepared_from(&state, snapshot)
             .expect("authorize exact project snapshot");
         controller
             .consume_snapshot_for_dispatch(&state)

@@ -44,7 +44,12 @@ pub struct RunPreparationInputs<'a, R, A> {
     pub design_management: &'a rspice_design_model::design_management::DesignManagementCatalog,
     pub configuration_sets: &'a rspice_design::configuration_set::ConfigurationSetCatalog,
     pub source_data: NetlistSourceData<'a>,
-    pub schematic_source: rspice_design::projection::SchematicSource<'a>,
+    /// The file the open schematic was loaded from, which task preparation
+    /// resolves the schematic's relative references against.
+    pub schematic_file: Option<&'a Path>,
+    /// The open schematic's topology revision, which a manual deck's run is
+    /// recorded against.
+    pub schematic_topology_revision: u64,
     pub imported_checkpoints:
         &'a rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointLibrary,
     pub imported_transient_checkpoints:
@@ -121,6 +126,24 @@ pub fn build_analysis_plan(
 pub fn build_prepared_run_set<'a, R, A, W>(
     inputs: &RunPreparationInputs<'a, R, A>,
     execution_projection: rspice_design::projection::ConfigurationExecutionProjection,
+) -> Result<PreparedRunSnapshot, PreparationError>
+where
+    R: AsRef<rspice_results::run::SimulationRun<A>>,
+    A: AsRef<rspice_results::analysis_result::AnalysisResult<W>> + 'a,
+    W: AsRef<rspice_results::waveform::RetainedWaveform> + 'a,
+{
+    build_prepared_run_set_reporting(inputs, execution_projection, &rspice_core::NoAbort, &|_| {})
+}
+
+/// [`build_prepared_run_set`], for a caller that runs it off the UI thread:
+/// it stops between stages once `abort` is raised, and tells `progress` how
+/// many of the run's points have their deck ready. What it prepares is the
+/// same, byte for byte.
+pub fn build_prepared_run_set_reporting<'a, R, A, W>(
+    inputs: &RunPreparationInputs<'a, R, A>,
+    execution_projection: rspice_design::projection::ConfigurationExecutionProjection,
+    abort: &dyn rspice_core::abort_signal::AbortSignal,
+    progress: &dyn Fn(super::PreparationProgress),
 ) -> Result<PreparedRunSnapshot, PreparationError>
 where
     R: AsRef<rspice_results::run::SimulationRun<A>>,
@@ -210,6 +233,7 @@ where
         .technology_gate_block_reason()
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
     let has_project_technology = inputs.technology.project_technology_in_effect();
+    PreparationError::check_abort(abort)?;
     let sealed_models = if has_project_technology {
         inputs.technology.seal_project_execution_model_sources()
     } else {
@@ -220,13 +244,14 @@ where
         )
     }
     .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
+    PreparationError::check_abort(abort)?;
     let tasks = prepare_plan_tasks(
         inputs.analysis,
         &plan,
         &sealed_models,
         inputs.imported_checkpoints,
         inputs.imported_transient_checkpoints,
-        inputs.schematic_source.current_file,
+        inputs.schematic_file,
     )
     .map_err(|errors| PreparationError::new(PreparationStage::AnalysisPlan, errors.join("; ")))?;
     let design_nets = std::sync::Arc::new(
@@ -269,6 +294,7 @@ where
         ));
     }
 
+    PreparationError::check_abort(abort)?;
     let run_set_config = inputs
         .analysis
         .sim_setup
@@ -296,6 +322,7 @@ where
     })?;
     let prepared_run_set =
         super::PreparedRunSet::new(inputs.analysis.sim_setup.run_set.clone(), run_set_contract);
+    PreparationError::check_abort(abort)?;
 
     // An FFT card is excluded from the run-level deck on purpose: it is
     // spliced into the deck of the transient it is bound to, and into no
@@ -342,6 +369,7 @@ where
         ));
     }
 
+    PreparationError::check_abort(abort)?;
     let model_execution_plan = sealed_models
         .reference_model_execution_plan(inputs.analysis.sim_setup.reference_pvt.process)
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
@@ -403,11 +431,14 @@ where
         &netlist,
         &project_veriloga_runtimes,
     )?;
+    PreparationError::check_abort(abort)?;
     reject_unresolved_device_models(&netlist, has_project_technology)?;
+    PreparationError::check_abort(abort)?;
     reject_deferred_corner_model_sources(
         tasks.iter().map(PreparedTask::queued_analysis),
         &netlist,
     )?;
+    PreparationError::check_abort(abort)?;
     let project_model_sources = prepared_project_model_sources(inputs.technology.models, &netlist)?;
 
     let source_digest = generated_executable_source_digest(&netlist);
@@ -454,51 +485,69 @@ where
         root_schematic.current_file(),
     )?;
 
-    PreparedRunSnapshot::new(SnapshotParts {
-        task_source_policy: super::snapshot::TaskSourcePolicy::PreparedObservations,
-        execution_limits: inputs.execution_limits(),
-        measurement_references,
-        intent: SimulationRunIntent::SimulateRunSet,
-        simulation_plan_id: Some(plan.plan_id()),
-        project_revision: inputs.technology.project.revision().get(),
-        topology_revision: root_schematic.topology_version(),
-        source_digest,
-        reference_process: inputs.analysis.sim_setup.reference_pvt.process,
-        reference_temperature_celsius: inputs.analysis.sim_setup.reference_pvt.temperature_celsius,
-        run_set: Some(prepared_run_set),
-        tasks,
-        executable_netlist: netlist,
-        save_policy: SavePolicy::PlanOwned {
-            output_selection_mode: inputs.analysis.sim_setup.save_policy.output_selection_mode,
-            retained_dataset_limit: inputs.analysis.sim_setup.save_policy.retained_dataset_limit,
-            maximum_storage_bytes: inputs.analysis.sim_setup.save_policy.maximum_storage_bytes,
-            live_streaming_enabled: inputs.analysis.sim_setup.save_policy.live_streaming_enabled,
-            retain_failure_diagnostics: inputs
+    // The limits are the ones `PreparedRunSnapshot::new` validates under.
+    PreparedRunSnapshot::new_with_preparation_policy(
+        SnapshotParts {
+            task_source_policy: super::snapshot::TaskSourcePolicy::PreparedObservations,
+            execution_limits: inputs.execution_limits(),
+            measurement_references,
+            intent: SimulationRunIntent::SimulateRunSet,
+            simulation_plan_id: Some(plan.plan_id()),
+            project_revision: inputs.technology.project.revision().get(),
+            topology_revision: root_schematic.topology_version(),
+            source_digest,
+            reference_process: inputs.analysis.sim_setup.reference_pvt.process,
+            reference_temperature_celsius: inputs
                 .analysis
                 .sim_setup
-                .save_policy
-                .retain_failure_diagnostics,
+                .reference_pvt
+                .temperature_celsius,
+            run_set: Some(prepared_run_set),
+            tasks,
+            executable_netlist: netlist,
+            save_policy: SavePolicy::PlanOwned {
+                output_selection_mode: inputs.analysis.sim_setup.save_policy.output_selection_mode,
+                retained_dataset_limit: inputs
+                    .analysis
+                    .sim_setup
+                    .save_policy
+                    .retained_dataset_limit,
+                maximum_storage_bytes: inputs.analysis.sim_setup.save_policy.maximum_storage_bytes,
+                live_streaming_enabled: inputs
+                    .analysis
+                    .sim_setup
+                    .save_policy
+                    .live_streaming_enabled,
+                retain_failure_diagnostics: inputs
+                    .analysis
+                    .sim_setup
+                    .save_policy
+                    .retain_failure_diagnostics,
+            },
+            model_identities,
+            project_model_sources,
+            specifications,
+            specification_policy,
+            project_veriloga_runtimes,
+            target: ExecutionTargetCapabilities::current(),
+            receipt,
+            advisories,
+            manual_source: None,
+            cross_probe: Some(CrossProbeSnapshot {
+                source_reference: root_reference,
+                point_to_net: generated.point_to_net,
+                nets: generated.nets,
+                net_segments: generated.net_segments,
+                topology_version: root_schematic.topology_version(),
+                emission_map: generated.emission_map,
+            }),
+            touchstone_export,
+            sealed_source_dependencies,
         },
-        model_identities,
-        project_model_sources,
-        specifications,
-        specification_policy,
-        project_veriloga_runtimes,
-        target: ExecutionTargetCapabilities::current(),
-        receipt,
-        advisories,
-        manual_source: None,
-        cross_probe: Some(CrossProbeSnapshot {
-            source_reference: root_reference,
-            point_to_net: generated.point_to_net,
-            nets: generated.nets,
-            net_segments: generated.net_segments,
-            topology_version: root_schematic.topology_version(),
-            emission_map: generated.emission_map,
-        }),
-        touchstone_export,
-        sealed_source_dependencies,
-    })
+        rspice_core::ResourceLimits::default(),
+        abort,
+        progress,
+    )
 }
 
 pub fn build_prepared_manual_deck<R, A>(
@@ -709,7 +758,7 @@ pub fn build_prepared_manual_deck<R, A>(
         intent: SimulationRunIntent::ManualDeck,
         simulation_plan_id: None,
         project_revision: inputs.technology.project.revision().get(),
-        topology_revision: inputs.schematic_source.schematic.topology_version(),
+        topology_revision: inputs.schematic_topology_revision,
         source_digest,
         reference_process: inputs.analysis.sim_setup.reference_pvt.process,
         reference_temperature_celsius: inputs.analysis.sim_setup.reference_pvt.temperature_celsius,

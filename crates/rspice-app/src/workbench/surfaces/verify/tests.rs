@@ -296,6 +296,49 @@ fn tuning_commit_is_one_plan_revision_and_queues_the_required_run() {
     assert!(!tuning_is_dirty(&app));
 }
 
+/// A tuning commit prepares the run it requires in its own frame and queues
+/// it. An edit to the design before the frame that dispatches it refuses the
+/// run there, as it refuses a run a Run press prepared: nothing is prepared
+/// again, and nothing runs.
+#[test]
+fn an_edit_after_a_tuning_commit_refuses_its_run() {
+    use crate::simulation::controller::prepared_run::thread_preparations;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.provision_test_project_technology_contract();
+    app.state.workspace.content.project_sources = Default::default();
+    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
+    add_tuning_variable(&mut app);
+    sync_tuning_session(&mut app);
+    app.state.workbench.verification.tuning_variables[0].candidate_expression =
+        "620 ohm".to_owned();
+    tuning::commit_tuning_and_run(&mut app).expect("valid candidate commits and dispatches");
+    assert!(app.state.simulation.execution.trigger_simulation);
+    thread_preparations::take();
+
+    app.state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .iter_mut()
+        .find(|component| component.name == "R2")
+        .expect("the divider draws R2")
+        .value = "22k".to_owned();
+    app.simulation_controller
+        .update(&mut app.state, &*app.export_workflow_io);
+
+    assert!(
+        thread_preparations::take().is_empty(),
+        "the dispatch frame prepares nothing"
+    );
+    assert!(!app.state.simulation.execution.has_active_execution());
+    assert!(app.state.simulation.retained.runs.is_empty());
+    assert_eq!(
+        app.state.simulation.execution.status,
+        "The design changed after it was checked; run again"
+    );
+}
+
 #[test]
 fn reverting_a_literal_value_proposal_discards_variable_and_binding_only() {
     let mut app = RSpiceApp::test_instance();

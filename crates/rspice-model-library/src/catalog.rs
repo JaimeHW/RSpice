@@ -27,7 +27,7 @@ pub use identity::model_library_source_digest;
 pub use project_models::{ProjectModelCommit, ProjectModelTarget};
 pub use providers::ModelDefinitionProvider;
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ModelCatalog {
     libraries: HashMap<String, ModelLibrary>,

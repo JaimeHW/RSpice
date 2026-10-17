@@ -10,8 +10,9 @@ struct PendingPreparedRun {
 }
 
 /// Owns both the retained snapshot and the authority that can consume it.
-/// Preparation stays with the owning workflow; this boundary compares its
-/// freshly rebuilt snapshot before releasing a dispatch.
+/// Preparation stays with the owning workflow, which retains what the
+/// snapshot was prepared from; before releasing a dispatch this boundary has
+/// the owner confirm that none of it has moved.
 #[derive(Default)]
 pub struct PreparedRunAuthorization {
     pending: Option<PendingPreparedRun>,
@@ -41,10 +42,18 @@ impl PreparedRunAuthorization {
         Ok(())
     }
 
+    /// Dispatch the retained snapshot itself, without preparing it again.
+    ///
+    /// The snapshot's own preparation is the authorization: it was prepared
+    /// from the session as it stood at one instant and checked, and the owner
+    /// retained the identity of those inputs beside it. `verify` confirms
+    /// that nothing the snapshot was prepared from has moved since. When it
+    /// refuses, the retained snapshot and its permit are spent and nothing is
+    /// dispatched.
     pub fn consume(
         &mut self,
         intent: SimulationRunIntent,
-        rebuild: impl FnOnce() -> Result<PreparedRunSnapshot, PreparationError>,
+        verify: impl FnOnce(&PreparedRunSnapshot) -> Result<(), PreparationError>,
     ) -> Result<AuthorizedRunDispatch, PreparationError> {
         if self
             .pending
@@ -75,25 +84,18 @@ impl PreparedRunAuthorization {
                 "No authorized prepared run is available",
             )
         })?;
-
-        let current = match rebuild() {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                let _ = self.permits.invalidate();
-                return Err(error);
-            }
-        };
-        let retained_digest = pending.snapshot.digest();
-        let current_digest = current.digest();
-        let proof = match pending.permit.consume(retained_digest, current_digest) {
+        if let Err(error) = verify(&pending.snapshot) {
+            let _ = self.permits.invalidate();
+            return Err(error);
+        }
+        let digest = pending.snapshot.digest();
+        let proof = match pending.permit.consume(digest, digest) {
             Ok(proof) => proof,
             Err(error) => {
                 let _ = self.permits.invalidate();
                 return Err(PreparationError::new(
                     PreparationStage::Authorization,
-                    format!(
-                        "Prepared run expired because a bound input, capability, or check receipt changed ({error})"
-                    ),
+                    format!("Prepared run could not be dispatched ({error})"),
                 ));
             }
         };

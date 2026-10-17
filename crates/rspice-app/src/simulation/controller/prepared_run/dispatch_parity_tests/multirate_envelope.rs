@@ -27,7 +27,7 @@ fn multirate_envelope_saved_plan_retains_its_solver_through_authorized_dispatch(
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
             .unwrap();
     let receipt = snapshot.prepared_run_receipt().unwrap();
-    controller.run_authorization.retain(snapshot).unwrap();
+    controller.retain_prepared_from(&state, snapshot).unwrap();
     let dispatch = controller.consume_snapshot_for_dispatch(&state).unwrap();
     assert_eq!(
         receipt,

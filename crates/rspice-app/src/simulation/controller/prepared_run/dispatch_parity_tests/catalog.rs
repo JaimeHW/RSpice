@@ -78,8 +78,7 @@ fn every_configured_analysis_survives_save_prepare_and_dispatch() {
                 .prepared_run_receipt()
                 .map_err(|error| error.to_string())?;
             controller
-                .run_authorization
-                .retain(snapshot)
+                .retain_prepared_from(&state, snapshot)
                 .map_err(|error| error.to_string())?;
             let dispatch = controller
                 .consume_snapshot_for_dispatch(&state)

@@ -322,6 +322,7 @@ pub fn prepare_headless_run(
         },
         expanded_limits,
         abort,
+        &|_| {},
     )?;
     check_abort(abort)?;
     Ok(snapshot)

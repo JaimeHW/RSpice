@@ -68,7 +68,7 @@ fn independent_ac_data_instances_keep_their_own_parameter_tables() {
     let snapshot =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
             .unwrap();
-    controller.run_authorization.retain(snapshot).unwrap();
+    controller.retain_prepared_from(&state, snapshot).unwrap();
     let dispatch = controller.consume_snapshot_for_dispatch(&state).unwrap();
     assert!(!dispatch.executable_netlist().contains(".DATA"));
     let mut ac_count = 0;
@@ -296,8 +296,7 @@ fn the_receipt_preflight_seals_is_the_receipt_dispatch_seals() {
         .expect("preflight seals a receipt");
 
     controller
-        .run_authorization
-        .retain(snapshot)
+        .retain_prepared_from(&state, snapshot)
         .expect("the snapshot authorizes");
     let dispatch = controller
         .consume_snapshot_for_dispatch(&state)

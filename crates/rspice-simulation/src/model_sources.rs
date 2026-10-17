@@ -4,7 +4,9 @@ mod binding_authority;
 pub use binding_authority::validate_projected_model_binding_authority;
 
 mod catalog_sealing;
-pub use catalog_sealing::{seal_catalog_execution_sources, seal_plan_execution_sources};
+pub use catalog_sealing::{
+    seal_catalog_execution_sources, seal_plan_execution_sources, verify_plan_external_model_sources,
+};
 
 mod project_provenance;
 pub use project_provenance::prepared_project_model_sources;

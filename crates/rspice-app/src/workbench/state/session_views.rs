@@ -1378,7 +1378,8 @@ pub struct PreflightDialogState {
     /// loop consumes it on its next pass, so the request records intent
     /// without its origin naming the workflow.
     pub(in crate::workbench) run_and_queue_requested: bool,
-    /// A pass whose decks the engine is still building, off the UI thread.
+    /// A pass whose run is still being prepared and checked, off the UI
+    /// thread.
     pub(in crate::workbench) checking: Option<PreflightCheck>,
     /// The reader stopped that pass. The frame loop cancels it before it
     /// looks for the pass's verdict, so a verdict that lands in between
@@ -1386,15 +1387,14 @@ pub struct PreflightDialogState {
     pub(in crate::workbench) check_cancel_requested: bool,
 }
 
-/// What a pass decided before its engine build began, held until the build
-/// says what the engine refuses.
+/// What a pass decided in the frame that took the press, held until the
+/// worker has prepared the run and the engine has built its decks.
 #[derive(Debug, Clone)]
 pub(in crate::workbench) struct PreflightCheck {
     /// The report as far as the press took it: the revisions it inspected,
-    /// and its advisories. The engine's refusals join its blockers.
+    /// and its advisories. What preparing the run and building its decks
+    /// finds joins it.
     pub(in crate::workbench) report: PreflightReport,
-    /// What the report authorizes if the engine refuses nothing.
-    pub(in crate::workbench) contract: PreparedPreflightContract,
     /// Whether the run is queued once the report authorizes it: a Run press
     /// rather than a check alone.
     pub(in crate::workbench) queue: bool,
@@ -1426,8 +1426,8 @@ impl PreflightDialogState {
         std::mem::take(&mut self.run_and_queue_requested)
     }
 
-    /// Ask the frame loop to stop the pass whose decks the engine is
-    /// building. Nothing when no pass is.
+    /// Ask the frame loop to stop the pass whose run is being prepared or
+    /// checked. Nothing when no pass is.
     pub(in crate::workbench) fn request_check_cancel(&mut self) {
         self.check_cancel_requested = self.checking.is_some();
     }
