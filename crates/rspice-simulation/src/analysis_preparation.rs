@@ -13,6 +13,7 @@ mod run_config;
 mod spec;
 
 pub use helpers::{map_frequency_sweep, parse_optional_spice_value, parse_positive_points};
+pub(crate) use helpers::{spell_expression_as_the_deck, spell_output_as_the_deck};
 pub use run_config::{
     corner_run_config_from_dialog, pac_run_config_from_dialog, pnoise_run_config_from_dialog,
     pstb_run_config_from_dialog, pxf_run_config_from_dialog, temp_run_config_from_dialog,

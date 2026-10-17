@@ -286,11 +286,11 @@ where
     Ok(spec)
 }
 
-/// Every reference node the spec carries from its form, spelled as the
-/// schematic's deck spells it, so a run measured against the drawn ground is
-/// measured against node 0 under any dialect.
+/// Every reference node and output expression the spec carries from its
+/// form, spelled as the schematic's deck spells it, so a run measured against
+/// the drawn ground is measured against node 0 under any dialect.
 fn spell_references_as_the_deck(spec: &mut AnalysisSpec) {
-    use super::helpers::spell_as_the_deck;
+    use super::helpers::{spell_as_the_deck, spell_expression_as_the_deck};
     match spec {
         AnalysisSpec::Noise { reference_node, .. } => spell_as_the_deck(reference_node),
         AnalysisSpec::PoleZero {
@@ -301,12 +301,38 @@ fn spell_references_as_the_deck(spec: &mut AnalysisSpec) {
             spell_as_the_deck(input_ref);
             spell_as_the_deck(output_ref);
         }
-        AnalysisSpec::Optimization { objective_ref, .. } => spell_as_the_deck(objective_ref),
-        AnalysisSpec::Fourier { output_ref, .. }
-        | AnalysisSpec::Hbnoise { output_ref, .. }
+        AnalysisSpec::Optimization {
+            objective_ref,
+            objective_expression,
+            ..
+        } => {
+            spell_as_the_deck(objective_ref);
+            if let Some(expression) = objective_expression {
+                spell_expression_as_the_deck(expression);
+            }
+        }
+        AnalysisSpec::Fourier {
+            output_ref,
+            additional_outputs,
+            ..
+        } => {
+            spell_as_the_deck(output_ref);
+            additional_outputs
+                .iter_mut()
+                .for_each(spell_expression_as_the_deck);
+        }
+        AnalysisSpec::Hbnoise { output_ref, .. }
         | AnalysisSpec::Qpac { output_ref, .. }
         | AnalysisSpec::Qpnoise { output_ref, .. }
         | AnalysisSpec::Qpxf { output_ref, .. } => spell_as_the_deck(output_ref),
+        AnalysisSpec::Tf {
+            output_expression, ..
+        }
+        | AnalysisSpec::DcMismatch {
+            output_expression, ..
+        } => spell_expression_as_the_deck(output_expression),
+        AnalysisSpec::Sensitivity { output_var, .. } => spell_expression_as_the_deck(output_var),
+        AnalysisSpec::Fft { request } => spell_expression_as_the_deck(&mut request.output),
         _ => {}
     }
 }

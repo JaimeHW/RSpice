@@ -1106,22 +1106,9 @@ fn sources_into_ground_and_into_a_ground_global_are_a_loop_the_engine_refuses() 
     );
 }
 
-/// A drawing returned through a `GND!` label is written with that net as node
-/// 0: the deck has no node named `GND!`, and the ngspice dialect it runs
-/// under does not fold that name onto ground itself. An objective a form
-/// measures against the drawn ground by that name is measured against node
-/// 0, and one measured against a node the deck lacks is refused rather than
-/// read as 0 V.
-#[test]
-fn an_output_reference_naming_the_drawn_ground_is_measured_against_node_zero() {
-    use crate::analysis_preparation::{AnalysisInputs, analysis_draft_spec};
-    use rspice_results::analysis_result::AnalysisResult;
-    use rspice_results::run::SimulationRun;
-    use rspice_simulation_contract::analysis_draft::AnalysisDraft;
-    use rspice_simulation_contract::optimization_draft::{
-        OptimizationConfig, OptimizationDialogState, OptimizationVariableConfig,
-    };
-
+/// V1 = 2 V into R1 = 1k over R2 = `{RLOAD}`, every ground drawn as a `GND!`
+/// label, generated with `RLOAD = 1k`.
+fn divider_returned_through_gnd_labels() -> String {
     let mut bench = Bench::new();
     let v1 = bench.place(ComponentType::VoltageSource, 0, 0, "V1", "2", "");
     let r1 = bench.place(ComponentType::Resistor, 200, 0, "R1", "1k", "");
@@ -1133,7 +1120,54 @@ fn an_output_reference_naming_the_drawn_ground_is_measured_against_node_zero() {
     bench.label((r2, 1), "GND!");
     let netlist = bench.netlist_with_parameters(&[".param RLOAD=1k".to_owned()]);
     assert!(!netlist.to_ascii_uppercase().contains("GND!"), "{netlist}");
+    netlist
+}
 
+/// Run an analysis form against `netlist` the way the simulate action does.
+fn run_form(
+    draft: rspice_simulation_contract::analysis_draft::AnalysisDraft,
+    netlist: &str,
+) -> Result<crate::results::SimulationResult, crate::error::SimulationError> {
+    use crate::analysis_preparation::{AnalysisInputs, analysis_draft_spec};
+    use rspice_results::analysis_result::AnalysisResult;
+    use rspice_results::run::SimulationRun;
+
+    let inputs: AnalysisInputs<'_, SimulationRun, AnalysisResult> = AnalysisInputs {
+        sim_setup: &Default::default(),
+        schematic: &Default::default(),
+        selected_components: &Default::default(),
+        selection_occurrence: None,
+        runs: &[],
+        active_run: None,
+        project_revision: rspice_app_types::product::ObjectRevision::INITIAL,
+        plan_payloads: &[],
+    };
+    let spec = analysis_draft_spec(&inputs, &draft).expect("the form builds a request");
+    run_spec_request(
+        &EngineBridge::new(),
+        spec,
+        SpecExecutionOptions::default(),
+        netlist,
+        None,
+        &ResolvedExecutionDependencies::default(),
+        &rspice_core::abort_signal::NoAbort,
+    )
+}
+
+/// A drawing returned through a `GND!` label is written with that net as node
+/// 0: the deck has no node named `GND!`, and the ngspice dialect it runs
+/// under does not fold that name onto ground itself. An objective a form
+/// measures against the drawn ground by that name is measured against node
+/// 0, and one measured against a node the deck lacks is refused rather than
+/// read as 0 V.
+#[test]
+fn an_output_reference_naming_the_drawn_ground_is_measured_against_node_zero() {
+    use rspice_simulation_contract::analysis_draft::AnalysisDraft;
+    use rspice_simulation_contract::optimization_draft::{
+        OptimizationConfig, OptimizationDialogState, OptimizationVariableConfig,
+    };
+
+    let netlist = divider_returned_through_gnd_labels();
     let optimized_against = |reference: &str| {
         let draft = OptimizationDialogState::from_config(&OptimizationConfig {
             variables: vec![OptimizationVariableConfig {
@@ -1148,27 +1182,7 @@ fn an_output_reference_naming_the_drawn_ground_is_measured_against_node_zero() {
             target_value: Some(1.2),
             ..OptimizationConfig::default()
         });
-        let inputs: AnalysisInputs<'_, SimulationRun, AnalysisResult> = AnalysisInputs {
-            sim_setup: &Default::default(),
-            schematic: &Default::default(),
-            selected_components: &Default::default(),
-            selection_occurrence: None,
-            runs: &[],
-            active_run: None,
-            project_revision: rspice_app_types::product::ObjectRevision::INITIAL,
-            plan_payloads: &[],
-        };
-        let spec = analysis_draft_spec(&inputs, &AnalysisDraft::Optimization(draft))
-            .expect("the form builds a request");
-        run_spec_request(
-            &EngineBridge::new(),
-            spec,
-            SpecExecutionOptions::default(),
-            &netlist,
-            None,
-            &ResolvedExecutionDependencies::default(),
-            &rspice_core::abort_signal::NoAbort,
-        )
+        run_form(AnalysisDraft::Optimization(draft), &netlist)
     };
 
     // V(out) = 2 V * RLOAD / (1k + RLOAD) is 1.2 V at RLOAD = 1.5k.
@@ -1201,4 +1215,87 @@ fn an_output_reference_naming_the_drawn_ground_is_measured_against_node_zero() {
             .contains("reference node 'nowhere' not found"),
         "{refused}"
     );
+}
+
+/// An output a form writes as an expression reads the drawn ground by any of
+/// its names as node 0, as the deck is written: the transfer function to
+/// `V(out,GND!)` is the one to `V(out)`, and an objective `V(out)-V(GND!)`
+/// places `V(out)` where `V(out)` does. A node the deck lacks is still refused.
+#[test]
+fn an_output_expression_naming_the_drawn_ground_reads_node_zero() {
+    use crate::results::{SimulationResult, TransferFunctionScalar};
+    use rspice_simulation_contract::analysis_draft::AnalysisDraft;
+    use rspice_simulation_contract::optimization_draft::{
+        OptimizationConfig, OptimizationDialogState, OptimizationVariableConfig,
+    };
+    use rspice_simulation_contract::xf_draft::{XfConfig, XfDialogState};
+
+    let netlist = divider_returned_through_gnd_labels();
+    let transfer_to = |output: &str| {
+        let draft = XfDialogState::from_config(&XfConfig {
+            input_source: "V1".to_owned(),
+            output_expression: output.to_owned(),
+            input_resistance: false,
+            output_resistance: false,
+            ..XfConfig::default()
+        });
+        run_form(AnalysisDraft::TransferFunction(draft), &netlist)
+    };
+    // V(out) / V1 = RLOAD / (1k + RLOAD) is 1/2 at RLOAD = 1k.
+    for output in ["V(out)", "V(out,GND!)", "V(out,ground)", "V(out,0)"] {
+        let result = transfer_to(output);
+        let Ok(SimulationResult::TransferFunction {
+            gain: Some(TransferFunctionScalar::Finite(gain)),
+            ..
+        }) = &result
+        else {
+            panic!("{output}: {result:?}");
+        };
+        assert!((gain - 0.5).abs() < 1e-9, "{output}: gain = {gain}");
+    }
+    let refused = transfer_to("V(out,nowhere)").expect_err("a node the deck lacks is refused");
+    assert!(refused.to_string().contains("nowhere"), "{refused}");
+
+    let optimized = |expression: &str| {
+        let draft = OptimizationDialogState::from_config(&OptimizationConfig {
+            variables: vec![OptimizationVariableConfig {
+                name: "RLOAD".to_owned(),
+                min: 500.0,
+                max: 5_000.0,
+                initial: 1_000.0,
+            }],
+            objective_unit: "V".to_owned(),
+            objective_expression: Some(expression.to_owned()),
+            target_value: Some(1.2),
+            ..OptimizationConfig::default()
+        });
+        run_form(AnalysisDraft::Optimization(draft), &netlist)
+    };
+    // V(out) = 2 V * RLOAD / (1k + RLOAD) is 1.2 V at RLOAD = 1.5k.
+    for expression in ["V(out)", "V(out)-V(GND!)", "V(out,GND!)"] {
+        let result = optimized(expression);
+        let Ok(SimulationResult::Optimization {
+            best_variables,
+            best_objectives,
+            ..
+        }) = &result
+        else {
+            panic!("{expression}: {result:?}");
+        };
+        let [objective] = best_objectives.as_slice() else {
+            panic!("{expression}: one objective: {best_objectives:?}");
+        };
+        assert!(
+            (objective.value - 1.2).abs() < 1e-3,
+            "{expression}: objective = {}",
+            objective.value
+        );
+        let rload = best_variables["RLOAD"];
+        assert!(
+            (rload - 1500.0).abs() < 5.0,
+            "{expression}: RLOAD = {rload}"
+        );
+    }
+    let refused = optimized("V(out)-V(nowhere)").expect_err("a node the deck lacks is refused");
+    assert!(refused.to_string().contains("nowhere"), "{refused}");
 }

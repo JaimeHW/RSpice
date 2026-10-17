@@ -155,6 +155,43 @@ pub(super) fn spell_as_the_deck(node: &mut String) {
     }
 }
 
+/// Spell every node an expression the run hands the engine names as the
+/// schematic's deck spells it: an output probe, an objective, a `.MEAS` card.
+///
+/// Only a node argument is respelled, where the engine's parser reads one:
+/// `V(out,GND!)` and `{V(out)-V(GND!)}` read node `0`, while a parameter, a
+/// device or a current probe named `gnd` keeps its name. A node the deck lacks
+/// is still refused by the analysis that reads it.
+pub(crate) fn spell_expression_as_the_deck(expression: &mut String) {
+    *expression = rspice_core::netlist::spell_ground_probe_arguments(
+        expression,
+        &rspice_design::schematic::ground_names::is_ground_reference,
+    );
+}
+
+/// Spell every node a plan's saved output names as the schematic's deck
+/// spells it, read by the grammar the output is evaluated with.
+///
+/// `V(out,GND!)` and `V(out)-V(GND!)` measure against the ground the user
+/// drew, which the deck holds only as node `0`. An expression that grammar
+/// refuses is left as written, for the output's contract to refuse in its own
+/// words.
+pub(crate) fn spell_output_as_the_deck(
+    output: &mut rspice_simulation_contract::saved_output::SavedOutput,
+) {
+    let deck_node = |node: &str| {
+        (node != "0" && rspice_design::schematic::ground_names::is_ground_reference(node))
+            .then(|| "0".to_owned())
+    };
+    if let Ok(Some(spelled)) = rspice_results::saved_output::respell_saved_output_nodes(
+        output.kind,
+        &output.source_expression,
+        deck_node,
+    ) {
+        output.source_expression = spelled;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::expand_temperature_points;

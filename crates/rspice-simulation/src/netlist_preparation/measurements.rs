@@ -115,6 +115,10 @@ fn append_statements(
                 definition.measurement
             )));
         }
+        // The deck holds the drawn ground only as node 0, so the card names
+        // it that way; the definition keeps the card as authored.
+        let mut statement = statement.to_owned();
+        crate::analysis_preparation::spell_expression_as_the_deck(&mut statement);
         statements.push(statement);
     }
     if statements.is_empty() {
