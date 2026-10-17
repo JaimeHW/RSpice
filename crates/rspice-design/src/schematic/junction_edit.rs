@@ -305,11 +305,15 @@ pub fn remove_orphan_junctions(document: &mut SchematicDocument) -> usize {
     retain_meaningful_junctions(document, &rule)
 }
 
+/// Keep the dots that mark something, one per point. A turn or a move can
+/// carry a dot onto a point that already has one, and the second marks
+/// nothing the first does not; the first in drawing order stays.
 fn retain_meaningful_junctions(document: &mut SchematicDocument, rule: &JunctionRule) -> usize {
     let before = document.junctions.len();
+    let mut marked = HashSet::with_capacity(before);
     document
         .junctions
-        .retain(|junction| rule.dot_belongs(junction.pos, true));
+        .retain(|junction| marked.insert(junction.pos) && rule.dot_belongs(junction.pos, true));
     before - document.junctions.len()
 }
 

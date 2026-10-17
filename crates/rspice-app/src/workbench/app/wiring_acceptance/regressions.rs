@@ -2,7 +2,7 @@
 //! reproduction.
 
 use super::Bench;
-use super::property::{Pick, Step::*, p, replay};
+use super::property::{Pick, Step::*, Turn, p, replay};
 use crate::state::{ComponentType, Point, Rotation};
 
 /// Replay a shrunk sequence the property test reported, from its fixture.
@@ -19,6 +19,22 @@ fn holds(steps: &[super::property::Step]) {
 #[test]
 fn deleting_a_t_branch_drops_its_dot_though_another_sheet_has_a_t_there() {
     holds(&[Delete(Pick::Wire(8))]);
+}
+
+/// A wire drawn from R2's pin on the T's right branch to the crossing
+/// wire, then R1 mirrored top to bottom with two wires: the mirror moved a
+/// dot onto a point that already had one, leaving two dots on (140, 100).
+#[test]
+fn a_mirrored_selection_leaves_one_dot_per_point() {
+    holds(&[
+        Sheet,
+        Sheet,
+        Draw(vec![p(280, 100), p(140, 180)]),
+        Transform(
+            vec![Pick::Part(1), Pick::Wire(38), Pick::Wire(29)],
+            Turn::MirrorVertical,
+        ),
+    ]);
 }
 
 /// A resistor dropped with its `-` pin on R2's `+` pin, where the T's
