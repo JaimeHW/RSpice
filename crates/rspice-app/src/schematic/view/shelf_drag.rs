@@ -189,17 +189,22 @@ fn apply_placement_transform(
     }
 }
 
-/// Whether something floats under the pointer for R and M to turn: the
-/// placement ghost, or a selection Move is carrying.
+/// Whether something floats under the pointer for R and M to turn: a
+/// floating paste or duplicate, a selection Move is carrying, or the
+/// placement ghost.
 pub(super) fn something_floats(state: &AppState) -> bool {
-    state.dialogs.move_selection.armed || state.schematic.session.editor.tool.is_place_tool()
+    state.dialogs.floating_paste.is_some()
+        || state.dialogs.move_selection.armed
+        || state.schematic.session.editor.tool.is_place_tool()
 }
 
-/// Turn what floats under the pointer, as R and M do. Rotate and Mirror
-/// on the touch strip and the canvas menu take this path while something
+/// Turn what floats under the pointer. R and M take this path, and so do
+/// Rotate and Mirror on the touch strip and the canvas menu while something
 /// floats, since a tablet has no R or M key. Returns whether anything did.
 pub(super) fn turn_what_floats(state: &mut AppState, transform: PlacementTransform) -> bool {
-    if state.dialogs.move_selection.armed {
+    if state.dialogs.floating_paste.is_some() {
+        crate::workbench::app::turn_floating_paste(state, selection_transform(transform))
+    } else if state.dialogs.move_selection.armed {
         turn_the_move(state, transform);
         true
     } else if state.schematic.session.editor.tool.is_place_tool() {
@@ -207,6 +212,15 @@ pub(super) fn turn_what_floats(state: &mut AppState, transform: PlacementTransfo
         true
     } else {
         false
+    }
+}
+
+const fn selection_transform(transform: PlacementTransform) -> SelectionTransform {
+    match transform {
+        PlacementTransform::RotateClockwise => SelectionTransform::RotateClockwise,
+        PlacementTransform::RotateCounterClockwise => SelectionTransform::RotateCounterClockwise,
+        PlacementTransform::ToggleHorizontalMirror => SelectionTransform::MirrorHorizontal,
+        PlacementTransform::ToggleVerticalMirror => SelectionTransform::MirrorVertical,
     }
 }
 
@@ -221,22 +235,17 @@ pub(crate) fn handle_pre_render_placement_transform(
     canvas_has_focus: bool,
 ) -> bool {
     let pointer_over_canvas = rspice_schematic_editor::view::canvas::contains_pointer(ctx);
-    if state.dialogs.floating_paste.is_some() && (canvas_has_focus || pointer_over_canvas) {
+    // A floating paste, or the selection Move carries, turns about its own
+    // middle and keeps floating. A turn of what Move carries is its own undo
+    // step; the floating copy is not on the sheet until it lands.
+    let carried = state.dialogs.floating_paste.is_some() || state.dialogs.move_selection.armed;
+    if carried && (canvas_has_focus || pointer_over_canvas) {
         let Some(transform) = ctx.input_mut(consume_placement_transform) else {
             return false;
         };
-        crate::workbench::app::turn_floating_paste(
-            state,
-            match transform {
-                PlacementTransform::RotateClockwise => SelectionTransform::RotateClockwise,
-                PlacementTransform::ToggleHorizontalMirror => SelectionTransform::MirrorHorizontal,
-            },
-        );
+        turn_what_floats(state, transform);
         ctx.request_repaint();
         return true;
-    }
-    if state.dialogs.move_selection.armed && (canvas_has_focus || pointer_over_canvas) {
-        return turn_the_floating_move(ctx, state);
     }
     let click_placement_active = state.schematic.session.editor.tool.is_place_tool()
         && (canvas_has_focus || pointer_over_canvas);
@@ -252,25 +261,10 @@ pub(crate) fn handle_pre_render_placement_transform(
     true
 }
 
-/// While Move carries the selection, R turns it clockwise and M mirrors it
-/// left to right about its own middle, and the move carries on from where
-/// the pointer is. The turn is its own undo step.
-fn turn_the_floating_move(ctx: &egui::Context, state: &mut AppState) -> bool {
-    let Some(transform) = ctx.input_mut(consume_placement_transform) else {
-        return false;
-    };
-    turn_the_move(state, transform);
-    ctx.request_repaint();
-    true
-}
-
+/// While Move carries the selection, a turn applies about its own middle,
+/// and the move carries on from where the pointer is.
 fn turn_the_move(state: &mut AppState, transform: PlacementTransform) {
-    let transform = match transform {
-        PlacementTransform::RotateClockwise => SelectionTransform::RotateClockwise,
-        PlacementTransform::RotateCounterClockwise => SelectionTransform::RotateCounterClockwise,
-        PlacementTransform::ToggleHorizontalMirror => SelectionTransform::MirrorHorizontal,
-        PlacementTransform::ToggleVerticalMirror => SelectionTransform::MirrorVertical,
-    };
+    let transform = selection_transform(transform);
     let symbol_context = super::schematic_symbol_context(state);
     if transform_selection_on_active_sheet(state, &symbol_context, transform) {
         // The move was armed against the drawing as it stood; it now

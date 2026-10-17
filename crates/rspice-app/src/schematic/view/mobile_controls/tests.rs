@@ -536,6 +536,41 @@ fn a_long_press_on_overlapping_parts_offers_each_of_them() {
     );
 }
 
+/// G-1 and G-12: R turns a floating paste or duplicate, and a tablet has no
+/// R. The strip's Rotate turns the floating copy, not the part it was copied
+/// from, and the copy lands turned.
+#[test]
+fn the_strip_turns_a_floating_duplicate() {
+    let mut finger = Finger::new(Vec2::new(1024.0, 768.0));
+    let original = finger.resistor(Point::new(200, 200));
+    let state = &mut finger.app.state;
+    state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_component(original);
+    assert!(state.duplicate_schematic_selection_at(Point::new(300, 300)));
+    finger.wake();
+    finger.press("Rotate clockwise");
+    assert!(
+        finger.app.state.dialogs.floating_paste.is_some(),
+        "the copy still floats"
+    );
+    assert!(finger.app.state.place_floating_paste());
+    let components = &finger.app.state.schematic.document().components;
+    let quarter = rspice_design::schematic::rotation::Rotation::default().rotate_cw();
+    let turned: Vec<_> = components
+        .iter()
+        .map(|part| (part.id == original, part.rotation))
+        .collect();
+    assert_eq!(
+        turned,
+        vec![(true, Default::default()), (false, quarter)],
+        "only the copy turned"
+    );
+}
+
 /// G-12: R and M turn the placement ghost, and a tablet has neither key.
 /// The strip's Rotate and Mirror turn the ghost while a part is being
 /// placed, and the part lands as the ghost showed it.

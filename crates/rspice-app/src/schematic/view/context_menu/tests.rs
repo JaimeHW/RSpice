@@ -1403,6 +1403,54 @@ fn a_paste_joins_wiring_on_its_own_sheet_only() {
     assert!(state.schematic.document().junctions.is_empty());
 }
 
+/// G-1 and G-12: while a duplicate floats under the pointer, R turns it, and
+/// so does the long-press menu's Rotate row, which is a finger's R. The part
+/// it was copied from stays as it was.
+#[test]
+fn the_rotate_row_turns_a_floating_duplicate_not_its_original() {
+    let mut state = AppState::default();
+    state.schematic.document_mut_for_test().components.clear();
+    let mut part = Component::new(41, ComponentType::Resistor, Point::new(20, 30));
+    part.name = "R1".to_owned();
+    state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(part);
+    state.sync_active_schematic_to_workspace();
+    state.schematic.init_undo_history();
+    state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(41);
+    assert!(state.duplicate_schematic_selection_at(Point::new(60, 30)));
+    let symbol_context = schematic_symbol_context(&state);
+
+    assert!(action_availability(ContextAction::Rotate, &state).0);
+    execute_context_action(
+        ContextAction::Rotate,
+        &mut state,
+        Point::new(60, 30),
+        &symbol_context,
+    );
+    assert!(state.place_floating_paste());
+    let quarter = rspice_design::schematic::rotation::Rotation::default().rotate_cw();
+    let turned: Vec<_> = state
+        .schematic
+        .document()
+        .components
+        .iter()
+        .map(|part| (part.id == 41, part.rotation))
+        .collect();
+    assert_eq!(
+        turned,
+        vec![(true, Default::default()), (false, quarter)],
+        "only the copy turned"
+    );
+}
+
 /// The canvas menu had Copy, Duplicate and Delete but no Cut, no Paste and
 /// no vertical mirror, so a reader working from the menu had to reach for
 /// keys to finish the job (audit E-9). Each row is offered on every target
