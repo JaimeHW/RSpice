@@ -464,7 +464,7 @@ fn occurrence_net_points<'a>(
 /// the occurrence the active tab is editing. The retained cross-probe point map
 /// is replaced for each dispatch, so pairing it with any other result would
 /// falsely attach values to a different solve.
-fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnnotation> {
+pub(super) fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnnotation> {
     if state.ui.schematic_visibility.annotations != SchematicAnnotationVisibility::OperatingPoint
         || !state.simulation.source.cross_probe.is_populated()
         || !state.simulation.source.cross_probe.is_current_for(
