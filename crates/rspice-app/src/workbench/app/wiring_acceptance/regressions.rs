@@ -2,7 +2,24 @@
 //! reproduction.
 
 use super::Bench;
+use super::property::{Pick, Step::*, replay};
 use crate::state::{ComponentType, Point, Rotation};
+
+/// Replay a shrunk sequence the property test reported, from its fixture.
+fn holds(steps: &[super::property::Step]) {
+    if let Err(failure) = replay(steps) {
+        panic!("{failure}");
+    }
+}
+
+/// Both fixture sheets draw a T at (200, 100). Deleting the T's right
+/// branch on Sheet 1 leaves two wire ends there, which no dot marks; the
+/// deletion's own dot cleanup counted Sheet 2's T at the same point as well
+/// and kept Sheet 1's dot.
+#[test]
+fn deleting_a_t_branch_drops_its_dot_though_another_sheet_has_a_t_there() {
+    holds(&[Delete(Pick::Wire(8))]);
+}
 
 /// Opening Sheet 2 is a step in the one undo order. A part placed there
 /// gave the part its sheet, which moved the project's revision, and the

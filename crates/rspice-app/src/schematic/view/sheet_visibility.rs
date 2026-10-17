@@ -377,20 +377,6 @@ pub(crate) fn finish_wire_on_active_sheet(state: &mut AppState) -> Option<u64> {
         .finish_wire(off_active_sheet(&state.workspace))
 }
 
-/// Protect hidden conductors around an operation that owns its own undo
-/// transaction. Keeping hidden objects present while that transaction captures
-/// snapshots preserves complete undo/redo state; restoring their authored
-/// values afterward removes any incidental cross-sheet endpoint remap or orphan
-/// cleanup performed by the legacy whole-buffer algorithm.
-pub(crate) fn with_hidden_wire_topology_preserved<R>(
-    state: &mut AppState,
-    operation: impl FnOnce(&mut SchematicState) -> R,
-) -> R {
-    state
-        .schematic
-        .with_hidden_wire_topology_preserved(off_active_sheet(&state.workspace), operation)
-}
-
 pub(super) fn active_sheet_has_objects(state: &AppState) -> bool {
     state
         .schematic
@@ -723,8 +709,11 @@ mod tests {
         assert_eq!(state.schematic.document().components.len(), 1);
     }
 
+    /// A deletion on Sheet 1 leaves Sheet 2's objects alone, even a dot
+    /// that marks nothing on Sheet 1's wires, and its undo step holds both
+    /// sheets.
     #[test]
-    fn self_undoing_edit_preserves_hidden_objects_and_complete_undo_snapshot() {
+    fn a_deletion_keeps_another_sheets_objects_and_undo_restores_both_sheets() {
         let mut state = two_sheet_state(&[10], &[21]);
         state.schematic.document_mut_for_test().wires =
             vec![Wire::segment(10, Point::origin(), Point::new(20, 0))];
@@ -733,10 +722,7 @@ mod tests {
         state.schematic.session.editor.selection.select_wire(10);
         state.schematic.init_undo_history();
 
-        assert!(with_hidden_wire_topology_preserved(
-            &mut state,
-            |schematic| schematic.delete_selection()
-        ));
+        assert!(state.delete_schematic_selection());
         assert!(state.schematic.document().wires.is_empty());
         assert_eq!(
             state.schematic.document().junctions,

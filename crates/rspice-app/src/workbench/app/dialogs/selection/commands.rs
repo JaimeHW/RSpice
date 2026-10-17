@@ -14,7 +14,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use crate::schematic::view::schematic_symbol_context;
 use crate::schematic::view::sheet_visibility::{
     selectable_objects_on_active_sheet, selection_filtered_to_active_sheet,
-    with_active_wire_topology, with_hidden_wire_topology_preserved,
+    with_active_wire_topology,
 };
 use crate::state::{CellViewRef, DuplicateExternalNets, Point, SchematicState, Selection};
 use rspice_design::connectivity::summary::{
@@ -50,7 +50,7 @@ impl AppState {
         let impact = delete_dependency_impact(state, &target);
         let previous_selection =
             std::mem::replace(&mut state.schematic.session.editor.selection, target);
-        if !with_hidden_wire_topology_preserved(state, SchematicState::delete_selection) {
+        if !delete_on_active_sheet(state) {
             state.schematic.session.editor.selection = previous_selection;
             state.prompt("Nothing was deleted.");
             return false;
@@ -90,7 +90,7 @@ impl AppState {
             refuse_empty(state);
             return false;
         };
-        if !with_hidden_wire_topology_preserved(state, SchematicState::delete_selection) {
+        if !delete_on_active_sheet(state) {
             state.schematic.session.editor.selection = previous_selection;
             state.prompt("Nothing was cut.");
             return false;
@@ -294,6 +294,16 @@ fn refuse_read_only(state: &AppState) -> bool {
 
 fn refuse_empty(state: &mut AppState) {
     state.prompt("Select something first.");
+}
+
+/// Delete the selection as one undo step. The step opens with every sheet
+/// present, so undo puts every sheet back; the cell view's other sheets,
+/// which share these coordinates, are out of reach while the objects go, so
+/// the dots the deletion tidies are judged by this sheet's wires alone.
+fn delete_on_active_sheet(state: &mut AppState) -> bool {
+    state.schematic.begin_operation("delete selection");
+    with_active_wire_topology(state, |schematic, _| schematic.delete_selection());
+    state.schematic.end_operation()
 }
 
 /// `objects` as the active cell view may receive them. A copy can come from

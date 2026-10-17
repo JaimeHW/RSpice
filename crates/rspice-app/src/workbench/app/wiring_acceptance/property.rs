@@ -805,6 +805,20 @@ fn fixture() -> (Bench, AppState) {
     (bench, state)
 }
 
+/// Replay `steps` from the fixture, as a regression test pins a sequence the
+/// property test reported; the first failure, if any.
+pub(super) fn replay(steps: &[Step]) -> Result<(), String> {
+    let (mut bench, fixture) = fixture();
+    run(&mut bench, &fixture, steps).map_err(|failure| {
+        format!(
+            "step {} `{}`: {}",
+            failure.step,
+            steps[failure.step].rust(),
+            failure.message
+        )
+    })
+}
+
 fn run(bench: &mut Bench, fixture: &AppState, steps: &[Step]) -> Result<(), Failure> {
     *bench.state_mut() = fixture.clone();
     let mut history = History::default();
@@ -908,7 +922,7 @@ fn check_sequences(seeds: std::ops::Range<u64>) {
 }
 
 #[test]
-#[ignore = "finds four defects, fixed in the commits that follow"]
+#[ignore = "finds defects fixed in the commits that follow"]
 fn random_edit_sequences_keep_sheets_dots_undo_and_wires_sound() {
     check_sequences(0..DEFAULT_SEQUENCES);
 }

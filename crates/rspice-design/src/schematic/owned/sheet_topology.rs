@@ -1,31 +1,17 @@
 //! Temporary sheet-topology isolation used by editor operations.
-use super::super::{bus::BusTap, component::Component, net_label::Junction, wire::Wire};
+use super::super::{component::Component, net_label::Junction, wire::Wire};
 use super::Schematic;
 pub struct HiddenWireTopology {
     wires: Vec<(usize, Wire)>,
     junctions: Vec<(usize, Junction)>,
     /// Parts taken out with their sheet's wires: their pins decide dots.
     components: Vec<(usize, Component)>,
-    preserved_bus_taps: Option<Vec<(usize, BusTap)>>,
 }
 impl HiddenWireTopology {
     pub fn restore(self, design: &mut Schematic) {
-        match self.preserved_bus_taps {
-            None => {
-                restore_hidden(&mut design.document.wires, self.wires);
-                restore_hidden(&mut design.document.junctions, self.junctions);
-                restore_hidden(&mut design.document.components, self.components);
-            }
-            Some(bus_taps) => {
-                restore_authored_by_id(&mut design.document.wires, self.wires, |wire| wire.id);
-                restore_authored_by_id(
-                    &mut design.document.junctions,
-                    self.junctions,
-                    |junction| junction.id,
-                );
-                restore_authored_by_id(&mut design.document.bus_taps, bus_taps, |tap| tap.id);
-            }
-        }
+        restore_hidden(&mut design.document.wires, self.wires);
+        restore_hidden(&mut design.document.junctions, self.junctions);
+        restore_hidden(&mut design.document.components, self.components);
     }
 }
 impl Schematic {
@@ -61,40 +47,6 @@ impl Schematic {
             wires: hidden_wires,
             junctions: hidden_junctions,
             components: hidden_components,
-            preserved_bus_taps: None,
-        }
-    }
-    pub fn capture_hidden_wire_topology(&self, hidden: impl Fn(u64) -> bool) -> HiddenWireTopology {
-        let hidden_wires = self
-            .document
-            .wires
-            .iter()
-            .enumerate()
-            .filter(|(_, wire)| hidden(wire.id))
-            .map(|(index, wire)| (index, wire.clone()))
-            .collect::<Vec<_>>();
-        let hidden_junctions = self
-            .document
-            .junctions
-            .iter()
-            .enumerate()
-            .filter(|(_, junction)| hidden(junction.id))
-            .map(|(index, junction)| (index, *junction))
-            .collect::<Vec<_>>();
-        let hidden_bus_taps = self
-            .document
-            .bus_taps
-            .iter()
-            .enumerate()
-            .filter(|(_, tap)| hidden(tap.id))
-            .map(|(index, tap)| (index, tap.clone()))
-            .collect::<Vec<_>>();
-
-        HiddenWireTopology {
-            wires: hidden_wires,
-            junctions: hidden_junctions,
-            components: Vec::new(),
-            preserved_bus_taps: Some(hidden_bus_taps),
         }
     }
 }
@@ -115,22 +67,5 @@ fn take_hidden<T>(items: &mut Vec<T>, hidden: impl Fn(&T) -> bool) -> Vec<(usize
 fn restore_hidden<T>(items: &mut Vec<T>, hidden: Vec<(usize, T)>) {
     for (index, item) in hidden {
         items.insert(index.min(items.len()), item);
-    }
-}
-
-fn restore_authored_by_id<T>(
-    items: &mut Vec<T>,
-    authored: Vec<(usize, T)>,
-    id: impl Fn(&T) -> u64,
-) {
-    for (original_index, object) in authored {
-        if let Some(current_index) = items
-            .iter()
-            .position(|candidate| id(candidate) == id(&object))
-        {
-            items[current_index] = object;
-        } else {
-            items.insert(original_index.min(items.len()), object);
-        }
     }
 }
