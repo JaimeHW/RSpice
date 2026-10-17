@@ -142,11 +142,11 @@ pub(super) fn handle_tool_interactions(
             }
             ToolPointerAction::Wire {
                 position,
-                finish_on_conductor,
+                ends_route,
             } => match position {
                 Some(wire_pos) if state.schematic.session.editor.wire_drawing.active => {
                     state.schematic.extend_wire(wire_pos);
-                    if finish_on_conductor {
+                    if ends_route {
                         let _ = finish_wire_on_active_sheet(state);
                     }
                 }

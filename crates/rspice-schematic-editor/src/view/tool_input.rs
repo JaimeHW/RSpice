@@ -18,7 +18,10 @@ use super::{
     symbol_context::SchematicSymbolContext,
     viewport::Viewport,
 };
-use crate::session::{snap::SnapEngine, tool::Tool};
+use crate::session::{
+    snap::{SnapEngine, SnapTargetType},
+    tool::Tool,
+};
 
 /// Events captured before any tool action changes the editor in this frame.
 pub struct ToolInput {
@@ -71,7 +74,9 @@ pub enum ToolPointerAction {
     Place(ComponentType, Point),
     Wire {
         position: Option<Point>,
-        finish_on_conductor: bool,
+        /// The click joins a conductor or lands on a pin, which ends a live
+        /// route there.
+        ends_route: bool,
     },
     Bus(Point),
     BusTap {
@@ -145,12 +150,14 @@ impl ToolPointerView<'_> {
                     viewport,
                     position,
                 );
-                let fallback = target_position();
+                let target =
+                    resolve_target_pointer(&self.design, self.snap_engine, symbols, viewport, position);
+                let on_pin = matches!(target.target_type(), Some(SnapTargetType::Terminal { .. }));
                 // A visual conductor owns the click. An unrepresentable exact
                 // attachment must not fall back to a disconnected grid point.
                 ToolPointerAction::Wire {
-                    position: hit.map_or(Some(fallback), |hit| hit.attachment),
-                    finish_on_conductor: hit.is_some(),
+                    position: hit.map_or(Some(target.snapped_position), |hit| hit.attachment),
+                    ends_route: hit.is_some() || on_pin,
                 }
             }
             Tool::Bus => ToolPointerAction::Bus(grid_position()),

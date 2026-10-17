@@ -268,3 +268,32 @@ fn a_double_click_on_a_wire_ends_the_route_without_starting_another() {
         state.schematic.document().wires
     );
 }
+
+/// A click on a pin ends the route there, as a click on a wire does.
+#[test]
+fn a_click_on_a_pin_ends_the_route() {
+    let ctx = egui::Context::default();
+    let mut state = AppState::default();
+    state
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(200, 200));
+    let pin = state.schematic.document().components[0].terminal_positions()[0].1;
+    let start = Point::new(pin.x, pin.y - 100);
+    wire_tool(&ctx, &mut state);
+    click(&ctx, &mut state, 0.1, start);
+
+    click(&ctx, &mut state, 1.0, pin);
+
+    let drawing = &state.schematic.session.editor.wire_drawing;
+    assert!(!drawing.active, "the route ran on: {:?}", drawing.points);
+    assert!(
+        state
+            .schematic
+            .document()
+            .wires
+            .iter()
+            .any(|wire| wire.points == vec![start, pin]),
+        "{:?}",
+        state.schematic.document().wires
+    );
+}
