@@ -2,8 +2,9 @@
 //!
 //! Interactive checks are derived evidence: they do not dirty project bytes or
 //! masquerade as a validated save. Each receipt binds the checker profile and
-//! the complete live schematic working set, so switching documents can never
-//! relabel another cell's findings as current.
+//! everything its check read, so switching documents can never relabel
+//! another cell's findings as current, and drawing in a cellview the check
+//! never read never stales them.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -189,7 +190,9 @@ impl AppState {
         config.waivers.apply(&mut result);
         let is_active_subject =
             owner_key(&subject) == owner_key(&self.workspace.content.active_schematic_reference());
-        let input_digest = design_check_input_digest(self, &subject, &config)?;
+        let input_digest = self.diagnostic_live_digest(&DiagnosticInputs::DesignCheck {
+            subject: subject.clone(),
+        })?;
         // Canonical records are derived before anything is stored, because
         // one of them needs to ask the live drawing where its object is and
         // both insertions take the state mutably.
@@ -278,8 +281,12 @@ impl AppState {
         if receipt.project_id != self.workspace.content.project.id() {
             return DesignCheckStatus::Stale(receipt);
         }
-        let config = self.design_check_config(subject);
-        match design_check_input_digest(self, subject, &config) {
+        // Through the store's memo, so the canvas and the status bar asking
+        // every frame cost nothing while the design stands still.
+        let published = DiagnosticInputs::DesignCheck {
+            subject: subject.clone(),
+        };
+        match self.diagnostic_live_digest(&published) {
             Ok(digest) if digest == receipt.input_digest => DesignCheckStatus::Current(receipt),
             Ok(_) => DesignCheckStatus::Stale(receipt),
             Err(reason) => DesignCheckStatus::Unavailable {
@@ -580,6 +587,18 @@ pub(in crate::workbench) fn live_input_digest(
     design_check_input_digest(state, subject, &config)
 }
 
+/// The digest of exactly what a check of `subject` reads.
+///
+/// The cellviews its walk reaches and every cellview an instance in them
+/// names, each as the configured design projects it; how the plan bound the
+/// instances the walk followed it at; the deck's global nodes; the library,
+/// the connectivity contract and the rule deck. Read off the same projection
+/// and the same walk the check takes, so an edit to a cellview the check
+/// never read leaves its findings current, and an edit to one it read, or to
+/// a binding that decided where it went, stales them.
+///
+/// It used to digest every schematic buffer in the project, so drawing in one
+/// cellview staled the findings of every other.
 fn design_check_input_digest(
     state: &AppState,
     subject: &CellViewRef,
@@ -588,32 +607,46 @@ fn design_check_input_digest(
     if let Some(error) = state.workspace.annotation_restoration_error() {
         return Err(format!("reference annotation restoration failed: {error}"));
     }
-    let mut live_buffers = state
+    let projection = state
         .workspace
-        .content
-        .schematic_buffers
+        .design_projection(
+            &state.library_manager,
+            &state.workspace.content.active_view,
+            &state.schematic,
+        )
+        .map_err(|error| error.to_string())?;
+    let buffer = |key: &str| {
+        projection
+            .schematic_buffers()
+            .iter()
+            .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
+            .map(|(_, schematic)| schematic)
+    };
+    let checked = buffer(&subject.key()).ok_or_else(|| {
+        format!(
+            "{} is not part of the configured design.",
+            subject.display_path()
+        )
+    })?;
+    let hierarchy = rspice_design::hierarchy::HierarchySource::from_design_projection(
+        state.library_manager.catalog(),
+        &projection,
+    );
+    let reads = rspice_design::drc::check_reads(checked, subject, &hierarchy);
+    let cellviews = reads
+        .cellviews
         .iter()
-        .map(|(key, schematic)| (key.clone(), schematic))
-        .collect::<std::collections::HashMap<_, _>>();
-    if matches!(
-        state.workspace.content.active_view_type(),
-        ViewType::Schematic | ViewType::Testbench
-    ) {
-        live_buffers.insert(
-            state.workspace.content.active_view.key(),
-            state.schematic.editor_ref().design,
-        );
-    }
-    let mut schematic_digests = live_buffers
-        .iter()
-        .map(|(key, schematic)| {
-            let content_digest = schematic
-                .validated_design_content_digest()
-                .map_err(|error| format!("could not digest schematic {key}: {error}"))?;
-            Ok((key.clone(), content_digest))
+        .map(|key| {
+            let digest = buffer(key)
+                .map(|schematic| {
+                    schematic
+                        .content_digest()
+                        .ok_or_else(|| format!("could not digest schematic {key}"))
+                })
+                .transpose()?;
+            Ok((key.as_str(), digest))
         })
         .collect::<Result<Vec<_>, String>>()?;
-    schematic_digests.sort_by(|left, right| left.0.cmp(&right.0));
 
     let mut overrides = config
         .severity_overrides
@@ -632,19 +665,18 @@ fn design_check_input_digest(
         config.min_connections,
         overrides,
     );
-    // Design management and the active configuration are inputs because the
-    // checks read the projection, not the source documents: a page assignment
-    // or a scoped override changes what was checked without touching a single
-    // schematic. A receipt that ignored them would read "current" for a design
-    // nobody checked.
+    // Each cellview is digested as projected, not as stored: a page
+    // assignment or a variant changes what was checked without touching a
+    // single schematic, and only the cellviews read carry theirs in. The
+    // configuration enters through the bindings it decided.
     let material = serde_json::to_vec(&(
         state.workspace.content.project.id(),
         owner_key(subject).to_string(),
-        schematic_digests,
+        cellviews,
+        &reads.bindings,
+        &reads.globals,
         state.library_manager.revision(),
-        &state.workspace.content.connectivity,
-        &state.workspace.content.design_management,
-        &state.workspace.content.configuration_sets,
+        projection.connectivity(),
         profile,
     ))
     .map_err(|error| format!("could not encode design-check inputs: {error}"))?;
@@ -653,6 +685,9 @@ fn design_check_input_digest(
     digest.update(material);
     Ok(ContentDigest::from_bytes(digest.finalize().into()))
 }
+
+#[cfg(test)]
+mod currency_tests;
 
 #[cfg(test)]
 mod tests {

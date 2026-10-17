@@ -58,7 +58,7 @@ pub(super) fn live_input_digest(state: &AppState) -> Result<ContentDigest, Strin
 }
 
 /// The project file the deck is stored in, as a reader finds it on disk.
-fn project_file_label(state: &AppState) -> String {
+pub(super) fn project_file_label(state: &AppState) -> String {
     let project = &state.workspace.content.project;
     project
         .path

@@ -22,6 +22,7 @@
 //! [`listing`] reads them in place.
 
 mod current;
+pub(in crate::workbench) mod digest_memo;
 pub(in crate::workbench) mod listing;
 mod producers;
 mod run_notices;
@@ -449,8 +450,8 @@ const _: () = {
 /// is defined for them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workbench) enum DiagnosticInputs {
-    /// The complete live schematic working set behind one cell view's checks,
-    /// exactly as the check receipt digests it.
+    /// Everything one cell view's checks read, exactly as the check receipt
+    /// digests it.
     DesignCheck { subject: CellViewRef },
     /// One symbol view's published artwork and the interface contract its
     /// pins are compared against — exactly what the pin checks read.
@@ -494,7 +495,7 @@ impl DiagnosticInputs {
     pub(in crate::workbench) fn stale_reason(&self) -> String {
         match self {
             Self::DesignCheck { subject } => format!(
-                "the schematic working set behind {} has changed since this was reported",
+                "a cellview or binding the check of {} read has changed since this was reported",
                 subject.display_path()
             ),
             Self::SymbolPins { subject } => format!(
@@ -552,6 +553,8 @@ impl DiagnosticInputs {
     /// told in the producer's own words rather than having findings silently
     /// dropped or silently kept.
     fn digest(&self, scope: &DigestScope<'_>) -> Result<ContentDigest, String> {
+        #[cfg(test)]
+        digest_memo::count_computed();
         let state = scope.state;
         match self {
             Self::DesignCheck { subject } => {
@@ -600,6 +603,24 @@ impl DiagnosticInputs {
             } => dispatched_setup_digest(scope, &(campaign, member_index)),
             Self::RuleDeck => super::rule_deck::live_input_digest(state),
         }
+    }
+
+    /// [`Self::digest`], read from the memo while nothing it reads has moved.
+    fn live_digest(&self, scope: &DigestScope<'_>) -> Result<ContentDigest, String> {
+        let state = scope.state;
+        let Some(key) = digest_memo::DigestKey::of(state, self) else {
+            return self.digest(scope);
+        };
+        let slot = self.key();
+        if let Some(remembered) = state.diagnostics.digests.get(&slot, &key) {
+            return remembered;
+        }
+        let digest = self.digest(scope);
+        state
+            .diagnostics
+            .digests
+            .remember(slot, key, digest.clone());
+        digest
     }
 }
 
@@ -690,6 +711,30 @@ pub(in crate::workbench) struct DiagnosticBatch {
     pub(in crate::workbench) inputs: DiagnosticInputs,
     input_digest: ContentDigest,
     pub(in crate::workbench) records: Vec<DiagnosticRecord>,
+    /// What the records say about themselves, folded once when the batch is
+    /// published: see [`fingerprint`].
+    fingerprint: u64,
+}
+
+/// A hash of everything a listed row reads off its record — identity,
+/// severity, waiver, subject, place and message — so a reader that arranges
+/// the rows can tell a batch republished unchanged from one that says
+/// something new without walking either.
+fn fingerprint(records: &[DiagnosticRecord]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for record in records {
+        (
+            record.canonical.diagnostic_id,
+            record.level.rung(),
+            record.waived(),
+            &record.subject.object,
+            record.subject.cell_view.as_ref().map(CellViewRef::key),
+            &record.message,
+        )
+            .hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 /// Where a published batch stands against the live design.
@@ -776,6 +821,8 @@ pub(crate) struct DiagnosticStore {
     generation: u64,
     /// What the current rendering pass decided about the list.
     pass_memo: PassMemoCell,
+    /// Each batch's live digest, by the key of what it read.
+    digests: digest_memo::DigestMemo,
 }
 
 /// The list's standings and counts for one rendering pass.
@@ -967,6 +1014,7 @@ impl DiagnosticStore {
         self.unresolved = None;
         self.run_baselines.clear();
         self.run_notices.clear();
+        self.digests.clear();
         self.generation = self.generation.wrapping_add(1);
     }
 
@@ -1019,6 +1067,7 @@ impl DiagnosticStore {
             DiagnosticBatch {
                 inputs,
                 input_digest: digest,
+                fingerprint: fingerprint(&records),
                 records,
             },
         );
@@ -1049,7 +1098,7 @@ impl AppState {
         inputs: DiagnosticInputs,
         records: Vec<DiagnosticRecord>,
     ) -> Result<(), String> {
-        let digest = inputs.digest(&DigestScope::new(self))?;
+        let digest = inputs.live_digest(&DigestScope::new(self))?;
         self.diagnostics.insert(digest, inputs, records)
     }
 
@@ -1166,11 +1215,19 @@ impl AppState {
     ) -> BatchStanding {
         batch_standing(batch, &DigestScope::new(self))
     }
+
+    /// The live digest of `inputs`, as the store decides currency by.
+    pub(in crate::workbench) fn diagnostic_live_digest(
+        &self,
+        inputs: &DiagnosticInputs,
+    ) -> Result<ContentDigest, String> {
+        inputs.live_digest(&DigestScope::new(self))
+    }
 }
 
 /// Where one published batch stands, digested within one scope.
 fn batch_standing(batch: &DiagnosticBatch, scope: &DigestScope<'_>) -> BatchStanding {
-    match batch.inputs.digest(scope) {
+    match batch.inputs.live_digest(scope) {
         Ok(digest) if digest == batch.input_digest => BatchStanding::Current,
         Ok(_) => BatchStanding::Stale,
         Err(reason) => BatchStanding::Unavailable(reason),

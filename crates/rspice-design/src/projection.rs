@@ -46,12 +46,12 @@ use crate::hierarchy::{
 };
 use crate::library::LibraryCatalog;
 use crate::project_sources::ProjectSourceRegistry;
-use crate::stamped::Stamped;
 use crate::schematic::{
     component::{LibraryCellInstance, PreparedVariantReplacement},
     document::SchematicDocument,
     owned::Schematic,
 };
+use crate::stamped::Stamped;
 use crate::symbol_resolver::SymbolResolver;
 use rspice_app_types::product::{ContentDigest, ObjectRevision, ProjectId};
 use rspice_design_model::{
@@ -130,16 +130,34 @@ impl ProjectedSchematic {
         &self.document
     }
 
-    /// The digest of the document as projected — the drawing a check or a
-    /// deck reads, after design management placed its pages — or `None`
-    /// where it cannot be serialized.
+    /// The design-content digest of the document as projected — the drawing
+    /// a check reads, after design management placed its pages — or `None`
+    /// where it cannot be digested.
+    ///
+    /// Design content as a validated revision states it: the drawing and its
+    /// policy, not the waivers stored beside it, the revision journal or the
+    /// probes. A waiver changes whether a finding counts, not what was found,
+    /// so recording one leaves a check's findings current.
     pub fn content_digest(&self) -> Option<ContentDigest> {
         *self.content_digest.get_or_init(|| {
             #[cfg(any(test, feature = "schematic-test-fixtures"))]
             PROJECTED_DIGESTS.with(|count| count.set(count.get().wrapping_add(1)));
-            let mut hasher = sha2::Sha256::new();
-            hash_serialized(&mut hasher, &*self.document)?;
-            Some(ContentDigest::from_bytes(hasher.finalize().into()))
+            let document = &*self.document;
+            crate::schematic::validated_revision::ValidatedRevisionSource {
+                grid_size: document.grid_size,
+                document_policy: document.document_policy,
+                components: &document.components,
+                wires: &document.wires,
+                buses: &document.buses,
+                bus_taps: &document.bus_taps,
+                junctions: &document.junctions,
+                net_labels: &document.net_labels,
+                design_notes: &document.design_notes,
+                documentation_shapes: &document.documentation_shapes,
+                connections: &document.connections,
+            }
+            .design_content_digest()
+            .ok()
         })
     }
 
@@ -401,7 +419,10 @@ struct DesignInputs {
 }
 
 impl DesignInputs {
-    fn fold(authority_epoch: ContentDigest, cell_views: &BTreeMap<String, ContentDigest>) -> ContentDigest {
+    fn fold(
+        authority_epoch: ContentDigest,
+        cell_views: &BTreeMap<String, ContentDigest>,
+    ) -> ContentDigest {
         let mut hasher = sha2::Sha256::new();
         hasher.update(authority_epoch.as_bytes());
         for (cell_view_key, digest) in cell_views {
