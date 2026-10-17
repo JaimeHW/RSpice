@@ -552,3 +552,61 @@ fn conductor_title_collision_uses_segments_not_the_route_bounding_box() {
         "the overflow report must not contain the historical false-positive finding"
     );
 }
+
+/// Every grid dot lands on a lattice point exactly where content on that
+/// point is placed: the lattice is phased on the viewport's own offset, the
+/// one `schematic_to_screen` uses, not on a separately passed pan, so a pin
+/// end on the grid sits on its dot at every pan.
+#[test]
+fn grid_dots_register_with_the_content_lattice() {
+    let ctx = egui::Context::default();
+    let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
+    let bounds = Rect::from_min_size(egui::pos2(3.25, 7.5), egui::vec2(400.0, 300.0));
+    let viewport = Viewport {
+        // World 200..600 by 100..400: inside the A4 drawing area.
+        offset: egui::pos2(-197.0, -103.0),
+        zoom: 1.0,
+        bounds,
+    };
+    let painter = Painter::new(
+        ctx,
+        egui::LayerId::new(egui::Order::Background, egui::Id::new("grid-phase")),
+        bounds,
+    );
+    draw_base(
+        &painter,
+        bounds,
+        &viewport,
+        DrawingSheetCanvas {
+            layers: DrawingSheetLayerVisibility::default(),
+            grid: GridStyle::Dots,
+            grid_size: 10,
+        },
+        &test_sheet(),
+        Vec::new,
+    );
+    let grid_ink = rspice_ui_kit::tokens::active_palette().canvas_grid;
+    let origin = viewport.schematic_to_screen(Point::new(0, 0));
+    let mut dots = 0;
+    painter.for_each_shape(|shape| {
+        let egui::Shape::Mesh(mesh) = &shape.shape else {
+            return;
+        };
+        for quad in mesh.vertices.chunks(4) {
+            if quad.len() < 4 || quad[0].color != grid_ink {
+                continue;
+            }
+            let centre = quad
+                .iter()
+                .fold(egui::Vec2::ZERO, |sum, vertex| sum + vertex.pos.to_vec2())
+                / 4.0;
+            let steps = (centre - origin.to_vec2()) / 10.0;
+            assert!(
+                (steps.x - steps.x.round()).abs() < 1e-3 && (steps.y - steps.y.round()).abs() < 1e-3,
+                "a dot at {centre:?} is off the lattice through {origin:?}"
+            );
+            dots += 1;
+        }
+    });
+    assert!(dots > 100, "the grid painted {dots} dots");
+}
