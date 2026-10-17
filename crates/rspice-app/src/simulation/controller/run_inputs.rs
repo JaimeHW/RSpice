@@ -65,7 +65,13 @@ pub(crate) const DESIGN_CHANGED_SINCE_CHECK: &str =
 ///   checkpoint reads the runs that hold it. Those reads are what is held, so
 ///   selecting something or opening an older run while a check runs does not
 ///   expire a run that never reads it.
-pub(super) struct RunInputIdentity {
+///
+/// Held on the heap: the controller holds one beside its retained run and
+/// another beside a press's pipeline, and the application holds the
+/// controller by value.
+pub(super) struct RunInputIdentity(Box<CapturedInputs>);
+
+struct CapturedInputs {
     projection: Option<rspice_design::projection::DesignProjectionKey>,
     topology: Vec<(String, u64)>,
     setup: ContentDigest,
@@ -210,7 +216,7 @@ impl RunInputIdentity {
     /// The identity of the inputs the session holds now.
     pub(super) fn capture(state: &AppState) -> Self {
         let live = LiveInputs::of(state);
-        Self {
+        Self(Box::new(CapturedInputs {
             projection: live.projection,
             topology: live.topology,
             setup: live.setup,
@@ -232,72 +238,77 @@ impl RunInputIdentity {
             max_parallel_workers: live.max_parallel_workers,
             compilation: live.compilation.cloned(),
             design_checks: live.design_checks,
-        }
+        }))
     }
 
     /// The first input the session no longer holds as it was captured, named
     /// for the reader, or `None` when every one is unchanged. A design whose
     /// key could not be taken is never confirmed unchanged.
     fn moved_in(&self, state: &AppState) -> Option<&'static str> {
+        let captured = &*self.0;
         let live = LiveInputs::of(state);
-        let compilation_unchanged = match (&self.compilation, live.compilation) {
+        let compilation_unchanged = match (&captured.compilation, live.compilation) {
             (None, None) => true,
-            (Some(captured), Some(live)) => {
-                captured.token() == live.token() && Arc::ptr_eq(captured.report(), live.report())
+            (Some(held), Some(now)) => {
+                held.token() == now.token() && Arc::ptr_eq(held.report(), now.report())
             }
             _ => false,
         };
         [
             (
-                self.projection.is_some() && self.projection == live.projection,
+                captured.projection.is_some() && captured.projection == live.projection,
                 "the design",
             ),
-            (self.topology == live.topology, "the design"),
-            (self.setup == live.setup, "the simulation setup"),
+            (captured.topology == live.topology, "the design"),
+            (captured.setup == live.setup, "the simulation setup"),
             (
-                self.plan_payloads == live.plan_payloads,
+                captured.plan_payloads == live.plan_payloads,
                 "the plan's variables, outputs or specifications",
             ),
-            (self.project == live.project, "the project"),
+            (captured.project == live.project, "the project"),
             (
-                self.models == *live.models && self.resolutions == *live.resolutions,
+                captured.models == *live.models && captured.resolutions == *live.resolutions,
                 "the model library",
             ),
-            (self.registry == *live.registry, "the PDK"),
-            (self.layouts == *live.layouts, "the physical layout"),
+            (captured.registry == *live.registry, "the PDK"),
+            (captured.layouts == *live.layouts, "the physical layout"),
             (
-                self.project_sources == *live.project_sources,
+                captured.project_sources == *live.project_sources,
                 "the project sources",
             ),
             (
-                self.design_management == *live.design_management
-                    && self.configuration_sets == *live.configuration_sets,
+                captured.design_management == *live.design_management
+                    && captured.configuration_sets == *live.configuration_sets,
                 "the design configuration",
             ),
             (
-                self.stimulus_library.as_ref() == live.stimulus_library,
+                captured.stimulus_library.as_ref() == live.stimulus_library,
                 "the stimulus library",
             ),
             (
-                self.imported_checkpoints == *live.imported_checkpoints
-                    && self.imported_transient_checkpoints == *live.imported_transient_checkpoints,
+                captured.imported_checkpoints == *live.imported_checkpoints
+                    && captured.imported_transient_checkpoints
+                        == *live.imported_transient_checkpoints,
                 "the imported checkpoints",
             ),
             (
-                self.operating_points == live.operating_points,
+                captured.operating_points == live.operating_points,
                 "the devices or results the operating point reports",
             ),
             (
-                self.checkpoint_runs == live.checkpoint_runs,
+                captured.checkpoint_runs == live.checkpoint_runs,
                 "the retained runs a checkpoint resumes from",
             ),
             (
-                self.display_waveform_cache_samples == live.display_waveform_cache_samples
-                    && self.max_parallel_workers == live.max_parallel_workers,
+                captured.display_waveform_cache_samples == live.display_waveform_cache_samples
+                    && captured.max_parallel_workers == live.max_parallel_workers,
                 "the solver limits",
             ),
             (compilation_unchanged, "the Verilog-A compilation"),
-            (self.design_checks == live.design_checks, "the design-check rules"),
+            (
+                captured.design_checks == live.design_checks,
+                "the design-check rules",
+            ),
         ]
         .into_iter()
         .find_map(|(unchanged, input)| (!unchanged).then_some(input))
