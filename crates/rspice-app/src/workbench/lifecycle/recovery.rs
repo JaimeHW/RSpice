@@ -16,7 +16,7 @@ use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
 use serde::Serialize;
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::state::{
@@ -680,12 +680,17 @@ pub(crate) fn open_comparison(
     app.state.sim_setup = crate::workbench::app_state::SimSetupState::new();
     app.state.model_library_manager = crate::workbench::app_state::default_model_library_manager();
     app.state.workbench.activate(Workspace::Design);
-    app.state.push_user_message(ConsoleMessage::warning(format!(
-        "Opened recovery comparison for '{}'; the saved source and checkpoint remain unchanged",
-        candidate.display_name
-    )));
+    app.state.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        format!(
+            "Opened recovery comparison for '{}'; the saved project and checkpoint are unchanged.",
+            candidate.display_name
+        ),
+    );
     if let Some(notice) = baseline_notice {
-        app.state.push_user_message(ConsoleMessage::warning(notice));
+        app.state
+            .record(LogSeverity::Warning, LogSource::Studio, notice);
     }
     Ok(())
 }
@@ -887,10 +892,14 @@ pub(crate) fn start_local_safe_mode(
     if options.open_project_read_only {
         enforced.push("project writes blocked");
     }
-    app.state.push_user_message(ConsoleMessage::warning(format!(
-        "Safe mode is active for this launch ({}); the prior session is retained for the next normal launch",
-        enforced.join(", ")
-    )));
+    app.state.record(
+        LogSeverity::Warning,
+        LogSource::Studio,
+        format!(
+            "Safe mode is active for this launch ({}); the previous session is kept for the next normal launch.",
+            enforced.join(", ")
+        ),
+    );
     Ok(())
 }
 

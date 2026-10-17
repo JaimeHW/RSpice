@@ -34,7 +34,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::state::workspace::{ReferenceChanges, SchematicReferenceTransaction};
 use compensation::{DocumentCompensation, RecordHeader};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::product::ObjectRevision;
 #[cfg(test)]
 use crate::state::model_library::{
@@ -1036,10 +1035,10 @@ impl AppState {
             self.schematic = buffer;
         }
         self.bump_active_schematic_epoch();
-        self.push_user_message(ConsoleMessage::info(format!(
-            "{operation} switched to {} to restore it",
+        self.prompt(format!(
+            "{operation} switched to {} to restore it.",
             reference.display_path()
-        )));
+        ));
     }
 }
 

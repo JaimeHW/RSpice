@@ -10,7 +10,7 @@
 
 use egui::Context;
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
@@ -65,8 +65,11 @@ impl RSpiceApp {
                 );
             }
             Err(e) => {
-                self.state
-                    .push_user_message(ConsoleMessage::warning(format!("Autosave failed: {e}")));
+                self.state.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    format!("Autosave failed: {e}"),
+                );
             }
         }
         self.autosave_last = Some(now);
@@ -138,14 +141,22 @@ impl RSpiceApp {
                             schematic,
                             file_workflow::SchematicLoadOrigin::PersistentPath(&path),
                         );
-                        self.state.push_user_message(ConsoleMessage::info(format!(
-                            "Restored exact autosave bytes from {age}; save to keep them"
-                        )));
+                        self.state.record(
+                            LogSeverity::Info,
+                            LogSource::Studio,
+                            format!("Restored the autosave from {age}; save to keep it."),
+                        );
                         self.state.dialogs.pending_autosave_restore = None;
                     }
-                    Err(error) => self.state.push_user_message(ConsoleMessage::warning(format!(
-                        "Autosave restore was blocked because the checkpoint changed or could not be verified: {error}"
-                    ))),
+                    Err(error) => {
+                        self.state.record(
+                            LogSeverity::Error,
+                            LogSource::Studio,
+                            format!(
+                                "Autosave restore failed because the checkpoint changed or could not be verified: {error}"
+                            ),
+                        );
+                    }
                 }
             }
             DialogChoice::Ghost => {
@@ -163,27 +174,36 @@ impl RSpiceApp {
                             );
                             self.state.dialogs.pending_autosave_restore = None;
                         }
-                        Err(error) => self.state.push_user_message(ConsoleMessage::warning(
-                            format!(
-                                "Autosave discard was blocked; no checkpoint bytes were deleted: {error}"
-                            ),
-                        )),
+                        Err(error) => {
+                            self.state.record(
+                                LogSeverity::Error,
+                                LogSource::Studio,
+                                format!(
+                                    "Autosave discard failed; the checkpoint was not deleted: {error}"
+                                ),
+                            );
+                        }
                     }
                 } else {
                     file_workflow::load_schematic_bypassing_autosave(&mut self.state, &path, io);
-                    self.state.push_user_message(ConsoleMessage::info(format!(
-                        "Legacy autosave kept for non-destructive Recovery review: {}",
-                        checkpoint.display()
-                    )));
+                    self.state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        format!(
+                            "Kept the autosave for review in Recovery: {}",
+                            checkpoint.display()
+                        ),
+                    );
                     self.state.dialogs.pending_autosave_restore = None;
                 }
             }
             DialogChoice::Cancelled => {
                 file_workflow::load_schematic_bypassing_autosave(&mut self.state, &path, io);
-                self.state.push_user_message(ConsoleMessage::info(format!(
-                    "Autosave kept: {}",
-                    checkpoint.display()
-                )));
+                self.state.record(
+                    LogSeverity::Info,
+                    LogSource::Studio,
+                    format!("Kept the autosave at {}.", checkpoint.display()),
+                );
                 self.state.dialogs.pending_autosave_restore = None;
             }
             DialogChoice::Secondary => {}

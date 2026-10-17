@@ -5,7 +5,7 @@
 //! deliberately excluded, so a restored session cannot resume authority it
 //! no longer holds.
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
 use crate::workbench::app_state::AppState;
 
@@ -316,14 +316,23 @@ impl<'de> serde::Deserialize<'de> for AppState {
             browser_project_binding_receipt,
             ..Default::default()
         };
-        match annotation_restoration {
-            Ok(0) => {}
-            Ok(count) => state.push_user_message(ConsoleMessage::warning(format!(
-                "Applied approved reference annotation to {count} component(s) and updated their live references."
-            ))),
-            Err(error) => state.push_user_message(ConsoleMessage::error(format!(
-                "Session reference annotation restoration failed: {error}. Recovered documents were preserved. Correct the references, then check the design to retry."
-            ))),
+        let annotation_outcome = match annotation_restoration {
+            Ok(0) => None,
+            Ok(count) => Some((
+                LogSeverity::Warning,
+                format!(
+                    "Applied approved reference annotation to {count} component(s) and updated their live references."
+                ),
+            )),
+            Err(error) => Some((
+                LogSeverity::Error,
+                format!(
+                    "Session reference annotation restoration failed: {error}. Recovered documents were preserved. Correct the references, then check the design to retry."
+                ),
+            )),
+        };
+        if let Some((severity, text)) = annotation_outcome {
+            state.record(severity, LogSource::Studio, text);
         }
         // Snap targets and unfinished-conductor routing are session-owned
         // editor presentation. Schematic documents deliberately skip them,
@@ -393,20 +402,14 @@ impl<'de> serde::Deserialize<'de> for AppState {
                     "Simulation results were not restored because their persisted session data is invalid: {error}"
                 )
             });
-        if let Some(warning) = simulation_results_warning {
-            state.push_user_message(ConsoleMessage::warning(warning));
-        }
-        for warning in execution_warnings {
-            state.push_user_message(ConsoleMessage::warning(warning));
-        }
-        for warning in [native_receipt_warning, browser_receipt_warning]
+        for warning in simulation_results_warning
             .into_iter()
-            .flatten()
+            .chain(execution_warnings)
+            .chain(native_receipt_warning)
+            .chain(browser_receipt_warning)
+            .chain(navigation_warning)
         {
-            state.push_user_message(ConsoleMessage::warning(warning));
-        }
-        if let Some(warning) = navigation_warning {
-            state.push_user_message(ConsoleMessage::warning(warning));
+            state.record(LogSeverity::Warning, LogSource::Studio, warning);
         }
         if let Some(recovery) = state.workbench.model_editor_recovery.clone() {
             match recovery.restore(
@@ -416,9 +419,11 @@ impl<'de> serde::Deserialize<'de> for AppState {
                 Ok(draft) => state.workbench.model_editor.draft = Some(draft),
                 Err(error) => {
                     state.workbench.model_editor_recovery = None;
-                    state.push_user_message(ConsoleMessage::warning(format!(
-                        "Unsaved model-editor recovery was not reopened because {error}."
-                    )));
+                    state.record(
+                        LogSeverity::Warning,
+                        LogSource::Studio,
+                        format!("Unsaved model-editor recovery was not reopened because {error}."),
+                    );
                 }
             }
         }
