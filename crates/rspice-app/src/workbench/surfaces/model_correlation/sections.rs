@@ -69,7 +69,7 @@ pub(super) fn datasets_section(
             ui,
             projection,
             "No reference datasets retained",
-            "Add a checksum-bound bench, silicon, vendor, oracle, or exact simulated dataset.",
+            "Add a bench, silicon, vendor, oracle, or simulated dataset.",
         );
         return;
     };
@@ -82,7 +82,7 @@ pub(super) fn datasets_section(
             ui,
             projection,
             "No reference datasets retained",
-            "Add a checksum-bound bench, silicon, vendor, oracle, or exact simulated dataset.",
+            "Add a bench, silicon, vendor, oracle, or simulated dataset.",
         );
         return;
     }
@@ -133,7 +133,7 @@ pub(super) fn datasets_section(
             });
     });
     ui.add_space(10.0);
-    section_panel(ui, "Selected dataset evidence", |ui| {
+    section_panel(ui, "Selected dataset", |ui| {
         let selected = app
             .state
             .workbench
@@ -178,7 +178,7 @@ pub(super) fn datasets_section(
                 key_value(ui, "Execution target", &provenance.execution_target);
                 key_value(
                     ui,
-                    "Canonical export",
+                    "Export digest",
                     &short_digest(&provenance.export_digest.to_string()),
                 );
             }
@@ -209,7 +209,7 @@ pub(super) fn conditions_section(ui: &mut Ui, projection: &CorrelationProjection
             ui,
             projection,
             "No operating-envelope observations retained",
-            "Import condition:<name>[<unit>] CSV columns to retain exact voltage, temperature, load, frequency, lot, and fixture coordinates.",
+            "Import condition:<name>[<unit>] CSV columns to record voltage, temperature, load, frequency, lot, and fixture coordinates.",
         );
         return;
     }
@@ -446,7 +446,7 @@ pub(super) fn comparison_section(
         empty_state(
             ui,
             projection,
-            "No aligned comparison evidence",
+            "No aligned comparison",
             "Add compatible datasets and at least one valid metric to evaluate the retained suite.",
         );
         return;
@@ -844,7 +844,7 @@ pub(super) fn outliers_section(
             ui,
             projection,
             "No outlier decisions retained",
-            "All numerical residuals remain in gate scope. Review any point below to retain, exclude a verified fixture fault, or preserve it as limit-only evidence.",
+            "All numerical residuals remain in gate scope. Review any point below to retain, exclude a verified fixture fault, or keep it as a limit check only.",
         );
     } else {
         section_panel(ui, "Append-only disposition ledger", |ui| {
@@ -940,7 +940,7 @@ pub(super) fn outliers_section(
                         ));
                         ui.label(format!("{:.4}×", residual.normalized_error.get()));
                         ui.label(if residual.excluded {
-                            "excluded · retained in evidence"
+                            "excluded · kept in the record"
                         } else {
                             "included in gate"
                         });
@@ -978,7 +978,7 @@ pub(super) fn evidence_section(ui: &mut Ui, projection: &CorrelationProjection) 
         empty_state(
             ui,
             projection,
-            "No immutable correlation evidence",
+            "No correlation reviews",
             "Validate a complete suite, then record an independent reviewer identity and conclusion.",
         );
         return;
@@ -987,11 +987,11 @@ pub(super) fn evidence_section(ui: &mut Ui, projection: &CorrelationProjection) 
         empty_state(
             ui,
             projection,
-            "No current immutable review evidence",
-            "The suite may be numerically evaluable, but a reviewer identity and explicit conclusion have not been retained for this exact revision.",
+            "No review of the current revision",
+            "The suite may evaluate numerically, but no reviewer and conclusion have been recorded for this revision.",
         );
     } else {
-        section_panel(ui, "Immutable reviewer conclusions", |ui| {
+        section_panel(ui, "Reviewer conclusions", |ui| {
             for evidence in projection.current_evidence.iter().rev() {
                 ui.horizontal_wrapped(|ui| {
                     status_text(
@@ -1015,7 +1015,7 @@ pub(super) fn evidence_section(ui: &mut Ui, projection: &CorrelationProjection) 
                 );
                 key_value(
                     ui,
-                    "Evidence digest",
+                    "Review digest",
                     &evidence
                         .content_digest()
                         .map(|digest| short_digest(&digest.to_string()))
@@ -1075,16 +1075,16 @@ pub(super) fn gate_section(ui: &mut Ui, app: &mut RSpiceApp, projection: &Correl
                     ui,
                     evidence.approved() && projection.source_current,
                     if evidence.approved() && projection.source_current {
-                        "current reviewed correlation evidence"
+                        "current reviewed correlation"
                     } else {
-                        "correlation evidence does not satisfy handoff"
+                        "correlation is not ready for handoff"
                     },
                 );
-                key_value(ui, "Evidence", &evidence.id);
+                key_value(ui, "Review", &evidence.id);
                 key_value(ui, "Reviewer", &evidence.reviewer_id);
                 key_value(
                     ui,
-                    "Exact source",
+                    "Source",
                     &format!(
                         "{} · r{} · {}",
                         suite.source.model_id,
@@ -1095,7 +1095,7 @@ pub(super) fn gate_section(ui: &mut Ui, app: &mut RSpiceApp, projection: &Correl
                 ui.label(&evidence.conclusion);
             }
             (Some(_), None) => {
-                ui.label("Validate and review this exact suite revision before handoff.");
+                ui.label("Validate and review this suite revision before handoff.");
             }
             (None, _) => {
                 ui.label("Create a correlation suite before qualification handoff.");
@@ -1182,7 +1182,7 @@ pub(super) fn empty_state(
         .source_error
         .as_deref()
         .map_or((title, detail), |error| {
-            ("Exact project model is unavailable", error)
+            ("The project model is unavailable", error)
         });
     let title_left = rect.left() + 14.0;
     let title_lead = if projection.source_error.is_some() {
@@ -1310,8 +1310,7 @@ pub(super) fn correlation_action_blocker(
         }
         if !datasets.iter().any(|dataset| dataset.class.is_simulation()) {
             return Some(
-                "Add an exact source-bound model-simulation dataset before defining a metric"
-                    .to_owned(),
+                "Add a simulated dataset from this model before defining a metric".to_owned(),
             );
         }
     }
