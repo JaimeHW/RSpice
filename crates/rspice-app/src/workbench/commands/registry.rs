@@ -1341,9 +1341,7 @@ impl Command {
             Self::CompareResultDatasets if app.state.workbench.workspace != Workspace::Results => {
                 "open an active result document"
             }
-            Self::CompareResultDatasets => {
-                "a second compatible run is required"
-            }
+            Self::CompareResultDatasets => "a second compatible run is required",
             Self::DatasetManifestBrowser | Self::CreateResultDocument => {
                 "no retained result dataset is available"
             }

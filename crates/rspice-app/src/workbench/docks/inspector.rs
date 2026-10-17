@@ -1492,9 +1492,7 @@ fn schematic_cross_probe_unavailability(
         return Some("The selected result dataset is no longer retained.".to_owned());
     };
     if run.dataset_id != selected.dataset_id() || selected.resolve(run).is_none() {
-        return Some(
-            "The selected trace does not belong to the open run.".to_owned(),
-        );
+        return Some("The selected trace does not belong to the open run.".to_owned());
     }
     let Some(receipt) = run.prepared_receipt() else {
         return Some(
