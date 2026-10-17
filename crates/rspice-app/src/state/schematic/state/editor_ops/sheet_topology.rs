@@ -58,6 +58,7 @@ mod tests {
     const WHOLE_DOCUMENT_OPERATIONS: &[&str] = &[
         "split_wires_at_t_junction",
         "split_wires_under_pins",
+        "connect_moved_pins",
         "merge_overlapping_wires",
         "update_wire_junctions",
         "auto_place_junctions",

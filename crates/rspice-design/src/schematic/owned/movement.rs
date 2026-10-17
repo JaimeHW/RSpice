@@ -74,6 +74,32 @@ impl Schematic {
         }
         Ok(impact)
     }
+    /// See [`movement::bridge_broken_abutments`]. Where the parts stood comes
+    /// from the pending operation; with none open, nothing is laid.
+    pub fn bridge_broken_abutments(
+        &mut self,
+        moved: &std::collections::HashSet<u64>,
+        terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+    ) -> bool {
+        let Some(before) = self
+            .history
+            .pending_baseline()
+            .map(|snapshot| snapshot.components.clone())
+        else {
+            return false;
+        };
+        let laid = movement::bridge_broken_abutments(
+            &mut self.document,
+            &mut self.identity,
+            &before,
+            moved,
+            terminal_points_for,
+        );
+        if laid {
+            self.invalidate_topology();
+        }
+        laid
+    }
     pub fn move_wire(&mut self, wire_id: u64, delta: Point) -> MovementImpact {
         let impact = movement::move_wire(&mut self.document, wire_id, delta);
         if impact.topology_changed {

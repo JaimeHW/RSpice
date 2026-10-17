@@ -5,6 +5,7 @@ use super::{
     component::Component,
     document::SchematicDocument,
     documentation_shape::clamped_documentation_shape_translation,
+    identity::SchematicIdentity,
     wire::{Wire, WireConnection, WireSegment},
 };
 use rspice_design_model::Point;
@@ -586,6 +587,111 @@ fn dragged_wire_points(
     } else {
         (moved, None)
     }
+}
+
+/// Keep the pin-to-pin contacts a move broke, with a wire each.
+///
+/// Two pins on one point are one node with no wire between them. When a
+/// part in `moved` takes a pin off a pin of a part that stayed, the two
+/// would part silently; a square wire from the pin that stayed to where the
+/// moved pin went keeps them one node. `before` holds the parts where they
+/// stood. Only parts still in `document` count as staying, so a caller that
+/// has another sheet's parts out of reach wires nothing to them. A contact
+/// a wire still covers, as when the moved pin's own wire is laid back
+/// through the old point, needs no new wire. Returns whether any was laid.
+pub fn bridge_broken_abutments(
+    document: &mut SchematicDocument,
+    identity: &mut SchematicIdentity,
+    before: &[Component],
+    moved: &HashSet<u64>,
+    mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+) -> bool {
+    let staying = document
+        .components
+        .iter()
+        .filter(|component| !moved.contains(&component.id))
+        .flat_map(|component| {
+            terminal_points_for(component)
+                .into_iter()
+                .map(|point| (point, component.id))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    // (pin that stayed, where its partner went, the two parts)
+    let mut bridges: Vec<(Point, Point, [u64; 2])> = Vec::new();
+    for old in before
+        .iter()
+        .filter(|component| moved.contains(&component.id))
+    {
+        let Some(new) = document
+            .components
+            .iter()
+            .find(|component| component.id == old.id)
+        else {
+            continue;
+        };
+        for (from, to) in terminal_points_for(old)
+            .into_iter()
+            .zip(terminal_points_for(new))
+        {
+            let Some(&(_, stayer)) = staying.iter().find(|(point, _)| *point == from) else {
+                continue;
+            };
+            let still_joined = from == to
+                || document
+                    .wires
+                    .iter()
+                    .any(|wire| wire.contains_point(from) && wire.contains_point(to))
+                || bridges
+                    .iter()
+                    .any(|(start, end, _)| *start == from && *end == to);
+            if !still_joined {
+                bridges.push((from, to, [stayer, old.id]));
+            }
+        }
+    }
+    let laid = !bridges.is_empty();
+    for (from, to, parts) in bridges {
+        let route = abutment_route(document, from, to, parts, &mut terminal_points_for);
+        let id = identity.allocate(document);
+        document.wires.push(Wire::new(id, route));
+    }
+    laid
+}
+
+/// A square route from `from` to `to`: straight when the two line up, and
+/// otherwise turning once, on the first side (leaving `from` across, then
+/// along) whose legs keep out of both `parts`' bodies.
+fn abutment_route(
+    document: &SchematicDocument,
+    from: Point,
+    to: Point,
+    parts: [u64; 2],
+    terminal_points_for: &mut impl FnMut(&Component) -> Vec<Point>,
+) -> Vec<Point> {
+    if from.x == to.x || from.y == to.y {
+        return vec![from, to];
+    }
+    let bodies = document
+        .components
+        .iter()
+        .filter(|component| parts.contains(&component.id))
+        .map(|component| (component, terminal_points_for(component)))
+        .collect::<Vec<_>>();
+    let corners = [Point::new(to.x, from.y), Point::new(from.x, to.y)];
+    let corner = corners
+        .into_iter()
+        .find(|&corner| {
+            [WireSegment::new(from, corner), WireSegment::new(corner, to)]
+                .into_iter()
+                .all(|segment| {
+                    bodies.iter().all(|(component, terminals)| {
+                        !segment_enters_component_body(segment, component, terminals)
+                    })
+                })
+        })
+        .unwrap_or(corners[0]);
+    vec![from, corner, to]
 }
 
 pub fn move_selection_with_mode_resolved(
