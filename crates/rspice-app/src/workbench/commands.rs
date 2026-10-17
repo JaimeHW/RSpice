@@ -675,10 +675,7 @@ impl Command {
             Self::FindReplace => active_schematic_editor(app) && !state.schematic_edit_read_only(),
             Self::RepeatLastCommand => {
                 active_schematic_editor(app)
-                    && state
-                        .workbench
-                        .last_repeatable_command
-                        .is_some_and(|command| command.is_enabled(app))
+                    && Self::last_repeatable(app).is_some_and(|command| command.is_enabled(app))
             }
             Self::ConfigurationSets | Self::RuleSetup => state.project_lifecycle.is_open(),
             Self::ReviewComments => {
@@ -1204,6 +1201,15 @@ impl Command {
         )
     }
 
+    /// The command Repeat last command would run.
+    pub(crate) fn last_repeatable(app: &RSpiceApp) -> Option<Self> {
+        app.state
+            .workbench
+            .last_repeatable_command
+            .as_deref()
+            .and_then(Self::from_stable_id)
+    }
+
     /// Shared by menu/palette dispatch and the keyboard dispatcher.
     pub(crate) fn commits_inspector_edit(self) -> bool {
         command_edits_schematic(self)
@@ -1273,7 +1279,7 @@ impl Command {
             return;
         }
         if self.repeatable() && self.is_enabled(app) {
-            app.state.workbench.last_repeatable_command = Some(self);
+            app.state.workbench.last_repeatable_command = Some(self.stable_id().to_owned());
         }
         match self {
             Self::OpenWorkspace(workspace) => {
@@ -1799,7 +1805,7 @@ impl Command {
                 crate::workbench::app::open_selection_bulk_edit_dialog(&mut app.state);
             }
             Self::FindReplace => crate::workbench::app::open_find_replace(&mut app.state),
-            Self::RepeatLastCommand => match app.state.workbench.last_repeatable_command {
+            Self::RepeatLastCommand => match Self::last_repeatable(app) {
                 Some(command) if command.is_enabled(app) => command.execute(app),
                 Some(command) => app.state.prompt(format!(
                     "{} cannot run here, so it was not repeated.",

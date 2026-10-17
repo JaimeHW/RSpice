@@ -1666,6 +1666,19 @@ fn repeat_runs_the_last_edit_again_on_the_canvas_key() {
         })
         .collect();
     assert!(sharing.is_empty(), "`.` is also bound to {sharing:?}");
+    // Repeat remembers a command by its stable id, so every command it can
+    // repeat must come back from that id as itself.
+    for command in COMMAND_REGISTRY
+        .iter()
+        .copied()
+        .filter(|command| command.repeatable())
+    {
+        assert_eq!(
+            Command::from_stable_id(command.stable_id()),
+            Some(command),
+            "{command:?}"
+        );
+    }
 
     let (mut app, _) = app_with_selected_resistor_pair();
     assert!(!repeat.is_enabled(&app), "nothing has run yet");
@@ -1686,7 +1699,7 @@ fn repeat_runs_the_last_edit_again_on_the_canvas_key() {
     );
     Command::Undo.execute(&mut app);
     assert_eq!(
-        app.state.workbench.last_repeatable_command,
+        Command::last_repeatable(&app),
         Some(Command::RotateSelection),
         "an undo is not what Repeat repeats"
     );
