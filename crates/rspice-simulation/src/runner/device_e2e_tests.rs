@@ -453,7 +453,11 @@ fn a_source_behind_its_series_resistance_closes_no_source_loop() {
     let behind = across("rs=50");
     let netlist = behind.netlist();
     assert!(loops(&behind).is_empty(), "{:?}\n{netlist}", loops(&behind));
-    assert!(gate(&behind).is_ok(), "{:?}\n{netlist}", gate(&behind).err());
+    assert!(
+        gate(&behind).is_ok(),
+        "{:?}\n{netlist}",
+        gate(&behind).err()
+    );
     solve_op(&netlist);
 
     let ideal = across("");
