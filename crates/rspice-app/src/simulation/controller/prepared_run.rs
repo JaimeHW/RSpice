@@ -236,13 +236,12 @@ impl FrozenRunPreparation {
         progress: &dyn Fn(crate::simulation::execution::PreparationProgress),
     ) -> Result<(PreparedRunSnapshot, super::run_inputs::SourceFileAnswers), PreparationError> {
         let Self { projection, inputs } = self;
-        let snapshot =
-            crate::simulation::execution::preparation::build_prepared_run_set_reporting(
-                &inputs.view(),
-                projection,
-                abort,
-                progress,
-            )?;
+        let snapshot = crate::simulation::execution::preparation::build_prepared_run_set_reporting(
+            &inputs.view(),
+            projection,
+            abort,
+            progress,
+        )?;
         Ok((snapshot, inputs.source_files.into_answers()))
     }
 }

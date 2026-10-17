@@ -230,9 +230,7 @@ fn queued_by_its_check(app: &mut RSpiceApp) -> crate::product::ContentDigest {
 }
 
 /// The frame that dispatches a queued run, with the preparations it ran.
-fn dispatch_frame(
-    app: &mut RSpiceApp,
-) -> Vec<crate::simulation::execution::SimulationRunIntent> {
+fn dispatch_frame(app: &mut RSpiceApp) -> Vec<crate::simulation::execution::SimulationRunIntent> {
     use crate::simulation::controller::prepared_run::thread_preparations;
 
     let earlier = thread_preparations::take();
@@ -250,10 +248,7 @@ fn stop_the_run(app: &mut RSpiceApp) {
     app.simulation_controller.abort();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
     while app.simulation_controller.is_running() {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the run did not stop"
-        );
+        assert!(std::time::Instant::now() < deadline, "the run did not stop");
         app.simulation_controller
             .update(&mut app.state, &*app.export_workflow_io);
         std::thread::sleep(std::time::Duration::from_millis(1));
@@ -308,7 +303,10 @@ fn the_dispatch_frame_runs_the_checked_snapshot_and_prepares_nothing() {
         .and_then(|run| run.prepared_receipt())
         .expect("the dispatch starts a run with its receipt")
         .prepared_snapshot_digest();
-    assert_eq!(dispatched, authorized, "the run is the snapshot the pass authorized");
+    assert_eq!(
+        dispatched, authorized,
+        "the run is the snapshot the pass authorized"
+    );
     stop_the_run(&mut app);
 }
 
@@ -326,7 +324,10 @@ fn an_edit_after_the_check_refuses_the_dispatch() {
 
     let prepared = dispatch_frame(&mut app);
 
-    assert!(prepared.is_empty(), "the refusal prepares nothing: {prepared:?}");
+    assert!(
+        prepared.is_empty(),
+        "the refusal prepares nothing: {prepared:?}"
+    );
     assert_refused_for(&app, "the design");
 }
 

@@ -341,7 +341,9 @@ fn operating_point_reads(state: &AppState) -> Vec<Result<AnalysisSpec, String>> 
 /// The revision of the retained runs, when an analysis in the plan resumes
 /// from a checkpoint they may hold; `None` when none does, because then
 /// nothing but an operating point reads them.
-fn checkpoint_run_reads(state: &AppState) -> Option<rspice_results::run_history::RunHistoryRevision> {
+fn checkpoint_run_reads(
+    state: &AppState,
+) -> Option<rspice_results::run_history::RunHistoryRevision> {
     let plan = state.sim_setup.analysis_plan.as_ref()?;
     plan.instances()
         .iter()
@@ -479,9 +481,8 @@ impl NetlistSourceHost for RecordingSourceFiles {
         data_root: Option<&Path>,
         table: Option<&RetainedPwlFile>,
     ) -> (TableRoute, Option<String>) {
-        let answer = crate::simulation::table_route::SourceFiles.route_retaining(
-            stored, data_root, table,
-        );
+        let answer =
+            crate::simulation::table_route::SourceFiles.route_retaining(stored, data_root, table);
         self.record(SourceFileAnswer::Route {
             stored: stored.to_owned(),
             data_root: data_root.map(Path::to_path_buf),
@@ -558,10 +559,7 @@ impl RetainedRunInputs {
             ))
         };
         if let Some(input) = self.identity.moved_in(state) {
-            return refuse(
-                PreparationStage::Authorization,
-                &format!("{input} changed"),
-            );
+            return refuse(PreparationStage::Authorization, &format!("{input} changed"));
         }
         if let Err(error) = rspice_simulation::model_sources::verify_plan_external_model_sources(
             state.model_library_manager.catalog(),

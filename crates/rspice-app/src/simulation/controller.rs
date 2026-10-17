@@ -75,12 +75,12 @@ mod live_transient;
 mod manual_deck_tests;
 mod monte_carlo_checkpoint;
 pub(crate) mod prepared_run;
-mod run_inputs;
 #[cfg(test)]
 mod projection_ratchet;
 mod results_convert;
 mod results_post;
 mod results_update;
+mod run_inputs;
 #[cfg(test)]
 pub(crate) mod test_execution;
 mod touchstone;
@@ -459,13 +459,15 @@ impl SimulationController {
                     state.workbench.preflight.invalidate();
                 }
                 state.push_sim_message(ConsoleMessage::warning(error.to_string()));
-                state.simulation.execution.status =
-                    if error.message().starts_with(run_inputs::DESIGN_CHANGED_SINCE_CHECK) {
-                        run_inputs::DESIGN_CHANGED_SINCE_CHECK
-                    } else {
-                        "Run blocked"
-                    }
-                    .to_owned();
+                state.simulation.execution.status = if error
+                    .message()
+                    .starts_with(run_inputs::DESIGN_CHANGED_SINCE_CHECK)
+                {
+                    run_inputs::DESIGN_CHANGED_SINCE_CHECK
+                } else {
+                    "Run blocked"
+                }
+                .to_owned();
                 return;
             }
         };
