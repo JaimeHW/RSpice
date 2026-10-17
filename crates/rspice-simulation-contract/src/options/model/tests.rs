@@ -187,6 +187,58 @@ fn a_node_shunt_is_not_part_of_any_preset() {
     );
 }
 
+/// The connect-rule block reaches the engine on the deck's own card, the
+/// parser reads back the block's name in the case it was written, and a plan
+/// that names none writes no key and serializes as it did before the field.
+#[test]
+fn a_named_connect_rule_block_is_on_the_deck_and_an_unnamed_one_is_nowhere() {
+    let options = SimulationOptions {
+        connect_rules: Some("Low_vdd".to_owned()),
+        ..SimulationOptions::default()
+    };
+    options.validate().expect("a simple identifier names a block");
+    let card = options.to_spice_options();
+    assert!(card.contains("+ CONNECTRULES=\"Low_vdd\""), "{card}");
+    let deck = format!("connect rules\nR1 a 0 1k\n{card}\n.end\n");
+    let parsed = rspice_core::Netlist::parse(&deck).expect("the options card parses");
+    assert_eq!(parsed.options.connect_rules.as_deref(), Some("Low_vdd"));
+
+    let unset = SimulationOptions::default();
+    assert!(!unset.to_spice_options().contains("CONNECTRULES"));
+    let persisted = serde_json::to_value(&unset).expect("options encode");
+    assert!(
+        persisted.get("connect_rules").is_none(),
+        "an unnamed block adds no key to the project"
+    );
+    let restored: SimulationOptions =
+        serde_json::from_value(serde_json::to_value(&options).expect("options encode"))
+            .expect("options decode");
+    assert_eq!(restored.connect_rules.as_deref(), Some("Low_vdd"));
+}
+
+/// Which converters the design elaborates is not a numerical policy: no
+/// preset names a block or clears one. A name no library could declare is
+/// refused before it reaches the card.
+#[test]
+fn a_connect_rule_block_is_not_part_of_any_preset_and_is_an_identifier() {
+    let named = SimulationOptions {
+        connect_rules: Some("only_d2a".to_owned()),
+        ..SimulationOptions::default()
+    };
+    assert_eq!(named.preset_name(), Some("Balanced"));
+    for refused in ["", "2fast", "low vdd", "a\"b", "rules;x"] {
+        assert!(
+            SimulationOptions {
+                connect_rules: Some(refused.to_owned()),
+                ..SimulationOptions::default()
+            }
+            .validate()
+            .is_err(),
+            "'{refused}' names no block"
+        );
+    }
+}
+
 #[test]
 fn no_seed_emits_no_seed_line() {
     assert!(
