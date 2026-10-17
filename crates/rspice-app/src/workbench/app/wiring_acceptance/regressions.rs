@@ -21,6 +21,17 @@ fn deleting_a_t_branch_drops_its_dot_though_another_sheet_has_a_t_there() {
     holds(&[Delete(Pick::Wire(8))]);
 }
 
+/// A resistor dropped with its `-` pin on R2's `+` pin, where the T's
+/// right branch ends: a pin, a pin and a wire end meet there, and the dot
+/// was never placed because no wire had to split.
+#[test]
+fn a_part_dropped_onto_a_pin_and_a_wire_end_gets_its_dot() {
+    holds(&[
+        Draw(vec![p(240, 20), p(240, 140)]),
+        Place(p(240, 100), Rotation::R0),
+    ]);
+}
+
 /// Undoing the switch to Sheet 2 and then moving a part on Sheet 1 is a
 /// new edit after the undo: the switch can no longer be redone. Redo
 /// replayed it anyway.

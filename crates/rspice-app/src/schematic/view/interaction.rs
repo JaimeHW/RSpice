@@ -479,8 +479,8 @@ fn refuse_label_on_unmarked_crossing(ui: &Ui, state: &mut AppState, anchor: Poin
 
 /// A placed part whose pin lands inside one of this sheet's wires is
 /// connected there: the wire splits so the pin owns a vertex and the wire
-/// follows the part, and the dot the join earns is placed under the
-/// document's junction policy.
+/// follows the part. The dots any join earns, inside a wire, at a wire's
+/// end or on another pin, are placed under the document's junction policy.
 fn connect_pins_inside_wires(
     workspace: &crate::state::ProjectWorkspace,
     schematic: &mut crate::state::SchematicState,
@@ -489,11 +489,15 @@ fn connect_pins_inside_wires(
 ) {
     with_active_wire_topology_in(workspace, schematic, |schematic, scope| {
         let placed = std::collections::HashSet::from([component]);
-        if schematic.split_wires_under_pins(
+        schematic.split_wires_under_pins(
             &placed,
             |component| symbols.terminal_points(component),
             scope,
-        ) && schematic
+        );
+        // A pin dropped onto a wire's end or onto another pin joins them
+        // with no wire to split, and can still make a point where three
+        // conductor ends meet: the dots follow the drawing either way.
+        if schematic
             .document()
             .document_policy
             .wire_junctions
