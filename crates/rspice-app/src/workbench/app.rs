@@ -227,7 +227,9 @@ pub(crate) use actions::veriloga_parameters::{
     undeclared_instance_parameters,
 };
 
-pub(crate) use dialogs::placement::net_label::open_net_label_placement;
+pub(crate) use dialogs::placement::net_label::{
+    open_net_label_placement, place_sequenced_net_label,
+};
 pub(crate) use dialogs::selection::array::{
     armed_array_selection_authority, armed_array_selection_plan, cancel_armed_array_selection,
     open_array_selection_dialog,

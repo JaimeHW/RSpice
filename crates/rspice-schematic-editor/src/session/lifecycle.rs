@@ -24,6 +24,8 @@ impl EditorSession {
         if tool != Tool::Place(ComponentType::Port) {
             self.pending_port_sequence = None;
         }
+        // Arming the Label tool again is asking for the entry again.
+        self.pending_net_label_sequence = None;
         if tool != Tool::DesignNote {
             self.pending_design_note = None;
         }
@@ -50,6 +52,7 @@ impl EditorSession {
         self.cancel_routing_gestures();
         self.pending_bus_tap = None;
         self.pending_port_sequence = None;
+        self.pending_net_label_sequence = None;
         self.pending_design_note = None;
         self.pending_documentation_shape = None;
         self.documentation_shape_drawing.clear();

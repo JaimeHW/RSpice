@@ -208,7 +208,7 @@ pub(super) fn handle_tool_interactions(
             ToolPointerAction::NetLabel(anchor) => {
                 if label_anchor_on_unmarked_crossing(state, anchor) {
                     refuse_label_on_unmarked_crossing(ui, state, anchor);
-                } else {
+                } else if !crate::workbench::app::place_sequenced_net_label(state, anchor) {
                     crate::workbench::app::open_net_label_placement(state, anchor);
                 }
             }
