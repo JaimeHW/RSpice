@@ -8,7 +8,9 @@ use crate::schematic::view::schematic_symbol_context;
 use crate::state::{ComponentType, Tool};
 use crate::workbench::app::sheets as sheet_actions;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::menu_bar::{FileMenuAction, dispatch_file_menu_action};
+use crate::workbench::menu_bar::{
+    FileMenuAction, check_cellview, check_design, dispatch_file_menu_action,
+};
 use crate::workbench::{AppState, RSpiceApp};
 use std::cell::RefCell;
 
@@ -1848,8 +1850,8 @@ impl Command {
             Self::CheckCellview if active_symbol_editor(app) => {
                 app.state.run_active_symbol_pin_checks();
             }
-            Self::CheckCellview => crate::workbench::menu_bar::check_cellview(&mut app.state),
-            Self::CheckDesign => crate::workbench::menu_bar::check_design(&mut app.state),
+            Self::CheckCellview => check_cellview(&mut app.state),
+            Self::CheckDesign => check_design(&mut app.state),
             Self::CheckAndSave => {
                 crate::workbench::app::open_check_and_save_dialog(&mut app.state);
             }
