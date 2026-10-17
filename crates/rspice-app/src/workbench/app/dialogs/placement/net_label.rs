@@ -428,14 +428,15 @@ mod tests {
     }
 
     /// Place what the entry names at `anchor`.
-    fn commit_entry(app: &mut RSpiceApp, anchor: Point, entry: &str) {
-        open_at(app, anchor);
-        app.state.dialogs.net_label_placement.name = entry.to_owned();
-        let DraftValidation::Valid(commit) = validate_draft(&app.state) else {
+    fn commit_entry(state: &mut AppState, anchor: Point, entry: &str) {
+        state.schematic.session.editor.tool = Tool::Label;
+        assert!(open_net_label_placement(state, anchor));
+        state.dialogs.net_label_placement.name = entry.to_owned();
+        let DraftValidation::Valid(commit) = validate_draft(state) else {
             panic!("{entry} is a valid entry");
         };
-        apply_commit(&mut app.state, *commit).expect("placement");
-        app.state.dialogs.net_label_placement.close();
+        apply_commit(state, *commit).expect("placement");
+        state.dialogs.net_label_placement.close();
     }
 
     fn label_names(app: &RSpiceApp) -> Vec<String> {
@@ -463,7 +464,7 @@ mod tests {
     #[test]
     fn a_numbered_label_keeps_the_tool_armed_with_the_next_name() {
         let mut app = RSpiceApp::test_instance();
-        commit_entry(&mut app, Point::new(0, 0), "D0");
+        commit_entry(&mut app.state, Point::new(0, 0), "D0");
         assert_eq!(next_name(&app).as_deref(), Some("D1"));
 
         assert!(place_sequenced_net_label(&mut app.state, Point::new(0, 20)));
@@ -489,7 +490,7 @@ mod tests {
             ("D<0:2>", vec!["D<0>", "D<1>", "D<2>"]),
         ] {
             let mut app = RSpiceApp::test_instance();
-            commit_entry(&mut app, Point::new(0, 0), entry);
+            commit_entry(&mut app.state, Point::new(0, 0), entry);
             let mut y = 0;
             while next_name(&app).is_some() {
                 y += 20;
@@ -507,7 +508,7 @@ mod tests {
             crate::state::Bus::segment(90, Point::new(-50, 0), Point::new(50, 0), None)
                 .expect("bus"),
         );
-        commit_entry(&mut app, Point::new(0, 0), "D<0:2>");
+        commit_entry(&mut app.state, Point::new(0, 0), "D<0:2>");
         assert_eq!(label_names(&app), ["D<0:2>"]);
         assert_eq!(next_name(&app), None);
     }
