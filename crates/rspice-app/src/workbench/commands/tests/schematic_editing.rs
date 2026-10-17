@@ -1644,3 +1644,50 @@ fn join_collinear_wires_lays_a_straight_run_as_one_wire_in_one_undo_step() {
     assert_eq!(app.state.schematic.document().wires, vec![first, second]);
     assert!(!app.state.schematic.can_undo(), "one step, not two");
 }
+
+/// Repeat last command, on `.` over the canvas as Virtuoso and ADS repeat,
+/// runs the last placement or edit again; an undo is never what it repeats
+/// (audit G-11).
+#[test]
+fn repeat_runs_the_last_edit_again_on_the_canvas_key() {
+    use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, CommandPlatform};
+
+    let repeat = Command::RepeatLastCommand;
+    assert_eq!(repeat.default_shortcut_label(CommandPlatform::Desktop), ".");
+    assert_eq!(
+        repeat.shortcut_context(),
+        ShortcutContext::EngineeringCanvas
+    );
+    let sharing: Vec<Command> = COMMAND_REGISTRY
+        .iter()
+        .copied()
+        .filter(|command| {
+            *command != repeat && command.default_shortcut_label(CommandPlatform::Desktop) == "."
+        })
+        .collect();
+    assert!(sharing.is_empty(), "`.` is also bound to {sharing:?}");
+
+    let (mut app, _) = app_with_selected_resistor_pair();
+    assert!(!repeat.is_enabled(&app), "nothing has run yet");
+    let offset = |app: &RSpiceApp| {
+        let components = &app.state.schematic.document().components;
+        components[1].pos - components[0].pos
+    };
+    let before = offset(&app);
+
+    Command::RotateSelection.execute(&mut app);
+    assert!(repeat.is_enabled(&app));
+    repeat.execute(&mut app);
+
+    assert_eq!(
+        offset(&app),
+        rotated_cw(rotated_cw(before)),
+        "Repeat turned the selection a second quarter"
+    );
+    Command::Undo.execute(&mut app);
+    assert_eq!(
+        app.state.workbench.last_repeatable_command,
+        Some(Command::RotateSelection),
+        "an undo is not what Repeat repeats"
+    );
+}

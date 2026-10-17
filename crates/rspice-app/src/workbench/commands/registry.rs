@@ -354,6 +354,10 @@ const FIND_REPLACE: &[ShortcutBinding] = &[primary(
     chord(Key::H, true, false, false, "Ctrl+H"),
     DESKTOP,
 )];
+// Virtuoso and ADS both repeat the last command on a bare key; `.` was
+// bound nowhere.
+const REPEAT_LAST_COMMAND: &[ShortcutBinding] =
+    &[primary(chord(Key::Period, false, false, false, "."), ALL)];
 // Ctrl+F in a focused source editor finds in that source; on a drawing it
 // finds in the design. As with Ctrl+D the focused surface decides.
 const FIND_CODE_DOCUMENT: &[ShortcutBinding] =
@@ -784,6 +788,7 @@ impl Command {
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical
             | Self::SnapSelectionToGrid
+            | Self::RepeatLastCommand
             | Self::NextSheet
             | Self::PreviousSheet
             | Self::NewSheet
@@ -935,6 +940,7 @@ impl Command {
             Self::ObjectProperties => OBJECT_PROPERTIES,
             Self::FindInDesign => FIND_DESIGN,
             Self::FindReplace => FIND_REPLACE,
+            Self::RepeatLastCommand => REPEAT_LAST_COMMAND,
             Self::Preferences => PREFERENCES,
             Self::ZoomIn => ZOOM_IN,
             Self::ZoomOut => ZOOM_OUT,
@@ -1468,6 +1474,9 @@ impl Command {
             }
             Self::StimulusApplyDraft | Self::StimulusRevertDraft => {
                 "this definition has no draft to apply"
+            }
+            Self::RepeatLastCommand if app.state.workbench.last_repeatable_command.is_none() => {
+                "no placement or edit has run yet"
             }
             _ => "command is unavailable in this context",
         };

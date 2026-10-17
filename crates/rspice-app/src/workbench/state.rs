@@ -1329,6 +1329,10 @@ pub struct WorkbenchState {
     /// placed twice has one editor session, so the session cannot hold it.
     #[serde(skip)]
     pub occurrence_net_highlights: std::collections::BTreeMap<String, String>,
+    /// The last placement or editing command run, which Repeat last
+    /// command runs again.
+    #[serde(skip)]
+    pub last_repeatable_command: Option<crate::workbench::commands::vocabulary::Command>,
     #[serde(skip)]
     pub drawer: Option<Drawer>,
     /// One-frame request to focus the workspace navigator filter.
@@ -1505,6 +1509,7 @@ impl Default for WorkbenchState {
             command_query: String::new(),
             inline_edit: InlineEdit::default(),
             occurrence_net_highlights: std::collections::BTreeMap::new(),
+            last_repeatable_command: None,
             drawer: None,
             focus_navigator_search: false,
             placement_query: String::new(),

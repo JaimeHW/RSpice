@@ -673,6 +673,13 @@ impl Command {
                 active_schematic_editor(app) && state.project_lifecycle.is_open()
             }
             Self::FindReplace => active_schematic_editor(app) && !state.schematic_edit_read_only(),
+            Self::RepeatLastCommand => {
+                active_schematic_editor(app)
+                    && state
+                        .workbench
+                        .last_repeatable_command
+                        .is_some_and(|command| command.is_enabled(app))
+            }
             Self::ConfigurationSets | Self::RuleSetup => state.project_lifecycle.is_open(),
             Self::ReviewComments => {
                 active_schematic_editor(app) && state.project_lifecycle.is_open()
@@ -1158,6 +1165,45 @@ impl Command {
         }
     }
 
+    /// The placement and editing commands Repeat last command runs again,
+    /// each with what it carries (a placed kind, a rotation's sense). An
+    /// undo, a delete or a form is not repeated: Repeat on those would be a
+    /// surprise rather than a shortcut.
+    pub(crate) const fn repeatable(self) -> bool {
+        matches!(
+            self,
+            Self::Place(_)
+                | Self::PlaceInstance
+                | Self::PlaceWire
+                | Self::PlaceBus
+                | Self::PlaceBusTap
+                | Self::PlaceJunction
+                | Self::PlaceLabel
+                | Self::PlaceOffSheetConnector
+                | Self::PlacePin
+                | Self::PlaceText
+                | Self::PlaceShape
+                | Self::Duplicate
+                | Self::Paste
+                | Self::MoveSelection
+                | Self::StretchSelection
+                | Self::RotateSelection
+                | Self::RotateSelectionCounterClockwise
+                | Self::MirrorSelectionHorizontal
+                | Self::MirrorSelectionVertical
+                | Self::AlignSelectionLeft
+                | Self::AlignSelectionCenter
+                | Self::AlignSelectionRight
+                | Self::AlignSelectionTop
+                | Self::AlignSelectionMiddle
+                | Self::AlignSelectionBottom
+                | Self::DistributeSelectionHorizontal
+                | Self::DistributeSelectionVertical
+                | Self::SnapSelectionToGrid
+                | Self::JoinCollinearWires
+        )
+    }
+
     /// Shared by menu/palette dispatch and the keyboard dispatcher.
     pub(crate) fn commits_inspector_edit(self) -> bool {
         command_edits_schematic(self)
@@ -1225,6 +1271,9 @@ impl Command {
         }
         if self.commits_inspector_edit() && !app.state.commit_pending_inspector_edit() {
             return;
+        }
+        if self.repeatable() && self.is_enabled(app) {
+            app.state.workbench.last_repeatable_command = Some(self);
         }
         match self {
             Self::OpenWorkspace(workspace) => {
@@ -1750,6 +1799,14 @@ impl Command {
                 crate::workbench::app::open_selection_bulk_edit_dialog(&mut app.state);
             }
             Self::FindReplace => crate::workbench::app::open_find_replace(&mut app.state),
+            Self::RepeatLastCommand => match app.state.workbench.last_repeatable_command {
+                Some(command) if command.is_enabled(app) => command.execute(app),
+                Some(command) => app.state.prompt(format!(
+                    "{} cannot run here, so it was not repeated.",
+                    command.spec().label
+                )),
+                None => app.state.prompt("No placement or edit has run yet."),
+            },
             Self::ConfigurationSets => {
                 crate::workbench::app::open_configuration_sets_dialog(&mut app.state);
             }
