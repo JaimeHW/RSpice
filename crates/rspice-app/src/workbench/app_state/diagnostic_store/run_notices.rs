@@ -78,14 +78,29 @@ pub(crate) enum RunNotice {
 /// Everything one run's analyses raised, in the order they reported it.
 pub(super) type RunNoticeFacts = Vec<(String, RunNotice)>;
 
-/// Where a drawn component the engine named is: the cell view that draws it,
-/// the component, and its place on that sheet.
+/// Where a drawn component the engine named is: the occurrence it was solved
+/// in, the cell view that draws it, the component, and its place on that
+/// sheet.
 #[derive(Debug, Clone, PartialEq)]
 pub(in crate::workbench) struct DrawnElement {
+    pub(in crate::workbench) occurrence: InstancePath,
     pub(in crate::workbench) cell_view: CellViewRef,
     pub(in crate::workbench) component: u64,
     pub(in crate::workbench) name: String,
     pub(in crate::workbench) position: Point,
+}
+
+impl DrawnElement {
+    /// The component as the reader finds it in the design: `M1` at the root,
+    /// `/amp/M1` inside an occurrence. A master placed twice draws one `M1`
+    /// that is solved twice, and the two are different conditions.
+    fn path(&self) -> String {
+        if self.occurrence.is_root() {
+            self.name.clone()
+        } else {
+            format!("{}/{}", self.occurrence, self.name)
+        }
+    }
 }
 
 /// One condition, gathered over every analysis and point that raised it.
@@ -270,7 +285,7 @@ impl AppState {
                         ),
                         ParameterScope::Instance => located.as_ref().map_or_else(
                             || replacement.element.clone().unwrap_or_default(),
-                            |drawn| drawn.name.clone(),
+                            DrawnElement::path,
                         ),
                     };
                     let fallback = if manual_deck { Some(deck()) } else { None };
@@ -301,7 +316,7 @@ impl AppState {
                                 .clone()
                                 .unwrap_or_else(|| condition.analyses.sentence())
                         },
-                        |drawn| drawn.name.clone(),
+                        DrawnElement::path,
                     );
                     (
                         DiagnosticLevel::Warning,
@@ -403,6 +418,7 @@ impl AppState {
             element,
         )?;
         Some(DrawnElement {
+            occurrence,
             cell_view: master,
             component: component.id,
             name: component.name.clone(),
@@ -818,8 +834,9 @@ mod tests {
         assert_eq!(record.details, "Raised 3 times in Transient, Transient 2");
     }
 
-    /// A root drawing that places `amp` and a memristor, over an `amp`
-    /// master that draws `M1` and a memristor of its own.
+    /// A root drawing that places `amp` twice, as `amp` and `amp2`, and a
+    /// memristor, over an `amp` master that draws `M1` and a memristor of its
+    /// own.
     fn hierarchical_design() -> AppState {
         let mut state = open_state(&[1]);
         let mut amp = SchematicState::default();
@@ -845,11 +862,15 @@ mod tests {
             top.add_cell(top_cell);
             state.library_manager.add_library(top);
         }
-        let mut instance = Component::new(1, ComponentType::CellInstance, Point::origin())
-            .with_library_cell(LibraryCellInstance::new("work", "amp", "schematic"));
-        instance.name = "amp".to_owned();
+        let placed = |id: u64, name: &str, x: i32| {
+            let mut instance = Component::new(id, ComponentType::CellInstance, Point::new(x, 0))
+                .with_library_cell(LibraryCellInstance::new("work", "amp", "schematic"));
+            instance.name = name.to_owned();
+            instance
+        };
         state.schematic.document_mut_for_test().components.extend([
-            instance,
+            placed(1, "amp", 0),
+            placed(3, "amp2", 400),
             Component::new(2, ComponentType::Memristor, Point::new(200, 60))
                 .with_name_value("MR1", "1"),
         ]);
@@ -859,7 +880,9 @@ mod tests {
 
     /// The engine names an element inside a sub-cell by the written names
     /// above it; the record finds the component the `amp` master draws, and
-    /// routes to it in that master rather than in the root.
+    /// routes to it in that master rather than in the root. The master is
+    /// placed twice, so each occurrence's clamp is its own record, named by
+    /// its occurrence, and both lead to the one `M1` the master draws.
     #[test]
     fn an_engine_name_in_a_sub_cell_locates_the_drawn_instance_under_its_occurrence() {
         let mut state = hierarchical_design();
@@ -868,42 +891,58 @@ mod tests {
         let located = state
             .locate_engine_element("xamp.m1")
             .expect("XAMP.M1 is the M1 that /amp draws");
+        assert_eq!(located.occurrence.to_string(), "/amp");
         assert_eq!(located.cell_view.key(), amp.key());
         assert_eq!(located.component, 10);
         assert_eq!(located.name, "M1");
+        assert_eq!(
+            state
+                .locate_engine_element("XAMP2.M1")
+                .map(|located| (located.occurrence.to_string(), located.component)),
+            Some(("/amp2".to_owned(), 10))
+        );
         assert_eq!(state.locate_engine_element("m1"), None, "no M1 at the root");
 
         state.open_run_outcome(1);
         state.publish_run_notices(
             "Operating point",
-            vec![clamp("XAMP.M1", "rdsw", &[])],
+            vec![
+                clamp("XAMP.M1", "rdsw", &[]),
+                clamp("XAMP2.M1", "rdsw", &[]),
+            ],
             None,
             &[],
             1,
         );
-        let record = state
+        let records: Vec<&DiagnosticRecord> = state
             .diagnostics
             .batches()
             .flat_map(|batch| batch.records.iter())
-            .find(|record| is_notice(record))
-            .expect("the clamp is a record");
-        assert_eq!(record.subject.object, "M1");
-        assert_eq!(
-            record.subject.cell_view.as_ref().map(CellViewRef::key),
-            Some(amp.key())
-        );
-        assert!(
-            matches!(
-                &record.route,
-                Some(DiagnosticRoute::Anchor(LogAnchor::Schematic {
-                    cell_view,
-                    component: Some(10),
-                    ..
-                })) if cell_view.key() == amp.key()
-            ),
-            "{:?}",
-            record.route
-        );
+            .filter(|record| is_notice(record))
+            .collect();
+        let subjects: Vec<&str> = records
+            .iter()
+            .map(|record| record.subject.object.as_str())
+            .collect();
+        assert_eq!(subjects, ["/amp/M1", "/amp2/M1"]);
+        for record in records {
+            assert_eq!(
+                record.subject.cell_view.as_ref().map(CellViewRef::key),
+                Some(amp.key())
+            );
+            assert!(
+                matches!(
+                    &record.route,
+                    Some(DiagnosticRoute::Anchor(LogAnchor::Schematic {
+                        cell_view,
+                        component: Some(10),
+                        ..
+                    })) if cell_view.key() == amp.key()
+                ),
+                "{:?}",
+                record.route
+            );
+        }
     }
 
     /// A memristor is known to the engine under its keyword, `YMEMRISTOR!MR1`,
