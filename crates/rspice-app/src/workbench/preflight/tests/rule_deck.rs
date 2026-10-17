@@ -209,6 +209,60 @@ fn rules_edited_during_a_pass_authorize_nothing() {
     }
 }
 
+/// A Run press after the rules changed under a pass in flight is not
+/// absorbed into it: that pass will authorize nothing, so a press that
+/// joined it would be lost with it. The pass stops, the press checks the
+/// design under the rules as they stand, and its run is queued.
+#[test]
+fn a_run_press_after_the_rules_change_in_flight_restarts_the_pass() {
+    let demote = |state: &mut AppState| {
+        state
+            .workspace
+            .content
+            .design_rules
+            .set_severity(DrcViolationType::OrphanNetLabel, DrcSeverity::Info)
+            .expect("an orphan label may be set as a note");
+        // As applying the Rule Setup dialog does.
+        state.workbench.preflight.invalidate();
+    };
+    let waive = |state: &mut AppState| {
+        let target = page_waiver_target(state, DrcViolationType::OrphanNetLabel);
+        state
+            .waive_finding(&target, "a spare label")
+            .expect("the finding is waived");
+    };
+    let edits: [(&str, &dyn Fn(&mut AppState)); 2] = [("deck", &demote), ("waiver", &waive)];
+    for (edit, apply) in edits {
+        let mut app = runnable_app();
+        app.state
+            .schematic
+            .add_net_label(Point::new(600, 600), "spare".to_owned());
+        app.state.sync_active_schematic_to_workspace();
+        let release = app.simulation_controller.hold_next_preflight_worker();
+        run_and_queue(&mut app);
+        apply(&mut app.state);
+        run_and_queue(&mut app);
+        release.send(()).expect("the stale worker waits to prepare");
+        app.settle_preflight();
+
+        assert!(
+            app.state
+                .log_buffer
+                .entries()
+                .any(|entry| entry.message.starts_with("Preflight restarted")),
+            "{edit}: the restart is stated"
+        );
+        assert!(
+            app.state.simulation.execution.trigger_simulation,
+            "{edit}: the press after the edit queues its run"
+        );
+        assert!(
+            app.simulation_controller.retained_run_deck().is_some(),
+            "{edit}: the run under the edited rules is authorized"
+        );
+    }
+}
+
 /// What waives the page's finding of `rule`, as its row offers it.
 fn page_waiver_target(
     state: &mut AppState,

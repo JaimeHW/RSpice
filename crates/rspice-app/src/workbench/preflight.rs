@@ -126,7 +126,7 @@ fn checks_the_design_as_it_stands(
     report: &PreflightReport,
 ) -> bool {
     let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
-    controller.preflight_is_current()
+    controller.preflight_is_current(state)
         && report.is_current_for(
             state.workspace.content.project.revision().get(),
             &topology_root,

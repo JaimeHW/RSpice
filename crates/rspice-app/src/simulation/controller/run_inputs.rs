@@ -338,6 +338,29 @@ impl RunInputIdentity {
     /// The first input the session no longer holds as it was captured, named
     /// for the reader, or `None` when every one is unchanged.
     fn moved_in(&self, state: &AppState, snapshot: &PreparedRunSnapshot) -> Option<&'static str> {
+        self.first_moved(state, |live| match &self.0.reads {
+            KindReads::RunSet(reads) => reads.compared(state, live),
+            KindReads::ManualDeck(reads) => reads.compared(state, live, snapshot),
+        })
+    }
+
+    /// The first input a run set's preparation froze that the session no
+    /// longer holds as it was, before any run is prepared from them: what a
+    /// Run press asks of the pass in flight, by the comparison its dispatch
+    /// will make. A manual deck's identity is taken once its deck is
+    /// prepared, so it names nothing here.
+    pub(super) fn run_set_moved_in(&self, state: &AppState) -> Option<&'static str> {
+        let KindReads::RunSet(reads) = &self.0.reads else {
+            return None;
+        };
+        self.first_moved(state, |live| reads.compared(state, live))
+    }
+
+    fn first_moved(
+        &self,
+        state: &AppState,
+        kind_reads: impl FnOnce(&LiveInputs<'_>) -> Compared,
+    ) -> Option<&'static str> {
         let captured = &*self.0;
         let live = LiveInputs::of(state);
         let compilation_unchanged = match (&captured.compilation, live.compilation) {
@@ -370,10 +393,7 @@ impl RunInputIdentity {
             ),
             (compilation_unchanged, "the Verilog-A compilation"),
         ];
-        let (first, last) = match &captured.reads {
-            KindReads::RunSet(reads) => reads.compared(state, &live),
-            KindReads::ManualDeck(reads) => reads.compared(state, &live, snapshot),
-        };
+        let (first, last) = kind_reads(&live);
         first
             .into_iter()
             .chain(shared)

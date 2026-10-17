@@ -162,13 +162,17 @@ impl SimulationController {
         })
     }
 
-    /// Whether a pipeline is in flight and nothing has dropped or replaced
-    /// the retained run since its press, so the run it prepares would be
-    /// retained when its verdict lands.
-    pub(crate) fn preflight_is_current(&self) -> bool {
-        self.preflight
-            .as_ref()
-            .is_some_and(|pending| pending.generation == self.retained_run_generation)
+    /// Whether a pipeline is in flight, nothing has dropped or replaced the
+    /// retained run since its press, and every input it froze is still the
+    /// session's: the run it prepares would be retained when its verdict
+    /// lands, and its dispatch would not refuse it. A rule deck or a waiver
+    /// edited in flight moves no revision and drops no run, so only the
+    /// inputs themselves say so.
+    pub(crate) fn preflight_is_current(&self, state: &AppState) -> bool {
+        self.preflight.as_ref().is_some_and(|pending| {
+            pending.generation == self.retained_run_generation
+                && pending.identity.run_set_moved_in(state).is_none()
+        })
     }
 
     /// Stop the pipeline in flight. Its worker stops at the next stage
