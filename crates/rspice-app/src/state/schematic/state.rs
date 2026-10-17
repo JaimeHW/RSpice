@@ -189,6 +189,10 @@ pub struct SchematicSession {
 
     /// The armed Move or Stretch preview, kept while its inputs stand still.
     pub(crate) transform_preview: super::transform_preview_memo::TransformPreviewMemo,
+
+    /// The sheet's overflow advisories, kept while the drawing and the sheet
+    /// stand still.
+    pub(crate) overflow_summary: super::overflow_memo::OverflowSummaryMemo,
 }
 
 impl Default for SchematicState {

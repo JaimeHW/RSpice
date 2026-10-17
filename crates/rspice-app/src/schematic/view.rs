@@ -467,6 +467,13 @@ pub fn render_schematic_view(
     // Badges are placed against the wires the canvas cache indexes, so they
     // are refreshed after it.
     scene::refresh_voltage_badges(state);
+    drawing_sheet::refresh_overflow_summary(
+        state,
+        &painter,
+        &viewport,
+        &symbol_context,
+        &drawing_sheet,
+    );
 
     draw_scene(
         &painter,
