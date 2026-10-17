@@ -214,7 +214,7 @@ pub(super) fn parse_command(
         }
         ".FUNC" => {
             // Parse user-defined function: .FUNC name(arg1, arg2, ...) = expression
-            parse_func_statement(stream, line_num, params)?;
+            parse_func_statement(stream, line_num, params, root_redefinitions.as_deref_mut())?;
         }
         ".PREPROCESS" => parse_preprocess_command(stream, line_num, diagnostics)?,
         ".OPTIONS" | ".OPTION" | ".OPT" => {
@@ -4624,7 +4624,13 @@ pub(super) fn parse_param_statement(
             let error_policy = params.parameter_redefinition_diagnostic_policy()
                 == ParameterRedefinitionDiagnosticPolicy::Error;
             if acceptance.authoritative && (acceptance.first_origin.is_none() || !error_policy) {
+                let pinned = root_redefinitions.as_deref_mut().and_then(|redefinitions| {
+                    redefinitions.define(&name, RootDefinitionKind::Function, params)
+                });
                 parse_param_function_definition(stream, line_num, params, name.clone())?;
+                if let Some(pin) = pinned {
+                    pin.bind(&name, RootDefinitionKind::Function, params);
+                }
             } else {
                 let mut ignored = params.clone();
                 parse_param_function_definition(stream, line_num, &mut ignored, name.clone())?;
@@ -4659,9 +4665,15 @@ pub(super) fn parse_param_statement(
                     && parameter.name.eq_ignore_ascii_case(&name)
             });
             // Every root reader sees a redefined parameter's last definition.
-            let pinned = root_redefinitions.as_deref_mut().and_then(|redefinitions| {
-                redefinitions.define(&name, retain_global_expression, params)
-            });
+            let kind = if retain_global_expression {
+                RootDefinitionKind::GlobalParameter
+            } else {
+                RootDefinitionKind::Parameter
+            };
+            let pinned = root_redefinitions
+                .as_deref_mut()
+                .and_then(|redefinitions| redefinitions.define(&name, kind, params))
+                .filter(|_| parameter_override.is_none());
             if let Some(error) = parse_param_assignment_value(
                 stream,
                 line_num,
@@ -4669,12 +4681,13 @@ pub(super) fn parse_param_statement(
                 deferred_params.as_deref_mut(),
                 retain_global_expression,
                 name.clone(),
-                parameter_override
-                    .map(|parameter| parameter.value)
-                    .or(pinned),
+                parameter_override.map(|parameter| parameter.value),
                 abort,
             )? {
                 temperature_options.retain_parameter_error(error, origin);
+            }
+            if let Some(pin) = pinned {
+                pin.bind(&name, kind, params);
             }
             params.retain_expression_origin(&name, retain_global_expression, origin);
             if parameter_override.is_some_and(|parameter| parameter.direction) {
@@ -5415,6 +5428,7 @@ pub(super) fn parse_func_statement(
     stream: &mut TokenStream,
     line_num: usize,
     params: &mut ParamContext,
+    root_redefinitions: Option<&mut RootRedefinitions>,
 ) -> Result<(), ParseError> {
     let func_name = expect_function_name(stream, line_num)?;
 
@@ -5468,8 +5482,14 @@ pub(super) fn parse_func_statement(
     }
 
     // Register the function
+    let pinned = root_redefinitions.and_then(|redefinitions| {
+        redefinitions.define(&func_name, RootDefinitionKind::Function, params)
+    });
     params.define_function(&func_name, args, &body);
     log::debug!("Defined function: {}(...) = {}", func_name, body);
+    if let Some(pin) = pinned {
+        pin.bind(&func_name, RootDefinitionKind::Function, params);
+    }
 
     Ok(())
 }

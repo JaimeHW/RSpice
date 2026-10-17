@@ -1093,6 +1093,16 @@ impl ParamContext {
         }
     }
 
+    /// The statistical capture an ordinary binding retained, if any.
+    pub(crate) fn statistical_parameter_capture(
+        &self,
+        name: &str,
+    ) -> Option<Arc<CapturedStatisticalParameter>> {
+        self.statistical_captures
+            .get(&name.to_ascii_uppercase())
+            .cloned()
+    }
+
     pub(crate) fn materialize_statistical_parameter_captures(&mut self) -> Result<(), ExprError> {
         let mut memo = HashMap::new();
         let mut names = self

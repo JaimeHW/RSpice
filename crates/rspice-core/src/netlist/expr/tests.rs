@@ -631,7 +631,9 @@ fn parsed_parameter_directions_preserve_definition_order_and_namespaces() {
             &crate::abort_signal::NoAbort,
         )
         .unwrap();
-        for (name, value, direction) in [("A", 17.0, 0.0), ("B", 0.0, 3.0), ("C", 0.0, 20.0)] {
+        // Every reader of a redefined name sees its last definition, as in
+        // ngspice-46 (a=b=c=17): b={a+p} reads a=17, c={b+a*p} reads b.
+        for (name, value, direction) in [("A", 17.0, 0.0), ("B", 17.0, 1.0), ("C", 17.0, 18.0)] {
             assert_eq!(parsed.params.get(name), Some(value));
             assert_eq!(
                 parsed.params.parameter_direction(name).unwrap().binary64(),

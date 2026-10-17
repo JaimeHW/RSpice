@@ -71,11 +71,13 @@ fn pending_cards_capture_known_complex_values_functions_and_lazy_branches() {
             "Captured analysis\n.param known=2 z={3+4j}\n.func scale(x) {known*x}\n.DC V1 {if(1,scale(2)+img(z),missing)} {later} 1\n.param known=20 z={30+40j}\n.func scale(x) {100*x}\n.param later=10\n.end\n",
             dialect,
         );
+        // The card reads the last definitions of known, z and scale, as every
+        // ngspice-46 reader does: scale(2)+img(z) = 100*2 + 40.
         assert!(
             matches!(
                 netlist.analyses[0],
                 AnalysisCommand::Dc {
-                    start: 8.0,
+                    start: 240.0,
                     stop: 10.0,
                     ..
                 }

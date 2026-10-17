@@ -59,7 +59,9 @@ mod scopes;
 mod startup_cards;
 mod stream;
 mod temperature;
-use root_redefinitions::{RootRedefinitions, parse_with_settled_root_redefinitions};
+use root_redefinitions::{
+    RootDefinitionKind, RootRedefinitions, parse_with_settled_root_redefinitions,
+};
 pub(super) use stream::NumericParseAbort;
 use stream::TokenStream;
 

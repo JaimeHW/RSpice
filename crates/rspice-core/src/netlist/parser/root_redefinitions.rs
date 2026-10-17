@@ -1,4 +1,5 @@
-//! One value for a root `.PARAM` that the deck defines more than once.
+//! One binding for a root `.PARAM` or parameter function that the deck
+//! defines more than once.
 //!
 //! The parser binds a top-level reader to the value its parameter holds when
 //! the reader's card is read, while subcircuit bodies and retained
@@ -6,54 +7,100 @@
 //! [`UseLast`] policy a redefinition further down the deck would therefore
 //! reach only some of the readers. ngspice deletes every earlier definition
 //! of a duplicated name before it evaluates anything (`inp_sort_params`,
-//! "mark earlier one to skip"), so every reader sees the last definition; a
-//! deck that appends `.param W=...` to change a design variable relies on it.
+//! "mark earlier one to skip"), and a redefined `.FUNC` body likewise
+//! reaches every call, so every reader sees the last definition; a deck that
+//! appends `.param W=...` to change a design variable relies on it.
 //!
-//! The first pass records each value a redefinition superseded. When one of
-//! them differs from the name's final value, the deck is parsed again with
-//! that final value pinned at every definition except the last, which still
-//! evaluates its own expression. A last definition that reads another
-//! redefined name can move under the pins, so passes repeat until no
-//! superseded value differs.
+//! The first pass records each binding a redefinition superseded. When one
+//! of them differs from the name's final binding, the deck is parsed again
+//! with that final binding pinned at every definition except the last,
+//! which still evaluates its own expression. A last definition that reads
+//! another redefined name can move under the pins, so passes repeat until no
+//! superseded binding differs.
 //!
 //! [`UseLast`]: crate::netlist::ParameterRedefinitionPolicy::UseLast
 
 use super::temperature::TemperaturePassError;
-use crate::Value;
-use crate::netlist::expr::{ComplexValue, ParamContext};
+use crate::netlist::expr::{
+    CapturedStatisticalParameter, ComplexDirection, ComplexValue, ExprError, ParamContext,
+};
 use crate::netlist::{Netlist, ParseError};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// One discovery pass plus the pinned passes a chain of redefinitions that
 /// read one another can need before it settles.
 const MAX_PASSES: usize = 4;
 
+/// The namespace a root definition binds in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum RootDefinitionKind {
+    /// `.PARAM`, `.PARAMS` or `.CSPARAM`.
+    Parameter,
+    /// `.GLOBAL_PARAM`.
+    GlobalParameter,
+    /// `.FUNC`, or `.PARAM name(args)=...`.
+    Function,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct RootBinding {
     name: String,
-    global: bool,
+    kind: RootDefinitionKind,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Bound {
+    Number(ComplexValue),
+    Text(String),
+    Function { args: Vec<String>, body: String },
 }
 
 impl RootBinding {
-    fn value(&self, params: &ParamContext) -> Option<ComplexValue> {
-        if self.global {
-            params.get_global_complex(&self.name)
-        } else {
-            params.get_complex(&self.name)
-        }
-    }
-
-    fn real_value(&self, params: &ParamContext) -> Option<Value> {
-        self.value(params)
-            .filter(|value| value.im == 0.0)
-            .map(|value| value.re)
+    fn bound(&self, params: &ParamContext) -> Option<Bound> {
+        let number = match self.kind {
+            RootDefinitionKind::Parameter => params.get_complex(&self.name),
+            RootDefinitionKind::GlobalParameter => params.get_global_complex(&self.name),
+            RootDefinitionKind::Function => {
+                return params.get_function(&self.name).map(|function| Bound::Function {
+                    args: function.args.clone(),
+                    body: function.body.clone(),
+                });
+            }
+        };
+        number
+            .map(Bound::Number)
+            .or_else(|| params.get_string(&self.name).map(|text| Bound::Text(text.to_owned())))
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct Pin {
-    value: Value,
+/// The last definition of a name, bound at every earlier definition of it.
+#[derive(Debug, Clone)]
+pub(super) struct Pin {
+    bound: Bound,
+    direction: Result<ComplexDirection, ExprError>,
+    capture: Option<Arc<CapturedStatisticalParameter>>,
     definitions: usize,
+}
+
+impl Pin {
+    /// Replace what an earlier definition bound, after its own expression has
+    /// been read and any random draws it makes consumed, with the last one.
+    pub(super) fn bind(self, name: &str, kind: RootDefinitionKind, params: &mut ParamContext) {
+        let global = kind == RootDefinitionKind::GlobalParameter;
+        match self.bound {
+            Bound::Number(value) if global => params.set_global_complex(name, value),
+            Bound::Number(value) => params.set_complex(name, value),
+            Bound::Text(text) if global => params.set_global_string(name, text),
+            Bound::Text(text) => params.set_string(name, text),
+            Bound::Function { args, body } => {
+                params.define_function(name, args, &body);
+                return;
+            }
+        }
+        params.retain_parameter_direction(name, global, Some(self.direction));
+        params.retain_statistical_parameter_capture(name, self.capture);
+    }
 }
 
 /// Root redefinitions observed in one pass, and the pins that pass applies.
@@ -61,7 +108,7 @@ struct Pin {
 pub(super) struct RootRedefinitions {
     pins: HashMap<RootBinding, Pin>,
     definitions: HashMap<RootBinding, usize>,
-    superseded: Vec<(RootBinding, ComplexValue)>,
+    superseded: Vec<(RootBinding, Bound)>,
 }
 
 impl RootRedefinitions {
@@ -74,16 +121,16 @@ impl RootRedefinitions {
     }
 
     /// Record an authoritative root definition of `name` before it binds, and
-    /// return the value it must bind in place of its own expression.
+    /// return the pin to bind once its own expression has been read.
     pub(super) fn define(
         &mut self,
         name: &str,
-        global: bool,
+        kind: RootDefinitionKind,
         params: &ParamContext,
-    ) -> Option<Value> {
+    ) -> Option<Pin> {
         let binding = RootBinding {
             name: name.to_ascii_uppercase(),
-            global,
+            kind,
         };
         let ordinal = {
             let count = self.definitions.entry(binding.clone()).or_default();
@@ -94,9 +141,9 @@ impl RootRedefinitions {
             .pins
             .get(&binding)
             .filter(|pin| ordinal < pin.definitions)
-            .map(|pin| pin.value);
+            .cloned();
         if ordinal > 1
-            && let Some(current) = binding.value(params)
+            && let Some(current) = binding.bound(params)
         {
             self.superseded.push((binding, current));
         }
@@ -104,15 +151,15 @@ impl RootRedefinitions {
     }
 
     /// The pins the next pass needs and the first name that needs one, or
-    /// `None` when every superseded value already equals its final value.
+    /// `None` when every superseded binding already equals its final one.
     fn next_pass(&self, params: &ParamContext) -> Option<(Self, String)> {
         let stale = self
             .superseded
             .iter()
             .filter(|(binding, superseded)| {
                 binding
-                    .real_value(params)
-                    .is_some_and(|last| ComplexValue::from(last) != *superseded)
+                    .bound(params)
+                    .is_some_and(|last| last != *superseded)
             })
             .map(|(binding, _)| binding)
             .collect::<Vec<_>>();
@@ -123,7 +170,11 @@ impl RootRedefinitions {
             .chain(stale)
             .filter_map(|binding| {
                 let pin = Pin {
-                    value: binding.real_value(params)?,
+                    bound: binding.bound(params)?,
+                    direction: params.parameter_direction(&binding.name),
+                    capture: (binding.kind == RootDefinitionKind::Parameter)
+                        .then(|| params.statistical_parameter_capture(&binding.name))
+                        .flatten(),
                     definitions: *self.definitions.get(binding)?,
                 };
                 Some((binding.clone(), pin))
@@ -139,8 +190,8 @@ impl RootRedefinitions {
     }
 }
 
-/// Parse until every reader of a redefined root parameter sees its last
-/// definition.
+/// Parse until every reader of a redefined root parameter or function sees
+/// its last definition.
 pub(super) fn parse_with_settled_root_redefinitions<T>(
     mut parse: impl FnMut(&mut RootRedefinitions) -> Result<(Netlist, T), TemperaturePassError>,
 ) -> Result<(Netlist, T), TemperaturePassError> {

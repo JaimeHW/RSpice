@@ -5721,7 +5721,8 @@ V1 inside b DC {1+img(next)} AC {1+img(next)}
             let mut netlist = Netlist::parse(&format!(
                 "statistical expansion\n.param rv=100\n.RSPICE_SPECTRE_STAT {}\n{definitions}\
                  .func hidden(x) {{rv*x}}\n.func nested(x) {{hidden(x)+1}}\n\
-                 .param scale=2 top_alias={{scale*rv}} bare_alias=top_alias\n\
+                 .param scale=2 top_alias={{scale*rv}} top_bare=top_alias\n\
+                 .param doubled={{2*rv}} bare_alias=doubled\n\
                  .param z={{3+4J}}\n.func captured(x) {{scale*x+img(z)}}\n\
                  .param captured_alias={{captured(rv)}} noise_capture={{rv+agauss(0,1,1)}}\n\
                  .param scale=9 top_alias=123 root_nested={{bare_alias+rv}}\n\
@@ -5732,7 +5733,7 @@ V1 inside b DC {1+img(next)} AC {1+img(next)}
                  R2 a b {{hidden(2)}}\nR3 a b {{nested(3)}}\nR4 a b {{indirect}}\n\
                  .model RSTAT R(R={{hidden(2)}})\nR5 a b 1 RSTAT\n\
                  R6 a b {{bare_alias}}\nR7 a b {{root_nested}}\nR8 a b {{top_alias}}\n\
-                 R9 a b {{captured_alias}}\nR10 a b {{noise_capture}}\n.ends\n\
+                 R9 a b {{captured_alias}}\nR10 a b {{noise_capture}}\nR11 a b {{top_bare}}\n.ends\n\
                  .subckt shadow a b rv=50\n.param local={{2*rv}}\n\
                  R1 a b {{rv}}\nR2 a b {{local}}\nR3 a b {{bare_alias}}\n\
                  R4 a b {{rv+bare_alias}}\n.model LOCAL R(R={{rv}})\nR5 a b 1 LOCAL\n\
@@ -5779,8 +5780,12 @@ V1 inside b DC {1+img(next)} AC {1+img(next)}
                 ("X1.R6", 2.0 * sample),
                 ("X1.R7", 3.0 * sample),
                 ("X1.R8", 123.0),
-                ("X1.R9", 2.0 * sample + 4.0),
+                // Readers of a root parameter that is redefined after them
+                // read the last definition, as in ngspice-46: scale=9 and
+                // z=0 reach captured(rv), and top_bare reads top_alias=123.
+                ("X1.R9", 9.0 * sample),
                 ("X1.R10", sample + captured_noise),
+                ("X1.R11", 123.0),
                 ("X2.R1", 50.0),
                 ("X2.R2", 100.0),
                 ("X2.R3", 2.0 * sample_for("X2")),
