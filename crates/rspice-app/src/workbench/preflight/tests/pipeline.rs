@@ -282,25 +282,19 @@ impl RSpiceApp {
 const DESIGN_CHANGED: &str = "The design changed after it was checked; run again";
 
 /// What a refused dispatch leaves: no run, the stated reason, the input that
-/// moved named on the Console, and no report left to queue it again.
+/// moved named on the status bar, and no report left to queue it again.
 fn assert_refused_for(app: &RSpiceApp, moved: &str) {
     assert!(!app.state.simulation.execution.has_active_execution());
     assert!(app.state.simulation.retained.runs.is_empty());
     assert_eq!(app.state.simulation.execution.status, DESIGN_CHANGED);
     let stated = format!("{DESIGN_CHANGED} · {moved} changed");
-    assert!(
-        stated_exactly(app, &stated),
-        "the Console names what moved: {stated}"
+    assert_eq!(
+        app.state.prompt_text(),
+        Some(stated.as_str()),
+        "the status bar names what moved"
     );
     assert!(app.state.workbench.preflight.report.is_none());
     assert!(app.simulation_controller.retained_run_deck().is_none());
-}
-
-fn stated_exactly(app: &RSpiceApp, message: &str) -> bool {
-    app.state
-        .log_buffer
-        .entries()
-        .any(|entry| entry.message == message)
 }
 
 /// The frame that dispatches a checked run prepares nothing: the run the
