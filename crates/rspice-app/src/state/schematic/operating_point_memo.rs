@@ -8,14 +8,20 @@
 
 use std::sync::Arc;
 
-use rspice_schematic_editor::view::scene::OperatingPointCanvasAnnotation;
+use rspice_schematic_editor::view::scene::{BadgeLayoutMemo, OperatingPointCanvasAnnotation};
 
 /// One set of voltage badges and a fingerprint of everything they were read
 /// from. The fingerprint hashes the inputs by content, so an input replaced
 /// without a counter moving still misses.
+///
+/// It also holds where the canvas last placed the badges. Placing them
+/// against each other and against every label, name and body on the sheet
+/// is quadratic; the layout is reused while its inputs, compared by content,
+/// stand still.
 #[derive(Clone, Default)]
 pub struct OperatingPointMemo {
     entry: Option<(u64, Arc<Vec<OperatingPointCanvasAnnotation>>)>,
+    layout: BadgeLayoutMemo,
 }
 
 impl std::fmt::Debug for OperatingPointMemo {
@@ -48,5 +54,10 @@ impl OperatingPointMemo {
         badges: Arc<Vec<OperatingPointCanvasAnnotation>>,
     ) {
         self.entry = Some((fingerprint, badges));
+    }
+
+    /// Where the canvas holds the badges' last layout.
+    pub(crate) const fn layout(&self) -> &BadgeLayoutMemo {
+        &self.layout
     }
 }

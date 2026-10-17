@@ -160,6 +160,7 @@ pub(super) fn draw_scene(
                 std::collections::HashMap::new()
             },
             operating_point: operating_point_annotations(state),
+            operating_point_layout: Some(state.schematic.session.operating_point_badges.layout()),
             probe_status: &probe_status,
             selected_trace_expression: &selected_trace_expression,
             open_pins: &open_pins(painter.ctx(), state),

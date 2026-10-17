@@ -566,13 +566,36 @@ fn run_frame(
 fn time_scenario(
     name: &'static str,
     budget_ms: f64,
+    state: AppState,
+    verify: impl FnOnce(&AppState),
+) -> FrameTimes {
+    time_scenario_in(name, budget_ms, state, None, verify)
+}
+
+/// [`time_scenario`], over the sheet fitted to the screen or, given a zoom
+/// and a world point, at that zoom centred on that point.
+fn time_scenario_in(
+    name: &'static str,
+    budget_ms: f64,
     mut state: AppState,
+    view: Option<(f64, Point)>,
     verify: impl FnOnce(&AppState),
 ) -> FrameTimes {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let symbols = super::super::symbols::SymbolLibrary::load_embedded().ok();
-    state.schematic.session.editor.needs_fit = true;
+    let editor = &mut state.schematic.session.editor;
+    match view {
+        None => editor.needs_fit = true,
+        Some((zoom, centre)) => {
+            editor.needs_fit = false;
+            editor.zoom = zoom;
+            editor.pan = (
+                f64::from(SCREEN.x) * 0.5 - f64::from(centre.x) * zoom,
+                f64::from(SCREEN.y) * 0.5 - f64::from(centre.y) * zoom,
+            );
+        }
+    }
     let centre = egui::pos2(SCREEN.x * 0.5, SCREEN.y * 0.5);
     let mut painted = 0;
     for frame in 0..WARM_UP_FRAMES {
@@ -702,6 +725,29 @@ fn operating_point_overlay() -> FrameTimes {
     })
 }
 
+/// The overlay at 100 %, where the badges are legible and so are placed:
+/// fitted, the whole sheet is too small for them and they hide.
+fn operating_point_overlay_legible() -> FrameTimes {
+    let mut state = scale_fixture().state;
+    state.ui.schematic_visibility.annotations = SchematicAnnotationVisibility::OperatingPoint;
+    time_scenario_in(
+        "operating-point overlay, 100 %",
+        8.0,
+        state,
+        Some((1.0, Point::new(ORIGIN + PITCH * 4, ORIGIN + PITCH * 3))),
+        |state| {
+            assert!(
+                !super::scene::operating_point_annotations(state).is_empty(),
+                "the overlay annotates the active sheet"
+            );
+            assert!(
+                (state.schematic.session.editor.zoom - 1.0).abs() < f64::EPSILON,
+                "the view stays at 100 %"
+            );
+        },
+    )
+}
+
 /// One suspected site's cost on its own: the median of seven calls, in
 /// milliseconds. `work` returns something read off its result, so the call
 /// cannot be optimized away.
@@ -746,6 +792,37 @@ fn print_site_costs() {
     let pointer = egui::pos2(SCREEN.x * 0.5, SCREEN.y * 0.5);
     let near = Point::new(ORIGIN + PITCH * 3, ORIGIN + 100);
     let mode = state.dialogs.move_selection.mode;
+    // The badges at 100 %, each about a dozen mono characters on one line.
+    let badges = super::scene::operating_point_annotations(state);
+    let badge_sizes = vec![egui::vec2(66.0, 12.0); badges.len()];
+    let placement = rspice_schematic_editor::view::scene::BadgePlacement {
+        view: &design,
+        symbols: &symbols,
+        annotations: &badges,
+        sizes: &badge_sizes,
+        zoom: 1.0,
+        world_view: egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN),
+    };
+    let held_layout = rspice_schematic_editor::view::scene::BadgeLayoutMemo::default();
+    // 500 check findings on the active sheet's objects, half on instances
+    // and half on wires, the far end of each list first.
+    let findings: Vec<rspice_design::drc::DrcLocation> = fixture.components[0]
+        .iter()
+        .rev()
+        .take(250)
+        .map(|id| rspice_design::drc::DrcLocation::Component {
+            id: *id,
+            name: String::new(),
+        })
+        .chain(
+            fixture.routed_wires[0]
+                .iter()
+                .rev()
+                .take(250)
+                .map(|id| rspice_design::drc::DrcLocation::Wire { id: *id }),
+        )
+        .collect();
+    let (circles, tessellate_ms) = idle_frame_circles_and_tessellation();
     let sites = [
         (
             "symbol context, resolved afresh (C-6)",
@@ -802,11 +879,79 @@ fn print_site_costs() {
             "operating-point badges, read afresh (C-7)",
             site_ms(|| super::scene::operating_point_annotations(state).len()),
         ),
+        (
+            "operating-point badge layout, afresh (item 11)",
+            site_ms(|| rspice_schematic_editor::view::scene::place_badges(&placement, None).len()),
+        ),
+        (
+            "operating-point badge layout, held (item 11)",
+            site_ms(|| {
+                rspice_schematic_editor::view::scene::place_badges(&placement, Some(&held_layout))
+                    .len()
+            }),
+        ),
+        (
+            "conductor chains, active sheet (C-21)",
+            site_ms(|| {
+                let wires =
+                    design.objects_on_active_sheet(&state.schematic.document().wires, |w| w.id);
+                rspice_schematic_editor::view::drawing::chain_conductors(
+                    wires.iter().map(|wire| wire.points.as_slice()),
+                )
+                .len()
+            }),
+        ),
+        (
+            "violation anchors, 500 findings (C-21)",
+            site_ms(|| {
+                findings
+                    .iter()
+                    .filter_map(|location| {
+                        rspice_schematic_editor::view::violations::anchor(&design, location)
+                    })
+                    .count()
+            }),
+        ),
+        ("tessellating the idle frame at fit (C-21)", tessellate_ms),
     ];
     println!("site                                           median ms");
     for (site, milliseconds) in sites {
         println!("{site:<46} {milliseconds:>10.3}");
     }
+    println!("circles painted in the idle frame at fit: {circles}");
+}
+
+/// One idle Select frame over the fitted sheet: how many circles it paints
+/// (symbol corner dots among them) and how long tessellating all of its
+/// shapes takes, which the timed frames leave to the host.
+fn idle_frame_circles_and_tessellation() -> (usize, f64) {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let symbols = super::super::symbols::SymbolLibrary::load_embedded().ok();
+    let mut state = fixture_without_overlay().state;
+    state.schematic.session.editor.needs_fit = true;
+    let mut shapes = Vec::new();
+    for _ in 0..WARM_UP_FRAMES {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
+            ..Default::default()
+        };
+        shapes = ctx
+            .run_ui(input, |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| {
+                        super::render_schematic_view(ui, &mut state, symbols.as_ref());
+                    });
+            })
+            .shapes;
+    }
+    let circles = shapes
+        .iter()
+        .filter(|clipped| matches!(clipped.shape, egui::Shape::Circle(_)))
+        .count();
+    let tessellate_ms = site_ms(|| ctx.tessellate(shapes.clone(), 1.0).len());
+    (circles, tessellate_ms)
 }
 
 /// Desktop release budgets: idle hover under 4 ms; the move preview, Stretch
@@ -822,6 +967,7 @@ fn canvas_frame_cost_at_scale() {
         junction_hover(),
         stretch_preview(),
         operating_point_overlay(),
+        operating_point_overlay_legible(),
     ];
     println!("scenario                            min ms  median ms     max ms   budget");
     for scenario in &scenarios {

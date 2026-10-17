@@ -32,7 +32,10 @@ mod annotations;
 mod empty;
 mod focus;
 use annotations::draw_operating_point_annotations;
-pub use annotations::{BadgeSubject, OperatingPointCanvasAnnotation};
+pub use annotations::{
+    BadgeLayoutMemo, BadgePlacement, BadgeSubject, OperatingPointCanvasAnnotation, PlacedBadge,
+    place_badges,
+};
 pub use empty::draw_empty_hint;
 pub use focus::{draw_keyboard_focus, keyboard_focus_matches_selection};
 
@@ -57,6 +60,9 @@ pub struct SceneView<'a> {
 pub struct SceneOverlays<'a> {
     pub net_class_colors: HashMap<u64, egui::Color32>,
     pub operating_point: Vec<OperatingPointCanvasAnnotation>,
+    /// Where the host holds the badges' last layout across frames; `None`
+    /// places them afresh every frame.
+    pub operating_point_layout: Option<&'a BadgeLayoutMemo>,
     pub probe_status: &'a dyn Fn(&SchematicProbe) -> ProbeVisualStatus,
     pub selected_trace_expression: &'a dyn Fn() -> Option<&'a str>,
     /// Each instance's open terminals (nothing meets them), which take the
@@ -299,6 +305,7 @@ pub fn draw_content(
         &view.design,
         symbol_context,
         &overlays.operating_point,
+        overlays.operating_point_layout,
     );
 
     // Presentation geometry is a background documentation layer. It remains
@@ -643,6 +650,7 @@ mod band_tests {
             SceneOverlays {
                 net_class_colors: HashMap::new(),
                 operating_point: Vec::new(),
+                operating_point_layout: None,
                 probe_status: &|_| ProbeVisualStatus::Materialized,
                 selected_trace_expression: &|| None,
                 open_pins: &HashMap::new(),
@@ -766,6 +774,7 @@ mod hover_tests {
             SceneOverlays {
                 net_class_colors: HashMap::new(),
                 operating_point: Vec::new(),
+                operating_point_layout: None,
                 probe_status: &|_| ProbeVisualStatus::Materialized,
                 selected_trace_expression: &|| None,
                 open_pins,

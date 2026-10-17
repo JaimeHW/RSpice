@@ -372,6 +372,7 @@ fn render_hover_review() {
                         SceneOverlays {
                             net_class_colors: std::collections::HashMap::new(),
                             operating_point: Vec::new(),
+                            operating_point_layout: None,
                             probe_status: &|_| ProbeVisualStatus::Materialized,
                             selected_trace_expression: &|| None,
                             open_pins: &std::collections::HashMap::new(),
@@ -465,6 +466,7 @@ fn render_open_pin_review() {
                         SceneOverlays {
                             net_class_colors: std::collections::HashMap::new(),
                             operating_point: Vec::new(),
+                            operating_point_layout: None,
                             probe_status: &|_| ProbeVisualStatus::Materialized,
                             selected_trace_expression: &|| None,
                             open_pins: &open_pins,
@@ -592,6 +594,7 @@ fn render_operating_point_review() {
                         SceneOverlays {
                             net_class_colors: std::collections::HashMap::new(),
                             operating_point: annotations.clone(),
+                            operating_point_layout: None,
                             probe_status: &|_| ProbeVisualStatus::Materialized,
                             selected_trace_expression: &|| None,
                             open_pins: &std::collections::HashMap::new(),
