@@ -1,18 +1,23 @@
 //! Symbol publication effects on placed instances and their attached conductors.
 
 use super::Schematic;
+use crate::symbol::edit::SymbolInstanceWiring;
 use rspice_design_model::{Point, cell_view::CellViewRef};
 use std::collections::{BTreeMap, HashMap};
 
 impl Schematic {
-    pub fn remap_symbol_instance_wires(
+    /// Move the wire vertices the wiring holds to where their terminals now
+    /// stand. History is the caller's: a symbol edit reaches each parent as
+    /// one undo record spanning the whole edit, which no single frame of it
+    /// can take on its own.
+    pub fn apply_symbol_instance_wiring(
         &mut self,
-        reference: &CellViewRef,
+        wiring: &SymbolInstanceWiring,
         pin_remaps: &HashMap<String, (Point, Point)>,
     ) -> bool {
-        if !crate::symbol::edit::remap_symbol_instance_wires(
+        if !crate::symbol::edit::apply_symbol_instance_wiring(
             &mut self.document,
-            reference,
+            wiring,
             pin_remaps,
         ) {
             return false;

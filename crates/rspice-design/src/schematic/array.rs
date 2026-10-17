@@ -10,7 +10,7 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-use super::bus::{Bus, BusTap};
+use super::bus::{Bus, BusNotation, BusTap};
 use super::component::Component;
 use super::design_note::DesignNote;
 use super::documentation_shape::DocumentationShape;
@@ -197,13 +197,25 @@ pub enum SchematicArrayNameAtom {
         suffix: String,
         minimum_width: Option<usize>,
     },
-    /// A scalar bus-style indexed name (`DATA[7]`).
+    /// A scalar bus-style indexed name (`DATA[7]`, `A2D<3>`).
     Indexed {
         stem: String,
         index: u64,
         minimum_width: Option<usize>,
+        /// The delimiters the name is written with.
+        #[serde(default)]
+        notation: BusNotation,
     },
+    /// A name without exactly one numeric run (`Rload`, `Vdd`, `M1_2`).
+    ///
+    /// No number in it can be the counter, so none is guessed at: the source
+    /// keeps its name as member zero and each copy appends one, `Rload_1`,
+    /// `Rload_2` and so on.
+    Suffixed { stem: String, number: u64 },
 }
+
+/// What two endpoints must share to count through one sequence.
+pub(super) type NameSequenceKey = (u8, String, String, Option<usize>);
 
 impl SchematicArrayNameAtom {
     pub fn parse(input: &str) -> Result<Self, SchematicArrayError> {
@@ -215,11 +227,16 @@ impl SchematicArrayNameAtom {
             return Err(invalid_naming_clause(input, "invalid name endpoint"));
         }
 
-        if let Some(stem) = input.strip_suffix(']').and_then(|body| {
-            let bracket = body.rfind('[')?;
-            Some((&body[..bracket], &body[bracket + 1..]))
-        }) {
-            let (stem, digits) = stem;
+        for (open, close, notation) in [
+            ('[', ']', BusNotation::Square),
+            ('<', '>', BusNotation::Angle),
+        ] {
+            let Some((stem, digits)) = input.strip_suffix(close).and_then(|body| {
+                let bracket = body.rfind(open)?;
+                Some((&body[..bracket], &body[bracket + 1..]))
+            }) else {
+                continue;
+            };
             if stem.is_empty() || !is_ascii_digits(digits) {
                 return Err(invalid_naming_clause(input, "invalid indexed endpoint"));
             }
@@ -230,14 +247,15 @@ impl SchematicArrayNameAtom {
                 stem: stem.to_owned(),
                 index,
                 minimum_width: leading_zero_width(digits),
+                notation,
             });
         }
 
         let Some(start) = input.find(|character: char| character.is_ascii_digit()) else {
-            return Err(invalid_naming_clause(
-                input,
-                "reference endpoint has no numeric run",
-            ));
+            return Ok(Self::Suffixed {
+                stem: input.to_owned(),
+                number: 0,
+            });
         };
         if start == 0 {
             return Err(invalid_naming_clause(
@@ -252,10 +270,10 @@ impl SchematicArrayNameAtom {
         let digits = &input[start..end];
         let suffix = &input[end..];
         if suffix.chars().any(|character| character.is_ascii_digit()) {
-            return Err(invalid_naming_clause(
-                input,
-                "reference endpoint has multiple numeric runs",
-            ));
+            return Ok(Self::Suffixed {
+                stem: input.to_owned(),
+                number: 0,
+            });
         }
         let number = digits
             .parse::<u64>()
@@ -268,9 +286,53 @@ impl SchematicArrayNameAtom {
         })
     }
 
+    /// Parse the far end of a range that starts at `self`.
+    ///
+    /// A suffixed name's copies are spelled `stem_n`, which read on their own
+    /// would be a reference with a different prefix; read against the start
+    /// they are the same sequence.
+    fn parse_range_end(&self, input: &str) -> Result<Self, SchematicArrayError> {
+        if let Self::Suffixed { stem, .. } = self {
+            if input == stem {
+                return Ok(self.with_numeric_value(0));
+            }
+            if let Some(digits) = input
+                .strip_prefix(stem.as_str())
+                .and_then(|rest| rest.strip_prefix('_'))
+                && is_ascii_digits(digits)
+                && leading_zero_width(digits).is_none()
+            {
+                let number = digits.parse::<u64>().map_err(|_| {
+                    invalid_naming_clause(input, "reference number is out of range")
+                })?;
+                return Ok(self.with_numeric_value(number));
+            }
+        }
+        Self::parse(input)
+    }
+
+    /// What every name counted through the same sequence as this one shares.
+    pub(super) fn sequence_key(&self) -> NameSequenceKey {
+        match self {
+            Self::Reference {
+                prefix,
+                suffix,
+                minimum_width,
+                ..
+            } => (0, prefix.clone(), suffix.clone(), *minimum_width),
+            Self::Indexed {
+                stem,
+                minimum_width,
+                notation,
+                ..
+            } => (1, stem.clone(), format!("{notation:?}"), *minimum_width),
+            Self::Suffixed { stem, .. } => (2, stem.clone(), String::new(), None),
+        }
+    }
+
     pub const fn numeric_value(&self) -> u64 {
         match self {
-            Self::Reference { number, .. } => *number,
+            Self::Reference { number, .. } | Self::Suffixed { number, .. } => *number,
             Self::Indexed { index, .. } => *index,
         }
     }
@@ -302,18 +364,25 @@ impl SchematicArrayNameAtom {
                     stem,
                     index,
                     minimum_width,
-                    ..
+                    notation,
                 },
                 Self::Indexed {
                     stem: other_stem,
                     index: other_index,
                     minimum_width: other_width,
-                    ..
+                    notation: other_notation,
                 },
             ) => {
                 stem == other_stem
+                    && notation == other_notation
                     && compatible_width(*minimum_width, *index, *other_width, *other_index)
             }
+            (
+                Self::Suffixed { stem, .. },
+                Self::Suffixed {
+                    stem: other_stem, ..
+                },
+            ) => stem == other_stem,
             _ => false,
         }
     }
@@ -334,11 +403,17 @@ impl SchematicArrayNameAtom {
             Self::Indexed {
                 stem,
                 minimum_width,
+                notation,
                 ..
             } => Self::Indexed {
                 stem: stem.clone(),
                 index: value,
                 minimum_width: *minimum_width,
+                notation: *notation,
+            },
+            Self::Suffixed { stem, .. } => Self::Suffixed {
+                stem: stem.clone(),
+                number: value,
             },
         }
     }
@@ -361,12 +436,19 @@ impl fmt::Display for SchematicArrayNameAtom {
                 stem,
                 index,
                 minimum_width,
+                notation,
             } => {
+                let (open, close) = match notation {
+                    BusNotation::Square => ("[", "]"),
+                    BusNotation::Angle => ("<", ">"),
+                };
                 formatter.write_str(stem)?;
-                formatter.write_str("[")?;
+                formatter.write_str(open)?;
                 write_padded(formatter, *index, *minimum_width)?;
-                formatter.write_str("]")
+                formatter.write_str(close)
             }
+            Self::Suffixed { stem, number: 0 } => formatter.write_str(stem),
+            Self::Suffixed { stem, number } => write!(formatter, "{stem}_{number}"),
         }
     }
 }
@@ -402,7 +484,7 @@ impl SchematicArrayNameRange {
             ));
         }
         let start = SchematicArrayNameAtom::parse(start_text.trim())?;
-        let end = SchematicArrayNameAtom::parse(end_text.trim())?;
+        let end = start.parse_range_end(end_text.trim())?;
         if !start.pattern_matches(&end) {
             return Err(SchematicArrayError::MismatchedNamingEndpoints {
                 clause: clause.trim().to_owned(),

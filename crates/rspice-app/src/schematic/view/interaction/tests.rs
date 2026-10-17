@@ -19,6 +19,7 @@ use crate::state::{
 use rspice_design::connectivity::extract_with_hierarchy as extract;
 
 mod bus_tap;
+mod wiring;
 
 fn pointer_viewport() -> Viewport {
     Viewport {

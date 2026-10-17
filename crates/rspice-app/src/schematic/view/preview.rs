@@ -75,6 +75,7 @@ pub(super) fn draw_interaction_previews(
         symbol_library,
     );
     preview::draw_selection_rect(painter, &view, viewport);
+    super::zoom_box::paint_zoom_box(painter, state, viewport);
     draw_placement_badge(painter, response, state);
 }
 
@@ -128,10 +129,7 @@ fn draw_move_selection_preview(
         return;
     }
     let mode = state.dialogs.move_selection.mode;
-    let mut candidate = state.schematic.clone();
-    let result = candidate.move_selection_with_mode_resolved(delta, mode, |component| {
-        symbol_context.terminal_points(component)
-    });
+    let (candidate, result) = move_preview_candidate(state, symbol_context, delta, mode);
     let valid = match result {
         Ok(true) => {
             state.dialogs.move_selection.canvas.preview_error = None;
@@ -197,13 +195,7 @@ fn draw_stretch_selection_preview(
         return;
     }
     let policy = state.dialogs.stretch_selection.policy;
-    let candidate = match state.schematic.preview_stretch_target_resolved(
-        delta,
-        target,
-        policy,
-        |component| symbol_context.terminal_points(component),
-        |component| symbol_context.component_bounds_tuple(component),
-    ) {
+    let candidate = match stretch_preview_candidate(state, symbol_context, delta, target, policy) {
         Ok(Some(candidate)) => {
             state.dialogs.stretch_selection.canvas.gesture.preview_error = None;
             candidate
@@ -236,6 +228,53 @@ fn draw_stretch_selection_preview(
             )
         });
     preview::draw_transform_feedback(painter, response, true, detail);
+}
+
+/// The document the armed Move would leave, and whether it would move.
+pub(super) fn move_preview_candidate(
+    state: &AppState,
+    symbol_context: &SchematicSymbolContext,
+    delta: Point,
+    mode: crate::state::MoveSelectionMode,
+) -> (
+    crate::state::SchematicState,
+    Result<bool, rspice_design::schematic::movement::MoveSelectionError>,
+) {
+    let mut candidate = state.schematic.clone();
+    let result = super::sheet_visibility::with_active_wire_topology_in(
+        &state.workspace,
+        &mut candidate,
+        |candidate, scope| {
+            candidate.move_selection_with_mode_resolved(
+                delta,
+                mode,
+                |component| symbol_context.terminal_points(component),
+                scope,
+            )
+        },
+    );
+    (candidate, result)
+}
+
+/// The document the armed Stretch would leave.
+pub(super) fn stretch_preview_candidate(
+    state: &AppState,
+    symbol_context: &SchematicSymbolContext,
+    delta: Point,
+    target: crate::state::StretchTarget,
+    policy: crate::state::StretchOrthogonalPolicy,
+) -> Result<
+    Option<rspice_design::schematic::document::SchematicDocument>,
+    rspice_design::schematic::stretch::StretchSelectionError,
+> {
+    state.schematic.preview_stretch_target_resolved(
+        delta,
+        target,
+        policy,
+        |component| symbol_context.terminal_points(component),
+        |component| symbol_context.component_bounds_tuple(component),
+        super::sheet_visibility::off_active_sheet(&state.workspace),
+    )
 }
 
 fn draw_array_selection_preview(
@@ -292,6 +331,7 @@ fn draw_array_selection_preview(
             .schematic
             .preview_array_selection_resolved(
                 &plan,
+                &|id| super::sheet_visibility::object_is_on_active_sheet(state, id),
                 |component| symbol_context.named_terminal_points(component),
                 |component| symbol_context.component_bounds_tuple(component),
             )

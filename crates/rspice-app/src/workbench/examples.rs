@@ -71,8 +71,10 @@ pub fn load_example(name: &str, state: &mut SchematicState) {
         _ => return,
     }
 
-    // Junction dots where wires tee, frame the circuit, fresh history.
-    state.update_wire_junctions();
+    // Junction dots where wires tee, frame the circuit, fresh history. The
+    // example replaces the whole document, so there is no other sheet to
+    // keep out of reach.
+    state.with_active_wire_topology(|_| false, SchematicState::update_wire_junctions);
     state.session.editor.needs_fit = true;
     state.session.needs_history_reset = true;
     state.session.is_dirty = true;

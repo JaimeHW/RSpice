@@ -480,6 +480,56 @@ C1 out 0 {CLOAD}\n\
     }
 }
 
+/// The point's value reaches a top-level transistor and one inside a
+/// subcircuit alike, although the deck defines the parameter before both
+/// read it and the point redefines it after them.
+#[test]
+fn global_parameter_axis_sizes_top_level_and_subcircuit_devices_at_every_point() {
+    let mut run = parts();
+    run.executable_netlist = "parameter axis on transistor length\n\
+.param LVAL=0.5u\n\
+.subckt cell d g\n\
+M1 d g 0 0 nch L={LVAL} W=10u\n\
+.ends\n\
+VG g 0 1\n\
+VTOP dtop 0 1\n\
+M1 dtop g 0 0 nch L={LVAL} W=10u\n\
+VSUB dsub 0 1\n\
+X1 dsub g cell\n\
+.model nch nmos level=1 vto=0.5 kp=100u\n\
+.op\n\
+.end\n"
+        .to_owned();
+    run.run_set = Some(global_parameter_run_set("LVAL", &["0.25u", "1u", "2u"]));
+
+    let snapshot = PreparedRunSnapshot::new(run).expect("parameter Run Set prepares");
+    assert_eq!(snapshot.tasks.len(), 3);
+    for (task, length) in snapshot.tasks.iter().zip([0.25e-6, 1e-6, 2e-6]) {
+        let result = crate::engine_bridge::EngineBridge::new()
+            .run(
+                task.task
+                    .config
+                    .as_ref()
+                    .expect("configured operating point"),
+                task.executable_netlist_override
+                    .as_deref()
+                    .expect("each parameter point owns a deck"),
+            )
+            .expect("parameter point solves");
+        // Saturation at VGS=VDS=1: Id = KP/2 * W/L * (VGS-VTO)^2. The
+        // drain-bulk junction adds about 1 pA beside the channel.
+        let expected = 100e-6 / 2.0 * (10e-6 / length) * 0.25;
+        for supply in ["I(VTOP)", "I(VSUB)"] {
+            let drain = -result.measurement(supply).expect("supply current");
+            assert!(
+                (drain - expected).abs() <= 1e-6 * expected,
+                "{} {supply}: {drain} A, expected {expected} A",
+                task.label
+            );
+        }
+    }
+}
+
 #[test]
 fn global_source_axis_replaces_only_the_bound_independent_source_dc_value() {
     let mut run = parts();

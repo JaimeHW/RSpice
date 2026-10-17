@@ -99,6 +99,8 @@ pub enum Command {
     ZoomFit,
     FitSchematicContent,
     ZoomOneToOne,
+    ZoomToSelection,
+    ZoomBox,
     CycleGrid,
     GridSnapRouting,
     DrawingSheetLayers,
@@ -468,6 +470,8 @@ impl Command {
                 spec("canvas-fit-content", "Fit schematic content", "View")
             }
             Self::ZoomOneToOne => spec("zoom-one-to-one", "Zoom 100%", "View"),
+            Self::ZoomToSelection => spec("zoom-to-selection", "Zoom to selection", "View"),
+            Self::ZoomBox => spec("zoom-box", "Zoom box", "View"),
             Self::CycleGrid => spec("cycle-grid", "Cycle grid display", "View"),
             Self::GridSnapRouting => spec(
                 "grid-snap-routing",
@@ -1196,6 +1200,8 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ZoomFit,
     Command::FitSchematicContent,
     Command::ZoomOneToOne,
+    Command::ZoomToSelection,
+    Command::ZoomBox,
     Command::CycleGrid,
     Command::GridSnapRouting,
     Command::DrawingSheetLayers,

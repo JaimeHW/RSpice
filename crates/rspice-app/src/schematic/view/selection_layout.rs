@@ -1,5 +1,6 @@
 //! Validate editor layout requests and apply one connected-movement undo unit.
 
+use super::sheet_visibility::with_active_wire_topology;
 use super::{SchematicSymbolContext, requests::editor_request_source, schematic_symbol_context};
 use crate::state::Point;
 use crate::workbench::app_state::AppState;
@@ -57,23 +58,29 @@ fn apply_request(
     }
 
     state.schematic.begin_operation(command.label());
-    for edit in deltas {
-        let delta = edit.delta;
-        match edit.object {
-            SelectionLayoutObject::Component(id) => state
-                .schematic
-                .move_component_with_wires_resolved(id, delta, |component| {
-                    symbol_context.terminal_points(component)
-                }),
-            SelectionLayoutObject::DesignNote(id) => {
-                state.schematic.translate_layout_design_note(id, delta)
+    // A wire end on another sheet can share a moved pin's coordinates; the
+    // parts carry only their own sheet's wires.
+    with_active_wire_topology(state, |schematic, scope| {
+        for edit in deltas {
+            let delta = edit.delta;
+            match edit.object {
+                SelectionLayoutObject::Component(id) => schematic
+                    .move_component_with_wires_resolved(
+                        id,
+                        delta,
+                        |component| symbol_context.terminal_points(component),
+                        scope,
+                    ),
+                SelectionLayoutObject::DesignNote(id) => {
+                    schematic.translate_layout_design_note(id, delta)
+                }
+                SelectionLayoutObject::DocumentationShape(id) => {
+                    schematic.translate_layout_documentation_shape(id, delta)
+                }
+                SelectionLayoutObject::Probe(id) => schematic.translate_layout_probe(id, delta),
             }
-            SelectionLayoutObject::DocumentationShape(id) => state
-                .schematic
-                .translate_layout_documentation_shape(id, delta),
-            SelectionLayoutObject::Probe(id) => state.schematic.translate_layout_probe(id, delta),
         }
-    }
+    });
     state.schematic.session.is_dirty = true;
     let recorded = state.schematic.end_operation();
     if recorded {
@@ -365,6 +372,48 @@ mod tests {
         assert_eq!(state.schematic.document().probes, original);
         assert_eq!(state.schematic.topology_version(), topology);
         assert!(!state.schematic.can_undo());
+    }
+
+    /// Sheet 2 shares Sheet 1's coordinates, not its conductors: aligning
+    /// Sheet 1's parts carries their own wires and leaves Sheet 2's wire end,
+    /// lying on a moved pin's old position, where it was.
+    #[test]
+    fn aligning_parts_leaves_another_sheets_wire_end_in_place() {
+        let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[1, 2], &[90]);
+        for (id, position) in [(1, Point::new(10, 10)), (2, Point::new(40, 50))] {
+            state
+                .schematic
+                .document_mut_for_test()
+                .components
+                .push(Component::new(id, ComponentType::Resistor, position));
+            state
+                .schematic
+                .session
+                .editor
+                .selection
+                .select_component(id);
+        }
+        let context = schematic_symbol_context(&state);
+        let terminal = context.terminal_points(&state.schematic.document().components[1])[0];
+        let hidden = crate::state::Wire::segment(90, terminal, Point::new(300, 300));
+        state
+            .schematic
+            .document_mut_for_test()
+            .wires
+            .push(hidden.clone());
+        state.schematic.init_undo_history();
+
+        assert!(
+            apply_selection_layout(&mut state, &context, SelectionLayoutCommand::AlignLeft)
+                .unwrap()
+        );
+
+        assert_ne!(
+            context.terminal_points(&state.schematic.document().components[1])[0],
+            terminal,
+            "the part moved"
+        );
+        assert_eq!(state.schematic.document().wires, vec![hidden]);
     }
 
     #[test]

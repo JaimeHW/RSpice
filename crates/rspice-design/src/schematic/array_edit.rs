@@ -7,9 +7,9 @@
 
 use super::{
     array::{
-        ArrayObjectIds, SchematicArrayCount, SchematicArrayError, SchematicArrayImpact,
-        SchematicArrayKind, SchematicArrayNameAtom, SchematicArrayNaming, SchematicArrayPlacement,
-        SchematicArrayPlan, SchematicArrayPreview,
+        ArrayObjectIds, NameSequenceKey, SchematicArrayCount, SchematicArrayError,
+        SchematicArrayImpact, SchematicArrayKind, SchematicArrayNameAtom, SchematicArrayNaming,
+        SchematicArrayPlacement, SchematicArrayPlan, SchematicArrayPreview,
     },
     bus::{Bus, BusNotation, BusSlice, BusTap, MAX_BUS_MEMBER_INDEX},
     clipboard::ClipboardData,
@@ -33,6 +33,17 @@ pub struct ArraySelection<'a, J> {
     pub objects: CopySelection<'a>,
     pub junctions: J,
     pub has_partial_objects: bool,
+    /// Whether an object is drawn on the sheet the selection was made on.
+    ///
+    /// A cell view's sheets share one coordinate space, so an object on
+    /// another sheet can stand exactly where a replica will. It neither
+    /// collides with the replicas nor travels with them.
+    pub on_sheet: &'a dyn Fn(u64) -> bool,
+}
+
+/// The predicate of a cell view with one sheet, which owns every object.
+pub fn every_sheet(_: u64) -> bool {
+    true
 }
 
 /// Immutable document and allocation inputs for array validation and preview.
@@ -257,29 +268,18 @@ impl<J: Iterator<Item = Point> + Clone> ArraySource<'_, J> {
             .filter(|item| self.selection.objects.components.contains(&item.id))
             .collect();
         selected_components.sort_by_key(|item| item.id);
-        let mut reference_groups =
-            HashMap::<(String, String, Option<usize>), Vec<SchematicArrayNameAtom>>::new();
+        // Every part name counts through a sequence: its one numeric run, an
+        // indexed bit, or a numbered suffix when the name has no single run.
+        let mut reference_groups = HashMap::<NameSequenceKey, Vec<SchematicArrayNameAtom>>::new();
         for component in &selected_components {
             if component.name.is_empty() {
                 continue;
             }
             let atom = SchematicArrayNameAtom::parse(&component.name)?;
-            if let SchematicArrayNameAtom::Reference {
-                prefix,
-                suffix,
-                minimum_width,
-                ..
-            } = &atom
-            {
-                reference_groups
-                    .entry((prefix.clone(), suffix.clone(), *minimum_width))
-                    .or_default()
-                    .push(atom);
-            } else {
-                return Err(SchematicArrayError::InvalidSourceName {
-                    name: component.name.clone(),
-                });
-            }
+            reference_groups
+                .entry(atom.sequence_key())
+                .or_default()
+                .push(atom);
         }
         let selected_ids = &self.selection.objects.components;
         let occupied_names: HashSet<String> = self
@@ -301,16 +301,10 @@ impl<J: Iterator<Item = Point> + Clone> ArraySource<'_, J> {
                 continue;
             }
             let atom = SchematicArrayNameAtom::parse(&component.name)?;
-            let key = match &atom {
-                SchematicArrayNameAtom::Reference {
-                    prefix,
-                    suffix,
-                    minimum_width,
-                    ..
-                } => (prefix.clone(), suffix.clone(), *minimum_width),
-                _ => unreachable!("component references were validated above"),
-            };
-            let stride = reference_strides.get(&key).copied().unwrap_or(1);
+            let stride = reference_strides
+                .get(&atom.sequence_key())
+                .copied()
+                .unwrap_or(1);
             let end = atom
                 .numeric_value()
                 .checked_add(
@@ -448,14 +442,20 @@ impl<J: Iterator<Item = Point> + Clone> ArraySource<'_, J> {
             object_ids: captured_object_ids(&capture.objects),
             ..Default::default()
         };
-        let outside_geometry =
-            geometry_for_document(self.document, terminal_points_for, component_bounds_for);
+        let on_sheet = self.selection.on_sheet;
+        let outside_geometry = geometry_for_document(
+            self.document,
+            on_sheet,
+            terminal_points_for,
+            component_bounds_for,
+        );
         let mut collision_index = GeometryBroadPhase::from_geometry(&outside_geometry);
         let radial_documentation = plan.kind == SchematicArrayKind::RadialDocumentation;
         let mut radial_note_positions: Vec<(u64, Point)> = if radial_documentation {
             self.document
                 .design_notes
                 .iter()
+                .filter(|note| on_sheet(note.id))
                 .map(|note| (note.id, note.pos))
                 .collect()
         } else {
@@ -466,6 +466,7 @@ impl<J: Iterator<Item = Point> + Clone> ArraySource<'_, J> {
                 self.document
                     .documentation_shapes
                     .iter()
+                    .filter(|shape| on_sheet(shape.id))
                     .map(|shape| (shape.id, shape.geometry.clone()))
                     .collect()
             } else {
@@ -1153,7 +1154,7 @@ fn validate_array_source_selection_direct(
     let mut captured_wire_ids = HashSet::new();
     for wire in &state.document.wires {
         let explicitly_selected = state.selection.objects.wires.contains(&wire.id);
-        let implicitly_selected = if wire.points.len() < 2 {
+        let implicitly_selected = if wire.points.len() < 2 || !(state.selection.on_sheet)(wire.id) {
             false
         } else {
             let last = wire.points.len() - 1;
@@ -1377,10 +1378,17 @@ fn capture_array_selection(
         state.selection.junctions.clone(),
         terminal_points_for,
     );
+    // A conductor joins the selected parts only on the sheet they are drawn
+    // on. Another sheet's wire between the same two points, or its junction
+    // on a copied wire's line, is not part of the circuit being repeated.
+    let on_sheet = state.selection.on_sheet;
+    objects
+        .wires
+        .retain(|wire| state.selection.objects.wires.contains(&wire.id) || on_sheet(wire.id));
     let selected_components = &state.selection.objects.components;
     let captured_wire_ids: HashSet<u64> = objects.wires.iter().map(|wire| wire.id).collect();
     for wire in &state.document.wires {
-        if captured_wire_ids.contains(&wire.id) || wire.points.len() < 2 {
+        if captured_wire_ids.contains(&wire.id) || wire.points.len() < 2 || !on_sheet(wire.id) {
             continue;
         }
         let last = wire.points.len() - 1;
@@ -1405,17 +1413,21 @@ fn capture_array_selection(
         .iter()
         .map(|component| component.id)
         .collect();
-    for junction in &state.document.junctions {
-        if objects.junctions.contains(&junction.pos)
-            || !objects
-                .wires
-                .iter()
-                .any(|wire| wire.contains_point(junction.pos))
-        {
-            continue;
-        }
-        objects.junctions.push(junction.pos);
-    }
+    let selected_junctions: Vec<Point> = state.selection.junctions.clone().collect();
+    objects.junctions = state
+        .document
+        .junctions
+        .iter()
+        .filter(|junction| on_sheet(junction.id))
+        .map(|junction| junction.pos)
+        .filter(|position| {
+            selected_junctions.contains(position)
+                || objects
+                    .wires
+                    .iter()
+                    .any(|wire| wire.contains_point(*position))
+        })
+        .collect();
     objects.junctions.sort_by_key(|point| (point.x, point.y));
     objects.junctions.dedup();
 
@@ -1731,12 +1743,15 @@ fn resolved_replica_connections(
     Ok(connections)
 }
 
+/// The geometry already drawn on the selection's sheet, which the replicas
+/// may neither overlap nor touch.
 fn geometry_for_document(
     document: &SchematicDocument,
+    on_sheet: &dyn Fn(u64) -> bool,
     terminal_points_for: &mut impl FnMut(&Component) -> Vec<(String, Point)>,
     component_bounds_for: &mut impl FnMut(&Component) -> (i32, i32, i32, i32),
 ) -> ReplicaGeometry {
-    geometry_from_parts(
+    let mut geometry = geometry_from_parts(
         ArrayGeometryInput {
             components: &document.components,
             wires: &document.wires,
@@ -1747,7 +1762,12 @@ fn geometry_for_document(
         },
         terminal_points_for,
         component_bounds_for,
-    )
+    );
+    geometry.component_bounds.retain(|(id, _)| on_sheet(*id));
+    geometry.terminals.retain(|(id, _)| on_sheet(*id));
+    geometry.conductors.retain(|(id, _, _)| on_sheet(*id));
+    geometry.anchors.retain(|(id, _)| on_sheet(*id));
+    geometry
 }
 
 fn geometry_for_additions(

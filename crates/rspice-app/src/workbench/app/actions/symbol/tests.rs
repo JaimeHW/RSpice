@@ -241,7 +241,7 @@ fn cancel_finishes_open_geometry_without_materializing_metadata_and_rejects_stal
     app.state.ui.symbol.editor.tool = SymbolTool::Polygon;
     let points = vec![Point::origin(), Point::new(10, 20), Point::new(20, 0)];
     app.state.ui.symbol.editor.pending_polyline = points.clone();
-    app.execute_symbol_shortcut_command(Command::Cancel);
+    app.execute_shortcut_command(Command::Cancel);
     assert_eq!(
         app.state.load_active_symbol_document().unwrap().body.last(),
         Some(&SymbolShape::Polyline {

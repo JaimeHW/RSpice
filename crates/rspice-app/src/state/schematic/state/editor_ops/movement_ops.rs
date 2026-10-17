@@ -39,6 +39,7 @@ impl SchematicState {
         component_id: u64,
         delta: Point,
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+        _scope: &ActiveSheetTopology,
     ) {
         if self.session.read_only {
             return;
@@ -60,8 +61,8 @@ impl SchematicState {
     /// moved entirely (not stretched).
     /// Runs on every drag frame: one O(1)-membership pass over the wires —
     /// no nested terminal scans, no per-update id searches.
-    pub fn move_selection_with_rubber_band(&mut self, delta: Point) {
-        self.move_selection_with_rubber_band_resolved(delta, legacy_terminal_points);
+    pub fn move_selection_with_rubber_band(&mut self, delta: Point, scope: &ActiveSheetTopology) {
+        self.move_selection_with_rubber_band_resolved(delta, legacy_terminal_points, scope);
     }
 
     /// Move selected components and rubber-band wires using caller-supplied terminal geometry.
@@ -69,6 +70,7 @@ impl SchematicState {
         &mut self,
         delta: Point,
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+        _scope: &ActiveSheetTopology,
     ) {
         if self.session.read_only {
             return;
@@ -91,8 +93,9 @@ impl SchematicState {
         &mut self,
         delta: Point,
         mode: MoveSelectionMode,
+        scope: &ActiveSheetTopology,
     ) -> Result<bool, MoveSelectionError> {
-        self.move_selection_with_mode_resolved(delta, mode, legacy_terminal_points)
+        self.move_selection_with_mode_resolved(delta, mode, legacy_terminal_points, scope)
     }
 
     /// Mode-aware selection movement using caller-resolved terminal geometry.
@@ -101,6 +104,7 @@ impl SchematicState {
         delta: Point,
         mode: MoveSelectionMode,
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+        _scope: &ActiveSheetTopology,
     ) -> Result<bool, MoveSelectionError> {
         if self.session.read_only {
             return Ok(false);
@@ -148,7 +152,7 @@ impl SchematicState {
     }
 
     /// Move all wire points at a junction to a new position
-    pub fn move_junction(&mut self, old_pos: Point, new_pos: Point) {
+    pub fn move_junction(&mut self, old_pos: Point, new_pos: Point, _scope: &ActiveSheetTopology) {
         if self.session.read_only {
             return;
         }

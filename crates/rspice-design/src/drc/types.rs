@@ -111,6 +111,9 @@ pub enum DrcViolationType {
     VectorWidthMismatch,
     /// An off-sheet connector's name is declared on only one sheet.
     OffSheetConnectorWithoutPartner,
+    /// A net label, pin or bus-tap end sits exactly where two wires cross
+    /// with no junction, so it does not say which wire it joins.
+    AmbiguousCrossing,
 
     //-------------------------------------------------------------------------
     // Electrical Issues
@@ -188,7 +191,7 @@ impl DrcViolationType {
     /// The array's fixed length does not make it exhaustive — a variant added
     /// to the enum and not here still compiles — so a test in `rules` holds it
     /// to the variants serde's derive declares.
-    pub const ALL: [Self; 32] = [
+    pub const ALL: [Self; 33] = [
         Self::FloatingNode,
         Self::UnconnectedPin,
         Self::UndrivenInput,
@@ -203,6 +206,7 @@ impl DrcViolationType {
         Self::DuplicateBusMemberDriver,
         Self::VectorWidthMismatch,
         Self::OffSheetConnectorWithoutPartner,
+        Self::AmbiguousCrossing,
         Self::ShortedOutputs,
         Self::MissingGround,
         Self::SourceToSource,
@@ -239,7 +243,8 @@ impl DrcViolationType {
             | Self::MixedBusTap
             | Self::DuplicateBusMemberDriver
             | Self::VectorWidthMismatch
-            | Self::OffSheetConnectorWithoutPartner => DrcRuleCategory::Connectivity,
+            | Self::OffSheetConnectorWithoutPartner
+            | Self::AmbiguousCrossing => DrcRuleCategory::Connectivity,
             Self::ShortedOutputs
             | Self::MissingGround
             | Self::SourceToSource
@@ -323,6 +328,7 @@ impl DrcViolationType {
             Self::OffSheetConnectorWithoutPartner => {
                 "Off-sheet connector has no partner on another sheet"
             }
+            Self::AmbiguousCrossing => "Label, pin or bus tap on an unmarked wire crossing",
             Self::ShortedOutputs => "Multiple declared outputs connected to the same net",
             Self::UndrivenNet => "Net joins declared inputs and nothing drives it",
             Self::GroundNotNodeZero => "Net named as ground is not node 0 in the deck",
@@ -366,6 +372,9 @@ impl DrcViolationType {
             }
             Self::OffSheetConnectorWithoutPartner => {
                 "Place the matching connector on the other sheet, or make this an ordinary net label"
+            }
+            Self::AmbiguousCrossing => {
+                "Place a junction to join the crossing wires, or move it onto one wire"
             }
             Self::ShortedOutputs => "Leave only one declared output driver on the net",
             Self::UndrivenNet => {

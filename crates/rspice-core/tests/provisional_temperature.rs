@@ -101,8 +101,10 @@ fn an_inactive_literal_hint_cannot_make_a_valid_analysis_fail() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
-fn numerical_validation_uses_the_reconciled_temperature_and_captured_function() {
-    let netlist = Netlist::parse("Temperature validation\n.func frequency(x) {x-50}\n.ac lin 1 {frequency(TEMP)} 100\n.func frequency(x) {x+1000}\n.param ambient=85\n.options temp={ambient}\n.end\n").unwrap();
+fn numerical_validation_uses_the_reconciled_temperature_and_last_function() {
+    // The card calls the last definition of frequency, as an ngspice-46
+    // reader does; at the provisional 27 C it is a negative frequency.
+    let netlist = Netlist::parse("Temperature validation\n.func frequency(x) {x+1000}\n.ac lin 1 {frequency(TEMP)} 100\n.func frequency(x) {x-50}\n.param ambient=85\n.options temp={ambient}\n.end\n").unwrap();
     let AnalysisCommand::Ac { start_freq, .. } = netlist.analyses[0] else {
         panic!("AC")
     };

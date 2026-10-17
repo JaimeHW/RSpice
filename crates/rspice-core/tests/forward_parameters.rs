@@ -98,6 +98,156 @@ fn forward_subcircuit_parameters_resolve_in_the_local_scope() {
     }
 }
 
+/// ngspice-46 selects `nch.1` for `L=0.1u` and solves the same drain current
+/// whether `.param LL=... WW=...` comes before the transistor or after it.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn forward_referenced_geometry_selects_its_bin_and_sizes_the_device() {
+    let cards = ".model nch.1 nmos level=1 vto=0.5 kp=100u lmin=0.05u lmax=0.2u wmin=1u wmax=100u\n\
+                 .model nch.2 nmos level=1 vto=0.5 kp=200u lmin=0.2u lmax=1u wmin=1u wmax=100u\n";
+    // Saturation at VGS=VDS=1: Id = KP/2 * W/L * (VGS-VTO)^2.
+    for (length, bin, kp) in [(0.1e-6, "nch.1", 100e-6), (0.5e-6, "nch.2", 200e-6)] {
+        let geometry = format!(".param LL={length} WW=10u\n");
+        let expected = kp / 2.0 * (10e-6 / length) * 0.25;
+        for (before, after) in [("", geometry.as_str()), (geometry.as_str(), "")] {
+            let source = format!(
+                "Forward geometry\n{before}VD d 0 1\nVG g 0 1\nM1 d g 0 0 nch L={{LL}} W={{WW}}\n{cards}{after}.end\n"
+            );
+            let netlist = Netlist::parse(&source).unwrap();
+            let inspection = Engine::default().inspect_model_bins(&netlist).unwrap();
+            let instance = &inspection.instances[0];
+            assert!(
+                instance.selected_model.eq_ignore_ascii_case(bin),
+                "{source}"
+            );
+            let close = |value: Option<f64>, expected: f64| {
+                value.is_some_and(|value| (value - expected).abs() <= 1e-12 * expected)
+            };
+            assert!(close(instance.length, length), "{source}");
+            assert!(close(instance.width, 10e-6), "{source}");
+            let drain = -Engine::default()
+                .run_dc_op(&netlist)
+                .unwrap()
+                .branch_current_named("VD")
+                .unwrap();
+            assert!(
+                // The drain-bulk junction leaks ~1 pA beside the channel.
+                (drain - expected).abs() <= 1e-6 * expected,
+                "{source}: {drain} vs {expected}"
+            );
+        }
+    }
+}
+
+/// Every top-level device family that defers an instance assignment binds the
+/// forward parameter instead of falling back to its default area or
+/// multiplier: the deck solves exactly as its literal twin does.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn forward_referenced_instance_parameters_match_their_literal_twin() {
+    let devices = "V1 a 0 1\nD1 a 0 dmod area={AREA}\nR1 a 0 1k m={MULT}\n\
+                   Q1 a a 0 qmod area={AREA}\nM1 a a 0 0 nch L=1u W=10u m={MULT}\n\
+                   .model dmod d is=1e-14\n.model qmod npn is=1e-16 bf=100\n\
+                   .model nch nmos level=1 vto=0.5 kp=100u\n";
+    let supply = |source: &str| {
+        -Engine::default()
+            .run_dc_op(&Netlist::parse(source).unwrap())
+            .unwrap()
+            .branch_current_named("V1")
+            .unwrap()
+    };
+    let forward = supply(&format!(
+        "Forward instance parameters\n{devices}.param AREA=2 MULT=3\n.end\n"
+    ));
+    let literal = supply(&format!(
+        "Literal instance parameters\n{}.end\n",
+        devices.replace("{AREA}", "2").replace("{MULT}", "3")
+    ));
+    let defaults = supply(&format!(
+        "Default instance parameters\n{}.end\n",
+        devices.replace("{AREA}", "1").replace("{MULT}", "1")
+    ));
+    assert!(
+        (forward - literal).abs() <= 1e-12 * literal,
+        "{forward} vs {literal}"
+    );
+    assert!((forward - defaults).abs() > 0.4 * defaults, "{forward}");
+}
+
+/// A root `.PARAM` redefined after its readers reaches every one of them:
+/// the transistor and resistor at the top level, the derived parameter, and
+/// the copies inside a subcircuit. ngspice-46 solves 11.25 mA in both
+/// supplies (the last definition, L=0.1u); Xyce 7.10, which keeps the first
+/// definition by default, solves 2.25 mA in both.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_redefined_root_parameter_reaches_every_reader_in_the_deck() {
+    let source = "Redefinition after the readers\n.param LVAL=0.5u\n.param RVAL={LVAL*1e9}\n\
+                  .subckt cell d g\nM1 d g 0 0 nch L={LVAL} W=10u\nR1 d 0 {LVAL*1e9}\n.ends\n\
+                  VG g 0 1\nV1 d 0 1\nM1 d g 0 0 nch L={LVAL} W=10u\nR1 d 0 {RVAL}\n\
+                  V2 d2 0 1\nX1 d2 g cell\n.model nch nmos level=1 vto=0.5 kp=100u\n\
+                  .param LVAL=0.1u\n.end\n";
+    for (policy, length, expected) in [
+        (ParameterRedefinitionPolicy::UseLast, 0.1e-6, 11.25e-3),
+        (ParameterRedefinitionPolicy::UseFirst, 0.5e-6, 2.25e-3),
+    ] {
+        for dialect in DIALECTS {
+            let mut opts = options(dialect);
+            opts.parameter_redefinition_policy = policy;
+            let netlist = Netlist::parse_with_options(source, opts).unwrap();
+            let derived = netlist.params.get("RVAL").unwrap();
+            assert!(
+                (derived - length * 1e9).abs() <= 1e-9 * derived,
+                "{policy:?} {dialect:?}: RVAL={derived}"
+            );
+            let solution = Engine::default().run_dc_op(&netlist).unwrap();
+            for supply in ["V1", "V2"] {
+                let current = -solution.branch_current_named(supply).unwrap();
+                assert!(
+                    (current - expected).abs() <= 1e-6 * expected,
+                    "{policy:?} {dialect:?} {supply}: {current} A, expected {expected} A"
+                );
+            }
+        }
+    }
+}
+
+/// A last definition that reads another redefined parameter sees that
+/// parameter's last definition too (ngspice-46: a=15, b=5), and a
+/// redefinition that feeds back into itself is refused, as ngspice refuses
+/// it, instead of settling on whichever pass ran last.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn chained_root_redefinitions_settle_and_circular_ones_are_refused() {
+    for dialect in DIALECTS {
+        let chained = Netlist::parse_with_options(
+            "Chained redefinitions\n.param a=1 b=1\nV1 n 0 1\nR1 n 0 {a}\nR2 n 0 {b}\n\
+             .param a={b*3}\n.param b=5\n.end\n",
+            options(dialect),
+        )
+        .unwrap();
+        assert_eq!(chained.params.get("a"), Some(15.0));
+        let current = -Engine::default()
+            .run_dc_op(&chained)
+            .unwrap()
+            .branch_current_named("V1")
+            .unwrap();
+        assert!(
+            (current - (1.0 / 15.0 + 1.0 / 5.0)).abs() < 1e-9,
+            "{current}"
+        );
+
+        let error = Netlist::parse_with_options(
+            "Circular redefinition\n.param a=1\n.param b={a*2}\nV1 n 0 1\nR1 n 0 {a}\n\
+             .param a={b+1}\n.end\n",
+            options(dialect),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("Parameter A does not settle"), "{error}");
+    }
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn failed_forward_probes_preserve_the_seeded_random_stream() {

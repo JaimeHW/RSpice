@@ -1583,8 +1583,9 @@ R1 in out {aunif(2,0.25)*(1+1e-8*q)}
             (".func rval(x) {1+1e-8*x}", "rval(p)", "", 1.0, 1e-8),
             (".param z={sqrt(-1)}", "1+abs(z)*(2+1e-8*p)", "", 3.0, 1e-8),
             (".param TEMP={27+1e-8*p}", "1+TEMP", "", 28.0, 1e-8),
-            // The eager parameter reader must still use its definition-time value.
-            (".param r={1+1e-8*p}", "r", ".param r={7+9e-8*p}", 1.0, 1e-8),
+            // An eager reader above a redefinition reads the last definition
+            // and its direction, as every ngspice-46 reader does (R1 = 7).
+            (".param r={1+1e-8*p}", "r", ".param r={7+9e-8*p}", 7.0, 9e-8),
         ];
         for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
             let engine = Engine::default();

@@ -81,6 +81,68 @@ fn corner_lib_sections_change_results() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A deck that writes its own nominal `.param` still runs each corner's
+/// value, whether the reader sits above or below that nominal: the corner's
+/// section is the last definition, and the last definition binds every
+/// reader (ngspice-46 gives 7.5 V for ss with the section read last, and the
+/// nominal 6.667 V with it read first).
+#[test]
+fn corner_lib_sections_override_a_nominal_the_deck_defines() {
+    let dir = test_dir("nominal_override");
+    let library = dir.join("corners.lib");
+    std::fs::write(
+        &library,
+        "* process corner library\n.lib tt\n.param rload=1k\n.endl tt\n.lib ss\n.param rload=3k\n.endl ss\n",
+    )
+    .expect("write corner lib");
+
+    for (label, cards) in [
+        ("above", "r2 out 0 {rload}\n.param rload=2k\n"),
+        ("below", ".param rload=2k\nr2 out 0 {rload}\n"),
+    ] {
+        let deck = dir.join(format!("{label}.sp"));
+        std::fs::write(
+            &deck,
+            format!("* nominal divider\nv1 in 0 dc 10\nr1 in out 1k\n{cards}.op\n.end\n"),
+        )
+        .expect("write deck");
+        let out = dir.join(format!("{label}.csv"));
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args([
+                "run",
+                deck.to_str().unwrap(),
+                "--corners",
+                "tt,ss",
+                "--corner-lib",
+                library.to_str().unwrap(),
+                "-o",
+                out.to_str().unwrap(),
+                "-f",
+                "csv",
+            ])
+            .output()
+            .expect("run rspice");
+        assert!(
+            output.status.success(),
+            "corner sweep failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let v_tt = read_op_voltage(&dir.join(format!("{label}.tt.csv")), "V(OUT)");
+        let v_ss = read_op_voltage(&dir.join(format!("{label}.ss.csv")), "V(OUT)");
+        assert!(
+            (v_tt - 5.0).abs() < 1e-6,
+            "{label}: tt corner wrong: {v_tt}"
+        );
+        assert!(
+            (v_ss - 7.5).abs() < 1e-6,
+            "{label}: ss corner wrong: {v_ss}"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Parallel corner workers must produce byte-identical outputs to the
 /// serial sweep — corners are independent, only the scheduling changes.
 #[test]

@@ -28,8 +28,32 @@ impl SchematicState {
         split
     }
 
+    /// Split the wires that pins of `components` land inside, so each pin
+    /// owns a vertex there and the wire follows the part. A pin on an
+    /// unmarked crossing of two wires is left for the user to resolve.
+    pub fn split_wires_under_pins(
+        &mut self,
+        components: &std::collections::HashSet<u64>,
+        mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+        _scope: &ActiveSheetTopology,
+    ) -> bool {
+        let pins = self
+            .design
+            .document()
+            .components
+            .iter()
+            .filter(|component| components.contains(&component.id))
+            .flat_map(&mut terminal_points_for)
+            .collect::<Vec<_>>();
+        let changed = self.design.split_wires_under_pins(&pins);
+        if changed {
+            self.session.is_dirty = true;
+        }
+        changed
+    }
+
     /// Optimize all wires by removing collinear intermediate points
-    pub fn optimize_all_wires(&mut self) {
+    pub fn optimize_all_wires(&mut self, _scope: &ActiveSheetTopology) {
         if self.design.optimize_all_wires() {
             self.session.is_dirty = true;
         }
@@ -46,7 +70,7 @@ impl SchematicState {
     ///
     /// # Returns
     /// A tuple of (wires_modified, wires_removed) counts
-    pub fn remove_degenerate_segments(&mut self) -> (usize, usize) {
+    pub fn remove_degenerate_segments(&mut self, _scope: &ActiveSheetTopology) -> (usize, usize) {
         let (wires_modified, wires_removed) = self.design.remove_degenerate_segments();
         if wires_modified > 0 || wires_removed > 0 {
             self.session.is_dirty = true;
@@ -62,20 +86,24 @@ impl SchematicState {
     /// 3. Updates junction markers
     ///
     /// This matches commercial EDA tool behavior for maintaining clean topology.
-    pub fn cleanup_wire_topology(&mut self) {
-        self.cleanup_wire_topology_with_junction_policy(true);
+    pub fn cleanup_wire_topology(&mut self, scope: &ActiveSheetTopology) {
+        self.cleanup_wire_topology_with_junction_policy(true, scope);
     }
 
     /// Clean topology while respecting the resolved document/user junction
     /// policy. Manual-junction projects still receive safe geometric cleanup,
     /// but existing explicit junction ownership is never synthesized away.
-    pub fn cleanup_wire_topology_with_junction_policy(&mut self, automatic_junctions: bool) {
-        self.remove_degenerate_segments();
-        self.optimize_all_wires();
+    pub fn cleanup_wire_topology_with_junction_policy(
+        &mut self,
+        automatic_junctions: bool,
+        scope: &ActiveSheetTopology,
+    ) {
+        self.remove_degenerate_segments(scope);
+        self.optimize_all_wires(scope);
         if automatic_junctions {
-            self.update_wire_junctions();
+            self.update_wire_junctions(scope);
         } else {
-            self.remove_orphan_junctions();
+            self.remove_orphan_junctions(scope);
         }
     }
 
@@ -92,7 +120,12 @@ impl SchematicState {
     /// * `new_pos` - The new position
     ///
     /// Returns true if any vertices were moved
-    pub fn move_all_vertices_at(&mut self, old_pos: Point, new_pos: Point) -> bool {
+    pub fn move_all_vertices_at(
+        &mut self,
+        old_pos: Point,
+        new_pos: Point,
+        scope: &ActiveSheetTopology,
+    ) -> bool {
         if old_pos == new_pos {
             return false;
         }
@@ -107,7 +140,7 @@ impl SchematicState {
             .any(|j| j.pos == old_pos);
         if is_junction {
             // Split any wires that pass through this junction point but don't have a vertex there
-            self.split_wires_at_t_junction(old_pos);
+            self.split_wires_at_t_junction(old_pos, scope);
         }
 
         let moved = self.design.move_vertices_at(old_pos, new_pos);

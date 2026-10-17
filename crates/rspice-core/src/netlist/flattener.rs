@@ -597,6 +597,18 @@ impl<'a> Flattener<'a> {
         let root_path = HierarchyPath::root_with_separator(self.config.hierarchy_separator);
         for (element_index, element) in netlist.elements.iter().enumerate() {
             poll_parse_abort(abort, element_index)?;
+            let bound = match self.bind_root_forward_instance_params(element, &global_scope, abort)
+            {
+                Ok(bound) => bound,
+                Err(error) => {
+                    self.handle_branch_error(
+                        error,
+                        &format!("top-level element {}", element.name),
+                    )?;
+                    continue;
+                }
+            };
+            let element = bound.as_ref().unwrap_or(element);
             let stack_len = self.expansion_stack.len();
             if let Err(error) = self.flatten_element(
                 element,
@@ -3261,6 +3273,116 @@ impl<'a> Flattener<'a> {
         Ok(merged)
     }
 
+    /// Bind the instance assignments a top-level element deferred because
+    /// they name a `.PARAM` the deck defines further down.
+    ///
+    /// A root `.PARAM` is visible to every reader in the deck, wherever it is
+    /// written: ngspice moves the definitions ahead of the elements before it
+    /// evaluates either. This is the top-level counterpart of the binding
+    /// `substitute_params` gives a subcircuit body, against the completed root
+    /// scope, so model-bin selection and the device builder read one geometry,
+    /// area, and multiplier; the builders never read a deferred assignment.
+    /// Assignments that read a Spectre statistical parameter stay deferred
+    /// for the per-trial materialization after flattening.
+    fn bind_root_forward_instance_params(
+        &self,
+        element: &Element,
+        scope: &ParamContext,
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Element>, ParseWithAbortError> {
+        let statistical = |(_, expression): &(String, String)| {
+            scope.expression_references_spectre_statistics(expression)
+        };
+        let pending = match &element.kind {
+            ElementKind::Resistor {
+                deferred_params, ..
+            }
+            | ElementKind::Capacitor {
+                deferred_params, ..
+            }
+            | ElementKind::Inductor {
+                deferred_params, ..
+            }
+            | ElementKind::Diode {
+                deferred_params, ..
+            }
+            | ElementKind::Bjt {
+                deferred_params, ..
+            }
+            | ElementKind::Mosfet {
+                deferred_params, ..
+            }
+            | ElementKind::Jfet {
+                deferred_params, ..
+            }
+            | ElementKind::Mesfet {
+                deferred_params, ..
+            }
+            | ElementKind::XyceMemristor {
+                deferred_params, ..
+            } => deferred_params,
+            _ => return Ok(None),
+        };
+        if pending.iter().all(statistical) {
+            return Ok(None);
+        }
+        let mut bound = element.clone();
+        if let ElementKind::Resistor {
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::Capacitor {
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::Inductor {
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::Diode {
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::Bjt {
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::Mosfet {
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::Jfet {
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::Mesfet {
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::XyceMemristor {
+            instance_params,
+            deferred_params,
+            ..
+        } = &mut bound.kind
+        {
+            let (kept, forward): (Vec<_>, Vec<_>) = std::mem::take(deferred_params)
+                .into_iter()
+                .partition(statistical);
+            *instance_params =
+                self.merge_deferred_params(instance_params, &forward, scope, abort)?;
+            *deferred_params = kept;
+        }
+        Ok(Some(bound))
+    }
+
     /// Merge deferred (expression-valued) instance parameters over the
     /// parse-time-resolved set, evaluating each against this instance's
     /// parameter scope. A deferred entry overrides a same-named resolved one.
@@ -5599,7 +5721,8 @@ V1 inside b DC {1+img(next)} AC {1+img(next)}
             let mut netlist = Netlist::parse(&format!(
                 "statistical expansion\n.param rv=100\n.RSPICE_SPECTRE_STAT {}\n{definitions}\
                  .func hidden(x) {{rv*x}}\n.func nested(x) {{hidden(x)+1}}\n\
-                 .param scale=2 top_alias={{scale*rv}} bare_alias=top_alias\n\
+                 .param scale=2 top_alias={{scale*rv}} top_bare=top_alias\n\
+                 .param doubled={{2*rv}} bare_alias=doubled\n\
                  .param z={{3+4J}}\n.func captured(x) {{scale*x+img(z)}}\n\
                  .param captured_alias={{captured(rv)}} noise_capture={{rv+agauss(0,1,1)}}\n\
                  .param scale=9 top_alias=123 root_nested={{bare_alias+rv}}\n\
@@ -5610,7 +5733,7 @@ V1 inside b DC {1+img(next)} AC {1+img(next)}
                  R2 a b {{hidden(2)}}\nR3 a b {{nested(3)}}\nR4 a b {{indirect}}\n\
                  .model RSTAT R(R={{hidden(2)}})\nR5 a b 1 RSTAT\n\
                  R6 a b {{bare_alias}}\nR7 a b {{root_nested}}\nR8 a b {{top_alias}}\n\
-                 R9 a b {{captured_alias}}\nR10 a b {{noise_capture}}\n.ends\n\
+                 R9 a b {{captured_alias}}\nR10 a b {{noise_capture}}\nR11 a b {{top_bare}}\n.ends\n\
                  .subckt shadow a b rv=50\n.param local={{2*rv}}\n\
                  R1 a b {{rv}}\nR2 a b {{local}}\nR3 a b {{bare_alias}}\n\
                  R4 a b {{rv+bare_alias}}\n.model LOCAL R(R={{rv}})\nR5 a b 1 LOCAL\n\
@@ -5657,8 +5780,12 @@ V1 inside b DC {1+img(next)} AC {1+img(next)}
                 ("X1.R6", 2.0 * sample),
                 ("X1.R7", 3.0 * sample),
                 ("X1.R8", 123.0),
-                ("X1.R9", 2.0 * sample + 4.0),
+                // Readers of a root parameter that is redefined after them
+                // read the last definition, as in ngspice-46: scale=9 and
+                // z=0 reach captured(rv), and top_bare reads top_alias=123.
+                ("X1.R9", 9.0 * sample),
                 ("X1.R10", sample + captured_noise),
+                ("X1.R11", 123.0),
                 ("X2.R1", 50.0),
                 ("X2.R2", 100.0),
                 ("X2.R3", 2.0 * sample_for("X2")),

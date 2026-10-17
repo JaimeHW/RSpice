@@ -1353,9 +1353,10 @@ fn drc_identity_tags_are_never_renumbered() {
         DrcViolationType::UnloadedOutput => 27,
         DrcViolationType::RecursiveInstantiation => 28,
         DrcViolationType::UnresolvedReference => 29,
-        DrcViolationType::UndrivenNet => 30,
-        DrcViolationType::GroundNotNodeZero => 31,
-        DrcViolationType::SupplyTiedToGround => 32,
+        DrcViolationType::AmbiguousCrossing => 30,
+        DrcViolationType::UndrivenNet => 31,
+        DrcViolationType::GroundNotNodeZero => 32,
+        DrcViolationType::SupplyTiedToGround => 33,
     };
     let types = [
         DrcViolationType::FloatingNode,
@@ -1387,6 +1388,7 @@ fn drc_identity_tags_are_never_renumbered() {
         DrcViolationType::UnloadedOutput,
         DrcViolationType::RecursiveInstantiation,
         DrcViolationType::UnresolvedReference,
+        DrcViolationType::AmbiguousCrossing,
         DrcViolationType::UndrivenNet,
         DrcViolationType::GroundNotNodeZero,
         DrcViolationType::SupplyTiedToGround,

@@ -27,3 +27,5 @@ mod tool_ops;
 mod waiver_ops;
 mod wire_management;
 mod wire_operations;
+
+pub use sheet_topology::ActiveSheetTopology;

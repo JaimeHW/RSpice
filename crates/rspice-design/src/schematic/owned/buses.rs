@@ -61,13 +61,15 @@ impl Schematic {
         })
     }
 
+    /// Edit a bus and the network joined to it on the sheet `on_sheet` admits.
     pub fn edit_bus_properties(
         &mut self,
         expected: &Bus,
         declaration: Option<BusDeclaration>,
+        on_sheet: &dyn Fn(u64) -> bool,
     ) -> Result<Option<DocumentEdit<()>>, BusParseError> {
         let Some(change) =
-            BusPropertyEdit::prepare(&mut self.document, expected, declaration.as_ref())?
+            BusPropertyEdit::prepare(&mut self.document, expected, declaration.as_ref(), on_sheet)?
         else {
             return Ok(None);
         };

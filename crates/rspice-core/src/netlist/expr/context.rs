@@ -159,6 +159,22 @@ pub enum ParameterRedefinitionPolicy {
     UseLast,
 }
 
+impl ParameterRedefinitionPolicy {
+    /// Which of the `definitions` one scope makes of a name binds every reader
+    /// in that scope, as a zero-based position in source order.
+    ///
+    /// The parser pins this definition's value at the scope's other
+    /// definitions of the name, and the editor's value hover reads the same
+    /// definition, so a reader above or between redefinitions sees the value
+    /// the engine binds.
+    pub fn binding_definition(self, definitions: usize) -> usize {
+        match self {
+            Self::UseFirst => 0,
+            Self::UseLast => definitions.saturating_sub(1),
+        }
+    }
+}
+
 /// Diagnostic behavior for repeated parameter definitions within one scope.
 ///
 /// This is deliberately independent from [`ParameterRedefinitionPolicy`]:
@@ -1091,6 +1107,16 @@ impl ParamContext {
             self.statistical_captures
                 .insert(name.to_ascii_uppercase(), capture);
         }
+    }
+
+    /// The statistical capture an ordinary binding retained, if any.
+    pub(crate) fn statistical_parameter_capture(
+        &self,
+        name: &str,
+    ) -> Option<Arc<CapturedStatisticalParameter>> {
+        self.statistical_captures
+            .get(&name.to_ascii_uppercase())
+            .cloned()
     }
 
     pub(crate) fn materialize_statistical_parameter_captures(&mut self) -> Result<(), ExprError> {

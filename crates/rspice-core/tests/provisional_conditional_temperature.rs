@@ -204,7 +204,10 @@ fn retained_conditional_errors_keep_included_continuation_origins() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
-fn conditional_functions_keep_the_definition_at_the_authored_card() {
-    let netlist = Netlist::parse("Conditional function\n.func choose(x) {if(x==27,missing,1)}\n.if choose(TEMP)\n.param selected=1\n.endif\n.func choose(x) {0}\n.temp 85\n.end\n").unwrap();
-    assert_eq!(netlist.params.get("selected"), Some(1.0));
+fn conditional_functions_read_the_last_definition() {
+    // The condition calls the last definition of choose, as an ngspice-46
+    // `.if` does, and evaluates it at the forward temperature: the branch
+    // that names the missing parameter is never taken.
+    let netlist = Netlist::parse("Conditional function\n.func choose(x) {1}\n.if choose(TEMP)\n.param selected=1\n.else\n.param selected=2\n.endif\n.func choose(x) {if(x==27,missing,0)}\n.temp 85\n.end\n").unwrap();
+    assert_eq!(netlist.params.get("selected"), Some(2.0));
 }

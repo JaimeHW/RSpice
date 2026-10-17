@@ -623,8 +623,8 @@ mod tests {
                     None,
                     None,
                     ParserReplay {
-                        seed: None,
                         temperatures,
+                        ..ParserReplay::default()
                     },
                     &[],
                     &NoAbort,

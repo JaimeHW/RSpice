@@ -42,6 +42,7 @@ mod stimulus_placement;
 mod undo;
 mod viewport;
 
+pub use editor_ops::ActiveSheetTopology;
 pub use stimulus_placement::PendingStimulusPlacement;
 
 // =============================================================================

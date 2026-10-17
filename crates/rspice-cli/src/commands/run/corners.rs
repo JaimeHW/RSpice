@@ -50,7 +50,7 @@ pub(super) struct PreparedCorner {
     pub args: RunArgs,
 }
 
-/// Inject the selected library before parsing any expressions or output requests.
+/// Read the selected library section as each corner's deck is parsed.
 pub(super) fn prepare(
     source: &str,
     args: &RunArgs,
@@ -86,8 +86,7 @@ pub(super) fn prepare(
             child.output = resolve_output_path(args.output.clone(), config)?
                 .map(|path| tag_output_path(&path, &name));
             let source = if let Some(library) = &library {
-                let (title, body) = source.split_once('\n').unwrap_or((source, ""));
-                format!("{title}\n.lib \"{}\" {name}\n{body}", library.display())
+                with_corner_library(source, library, &name)
             } else {
                 source.to_string()
             };
@@ -99,6 +98,29 @@ pub(super) fn prepare(
             })
         })
         .collect()
+}
+
+/// `source` with the corner's library section read as the last card of the
+/// base deck, ahead of its `.END` or first `.ALTER`.
+///
+/// The last definition of a parameter binds every reader in the deck, so a
+/// section read last overrides a nominal `.PARAM` the deck itself writes,
+/// wherever that definition and its readers sit. Read first, the deck's own
+/// definition would win and every corner would simulate the nominal circuit.
+fn with_corner_library(source: &str, library: &std::path::Path, corner: &str) -> String {
+    let card = format!(".lib \"{}\" {corner}\n", library.display());
+    // The first line is the title, never a card.
+    let mut end = source.find('\n').map_or(source.len(), |at| at + 1);
+    for line in source[end..].split_inclusive('\n') {
+        let head = line.split_whitespace().next().unwrap_or_default();
+        if head.eq_ignore_ascii_case(".end") || head.eq_ignore_ascii_case(".alter") {
+            break;
+        }
+        end += line.len();
+    }
+    let (deck, rest) = source.split_at(end);
+    let separator = if deck.ends_with('\n') { "" } else { "\n" };
+    format!("{deck}{separator}{card}{rest}")
 }
 
 pub(super) fn run(

@@ -121,33 +121,33 @@ impl SchematicState {
         self.with_undo("draw wire", |schematic| {
             // The undo record opened with every sheet present; the other
             // sheets step out only while the route is laid down.
-            let other_sheets = schematic.design.take_hidden_wire_topology(&hidden);
-            // Split the path into individual 2-point wire segments. The
-            // complete route and every topology repair it causes are one
-            // atomic user operation.
-            let mut endpoints_to_check = Vec::new();
+            schematic.with_active_wire_topology(&hidden, |schematic, scope| {
+                // Split the path into individual 2-point wire segments. The
+                // complete route and every topology repair it causes are one
+                // atomic user operation.
+                let mut endpoints_to_check = Vec::new();
 
-            for i in 0..simplified.len() - 1 {
-                let segment = vec![simplified[i], simplified[i + 1]];
-                endpoints_to_check.push(simplified[i]);
-                if i == simplified.len() - 2 {
-                    endpoints_to_check.push(simplified[i + 1]);
+                for i in 0..simplified.len() - 1 {
+                    let segment = vec![simplified[i], simplified[i + 1]];
+                    endpoints_to_check.push(simplified[i]);
+                    if i == simplified.len() - 2 {
+                        endpoints_to_check.push(simplified[i + 1]);
+                    }
+                    if let Some(wire_id) = schematic.add_wire(segment) {
+                        last_wire_id = Some(wire_id);
+                    }
                 }
-                if let Some(wire_id) = schematic.add_wire(segment) {
-                    last_wire_id = Some(wire_id);
+
+                // Professional EDA behavior: split existing wires at T-junction
+                // points. Keeping this inside the route transaction guarantees
+                // that one Undo restores both the route and the prior topology.
+                for point in endpoints_to_check {
+                    schematic.split_wires_at_t_junction(point, scope);
                 }
-            }
 
-            // Professional EDA behavior: split existing wires at T-junction
-            // points. Keeping this inside the route transaction guarantees
-            // that one Undo restores both the route and the prior topology.
-            for point in endpoints_to_check {
-                schematic.split_wires_at_t_junction(point);
-            }
-
-            // Add junction markers where 3+ wire endpoints meet.
-            schematic.update_wire_junctions();
-            other_sheets.restore(&mut schematic.design);
+                // Add junction markers where 3+ wire endpoints meet.
+                schematic.update_wire_junctions(scope);
+            });
         });
 
         last_wire_id
@@ -162,7 +162,7 @@ impl SchematicState {
     /// This ensures correct rubber-banding: since all wires at the junction
     /// share the same endpoint vertex, moving any attached wire keeps the
     /// junction topology intact.
-    pub fn split_wires_at_t_junction(&mut self, point: Point) {
+    pub fn split_wires_at_t_junction(&mut self, point: Point, _scope: &ActiveSheetTopology) {
         for wire_id in wire_edit::wires_to_split_at(self.design.document(), point) {
             let _ = self.split_wire(wire_id, point);
         }

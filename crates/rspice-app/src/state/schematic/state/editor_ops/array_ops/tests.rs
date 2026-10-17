@@ -273,7 +273,7 @@ fn resolved_internal_wire_connections_are_remapped_per_replica() {
     };
 
     let preview = state
-        .preview_array_selection_resolved(&plan, terminals, bounds)
+        .preview_array_selection_resolved(&plan, &every_sheet, terminals, bounds)
         .unwrap();
     assert_eq!(preview.wires().len(), 1);
     assert_eq!(preview.connections().len(), 2);
@@ -285,7 +285,7 @@ fn resolved_internal_wire_connections_are_remapped_per_replica() {
             .all(|connection| connection.wire_id == generated_wire_id)
     );
     state
-        .array_selection_resolved(&plan, terminals, bounds)
+        .array_selection_resolved(&plan, &every_sheet, terminals, bounds)
         .unwrap();
     assert_eq!(state.design.document().connections, preview.connections());
 }
@@ -755,7 +755,7 @@ fn snapped_durable_connections_capture_implicit_wire_and_close_selection_symmetr
     };
 
     let preview = state
-        .preview_array_selection_resolved(&plan, terminals, bounds)
+        .preview_array_selection_resolved(&plan, &every_sheet, terminals, bounds)
         .unwrap();
     assert_eq!(preview.wires().len(), 1);
     assert_eq!(preview.connections().len(), 2);
@@ -764,7 +764,7 @@ fn snapped_durable_connections_capture_implicit_wire_and_close_selection_symmetr
     assert!(preview.object_ids().wires.contains(&wire_id));
     assert!(preview.object_ids().wires.contains(&preview.wires()[0].id));
     state
-        .array_selection_resolved(&plan, terminals, bounds)
+        .array_selection_resolved(&plan, &every_sheet, terminals, bounds)
         .unwrap();
     assert_eq!(state.design.document().connections.len(), 4);
     assert!(state.session.editor.selection.has_wire(wire_id));
@@ -823,7 +823,7 @@ fn explicitly_selected_wire_preserves_durable_terminal_ownership_without_duplica
     };
 
     let preview = state
-        .preview_array_selection_resolved(&plan, terminals, bounds)
+        .preview_array_selection_resolved(&plan, &every_sheet, terminals, bounds)
         .unwrap();
     assert_eq!(preview.connections().len(), 1);
     assert_eq!(preview.connections()[0].terminal_name, "durable-terminal");
@@ -858,7 +858,12 @@ fn resolved_authored_bounds_enforce_symmetric_body_conductor_and_anchor_collisio
     )
     .unwrap();
     assert!(matches!(
-        component_case.preview_array_selection_resolved(&component_plan, terminals, bounds),
+        component_case.preview_array_selection_resolved(
+            &component_plan,
+            &every_sheet,
+            terminals,
+            bounds
+        ),
         Err(SchematicArrayError::GeometryCollision { .. })
     ));
 
@@ -888,7 +893,12 @@ fn resolved_authored_bounds_enforce_symmetric_body_conductor_and_anchor_collisio
         SchematicArrayPlacement::Pitch(Point::new(100, 0)),
     );
     assert!(matches!(
-        conductor_case.preview_array_selection_resolved(&conductor_plan, terminals, bounds),
+        conductor_case.preview_array_selection_resolved(
+            &conductor_plan,
+            &every_sheet,
+            terminals,
+            bounds
+        ),
         Err(SchematicArrayError::GeometryCollision { .. })
     ));
 
@@ -910,7 +920,7 @@ fn resolved_authored_bounds_enforce_symmetric_body_conductor_and_anchor_collisio
         SchematicArrayPlacement::Pitch(Point::new(100, 0)),
     );
     assert!(matches!(
-        anchor_case.preview_array_selection_resolved(&anchor_plan, terminals, bounds),
+        anchor_case.preview_array_selection_resolved(&anchor_plan, &every_sheet, terminals, bounds),
         Err(SchematicArrayError::GeometryCollision { .. })
     ));
 
@@ -928,7 +938,7 @@ fn resolved_authored_bounds_enforce_symmetric_body_conductor_and_anchor_collisio
     )
     .unwrap();
     assert!(matches!(
-        body_case.preview_array_selection_resolved(&body_plan, terminals, bounds),
+        body_case.preview_array_selection_resolved(&body_plan, &every_sheet, terminals, bounds),
         Err(SchematicArrayError::GeometryCollision { .. })
     ));
 }
