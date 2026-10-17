@@ -823,6 +823,20 @@ fn print_site_costs() {
         )
         .collect();
     let (circles, tessellate_ms) = idle_frame_circles_and_tessellation();
+    // Every wire the active sheet draws, in plain ink, as the canvas groups
+    // them at fit.
+    let chain_groups = vec![(
+        rspice_schematic_editor::view::drawing::ConductorInk::Plain,
+        state
+            .schematic
+            .document()
+            .wires
+            .iter()
+            .enumerate()
+            .filter(|(_, wire)| design.object_is_visible(wire.id))
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>(),
+    )];
     let sites = [
         (
             "symbol context, resolved afresh (C-6)",
@@ -899,6 +913,16 @@ fn print_site_costs() {
                     wires.iter().map(|wire| wire.points.as_slice()),
                 )
                 .len()
+            }),
+        ),
+        (
+            "conductor chains, held (C-21)",
+            site_ms(|| {
+                design
+                    .canvas_cache
+                    .expect("the fixture's canvas cache is built")
+                    .conductor_chains(&state.schematic.document().wires, chain_groups.clone())
+                    .len()
             }),
         ),
         (

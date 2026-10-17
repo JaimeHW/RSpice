@@ -14,6 +14,8 @@ use rspice_design::schematic::wire::Wire;
 use rspice_design_model::Point;
 use rspice_design_model::design_management::SheetId;
 
+use crate::view::drawing::{ConductorInk, chain_conductors};
+
 const SPATIAL_CELL: i32 = 256;
 const MAX_CELLS_PER_WIRE: i64 = 4_096;
 
@@ -51,6 +53,61 @@ pub struct CanvasCache {
     /// than once per hover frame. Behind a lock because the canvas reads the
     /// cache through a shared borrow.
     junction_candidates: Mutex<Option<(JunctionCandidateScope, Arc<Vec<Point>>)>>,
+
+    /// The conductor chains last painted, with what they were chained from.
+    conductor_chains: Mutex<Option<HeldConductorChains>>,
+}
+
+/// One frame's conductors to paint: per ink, in paint order, the indices of
+/// the visible wires drawn in it.
+pub type ConductorGroups = Vec<(ConductorInk, Vec<usize>)>;
+
+/// Each ink's chained conductor paths, in paint order.
+pub type ConductorChains = Arc<Vec<(ConductorInk, Vec<Vec<Point>>)>>;
+
+/// Chains and everything they were chained from: the grouping, and every
+/// grouped wire's points by content, so a wire moved without a topology
+/// bump still chains afresh.
+#[derive(Debug)]
+struct HeldConductorChains {
+    groups: ConductorGroups,
+    lengths: Vec<usize>,
+    points: Vec<Point>,
+    chains: ConductorChains,
+}
+
+/// The points of the wires `indices` names, in order; a missing wire has
+/// none.
+fn wire_points<'a>(
+    wires: &'a [Wire],
+    indices: &'a [usize],
+) -> impl Iterator<Item = &'a [Point]> + 'a {
+    indices.iter().map(|index| {
+        wires
+            .get(*index)
+            .map_or(&[][..], |wire| wire.points.as_slice())
+    })
+}
+
+impl HeldConductorChains {
+    /// Whether `groups` over `wires` is what these chains were built from.
+    fn chained_from(&self, wires: &[Wire], groups: &ConductorGroups) -> bool {
+        if self.groups != *groups {
+            return false;
+        }
+        let mut lengths = self.lengths.iter();
+        let mut points = self.points.as_slice();
+        for wire in groups
+            .iter()
+            .flat_map(|(_, indices)| wire_points(wires, indices))
+        {
+            if lengths.next() != Some(&wire.len()) || !points.starts_with(wire) {
+                return false;
+            }
+            points = &points[wire.len()..];
+        }
+        true
+    }
 }
 
 impl Clone for CanvasCache {
@@ -76,6 +133,10 @@ impl CanvasCache {
         self.oversized_wires.clear();
         *self
             .junction_candidates
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner) = None;
+        *self
+            .conductor_chains
             .get_mut()
             .unwrap_or_else(PoisonError::into_inner) = None;
 
@@ -183,6 +244,40 @@ impl CanvasCache {
         candidates
     }
 
+    /// The chained paths of `groups` over `wires`: the held ones when the
+    /// grouping and every grouped wire's points are what they were chained
+    /// from, else chained afresh and held. A steady frame then only compares;
+    /// chaining copies every wire and indexes every end.
+    pub fn conductor_chains(&self, wires: &[Wire], groups: ConductorGroups) -> ConductorChains {
+        let mut held = self
+            .conductor_chains
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(held) = held.as_ref()
+            && held.chained_from(wires, &groups)
+        {
+            return Arc::clone(&held.chains);
+        }
+        let grouped = || {
+            groups
+                .iter()
+                .flat_map(|(_, indices)| wire_points(wires, indices))
+        };
+        let chains: ConductorChains = Arc::new(
+            groups
+                .iter()
+                .map(|(ink, indices)| (*ink, chain_conductors(wire_points(wires, indices))))
+                .collect(),
+        );
+        *held = Some(HeldConductorChains {
+            lengths: grouped().map(<[Point]>::len).collect(),
+            points: grouped().flatten().copied().collect(),
+            groups,
+            chains: Arc::clone(&chains),
+        });
+        chains
+    }
+
     /// Sorted wire-list candidates for an exact authored grid point.
     pub fn wire_indices_at_point(&self, point: Point) -> Vec<usize> {
         let mut indices = self.oversized_wires.clone();
@@ -195,5 +290,78 @@ impl CanvasCache {
         indices.sort_unstable();
         indices.dedup();
         indices
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn corner_wires() -> Vec<Wire> {
+        vec![
+            Wire::new(1, vec![Point::new(0, 0), Point::new(40, 0)]),
+            Wire::new(2, vec![Point::new(40, 0), Point::new(40, 40)]),
+            Wire::new(3, vec![Point::new(0, 80), Point::new(40, 80)]),
+        ]
+    }
+
+    fn chained_afresh(
+        wires: &[Wire],
+        groups: &ConductorGroups,
+    ) -> Vec<(ConductorInk, Vec<Vec<Point>>)> {
+        groups
+            .iter()
+            .map(|(ink, indices)| (*ink, chain_conductors(wire_points(wires, indices))))
+            .collect()
+    }
+
+    /// The held chains are reused for the same grouping over the same
+    /// wires, and chained afresh when the grouping changes (an ink, a wire
+    /// added, dropped or reordered) or when a grouped wire's points change
+    /// with the grouping unchanged, which no topology counter has to report.
+    #[test]
+    fn held_conductor_chains_follow_their_grouping_and_wires() {
+        type Inputs = (Vec<Wire>, ConductorGroups);
+        let base: Inputs = (
+            corner_wires(),
+            vec![
+                (ConductorInk::Plain, vec![0, 1]),
+                (ConductorInk::Selected, vec![2]),
+            ],
+        );
+        let changes: [(&str, fn(&mut Inputs)); 6] = [
+            ("ink", |inputs| inputs.1[1].0 = ConductorInk::Highlighted),
+            ("wire added", |inputs| inputs.1[1].1.insert(0, 1)),
+            ("wire dropped", |inputs| inputs.1[0].1.truncate(1)),
+            ("order", |inputs| inputs.1[0].1.reverse()),
+            ("a point moved", |inputs| {
+                inputs.0[1].points[1] = Point::new(80, 40)
+            }),
+            ("a vertex added", |inputs| {
+                inputs.0[0].points.insert(1, Point::new(20, 0));
+            }),
+        ];
+        for (input, change) in changes {
+            let cache = CanvasCache::default();
+            let held = cache.conductor_chains(&base.0, base.1.clone());
+            assert!(Arc::ptr_eq(
+                &held,
+                &cache.conductor_chains(&base.0, base.1.clone())
+            ));
+            let mut changed = base.clone();
+            change(&mut changed);
+            let fresh = cache.conductor_chains(&changed.0, changed.1.clone());
+            assert!(!Arc::ptr_eq(&held, &fresh), "{input}: chained afresh");
+            assert_eq!(*fresh, chained_afresh(&changed.0, &changed.1), "{input}");
+        }
+
+        // A rebuild for a new topology drops what was held.
+        let mut cache = CanvasCache::default();
+        let held = cache.conductor_chains(&base.0, base.1.clone());
+        cache.rebuild(&base.0, &[], 2);
+        assert!(!Arc::ptr_eq(
+            &held,
+            &cache.conductor_chains(&base.0, base.1.clone())
+        ));
     }
 }

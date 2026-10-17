@@ -17,6 +17,7 @@ use super::{
 use crate::{
     session::{
         EditorSession,
+        canvas_cache::ConductorGroups,
         selection::SchematicSelectionFilter,
         visibility::{SchematicNetHighlighting, SchematicParameterLabelVisibility},
     },
@@ -138,7 +139,7 @@ pub fn draw_content(
     // then class colours, highlighted nets and the selection, so emphasis
     // stays on top.
     type ConductorStyle = (u8, [u8; 4]);
-    let mut conductor_groups: BTreeMap<ConductorStyle, (ConductorInk, Vec<&[Point]>)> =
+    let mut conductor_groups: BTreeMap<ConductorStyle, (ConductorInk, Vec<usize>)> =
         BTreeMap::new();
     // The ink of every wire drawn other than plain, by wire index, so a
     // junction takes the colour and the width of what it joins.
@@ -192,11 +193,27 @@ pub fn draw_content(
             .entry((ink.rank(), colour_key))
             .or_insert_with(|| (ink, Vec::new()))
             .1
-            .push(wire.points.as_slice());
+            .push(index);
     }
-    for (_, (ink, polylines)) in conductor_groups {
-        for chain in chain_conductors(polylines) {
-            draw_conductor(painter, viewport, &chain, ink);
+    // The chains are held across frames while the grouping and the wires
+    // stand still.
+    let wires = &view.design.document.wires;
+    let groups: ConductorGroups = conductor_groups.into_values().collect();
+    let chains = match cache {
+        Some(cache) => cache.conductor_chains(wires, groups),
+        None => std::sync::Arc::new(
+            groups
+                .into_iter()
+                .map(|(ink, indices)| {
+                    let polylines = indices.iter().map(|index| wires[*index].points.as_slice());
+                    (ink, chain_conductors(polylines))
+                })
+                .collect(),
+        ),
+    };
+    for (ink, chains) in chains.iter() {
+        for chain in chains {
+            draw_conductor(painter, viewport, chain, *ink);
         }
     }
 
