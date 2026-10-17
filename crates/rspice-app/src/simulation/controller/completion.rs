@@ -9,6 +9,9 @@ impl SimulationController {
         export_io: &(impl ExportWorkflowIo + ?Sized),
         result: Result<crate::simulation::SimulationResult, SimulationError>,
     ) {
+        // What the task raised and went on past. Taken on every outcome, so
+        // an aborted task's notices cannot be read as the next task's.
+        let notices = self.runner.drain_engine_notices();
         match result {
             Ok(sim_result) => {
                 log::info!(
@@ -140,6 +143,17 @@ impl SimulationController {
                 self.materialize_current_saved_outputs(&mut analysis_result);
                 if analysis_result.analysis_type == AnalysisType::Transient {
                     self.populate_transient_post_views(state, &analysis_result);
+                }
+                // The Console has had the prose as the engine logged it; the
+                // run's batch gets the conditions, one record each for the
+                // whole run.
+                if let Some(run_sequence) = target_run_id {
+                    state.publish_run_notices(
+                        &current_label,
+                        notices,
+                        &analysis_result.measurements,
+                        run_sequence,
+                    );
                 }
                 let retention_error = analysis_result.error_message.clone();
                 if let Some(provenance) = self.current_provenance.take() {
@@ -328,6 +342,11 @@ impl SimulationController {
                     &attribution,
                     self.target_run_id(state),
                 );
+                // A clamp the analysis raised before it failed is part of
+                // the account of the failure.
+                if let Some(run_sequence) = self.target_run_id(state) {
+                    state.publish_run_notices(&failed_label, notices, &[], run_sequence);
+                }
                 let failed_type = self
                     .current_spec
                     .as_ref()

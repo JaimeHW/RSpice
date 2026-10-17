@@ -90,19 +90,41 @@ pub(crate) fn run_generated_batch(
     run_batch(state, controller, expected_lifecycle)
 }
 
+/// Run `source` as a manual deck through the real controller and hand back
+/// the session it ran in, for a test that reads what the run published.
+pub(crate) fn run_manual_batch_session(source: &str) -> AppState {
+    let mut state = AppState::default();
+    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.workspace.content.netlist_source = Some(source.to_owned());
+    let mut controller = SimulationController::new();
+    controller
+        .validate_manual_deck_document(&state)
+        .expect("fixture source passes complete preparation");
+    run_batch_session(&mut state, controller, SimulationRunLifecycle::Completed);
+    state
+}
+
 fn run_batch(
     mut state: AppState,
+    controller: SimulationController,
+    expected_lifecycle: SimulationRunLifecycle,
+) -> crate::state::SimulationRun {
+    run_batch_session(&mut state, controller, expected_lifecycle)
+}
+
+fn run_batch_session(
+    state: &mut AppState,
     mut controller: SimulationController,
     expected_lifecycle: SimulationRunLifecycle,
 ) -> crate::state::SimulationRun {
     let export_io = super::tests::MockExportWorkflowIo::default();
     state.simulation.execution.trigger_simulation = true;
-    controller.update(&mut state, &export_io);
+    controller.update(state, &export_io);
     let deadline = Instant::now() + Duration::from_secs(60);
     while controller.has_active_batch() {
         assert!(Instant::now() < deadline, "fixture batch timed out");
         std::thread::sleep(Duration::from_millis(1));
-        controller.update(&mut state, &export_io);
+        controller.update(state, &export_io);
     }
     assert_eq!(
         state.simulation.retained.runs.len(),

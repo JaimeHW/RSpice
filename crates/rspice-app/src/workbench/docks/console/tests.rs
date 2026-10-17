@@ -171,6 +171,75 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
     }
 }
 
+/// A run that completes with an engine warning puts it on the page, as the
+/// run's failures are put there: a record with a code, a subject and
+/// somewhere to go, beside the Console's prose rather than instead of it.
+///
+/// Driven through the real run: the engine clamps the card's `pbs` while it
+/// binds `M1`, the runner hands the notice over with the result, and the
+/// controller's completion path publishes it. Before this the clamp reached
+/// the Console as one line and the page said nothing.
+#[test]
+fn a_completed_runs_engine_warnings_reach_the_page_as_canonical_records() {
+    use crate::workbench::app_state::diagnostic_store::DiagnosticLevel;
+
+    let mut state = crate::simulation::controller::test_execution::run_manual_batch_session(
+        "BSIM4 clamp\nVD d 0 1\nVG g 0 1\nM1 d g 0 0 nch L=1u W=10u\n\
+         .model nch nmos level=54 version=4.8 pbs=0.05\n.op\n.end\n",
+    );
+    state.project_lifecycle.authority.open_session();
+
+    let batch = state
+        .diagnostics
+        .batches()
+        .find(|batch| batch.inputs.owner() == DiagnosticOwner::Run)
+        .expect("the run published its warnings")
+        .clone();
+    let clamp = batch
+        .records
+        .iter()
+        .find(|record| record.canonical.code.as_ref() == "MODEL-PARAMETER-CLAMPED")
+        .unwrap_or_else(|| panic!("the pbs clamp is a record: {:#?}", batch.records));
+    assert_eq!(clamp.level, DiagnosticLevel::Warning);
+    assert!(
+        clamp.subject.object.eq_ignore_ascii_case("model nch"),
+        "the subject is the card, as the engine names it: {}",
+        clamp.subject.object
+    );
+    assert!(
+        clamp.message.contains("pbs = 50m") && clamp.message.contains("uses 100m"),
+        "the record states the parameter, its value and the value used: {}",
+        clamp.message
+    );
+    assert!(
+        clamp.details.contains("M1"),
+        "the record names the element that bound the card: {}",
+        clamp.details
+    );
+    assert!(
+        clamp.route.is_some(),
+        "a manual deck's warning is repaired in the deck"
+    );
+
+    let listed = listing(&state);
+    assert!(
+        (0..listed.len())
+            .filter_map(|index| listed.row(index))
+            .any(|row| row.message == clamp.message),
+        "the page lists the record"
+    );
+    assert!(
+        listed.counts().warnings > 0,
+        "a clamp counts as a warning: {:?}",
+        listed.counts()
+    );
+    assert_eq!(
+        listed.counts().errors,
+        0,
+        "a run that completed counts no error"
+    );
+}
+
 /// The page reads records. It must not read the session log back in, which is
 /// what made it a severity filter over everything that had ever happened.
 ///
