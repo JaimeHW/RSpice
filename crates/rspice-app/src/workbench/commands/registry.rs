@@ -279,10 +279,10 @@ const PREFERENCES: &[ShortcutBinding] = &[primary(
     ALL,
 )];
 const UNDO: &[ShortcutBinding] = &[primary(chord(Key::Z, true, false, false, "Ctrl+Z"), ALL)];
-const REDO: &[ShortcutBinding] = &[primary(
-    chord(Key::Z, true, false, true, "Ctrl+Shift+Z"),
-    ALL,
-)];
+const REDO: &[ShortcutBinding] = &[
+    primary(chord(Key::Z, true, false, true, "Ctrl+Shift+Z"), ALL),
+    alternate(chord(Key::Y, true, false, false, "Ctrl+Y"), ALL),
+];
 const CUT: &[ShortcutBinding] = &[primary(chord(Key::X, true, false, false, "Ctrl+X"), ALL)];
 const COPY: &[ShortcutBinding] = &[primary(chord(Key::C, true, false, false, "Ctrl+C"), ALL)];
 const PASTE: &[ShortcutBinding] = &[primary(chord(Key::V, true, false, false, "Ctrl+V"), ALL)];
@@ -511,6 +511,10 @@ const CHECK_AND_SAVE: &[ShortcutBinding] = &[primary(
 const NEXT_VIOLATION: &[ShortcutBinding] = &[
     primary(chord(Key::CloseBracket, false, false, false, "]"), ALL),
     alternate(chord(Key::F8, false, false, false, "F8"), ALL),
+];
+const PREVIOUS_VIOLATION: &[ShortcutBinding] = &[
+    primary(chord(Key::OpenBracket, false, false, false, "["), ALL),
+    alternate(chord(Key::F8, false, false, true, "Shift+F8"), ALL),
 ];
 const RUN_SIMULATION: &[ShortcutBinding] = &[
     primary(chord(Key::F5, false, false, false, "F5"), DESKTOP),
@@ -993,6 +997,7 @@ impl Command {
             Self::RunChecks => RUN_CHECKS,
             Self::CheckAndSave => CHECK_AND_SAVE,
             Self::NextViolation => NEXT_VIOLATION,
+            Self::PreviousViolation => PREVIOUS_VIOLATION,
             Self::RunSimulation => RUN_SIMULATION,
             Self::StopSimulation => STOP_SIMULATION,
             Self::PreflightChecks => PREFLIGHT,

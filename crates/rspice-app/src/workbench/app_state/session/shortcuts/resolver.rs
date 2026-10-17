@@ -1411,6 +1411,40 @@ mod tests {
         }
     }
 
+    /// Next violation had `]` and F8 while Previous had no key at all, and
+    /// Redo answered only Ctrl+Shift+Z (audit E-16). Previous takes the
+    /// mirror keys, `[` and Shift+F8, and Redo also answers Ctrl+Y.
+    #[test]
+    fn previous_marker_and_redo_answer_their_conventional_keys() {
+        let profile = ShortcutPreferences::default();
+        let mut state = ShortcutResolverState::default();
+        let shift = Modifiers {
+            shift: true,
+            ..Modifiers::NONE
+        };
+        for (time, key, modifiers, environment, command) in [
+            (
+                0,
+                Key::OpenBracket,
+                Modifiers::NONE,
+                verification(),
+                Command::PreviousViolation,
+            ),
+            (1, Key::F8, shift, design(false), Command::PreviousViolation),
+            (2, Key::Y, primary(), design(true), Command::Redo),
+        ] {
+            let resolved = state.resolve(
+                &snapshot(&[event(key, modifiers, false)], false),
+                &profile,
+                CommandPlatform::Desktop,
+                environment,
+                Duration::from_millis(time),
+                |candidate| candidate == command,
+            );
+            assert_eq!(resolved.command, Some(command), "{key:?} {modifiers:?}");
+        }
+    }
+
     /// Ctrl+D belongs to whichever surface holds focus: the focused source
     /// editor duplicates its line, the focused canvas its selection.
     #[test]
