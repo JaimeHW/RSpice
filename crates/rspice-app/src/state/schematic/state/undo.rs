@@ -117,7 +117,6 @@ impl SchematicState {
             self.session.is_dirty = true;
             self.session.editor.selection.clear();
             self.session.editor.snap_engine.grid_size = self.design.document().grid_size;
-            self.repair_clipboard_after_load();
             self.remove_stale_runtime_references(&repaired);
         }
         if let Some(cancel) = self.session.operation_cancel.take()
@@ -179,7 +178,6 @@ impl SchematicState {
         self.session.is_dirty = true;
         self.session.editor.selection.clear();
         self.session.editor.snap_engine.grid_size = self.design.document().grid_size;
-        self.repair_clipboard_after_load();
         self.remove_stale_runtime_references(&repaired);
         true
     }
@@ -194,7 +192,6 @@ impl SchematicState {
         self.session.is_dirty = true;
         self.session.editor.selection.clear();
         self.session.editor.snap_engine.grid_size = self.design.document().grid_size;
-        self.repair_clipboard_after_load();
         self.remove_stale_runtime_references(&repaired);
         true
     }

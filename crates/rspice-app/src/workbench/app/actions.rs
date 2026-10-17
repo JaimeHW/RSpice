@@ -292,7 +292,7 @@ impl RSpiceApp {
 
     pub(in crate::workbench) fn action_edit_paste(&mut self) {
         let anchor = self.state.schematic_paste_anchor();
-        let message = match self.state.schematic.paste_at_checked(anchor) {
+        let message = match self.state.paste_schematic_clipboard_at(anchor) {
             Ok(true) => return,
             Ok(false) => "Paste could not be completed at the current canvas target".to_owned(),
             Err(reason) => reason,

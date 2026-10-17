@@ -53,8 +53,12 @@ mod tests {
         state.document_mut_for_test().components[2].value = "0.9".to_owned();
         state.document_mut_for_test().components[3].name = "bias".to_owned();
         state.document_mut_for_test().components[4].params = "vref=Vbias".to_owned();
-        state.copy_selection();
-        assert!(state.paste_at_checked(Point::new(0, 1000)).unwrap());
+        let clipboard = state.copy_selection();
+        assert!(
+            state
+                .paste_at_checked(&clipboard, Point::new(0, 1000))
+                .unwrap()
+        );
         let netlist = generate_netlist(&state).netlist;
         for expected in ["K1 Lcoil L2 0.9", "K2 L3 L4 0.9"] {
             assert!(netlist.lines().any(|line| line == expected), "{netlist}");

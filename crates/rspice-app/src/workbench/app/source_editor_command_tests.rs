@@ -195,7 +195,7 @@ fn edit_select_all_then_copy_reach_the_source_editor() {
         "Select all then Copy put the whole source on the clipboard"
     );
     assert!(
-        app.state.schematic.session.editor.clipboard.is_empty(),
+        app.state.ui.schematic_clipboard.is_empty(),
         "Copy did not copy the schematic selection"
     );
     assert_eq!(root_text(&app, bundle_id), original);

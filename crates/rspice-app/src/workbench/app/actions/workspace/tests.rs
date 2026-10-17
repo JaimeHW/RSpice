@@ -232,9 +232,9 @@ fn production_copy_uses_authored_symbol_terminal_geometry() {
     state.schematic.session.editor.selection.select_component(2);
 
     assert!(state.copy_active_schematic_selection());
-    assert_eq!(state.schematic.session.editor.clipboard.components.len(), 2);
+    assert_eq!(state.ui.schematic_clipboard.components.len(), 2);
     assert_eq!(
-        state.schematic.session.editor.clipboard.wires.len(),
+        state.ui.schematic_clipboard.wires.len(),
         1,
         "the conductor between authored pins must travel with both selected instances"
     );

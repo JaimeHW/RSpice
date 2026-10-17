@@ -566,7 +566,7 @@ impl Command {
                 } else {
                     active_schematic_editor(app)
                         && !state.schematic_edit_read_only()
-                        && !state.schematic.session.editor.clipboard.is_empty()
+                        && !state.ui.schematic_clipboard.is_empty()
                 }
             }
             Self::SelectAll => active_symbol_editor(app) || active_schematic_editor(app),

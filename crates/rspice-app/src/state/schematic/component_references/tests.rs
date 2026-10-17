@@ -177,8 +177,12 @@ fn unrelated_display_names_cannot_steal_a_physical_reference() {
 fn paste_rebinds_forward_references_in_one_undo_step() {
     let mut state = coupled_selection();
     let original = state.design.document().components.clone();
-    state.copy_selection();
-    assert!(state.paste_at_checked(Point::new(0, 1000)).unwrap());
+    let clipboard = state.copy_selection();
+    assert!(
+        state
+            .paste_at_checked(&clipboard, Point::new(0, 1000))
+            .unwrap()
+    );
     let pasted = state.design.document().components.clone();
     assert_eq!(&pasted[..original.len()], original);
     assert_eq!(parameter(component(&pasted, "L3"), "coupled_to"), "L4");
@@ -303,9 +307,11 @@ fn rejected_copy_and_array_leave_the_document_history_and_allocators_unchanged()
                 .unwrap()
                 .name = "l1".to_owned();
         }
-        state.copy_selection();
+        let clipboard = state.copy_selection();
         let mut before = state.clone();
-        let error = state.paste_at_checked(Point::new(0, 1000)).unwrap_err();
+        let error = state
+            .paste_at_checked(&clipboard, Point::new(0, 1000))
+            .unwrap_err();
         assert!(error.contains("K1"), "{error}");
         assert_eq!(
             state.design.document().components,

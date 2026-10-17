@@ -733,7 +733,7 @@ mod tests {
 
     #[test]
     fn hierarchy_candidates_preserve_editor_state_without_mutating_source() {
-        use crate::state::{Rotation, Tool, Wire};
+        use crate::state::{Rotation, Tool};
         use rspice_design::schematic::history::SchematicSnapshot;
         use rspice_schematic_editor::session::placement::PendingPartModel;
 
@@ -756,9 +756,6 @@ mod tests {
             model: "pending".to_owned(),
             variant: None,
         });
-        let mut invalid_wire = Wire::segment(99, Point::origin(), Point::new(10, 0));
-        invalid_wire.points.clear();
-        schematic.session.editor.clipboard.wires.push(invalid_wire);
         schematic.session.is_dirty = false;
         let before = SchematicSnapshot::capture(schematic.design.document());
         let selection = schematic.session.editor.selection.clone();
@@ -777,7 +774,6 @@ mod tests {
         assert!(before.is_equal_document(schematic.design.document()));
         assert_eq!(schematic.session.editor.selection, selection);
         assert_eq!(schematic.identity_cursor(), cursor);
-        assert_eq!(schematic.session.editor.clipboard.wires.len(), 1);
         assert!(!schematic.session.is_dirty);
         let parent = candidate.parent;
         assert_eq!(parent.session.editor.zoom, schematic.session.editor.zoom);
@@ -792,7 +788,6 @@ mod tests {
         assert_eq!(parent.undo_description(), Some("seed"));
         assert_eq!(parent.content_version(), schematic.content_version());
         assert_eq!(parent.topology_version(), topology + 2);
-        assert!(parent.session.editor.clipboard.wires.is_empty());
         assert_eq!(
             parent.session.editor.selection.components,
             std::collections::HashSet::from([candidate.instance_id])

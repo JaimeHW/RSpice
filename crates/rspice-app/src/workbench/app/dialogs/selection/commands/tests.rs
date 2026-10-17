@@ -227,11 +227,8 @@ fn cut_copies_the_selection_and_then_removes_it() {
     assert!(state.cut_schematic_selection());
 
     assert_eq!(state.schematic.document().components.len(), 1);
-    assert_eq!(state.schematic.session.editor.clipboard.components.len(), 1);
-    assert_eq!(
-        state.schematic.session.editor.clipboard.components[0].name,
-        "R1"
-    );
+    assert_eq!(state.ui.schematic_clipboard.components.len(), 1);
+    assert_eq!(state.ui.schematic_clipboard.components[0].name, "R1");
     assert_eq!(last_prompt(&state), "Cut 1 object.");
     assert!(state.schematic.undo());
     assert_eq!(state.schematic.document().components.len(), 2);
@@ -299,8 +296,7 @@ fn duplicate_leaves_the_clipboard_byte_identical() {
         .selection
         .select_only_component(41);
     assert!(state.copy_active_schematic_selection());
-    let before =
-        serde_json::to_string(&state.schematic.session.editor.clipboard).expect("clipboard");
+    let before = serde_json::to_string(&state.ui.schematic_clipboard).expect("clipboard");
 
     state
         .schematic
@@ -312,9 +308,9 @@ fn duplicate_leaves_the_clipboard_byte_identical() {
 
     assert_eq!(state.schematic.document().components.len(), 3);
     assert_eq!(
-        serde_json::to_string(&state.schematic.session.editor.clipboard).expect("clipboard"),
+        serde_json::to_string(&state.ui.schematic_clipboard).expect("clipboard"),
         before,
-        "Duplicate borrows the clipboard and must hand it back untouched"
+        "Duplicate must leave the clipboard untouched"
     );
     assert_eq!(last_prompt(&state), "Duplicated 1 object.");
 }
@@ -502,7 +498,7 @@ fn a_read_only_schematic_refuses_every_mutating_command_without_touching_it() {
         assert_eq!(state.log_buffer.len(), logged);
     }
     assert_eq!(state.schematic.document().components.len(), 2);
-    assert!(state.schematic.session.editor.clipboard.is_empty());
+    assert!(state.ui.schematic_clipboard.is_empty());
     assert!(
         state.select_all_schematic_objects(),
         "reading a read-only schematic is not an edit"

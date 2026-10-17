@@ -1,12 +1,13 @@
-//! Delete, Cut, Duplicate and Select all, acting immediately.
+//! Delete, Cut, Paste, Duplicate and Select all, acting immediately.
 //!
-//! Every professional schematic editor treats these four as direct commands
+//! Every professional schematic editor treats these as direct commands
 //! with undo as the safety net; a modal in front of Ctrl+D is a modal the
 //! reader dismisses without reading. What the old review surface computed and
 //! showed up front is still computed — which nets a deletion touches, which
 //! saved outputs and probes still name them, which nets a cut leaves open —
 //! and is reported on the status bar afterwards, as the answer to the gesture.
 
+use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::schematic::view::schematic_symbol_context;
@@ -14,11 +15,12 @@ use crate::schematic::view::sheet_visibility::{
     selectable_objects_on_active_sheet, selection_filtered_to_active_sheet,
     with_hidden_wire_topology_preserved,
 };
-use crate::state::{DuplicateExternalNets, Point, SchematicState, Selection};
+use crate::state::{CellViewRef, DuplicateExternalNets, Point, SchematicState, Selection};
 use rspice_design::connectivity::summary::{
     DesignNet, design_nets_with_hierarchy, projection_nets,
 };
 use rspice_design::hierarchy::HierarchySource;
+use rspice_design::schematic::clipboard::ClipboardData;
 
 use crate::workbench::app_state::AppState;
 
@@ -74,23 +76,23 @@ impl AppState {
         }
 
         let open_nets = cut_open_net_count(state, &target);
-        let previous_clipboard = state.schematic.session.editor.clipboard.clone();
         let previous_selection =
             std::mem::replace(&mut state.schematic.session.editor.selection, target);
-        if !state.copy_active_schematic_selection()
-            || state.schematic.session.editor.clipboard.is_empty()
-        {
-            state.schematic.session.editor.clipboard = previous_clipboard;
+        let Some(copy) = state
+            .capture_active_schematic_selection()
+            .filter(|copy| !copy.is_empty())
+        else {
             state.schematic.session.editor.selection = previous_selection;
             refuse_empty(state);
             return false;
-        }
+        };
         if !with_hidden_wire_topology_preserved(state, SchematicState::delete_selection) {
-            state.schematic.session.editor.clipboard = previous_clipboard;
             state.schematic.session.editor.selection = previous_selection;
             state.prompt("Nothing was cut.");
             return false;
         }
+        // The clipboard changes only once the cut has landed.
+        state.ui.schematic_clipboard = copy;
         state.sync_active_schematic_to_workspace();
 
         state.prompt(match open_nets {
@@ -118,8 +120,8 @@ impl AppState {
 
     /// Duplicate what is selected, placed at `anchor`.
     ///
-    /// The user's clipboard is theirs. Duplicate borrows it to carry the copy and
-    /// hands it back byte for byte, whether the paste landed or not.
+    /// The user's clipboard is theirs: Duplicate carries its own copy and never
+    /// touches it.
     pub(crate) fn duplicate_schematic_selection_at(&mut self, anchor: Point) -> bool {
         let state = self;
         if refuse_read_only(state) {
@@ -133,17 +135,16 @@ impl AppState {
             return false;
         }
 
-        let previous_clipboard = state.schematic.session.editor.clipboard.clone();
         let previous_selection =
             std::mem::replace(&mut state.schematic.session.editor.selection, target);
-        if !state.copy_active_schematic_selection()
-            || state.schematic.session.editor.clipboard.is_empty()
-        {
-            state.schematic.session.editor.clipboard = previous_clipboard;
+        let Some(mut copy) = state
+            .capture_active_schematic_selection()
+            .filter(|copy| !copy.is_empty())
+        else {
             state.schematic.session.editor.selection = previous_selection;
             refuse_empty(state);
             return false;
-        }
+        };
 
         // A design whose hierarchy does not resolve cannot name its nets, and a
         // Duplicate that refuses for that reason is a Duplicate that stops working
@@ -153,13 +154,8 @@ impl AppState {
         let kept = if state.ui.duplicate_external_nets
             == DuplicateExternalNets::PreserveNamedNetAttachment
         {
-            match named_external_attachments(state) {
-                Ok(attachments) => state
-                    .schematic
-                    .session
-                    .editor
-                    .clipboard
-                    .preserve_named_net_attachments(attachments),
+            match named_external_attachments(state, &copy) {
+                Ok(attachments) => copy.preserve_named_net_attachments(attachments),
                 Err(_) => {
                     unresolved_nets = true;
                     0
@@ -169,8 +165,7 @@ impl AppState {
             0
         };
 
-        let pasted = state.schematic.paste_at_checked(anchor);
-        state.schematic.session.editor.clipboard = previous_clipboard;
+        let pasted = state.paste_schematic_objects_at(&copy, anchor);
         if !matches!(pasted, Ok(true)) {
             state.schematic.session.editor.selection = previous_selection;
             state.prompt(
@@ -180,7 +175,6 @@ impl AppState {
             );
             return false;
         }
-        state.sync_active_schematic_to_workspace();
 
         state.prompt(if unresolved_nets {
             format!(
@@ -197,6 +191,31 @@ impl AppState {
             )
         });
         true
+    }
+
+    /// Paste the app's clipboard at `anchor`, whichever cell view it was
+    /// copied from. Returns whether anything was pasted.
+    pub(crate) fn paste_schematic_clipboard_at(&mut self, anchor: Point) -> Result<bool, String> {
+        let clipboard = self.ui.schematic_clipboard.clone();
+        self.paste_schematic_objects_at(&clipboard, anchor)
+    }
+
+    /// Paste `objects` at `anchor` into the active cell view as one undo step.
+    /// The pasted objects become the selection.
+    fn paste_schematic_objects_at(
+        &mut self,
+        objects: &ClipboardData,
+        anchor: Point,
+    ) -> Result<bool, String> {
+        if self.schematic_edit_read_only() {
+            return Ok(false);
+        }
+        let objects = bound_to_active_cell(self, objects)?;
+        let pasted = self.schematic.paste_at_checked(&objects, anchor)?;
+        if pasted {
+            self.sync_active_schematic_to_workspace();
+        }
+        Ok(pasted)
     }
 
     /// Select every object on the active sheet the selection filter admits.
@@ -231,6 +250,42 @@ fn refuse_read_only(state: &AppState) -> bool {
 
 fn refuse_empty(state: &mut AppState) {
     state.prompt("Select something first.");
+}
+
+/// `objects` as the active cell view may receive them. A copy can come from
+/// another cell view, so each hierarchical instance is bound again to its
+/// master's interface as this project now holds it, and an instance of the
+/// cell being edited is refused: the cell would contain itself. Names are
+/// drawn fresh by the paste itself.
+fn bound_to_active_cell<'a>(
+    state: &AppState,
+    objects: &'a ClipboardData,
+) -> Result<Cow<'a, ClipboardData>, String> {
+    let active = &state.workspace.content.active_view;
+    let mut bound = Cow::Borrowed(objects);
+    for (index, component) in objects.components.iter().enumerate() {
+        let Some(binding) = component.library_cell.as_ref() else {
+            continue;
+        };
+        let master = CellViewRef::new(&binding.library, &binding.cell, &binding.view);
+        let buffer = state.workspace.content.schematic_buffers.get(&master.key());
+        if binding.library == active.library
+            && binding.cell == active.cell
+            && (binding.view == active.view || buffer.is_some())
+        {
+            return Err(format!(
+                "Cannot paste {}: it is an instance of {}/{}, the cell being edited, which cannot contain itself.",
+                component.name, binding.library, binding.cell
+            ));
+        }
+        let Some(buffer) = buffer else {
+            continue;
+        };
+        let mut rebound = binding.clone();
+        rebound.bind_interface(&buffer.document().interface_ports());
+        bound.to_mut().components[index].library_cell = Some(rebound);
+    }
+    Ok(bound)
 }
 
 fn object_count(count: usize) -> String {
@@ -735,22 +790,17 @@ fn terminal_identity(
 /// The attachment carries a name into the duplicate, so the name has to be
 /// the one the design gives the conductor. A duplicate stamped with an
 /// editor-buffer name would attach to a net the run does not have.
-fn named_external_attachments(state: &AppState) -> Result<Vec<(Point, String)>, String> {
+fn named_external_attachments(
+    state: &AppState,
+    copy: &ClipboardData,
+) -> Result<Vec<(Point, String)>, String> {
     let selected_components = &state.schematic.session.editor.selection.components;
-    let captured_wires = state
-        .schematic
-        .session
-        .editor
-        .clipboard
+    let captured_wires = copy
         .wires
         .iter()
         .map(|wire| wire.id)
         .collect::<HashSet<_>>();
-    let captured_names = state
-        .schematic
-        .session
-        .editor
-        .clipboard
+    let captured_names = copy
         .net_labels
         .iter()
         .map(|label| label.name.as_str())

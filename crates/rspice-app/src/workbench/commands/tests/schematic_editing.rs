@@ -551,16 +551,7 @@ fn delete_cut_and_duplicate_act_on_the_schematic_without_a_dialog() {
     Command::Cut.execute(&mut app);
     assert!(!app.state.dialogs.application_modal_open());
     assert_eq!(app.state.schematic.document().components.len(), 1);
-    assert_eq!(
-        app.state
-            .schematic
-            .session
-            .editor
-            .clipboard
-            .components
-            .len(),
-        1
-    );
+    assert_eq!(app.state.ui.schematic_clipboard.components.len(), 1);
 
     app.state
         .schematic
@@ -1277,5 +1268,98 @@ fn repairing_a_stale_instance_restores_its_x_line() {
             .any(|line| line.trim_start().to_ascii_lowercase().starts_with("x1 ")),
         "the repaired instance emits again:\n{}",
         repaired.netlist
+    );
+}
+
+/// Library `work` with cells `a` and `b`, each with a schematic view; `a`
+/// is open on the design canvas.
+fn app_with_two_cells() -> RSpiceApp {
+    use crate::state::{Cell, Library, View, ViewType};
+
+    let mut app = RSpiceApp::test_instance();
+    let mut library = Library::new("work");
+    for name in ["a", "b"] {
+        let mut cell = Cell::new(name);
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        library.add_cell(cell);
+    }
+    app.state.library_manager.add_library(library);
+    app.state
+        .open_workspace_view(crate::state::CellViewRef::new("work", "a", "schematic"));
+    app.state.workbench.activate(Workspace::Design);
+    app
+}
+
+/// Two inductors named L1 and L2 and a K1 coupling them, ids from `first`.
+fn coupled_pair(first: u64) -> Vec<crate::state::Component> {
+    use crate::state::{Component, ComponentType, Point};
+
+    let x = i32::try_from(first).expect("small id") * 100;
+    let mut l1 = Component::new(first, ComponentType::Inductor, Point::new(x, 0));
+    l1.name = "L1".to_owned();
+    let mut l2 = Component::new(first + 1, ComponentType::Inductor, Point::new(x, 100));
+    l2.name = "L2".to_owned();
+    let mut k1 = Component::new(
+        first + 2,
+        ComponentType::CoupledInductor,
+        Point::new(x + 50, 50),
+    );
+    k1.name = "K1".to_owned();
+    k1.params = "inductors=\"L1 L2\"".to_owned();
+    vec![l1, l2, k1]
+}
+
+/// The clipboard belonged to each cell's editor, so a copy made in one cell
+/// was gone once another cell opened, and Paste was disabled there. It
+/// belongs to the app now. Copy a coupled pair in cell A, open cell B,
+/// which has its own L1, L2 and K1, and paste: the copies take B's next
+/// free names and the new K couples the new pair (audit E-8).
+#[test]
+fn a_copy_in_one_cell_pastes_into_another_with_its_coupling() {
+    let mut app = app_with_two_cells();
+    app.state.schematic.document_mut_for_test().components = coupled_pair(1);
+    for id in [1, 2, 3] {
+        app.state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(id);
+    }
+    Command::Copy.execute(&mut app);
+
+    app.state
+        .open_workspace_view(crate::state::CellViewRef::new("work", "b", "schematic"));
+    app.state.workbench.activate(Workspace::Design);
+    app.state.schematic.document_mut_for_test().components = coupled_pair(11);
+    app.state.schematic.init_undo_history();
+    assert!(
+        Command::Paste.is_enabled(&app),
+        "a copy from cell A pastes here"
+    );
+
+    Command::Paste.execute(&mut app);
+
+    let document = app.state.schematic.document();
+    assert_eq!(document.components.len(), 6);
+    let pasted: Vec<_> = document
+        .components
+        .iter()
+        .filter(|component| ![11, 12, 13].contains(&component.id))
+        .collect();
+    let mut names: Vec<&str> = pasted
+        .iter()
+        .map(|component| component.name.as_str())
+        .collect();
+    names.sort_unstable();
+    assert_eq!(names, ["K2", "L3", "L4"]);
+    let coupling = pasted
+        .iter()
+        .find(|component| component.name == "K2")
+        .expect("K2");
+    assert!(
+        coupling.params.contains("L3") && coupling.params.contains("L4"),
+        "the pasted K couples {}",
+        coupling.params
     );
 }

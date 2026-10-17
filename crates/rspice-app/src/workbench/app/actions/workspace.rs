@@ -96,15 +96,28 @@ impl AppState {
     /// `SchematicState::copy_selection` remains a state-only fallback for
     /// primitive fixtures. Production UI commands must enter here so a wire
     /// joining two authored cell pins is captured with the selected
-    /// instances instead of being silently omitted.
+    /// instances instead of being silently omitted. The copy goes to the
+    /// app's clipboard, which outlives the cell view it came from.
     pub(crate) fn copy_active_schematic_selection(&mut self) -> bool {
-        if self.schematic.session.editor.selection.is_empty() {
+        let Some(copy) = self.capture_active_schematic_selection() else {
             return false;
+        };
+        self.ui.schematic_clipboard = copy;
+        true
+    }
+
+    /// The active sheet's selection as a clipboard would hold it, or `None`
+    /// when nothing is selected. Nothing is stored anywhere.
+    pub(crate) fn capture_active_schematic_selection(
+        &self,
+    ) -> Option<rspice_design::schematic::clipboard::ClipboardData> {
+        if self.schematic.session.editor.selection.is_empty() {
+            return None;
         }
         let symbols = schematic_symbol_context(self);
         let on_sheet =
             |id| crate::schematic::view::sheet_visibility::object_is_on_active_sheet(self, id);
-        let clipboard = self.schematic.capture_complete_selection_resolved(
+        Some(self.schematic.capture_complete_selection_resolved(
             |component| {
                 symbols
                     .named_terminal_points(component)
@@ -113,9 +126,7 @@ impl AppState {
                     .collect()
             },
             &on_sheet,
-        );
-        self.schematic.session.editor.clipboard = clipboard;
-        true
+        ))
     }
 
     pub(crate) fn rebuild_active_connections_from_symbols(&mut self) {

@@ -1319,7 +1319,7 @@ fn copy_takes_no_wire_or_junction_from_another_sheet() {
         &symbol_context,
     );
 
-    let clipboard = &state.schematic.session.editor.clipboard;
+    let clipboard = &state.ui.schematic_clipboard;
     assert_eq!(clipboard.components.len(), 2);
     let mut copied: Vec<u64> = clipboard.wires.iter().map(|wire| wire.id).collect();
     copied.sort_unstable();
