@@ -721,6 +721,26 @@ impl RSpiceApp {
             .digest();
         (inputs, image)
     }
+
+    /// Run the RC lowpass's transient as [`Self::ran_capturing_checkpoints`]
+    /// does, then queue, as Automation queues it, the transient resuming from
+    /// the checkpoint that run captured at 20 µs and running on to 40 µs.
+    /// Returns the digest Automation prepared and the inputs it kept.
+    fn queued_resuming_from_a_checkpoint(
+        &mut self,
+    ) -> (
+        crate::product::ContentDigest,
+        crate::simulation::controller::PreparedRunSetInputs,
+    ) {
+        let (_, image) = self.ran_capturing_checkpoints();
+        edit_the_transient(&mut self.state, |draft| {
+            draft.stop = "40u".to_owned();
+            if let Some(checkpoint) = draft.checkpoint.as_mut() {
+                checkpoint.resume = vec![image];
+            }
+        });
+        self.queued_as_automation_queues()
+    }
 }
 
 /// A transient that captures checkpoints and resumes from none reads no
@@ -737,30 +757,132 @@ fn a_transient_capturing_checkpoints_does_not_expire_its_own_evidence() {
     assert!(prepared.is_empty(), "{prepared:?}");
 }
 
-/// A transient that resumes from a checkpoint reads the retained run that
-/// holds it. Removing that run expires the evidence of a run prepared to
-/// resume from it, named as the input it is.
+/// A transient that resumes from a checkpoint reads the run that holds it,
+/// and nothing else of the history. The run Automation dispatches joins the
+/// history beside that run, from the dispatch on, and captures checkpoints of
+/// its own; what the transient resumes from is unchanged, so its evidence
+/// stands while the run is in flight and when it publishes.
 #[test]
-fn removing_the_run_a_checkpoint_resumes_from_expires_the_evidence() {
+fn an_automation_run_resuming_from_a_checkpoint_keeps_its_evidence() {
     let mut app = rc_lowpass();
-    let (_, image) = app.ran_capturing_checkpoints();
-    edit_the_transient(&mut app.state, |draft| {
-        draft.stop = "40u".to_owned();
-        if let Some(checkpoint) = draft.checkpoint.as_mut() {
-            checkpoint.resume = vec![image];
-        }
-    });
-    let (_, inputs) = app.queued_as_automation_queues();
-    assert_eq!(app.evidence_check(&inputs).0, Ok(()));
+    let (authorized, inputs) = app.queued_resuming_from_a_checkpoint();
 
-    app.state.simulation.retained.runs.remove(0);
-    let (verdict, prepared) = app.evidence_check(&inputs);
-
+    assert!(app.dispatch_frame().is_empty());
+    assert!(app.state.simulation.execution.has_active_execution());
+    let (in_flight, prepared) = app.evidence_check(&inputs);
+    assert_eq!(in_flight, Ok(()));
     assert!(prepared.is_empty(), "{prepared:?}");
+
+    app.finish_the_run();
+    let runs = &app.state.simulation.retained.runs;
+    assert_eq!(runs.len(), 2, "the run joins the one it resumes from");
+    assert!(runs[0].success, "{:?}", runs[0].analyses);
     assert_eq!(
-        verdict.expect_err("the checkpoint's run is gone").message(),
-        format!("{DESIGN_CHANGED} · the retained runs a checkpoint resumes from changed")
+        runs[0]
+            .prepared_receipt()
+            .map(|receipt| receipt.prepared_snapshot_digest()),
+        Some(authorized)
     );
+    assert!(
+        runs[0]
+            .analyses
+            .iter()
+            .any(|analysis| analysis.transient_checkpoint.is_some()),
+        "the resumed run captures a checkpoint of its own"
+    );
+    let (at_publication, prepared) = app.evidence_check(&inputs);
+    assert_eq!(at_publication, Ok(()));
+    assert!(prepared.is_empty(), "{prepared:?}");
+}
+
+/// A run added to the history that holds nothing the transient resumes from
+/// changes nothing it reads: Automation's evidence stands, and the dispatch
+/// starts the run Automation prepared.
+#[test]
+fn an_unrelated_run_added_to_the_history_leaves_a_resuming_run_current() {
+    let mut app = rc_lowpass();
+    let (authorized, inputs) = app.queued_resuming_from_a_checkpoint();
+    app.state.simulation.start_run();
+
+    let (verdict, prepared) = app.evidence_check(&inputs);
+    assert_eq!(verdict, Ok(()));
+    assert!(prepared.is_empty(), "{prepared:?}");
+
+    assert!(app.dispatch_frame().is_empty());
+    assert!(app.state.simulation.execution.has_active_execution());
+    assert_eq!(
+        app.state
+            .simulation
+            .retained
+            .runs
+            .first()
+            .and_then(|run| run.prepared_receipt())
+            .map(|receipt| receipt.prepared_snapshot_digest()),
+        Some(authorized),
+        "the run is the snapshot Automation prepared"
+    );
+    app.stop_the_run();
+}
+
+/// Removing the run a checkpoint resumes from leaves nothing to resume from;
+/// replacing it with a run whose transient no longer carries the prepared
+/// provenance a checkpoint is resumed against, as a result read from a file
+/// does not, leaves a checkpoint that cannot be resumed. Either way what the
+/// transient resumes from has changed: Automation's evidence check and the
+/// dispatch of the run it queued refuse it alike, in the same words, and
+/// nothing is prepared to find it.
+#[test]
+fn removing_or_replacing_the_run_a_checkpoint_resumes_from_refuses_dispatch_and_evidence_alike() {
+    /// An edit of the history, beside its name.
+    type Edit = (&'static str, fn(&mut AppState));
+    let edits: [Edit; 2] = [
+        ("removed", |state| {
+            state.simulation.retained.runs.remove(0);
+        }),
+        ("replaced", |state| {
+            let mut run = state.simulation.retained.runs.remove(0);
+            for analysis in &mut run.analyses {
+                analysis.provenance = None;
+            }
+            state.simulation.retained.runs.insert(0, run);
+        }),
+    ];
+    for (edited, edit) in edits {
+        let mut app = rc_lowpass();
+        let (_, inputs) = app.queued_resuming_from_a_checkpoint();
+        assert_eq!(app.evidence_check(&inputs).0, Ok(()), "{edited}");
+        edit(&mut app.state);
+        let retained = app.state.simulation.retained.runs.len();
+
+        let (verdict, prepared) = app.evidence_check(&inputs);
+        assert!(prepared.is_empty(), "{edited}: {prepared:?}");
+        let evidence = verdict.expect_err(edited);
+        assert_eq!(
+            evidence.message(),
+            format!("{DESIGN_CHANGED} · the retained runs a checkpoint resumes from changed"),
+            "{edited}"
+        );
+        assert!(app.dispatch_frame().is_empty(), "{edited}");
+
+        assert!(
+            !app.state.simulation.execution.has_active_execution(),
+            "{edited}"
+        );
+        assert_eq!(
+            app.state.simulation.retained.runs.len(),
+            retained,
+            "{edited}: no run starts"
+        );
+        assert_eq!(
+            app.state.simulation.execution.status, DESIGN_CHANGED,
+            "{edited}"
+        );
+        assert_eq!(
+            app.state.prompt_text(),
+            Some(evidence.to_string().as_str()),
+            "{edited}: the evidence check and the dispatch name it alike"
+        );
+    }
 }
 
 /// An edit made while Automation's run is in flight expires its evidence, and
