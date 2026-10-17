@@ -51,6 +51,7 @@ use rspice_design::schematic::rotation;
 use rspice_schematic_editor::session::selection;
 use rspice_schematic_editor::session::snap;
 mod state;
+pub(crate) mod symbol_context_cache;
 use rspice_schematic_editor::session::tool;
 mod undo_history;
 mod validated_revision;

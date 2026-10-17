@@ -178,6 +178,10 @@ pub struct SchematicSession {
     /// Editor selection and dirty baseline for the current document transaction.
     pub(in crate::state::schematic) operation_cancel:
         Option<super::undo_history::OperationCancelState>,
+
+    /// The canvas's resolved symbols, kept while what they resolve from
+    /// stands still.
+    pub(crate) symbol_context: super::symbol_context_cache::SymbolContextCache,
 }
 
 impl Default for SchematicState {

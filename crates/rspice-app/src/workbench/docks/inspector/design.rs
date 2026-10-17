@@ -20,7 +20,7 @@ use crate::schematic::view::{
     drawing_sheet::{
         DrawingSheetOverflowSummary, drawing_sheet_overflow_summary, resolve_active_drawing_sheet,
     },
-    schematic_symbol_context,
+    frame_symbol_context,
     sheet_visibility::{self, SheetScope},
 };
 use crate::state::{
@@ -789,7 +789,8 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp) {
 /// section.
 fn drawing_sheet_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
     let sheet = resolve_active_drawing_sheet(&app.state);
-    let symbol_context = schematic_symbol_context(&app.state);
+    // The canvas's own cached context: the inspector resolves nothing.
+    let symbol_context = frame_symbol_context(&mut app.state);
     let overflow = drawing_sheet_overflow_summary(&app.state, &symbol_context, &sheet);
     let substituted = sheet.format.title_block_substituted();
     let writable = !app.state.schematic_edit_read_only();
