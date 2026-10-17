@@ -220,7 +220,24 @@ impl RSpiceApp {
         false
     }
 
+    /// Whether the schematic is in the middle of an edit (a drag still held,
+    /// a move still floating). A history step taken then would be folded
+    /// into that edit's undo record when it lands, so it is refused, with a
+    /// line saying why.
+    fn history_waits_for_the_edit_in_progress(&mut self, step: &str) -> bool {
+        if !self.state.schematic.has_pending_operation() {
+            return false;
+        }
+        self.state.push_user_message(ConsoleMessage::info(format!(
+            "Finish or cancel the edit in progress before {step}."
+        )));
+        true
+    }
+
     pub(crate) fn action_edit_undo(&mut self) {
+        if self.history_waits_for_the_edit_in_progress("undoing") {
+            return;
+        }
         // A stimulus draft is the workspace's own edit history, like the
         // symbol document's. It is stepped first while that workspace is open
         // so Ctrl+Z means "take back what I just typed" rather than reaching
@@ -259,6 +276,9 @@ impl RSpiceApp {
     }
 
     pub(crate) fn action_edit_redo(&mut self) {
+        if self.history_waits_for_the_edit_in_progress("redoing") {
+            return;
+        }
         if self.state.workbench.workspace == crate::workbench::state::Workspace::Stimulus
             && stimulus::redo_draft(&mut self.state)
         {

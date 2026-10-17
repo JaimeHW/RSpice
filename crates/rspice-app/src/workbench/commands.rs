@@ -489,7 +489,9 @@ impl Command {
                     )
             }
             Self::Undo => {
-                if state.workbench.safe_mode.project_read_only() {
+                if state.workbench.safe_mode.project_read_only()
+                    || state.schematic.has_pending_operation()
+                {
                     false
                 } else if (netlist_page_is_visible(state)
                     && crate::workbench::documents::netlist_document::can_undo_netlist_edit(state))
@@ -505,7 +507,9 @@ impl Command {
                 }
             }
             Self::Redo => {
-                if state.workbench.safe_mode.project_read_only() {
+                if state.workbench.safe_mode.project_read_only()
+                    || state.schematic.has_pending_operation()
+                {
                     false
                 } else if (netlist_page_is_visible(state)
                     && crate::workbench::documents::netlist_document::can_redo_netlist_edit(state))

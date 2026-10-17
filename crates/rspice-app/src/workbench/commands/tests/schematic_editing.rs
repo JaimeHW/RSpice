@@ -1472,3 +1472,89 @@ fn a_copy_in_one_cell_pastes_into_another_with_its_coupling() {
         coupling.params
     );
 }
+
+/// Ctrl+Z pressed while a drag was still held undid the step before it, and
+/// the release then committed the drag against the snapshot taken before
+/// that undo: the undone edit came back as part of "drag selection" and the
+/// redo stack was lost (audit E-7). Undo and Redo now wait for the edit in
+/// progress, by menu, palette or key.
+#[test]
+fn undo_and_redo_wait_for_the_edit_in_progress() {
+    use crate::state::{ComponentType, Point};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    app.state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
+    let first = app
+        .state
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(0, 0));
+    app.state.schematic.reset_undo_history();
+    app.state.schematic.with_undo("place R2", |schematic| {
+        schematic.add_component(ComponentType::Resistor, Point::new(200, 0));
+    });
+    let carry = |app: &mut RSpiceApp, to: Point| {
+        app.state
+            .schematic
+            .document_mut_for_test()
+            .components
+            .iter_mut()
+            .find(|component| component.id == first)
+            .expect("R1")
+            .pos = to;
+    };
+    let position = |app: &RSpiceApp| {
+        app.state
+            .schematic
+            .document()
+            .components
+            .iter()
+            .find(|component| component.id == first)
+            .map(|component| component.pos)
+            .expect("R1")
+    };
+    let mid_drag = "finish or cancel the edit in progress first";
+
+    // R1 is picked up and carried while the mouse is held.
+    app.state.schematic.begin_operation("drag selection");
+    carry(&mut app, Point::new(0, 100));
+    assert_eq!(
+        Command::Undo.availability(&app),
+        CommandAvailability::Disabled(mid_drag)
+    );
+    Command::Undo.execute(&mut app);
+    app.execute_shortcut_command(Command::Undo);
+    assert_eq!(app.state.schematic.document().components.len(), 2);
+    assert!(app.state.schematic.has_pending_operation());
+
+    // The release commits the drag as its own step, and Undo takes back
+    // exactly that, then the placement before it.
+    assert!(app.state.schematic.end_operation());
+    assert_eq!(
+        Command::Undo.availability(&app),
+        CommandAvailability::Available
+    );
+    Command::Undo.execute(&mut app);
+    assert_eq!(position(&app), Point::new(0, 0));
+    assert_eq!(app.state.schematic.document().components.len(), 2);
+    Command::Undo.execute(&mut app);
+    assert_eq!(app.state.schematic.document().components.len(), 1);
+
+    // Redo waits the same way, and the redo stack survives the wait.
+    app.state.schematic.begin_operation("drag selection");
+    carry(&mut app, Point::new(0, 50));
+    assert_eq!(
+        Command::Redo.availability(&app),
+        CommandAvailability::Disabled(mid_drag)
+    );
+    Command::Redo.execute(&mut app);
+    assert_eq!(app.state.schematic.document().components.len(), 1);
+    assert!(app.state.schematic.cancel_operation());
+    assert_eq!(app.state.schematic.redo_description(), Some("place R2"));
+    Command::Redo.execute(&mut app);
+    assert_eq!(app.state.schematic.document().components.len(), 2);
+}

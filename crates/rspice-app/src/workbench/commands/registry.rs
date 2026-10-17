@@ -1075,6 +1075,11 @@ impl Command {
             Self::ReattachDocument => "the active document is already in the main window",
             Self::ConsolidateWindows => "there are no detached application windows",
             Self::MonitorRecovery => "there are no secondary application windows to recover",
+            // A step taken mid-drag would be folded into the drag when it
+            // lands, so the history waits for the edit to finish or cancel.
+            Self::Undo | Self::Redo if app.state.schematic.has_pending_operation() => {
+                "finish or cancel the edit in progress first"
+            }
             Self::Undo => "nothing to undo",
             Self::Redo => "nothing to redo",
             // The repair exists only for an instance the deck already refuses
