@@ -927,6 +927,16 @@ impl std::fmt::Debug for PreparedRunSnapshot {
     }
 }
 
+/// How far preparing a run has got.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PreparationProgress {
+    /// Points whose deck is ready.
+    pub prepared: usize,
+    /// The run's points: one per distinct PVT point its tasks are expanded
+    /// to, and none for a run that is not expanded to any.
+    pub total: usize,
+}
+
 impl PreparedRunSnapshot {
     /// Immutable host resource policy authenticated by this snapshot.
     pub const fn execution_limits(&self) -> rspice_core::ResourceLimits {
@@ -942,15 +952,19 @@ impl PreparedRunSnapshot {
             parts,
             rspice_core::ResourceLimits::default(),
             &rspice_core::NoAbort,
+            &|_| {},
         )
     }
 
     /// Policy for validating materialized sources, including cards introduced
     /// by task preparation. This does not change the solver execution policy.
+    ///
+    /// `progress` is told how many of the run's points have their deck ready.
     pub(crate) fn new_with_preparation_policy(
         mut parts: SnapshotParts,
         limits: rspice_core::ResourceLimits,
         abort: &dyn rspice_core::abort_signal::AbortSignal,
+        progress: &dyn Fn(PreparationProgress),
     ) -> Result<Self, PreparationError> {
         PreparationError::check_abort(abort)?;
         for task in &parts.tasks {
@@ -1378,7 +1392,7 @@ impl PreparedRunSnapshot {
                 error,
             )
         })?;
-        saved_outputs::bind_decks(&mut parts.tasks, &parsed_netlist)?;
+        saved_outputs::bind_decks(&mut parts.tasks, &parsed_netlist, abort, progress)?;
         let model_bin_config = rspice_core::SimulationConfig {
             resource_limits: limits,
             temperature: rspice_core::constants::celsius_to_kelvin(

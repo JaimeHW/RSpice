@@ -63,14 +63,16 @@ fn project_netlist_source_data(
     }
 }
 
-fn run_preparation_inputs(
-    state: &AppState,
-) -> crate::simulation::execution::preparation::RunPreparationInputs<
-    '_,
+type RunPreparationInputs<'a> = crate::simulation::execution::preparation::RunPreparationInputs<
+    'a,
     crate::state::SimulationRun,
     crate::state::AnalysisResult,
-> {
-    crate::simulation::execution::preparation::RunPreparationInputs {
+>;
+
+fn run_preparation_inputs(state: &AppState) -> RunPreparationInputs<'_> {
+    let schematic =
+        rspice_design::projection::ProjectionSource::projection_source(&state.schematic);
+    RunPreparationInputs {
         analysis: analysis_inputs(state),
         technology: state.technology_inputs(),
         libraries: state.library_manager.catalog(),
@@ -78,9 +80,8 @@ fn run_preparation_inputs(
         design_management: &state.workspace.content.design_management,
         configuration_sets: &state.workspace.content.configuration_sets,
         source_data: project_netlist_source_data(state),
-        schematic_source: rspice_design::projection::ProjectionSource::projection_source(
-            &state.schematic,
-        ),
+        schematic_file: schematic.current_file,
+        schematic_topology_revision: schematic.schematic.topology_version(),
         imported_checkpoints: &state.simulation.retained.imported_monte_carlo_checkpoints,
         imported_transient_checkpoints: &state.simulation.retained.imported_transient_checkpoints,
         display_waveform_cache_samples: crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
