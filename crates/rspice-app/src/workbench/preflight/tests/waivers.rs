@@ -86,6 +86,7 @@ fn a_waived_error_is_run_and_an_unwaived_one_is_refused() {
     assert!(collision(&mut app.state).1, "the page lists it waived");
 
     run_and_queue(&mut app);
+    app.settle_preflight();
     assert!(!blocked(&app), "{:?}", app.state.workbench.preflight.report);
     assert!(
         app.state.simulation.execution.trigger_simulation,
