@@ -843,6 +843,48 @@ impl IncludeProcessor {
         section: Option<&str>,
         abort: &dyn AbortSignal,
     ) -> Result<String, ParseWithAbortError> {
+        self.process_sealed_root_mapped_with_abort(root_path, section, abort)
+            .map(|expanded| expanded.render())
+    }
+
+    /// [`Self::process_sealed_root`], and every Verilog-A source directive the
+    /// materialized cards carry, each with the file and line that wrote it.
+    ///
+    /// A directive names its source relative to the file that wrote it, and
+    /// once includes are expanded into the cards nothing in them says which
+    /// file that was. Resolving a directive through the bundle's edges needs
+    /// that owner. Only what the selection read is returned: a directive in a
+    /// section nothing selected is not part of the cards and is not listed.
+    pub fn process_sealed_root_reading_veriloga(
+        &mut self,
+        root_path: &Path,
+        section: Option<&str>,
+    ) -> Result<(String, Vec<super::VerilogAInclude>), ParseError> {
+        let expanded = finish_non_aborting_parse(
+            self.process_sealed_root_mapped_with_abort(root_path, section, &NoAbort),
+        )?;
+        let veriloga = expanded
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                ExpandedSourceItem::Line { text, origin } => {
+                    super::parse_veriloga_source_directive(text).map(|mut include| {
+                        include.origin = origin.clone();
+                        include
+                    })
+                }
+                _ => None,
+            })
+            .collect();
+        Ok((expanded.render(), veriloga))
+    }
+
+    fn process_sealed_root_mapped_with_abort(
+        &mut self,
+        root_path: &Path,
+        section: Option<&str>,
+        abort: &dyn AbortSignal,
+    ) -> Result<ExpandedSource, ParseWithAbortError> {
         self.begin_source_operation();
         ensure_parse_not_aborted(abort)?;
         let sources = self
@@ -878,8 +920,11 @@ impl IncludeProcessor {
                 true,
                 abort,
             )?;
-            let rendered = expanded.render();
-            for (line_index, line) in rendered.lines().enumerate() {
+            let lines = expanded.items.iter().filter_map(|item| match item {
+                ExpandedSourceItem::Line { text, .. } => Some(text.as_str()),
+                _ => None,
+            });
+            for (line_index, line) in lines.enumerate() {
                 poll_parse_abort(abort, line_index)?;
                 if parse_include_directive(line).is_some() || parse_lib_directive(line).is_some() {
                     return Err(ParseWithAbortError::from(ParseError::Syntax {
@@ -893,7 +938,7 @@ impl IncludeProcessor {
                 }
             }
             ensure_parse_not_aborted(abort)?;
-            Ok(rendered)
+            Ok(expanded)
         })();
 
         self.leave_include(&key);

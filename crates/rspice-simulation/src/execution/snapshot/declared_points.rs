@@ -33,6 +33,7 @@ use crate::sweeps::{CornerBaseMode, CornerRunConfig, TempRunConfig};
 pub(super) fn expand_corner_run_point_tasks(
     corner_task: &PreparedTask,
     executable_netlist: &str,
+    corner_veriloga: &CornerVerilogARuntimes,
     reference_process: ProcessCorner,
     reference_temperature_celsius: f64,
 ) -> Result<Vec<PreparedTask>, PreparationError> {
@@ -76,7 +77,8 @@ pub(super) fn expand_corner_run_point_tasks(
             run_set_point_key: None,
             corner_contract: Some(contract.clone()),
         };
-        let (deck, nominal_supply_voltage) = prepare_pvt_point_source(executable_netlist, &pvt)?;
+        let (deck, nominal_supply_voltage) =
+            prepare_pvt_point_source(executable_netlist, &pvt, corner_veriloga)?;
         points.push(DeclaredPoint {
             identity: format!(
                 "{}/{:016x}/{:016x}/{contract_digest}",
@@ -163,7 +165,9 @@ pub(super) fn expand_temperature_run_point_tasks(
             run_set_point_key: None,
             corner_contract: None,
         };
-        let (deck, nominal_supply_voltage) = prepare_pvt_point_source(executable_netlist, &pvt)?;
+        // A temperature point binds no process, so no corner's Verilog-A.
+        let (deck, nominal_supply_voltage) =
+            prepare_pvt_point_source(executable_netlist, &pvt, &CornerVerilogARuntimes::default())?;
         points.push(DeclaredPoint {
             identity: format!("{:016x}", temperature_celsius.to_bits()),
             label: format!("{temperature_celsius} \u{00b0}C"),

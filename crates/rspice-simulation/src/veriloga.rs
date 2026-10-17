@@ -426,7 +426,14 @@ impl PreparedVerilogARuntimeSet {
             )
     }
 
-    pub fn install(&self) -> Result<(), String> {
+    /// Install every source for this process session, held until the
+    /// returned value is dropped.
+    ///
+    /// Hold it for as long as anything builds a deck naming these sources: a
+    /// sealed source the shared cache evicted is not compiled again, so a
+    /// build after the eviction fails. While held, another execution's
+    /// install that could only fit by evicting one is refused instead.
+    pub fn install(&self) -> Result<rspice_core::HeldVerilogASources, String> {
         self.validate()?;
         let registrations = self
             .runtimes
@@ -442,7 +449,62 @@ impl PreparedVerilogARuntimeSet {
                     .map(PreparedVerilogAConnectionLibrary::registration),
             )
             .collect::<Result<Vec<_>, _>>()?;
-        rspice_core::register_project_veriloga_sources_for_session(registrations)
+        rspice_core::hold_project_veriloga_sources_for_session(
+            registrations,
+            rspice_core::ResourceLimits::default(),
+        )
+    }
+
+    /// The sources of these sets that `deck` names on an exact sealed
+    /// directive line, as one set.
+    ///
+    /// A deck's directives say which runtimes it installs. A run whose
+    /// process corners bind different Verilog-A gives each corner's deck that
+    /// corner's directives, and every task installs exactly the set its own
+    /// deck names, whichever deck it was handed. The result is validated as
+    /// one set, so two sources one deck names under one alias are refused.
+    pub(crate) fn named_by<'a>(
+        inventory: impl IntoIterator<Item = &'a Self>,
+        deck: &str,
+    ) -> Result<Self, String> {
+        let lines = deck
+            .lines()
+            .map(|line| line.trim().to_ascii_lowercase())
+            .collect::<std::collections::HashSet<_>>();
+        let named = |binding: PreparedVerilogASourceBinding<'_>| {
+            lines.contains(
+                &crate::netlist_preparation::project_veriloga_directive(
+                    binding.source_key,
+                    binding.netlist_alias,
+                )
+                .to_ascii_lowercase(),
+            )
+        };
+        let mut runtimes = Vec::<PreparedVerilogARuntime>::new();
+        let mut connections = Vec::<PreparedVerilogAConnectionLibrary>::new();
+        for set in inventory {
+            for runtime in &set.runtimes {
+                if named(runtime.binding()) && !runtimes.contains(runtime) {
+                    runtimes.push(runtime.clone());
+                }
+            }
+            for library in &set.connections {
+                if named(library.binding()) && !connections.contains(library) {
+                    connections.push(library.clone());
+                }
+            }
+        }
+        let directives = lines
+            .iter()
+            .filter(|line| line.starts_with(".veriloga "))
+            .count();
+        if directives != runtimes.len() + connections.len() {
+            return Err(format!(
+                "The deck names {directives} Verilog-A sources and {} of them are prepared",
+                runtimes.len() + connections.len()
+            ));
+        }
+        Self::try_with_connections(runtimes, connections)
     }
 
     pub fn try_merge(self, additional: Self) -> Result<Self, String> {

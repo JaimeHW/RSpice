@@ -190,8 +190,19 @@ use rspice_core::analysis::harmonic_balance::{
 // preparation (`rspice-simulation` analysis_preparation) writes the drawn
 // ground's names as node 0 inside the cards and expressions it adds to the
 // deck by the parser's own rule for where a node argument stands, rather than
-// a copy of it. The census is 5,734, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5734;
+// a copy of it. The census was 5,734, with no slack.
+// Two statements keep an execution's installed Verilog-A from eviction until
+// it is done with it: `hold_project_veriloga_sources_for_session` and the
+// `HeldVerilogASources` it returns, which the simulation service's prepared
+// runtime sets install through (`rspice-simulation` veriloga.rs, behind the
+// runner, preflight's deck builds and checkpoint routing).
+// `IncludeProcessor::process_sealed_root_reading_veriloga` adds one: the
+// simulation service's model sources (`rspice-simulation` model_sources.rs)
+// read the Verilog-A directives the library sections a process selects carry,
+// each with the file that wrote it, so a corner's deck installs its own
+// sections' runtimes and never another section's.
+// The census is 5,737, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5737;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

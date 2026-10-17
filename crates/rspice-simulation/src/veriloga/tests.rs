@@ -43,7 +43,10 @@ pub(crate) fn standalone_connection_fixture() -> (super::PreparedVerilogARuntime
         &rspice_model_library::ModelResolutionRecords::default(),
     )
     .unwrap();
-    let authority = sealed.model_library_veriloga_authority().unwrap().unwrap();
+    let authority = sealed
+        .reference_model_library_veriloga_authority(rspice_app_types::product::ProcessCorner::TT)
+        .unwrap()
+        .unwrap();
     let sources =
         crate::project_veriloga::compile_model_library_source_runtimes(&authority).unwrap();
     let mut deck = "standalone UI connections\nV1 p 0 1\nX1 p q UI_DRIVER\n.options connectrules=Low connectrules_source=ui_connections\n.tran 0.2n 2n\n.end\n".to_owned();
@@ -585,12 +588,12 @@ fn installing_an_edited_module_leaves_each_deck_the_runtime_it_names() {
     };
     let running = seal_runtime("installed-while-running.va", "load", &load("1.0e-3"));
     let edited = seal_runtime("installed-after-an-edit.va", "load", &load("2.0e-3"));
-    for runtime in [&running, &edited] {
+    let _installed = [&running, &edited].map(|runtime| {
         super::PreparedVerilogARuntimeSet::try_new(vec![runtime.clone()])
             .expect("one runtime is a set")
             .install()
-            .expect("an edited module installs beside the running one");
-    }
+            .expect("an edited module installs beside the running one")
+    });
 
     for (runtime, conductance) in [(&running, 1.0e-3), (&edited, 2.0e-3)] {
         let directive = crate::netlist_preparation::project_veriloga_directive(

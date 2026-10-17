@@ -43,6 +43,7 @@ pub(super) fn expand_pvt_point_tasks(
     tasks: Vec<PreparedTask>,
     pvt_points: &[PreparedPvtPoint],
     executable_netlist: &str,
+    corner_veriloga: &CornerVerilogARuntimes,
     reference_process: ProcessCorner,
     reference_temperature_celsius: f64,
 ) -> Result<Vec<PreparedTask>, PreparationError> {
@@ -150,6 +151,7 @@ pub(super) fn expand_pvt_point_tasks(
             AnalysisSpec::Corner => Some(expand_corner_run_point_tasks(
                 &prepared,
                 executable_netlist,
+                corner_veriloga,
                 reference_process,
                 reference_temperature_celsius,
             )?),
@@ -239,7 +241,7 @@ pub(super) fn expand_pvt_point_tasks(
             let mut config = base_config.clone();
             config.temperature_celsius = point.temperature_celsius;
             let (source_override, nominal_supply_voltage) =
-                prepare_pvt_point_source(executable_netlist, point)?;
+                prepare_pvt_point_source(executable_netlist, point, corner_veriloga)?;
             config.run_point = OpRunPointContext {
                 index,
                 count: pvt_points.len(),
@@ -319,9 +321,14 @@ pub(super) fn expand_pvt_point_tasks(
     Ok(expanded)
 }
 
+/// The point's own deck, and the nominal supply its supply axis scales from.
+///
+/// A point with a corner contract binds its process's model cards and the
+/// model-library Verilog-A its process's sections name (`corner_veriloga`).
 pub(super) fn prepare_pvt_point_source(
     executable_netlist: &str,
     point: &PreparedPvtPoint,
+    corner_veriloga: &CornerVerilogARuntimes,
 ) -> Result<(Option<String>, Option<f64>), PreparationError> {
     let Some(contract) = point.corner_contract.as_ref() else {
         if point.voltage.is_some() {
@@ -350,6 +357,7 @@ pub(super) fn prepare_pvt_point_source(
             ),
         )
     })?;
+    let source = corner_veriloga.bind_process(source, point.process)?;
 
     let nominal_supply_voltage = if point.voltage.is_some() {
         let parsed = rspice_core::Netlist::parse(&source).map_err(|error| {

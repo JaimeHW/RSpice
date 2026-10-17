@@ -40,7 +40,7 @@ fn project_bundle(profile: &build_profile::VerilogABuildProfile) -> ProjectSourc
 }
 
 fn assert_controlled_conductance(runtime: &PreparedVerilogARuntime, series_resistance: f64) {
-    super::PreparedVerilogARuntimeSet::try_new(vec![runtime.clone()])
+    let _installed = super::PreparedVerilogARuntimeSet::try_new(vec![runtime.clone()])
         .unwrap()
         .install()
         .unwrap();

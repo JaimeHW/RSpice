@@ -266,6 +266,8 @@ pub(crate) fn read_utf8_file_limited(
 struct BoundedCacheEntry<V> {
     value: V,
     retained_bytes: usize,
+    /// How many holders keep this entry from eviction ([`BoundedCache::hold`]).
+    holds: usize,
 }
 
 /// Conservative retained-byte estimate for one [`BoundedCache`] entry.
@@ -287,6 +289,10 @@ pub(crate) fn estimated_cache_entry_bytes<K, V>(
 /// The caller-provided weight must include the retained value, key, and any
 /// relevant cache bookkeeping. Eviction only releases the cache's ownership;
 /// callers that hold an `Arc` continue using the value safely.
+///
+/// An entry a caller holds ([`Self::hold`]) is never evicted to make room. A
+/// cache whose held entries alone exceed its limit stays over it until they
+/// are released, and makes no room it would need a held entry for.
 #[derive(Debug)]
 pub(crate) struct BoundedCache<K, V> {
     entries: HashMap<K, BoundedCacheEntry<V>>,
@@ -323,14 +329,54 @@ where
 
     pub(crate) fn enforce_limit(&mut self, limit: usize) {
         while self.retained_bytes > limit {
-            let Some(key) = self.insertion_order.pop_front() else {
-                self.entries.clear();
-                self.retained_bytes = 0;
+            if !self.evict_oldest_unheld() {
                 break;
-            };
-            if let Some(entry) = self.entries.remove(&key) {
-                self.retained_bytes = self.retained_bytes.saturating_sub(entry.retained_bytes);
             }
+        }
+    }
+
+    /// Evict the oldest entry nobody holds; `false` when every entry left is
+    /// held and nothing was evicted.
+    fn evict_oldest_unheld(&mut self) -> bool {
+        if self.insertion_order.is_empty() {
+            // Retained bytes with no entry in the order to account for them:
+            // the accounting is wrong, so start over.
+            let drifted = self.retained_bytes > 0 || !self.entries.is_empty();
+            self.entries.clear();
+            self.retained_bytes = 0;
+            return drifted;
+        }
+        let entries = &self.entries;
+        let Some(position) = self
+            .insertion_order
+            .iter()
+            .position(|key| entries.get(key).is_none_or(|entry| entry.holds == 0))
+        else {
+            return false;
+        };
+        if let Some(key) = self.insertion_order.remove(position)
+            && let Some(entry) = self.entries.remove(&key)
+        {
+            self.retained_bytes = self.retained_bytes.saturating_sub(entry.retained_bytes);
+        }
+        true
+    }
+
+    /// Keep `key` from eviction until a matching [`Self::release`]. Holds
+    /// count, so each holder releases its own.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn hold(&mut self, key: &K) {
+        if let Some(entry) = self.entries.get_mut(key) {
+            entry.holds = entry.holds.saturating_add(1);
+        }
+    }
+
+    /// Release one [`Self::hold`] of `key`. The entry stays until it is next
+    /// the oldest one evicted.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn release(&mut self, key: &K) {
+        if let Some(entry) = self.entries.get_mut(key) {
+            entry.holds = entry.holds.saturating_sub(1);
         }
     }
 
@@ -355,13 +401,9 @@ where
             return value;
         }
         while self.retained_bytes.saturating_add(retained_bytes) > limit {
-            let Some(oldest) = self.insertion_order.pop_front() else {
-                self.entries.clear();
-                self.retained_bytes = 0;
-                break;
-            };
-            if let Some(entry) = self.entries.remove(&oldest) {
-                self.retained_bytes = self.retained_bytes.saturating_sub(entry.retained_bytes);
+            if !self.evict_oldest_unheld() {
+                // Held entries leave no room: the value stays uncached.
+                return value;
             }
         }
 
@@ -374,6 +416,7 @@ where
             BoundedCacheEntry {
                 value: value.clone(),
                 retained_bytes,
+                holds: 0,
             },
         );
         self.retained_bytes = self.retained_bytes.saturating_add(retained_bytes);
@@ -386,6 +429,9 @@ where
     /// Callers can therefore use this as the commit point for a transaction:
     /// an allocation or aggregate-budget failure leaves every existing entry,
     /// its insertion order, and the retained-byte accounting unchanged.
+    ///
+    /// A replaced entry keeps its holds. A batch that fits only by evicting a
+    /// held entry is refused the same way.
     #[cfg(feature = "veriloga")]
     pub(crate) fn try_replace_batch(
         &mut self,
@@ -398,6 +444,28 @@ where
             .fold(0usize, usize::saturating_add);
         ResourceLimitError::ensure(ResourceKind::SharedCacheBytes, replacement_bytes, limit)
             .map_err(|error| error.to_string())?;
+        let replaced = replacements
+            .iter()
+            .map(|(key, _, _)| key)
+            .collect::<std::collections::HashSet<_>>();
+        let kept_held_bytes = self
+            .entries
+            .iter()
+            .filter(|(key, entry)| entry.holds > 0 && !replaced.contains(key))
+            .map(|(_, entry)| entry.retained_bytes)
+            .fold(0usize, usize::saturating_add);
+        ResourceLimitError::ensure(
+            ResourceKind::SharedCacheBytes,
+            kept_held_bytes.saturating_add(replacement_bytes),
+            limit,
+        )
+        .map_err(|error| {
+            format!("{error}; {kept_held_bytes} bytes of it are held by executions in progress")
+        })?;
+        let holds = replacements
+            .iter()
+            .map(|(key, _, _)| self.entries.get(key).map_or(0, |entry| entry.holds))
+            .collect::<Vec<_>>();
 
         self.entries
             .try_reserve(replacements.len())
@@ -421,18 +489,15 @@ where
         for (key, _, _) in &replacements {
             self.remove(key);
         }
+        // Held entries were counted above, so this never runs out of entries
+        // it may evict before the batch fits.
         while self.retained_bytes.saturating_add(replacement_bytes) > limit {
-            let Some(oldest) = self.insertion_order.pop_front() else {
-                self.entries.clear();
-                self.retained_bytes = 0;
+            if !self.evict_oldest_unheld() {
                 break;
-            };
-            if let Some(entry) = self.entries.remove(&oldest) {
-                self.retained_bytes = self.retained_bytes.saturating_sub(entry.retained_bytes);
             }
         }
 
-        for (key, value, retained_bytes) in replacements {
+        for ((key, value, retained_bytes), holds) in replacements.into_iter().zip(holds) {
             let retained_bytes = retained_bytes.max(1);
             self.insertion_order.push_back(key.clone());
             let previous = self.entries.insert(
@@ -440,6 +505,7 @@ where
                 BoundedCacheEntry {
                     value,
                     retained_bytes,
+                    holds,
                 },
             );
             debug_assert!(previous.is_none(), "batch keys must be distinct");
@@ -685,6 +751,46 @@ mod tests {
         assert!(cache.get(&"b").is_none());
         assert_eq!(cache.get(&"c"), Some(&3));
         assert_eq!(cache.retained_bytes(), 4);
+    }
+
+    /// Eviction passes over a held entry to the oldest one nobody holds, and
+    /// leaves the cache over its limit rather than evict a held one.
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn bounded_cache_never_evicts_a_held_entry() {
+        let mut cache = BoundedCache::default();
+        cache.insert_or_get("held", 1, 4, 12);
+        cache.insert_or_get("free", 2, 4, 12);
+        cache.hold(&"held");
+
+        assert_eq!(cache.insert_or_get("next", 3, 4, 8), 3);
+        assert_eq!(cache.get(&"held"), Some(&1));
+        assert!(cache.get(&"free").is_none());
+        assert_eq!(cache.get(&"next"), Some(&3));
+
+        cache.enforce_limit(4);
+        assert_eq!(cache.get(&"held"), Some(&1));
+        assert!(cache.get(&"next").is_none());
+        assert_eq!(cache.insert_or_get("uncached", 4, 4, 4), 4);
+        assert!(
+            cache.get(&"uncached").is_none(),
+            "only by evicting a held entry"
+        );
+        assert!(
+            cache
+                .try_replace_batch(vec![("batch", 5, 4)], 4)
+                .unwrap_err()
+                .contains("4 bytes of it are held")
+        );
+
+        cache.hold(&"held");
+        cache.release(&"held");
+        cache.enforce_limit(0);
+        assert_eq!(cache.get(&"held"), Some(&1), "one hold is still out");
+        cache.release(&"held");
+        cache.enforce_limit(0);
+        assert!(cache.get(&"held").is_none());
+        assert_eq!(cache.retained_bytes(), 0);
     }
 
     #[test]

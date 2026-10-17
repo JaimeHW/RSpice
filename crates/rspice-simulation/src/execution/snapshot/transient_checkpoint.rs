@@ -56,10 +56,6 @@ pub(super) fn route_resumes(
         return Ok(());
     }
     PreparationError::check_abort(abort)?;
-    parts
-        .project_veriloga_runtimes
-        .install()
-        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
     let mut bridge_limits = limits;
     bridge_limits.max_netlist_bytes = limits.max_expanded_source_bytes;
     let bridge = EngineBridge::new()
@@ -141,6 +137,14 @@ pub(super) fn route_resumes(
             .executable_netlist_override
             .as_deref()
             .unwrap_or(&parts.executable_netlist);
+        // Checking a checkpoint builds the task's deck, which reads the
+        // Verilog-A that deck names; held until the checks are done.
+        let _installed = task
+            .veriloga_runtimes
+            .as_ref()
+            .unwrap_or(&parts.project_veriloga_runtimes)
+            .install()
+            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         if !task.transient_resumes.is_empty() {
             if request.resume.is_some() {
                 return Err(invalid(

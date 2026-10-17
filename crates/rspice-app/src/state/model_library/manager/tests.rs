@@ -313,7 +313,7 @@ fn browser_bundle_retains_native_spectre_ahdl_dependency_without_parsing_it_as_s
         .seal_execution_sources()
         .expect("retained AHDL edge seals as part of the source closure");
     let authority = sealed
-        .model_library_veriloga_authority()
+        .reference_model_library_veriloga_authority(crate::product::ProcessCorner::TT)
         .expect("sealed AHDL authority is valid")
         .expect("AHDL authority is present");
     assert_eq!(authority.roots().len(), 1);
@@ -370,7 +370,7 @@ fn native_spectre_import_captures_transitive_veriloga_preprocessor_dependencies(
         .seal_execution_sources()
         .expect("native AHDL closure seals");
     let authority = sealed
-        .model_library_veriloga_authority()
+        .reference_model_library_veriloga_authority(crate::product::ProcessCorner::TT)
         .expect("native authority is valid")
         .expect("native authority is present");
     let runtimes =

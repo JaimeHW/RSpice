@@ -66,15 +66,17 @@ mod tests {
         old_shape.as_object_mut().unwrap().remove("connections");
         assert!(serde_json::from_value::<PreparedVerilogARuntimeSet>(old_shape).is_err());
 
-        let authority =
-            standalone_connection_authority_with_directive(".va \"rules.vams\" ui_driver\n");
+        let error =
+            standalone_connection_authority_with_directive(".va \"rules.vams\" ui_driver\n")
+                .expect_err("one alias bound to two sources is refused");
         assert!(
-            compile_model_library_source_runtimes(&authority)
-                .unwrap_err()
-                .to_string()
-                .contains("different prepared artifacts")
+            error.contains("'ui_driver' is bound to both")
+                && error.contains("driver.vams")
+                && error.contains("rules.vams"),
+            "{error}"
         );
-        let authority = standalone_connection_authority_with_directive(".va \"rules.vams\"\n");
+        let authority =
+            standalone_connection_authority_with_directive(".va \"rules.vams\"\n").unwrap();
         let unnamed = compile_model_library_source_runtimes(&authority).unwrap();
         assert!(
             unnamed
@@ -82,7 +84,8 @@ mod tests {
                 .any(|source| source.netlist_alias().starts_with("__rspice_connections_"))
         );
         let authority =
-            standalone_connection_authority_with_directive(".va \"rules.vams\" module=ui_driver\n");
+            standalone_connection_authority_with_directive(".va \"rules.vams\" module=ui_driver\n")
+                .unwrap();
         assert!(
             compile_model_library_source_runtimes(&authority)
                 .unwrap_err()
@@ -106,7 +109,10 @@ mod tests {
                 None,
             ).unwrap();
             let sealed = manager.seal_execution_sources().unwrap();
-            sealed.model_library_veriloga_authority().unwrap().unwrap()
+            sealed
+                .reference_model_library_veriloga_authority(crate::product::ProcessCorner::TT)
+                .unwrap()
+                .unwrap()
         }
         let authority = selected_authority("first_load");
         assert_eq!(authority.roots().len(), 2);

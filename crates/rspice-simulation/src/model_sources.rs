@@ -98,6 +98,17 @@ struct MaterializedCornerSection {
     materialized_model_cards: String,
 }
 
+/// The model cards a process selection binds, and the Verilog-A source
+/// directives its sections read, each with the file that wrote it.
+///
+/// The two are one materialization. A section's Verilog-A is part of what the
+/// section binds, so the runtimes a deck installs are the ones the sections it
+/// selected name, never those of a section it did not select.
+struct MaterializedSelection {
+    bindings: Vec<MaterializedPlanBinding>,
+    veriloga: Vec<rspice_core::netlist::VerilogAInclude>,
+}
+
 const fn pdk_model_process(
     process: CornerProcess,
 ) -> rspice_model_library::pdk::contracts::PdkModelProcess {
@@ -367,7 +378,7 @@ impl SealedModelExecutionSources {
         &self,
         process: CornerProcess,
     ) -> Result<ModelExecutionPlan, String> {
-        let materialized = self.bindings_for_processes(&[process], true)?;
+        let materialized = self.bindings_for_processes(&[process], true)?.bindings;
         let selected_library_corners = self
             .libraries
             .iter()
@@ -408,7 +419,7 @@ impl SealedModelExecutionSources {
     ) -> Result<Vec<CornerModelBinding>, String> {
         let mut resolved = Vec::new();
         for process in processes {
-            let materialized = self.bindings_for_processes(&[*process], false)?;
+            let materialized = self.bindings_for_processes(&[*process], false)?.bindings;
             let (bindings, _) =
                 resolve_materialized_definition_namespace(materialized, &self.resolution_records)?;
             resolved.extend(bindings);
@@ -420,7 +431,7 @@ impl SealedModelExecutionSources {
         &self,
         processes: &[CornerProcess],
         honor_nominal_selection: bool,
-    ) -> Result<Vec<MaterializedPlanBinding>, String> {
+    ) -> Result<MaterializedSelection, String> {
         if self.libraries.is_empty() && self.pdk_process_bindings.is_empty() {
             if let Some(process) = processes
                 .iter()
@@ -431,10 +442,14 @@ impl SealedModelExecutionSources {
                     process.short_name()
                 ));
             }
-            return Ok(Vec::new());
+            return Ok(MaterializedSelection {
+                bindings: Vec::new(),
+                veriloga: Vec::new(),
+            });
         }
 
         let mut bindings = Vec::new();
+        let mut veriloga = Vec::new();
         for process in processes {
             for library in &self.libraries {
                 let keyword = process.short_name();
@@ -459,7 +474,10 @@ impl SealedModelExecutionSources {
                 }
                 match corner.as_ref() {
                     Some(corner) => {
-                        for section in self.materialize_library_corner(library, corner)? {
+                        let (sections, section_veriloga) =
+                            self.materialize_library_corner(library, corner)?;
+                        veriloga.extend(section_veriloga);
+                        for section in sections {
                             let binding = MaterializedPlanBinding::try_new(
                                 CornerModelBinding {
                                     process: *process,
@@ -479,8 +497,8 @@ impl SealedModelExecutionSources {
                             &library.root_path,
                             self.bundle.clone(),
                         );
-                        let materialized_model_cards = processor
-                            .process_sealed_root(&library.root_path, None)
+                        let (materialized_model_cards, root_veriloga) = processor
+                            .process_sealed_root_reading_veriloga(&library.root_path, None)
                             .map_err(|error| {
                                 format!(
                                     "Failed to materialize sealed model library '{}' from '{}': {error}",
@@ -488,6 +506,7 @@ impl SealedModelExecutionSources {
                                     library.root_path.display()
                                 )
                             })?;
+                        veriloga.extend(root_veriloga);
                         let Some(materialized_model_cards) =
                             without_veriloga_source_directives(materialized_model_cards)
                         else {
@@ -572,14 +591,20 @@ impl SealedModelExecutionSources {
                 }
             }
         }
-        Ok(bindings)
+        Ok(MaterializedSelection { bindings, veriloga })
     }
 
     fn materialize_library_corner(
         &self,
         library: &SealedExecutionLibrary,
         corner: &ProcessCorner,
-    ) -> Result<Vec<MaterializedCornerSection>, String> {
+    ) -> Result<
+        (
+            Vec<MaterializedCornerSection>,
+            Vec<rspice_core::netlist::VerilogAInclude>,
+        ),
+        String,
+    > {
         if let Err(errors) = corner.validate_contract() {
             return Err(format!(
                 "Model library '{}' corner '{}' has an invalid section contract: {}",
@@ -610,13 +635,14 @@ impl SealedModelExecutionSources {
         }
 
         let mut sections = Vec::with_capacity(domains_by_section.len());
+        let mut veriloga = Vec::new();
         for ((path, section), mut domains) in domains_by_section {
             domains.sort();
             domains.dedup();
             let mut processor =
                 rspice_core::netlist::IncludeProcessor::new_sealed(&path, self.bundle.clone());
-            let materialized_model_cards = processor
-                .process_sealed_root(&path, Some(&section))
+            let (materialized_model_cards, section_veriloga) = processor
+                .process_sealed_root_reading_veriloga(&path, Some(&section))
                 .map_err(|error| {
                     format!(
                         "Failed to materialize {} section '{}' for model library '{}' corner '{}' from '{}': {error}",
@@ -631,6 +657,7 @@ impl SealedModelExecutionSources {
                         path.display()
                     )
                 })?;
+            veriloga.extend(section_veriloga);
             let Some(materialized_model_cards) =
                 without_veriloga_source_directives(materialized_model_cards)
             else {
@@ -651,16 +678,17 @@ impl SealedModelExecutionSources {
                 materialized_model_cards,
             });
         }
-        Ok(sections)
+        Ok((sections, veriloga))
     }
 }
 
 /// A model library's materialized cards without its Verilog-A source
 /// directives, or `None` when the directives were all there was.
 ///
-/// Each directive a library source writes is compiled from the sealed library
-/// into a runtime of its own (`model_library_veriloga_authority`), and the deck
-/// names that runtime on an exact `.veriloga` line of its own. Spliced into the
+/// Each directive a selected section reads is compiled from the sealed library
+/// into a runtime of its own (`reference_model_library_veriloga_authority`,
+/// `corner_model_library_veriloga_authority`), and the deck names that runtime
+/// on an exact `.veriloga` line of its own. Spliced into the
 /// deck as the library wrote it, the directive names a file the deck does not
 /// carry, which the deck's source closure refuses, so a library that ships
 /// Verilog-A could never run. A directive's continuation records go with it.
@@ -1067,8 +1095,41 @@ where
 }
 
 impl SealedModelExecutionSources {
-    pub fn model_library_veriloga_authority(
+    /// The model-library Verilog-A the reference selection's sections name:
+    /// what a deck carrying the reference model cards installs.
+    ///
+    /// The selection is the one [`Self::reference_model_execution_plan`] binds
+    /// cards from, so the runtimes and the cards can never come from two
+    /// different sections.
+    pub fn reference_model_library_veriloga_authority(
         &self,
+        process: CornerProcess,
+    ) -> Result<Option<SealedModelLibraryVerilogAAuthority>, String> {
+        let selection = self.bindings_for_processes(&[process], true)?;
+        self.model_library_veriloga_authority(selection.veriloga)
+    }
+
+    /// The model-library Verilog-A one process corner's sections name: what a
+    /// deck materialized from [`Self::corner_model_bindings`] for `process`
+    /// installs in place of the reference selection's.
+    ///
+    /// Corner libraries commonly bind one alias to a different source in each
+    /// section. Each corner's runtimes are therefore its own: compiled from
+    /// its sections, keyed by a digest of them, and never installed beside
+    /// another corner's in one deck.
+    pub(crate) fn corner_model_library_veriloga_authority(
+        &self,
+        process: CornerProcess,
+    ) -> Result<Option<SealedModelLibraryVerilogAAuthority>, String> {
+        let selection = self.bindings_for_processes(&[process], false)?;
+        self.model_library_veriloga_authority(selection.veriloga)
+    }
+
+    /// The authority for exactly the directives a selection read, each
+    /// resolved through the sealed edge of the file that wrote it.
+    fn model_library_veriloga_authority(
+        &self,
+        veriloga: Vec<rspice_core::netlist::VerilogAInclude>,
     ) -> Result<Option<SealedModelLibraryVerilogAAuthority>, String> {
         let model_paths = self
             .model_library_source_paths
@@ -1084,61 +1145,50 @@ impl SealedModelExecutionSources {
         sources.sort_by(|left, right| left.0.cmp(&right.0));
 
         let mut roots = Vec::<SealedModelLibraryVerilogARoot>::new();
-        for (owner, source) in &sources {
-            let projected = rspice_core::library::adapt_spectre_model_library(owner, source)
-                .map_err(|error| {
-                    format!(
-                        "Authenticated model source '{}':{} no longer satisfies the Spectre adapter: {}",
-                        owner.display(),
-                        error.line,
-                        error.message
-                    )
-                })?;
-            for line in projected.lines() {
-                let Some(include) = rspice_core::netlist::parse_veriloga_source_directive(line)
-                else {
-                    continue;
-                };
-                let requested = rspice_core::netlist::normalize_source_path_literal(
-                    &include.file_path.to_string_lossy(),
+        for include in veriloga {
+            let Some(owner) = include.origin.path.as_deref() else {
+                return Err(format!(
+                    "Authenticated Verilog-A dependency '{}' has no owning model source",
+                    include.file_path.display()
+                ));
+            };
+            let requested = rspice_core::netlist::normalize_source_path_literal(
+                &include.file_path.to_string_lossy(),
+            )
+            .map_err(|error| {
+                format!(
+                    "Authenticated Verilog-A dependency in '{}' is invalid: {error}",
+                    owner.display()
                 )
-                .map_err(|error| {
-                    format!(
-                        "Authenticated Verilog-A dependency in '{}' is invalid: {error}",
-                        owner.display()
-                    )
-                })?;
-                let matches = self
-                    .edges
-                    .iter()
-                    .filter(|edge| {
-                        portable_path_key(&edge.owner) == portable_path_key(owner)
-                            && rspice_core::netlist::normalize_source_path_literal(
-                                &edge.requested_path,
-                            )
+            })?;
+            let matches = self
+                .edges
+                .iter()
+                .filter(|edge| {
+                    portable_path_key(&edge.owner) == portable_path_key(owner)
+                        && rspice_core::netlist::normalize_source_path_literal(&edge.requested_path)
                             .is_ok_and(|edge_requested| edge_requested == requested)
-                    })
-                    .collect::<Vec<_>>();
-                let [edge] = matches.as_slice() else {
-                    return Err(format!(
-                        "Authenticated Verilog-A dependency '{}' in '{}' has {} exact resolution edges; refresh or re-import the model library",
-                        requested,
-                        owner.display(),
-                        matches.len()
-                    ));
-                };
-                if !model_paths.contains(&portable_path_key(&edge.target)) {
-                    return Err(format!(
-                        "Authenticated Verilog-A dependency '{}' resolves outside the sealed model-library authority",
-                        requested
-                    ));
-                }
-                roots.push(SealedModelLibraryVerilogARoot {
-                    path: edge.target.clone(),
-                    netlist_alias: include.model_name,
-                    selected_module: include.selected_module,
-                });
+                })
+                .collect::<Vec<_>>();
+            let [edge] = matches.as_slice() else {
+                return Err(format!(
+                    "Authenticated Verilog-A dependency '{}' in '{}' has {} exact resolution edges; refresh or re-import the model library",
+                    requested,
+                    owner.display(),
+                    matches.len()
+                ));
+            };
+            if !model_paths.contains(&portable_path_key(&edge.target)) {
+                return Err(format!(
+                    "Authenticated Verilog-A dependency '{}' resolves outside the sealed model-library authority",
+                    requested
+                ));
             }
+            roots.push(SealedModelLibraryVerilogARoot {
+                path: edge.target.clone(),
+                netlist_alias: include.model_name,
+                selected_module: include.selected_module,
+            });
         }
         roots.sort_by(|left, right| {
             left.path
@@ -1160,6 +1210,25 @@ impl SealedModelExecutionSources {
                 return Err(format!(
                     "Verilog-A source '{}' is included with conflicting model aliases",
                     pair[1].path.display()
+                ));
+            }
+        }
+        // One deck names one model per alias. Different sections may bind an
+        // alias to different sources, because a deck selects one of them; the
+        // sections one deck selects together may not.
+        let mut bound_aliases = BTreeMap::<String, &SealedModelLibraryVerilogARoot>::new();
+        for root in &roots {
+            let Some(alias) = root.netlist_alias.as_deref() else {
+                continue;
+            };
+            if let Some(bound) = bound_aliases.insert(alias.to_ascii_uppercase(), root)
+                && (portable_path_key(&bound.path) != portable_path_key(&root.path)
+                    || bound.selected_module != root.selected_module)
+            {
+                return Err(format!(
+                    "Verilog-A model alias '{alias}' is bound to both '{}' and '{}' by the model sections one run selects",
+                    bound.path.display(),
+                    root.path.display()
                 ));
             }
         }

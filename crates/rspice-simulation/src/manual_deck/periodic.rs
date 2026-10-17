@@ -421,7 +421,7 @@ fn driven_tone_sources(
     netlist: &Netlist,
     runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
 ) -> Result<Vec<String>, ManualDeckError> {
-    runtimes.install().map_err(|error| {
+    let _installed = runtimes.install().map_err(|error| {
         vec![format!(
             "the deck's sealed Verilog-A runtimes could not be installed: {error}"
         )]

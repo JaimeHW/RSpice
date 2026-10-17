@@ -9,6 +9,7 @@
 //! circuit — or the build's own error — says what the engine will refuse.
 //! Nothing is solved.
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use rspice_core::circuit::DcBranchVoltageLoop;
@@ -152,21 +153,6 @@ impl PreparedRunSnapshot {
         progress: &dyn Fn(DeckBuildProgress),
     ) -> Vec<EngineRefusal> {
         let mut refusals: Vec<EngineRefusal> = Vec::new();
-        if !self.project_veriloga_runtimes.is_empty()
-            && let Err(error) = self.project_veriloga_runtimes.install()
-        {
-            let tasks = self.tasks.iter().map(refused_task).collect();
-            refusals.push(EngineRefusal {
-                kind: EngineRefusalKind::Build {
-                    message: format!(
-                        "Could not install prepared project Verilog-A runtimes: {error}"
-                    ),
-                    instance: None,
-                },
-                tasks,
-            });
-            return refusals;
-        }
 
         // Every deck every task dispatches, in dispatch order, so the pass can
         // say how many it builds before it builds the first. A recorded FFT
@@ -198,20 +184,33 @@ impl PreparedRunSnapshot {
         progress(DeckBuildProgress { built, total });
 
         let mut verdicts: HashMap<DeckKey<'_>, Option<DeckVerdict>> = HashMap::new();
+        // The Verilog-A the deck being built names, installed as its task's
+        // runner installs it, and held while it builds.
+        let mut installed = None;
         for (task, deck) in dispatched {
             if abort.is_aborted() {
                 return Vec::new();
             }
             let key = (deck.source, deck.temperature.key());
-            let fresh = !verdicts.contains_key(&key);
-            let verdict = verdicts.entry(key).or_insert_with_key(|(source, _)| {
-                self.build_verdict(source, deck.temperature, abort)
-            });
-            if fresh {
+            if let Entry::Vacant(unbuilt) = verdicts.entry(key) {
+                let runtimes = task
+                    .veriloga_runtimes
+                    .as_ref()
+                    .unwrap_or(&self.project_veriloga_runtimes);
+                let verdict = match hold_for_build(&mut installed, runtimes) {
+                    Ok(()) => self.build_verdict(deck.source, deck.temperature, abort),
+                    Err(error) => Some(DeckVerdict::Refused(vec![EngineRefusalKind::Build {
+                        message: format!(
+                            "Could not install prepared project Verilog-A runtimes: {error}"
+                        ),
+                        instance: None,
+                    }])),
+                };
+                unbuilt.insert(verdict);
                 built += 1;
                 progress(DeckBuildProgress { built, total });
             }
-            let Some(verdict) = verdict else {
+            let Some(verdict) = &verdicts[&key] else {
                 continue;
             };
             let refused = refused_task(task);
@@ -416,6 +415,27 @@ fn checks_dc_bias_before_solving(task: &PreparedTask) -> bool {
         } => *node_initialization != OpNodeInitialization::ForceIcValues,
         _ => false,
     }
+}
+
+/// Install `runtimes` for the next build, unless they are the sources already
+/// installed and held. The previous deck's are released first, so the pass
+/// holds one deck's sources at a time.
+fn hold_for_build<'a>(
+    installed: &mut Option<(
+        &'a crate::veriloga::PreparedVerilogARuntimeSet,
+        rspice_core::HeldVerilogASources,
+    )>,
+    runtimes: &'a crate::veriloga::PreparedVerilogARuntimeSet,
+) -> Result<(), String> {
+    if installed
+        .as_ref()
+        .is_some_and(|(current, _)| *current == runtimes)
+    {
+        return Ok(());
+    }
+    *installed = None;
+    *installed = Some((runtimes, runtimes.install()?));
+    Ok(())
 }
 
 fn refused_task(task: &PreparedTask) -> RefusedTask {

@@ -98,8 +98,9 @@ fn spectre_model_library_ahdl_is_compiled_and_emitted_as_a_sealed_runtime_direct
         .seal_execution_sources_for_plan(&[binding])
         .expect("model-library sources seal");
 
-    let runtimes = prepared_model_library_veriloga_runtimes(&sealed)
-        .expect("prepared-run compilation succeeds");
+    let runtimes =
+        prepared_model_library_veriloga_runtimes(&sealed, crate::product::ProcessCorner::TT)
+            .expect("prepared-run compilation succeeds");
     assert_eq!(runtimes.len(), 1);
     let runtime = runtimes.device_runtimes().next().expect("one AHDL runtime");
     let mut executable = "prepared Spectre AHDL\n.end\n".to_owned();
@@ -1315,10 +1316,11 @@ fn configured_cell_view_compiles_the_exact_sealed_veriloga_bundle() {
         1,
         "configured netlist must reference the exact prepared runtime once"
     );
-    rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime.clone()])
-        .unwrap()
-        .install()
-        .expect("sealed configured runtime installs in the session cache");
+    let _installed =
+        rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime.clone()])
+            .unwrap()
+            .install()
+            .expect("sealed configured runtime installs in the session cache");
 }
 
 #[cfg(not(target_arch = "wasm32"))]
