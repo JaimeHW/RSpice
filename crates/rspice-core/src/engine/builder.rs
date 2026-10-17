@@ -358,6 +358,8 @@ use advanced_mos::{
 };
 #[cfg(feature = "veriloga-builtins-base")]
 mod generated_model_routing;
+#[cfg(test)]
+mod inventory_tests;
 #[cfg(feature = "veriloga-builtins-base")]
 use generated_model_routing::{
     GeneratedRoutingContext, try_route_generated_bjt_model, try_route_generated_diode_model,
