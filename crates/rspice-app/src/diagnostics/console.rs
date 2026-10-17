@@ -1,8 +1,8 @@
 //! Console messages.
 //!
-//! The legacy console value model. New messages should be logged through
-//! [`crate::diagnostics::LogBuffer`], which this mirrors into and which
-//! carries the timestamp the console renders.
+//! The legacy value the simulation controller still hands to
+//! `AppState::push_sim_message`. Nothing else uses it: every other site
+//! records through `AppState::record` or answers through `AppState::prompt`.
 
 /// Console message with severity level.
 #[derive(Debug, Clone)]

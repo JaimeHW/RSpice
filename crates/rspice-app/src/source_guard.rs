@@ -1009,4 +1009,100 @@ mod tests {
             found.join("\n  ")
         );
     }
+
+    /// No Console line or status-bar prompt is formatted with `{:?}`.
+    ///
+    /// Debug formatting prints a type's internal spelling — `Some("amp")`,
+    /// `ProjectRevision(7)` — where the reader needs a sentence, and every
+    /// one of these sites is product text. The scan covers every shipped
+    /// call of the three verbs; the run's own lines under `simulation/` are
+    /// another owner's and are left to it.
+    #[test]
+    fn no_console_line_or_prompt_is_formatted_with_debug() {
+        const VERBS: [&str; 3] = [".record(", ".record_anchored(", ".prompt("];
+        let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut paths = Vec::new();
+        rust_sources(&source_root, &mut paths);
+        paths.sort();
+        let sources = paths
+            .iter()
+            .map(|path| {
+                let source = std::fs::read_to_string(path)
+                    .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+                (path.clone(), source)
+            })
+            .collect::<Vec<_>>();
+        let roots = sources
+            .iter()
+            .flat_map(|(path, source)| test_only_roots(path, source))
+            .collect::<Vec<_>>();
+        let simulation = source_root.join("simulation");
+
+        let mut calls = 0_usize;
+        let mut found = Vec::new();
+        for (path, source) in &sources {
+            if path.starts_with(&simulation) || !ships(path, &roots) {
+                continue;
+            }
+            let shipped = without_test_items(source);
+            for verb in VERBS {
+                for (start, _) in shipped.match_indices(verb) {
+                    calls += 1;
+                    let arguments = call_arguments(&shipped[start + verb.len()..]);
+                    if arguments.contains(":?}") || arguments.contains(":#?}") {
+                        let line = shipped[..start].lines().count();
+                        found.push(format!("{}:{line}", path.display()));
+                    }
+                }
+            }
+        }
+
+        assert!(
+            calls > 300,
+            "the scan found only {calls} calls; a scan that reaches nothing passes forever"
+        );
+        assert!(
+            found.is_empty(),
+            "a Console line or prompt is formatted with `{{:?}}`; say it in words:\n  {}",
+            found.join("\n  ")
+        );
+    }
+
+    /// The text of a call's arguments: everything up to the parenthesis that
+    /// closes the one the call opened, with string and character literals
+    /// stepped over so a parenthesis inside a message does not end it.
+    fn call_arguments(after_open: &str) -> &str {
+        let bytes = after_open.as_bytes();
+        let mut depth = 1_usize;
+        let mut index = 0;
+        while index < bytes.len() {
+            match bytes[index] {
+                b'"' => {
+                    // A raw string's hashes make no difference here: its
+                    // closing quote is the next quote it holds.
+                    index += 1;
+                    while index < bytes.len() && bytes[index] != b'"' {
+                        index += if bytes[index] == b'\\' { 2 } else { 1 };
+                    }
+                }
+                b'\'' if bytes.get(index + 2) == Some(&b'\'') => index += 2,
+                b'\'' if bytes.get(index + 1) == Some(&b'\\') => {
+                    while index + 1 < bytes.len() && bytes[index + 1] != b'\'' {
+                        index += 1;
+                    }
+                    index += 1;
+                }
+                b'(' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return &after_open[..index];
+                    }
+                }
+                _ => {}
+            }
+            index += 1;
+        }
+        after_open
+    }
 }

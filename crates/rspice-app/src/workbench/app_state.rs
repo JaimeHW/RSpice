@@ -1087,16 +1087,6 @@ impl AppState {
         }
     }
 
-    /// Push a console message with an explicit structured-log source.
-    pub fn push_console_message_with_source(
-        &mut self,
-        source: crate::diagnostics::LogSource,
-        message: ConsoleMessage,
-    ) {
-        let severity = Self::log_severity_for_console(message.level);
-        self.record(severity, source, message.message);
-    }
-
     /// Announce a committed plan command on the lifecycle status line and
     /// record it in the Console.
     ///
@@ -1170,8 +1160,15 @@ impl AppState {
         }
     }
 
+    /// A run's own line, for the simulation controller only: every other site
+    /// records through [`Self::record`] or answers through [`Self::prompt`].
     pub fn push_sim_message(&mut self, message: ConsoleMessage) {
-        self.push_console_message_with_source(crate::diagnostics::LogSource::Run, message);
+        let severity = Self::log_severity_for_console(message.level);
+        self.record(
+            severity,
+            crate::diagnostics::LogSource::Run,
+            message.message,
+        );
     }
 
     pub fn clear_primary_log(&mut self) {
