@@ -242,6 +242,14 @@ pub(super) fn detail(
                     actions.related = route;
                 }
             }
+            // Each other object the finding involves, by the name it is drawn
+            // with and what it is to the finding, followed the way the row is.
+            for place in row.related_places {
+                let route = row.place_route(place);
+                if place_line(ui, &place.label, route.is_some()) {
+                    actions.related = route;
+                }
+            }
         });
     actions
 }
@@ -391,13 +399,19 @@ fn related_line(
     related: &rspice_app_types::diagnostics::DiagnosticRelatedLocation,
     followable: bool,
 ) -> bool {
-    let tokens = Tokens::get(ui.ctx());
     let position = related.range.map_or_else(String::new, |range| {
         format!(" · line {}", range.start.line + 1)
     });
     let text = format!("{}{position} · {}", related.document_id, related.message);
+    place_line(ui, &text, followable)
+}
+
+/// One place the finding names, with a verb to go there where it can be
+/// followed. Returns true when the reader asked to go there.
+fn place_line(ui: &mut Ui, text: &str, followable: bool) -> bool {
+    let tokens = Tokens::get(ui.ctx());
     if !followable {
-        line(ui, &text, tokens.color.text_faint, FontWeight::Regular);
+        line(ui, text, tokens.color.text_faint, FontWeight::Regular);
         return false;
     }
     let mut followed = false;
@@ -408,7 +422,7 @@ fn related_line(
             .accessible_label(&format!("Go to {text}"))
             .show(ui)
             .clicked();
-        line(ui, &text, tokens.color.text_dim, FontWeight::Regular);
+        line(ui, text, tokens.color.text_dim, FontWeight::Regular);
     });
     followed
 }
