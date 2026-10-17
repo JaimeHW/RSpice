@@ -284,8 +284,7 @@ pub(crate) fn commit_language_rename(app: &mut RSpiceApp) -> Result<String, Stri
         confirm_rename: false,
         error: None,
     });
-    app.state
-        .push_user_message(crate::diagnostics::ConsoleMessage::info(message.clone()));
+    app.state.prompt(message.clone());
     Ok(message)
 }
 
@@ -307,8 +306,7 @@ pub(crate) fn commit_language_completion(
         "Inserted completion '{completion}' into '{}'.",
         state.active_path
     );
-    app.state
-        .push_user_message(crate::diagnostics::ConsoleMessage::info(message.clone()));
+    app.state.prompt(message.clone());
     Ok(message)
 }
 
@@ -334,8 +332,7 @@ pub(crate) fn commit_language_code_action(
         action.replacement.clone(),
     )?;
     let message = format!("Applied {}: {}.", action.kind.label(), action.title);
-    app.state
-        .push_user_message(crate::diagnostics::ConsoleMessage::info(message.clone()));
+    app.state.prompt(message.clone());
     Ok(message)
 }
 

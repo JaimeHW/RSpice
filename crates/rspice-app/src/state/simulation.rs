@@ -39,10 +39,10 @@ mod current_impulses;
 #[cfg(test)]
 pub(crate) use current_impulses::current_impulse_history_fixture;
 
-pub use rspice_results::sensitivity::SensitivityStudyRow;
 #[cfg(test)]
 pub use rspice_results::sensitivity::{
-    SensitivityBasisEvidence, SensitivityResultMode, SensitivityResultRow, SensitivityStudyEvidence,
+    SensitivityBasisEvidence, SensitivityResultMode, SensitivityResultRow,
+    SensitivityStudyEvidence, SensitivityStudyRow,
 };
 #[cfg(test)]
 pub use rspice_results::simulation_values::ComplexResultValue;

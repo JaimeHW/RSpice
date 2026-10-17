@@ -18,7 +18,7 @@ mod transfer;
 
 use egui::Ui;
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::design_system::{
@@ -46,10 +46,10 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
             if !crate::workbench::documents::netlist_document::open_run_deck_snapshot(
                 &mut app.state,
             ) {
-                app.state.push_user_message(ConsoleMessage::warning(format!(
+                app.state.prompt(format!(
                     "The deck this run used cannot be opened: {}.",
                     crate::state::absent_deck_reason()
-                )));
+                ));
             }
         }
         Some(RunStripAction::Compare) => {
@@ -58,7 +58,7 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
                     &mut app.state,
                 )
             {
-                app.state.push_user_message(ConsoleMessage::warning(error));
+                app.state.prompt(error);
             }
         }
         Some(RunStripAction::OpenTaskDeck { run_id, point }) => {
@@ -67,10 +67,10 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
                 run_id,
                 point,
             ) {
-                app.state.push_user_message(ConsoleMessage::warning(format!(
+                app.state.prompt(format!(
                     "The source Run {run_id} executed cannot be opened: {}.",
                     crate::state::absent_deck_reason()
-                )));
+                ));
             }
         }
         Some(RunStripAction::OpenInResults(run_id)) => {
@@ -85,10 +85,10 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
                 )
                 .execute(app);
             } else {
-                app.state.push_user_message(ConsoleMessage::warning(format!(
-                    "Run {run_id} is no longer retained in this session, so Results was not \
-                     opened on it."
-                )));
+                app.state.prompt(format!(
+                    "Run {run_id} is no longer kept in this session, so Results was not opened \
+                     on it."
+                ));
             }
         }
         None => {}
@@ -99,7 +99,7 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
         ui,
         crate::workbench::documents::netlist_document::editor_id(&app.state),
     ) {
-        format_owned_netlist(ui.ctx(), app);
+        format_owned_netlist(app);
     }
     let t = Tokens::get(ui.ctx());
     egui::Frame::new().fill(t.color.bg_inset).show(ui, |ui| {
@@ -142,7 +142,7 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
                             )
                         });
                         if let Err(error) = result {
-                            app.state.push_user_message(ConsoleMessage::error(error));
+                            app.state.prompt(error);
                         }
                     }
                     Some(EmptyNetlistAction::ImportDeck) => {
@@ -796,9 +796,8 @@ fn handle_netlist_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
         return;
     }
     if dropped.len() != 1 {
-        app.state.push_user_message(ConsoleMessage::warning(
-            "Drop one SPICE deck or RSpice netlist bundle at a time so the staged import review has one exact source identity.",
-        ));
+        app.state
+            .prompt("Drop one SPICE deck or RSpice netlist bundle at a time.");
         return;
     }
     let file = &dropped[0];
@@ -836,13 +835,17 @@ fn handle_netlist_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
                 display_name,
             );
         }
-        Err(error) => app.state.push_user_message(ConsoleMessage::error(format!(
-            "Dropped SPICE source could not be read: {error}"
-        ))),
+        Err(error) => {
+            app.state.record(
+                LogSeverity::Error,
+                LogSource::Netlist,
+                format!("The dropped SPICE file could not be read: {error}"),
+            );
+        }
     }
 }
 
-fn format_owned_netlist(ctx: &egui::Context, app: &mut RSpiceApp) {
+fn format_owned_netlist(app: &mut RSpiceApp) {
     if !crate::workbench::documents::netlist_document::active_netlist_source_is_editable(&app.state)
     {
         return;
@@ -856,23 +859,19 @@ fn format_owned_netlist(ctx: &egui::Context, app: &mut RSpiceApp) {
                     == crate::workbench::documents::netlist_document::DiagnosticSeverity::Error
         });
         if has_errors {
-            app.state.push_user_message(ConsoleMessage::error(
-                "Include formatting is blocked until the current document has no syntax errors.",
-            ));
+            app.state
+                .prompt("Fix the include file's syntax errors before formatting it.");
             return;
         }
         let formatted = normalize_owned_netlist_whitespace(&source);
         if formatted == source {
-            app.state.push_user_message(ConsoleMessage::info(
-                "The owned include already matches the deterministic source format.",
-            ));
+            app.state.prompt("The include file is already formatted.");
         } else if crate::workbench::documents::netlist_document::replace_owned_dependency_source(
             &mut app.state,
             formatted,
         ) {
-            app.state.push_user_message(ConsoleMessage::info(
-                "Formatted the exact project-owned include revision; root-deck validation was invalidated.",
-            ));
+            app.state
+                .prompt("Formatted the include file; the top-level deck needs validating again.");
         }
         return;
     }
@@ -907,37 +906,28 @@ fn format_owned_netlist(ctx: &egui::Context, app: &mut RSpiceApp) {
             .netlist
             .validation_error
             .clone()
-            .unwrap_or_else(|| {
-                "Formatting is blocked until the exact owned source passes executable validation."
-                    .to_owned()
-            });
+            .unwrap_or_else(|| "the netlist does not validate".to_owned());
+        // Validation has already recorded why it failed; this answers the
+        // format gesture.
         app.state
-            .push_user_message(ConsoleMessage::error(message.clone()));
-        app.state
-            .ui
-            .toasts
-            .error_with_title(ctx, "Netlist format blocked", message);
+            .prompt(format!("The netlist was not formatted: {message}"));
         return;
     }
 
     let formatted = normalize_owned_netlist_whitespace(&source);
     if formatted == source {
-        app.state.push_user_message(ConsoleMessage::info(
-            "The owned netlist already matches the deterministic source format.",
-        ));
+        app.state.prompt("The netlist is already formatted.");
         return;
     }
     if crate::workbench::documents::netlist_document::replace_owned_source(
         &mut app.state,
         formatted,
     ) {
-        app.state.push_user_message(ConsoleMessage::info(
-            "Formatted the exact owned netlist revision; prior validation was invalidated.",
-        ));
+        app.state
+            .prompt("Formatted the netlist; it needs validating again.");
     } else {
-        app.state.push_user_message(ConsoleMessage::error(
-            "The owned netlist changed before formatting could commit. Review the current revision and retry.",
-        ));
+        app.state
+            .prompt("The netlist changed before formatting finished. Review it and try again.");
     }
 }
 

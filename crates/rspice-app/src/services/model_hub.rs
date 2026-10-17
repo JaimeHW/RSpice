@@ -251,16 +251,24 @@ impl ModelHubService {
     /// serial floor, the expiry, the recall list — through the same
     /// [`ModelHub::open`] a desktop launch runs, rather than through anything
     /// written for a browser.
+    ///
+    /// Beside the report, why the store could not be re-read, when it could
+    /// not: the caller states it in the Console.
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn restore_persisted_packs(
         &mut self,
         persisted: crate::state::model_hub::durable::PersistedHubState,
-    ) -> Option<crate::state::model_hub::durable::HydrationReport> {
+    ) -> Option<(
+        crate::state::model_hub::durable::HydrationReport,
+        Option<String>,
+    )> {
         let report = self.store.as_ref()?.restore(persisted)?;
-        if let Err(error) = self.reload() {
-            log::warn!("the model hub could not be re-read after restoring stored packs: {error}");
-        }
-        Some(report)
+        let reload_error = self.reload().err().map(|error| {
+            format!(
+                "The model hub could not be re-read after restoring this browser's packs: {error}"
+            )
+        });
+        Some((report, reload_error))
     }
 
     /// Why there is no hub, in words a user can act on.

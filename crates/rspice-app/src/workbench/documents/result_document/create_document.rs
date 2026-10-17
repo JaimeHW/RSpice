@@ -11,7 +11,7 @@ use rspice_results_ui::create_document::{
     self, CreateDocumentHost, CreateResultDocumentDialogState, ViewerChoice,
 };
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::product::{AnalysisInstanceId, DatasetBinding, DatasetId, ResultDocumentId};
 use crate::results::viewer_catalog::{
     VIEWER_DOCUMENTS, ViewerArt, ViewerCapabilities, ViewerCompatibility, ViewerDocumentDefinition,
@@ -84,11 +84,20 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
     let submit = create_document::show(ctx, &mut draft, &CreateDocumentSources(&app.state));
     app.state.workbench.create_result_document = draft;
     if submit {
+        let name = app
+            .state
+            .workbench
+            .create_result_document
+            .name
+            .trim()
+            .to_owned();
         match commit(app) {
-            Ok(document_id) => {
-                app.state.push_user_message(ConsoleMessage::info(format!(
-                    "Created project result document {document_id}"
-                )));
+            Ok(_) => {
+                app.state.record(
+                    LogSeverity::Info,
+                    LogSource::Studio,
+                    format!("Created result document {name}."),
+                );
             }
             Err(error) => {
                 app.state.workbench.create_result_document.validation_error =

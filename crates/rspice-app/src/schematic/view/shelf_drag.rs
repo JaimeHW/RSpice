@@ -7,9 +7,10 @@
 
 use egui::{InputState, Key, Modifiers, Popup, Response};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{ComponentType, LibraryCellInstance, PendingStimulusPlacement, Point};
 use crate::workbench::app_state::AppState;
+
+use super::selection_transform::{SelectionTransform, transform_selection_on_active_sheet};
 
 /// Typed payload shared by component-shelf drag sources and the schematic
 /// canvas drop target.
@@ -137,10 +138,10 @@ pub(super) fn commit_shelf_drop(
         state.schematic.cancel_tool();
         state.schematic.session.editor.pending_library_cell = None;
     }
-    state.push_user_message(ConsoleMessage::info(format!(
-        "Placed {label} at ({}, {}) from the component shelf.",
+    state.prompt(format!(
+        "Placed {label} at ({}, {}).",
         grid_pos.x, grid_pos.y
-    )));
+    ));
     ShelfDropOutcome::Placed
 }
 
@@ -186,6 +187,9 @@ pub(crate) fn handle_pre_render_placement_transform(
     canvas_has_focus: bool,
 ) -> bool {
     let pointer_over_canvas = rspice_schematic_editor::view::canvas::contains_pointer(ctx);
+    if state.dialogs.move_selection.armed && (canvas_has_focus || pointer_over_canvas) {
+        return turn_the_floating_move(ctx, state);
+    }
     let click_placement_active = state.schematic.session.editor.tool.is_place_tool()
         && (canvas_has_focus || pointer_over_canvas);
     let shelf_drag_over_canvas = super::shelf_drag_over_schematic_canvas(ctx);
@@ -196,6 +200,29 @@ pub(crate) fn handle_pre_render_placement_transform(
         return false;
     };
     apply_placement_transform(&mut state.schematic, transform);
+    ctx.request_repaint();
+    true
+}
+
+/// While Move carries the selection, R turns it clockwise and M mirrors it
+/// left to right about its own middle, and the move carries on from where
+/// the pointer is. The turn is its own undo step.
+fn turn_the_floating_move(ctx: &egui::Context, state: &mut AppState) -> bool {
+    let Some(transform) = ctx.input_mut(consume_placement_transform) else {
+        return false;
+    };
+    let transform = match transform {
+        PlacementTransform::RotateClockwise => SelectionTransform::RotateClockwise,
+        PlacementTransform::ToggleHorizontalMirror => SelectionTransform::MirrorHorizontal,
+    };
+    let symbol_context = super::schematic_symbol_context(state);
+    if transform_selection_on_active_sheet(state, &symbol_context, transform) {
+        // The move was armed against the drawing as it stood; it now
+        // carries the turned selection.
+        state.dialogs.move_selection.authority = Some(
+            crate::workbench::app::SchematicEditAuthority::capture(state),
+        );
+    }
     ctx.request_repaint();
     true
 }

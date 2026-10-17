@@ -202,6 +202,41 @@ fn transient_convergence_survives_worker_round_trip() {
 }
 
 #[test]
+fn a_testbench_error_crosses_the_worker_and_its_other_output_does_not() {
+    use rspice_core::config::{HdlOrigin, HdlOutputRecord, HdlPoint, HdlSeverity, HdlStream};
+
+    let record = |severity, text: &str| HdlOutputRecord {
+        point: HdlPoint::Transient { time: 2e-9 },
+        tick: 2000,
+        seconds: 2e-9,
+        stream: HdlStream::Diagnostic { severity },
+        text: text.to_owned(),
+        origin: HdlOrigin {
+            scope: "tb".to_owned(),
+            file: "tb.sv".to_owned(),
+            line: 14,
+        },
+    };
+    let error = record(HdlSeverity::Error, "out stuck low at 2 ns\n");
+    let result = SimulationResult::Transient {
+        spectra: Vec::new(),
+        hdl_output: vec![record(HdlSeverity::Info, "checking out\n"), error.clone()],
+        time: vec![0.0, 2e-9],
+        waveforms: HashMap::new(),
+        measurements: Vec::new(),
+        periodic_state: None,
+        convergence: None,
+        events: Default::default(),
+    };
+
+    let restored = crate::runner::worker_contract::round_trip_response_for_test(result);
+    let SimulationResult::Transient { hdl_output, .. } = restored else {
+        panic!("transient result must retain its kind")
+    };
+    assert_eq!(hdl_output, vec![error]);
+}
+
+#[test]
 fn worker_result_round_trip() {
     let dc_op = SimulationResult::DcOp(Box::new(DcOpResult {
         configuration: rspice_simulation_contract::config::OpConfig::default(),

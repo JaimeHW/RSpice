@@ -7,7 +7,7 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use egui::{Align, Color32, Frame, Grid, Layout, RichText, ScrollArea, Sense, Stroke, Ui};
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 #[cfg(target_arch = "wasm32")]
 use crate::state::pdk_config::MAX_PDK_ARCHIVE_BYTES;
 use crate::state::pdk_config::{
@@ -309,24 +309,12 @@ fn browser_pdk_storage_status(ui: &mut Ui, app: &mut RSpiceApp) {
                         .clicked()
                 {
                     match app.retry_browser_pdk_persistence(ui.ctx()) {
-                        Ok(()) => {
-                            app.state.push_user_message(ConsoleMessage::info(
-                                "Retrying browser PDK storage recovery.".to_owned(),
-                            ));
-                            app.state.ui.toasts.info(
-                                ui.ctx(),
-                                "PDK storage recovery: reloading and validating authoritative browser PDK state.",
-                            );
-                        }
+                        Ok(()) => app.state.prompt("Retrying browser PDK storage recovery."),
                         Err(error) => {
-                            let message =
-                                format!("Browser PDK storage recovery could not start: {error}");
-                            app.state
-                                .push_user_message(ConsoleMessage::error(message.clone()));
-                            app.state.ui.toasts.error_with_title(
-                                ui.ctx(),
-                                "PDK storage recovery blocked",
-                                message,
+                            app.state.record(
+                                LogSeverity::Error,
+                                LogSource::Studio,
+                                format!("Browser PDK storage recovery could not start: {error}"),
                             );
                         }
                     }
@@ -4032,7 +4020,7 @@ fn apply_action(
                 });
             package.and_then(|package| {
                 let archive = registry.archive_for_package(package).ok_or_else(|| {
-                    "The exact source archive for this draft is unavailable.".to_owned()
+                    "The source archive this draft was made from is unavailable.".to_owned()
                 })?;
                 let bundle = draft
                     .authoring_bundle(package.metadata(), archive)
@@ -4182,8 +4170,7 @@ fn apply_action(
                 .find(|package| package.binding() == draft.technology)
                 .cloned()
                 .ok_or_else(|| {
-                    "The display draft no longer resolves to an exact currently trusted technology package."
-                        .to_owned()
+                    "The display draft's technology package is no longer trusted.".to_owned()
                 });
             package.and_then(|package| {
                 let receipt = candidate
@@ -4221,7 +4208,7 @@ fn apply_action(
                 .find(|package| package.manifest_digest() == binding.technology_manifest_digest)
                 .cloned()
                 .ok_or_else(|| {
-                    "The selected display revision no longer resolves to an exact currently trusted technology package."
+                    "The selected display revision's technology package is no longer trusted."
                         .to_owned()
                 });
             package.and_then(|package| {
@@ -4277,7 +4264,7 @@ fn apply_action(
             .execute_project_pdk_callback(&callback_id, &authority(view), view.reason.trim())
             .map(|receipt| {
                 Some(format!(
-                    "Executed signed callback {} for exact package {} {} and committed project receipt #{} at revision {}.",
+                    "Ran signed callback {} for package {} {} (project receipt #{}, revision {}).",
                     receipt.execution.callback_id,
                     receipt.execution.package_binding.package_id,
                     receipt.execution.package_binding.revision,
@@ -4291,20 +4278,12 @@ fn apply_action(
     match result {
         Ok(Some(message)) => {
             app.state
-                .push_user_message(ConsoleMessage::info(message.clone()));
-            app.state
-                .ui
-                .toasts
-                .success(ctx, "PDK technology operation completed", message);
+                .record(LogSeverity::Info, LogSource::Studio, message);
         }
         Ok(None) => {}
         Err(error) => {
             app.state
-                .push_user_message(ConsoleMessage::error(error.clone()));
-            app.state
-                .ui
-                .toasts
-                .error_with_title(ctx, "PDK technology operation blocked", error);
+                .record(LogSeverity::Error, LogSource::Studio, error);
         }
     }
 }
@@ -4341,52 +4320,46 @@ fn persist_candidate(
     #[cfg(target_arch = "wasm32")]
     {
         let _ = view;
-        app.start_browser_pdk_administration_publication(
-            ctx,
-            candidate,
-            "PDK technology updated",
-            message,
-            move |ctx| {
-                ctx.data_mut(|data| {
-                    let id = egui::Id::new(VIEW_STATE_ID);
-                    let mut view = data.get_temp::<AdminViewState>(id).unwrap_or_default();
-                    match effect {
-                        AdminCommitEffect::None => {}
-                        AdminCommitEffect::ClearTrustDraft {
-                            publisher_id,
-                            key_id,
-                        } => {
-                            if view.trust_publisher_id.trim() == publisher_id
-                                && view.trust_key_id.trim() == key_id
-                            {
-                                view.trust_publisher_id.clear();
-                                view.trust_key_id.clear();
-                                view.trust_key_base64.clear();
-                            }
-                        }
-                        AdminCommitEffect::SelectDisplayProfile {
-                            profile_id,
-                            revision,
-                        } => {
-                            view.selected_display_profile = Some((profile_id, revision));
-                            view.display_draft_dirty = false;
-                        }
-                        AdminCommitEffect::TechnologyDraftSaved => {
-                            view.technology_draft_dirty = false;
-                            view.discard_technology_draft_armed = false;
-                            view.technology_draft_error = None;
-                        }
-                        AdminCommitEffect::TechnologyDraftDiscarded => {
-                            view.technology_draft = None;
-                            view.technology_draft_dirty = false;
-                            view.discard_technology_draft_armed = false;
-                            view.technology_draft_error = None;
+        app.start_browser_pdk_administration_publication(ctx, candidate, message, move |ctx| {
+            ctx.data_mut(|data| {
+                let id = egui::Id::new(VIEW_STATE_ID);
+                let mut view = data.get_temp::<AdminViewState>(id).unwrap_or_default();
+                match effect {
+                    AdminCommitEffect::None => {}
+                    AdminCommitEffect::ClearTrustDraft {
+                        publisher_id,
+                        key_id,
+                    } => {
+                        if view.trust_publisher_id.trim() == publisher_id
+                            && view.trust_key_id.trim() == key_id
+                        {
+                            view.trust_publisher_id.clear();
+                            view.trust_key_id.clear();
+                            view.trust_key_base64.clear();
                         }
                     }
-                    data.insert_temp(id, view);
-                });
-            },
-        )?;
+                    AdminCommitEffect::SelectDisplayProfile {
+                        profile_id,
+                        revision,
+                    } => {
+                        view.selected_display_profile = Some((profile_id, revision));
+                        view.display_draft_dirty = false;
+                    }
+                    AdminCommitEffect::TechnologyDraftSaved => {
+                        view.technology_draft_dirty = false;
+                        view.discard_technology_draft_armed = false;
+                        view.technology_draft_error = None;
+                    }
+                    AdminCommitEffect::TechnologyDraftDiscarded => {
+                        view.technology_draft = None;
+                        view.technology_draft_dirty = false;
+                        view.discard_technology_draft_armed = false;
+                        view.technology_draft_error = None;
+                    }
+                }
+                data.insert_temp(id, view);
+            });
+        })?;
         Ok(None)
     }
 }

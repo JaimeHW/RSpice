@@ -21,7 +21,7 @@
 
 mod engine_refusals;
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::simulation::SimulationController;
 use crate::simulation::controller::EngineCheckOutcome;
 use crate::workbench::RSpiceApp;
@@ -71,9 +71,11 @@ fn start(state: &mut AppState, controller: &mut SimulationController, queue: boo
     if let Some(result) = design_rules
         && let Err(error) = state.publish_configured_root_design_check_result(result)
     {
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "Design-rule findings could not be recorded: {error}"
-        )));
+        state.record(
+            LogSeverity::Error,
+            LogSource::Studio,
+            format!("Design-rule check findings could not be published: {error}"),
+        );
     }
     if report.blockers.is_empty() {
         match controller.prepare_run_set_for_preflight(state) {
@@ -145,10 +147,14 @@ pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) 
         // The controller dropped the build: the design was replaced under it.
         let revision = check.report.project_revision;
         state.workbench.preflight.checking = None;
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "Preflight stopped · the design was replaced while revision {revision} was checked \
-             · nothing was queued"
-        )));
+        state.record(
+            LogSeverity::Warning,
+            LogSource::Studio,
+            format!(
+                "Preflight stopped · the design was replaced while revision {revision} was \
+                 checked · nothing was queued"
+            ),
+        );
         return;
     }
     let Some(outcome) = controller.poll_engine_check() else {
@@ -206,10 +212,14 @@ fn cancel(state: &mut AppState, controller: &mut SimulationController) {
     };
     controller.cancel_engine_check();
     controller.clear_prepared_run();
-    state.push_user_message(ConsoleMessage::warning(format!(
-        "Preflight cancelled · design revision {} was not checked · nothing was queued",
-        check.report.project_revision
-    )));
+    state.record(
+        LogSeverity::Warning,
+        LogSource::Studio,
+        format!(
+            "Preflight cancelled · design revision {} was not checked · nothing was queued",
+            check.report.project_revision
+        ),
+    );
 }
 
 /// A pass whose run is no longer the one retained: its findings are
@@ -225,13 +235,17 @@ fn conclude_stale(
     if let Some(inputs_at_press) = inputs_at_press {
         state.publish_dispatch_diagnostics_against(&report, inputs_at_press);
     }
-    state.push_user_message(ConsoleMessage::warning(format!(
-        "Preflight stale · the design changed while revision {} was checked · {} finding{} \
-         marked stale · nothing was queued",
-        report.project_revision,
-        report.blockers.len(),
-        if report.blockers.len() == 1 { "" } else { "s" }
-    )));
+    state.record(
+        LogSeverity::Warning,
+        LogSource::Studio,
+        format!(
+            "Preflight stale · the design changed while revision {} was checked · {} finding{} \
+             marked stale · nothing was queued",
+            report.project_revision,
+            report.blockers.len(),
+            if report.blockers.len() == 1 { "" } else { "s" }
+        ),
+    );
 }
 
 /// Retain a finished pass's report, publish what it found, say what it
@@ -295,11 +309,12 @@ fn conclude(
     // An event, at the severity of the pass rather than of its findings: the
     // findings are records on the Problems page, and this says the pass ran
     // and what it decided.
-    state.push_user_message(if blocked {
-        ConsoleMessage::warning(message)
+    let severity = if blocked {
+        LogSeverity::Warning
     } else {
-        ConsoleMessage::info(message)
-    });
+        LogSeverity::Info
+    };
+    state.record(severity, LogSource::Studio, message);
 
     if blocked {
         show_blockers(state);
@@ -328,9 +343,8 @@ pub(crate) fn run_and_queue(app: &mut RSpiceApp) {
     if app.state.simulation.execution.has_active_execution()
         || app.state.simulation.execution.trigger_simulation
     {
-        app.state.push_user_message(ConsoleMessage::warning(
-            "A simulation is already running or waiting to start".to_owned(),
-        ));
+        app.state
+            .prompt("A simulation is already running or waiting to start.");
         return;
     }
 

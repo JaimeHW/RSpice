@@ -14,7 +14,6 @@ use egui::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::diagnostics::ConsoleMessage;
 use crate::ui::{
     theme::{self, FontWeight},
     tokens::{self, Tokens},
@@ -69,8 +68,7 @@ pub(crate) fn open(app: &mut RSpiceApp) {
         .workbench
         .navigate(route, RouteTransitionSource::User)
     {
-        app.state
-            .push_user_message(ConsoleMessage::warning(error.to_string()));
+        app.state.prompt(error.to_string());
     }
 }
 
@@ -118,10 +116,10 @@ fn execute_action(app: &mut RSpiceApp, action: BrowserAction) {
                     "This specialist workspace is not currently available."
                 }
             };
-            app.state.push_user_message(ConsoleMessage::warning(format!(
+            app.state.prompt(format!(
                 "{} is unavailable: {reason}",
                 surface.metadata().label
-            )));
+            ));
         }
         BrowserAction::ToggleFavorite(surface) => app
             .state
@@ -145,10 +143,7 @@ fn execute_action(app: &mut RSpiceApp, action: BrowserAction) {
                     .workbench
                     .specialist_tool_browser
                     .record_recent(surface),
-                Err(error) => {
-                    app.state
-                        .push_user_message(ConsoleMessage::warning(error.to_string()));
-                }
+                Err(error) => app.state.prompt(error.to_string()),
             }
         }
     }
@@ -167,9 +162,7 @@ fn close_to_source(state: &mut AppState) {
         .workbench
         .replace_route(fallback, RouteTransitionSource::User)
     {
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "Could not close Specialist tool browser: {error}"
-        )));
+        state.prompt(format!("Could not close Specialist tool browser: {error}"));
     }
 }
 

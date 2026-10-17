@@ -7,7 +7,6 @@
 
 use egui::{Response, Ui};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{
     ComponentType, OccurrenceProbeSpelling, Point, SavedOutput, SavedOutputCompatibility,
     SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicProbe,
@@ -112,7 +111,7 @@ pub(super) fn handle_tool_interactions(
         )
     {
         let request = capture_shape_input(state, transition);
-        apply_shape_input(ui, state, request);
+        apply_shape_input(state, request);
     }
 
     if matches!(current_tool, Tool::Select) {
@@ -127,7 +126,7 @@ pub(super) fn handle_tool_interactions(
 
     if let Some(pos) = input.shape_double_click {
         let position = resolve_grid_pointer(state, viewport, pos).snapped_position;
-        handle_documentation_shape_click(ui, state, position, true);
+        handle_documentation_shape_click(state, position, true);
     }
 
     if let Some(pos) = input.primary_click
@@ -152,7 +151,7 @@ pub(super) fn handle_tool_interactions(
                     }
                 }
                 Some(wire_pos) => state.start_canvas_wire(ui.ctx(), wire_pos),
-                None => report_unrepresentable_conductor_attachment(ui, state),
+                None => report_unrepresentable_conductor_attachment(state),
             },
             ToolPointerAction::Bus(bus_pos) => {
                 if state.schematic.session.editor.bus_drawing.active {
@@ -166,17 +165,17 @@ pub(super) fn handle_tool_interactions(
                         .declaration
                         .clone();
                     if let Err(error) = state.start_canvas_bus(ui.ctx(), bus_pos, declaration) {
-                        report_bus_error(ui, state, "Bus could not be started", error.to_string());
+                        state.prompt(format!("Bus not started: {error}"));
                     }
                 }
             }
             ToolPointerAction::BusTap { position, radius } => {
-                handle_bus_tap_click(ui, state, position, radius);
+                handle_bus_tap_click(state, position, radius);
             }
-            ToolPointerAction::Junction(position) => handle_junction_click(ui, state, position),
+            ToolPointerAction::Junction(position) => handle_junction_click(state, position),
             ToolPointerAction::DesignNote(position) => place_pending_design_note(state, position),
             ToolPointerAction::DocumentationShape(position) => {
-                handle_documentation_shape_click(ui, state, position, false);
+                handle_documentation_shape_click(state, position, false);
             }
             ToolPointerAction::Select(query) => {
                 handle_select_click(
@@ -190,7 +189,7 @@ pub(super) fn handle_tool_interactions(
                 );
             }
             ToolPointerAction::Probe(position) => {
-                handle_probe_click(ui, state, position, symbol_context);
+                handle_probe_click(state, position, symbol_context);
             }
             // The armed tool determines whether the naming transaction makes
             // a local label or an off-sheet connector at this shared anchor.
@@ -308,7 +307,7 @@ fn finish_active_route(ui: &Ui, state: &mut AppState) -> bool {
         return match state.schematic.finish_bus() {
             Ok(bus) => bus.is_some(),
             Err(error) => {
-                report_bus_error(ui, state, "Bus could not be committed", error.to_string());
+                state.prompt(format!("Bus not committed: {error}"));
                 false
             }
         };
@@ -364,31 +363,29 @@ fn activate_requirement_link(state: &mut AppState, note_id: u64, ctx: &egui::Con
         Some(crate::state::RequirementTarget::ExternalUri(uri)) => {
             let uri = uri.to_owned();
             ctx.open_url(egui::OpenUrl::new_tab(&uri));
-            state.push_user_message(ConsoleMessage::info(format!(
-                "Opened requirement link {uri}."
-            )));
+            state.prompt(format!("Opened requirement link {uri}."));
             true
         }
         Some(crate::state::RequirementTarget::ProjectSpecification(reference)) => {
             let reference = reference.to_owned();
             crate::workbench::documents::result_document::open_specification_editor(state);
-            state.push_user_message(ConsoleMessage::info(format!(
+            state.prompt(format!(
                 "Opened project specifications for requirement {reference}."
-            )));
+            ));
             true
         }
         None => false,
     }
 }
 
-fn handle_bus_tap_click(ui: &Ui, state: &mut AppState, requested: Point, hit_radius: i32) {
+fn handle_bus_tap_click(state: &mut AppState, requested: Point, hit_radius: i32) {
     if state.schematic_edit_read_only() {
         state.deny_read_only_edit();
         state.schematic.cancel_tool();
         return;
     }
     let Some(placement) = state.schematic.session.editor.pending_bus_tap.as_ref() else {
-        report_bus_candidate_error(ui, state, BusTapCandidateError::MissingConfiguration);
+        report_bus_candidate_error(state, BusTapCandidateError::MissingConfiguration);
         return;
     };
     if state.schematic.session.editor.tool != Tool::BusTap
@@ -396,19 +393,14 @@ fn handle_bus_tap_click(ui: &Ui, state: &mut AppState, requested: Point, hit_rad
             .authority
             .matches(&super::requests::editor_request_source(state))
     {
-        report_bus_error(
-            ui,
-            state,
-            "Bus tap rejected",
-            "The active schematic context changed. Reopen Place bus tap.".to_owned(),
-        );
+        state.prompt("The active schematic changed. Reopen Place bus tap.");
         state.schematic.cancel_tool();
         return;
     }
     let candidate = match resolve_bus_tap_candidate_on_active_sheet(state, requested, hit_radius) {
         Ok(candidate) => candidate,
         Err(error) => {
-            report_bus_candidate_error(ui, state, error);
+            report_bus_candidate_error(state, error);
             return;
         }
     };
@@ -429,43 +421,24 @@ fn handle_bus_tap_click(ui: &Ui, state: &mut AppState, requested: Point, hit_rad
             } else {
                 format!("bus slice {}", pending.slice)
             };
-            let message = format!(
+            state.prompt(format!(
                 "Placed {target} from ({}, {}) to ({}, {}).",
                 candidate.bus_point.x,
                 candidate.bus_point.y,
                 candidate.connection_point.x,
                 candidate.connection_point.y
-            );
-            state
-                .ui
-                .toasts
-                .success(ui.ctx(), "Bus tap placed", message.clone());
-            state.push_user_message(ConsoleMessage::info(message));
+            ));
         }
-        Err(error) => report_bus_error(ui, state, "Bus tap rejected", error.to_string()),
+        Err(error) => state.prompt(format!("Bus tap not placed: {error}")),
     }
 }
 
-fn report_bus_candidate_error(ui: &Ui, state: &mut AppState, error: BusTapCandidateError) {
-    report_bus_error(ui, state, "Invalid bus-tap target", error.message());
+fn report_bus_candidate_error(state: &mut AppState, error: BusTapCandidateError) {
+    state.prompt(error.message());
 }
 
-fn report_bus_error(ui: &Ui, state: &mut AppState, title: &str, message: String) {
-    state
-        .ui
-        .toasts
-        .warn_with_title(ui.ctx(), title, message.clone());
-    state.push_user_message(ConsoleMessage::warning(message));
-}
-
-fn report_unrepresentable_conductor_attachment(ui: &Ui, state: &mut AppState) {
-    let message = "The conductor was acquired visually, but no exact schematic attachment point could be represented; the wire was not started."
-        .to_owned();
-    state
-        .ui
-        .toasts
-        .warn_with_title(ui.ctx(), "Wire attachment unavailable", message.clone());
-    state.push_user_message(ConsoleMessage::warning(message));
+fn report_unrepresentable_conductor_attachment(state: &mut AppState) {
+    state.prompt("No schematic point can be attached to that conductor; the wire was not started.");
 }
 
 /// Whether a label dropped at `anchor` would sit exactly where two of this
@@ -484,11 +457,12 @@ fn refuse_label_on_unmarked_crossing(ui: &Ui, state: &mut AppState, anchor: Poin
          neither. Place a junction there to join the wires, or drop the label onto one wire.",
         anchor.x, anchor.y
     );
+    // The toast is the answer: the label the user dropped is not there, and
+    // the reason is longer than the status bar holds.
     state
         .ui
         .toasts
-        .warn_with_title(ui.ctx(), "Label not placed", message.clone());
-    state.push_user_message(ConsoleMessage::warning(message));
+        .warn_with_title(ui.ctx(), "Label not placed", message);
 }
 
 /// A placed part whose pin lands inside one of this sheet's wires is
@@ -523,9 +497,7 @@ fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos
         ComponentType::Port => place_pending_port(state, grid_pos),
         ComponentType::CellInstance => {
             let Some(pending) = state.schematic.session.editor.pending_library_cell.as_ref() else {
-                state.push_user_message(ConsoleMessage::warning(
-                    "No library cell selected for placement".to_string(),
-                ));
+                state.prompt("Choose a library cell to place.");
                 state.schematic.cancel_tool();
                 return;
             };
@@ -535,10 +507,9 @@ fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos
                     .authority
                     .matches(&super::requests::editor_request_source(state))
             {
-                state.push_user_message(ConsoleMessage::warning(
-                    "Library cell was not placed: the active schematic context changed; choose the cell again."
-                        .to_owned(),
-                ));
+                state.prompt(
+                    "Library cell not placed: the active schematic changed. Choose the cell again.",
+                );
                 state.schematic.cancel_tool();
                 return;
             }
@@ -575,10 +546,7 @@ fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos
 
 fn place_pending_design_note(state: &mut AppState, grid_pos: Point) {
     let Some(pending) = state.schematic.session.editor.pending_design_note.clone() else {
-        state.push_user_message(ConsoleMessage::warning(
-            "Design-note placement requires a validated documentation contract; reopen Place text or note."
-                .to_owned(),
-        ));
+        state.prompt("No note is armed. Reopen Place text or note.");
         state.schematic.cancel_tool();
         return;
     };
@@ -587,37 +555,25 @@ fn place_pending_design_note(state: &mut AppState, grid_pos: Point) {
         .as_ref()
         .is_some_and(|source| *source == super::requests::editor_request_source(state));
     if state.schematic_edit_read_only() || !authority_matches {
-        state.push_user_message(ConsoleMessage::warning(
-            "Design note was not placed: the active schematic authority changed; reopen Place text or note."
-                .to_owned(),
-        ));
+        state.prompt("Note not placed: the active schematic changed. Reopen Place text or note.");
         state.schematic.cancel_tool();
         return;
     }
     let kind = pending.kind.label();
     match state.schematic.place_pending_design_note(grid_pos, pending) {
-        Ok(stable_id) => {
+        Ok(_) => {
             state.schematic.cancel_tool();
             state.sync_active_schematic_to_workspace();
-            state.push_user_message(ConsoleMessage::info(format!(
-                "Placed {kind} as stable non-electrical object {stable_id}."
-            )));
+            state.prompt(format!("Placed {kind}."));
         }
         Err(error) => {
-            state.push_user_message(ConsoleMessage::warning(format!(
-                "Design note was not placed: {error}"
-            )));
+            state.prompt(format!("Note not placed: {error}"));
             state.schematic.cancel_tool();
         }
     }
 }
 
-fn handle_documentation_shape_click(
-    ui: &Ui,
-    state: &mut AppState,
-    grid_pos: Point,
-    finish_polygon: bool,
-) {
+fn handle_documentation_shape_click(state: &mut AppState, grid_pos: Point, finish_polygon: bool) {
     state
         .schematic
         .session
@@ -637,10 +593,7 @@ fn handle_documentation_shape_click(
         .pending_documentation_shape
         .as_ref()
     else {
-        state.push_user_message(ConsoleMessage::warning(
-            "Documentation-shape placement requires a validated graphics contract; reopen Draw documentation shape."
-                .to_owned(),
-        ));
+        state.prompt("No shape is armed. Reopen Draw documentation shape.");
         state.schematic.cancel_tool();
         return;
     };
@@ -649,10 +602,9 @@ fn handle_documentation_shape_click(
         .as_ref()
         .is_some_and(|source| *source == super::requests::editor_request_source(state));
     if state.schematic_edit_read_only() || !authority_matches {
-        state.push_user_message(ConsoleMessage::warning(
-            "Documentation shape was not placed: the active schematic authority changed; reopen Draw documentation shape."
-                .to_owned(),
-        ));
+        state.prompt(
+            "Shape not placed: the active schematic changed. Reopen Draw documentation shape.",
+        );
         state.schematic.cancel_tool();
         return;
     }
@@ -665,10 +617,10 @@ fn handle_documentation_shape_click(
         .add_point(kind, grid_pos)
     {
         Ok(auto_commit) if auto_commit || finish_polygon => {
-            finish_documentation_shape(ui, state, kind);
+            finish_documentation_shape(state, kind);
         }
         Ok(_) => {}
-        Err(error) => report_documentation_shape_error(ui, state, error),
+        Err(error) => report_documentation_shape_error(state, error),
     }
 }
 
@@ -702,7 +654,7 @@ fn handle_documentation_shape_keyboard(
         grid_size,
     ) {
         let request = capture_shape_input(state, transition);
-        apply_shape_input(ui, state, request);
+        apply_shape_input(state, request);
     }
 }
 
@@ -720,7 +672,7 @@ fn capture_shape_input(state: &AppState, transition: ShapeInputTransition) -> Sh
     }
 }
 
-fn apply_shape_input(ui: &Ui, state: &mut AppState, request: ShapeInputRequest) {
+fn apply_shape_input(state: &mut AppState, request: ShapeInputRequest) {
     if request.source != super::requests::editor_request_source(state)
         || request.kind
             != state
@@ -739,7 +691,7 @@ fn apply_shape_input(ui: &Ui, state: &mut AppState, request: ShapeInputRequest) 
     state.schematic.session.editor.documentation_shape_drawing = request.transition.next;
     match request.transition.action {
         Some(ShapeInputAction::PlacePoint(cursor)) => {
-            handle_documentation_shape_click(ui, state, cursor, false);
+            handle_documentation_shape_click(state, cursor, false);
             if state.schematic.session.editor.tool == Tool::DocumentationShape {
                 state
                     .schematic
@@ -749,12 +701,12 @@ fn apply_shape_input(ui: &Ui, state: &mut AppState, request: ShapeInputRequest) 
                     .keyboard_active = true;
             }
         }
-        Some(ShapeInputAction::FinishPolygon) => finish_documentation_polygon(ui, state),
+        Some(ShapeInputAction::FinishPolygon) => finish_documentation_polygon(state),
         None => {}
     }
 }
 
-fn finish_documentation_polygon(ui: &Ui, state: &mut AppState) {
+fn finish_documentation_polygon(state: &mut AppState) {
     let Some(kind) = state
         .schematic
         .session
@@ -766,15 +718,11 @@ fn finish_documentation_polygon(ui: &Ui, state: &mut AppState) {
         return;
     };
     if kind == crate::state::DocumentationShapeKind::Polygon {
-        finish_documentation_shape(ui, state, kind);
+        finish_documentation_shape(state, kind);
     }
 }
 
-fn finish_documentation_shape(
-    ui: &Ui,
-    state: &mut AppState,
-    kind: crate::state::DocumentationShapeKind,
-) {
+fn finish_documentation_shape(state: &mut AppState, kind: crate::state::DocumentationShapeKind) {
     let geometry = match state
         .schematic
         .session
@@ -784,7 +732,7 @@ fn finish_documentation_shape(
     {
         Ok(geometry) => geometry,
         Err(error) => {
-            report_documentation_shape_error(ui, state, error);
+            report_documentation_shape_error(state, error);
             return;
         }
     };
@@ -805,7 +753,7 @@ fn finish_documentation_shape(
         None
     };
     if let Some(error) = authority_error {
-        report_documentation_shape_error(ui, state, error);
+        report_documentation_shape_error(state, error);
         state.schematic.cancel_tool();
         return;
     }
@@ -813,21 +761,13 @@ fn finish_documentation_shape(
         .schematic
         .commit_documentation_shape(pending, geometry)
     {
-        Ok(stable_id) => {
+        Ok(_) => {
             state.schematic.cancel_tool();
             state.sync_active_schematic_to_workspace();
-            let message = format!(
-                "Placed {} as stable non-electrical documentation shape {stable_id}.",
-                kind.label()
-            );
-            state
-                .ui
-                .toasts
-                .success(ui.ctx(), "Documentation shape placed", message.clone());
-            state.push_user_message(ConsoleMessage::info(message));
+            state.prompt(format!("Placed {}.", kind.label()));
         }
         Err(error) => {
-            report_documentation_shape_error(ui, state, error);
+            report_documentation_shape_error(state, error);
             if matches!(
                 error,
                 crate::state::DocumentationShapeError::ReadOnly
@@ -840,17 +780,10 @@ fn finish_documentation_shape(
 }
 
 fn report_documentation_shape_error(
-    ui: &Ui,
     state: &mut AppState,
     error: crate::state::DocumentationShapeError,
 ) {
-    let message = format!("Documentation shape was not placed: {error}");
-    state.ui.toasts.warn_with_title(
-        ui.ctx(),
-        "Documentation shape needs attention",
-        message.clone(),
-    );
-    state.push_user_message(ConsoleMessage::warning(message));
+    state.prompt(format!("Shape not placed: {error}"));
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -889,44 +822,22 @@ fn commit_explicit_junction(state: &mut AppState, requested: Point) -> JunctionP
     JunctionPlacementOutcome::Placed(target)
 }
 
-fn handle_junction_click(ui: &Ui, state: &mut AppState, requested: Point) {
-    let (title, message, warning) = match commit_explicit_junction(state, requested) {
-        JunctionPlacementOutcome::Placed(point) => (
-            "Junction placed",
-            format!("Added an explicit junction at ({}, {}).", point.x, point.y),
-            false,
-        ),
-        JunctionPlacementOutcome::Removed(point) => (
-            "Junction removed",
-            format!(
-                "Removed the explicit junction at ({}, {}).",
-                point.x, point.y
-            ),
-            false,
-        ),
-        JunctionPlacementOutcome::NoIntersection => (
-            "No conductor intersection",
-            "Move the pointer to a point where two conductors meet.".to_owned(),
-            true,
-        ),
-        JunctionPlacementOutcome::MixedBus => (
-            "Mixed scalar/bus junction rejected",
-            "Use a typed bus tap; explicit junctions cannot connect scalar wires to buses."
-                .to_owned(),
-            true,
-        ),
+fn handle_junction_click(state: &mut AppState, requested: Point) {
+    let message = match commit_explicit_junction(state, requested) {
+        JunctionPlacementOutcome::Placed(point) => {
+            format!("Added a junction at ({}, {}).", point.x, point.y)
+        }
+        JunctionPlacementOutcome::Removed(point) => {
+            format!("Removed the junction at ({}, {}).", point.x, point.y)
+        }
+        JunctionPlacementOutcome::NoIntersection => {
+            "No junction: two conductors do not meet there.".to_owned()
+        }
+        JunctionPlacementOutcome::MixedBus => {
+            "No junction: a wire joins a bus through a bus tap.".to_owned()
+        }
     };
-
-    if warning {
-        state
-            .ui
-            .toasts
-            .warn_with_title(ui.ctx(), title, message.clone());
-        state.push_user_message(ConsoleMessage::warning(message));
-    } else {
-        state.ui.toasts.success(ui.ctx(), title, message.clone());
-        state.push_user_message(ConsoleMessage::info(message));
-    }
+    state.prompt(message);
 }
 
 fn handle_select_click(
@@ -1300,22 +1211,16 @@ fn commit_probe_request(
 /// transaction, so a net can never be "plotted" by one surface and absent
 /// from the other. Materialized data plots immediately; otherwise the active
 /// simulation plan receives an idempotent saved-output contract.
-pub(crate) fn toggle_probe_with_feedback(
-    ui: &Ui,
-    state: &mut AppState,
-    name: &str,
-    display: &str,
-) -> bool {
+pub(crate) fn toggle_probe_with_feedback(state: &mut AppState, name: &str, display: &str) -> bool {
     let (spelling, outcome) = commit_probe_request(state, name, display, request_probe_signal);
     let configuration_changed = matches!(&outcome, ProbeSignalOutcome::SavedOutputCreated { .. });
-    report_probe_outcome(ui, state, spelling.display(), outcome);
+    report_probe_outcome(state, spelling.display(), outcome);
     configuration_changed
 }
 
 /// Inspector/navigation action: reveal a probe without ever toggling a
 /// currently visible trace off.
 pub(crate) fn ensure_probe_visible_with_feedback(
-    ui: &Ui,
     state: &mut AppState,
     name: &str,
     display: &str,
@@ -1323,7 +1228,7 @@ pub(crate) fn ensure_probe_visible_with_feedback(
     let (spelling, outcome) =
         commit_probe_request(state, name, display, request_probe_signal_visible);
     let configuration_changed = matches!(&outcome, ProbeSignalOutcome::SavedOutputCreated { .. });
-    report_probe_outcome(ui, state, spelling.display(), outcome);
+    report_probe_outcome(state, spelling.display(), outcome);
     configuration_changed
 }
 
@@ -1331,7 +1236,6 @@ pub(crate) fn ensure_probe_visible_with_feedback(
 /// path keeps cross-probing useful for read-only library/testbench views while
 /// preserving their write boundary.
 pub(crate) fn ensure_retained_probe_visible_with_feedback(
-    ui: &Ui,
     state: &mut AppState,
     name: &str,
     display: &str,
@@ -1339,7 +1243,7 @@ pub(crate) fn ensure_retained_probe_visible_with_feedback(
     let spelling = match probe_spelling_for(state, name, display) {
         Ok(spelling) => spelling,
         Err(reason) => {
-            report_probe_outcome(ui, state, display, ProbeSignalOutcome::Rejected { reason });
+            report_probe_outcome(state, display, ProbeSignalOutcome::Rejected { reason });
             return false;
         }
     };
@@ -1366,77 +1270,26 @@ pub(crate) fn ensure_retained_probe_visible_with_feedback(
         &outcome,
         ProbeSignalOutcome::WaveformShown | ProbeSignalOutcome::WaveformAlreadyVisible
     );
-    report_probe_outcome(ui, state, spelling.display(), outcome);
+    report_probe_outcome(state, spelling.display(), outcome);
     shown
 }
 
-fn report_probe_outcome(ui: &Ui, state: &mut AppState, display: &str, outcome: ProbeSignalOutcome) {
-    match outcome {
-        ProbeSignalOutcome::WaveformShown => {
-            let message = format!("{display} added to plot");
-            state
-                .ui
-                .toasts
-                .success(ui.ctx(), "Trace shown", format!("{message}."));
-            state.push_user_message(ConsoleMessage::info(message));
-        }
-        ProbeSignalOutcome::WaveformHidden => {
-            let message = format!("{display} removed from plot");
-            state
-                .ui
-                .toasts
-                .success(ui.ctx(), "Trace hidden", format!("{message}."));
-            state.push_user_message(ConsoleMessage::info(message));
-        }
+fn report_probe_outcome(state: &mut AppState, display: &str, outcome: ProbeSignalOutcome) {
+    state.prompt(match outcome {
+        ProbeSignalOutcome::WaveformShown => format!("{display} added to the plot."),
+        ProbeSignalOutcome::WaveformHidden => format!("{display} removed from the plot."),
         ProbeSignalOutcome::WaveformAlreadyVisible => {
-            let message = format!("{display} is already visible in the plot");
-            state.ui.toasts.info_with_title(
-                ui.ctx(),
-                "Trace already visible",
-                format!("{message}."),
-            );
-            state.push_user_message(ConsoleMessage::info(message));
+            format!("{display} is already in the plot.")
         }
-        ProbeSignalOutcome::GroundReference => {
-            state.ui.toasts.success(
-                ui.ctx(),
-                "Ground reference selected",
-                "Node 0 is the 0 V reference.",
-            );
-            state.push_user_message(ConsoleMessage::info(
-                "Ground node: 0 V reference".to_owned(),
-            ));
-        }
-        ProbeSignalOutcome::SavedOutputCreated { plan_name } => {
-            let message = format!(
-                "{display} was added to saved outputs for {plan_name}; use Run active plan to materialize and plot it"
-            );
-            state
-                .ui
-                .toasts
-                .success(ui.ctx(), "Pending next run", format!("{message}."));
-            state.push_user_message(ConsoleMessage::info(message));
-        }
-        ProbeSignalOutcome::SavedOutputAlreadyPresent { plan_name } => {
-            let message = format!(
-                "{display} is already saved for {plan_name}; use Run active plan to materialize and plot it"
-            );
-            state
-                .ui
-                .toasts
-                .info_with_title(ui.ctx(), "Pending next run", format!("{message}."));
-            state.push_user_message(ConsoleMessage::info(message));
-        }
-        ProbeSignalOutcome::Rejected { reason } => {
-            let message = format!("Could not save {display}: {reason}");
-            state.ui.toasts.warn_with_title(
-                ui.ctx(),
-                "Probe output unavailable",
-                format!("{message}."),
-            );
-            state.push_user_message(ConsoleMessage::warning(message));
-        }
-    }
+        ProbeSignalOutcome::GroundReference => "Node 0 is the 0 V reference.".to_owned(),
+        ProbeSignalOutcome::SavedOutputCreated { plan_name } => format!(
+            "{display} added to the saved outputs of {plan_name}; it is plotted after the next run."
+        ),
+        ProbeSignalOutcome::SavedOutputAlreadyPresent { plan_name } => format!(
+            "{display} is already a saved output of {plan_name}; it is plotted after the next run."
+        ),
+        ProbeSignalOutcome::Rejected { reason } => format!("{display} not saved: {reason}."),
+    });
 }
 
 fn probe_edit_identity_is_current(state: &AppState) -> Result<(), String> {
@@ -1726,7 +1579,6 @@ fn component_probe_expression(
 }
 
 fn handle_probe_click(
-    ui: &Ui,
     state: &mut AppState,
     grid_pos: Point,
     symbol_context: &SchematicSymbolContext,
@@ -1735,11 +1587,7 @@ fn handle_probe_click(
         if state.schematic_edit_read_only() {
             state.deny_read_only_edit();
         } else {
-            state
-                .ui
-                .toasts
-                .warn_with_title(ui.ctx(), "Probe could not be placed", reason.clone());
-            state.push_user_message(ConsoleMessage::warning(reason));
+            state.prompt(format!("Probe not placed: {reason}"));
         }
         return;
     }
@@ -1757,17 +1605,12 @@ fn handle_probe_click(
                 &outcome,
                 ProbeSignalOutcome::Rejected { .. } | ProbeSignalOutcome::GroundReference
             );
-            report_probe_outcome(ui, state, spelling.display(), outcome);
+            report_probe_outcome(state, spelling.display(), outcome);
             let binding = current_probe_output_binding(state, spelling.engine());
             if retain_marker
                 && let Err(reason) = retain_probe_flag(state, grid_pos, Some(&spelling), binding)
             {
-                state.ui.toasts.warn_with_title(
-                    ui.ctx(),
-                    "Probe marker could not be retained",
-                    reason.clone(),
-                );
-                state.push_user_message(ConsoleMessage::warning(reason));
+                state.prompt(format!("Probe marker not kept: {reason}"));
             }
             if net_name != "0"
                 && state
@@ -1782,14 +1625,7 @@ fn handle_probe_click(
                 "Probe: wire at {:?} has no unambiguous live or retained net identity",
                 grid_pos
             );
-            state.ui.toasts.warn_with_title(
-                ui.ctx(),
-                "Wire has no probeable net",
-                "The current schematic connectivity could not resolve this conductor to one net",
-            );
-            state.push_user_message(ConsoleMessage::warning(
-                "Wire has no unambiguous probeable net in the current schematic.".to_string(),
-            ));
+            state.prompt("Nothing probed: this wire does not resolve to one net.");
         }
     } else {
         let components =
@@ -1801,33 +1637,18 @@ fn handle_probe_click(
         else {
             state.schematic.session.editor.net_highlight.clear();
             match retain_probe_flag(state, grid_pos, None, None) {
-                Ok(id) => {
-                    let message = format!(
-                        "P{id} was added to the saved-output marker set; place it on a conductor to bind an exact signal"
-                    );
-                    state
-                        .ui
-                        .toasts
-                        .success(ui.ctx(), "Probe placed", format!("{message}."));
-                    state.push_user_message(ConsoleMessage::info(message));
-                }
-                Err(reason) => {
-                    state.ui.toasts.warn_with_title(
-                        ui.ctx(),
-                        "Probe could not be placed",
-                        reason.clone(),
-                    );
-                    state.push_user_message(ConsoleMessage::warning(reason));
-                }
+                Ok(id) => state.prompt(format!(
+                    "Placed probe P{id}; move it onto a conductor to bind it to a signal."
+                )),
+                Err(reason) => state.prompt(format!("Probe not placed: {reason}")),
             }
             return;
         };
-        handle_component_probe(ui, state, comp_id, grid_pos, symbol_context);
+        handle_component_probe(state, comp_id, grid_pos, symbol_context);
     }
 }
 
 fn handle_component_probe(
-    ui: &Ui,
     state: &mut AppState,
     comp_id: u64,
     grid_pos: Point,
@@ -1849,15 +1670,9 @@ fn handle_component_probe(
 
         let Some(probe) = component_probe_expression(state, comp_id, grid_pos, symbol_context)
         else {
-            let message = format!(
-                "{comp_name} has no unambiguous current at that body location; probe an exact terminal or conductor for voltage, or add an exact lead/winding current expression in Saved outputs"
-            );
-            state.ui.toasts.warn_with_title(
-                ui.ctx(),
-                "Component current is ambiguous",
-                format!("{message}."),
-            );
-            state.push_user_message(ConsoleMessage::warning(message));
+            state.prompt(format!(
+                "{comp_name} has no single current there. Probe a terminal or a wire, or add the lead current in Saved outputs."
+            ));
             return;
         };
 
@@ -1874,17 +1689,12 @@ fn handle_component_probe(
             &outcome,
             ProbeSignalOutcome::Rejected { .. } | ProbeSignalOutcome::GroundReference
         );
-        report_probe_outcome(ui, state, spelling.display(), outcome);
+        report_probe_outcome(state, spelling.display(), outcome);
         let binding = current_probe_output_binding(state, spelling.engine());
         if retain_marker
             && let Err(reason) = retain_probe_flag(state, grid_pos, Some(&spelling), binding)
         {
-            state.ui.toasts.warn_with_title(
-                ui.ctx(),
-                "Probe marker could not be retained",
-                reason.clone(),
-            );
-            state.push_user_message(ConsoleMessage::warning(reason));
+            state.prompt(format!("Probe marker not kept: {reason}"));
         }
     }
 }

@@ -4,7 +4,6 @@ use super::{
     SchematicSymbolContext, requests::editor_request_source,
     sheet_visibility::with_active_wire_topology, viewport::Viewport,
 };
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{Point, Tool};
 use crate::workbench::{
     app::{armed_move_selection_authority, cancel_armed_move_selection},
@@ -30,9 +29,7 @@ pub(super) fn handle_armed_move_selection(
         return;
     }
     if let Err(message) = armed_move_selection_authority(state) {
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "Move selection cancelled: {message}"
-        )));
+        state.prompt(format!("Move cancelled: {message}"));
         cancel_armed_move_selection(state);
         return;
     }
@@ -87,19 +84,14 @@ fn apply(state: &mut AppState, symbols: &SchematicSymbolContext, request: MoveIn
 
 fn commit_armed_move_selection(state: &mut AppState, symbol_context: &SchematicSymbolContext) {
     if let Err(message) = armed_move_selection_authority(state) {
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "Move selection cancelled: {message}"
-        )));
+        state.prompt(format!("Move cancelled: {message}"));
         cancel_armed_move_selection(state);
         return;
     }
     let delta = state.dialogs.move_selection.canvas.preview_delta;
     let mode = state.dialogs.move_selection.mode;
     if delta == Point::origin() {
-        state.push_user_message(ConsoleMessage::info(
-            "Move selection finished without changing geometry; no undo record was created."
-                .to_owned(),
-        ));
+        state.prompt("Nothing moved.");
         cancel_armed_move_selection(state);
         return;
     }
@@ -134,26 +126,22 @@ fn commit_armed_move_selection(state: &mut AppState, symbol_context: &SchematicS
         Ok(true) => {
             let recorded = state.schematic.end_operation();
             state.sync_active_schematic_to_workspace();
-            state.push_user_message(ConsoleMessage::info(format!(
-                "Moved {} selected objects by ({}, {}) in {} mode; {}.",
-                state.schematic.live_movable_selection_count(),
-                delta.x,
-                delta.y,
-                mode.label(),
-                if recorded {
-                    "one undo record committed"
-                } else {
-                    "geometry was unchanged"
-                }
-            )));
+            state.prompt(if recorded {
+                format!(
+                    "Moved {} objects by ({}, {}) in {} mode.",
+                    state.schematic.live_movable_selection_count(),
+                    delta.x,
+                    delta.y,
+                    mode.label(),
+                )
+            } else {
+                "Nothing moved.".to_owned()
+            });
             cancel_armed_move_selection(state);
         }
         Ok(false) => {
             state.schematic.cancel_operation();
-            state.push_user_message(ConsoleMessage::info(
-                "Move selection produced no geometry change; no undo record was created."
-                    .to_owned(),
-            ));
+            state.prompt("Nothing moved.");
             cancel_armed_move_selection(state);
         }
         Err(error) => {
@@ -161,9 +149,7 @@ fn commit_armed_move_selection(state: &mut AppState, symbol_context: &SchematicS
             state.dialogs.move_selection.canvas.preview_error = Some(error.to_string());
             state.dialogs.move_selection.canvas.anchor = None;
             state.dialogs.move_selection.canvas.preview_delta = Point::origin();
-            state.push_user_message(ConsoleMessage::warning(format!(
-                "Move selection was not committed: {error}"
-            )));
+            state.prompt(format!("Move not committed: {error}"));
         }
     }
 }

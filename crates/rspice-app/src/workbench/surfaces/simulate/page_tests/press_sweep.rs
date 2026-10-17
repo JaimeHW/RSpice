@@ -1580,11 +1580,19 @@ impl Sweep {
         self.pass(Vec::new());
     }
 
-    /// The lifecycle receipt the studio last wrote, with its sequence, so a
-    /// receipt re-issued unchanged is still told from no receipt at all.
-    fn receipt(&self) -> (u64, String) {
+    /// The lifecycle receipt the studio last wrote, with how many plan
+    /// outcomes the Console has recorded, so a new outcome that repeats an
+    /// earlier message is still told from no outcome at all.
+    fn receipt(&self) -> (usize, String) {
+        let recorded = self
+            .app
+            .state
+            .log_buffer
+            .entries()
+            .filter(|entry| entry.source == crate::diagnostics::LogSource::Plan)
+            .count();
         let status = &self.app.state.workbench.analysis_lifecycle_status;
-        (status.sequence(), status.message().to_owned())
+        (recorded, status.message().to_owned())
     }
 
     /// Everything a removal could take: the plan, and the payload the project

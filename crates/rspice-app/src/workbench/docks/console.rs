@@ -4,8 +4,8 @@ mod log_anchor;
 #[cfg(test)]
 mod measurement_rows_tests;
 mod problems;
+mod transcript;
 
-use log_anchor::log_row;
 use problems::{ProblemCount, active_problem_count, problems};
 
 use egui::{Align, Grid, Layout, ScrollArea, Sense, Ui, Vec2};
@@ -20,7 +20,7 @@ use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
-use super::super::state::ConsolePage;
+use super::super::state::{ConsoleChannel, ConsolePage};
 use crate::workbench::commands::vocabulary::Command;
 
 const CONSOLE_HEADER_HEIGHT: f32 = 31.0;
@@ -32,9 +32,9 @@ const CONSOLE_BODY_PADDING_TOP: f32 = 7.0;
 const CONSOLE_BODY_PADDING_BOTTOM: f32 = 7.0;
 const CONSOLE_BODY_PADDING_X: f32 = 10.0;
 const CONSOLE_ROW_MIN_HEIGHT: f32 = 16.0;
-const CONSOLE_TIME_WIDTH: f32 = 58.0;
-const CONSOLE_SOURCE_WIDTH: f32 = 62.0;
 const CONSOLE_COLUMN_GAP: f32 = 9.0;
+/// Space between the tabs and the Console page's controls beside them.
+const CONSOLE_TOOLBAR_GAP: f32 = 12.0;
 /// Side of a row's leading problem mark, and the gutter every row reserves for
 /// it so a marked row's columns line up with an unmarked row's. Both read from
 /// the kit, so a console row's mark is the mark every other panel sets.
@@ -44,6 +44,7 @@ use crate::ui::widgets::{
 const CONSOLE_FONT_SIZE: f32 = tokens::FS_1;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    transcript::collect_save(ui.ctx(), &mut app.state);
     ui.spacing_mut().item_spacing.y = 0.0;
     header(ui, app, layout);
     if !layout.show_console_body {
@@ -68,7 +69,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             .max_rect(content_rect)
             .layout(Layout::top_down(Align::Min)),
         |ui| match page {
-            ConsolePage::Console => console(ui, &mut app.state),
+            ConsolePage::Console => transcript::console(ui, &mut app.state),
             ConsolePage::Problems => {
                 // A waiver changes what refuses a run, as the rule deck does,
                 // so a run prepared or checked before it is not authorized
@@ -96,31 +97,41 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     } else {
         CONSOLE_HEADER_HEIGHT
     };
+    let console_page = app.state.workbench.console_page == ConsolePage::Console;
+    let clear_shown = clear_is_offered(
+        layout,
+        app.state.workbench.console_page,
+        app.state.workbench.console_view.channel,
+    );
     let header = ui.allocate_ui_with_layout(
         Vec2::new(ui.available_width(), header_height),
         Layout::left_to_right(Align::Center),
         |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
-            let action_width = console_trailing_actions_width(
-                layout,
-                app.state.workbench.console_page,
-                touch_targets,
-            );
+            let action_width = console_trailing_actions_width(layout, clear_shown, touch_targets);
             egui::ScrollArea::horizontal()
                 .id_salt("workbench.console.tabs.scroll")
                 .max_width((ui.available_width() - action_width).max(header_height))
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .show(ui, |ui| {
-                    console_tabs(
-                        ui,
-                        app,
-                        problems,
-                        if touch_targets {
-                            header_height
-                        } else {
-                            CONSOLE_TAB_HEIGHT
-                        },
-                    );
+                    ui.horizontal(|ui| {
+                        console_tabs(
+                            ui,
+                            app,
+                            problems,
+                            if touch_targets {
+                                header_height
+                            } else {
+                                CONSOLE_TAB_HEIGHT
+                            },
+                        );
+                        // A compact header has no band beside the tabs, so the
+                        // page's controls scroll with them.
+                        if layout.compact_shell && console_page {
+                            ui.add_space(CONSOLE_TOOLBAR_GAP);
+                            transcript::toolbar(ui, &mut app.state);
+                        }
+                    });
                 });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let control_size = if touch_targets {
@@ -169,28 +180,37 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                     // The command decides what the visible page has to clear
                     // and does the clearing; this control contributes only the
                     // wording for the page in front of the user.
-                    let clear = console_clear_action(
-                        app.state.workbench.console_page,
-                        Command::ClearConsole.is_enabled(app),
-                    );
-                    ui.add_space(CONSOLE_ACTION_MARGIN_RIGHT);
-                    let response = ui
-                        .add_enabled_ui(clear.enabled, |ui| {
-                            console_action(
-                                ui,
-                                ConsoleActionIcon::Clear,
-                                clear.label,
-                                false,
-                                control_size,
-                            )
-                        })
-                        .inner;
-                    if response.clicked() {
-                        Command::ClearConsole.execute(app);
+                    if clear_shown {
+                        let clear = console_clear_action(
+                            app.state.workbench.console_page,
+                            Command::ClearConsole.is_enabled(app),
+                        );
+                        ui.add_space(CONSOLE_ACTION_MARGIN_RIGHT);
+                        let response = ui
+                            .add_enabled_ui(clear.enabled, |ui| {
+                                console_action(
+                                    ui,
+                                    ConsoleActionIcon::Clear,
+                                    clear.label,
+                                    false,
+                                    control_size,
+                                )
+                            })
+                            .inner;
+                        if response.clicked() {
+                            Command::ClearConsole.execute(app);
+                        }
                     }
-                }
-                if !layout.compact_shell {
-                    console_context(ui, app);
+                    if console_page {
+                        // The rest of the band, left to right after the tabs.
+                        // Clipped to it, so a narrow dock cuts the find field
+                        // short rather than painting it under the actions.
+                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                            ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
+                            ui.add_space(CONSOLE_TOOLBAR_GAP);
+                            transcript::toolbar(ui, &mut app.state);
+                        });
+                    }
                 }
             });
         },
@@ -204,9 +224,17 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     }
 }
 
+/// Whether the header offers Clear. Every page but a run's log shows it, the
+/// pages with nothing to clear disabled with the reason; a run's log is a
+/// record, so it has no Clear at all.
+fn clear_is_offered(layout: LayoutSpec, page: ConsolePage, channel: ConsoleChannel) -> bool {
+    let run_log = page == ConsolePage::Console && matches!(channel, ConsoleChannel::Run(_));
+    !(layout.compact_shell || run_log)
+}
+
 fn console_trailing_actions_width(
     layout: LayoutSpec,
-    _page: ConsolePage,
+    clear_shown: bool,
     touch_targets: bool,
 ) -> f32 {
     let control_size = if touch_targets {
@@ -217,11 +245,8 @@ fn console_trailing_actions_width(
     let mut actions = 1_usize;
     if !layout.compact_shell {
         actions += usize::from(!touch_targets);
-        // Clear remains present for every page so switching tabs never moves
-        // Maximize or Collapse. Pages backed by immutable/derived data expose
-        // the same affordance disabled with a precise explanation.
-        actions += 1;
     }
+    actions += usize::from(clear_shown);
     actions as f32 * (control_size + CONSOLE_ACTION_MARGIN_RIGHT)
 }
 
@@ -443,162 +468,6 @@ fn paint_trash(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) 
     );
 }
 
-fn console_context(ui: &mut Ui, app: &RSpiceApp) {
-    let t = Tokens::get(ui.ctx());
-    let text = if app.state.simulation.execution.has_active_execution() {
-        let activity = if app.state.simulation.cancellation_is_pending() {
-            "cancellation in progress"
-        } else {
-            "execution in progress"
-        };
-        format!(
-            "Active job · {}% · {activity}",
-            simulation_progress_percent(app.state.simulation.execution.progress),
-        )
-    } else if let Some(index) = app.state.simulation.view.active_run_idx {
-        app.state.simulation.retained.runs.get(index).map_or_else(
-            || "No retained result selected".to_owned(),
-            |run| {
-                format!(
-                    "Selected result · {} · {} · {:.2} s elapsed",
-                    run.label,
-                    run_lifecycle_label(run.lifecycle),
-                    run.elapsed_time
-                )
-            },
-        )
-    } else {
-        "No retained result selected".to_owned()
-    };
-    ui.add(
-        egui::Label::new(
-            egui::RichText::new(text)
-                .font(theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular))
-                .color(t.color.text_faint),
-        )
-        .truncate(),
-    );
-}
-
-fn console(ui: &mut Ui, state: &mut AppState) {
-    let filter = state.workbench.console_producer_filter.clone();
-    let scroll_to_newest = state
-        .workbench
-        .console_producer_filter
-        .as_mut()
-        .is_some_and(|filter| std::mem::take(&mut filter.scroll_to_newest));
-    if let Some(filter) = filter.as_ref() {
-        let matched = state
-            .log_buffer
-            .entries()
-            .filter(|entry| filter.matches(entry))
-            .count();
-        if producer_filter_strip(ui, filter, matched, state.log_buffer.len()) {
-            state.workbench.console_producer_filter = None;
-            return;
-        }
-    }
-    let requested = ScrollArea::vertical()
-        .id_salt("workbench.console.body")
-        .stick_to_bottom(true)
-        .show(ui, |ui| {
-            console_rows(ui, state, filter.as_ref(), scroll_to_newest)
-        })
-        .inner;
-    if let Some(anchor) = requested {
-        state.jump_to_log_anchor(anchor);
-    }
-}
-
-/// Simulation entries carry no producer identity, so a producer whose entries
-/// never name its own quantity has none this filter can find. That is a fact
-/// about the log rather than about the run, and the empty state says which — an
-/// unexplained empty console would read as a session that never ran.
-///
-/// Present tense on purpose. "Not yet tagged" promised a tagging nobody has
-/// scheduled, which is a claim about the roadmap rather than about the log the
-/// reader is looking at.
-const UNTAGGED_LOG_HINT: &str = "Simulation entries carry no producer tag, so this filter matches only the \
-     entries that name the quantity themselves.";
-
-fn console_rows(
-    ui: &mut Ui,
-    state: &AppState,
-    filter: Option<&crate::workbench::state::ConsoleProducerFilter>,
-    scroll_to_newest: bool,
-) -> Option<crate::diagnostics::LogAnchor> {
-    let mut any = false;
-    let mut requested = None;
-    for entry in state.log_buffer.entries() {
-        if filter.is_some_and(|filter| !filter.matches(entry)) {
-            continue;
-        }
-        any = true;
-        // Last click wins, and there is at most one per frame: a pointer
-        // press lands on exactly one row.
-        requested = log_row(ui, state, entry).or(requested);
-    }
-    if scroll_to_newest {
-        // The reader asked to be shown this producer's newest entry. The
-        // request rides the cursor rather than a raw scroll offset so it lands
-        // on the end of the *filtered* content, whose height this frame is the
-        // first to know.
-        ui.scroll_to_cursor(Some(Align::BOTTOM));
-    }
-    if any {
-        return requested;
-    }
-    match filter {
-        Some(filter) => muted(
-            ui,
-            &format!(
-                "No console entry names {}. {UNTAGGED_LOG_HINT}",
-                filter.label()
-            ),
-        ),
-        None => muted(ui, "Engine messages will appear here."),
-    }
-    None
-}
-
-/// The strip above a narrowed console: which producer, how much of the log it
-/// keeps, and the one control that puts the whole log back. Returns whether
-/// the reader cleared the filter.
-fn producer_filter_strip(
-    ui: &mut Ui,
-    filter: &crate::workbench::state::ConsoleProducerFilter,
-    matched: usize,
-    total: usize,
-) -> bool {
-    let t = Tokens::get(ui.ctx());
-    let mut cleared = false;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
-        ui.label(
-            egui::RichText::new(format!(
-                "PRODUCER · {} · {matched} of {total} entries",
-                filter.label()
-            ))
-            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-            .color(t.color.text_dim),
-        )
-        .on_hover_text(&filter.producer);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let clear = ui.button("Show all entries");
-            clear.widget_info(|| {
-                egui::WidgetInfo::labeled(
-                    egui::WidgetType::Button,
-                    ui.is_enabled(),
-                    "Clear the console producer filter",
-                )
-            });
-            cleared = clear.clicked();
-        });
-    });
-    ui.add_space(4.0);
-    cleared
-}
-
 fn active_measurement_count(simulation: &SimulationState) -> usize {
     simulation.active_run().map_or(0, |run| {
         run.analyses
@@ -655,7 +524,7 @@ fn measurements(ui: &mut Ui, app: &mut RSpiceApp) {
         .state
         .simulation
         .active_run()
-        .map(|run| format!("Run {} · immutable dataset", run.id));
+        .map(|run| run.label.clone());
     let mut add_measurement = false;
     ScrollArea::vertical()
         .id_salt("workbench.measurements")
@@ -729,6 +598,7 @@ fn measurements(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
+    let mut open_log = None;
     ScrollArea::vertical()
         .id_salt("workbench.task_log")
         .show(ui, |ui| {
@@ -738,6 +608,21 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
                     "Queued, active, cancelled, and completed simulation tasks will appear here.",
                 );
             }
+            // Both columns fit their widest text, measured in the row's own
+            // font: the status over every state a run can be in, so a row
+            // does not shift when its run finishes, and the label over the
+            // runs listed.
+            let columns = TaskColumns {
+                status: widest_status_width(ui),
+                label: app
+                    .state
+                    .simulation
+                    .retained
+                    .runs
+                    .iter()
+                    .map(|run| task_text_width(ui, &run.label, FontWeight::Medium))
+                    .fold(0.0, f32::max),
+            };
             for run in &app.state.simulation.retained.runs {
                 let active = app.state.simulation.execution.active_execution
                     == run.execution_identity()
@@ -755,19 +640,34 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
                     || "revision unavailable".to_owned(),
                     |receipt| format!("revision {}", receipt.project_revision().get()),
                 );
-                issue_row(
+                let analyses = run.analyses.len();
+                let row = issue_row(
                     ui,
+                    columns,
                     problem,
                     status,
                     &run.label,
                     &format!(
-                        "{} analyses · {:.3} s{progress} · {revision}",
-                        run.analyses.len(),
+                        "{analyses} {} · {:.3} s{progress} · {revision}",
+                        if analyses == 1 {
+                            "analysis"
+                        } else {
+                            "analyses"
+                        },
                         run.elapsed_time
                     ),
                 );
+                row.context_menu(|ui| {
+                    if ui.button("Open run log").clicked() {
+                        open_log = Some(run.id);
+                        ui.close();
+                    }
+                });
             }
         });
+    if let Some(run) = open_log {
+        crate::workbench::commands::result_navigation::open_run_log(&mut app.state, run);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1187,20 +1087,6 @@ fn measurement_status_cell(ui: &mut Ui, text: &str, failed: bool) {
     );
 }
 
-fn run_lifecycle_label(lifecycle: crate::state::SimulationRunLifecycle) -> &'static str {
-    use crate::state::SimulationRunLifecycle as Lifecycle;
-    match lifecycle {
-        Lifecycle::LegacyUnknown => "legacy status unknown",
-        Lifecycle::Preparing => "queued",
-        Lifecycle::Running => "running",
-        Lifecycle::Cancelling => "cancelling",
-        Lifecycle::Completed => "completed",
-        Lifecycle::Failed => "failed",
-        Lifecycle::Aborted => "cancelled",
-        Lifecycle::Interrupted => "interrupted",
-    }
-}
-
 /// A run's lifecycle word, and the mark it earns. Lifecycle words are states,
 /// not severities: only a failed run is a problem.
 fn run_lifecycle_presentation(
@@ -1219,27 +1105,71 @@ fn run_lifecycle_presentation(
     }
 }
 
-/// A problem, log or task row: a leading mark for a warning or a failure,
-/// then neutral columns.
-/// One task-history row: the same three columns a log line uses, with the
-/// run's lifecycle in the time column instead of a timestamp.
+/// One task-history row: a leading mark for a failed run, then the run's
+/// lifecycle, its label and its figures in neutral columns. It senses a
+/// press so it can carry a context menu, and takes no focus.
 fn issue_row(
     ui: &mut Ui,
+    columns: TaskColumns,
     problem: Option<Problem>,
     status: &str,
-    source: &str,
+    label: &str,
     message: &str,
 ) -> egui::Response {
     let t = Tokens::get(ui.ctx());
-    row(
+    row_with_sense(
         ui,
+        columns,
         problem,
         status,
-        source,
+        label,
         message,
         t.color.text_dim,
         t.color.text,
+        Sense::CLICK,
     )
+}
+
+/// The widths of a task row's status and label columns.
+#[derive(Debug, Clone, Copy)]
+struct TaskColumns {
+    status: f32,
+    label: f32,
+}
+
+/// The width of the widest status a run can show.
+fn widest_status_width(ui: &Ui) -> f32 {
+    use crate::state::SimulationRunLifecycle as Lifecycle;
+    [
+        Lifecycle::LegacyUnknown,
+        Lifecycle::Preparing,
+        Lifecycle::Running,
+        Lifecycle::Cancelling,
+        Lifecycle::Completed,
+        Lifecycle::Failed,
+        Lifecycle::Aborted,
+        Lifecycle::Interrupted,
+    ]
+    .into_iter()
+    .map(|lifecycle| {
+        task_text_width(
+            ui,
+            run_lifecycle_presentation(lifecycle).0,
+            FontWeight::Regular,
+        )
+    })
+    .fold(0.0, f32::max)
+}
+
+fn task_text_width(ui: &Ui, text: &str, weight: FontWeight) -> f32 {
+    ui.painter()
+        .layout_no_wrap(
+            text.to_owned(),
+            theme::mono(CONSOLE_FONT_SIZE, weight),
+            egui::Color32::PLACEHOLDER,
+        )
+        .size()
+        .x
 }
 
 fn log_problem(severity: LogSeverity) -> Option<Problem> {
@@ -1279,26 +1209,27 @@ struct ConsoleClearAction {
     label: &'static str,
 }
 
+/// The Clear control's state on `page`. On the Console page it is the
+/// session's log it clears; a run's log offers no Clear at all.
 fn console_clear_action(page: ConsolePage, console_has_output: bool) -> ConsoleClearAction {
     match page {
         ConsolePage::Console => ConsoleClearAction {
             enabled: console_has_output,
             label: if console_has_output {
-                "Clear console output"
+                "Clear the session log"
             } else {
-                "Console output is already empty"
+                "The session log is already empty"
             },
         },
         ConsolePage::Problems => ConsoleClearAction {
             enabled: false,
-            // Says what this control does, which is nothing, rather than
-            // claiming the page is beyond clearing: part of it is still
-            // projected from the log, and the log clears from the Console.
+            // A finding leaves the list when the check that made it no longer
+            // does, not when a control hides it.
             label: "Problems lists current findings and is not cleared from here",
         },
         ConsolePage::Measurements => ConsoleClearAction {
             enabled: false,
-            label: "Measurements belong to the selected immutable dataset",
+            label: "Measurements belong to the selected run's results",
         },
         ConsolePage::TaskLog => ConsoleClearAction {
             enabled: false,
@@ -1307,44 +1238,24 @@ fn console_clear_action(page: ConsolePage, console_has_output: bool) -> ConsoleC
     }
 }
 
-fn row(
-    ui: &mut Ui,
-    problem: Option<Problem>,
-    time: &str,
-    source: &str,
-    message: &str,
-    source_color: egui::Color32,
-    message_color: egui::Color32,
-) -> egui::Response {
-    row_with_sense(
-        ui,
-        problem,
-        time,
-        source,
-        message,
-        source_color,
-        message_color,
-        egui::Sense::hover(),
-    )
-}
-
-/// One console line: the problem-mark gutter, then the time, source and
-/// message columns. Severity is the mark's alone; the columns are neutral.
+/// One task-history line: the problem-mark gutter, then the status, run and
+/// figures columns. Severity is the mark's alone; the columns are neutral.
 fn row_with_sense(
     ui: &mut Ui,
+    columns: TaskColumns,
     problem: Option<Problem>,
-    time: &str,
-    source: &str,
+    status: &str,
+    label: &str,
     message: &str,
-    source_color: egui::Color32,
+    label_color: egui::Color32,
     message_color: egui::Color32,
     sense: egui::Sense,
 ) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let message_x_offset = CONSOLE_MARK_GUTTER
-        + CONSOLE_TIME_WIDTH
+        + columns.status
         + CONSOLE_COLUMN_GAP
-        + CONSOLE_SOURCE_WIDTH
+        + columns.label
         + CONSOLE_COLUMN_GAP;
     let message_width = (ui.available_width() - message_x_offset).max(1.0);
     let message_galley = ui.painter().layout(
@@ -1356,20 +1267,19 @@ fn row_with_sense(
     let row_height = message_galley.size().y.max(CONSOLE_ROW_MIN_HEIGHT);
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), row_height), sense);
-    // Every console line comes through here, and all three columns are
-    // painted galleys. Without this the log is invisible to a screen reader,
-    // and an issue row — which a clickable sense turns into a tab stop —
-    // would take focus with nothing announced and nothing drawn.
-    let label = announced_row(problem, &[time, source, message]);
+    // All three columns are painted galleys. Without this the row is
+    // invisible to a screen reader, and a row a focusable sense turns into a
+    // tab stop would take focus with nothing announced and nothing drawn.
+    let announcement = announced_row(problem, &[status, label, message]);
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
-            if sense.senses_click() {
+            if sense.is_focusable() {
                 egui::WidgetType::Button
             } else {
                 egui::WidgetType::Label
             },
             ui.is_enabled(),
-            label.clone(),
+            announcement.clone(),
         )
     });
     // A row that can be clicked says so under the pointer. Painted before the
@@ -1378,30 +1288,22 @@ fn row_with_sense(
         ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
     }
     paint_row_mark(ui, rect.left(), rect.top(), problem);
-    let time_x = rect.left() + CONSOLE_MARK_GUTTER;
-    let source_x = time_x + CONSOLE_TIME_WIDTH + CONSOLE_COLUMN_GAP;
-    let message_x = source_x + CONSOLE_SOURCE_WIDTH + CONSOLE_COLUMN_GAP;
-    let time_clip = egui::Rect::from_min_max(
-        egui::pos2(time_x, rect.top()),
-        egui::pos2(time_x + CONSOLE_TIME_WIDTH, rect.bottom()),
-    );
-    ui.painter().with_clip_rect(time_clip).text(
-        egui::pos2(time_x, rect.top() + CONSOLE_ROW_MIN_HEIGHT * 0.5),
+    let status_x = rect.left() + CONSOLE_MARK_GUTTER;
+    let label_x = status_x + columns.status + CONSOLE_COLUMN_GAP;
+    let message_x = label_x + columns.label + CONSOLE_COLUMN_GAP;
+    ui.painter().text(
+        egui::pos2(status_x, rect.top() + CONSOLE_ROW_MIN_HEIGHT * 0.5),
         egui::Align2::LEFT_CENTER,
-        time,
+        status,
         theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular),
         t.color.text_faint,
     );
-    let source_clip = egui::Rect::from_min_max(
-        egui::pos2(source_x, rect.top()),
-        egui::pos2(source_x + CONSOLE_SOURCE_WIDTH, rect.bottom()),
-    );
-    ui.painter().with_clip_rect(source_clip).text(
-        egui::pos2(source_x, rect.top() + CONSOLE_ROW_MIN_HEIGHT * 0.5),
+    ui.painter().text(
+        egui::pos2(label_x, rect.top() + CONSOLE_ROW_MIN_HEIGHT * 0.5),
         egui::Align2::LEFT_CENTER,
-        source,
+        label,
         theme::mono(CONSOLE_FONT_SIZE, FontWeight::Medium),
-        source_color,
+        label_color,
     );
     let message_clip = egui::Rect::from_min_max(
         egui::pos2(message_x, rect.top()),

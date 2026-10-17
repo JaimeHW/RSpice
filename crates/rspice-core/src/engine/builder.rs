@@ -359,6 +359,8 @@ use advanced_mos::{
 };
 #[cfg(feature = "veriloga-builtins-base")]
 mod generated_model_routing;
+#[cfg(test)]
+mod inventory_tests;
 #[cfg(feature = "veriloga-builtins-base")]
 use generated_model_routing::{
     GeneratedRoutingContext, try_route_generated_bjt_model, try_route_generated_diode_model,
@@ -4737,13 +4739,15 @@ fn add_template_xspice_auto_bridge(
     })?;
     if device_is_subcircuit {
         add_generated_xspice_auto_bridge_subcircuit(circuit, &generated, template, context, abort)?;
-        log::debug!(
-            "Generated XSPICE subcircuit auto-bridge on nodes {} from template {}",
+        say_bridge_inserted(format!(
+            "Inserted {} bridge subcircuit for {} {} from bridge template '{}'",
+            xspice_auto_bridge_kind_label(first_bridge.kind),
+            if bridges.len() == 1 { "node" } else { "nodes" },
             node_list,
             template.key
-        );
+        ));
         if node_names.is_some() {
-            log::info!("Generated XSPICE auto-bridge card: {}", device_card);
+            log::debug!("Generated XSPICE auto-bridge card: {}", device_card);
         }
         return Ok(());
     }
@@ -4764,16 +4768,27 @@ fn add_template_xspice_auto_bridge(
         context,
     )?;
 
-    log::debug!(
-        "Generated XSPICE auto-bridge {} on nodes {} from template {}",
+    say_bridge_inserted(format!(
+        "Inserted {} bridge {} for {} {} from bridge template '{}'",
+        xspice_auto_bridge_kind_label(first_bridge.kind),
         element.name,
+        if bridges.len() == 1 { "node" } else { "nodes" },
         node_list,
         template.key
-    );
+    ));
     if node_names.is_some() {
-        log::info!("Generated XSPICE auto-bridge card: {}", device_card);
+        log::debug!("Generated XSPICE auto-bridge card: {}", device_card);
     }
     Ok(())
+}
+
+/// State one bridge the builder inserted, once per run: a run elaborates the
+/// circuit for its operating point, each sweep point and each Monte Carlo
+/// sample, and inserts the same bridges every time.
+fn say_bridge_inserted(line: String) {
+    if crate::log_scope::first_saying(&line) {
+        log::info!("{line}");
+    }
 }
 
 fn add_planned_xspice_auto_bridges(
@@ -5119,18 +5134,21 @@ fn add_planned_xspice_auto_bridge(
         ))
     })?;
 
-    log::debug!(
-        "Generated XSPICE auto-bridge {} on node {}",
+    say_bridge_inserted(format!(
+        "Inserted {} bridge {} for node {}",
+        xspice_auto_bridge_kind_label(bridge.kind),
         instance_name,
-        bridge.node
-    );
-    if node_names.is_some() {
+        circuit
+            .node_name_by_id(bridge.node)
+            .map_or_else(|| bridge.node.to_string(), str::to_owned)
+    ));
+    if node_names.is_some() && log::log_enabled!(log::Level::Debug) {
         let node_label = xspice_auto_bridge_node_label(node_names, bridge.node);
         let event_label = xspice_auto_bridge_node_label(node_names, event_node);
         if let Some(card) =
             xspice_auto_bridge_generated_card(bridge, &instance_name, &node_label, &event_label)
         {
-            log::info!("Generated XSPICE auto-bridge card: {card}");
+            log::debug!("Generated XSPICE auto-bridge card: {card}");
         }
     }
     circuit.add_xspice_instance(instance);
@@ -5549,18 +5567,30 @@ impl Engine {
         });
         let (built, reference) =
             self.elaborate_circuit(netlist, default_ports, transient_stop_time, None, abort)?;
-        let Some(reference) = reference else {
-            return Ok(*built);
+        let built = match reference {
+            None => built,
+            Some(reference) => {
+                drop(built);
+                self.elaborate_circuit(
+                    netlist,
+                    default_ports,
+                    transient_stop_time,
+                    Some(&reference),
+                    abort,
+                )?
+                .0
+            }
         };
-        drop(built);
-        self.elaborate_circuit(
-            netlist,
-            default_ports,
-            transient_stop_time,
-            Some(&reference),
-            abort,
-        )
-        .map(|(built, _)| *built)
+        if log::log_enabled!(log::Level::Info) {
+            let inventory = built.circuit.inventory_line();
+            // A run elaborates the same circuit for its operating point, each
+            // sweep point and each Monte Carlo sample; it says what it built
+            // once for each circuit that differs.
+            if crate::log_scope::first_saying(&inventory) {
+                log::info!("{inventory}");
+            }
+        }
+        Ok(*built)
     }
 
     /// One elaboration of the deck, with `reference`, when given, aliased to
@@ -6749,11 +6779,15 @@ impl Engine {
                             .any(|name| params_map.contains_key(*name));
                         diode = diode.with_model_params(params_map);
                         model_params = params_map.clone();
-                        log::debug!(
-                            "Applied embedded diode fallback model '{}' to {}",
-                            model,
-                            element.name
+                        // Once per run, not once per elaboration of it.
+                        let line = format!(
+                            "{} uses the built-in diode model '{}': the deck defines no .MODEL \
+                             of that name",
+                            element.name, model
                         );
+                        if crate::log_scope::first_saying(&line) {
+                            log::warn!("{line}");
+                        }
                     } else {
                         return Err(SimulationError::Circuit(format!(
                             "Diode '{}' references unknown model '{}'",
@@ -7115,11 +7149,15 @@ impl Engine {
                         // Fallback to embedded transistor library models when no
                         // explicit .MODEL card is present in the parsed netlist.
                         bjt = bjt.with_params(&effective_params);
-                        log::debug!(
-                            "Applied embedded BJT fallback model '{}' to {}",
-                            model,
-                            element.name
+                        // Once per run, not once per elaboration of it.
+                        let line = format!(
+                            "{} uses the built-in transistor model '{}': the deck defines no \
+                             .MODEL of that name",
+                            element.name, model
                         );
+                        if crate::log_scope::first_saying(&line) {
+                            log::warn!("{line}");
+                        }
                     } else {
                         return Err(SimulationError::Circuit(format!(
                             "BJT '{}' references unknown model '{}'",

@@ -1,6 +1,6 @@
 //! Exact, transactional source-file lifecycle for the Code Workspace tree.
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{
     ProjectSourceBundle, ProjectSourceDependency, ProjectSourceFile, ProjectSourceLanguage,
     ProjectSourceOwner, ProjectSourceRole, ProjectSourceRoleBinding,
@@ -137,13 +137,11 @@ pub(crate) fn commit_source_workspace_dialog(app: &mut RSpiceApp) -> Result<Stri
     app.state.ui.code_workspace.automation = Default::default();
     app.state.ui.code_workspace.automation.selected_file = Some(root_path.clone());
     app.state.ui.code_workspace.source_workspace_dialog = None;
-    let message = format!(
-        "Created a project-owned {} source workspace rooted at '{root_path}'.",
+    // The dialog that commits this records the line.
+    Ok(format!(
+        "Created a {} source workspace at {root_path}.",
         language.label()
-    );
-    app.state
-        .push_user_message(ConsoleMessage::info(message.clone()));
-    Ok(message)
+    ))
 }
 
 /// A module name for a qualification record that has no module of its own,
@@ -344,12 +342,16 @@ pub(crate) fn assign_automation_source_role(
     }
     let role_label = role.map_or("unassigned", ProjectSourceRole::label);
     let message = if changed {
-        format!("Set Automation source '{logical_path}' role to {role_label}.")
+        let message = format!("Set Automation source '{logical_path}' role to {role_label}.");
+        app.state
+            .record(LogSeverity::Info, LogSource::Studio, message.clone());
+        message
     } else {
-        format!("Automation source '{logical_path}' already has the {role_label} role.")
+        let message =
+            format!("Automation source '{logical_path}' already has the {role_label} role.");
+        app.state.prompt(message.clone());
+        message
     };
-    app.state
-        .push_user_message(ConsoleMessage::info(message.clone()));
     Ok(message)
 }
 
@@ -654,7 +656,7 @@ pub(crate) fn commit_source_file_dialog(app: &mut RSpiceApp) -> Result<String, S
         CodeSourceFileAction::Delete => format!("Deleted project source '{}'.", draft.source_path),
     };
     app.state
-        .push_user_message(ConsoleMessage::info(message.clone()));
+        .record(LogSeverity::Info, LogSource::Studio, message.clone());
     Ok(message)
 }
 
@@ -769,9 +771,8 @@ pub(crate) fn poll_automation_source_import(app: &mut RSpiceApp) {
         source_file_mutation_block_reason(app, ProjectSourceLanguage::RSpiceAutomation)
     {
         app.state.ui.code_workspace.source_import = None;
-        app.state.push_user_message(ConsoleMessage::error(format!(
-            "Automation source import cancelled: {reason}"
-        )));
+        app.state
+            .prompt(format!("Automation source import cancelled: {reason}"));
         return;
     }
 
@@ -790,19 +791,15 @@ pub(crate) fn poll_automation_source_import(app: &mut RSpiceApp) {
         else {
             return;
         };
-        match read_imported_text(&path) {
-            Ok((file_name, contents)) => {
-                if let Err(error) =
-                    apply_automation_source_import(app, request, file_name, contents)
-                {
-                    app.state.push_user_message(ConsoleMessage::error(format!(
-                        "Automation source import failed: {error}"
-                    )));
-                }
-            }
-            Err(error) => app.state.push_user_message(ConsoleMessage::error(format!(
-                "Automation source import failed: {error}"
-            ))),
+        let result = read_imported_text(&path).and_then(|(file_name, contents)| {
+            apply_automation_source_import(app, request, file_name, contents)
+        });
+        if let Err(error) = result {
+            app.state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Automation source import failed: {error}"),
+            );
         }
     }
 
@@ -814,9 +811,8 @@ pub(crate) fn poll_automation_source_import(app: &mut RSpiceApp) {
             Ok(token) => token,
             Err(error) => {
                 app.state.ui.code_workspace.source_import = None;
-                app.state.push_user_message(ConsoleMessage::error(format!(
-                    "Automation source import failed: {error}"
-                )));
+                app.state
+                    .prompt(format!("Automation source import failed: {error}"));
                 return;
             }
         };
@@ -876,20 +872,17 @@ fn poll_browser_automation_import_completion(app: &mut RSpiceApp) {
     let Some(request) = app.state.ui.code_workspace.source_import.take() else {
         return;
     };
-    match completion.result {
-        Ok(Some(file)) => {
-            if let Err(error) =
-                apply_automation_source_import(app, request, file.name, file.contents)
-            {
-                app.state.push_user_message(ConsoleMessage::error(format!(
-                    "Automation source import failed: {error}"
-                )));
-            }
-        }
-        Ok(None) => {}
-        Err(error) => app.state.push_user_message(ConsoleMessage::error(format!(
-            "Automation source import failed: {error}"
-        ))),
+    let result = match completion.result {
+        Ok(Some(file)) => apply_automation_source_import(app, request, file.name, file.contents),
+        Ok(None) => return,
+        Err(error) => Err(error),
+    };
+    if let Err(error) = result {
+        app.state.record(
+            LogSeverity::Error,
+            LogSource::Studio,
+            format!("Automation source import failed: {error}"),
+        );
     }
 }
 
@@ -941,9 +934,9 @@ fn apply_automation_source_import(
         .map_err(|error| error.to_string())?;
     app.state.ui.code_workspace.automation.selected_file = Some(logical_path.clone());
     super::automation::invalidate_automation_evidence(app);
-    let message = format!("Imported project-owned Automation source '{logical_path}'.");
+    let message = format!("Imported Automation source '{logical_path}'.");
     app.state
-        .push_user_message(ConsoleMessage::info(message.clone()));
+        .record(LogSeverity::Info, LogSource::Studio, message.clone());
     Ok(message)
 }
 
@@ -1079,7 +1072,7 @@ pub(crate) fn commit_source_history_restore(app: &mut RSpiceApp) -> Result<Strin
         retained_revision.get()
     );
     app.state
-        .push_user_message(ConsoleMessage::info(message.clone()));
+        .record(LogSeverity::Info, LogSource::Studio, message.clone());
     Ok(message)
 }
 

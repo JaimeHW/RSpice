@@ -3,7 +3,7 @@
 
 use super::shared::{DialogActionOutcome, LIBRARY_CATALOG_STALE_MESSAGE, validate_lcv_name};
 use super::{Context, RSpiceApp, VERILOGA_LIBRARY_NAME};
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, input_row, switch_row};
@@ -271,10 +271,11 @@ impl RSpiceApp {
             }
             self.state
                 .publish_project_library_mutation(project_mutation);
-            self.state.push_user_message(ConsoleMessage::info(format!(
-                "Created cell '{}' in library '{}'",
-                name, library
-            )));
+            self.state.record(
+                LogSeverity::Info,
+                LogSource::Studio,
+                format!("Created cell '{name}' in library '{library}'."),
+            );
             // A schematic defines the cell's ports, so it opens first; a
             // Verilog-A view without one is the module to write next.
             let view_to_open = if self.state.dialogs.new_cell_create_schematic {

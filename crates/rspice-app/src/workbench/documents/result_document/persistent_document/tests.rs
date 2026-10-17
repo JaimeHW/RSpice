@@ -313,9 +313,8 @@ fn a_trace_the_document_does_not_retain_falls_back_to_a_quick_marker() {
     assert!(retained_markers(&app, document_id).is_empty());
     assert!(
         app.state
-            .log_buffer
-            .entries()
-            .any(|entry| entry.message.contains("not a retained trace")),
+            .prompt_text()
+            .is_some_and(|text| text.contains("not a retained trace")),
         "the fallback has to be stated, not silent"
     );
 }

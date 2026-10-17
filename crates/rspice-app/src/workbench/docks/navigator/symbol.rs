@@ -100,9 +100,7 @@ fn pins_section(
                 .store_active_symbol_editor_bundle(document, metadata)
             {
                 Ok(()) => app.state.ui.symbol.editor.select_pin(name),
-                Err(error) => app
-                    .state
-                    .push_user_message(crate::diagnostics::ConsoleMessage::warning(error)),
+                Err(error) => app.state.prompt(error),
             }
         }
     });

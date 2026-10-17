@@ -210,20 +210,29 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
             crate::workbench::app_state::session::shortcut_library::ShortcutLibraryPersistenceRuntime::default(),
         shortcut_library_publication_continuation: None,
     };
-    if let Some(error) = pdk_load_error {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-            "PDK configuration could not be loaded; the session started with no configured PDK authority: {error}"
-        )));
-    }
-    for error in pdk_validation_errors {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-            "PDK technology trust blocked during startup: {error}"
-        )));
-    }
-    for error in pdk_model_restore_errors {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-            "Configured PDK model catalog could not be restored; the session is using built-in models only: {error}"
-        )));
+    let startup_errors = pdk_load_error
+        .map(|error| {
+            format!(
+                "PDK configuration could not be loaded; the session started without a PDK: {error}"
+            )
+        })
+        .into_iter()
+        .chain(
+            pdk_validation_errors
+                .into_iter()
+                .map(|error| format!("A PDK was not trusted at startup: {error}")),
+        )
+        .chain(pdk_model_restore_errors.into_iter().map(|error| {
+            format!(
+                "Configured PDK model catalog could not be restored; the session is using built-in models only: {error}"
+            )
+        }));
+    for error in startup_errors {
+        state.record(
+            crate::diagnostics::LogSeverity::Error,
+            crate::diagnostics::LogSource::Studio,
+            error,
+        );
     }
     state
 }

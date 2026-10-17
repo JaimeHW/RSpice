@@ -4,7 +4,6 @@ use std::borrow::Cow;
 
 use sha2::{Digest as _, Sha256};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::product::ContentDigest;
 use crate::state::{
     BoundedFindMatches, FindDirection, FindOptions, ProjectSourceBundle,
@@ -371,8 +370,7 @@ pub(crate) fn commit_source_search_replace(app: &mut RSpiceApp) -> Result<String
             )
         }
     );
-    app.state
-        .push_user_message(ConsoleMessage::info(message.clone()));
+    app.state.prompt(message.clone());
     Ok(message)
 }
 

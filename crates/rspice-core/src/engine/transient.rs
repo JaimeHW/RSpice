@@ -8727,23 +8727,7 @@ impl Engine {
                     }
                 }
 
-                let newton_stamp_elapsed = newton_stamp_start.elapsed();
-                total_stamp_nanos += newton_stamp_elapsed.as_nanos();
-                static TRANSIENT_NEWTON_STAMP_LOG_COUNT: std::sync::atomic::AtomicUsize =
-                    std::sync::atomic::AtomicUsize::new(0);
-                if newton_stamp_elapsed.as_millis() >= 100 {
-                    let log_count = TRANSIENT_NEWTON_STAMP_LOG_COUNT
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if log_count < 40 {
-                        log::warn!(
-                            "Slow transient Newton stamp at t={:.6e}, dt={:.3e}, step_attempt={}, elapsed={:.3?}",
-                            step_time,
-                            dt,
-                            total_step_attempts,
-                            newton_stamp_elapsed,
-                        );
-                    }
-                }
+                total_stamp_nanos += newton_stamp_start.elapsed().as_nanos();
 
                 // Merit-gated Newton globalization: the freshly stamped
                 // system gives the true nonlinear residual at the current
@@ -8823,19 +8807,13 @@ impl Engine {
                                 && last_stamped_merit.is_finite()
                                 && current_merit >= last_stamped_merit))
                     {
-                        static MERIT_BACKTRACK_LOG_COUNT: std::sync::atomic::AtomicUsize =
-                            std::sync::atomic::AtomicUsize::new(0);
-                        let log_count = MERIT_BACKTRACK_LOG_COUNT
-                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        if log_count < 20 {
-                            log::debug!(
-                                "Newton merit backtrack engaged at t={:.6e}, dt={:.3e}: residual {:.3e} -> {:.3e}",
-                                t,
-                                dt,
-                                last_stamped_merit,
-                                current_merit,
-                            );
-                        }
+                        log::debug!(
+                            "Newton merit backtrack engaged at t={:.6e}, dt={:.3e}: residual {:.3e} -> {:.3e}",
+                            t,
+                            dt,
+                            last_stamped_merit,
+                            current_merit,
+                        );
                         let (search, trial) = globalization::NewtonMeritBacktrack::engage(
                             &last_stamped_iterate,
                             last_stamped_merit,
@@ -9021,23 +8999,7 @@ impl Engine {
                 } else {
                     matrix.solve_into(&rhs, &mut linear_solution)
                 };
-                let newton_solve_elapsed = newton_solve_start.elapsed();
-                total_solve_nanos += newton_solve_elapsed.as_nanos();
-                static TRANSIENT_NEWTON_SOLVE_LOG_COUNT: std::sync::atomic::AtomicUsize =
-                    std::sync::atomic::AtomicUsize::new(0);
-                if newton_solve_elapsed.as_millis() >= 100 {
-                    let log_count = TRANSIENT_NEWTON_SOLVE_LOG_COUNT
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if log_count < 40 {
-                        log::warn!(
-                            "Slow transient Newton solve at t={:.6e}, dt={:.3e}, step_attempt={}, elapsed={:.3?}",
-                            t,
-                            dt,
-                            total_step_attempts,
-                            newton_solve_elapsed,
-                        );
-                    }
-                }
+                total_solve_nanos += newton_solve_start.elapsed().as_nanos();
 
                 let postsolve_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
                 // One additional Newton linear solve was attempted even when
@@ -9644,12 +9606,12 @@ impl Engine {
                 // ordinal until every in-step nonlinear rescue has failed.
                 let nonlinear_failure_ordinal = retry_count.saturating_add(1);
 
-                // Diagnostic logging for debugging convergence issues
-                static CONV_LOG_COUNT: std::sync::atomic::AtomicUsize =
-                    std::sync::atomic::AtomicUsize::new(0);
-                let count = CONV_LOG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                if count < 10 || (t > 9.5e-8 && dt < 1.0e-15) {
-                    // Check what specifically didn't converge
+                // Which criterion failed, for a verbose run's solver trace. A
+                // rejected attempt is normal timestep control, so this is not
+                // a warning: the run's statistics carry the count. Checking
+                // the criteria again costs a residual evaluation, so it runs
+                // only when the line is wanted.
+                if log::log_enabled!(log::Level::Debug) {
                     let v_conv =
                         self.node_voltage_convergence_met(&solution, &new_solution, num_nodes);
                     let d_conv = core_trial_converged(&circuit)
@@ -9672,7 +9634,7 @@ impl Engine {
                             transient_newton_update_weights.as_deref(),
                         )
                         .unwrap_or(Value::NAN);
-                    log::warn!(
+                    log::debug!(
                         "Newton non-converge at t={:.6e}, dt={:.3e}: voltage_conv={}, device_conv={}, residual_conv={}, update_norm={:.3e}, max_dv={:.3e}, iter={}",
                         t,
                         dt,
@@ -9752,18 +9714,12 @@ impl Engine {
                         abort,
                     ))?
                 {
-                    static GMIN_RESCUE_LOG_COUNT: std::sync::atomic::AtomicUsize =
-                        std::sync::atomic::AtomicUsize::new(0);
-                    let log_count =
-                        GMIN_RESCUE_LOG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if log_count < 20 {
-                        log::warn!(
-                            "Transient gmin-continuation rescue converged at t={:.6e}, dt={:.3e} (retry {})",
-                            t,
-                            dt,
-                            nonlinear_failure_ordinal,
-                        );
-                    }
+                    log::debug!(
+                        "Transient gmin-continuation rescue converged at t={:.6e}, dt={:.3e} (retry {})",
+                        t,
+                        dt,
+                        nonlinear_failure_ordinal,
+                    );
                     new_solution = rescued;
                     nonlinear_state_matches_new_solution = true;
                     had_solver_candidate = true;
@@ -10425,45 +10381,33 @@ impl Engine {
                 let can_shrink = retry_dt < dt * 0.999;
                 let retry_budget_available = retry_count < MAX_RETRIES;
                 if !can_shrink || !retry_budget_available {
-                    static DEVICE_TRUNC_MIN_ACCEPT_LOG_COUNT: std::sync::atomic::AtomicUsize =
-                        std::sync::atomic::AtomicUsize::new(0);
-                    let log_count = DEVICE_TRUNC_MIN_ACCEPT_LOG_COUNT
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if log_count < 20 {
-                        log::warn!(
-                            "Candidate truncation reached minimum retry step at t={:.6e}, dt={:.3e}, limit={:.3e}, retry_count={}; accepting converged solution",
-                            t,
-                            dt,
-                            limit,
-                            retry_count
-                        );
-                    }
+                    log::debug!(
+                        "Candidate truncation reached minimum retry step at t={:.6e}, dt={:.3e}, limit={:.3e}, retry_count={}; accepting converged solution",
+                        t,
+                        dt,
+                        limit,
+                        retry_count
+                    );
                 } else {
-                    static DEVICE_TRUNC_REJECT_LOG_COUNT: std::sync::atomic::AtomicUsize =
-                        std::sync::atomic::AtomicUsize::new(0);
-                    let log_count = DEVICE_TRUNC_REJECT_LOG_COUNT
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     // Routine LTE step-rejection diagnostics, not a user-facing
                     // condition: keep them at debug so healthy runs have a
                     // clean stderr at the default log level.
-                    if log_count < 40 || (t > 9.5e-8 && dt < 1.0e-15) {
-                        log::debug!(
-                            "Candidate truncation reject at t={:.6e}, dt={:.3e}, limit={:.3e}, cap={:?}, ind={:?}, bjt={:?}, jfet={:?}, dio={:?}, mos={:?}, vdmos={:?}, ltra={:?}, method={:?}, order={}",
-                            t,
-                            dt,
-                            limit,
-                            capacitor_truncation_limit,
-                            inductor_truncation_limit,
-                            bjt_truncation_limit,
-                            jfet_truncation_limit,
-                            diode_truncation_limit,
-                            mosfet_truncation_limit,
-                            vdmos_truncation_limit,
-                            ltra_truncation_limit,
-                            current_method,
-                            step_trap_order
-                        );
-                    }
+                    log::debug!(
+                        "Candidate truncation reject at t={:.6e}, dt={:.3e}, limit={:.3e}, cap={:?}, ind={:?}, bjt={:?}, jfet={:?}, dio={:?}, mos={:?}, vdmos={:?}, ltra={:?}, method={:?}, order={}",
+                        t,
+                        dt,
+                        limit,
+                        capacitor_truncation_limit,
+                        inductor_truncation_limit,
+                        bjt_truncation_limit,
+                        jfet_truncation_limit,
+                        diode_truncation_limit,
+                        mosfet_truncation_limit,
+                        vdmos_truncation_limit,
+                        ltra_truncation_limit,
+                        current_method,
+                        step_trap_order
+                    );
                     retry_count += 1;
                     self.record_convergence(|quality| quality.record_timestep_reduction());
                     // Match ngspice truncation retries: keep the current integration
@@ -12260,16 +12204,6 @@ impl Engine {
                 && limit + 1e-18 < timestep.dt()
                 && !growth_ceiling_of_an_event_cut(limit)
             {
-                if t > 9.5e-8 && dt < 1.0e-15 {
-                    log::warn!(
-                        "Candidate post-accept timestep cap at t={:.12e}, accepted_dt={:.3e}, requested_next={:.3e}, limit={:.3e}, order={}",
-                        t,
-                        dt,
-                        timestep.dt(),
-                        limit,
-                        step_trap_order
-                    );
-                }
                 timestep.force_step(limit);
             }
             // Verilog-A `$bound_step(0)` requests the solver's smallest

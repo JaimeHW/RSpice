@@ -15,7 +15,7 @@ use release_candidate::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
 use crate::services::model_qualification::{
     QualificationExecutionProgress, QualificationExecutionSession, QualificationExecutionStep,

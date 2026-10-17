@@ -709,9 +709,7 @@ pub(super) fn place_marker(
     if let Err(error) =
         ResultMarker::validate_placement(placement.analysis, &placement.anchor, placement.x)
     {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-            "Could not place marker: {error}"
-        )));
+        state.prompt(format!("Could not place marker: {error}"));
         return None;
     }
     let retained_x = placement.retained_x();
@@ -746,14 +744,12 @@ pub(super) fn place_marker(
     {
         Ok(id) => {
             if let Some(reason) = reason {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::info(reason));
+                state.prompt(reason);
             }
             Some(MarkerSelector::Quick(id))
         }
         Err(error) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "Could not place marker: {error}"
-            )));
+            state.prompt(format!("Could not place marker: {error}"));
             None
         }
     };
@@ -850,9 +846,7 @@ pub(super) fn remove_marker(state: &mut AppState, selector: MarkerSelector) {
                     ),
                 ],
             ) {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                    "Could not remove the retained marker: {error}"
-                )));
+                state.prompt(format!("Could not remove the marker: {error}"));
                 return;
             }
             state

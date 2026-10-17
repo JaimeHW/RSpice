@@ -18,7 +18,6 @@ use egui::{
     vec2,
 };
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{
     AuthoredDrawingSheetSize, DrawingSheetBorderTemplate, DrawingSheetDisplayUnit,
     DrawingSheetInheritance, DrawingSheetNewSheetPolicy, DrawingSheetPreset,
@@ -182,7 +181,7 @@ impl RSpiceApp {
         match choice {
             DialogChoice::Primary => match apply_drawing_sheet_defaults(self) {
                 Ok(message) => {
-                    self.state.push_user_message(ConsoleMessage::info(message));
+                    self.state.prompt(message);
                     self.state.dialogs.drawing_sheet_defaults = Default::default();
                 }
                 Err(error) => self.state.dialogs.drawing_sheet_defaults.error = Some(error),

@@ -1586,7 +1586,7 @@ impl Engine {
                 abort,
             ) {
                 Ok(source_stepped) => {
-                    log::info!(
+                    log::debug!(
                         "DC operating point after source stepping ({} nodes): {:?}",
                         source_stepped.len(),
                         source_stepped.iter().take(10).collect::<Vec<_>>()
@@ -1640,7 +1640,7 @@ impl Engine {
                 abort,
             ) {
                 Ok(pseudo_solution) => {
-                    log::info!(
+                    log::debug!(
                         "DC operating point after pseudo-transient continuation ({} nodes): {:?}",
                         pseudo_solution.len(),
                         pseudo_solution.iter().take(10).collect::<Vec<_>>()

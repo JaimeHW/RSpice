@@ -48,7 +48,7 @@ mod browser {
     use wasm_bindgen::prelude::*;
 
     use super::{next_request_id, request_id_from_js_number, stale_result, stale_worker_epoch};
-    use crate::engine_log::{EngineLogLine, EngineLogQueue};
+    use crate::engine_log::{EngineLogLine, EngineLogQueue, EngineLogSeal};
     use crate::error::SimulationError;
     use crate::live_transient::{
         LiveTransientQueue, TransientSampleDelta, push_live_transient_sample,
@@ -641,6 +641,19 @@ mod browser {
         let Some(engine_log) = engine_log else {
             return;
         };
+        // The worker's closing count: what it withheld past the line bound and
+        // what the warning limit held back, stated as a native run states them.
+        if let Ok(seal) = Reflect::get(data, &JsValue::from_str("seal"))
+            && !seal.is_undefined()
+        {
+            match serde_wasm_bindgen::from_value::<EngineLogSeal>(seal) {
+                Ok(seal) => crate::engine_log::lock_queue(&engine_log).seal_with(seal),
+                Err(_) => web_sys::console::warn_1(&JsValue::from_str(
+                    "Ignoring malformed simulation worker engine log seal",
+                )),
+            }
+            return;
+        }
         let line = Reflect::get(data, &JsValue::from_str("line"))
             .map_err(js_error_message)
             .and_then(|value| {

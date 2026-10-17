@@ -6,7 +6,6 @@
 
 use egui::{Context, Frame, Margin, Stroke, Ui, vec2};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::SchematicHierarchyVisibility;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -28,9 +27,7 @@ pub(crate) fn open_descend_hierarchy_dialog(state: &mut AppState) -> bool {
         return false;
     }
     let Some((instance_name, reference)) = state.selected_hierarchy_master() else {
-        state.push_user_message(ConsoleMessage::warning(
-            "Select one instance with a resolved schematic master first.",
-        ));
+        state.prompt("Select one instance with a resolved schematic master first.");
         return false;
     };
     let authority = SchematicEditAuthority::capture(state);
@@ -155,9 +152,7 @@ fn commit_descend_context(state: &mut AppState) -> Result<(), String> {
         }
     }
     state.dialogs.descend_hierarchy.close();
-    state.push_user_message(ConsoleMessage::info(
-        "Hierarchy edit context opened; the parent working revision was preserved.",
-    ));
+    state.prompt("Descended into the instance; the parent's unsaved changes are kept.");
     Ok(())
 }
 

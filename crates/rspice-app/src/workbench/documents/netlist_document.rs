@@ -642,9 +642,9 @@ pub(crate) fn redo_netlist_edit(state: &mut AppState) -> Result<Option<String>, 
 /// document, persisted project projection, and visible editor buffer.
 pub fn replace_owned_source(state: &mut AppState, source: String) -> bool {
     if let Some(holder) = state.workbench.live_write_locks.netlist.clone() {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+        state.prompt(format!(
             "{holder} holds the netlist write lease; no source was changed."
-        )));
+        ));
         return false;
     }
     replace_owned_source_unlocked(state, source)
@@ -841,9 +841,9 @@ fn replace_owned_source_unlocked(state: &mut AppState, source: String) -> bool {
         *state = candidate;
         return true;
     };
-    state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-        "The netlist edit was not applied because it would invalidate the owned source graph: {error}"
-    )));
+    state.prompt(format!(
+        "The netlist edit was not applied because it would break the project's sources: {error}"
+    ));
     false
 }
 
@@ -2291,8 +2291,12 @@ pub struct NetlistDocumentState {
     /// `generated_input_digest` makes the retained artifact stale and blocks
     /// execution until generation succeeds.
     pub current_generation_input_digest: Option<crate::product::ContentDigest>,
-    /// Exact diagnostic from the latest failed generation attempt.
+    /// Diagnostic from the latest failed generation attempt.
     pub generation_error: Option<String>,
+    /// Input digest of the latest generation that failed. The same inputs
+    /// fail the same way, so they are not rebuilt, and the failure is not
+    /// recorded again, until one of them changes.
+    pub failed_generation_input_digest: Option<crate::product::ContentDigest>,
     /// Receipt for the latest exact visible source validation.
     pub validation: Option<NetlistValidationReceipt>,
     /// Exact validation failure retained until the bytes change or validation
@@ -2437,9 +2441,11 @@ pub fn prepare(state: &mut AppState) {
     if state.ui.netlist.rerun_queued && !state.simulation.execution.has_active_execution() {
         state.ui.netlist.rerun_queued = false;
         if let Some(reason) = state.manual_deck_run_block_reason() {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                "Queued netlist re-run cancelled: {reason}"
-            )));
+            state.record(
+                crate::diagnostics::LogSeverity::Warning,
+                crate::diagnostics::LogSource::Run,
+                format!("Queued netlist re-run cancelled: {reason}"),
+            );
         } else {
             state.request_netlist_manual_deck_run();
         }

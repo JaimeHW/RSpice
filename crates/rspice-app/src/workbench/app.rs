@@ -24,7 +24,6 @@
 
 use egui::Context;
 
-use crate::diagnostics::ConsoleMessage;
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::session::veriloga_library::{
     VERILOGA_LIBRARY_NAME, restore_global_veriloga_library, save_global_veriloga_library,
@@ -470,7 +469,20 @@ impl RSpiceApp {
         cc.egui_ctx.set_zoom_factor(1.0);
 
         // Restore global user Verilog-A library (commercial-style user library).
-        restore_global_veriloga_library(&mut state.library_manager, &mut state.workspace);
+        let startup_faults = [
+            restore_global_veriloga_library(&mut state.library_manager, &mut state.workspace).err(),
+            state
+                .model_library_manager
+                .spice_pack_error()
+                .map(str::to_owned),
+        ];
+        for fault in startup_faults.into_iter().flatten() {
+            state.record(
+                crate::diagnostics::LogSeverity::Error,
+                crate::diagnostics::LogSource::Studio,
+                fault,
+            );
+        }
         state.restore_active_schematic_from_workspace();
         crate::workbench::lifecycle::project_lifecycle::initialize_from_session(&mut state);
         #[cfg(target_arch = "wasm32")]
@@ -503,8 +515,13 @@ impl RSpiceApp {
                 Some(lib)
             }
             Err(e) => {
-                log::error!(
-                    "Canonical symbol library unavailable; schematic components will display resolution errors: {e}"
+                state.record(
+                    crate::diagnostics::LogSeverity::Error,
+                    crate::diagnostics::LogSource::Studio,
+                    format!(
+                        "The built-in symbol library could not be loaded; schematic components \
+                         show as unresolved: {e}"
+                    ),
                 );
                 None
             }
@@ -1016,9 +1033,7 @@ pub(crate) fn close_route_owned_transient(
         .workbench
         .replace_route(fallback, crate::workbench::RouteTransitionSource::User)
     {
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "Could not close {label}: {error}"
-        )));
+        state.prompt(format!("Could not close {label}: {error}"));
     }
 }
 
@@ -1043,10 +1058,22 @@ pub(crate) fn close_design_management_dialog_route(state: &mut AppState) {
         .workbench
         .replace_route(fallback, crate::workbench::RouteTransitionSource::User)
     {
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "Could not close Design Management: {error}"
-        )));
+        state.prompt(format!("Could not close Design Management: {error}"));
     }
+}
+
+/// Record a browser-history synchronization problem in the Console.
+///
+/// Each of these leaves the app working at the task on screen, so none is an
+/// error. What the reader must know is that the browser's Back and Forward
+/// may not do what they expect until synchronization recovers.
+#[cfg(target_arch = "wasm32")]
+fn record_browser_history_warning(state: &mut AppState, text: String) {
+    state.record(
+        crate::diagnostics::LogSeverity::Warning,
+        crate::diagnostics::LogSource::Studio,
+        text,
+    );
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1063,14 +1090,19 @@ fn initialize_browser_surface_navigation(state: &mut AppState, ctx: &Context) {
                     .workbench
                     .navigate(route, RouteTransitionSource::BrowserPop)
             {
-                state.push_user_message(ConsoleMessage::warning(format!(
-                    "The requested deep link was not opened: {error}"
-                )));
+                record_browser_history_warning(
+                    state,
+                    format!("The page in the link was not opened: {error}"),
+                );
             }
         }
-        Err(error) => state.push_user_message(ConsoleMessage::warning(format!(
-            "The browser deep link is malformed and was rejected; the address was recovered to the active task: {error}"
-        ))),
+        Err(error) => record_browser_history_warning(
+            state,
+            format!(
+                "The browser address is not a valid RSpice link; the current task was opened \
+                 instead: {error}"
+            ),
+        ),
     }
 
     // A restored native-style stack is not browser traversal authority. The
@@ -1082,16 +1114,24 @@ fn initialize_browser_surface_navigation(state: &mut AppState, ctx: &Context) {
     let listener_ready = match install_popstate_listener(ctx) {
         Ok(()) => true,
         Err(error) => {
-            state.push_user_message(ConsoleMessage::warning(format!(
-                "Browser route synchronization is disabled and listener installation will retry automatically: {error}"
-            )));
+            record_browser_history_warning(
+                state,
+                format!(
+                    "Browser Back and Forward are off and will be set up again automatically: \
+                     {error}"
+                ),
+            );
             false
         }
     };
     if listener_ready && let Err(error) = restart_history_session(state.workbench.current_route()) {
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "Browser route synchronization is disabled and will retry automatically; history could not be initialized at the active task: {error}"
-        )));
+        record_browser_history_warning(
+            state,
+            format!(
+                "Browser Back and Forward are off and will be set up again automatically; \
+                 browser history could not be started at the current task: {error}"
+            ),
+        );
     }
 }
 
@@ -1113,32 +1153,32 @@ fn synchronize_browser_surface_navigation(state: &mut AppState) {
                 let external_race = !event.initiated_by_app() && pending_effects;
                 let applied = if !availability.can_open() {
                     Err(format!(
-                        "surface `{}` is unavailable: {}",
-                        route.surface_id(),
+                        "{} is unavailable: {}",
+                        route.surface_id().label(),
                         availability
                             .reason()
-                            .unwrap_or("no complete route executor is registered")
+                            .unwrap_or("it cannot be opened in this build")
                     ))
                 } else if external_race {
                     Err(
-                        "an external browser traversal raced with newer in-app navigation"
+                        "the browser moved through history while the app was still navigating"
                             .to_owned(),
                     )
                 } else if event.initiated_by_app() {
                     (state.workbench.current_route() == route || pending_effects)
                         .then_some(())
                         .ok_or_else(|| {
-                            "the in-app traversal did not reach its authenticated browser entry"
-                                .to_owned()
+                            "the browser did not arrive at the page the app asked for".to_owned()
                         })
                 } else {
                     apply_authenticated_browser_pop(state, event.delta(), route)
                 };
 
                 if let Err(error) = applied {
-                    state.push_user_message(ConsoleMessage::warning(format!(
-                        "Browser history could not restore the requested task and was recovered at a canonical route: {error}"
-                    )));
+                    state.prompt(format!(
+                        "Browser history could not open the requested page and returned to the \
+                         current task: {error}"
+                    ));
                     if availability.can_open() && !external_race {
                         // The browser entry is authenticated and available;
                         // make it authoritative, then start a bounded session
@@ -1154,9 +1194,10 @@ fn synchronize_browser_surface_navigation(state: &mut AppState) {
                 }
             }
             Err(error) => {
-                state.push_user_message(ConsoleMessage::warning(format!(
-                    "An unauthenticated or malformed browser history entry was rejected and canonicalized to the active task: {error}"
-                )));
+                state.prompt(format!(
+                    "A browser history entry could not be read and was replaced with the current \
+                     task: {error}"
+                ));
                 recover_browser_history_at_active_task(state);
                 return;
             }
@@ -1167,17 +1208,21 @@ fn synchronize_browser_surface_navigation(state: &mut AppState) {
         .workbench
         .take_browser_history_effect_queue_overflowed()
     {
-        state.push_user_message(ConsoleMessage::warning(
-            "Browser synchronization commands exceeded the bounded queue; the address was recovered directly to the active task.",
-        ));
+        record_browser_history_warning(
+            state,
+            "Browser history fell behind the app and was reset to the current task.".to_owned(),
+        );
         recover_browser_history_at_active_task(state);
         return;
     }
 
     if traversal_watchdog_expired() {
-        state.push_user_message(ConsoleMessage::warning(
-            "Browser traversal did not produce an authenticated history event before the watchdog deadline; the address was recovered to the active task.",
-        ));
+        record_browser_history_warning(
+            state,
+            "The browser did not finish moving through history in time; the address was reset \
+             to the current task."
+                .to_owned(),
+        );
         recover_browser_history_at_active_task(state);
         return;
     }
@@ -1193,9 +1238,12 @@ fn synchronize_browser_surface_navigation(state: &mut AppState) {
                 state
                     .workbench
                     .reset_navigation_history_for_fresh_browser_session();
-                state.push_user_message(ConsoleMessage::info(
-                    "Browser route synchronization resumed at the active task; browser traversal history was restarted.",
-                ));
+                state.record(
+                    crate::diagnostics::LogSeverity::Info,
+                    crate::diagnostics::LogSource::Studio,
+                    "Browser Back and Forward resumed at the current task; earlier browser \
+                     history was cleared.",
+                );
             }
             Err(_) => return,
         }
@@ -1234,18 +1282,26 @@ fn recover_browser_history_at_active_task(state: &mut AppState) {
     state.workbench.clear_browser_history_effects();
     let canonical = state.workbench.current_route();
     if let Err(error) = ensure_popstate_listener() {
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "Browser route synchronization is disabled and listener installation will retry automatically: {error}"
-        )));
+        record_browser_history_warning(
+            state,
+            format!(
+                "Browser Back and Forward are off and will be set up again automatically: \
+                 {error}"
+            ),
+        );
         return;
     }
     match restart_history_session(canonical) {
         Ok(()) => state
             .workbench
             .reset_navigation_history_for_fresh_browser_session(),
-        Err(error) => state.push_user_message(ConsoleMessage::warning(format!(
-            "Browser route synchronization is disabled and will retry automatically; the address could not be recovered to the active task: {error}"
-        ))),
+        Err(error) => record_browser_history_warning(
+            state,
+            format!(
+                "Browser Back and Forward are off and will be set up again automatically; the \
+                 address could not be reset to the current task: {error}"
+            ),
+        ),
     }
 }
 
@@ -1259,9 +1315,13 @@ fn rollback_browser_navigation_after_sync_failure(
 
     match active_browser_route() {
         Ok(browser_route) => {
-            state.push_user_message(ConsoleMessage::warning(format!(
-                "The browser address could not be synchronized; the active task was rolled back to the last committed browser route: {error}"
-            )));
+            record_browser_history_warning(
+                state,
+                format!(
+                    "The browser address could not be updated; the app returned to the last page \
+                     the browser recorded: {error}"
+                ),
+            );
             if state.workbench.current_route() != browser_route {
                 let _ = state
                     .workbench
@@ -1272,15 +1332,23 @@ fn rollback_browser_navigation_after_sync_failure(
                 .workbench
                 .reset_navigation_history_for_fresh_browser_session();
             if let Err(recovery_error) = restart_history_session(browser_route) {
-                state.push_user_message(ConsoleMessage::warning(format!(
-                    "Browser route synchronization is disabled and will retry automatically; the history session could not be restarted after rollback: {recovery_error}"
-                )));
+                record_browser_history_warning(
+                    state,
+                    format!(
+                        "Browser Back and Forward are off and will be set up again \
+                         automatically; browser history could not be restarted: {recovery_error}"
+                    ),
+                );
             }
         }
         Err(_) => {
-            state.push_user_message(ConsoleMessage::warning(format!(
-                "The browser address could not be synchronized and no committed browser session was available for rollback: {error}"
-            )));
+            record_browser_history_warning(
+                state,
+                format!(
+                    "The browser address could not be updated, and there was no earlier page to \
+                     return to: {error}"
+                ),
+            );
             recover_browser_history_at_active_task(state);
         }
     }
@@ -1295,31 +1363,31 @@ fn apply_authenticated_browser_pop(
     use crate::workbench::RouteTransitionSource;
 
     if delta < 0 {
-        let steps = usize::try_from(delta.unsigned_abs())
-            .map_err(|_| "browser back distance is not representable".to_owned())?;
+        let outside = || "the page is older than this session's history".to_owned();
+        let steps = usize::try_from(delta.unsigned_abs()).map_err(|_| outside())?;
         if steps > state.workbench.back_route_count() {
-            return Err("browser back entry is outside the in-app task stack".to_owned());
+            return Err(outside());
         }
         state
             .workbench
             .navigate_back_steps(steps, RouteTransitionSource::BrowserPop)
-            .ok_or_else(|| "browser back entry is outside the in-app task stack".to_owned())?;
+            .ok_or_else(outside)?;
     } else if delta > 0 {
-        let steps = usize::try_from(delta)
-            .map_err(|_| "browser forward distance is not representable".to_owned())?;
+        let outside = || "the page is newer than this session's history".to_owned();
+        let steps = usize::try_from(delta).map_err(|_| outside())?;
         if steps > state.workbench.forward_route_count() {
-            return Err("browser forward entry is outside the in-app task stack".to_owned());
+            return Err(outside());
         }
         state
             .workbench
             .navigate_forward_steps(steps, RouteTransitionSource::BrowserPop)
-            .ok_or_else(|| "browser forward entry is outside the in-app task stack".to_owned())?;
+            .ok_or_else(outside)?;
     }
 
     if state.workbench.current_route() == route {
         Ok(())
     } else {
-        Err("authenticated browser entry and in-app task stack disagree".to_owned())
+        Err("the browser and the app disagree about which page is current".to_owned())
     }
 }
 
@@ -1342,9 +1410,15 @@ impl eframe::App for RSpiceApp {
         }
         self.prepare_frame(&ctx);
         self.cloud_account.poll();
-        if let Some(error) = self.cloud_account.take_local_error() {
-            self.state
-                .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+        if let Some(refusal) = self.cloud_account.take_local_error() {
+            self.state.prompt(refusal);
+        }
+        if let Some(failure) = self.cloud_account.take_storage_failure() {
+            self.state.record(
+                crate::diagnostics::LogSeverity::Error,
+                crate::diagnostics::LogSource::Studio,
+                failure,
+            );
         }
         if let Some(url) = self.cloud_account.take_browser_request() {
             #[cfg(not(target_arch = "wasm32"))]
@@ -1354,7 +1428,11 @@ impl eframe::App for RSpiceApp {
                 .and_then(|window| window.location().assign(&url).ok())
                 .is_none()
             {
-                log::error!("browser sign-in navigation was rejected");
+                self.state.record(
+                    crate::diagnostics::LogSeverity::Error,
+                    crate::diagnostics::LogSource::Studio,
+                    "Sign-in failed: the browser did not open the sign-in page.",
+                );
             }
         }
         self.record_publish_receipt();
@@ -1397,12 +1475,13 @@ impl eframe::App for RSpiceApp {
         self.state.sync_active_schematic_to_workspace();
         self.state.workbench.capture_authoring_recovery();
         log::debug!("save: veriloga library");
-        if let Err(err) =
+        if let Err(error) =
             save_global_veriloga_library(&self.state.library_manager, &self.state.workspace)
         {
-            log::warn!(
-                "Failed to persist global Verilog-A library during app save: {}",
-                err
+            self.state.record(
+                crate::diagnostics::LogSeverity::Error,
+                crate::diagnostics::LogSource::Studio,
+                format!("The Verilog-A library could not be saved: {error}"),
             );
         }
         log::debug!("save: serialize app state");
@@ -2393,6 +2472,24 @@ mod tests {
         assert_eq!(
             restored.schematic.document().wires,
             expected.schematic.document().wires
+        );
+        assert_eq!(restored.log_buffer.entries().count(), 0);
+
+        // A session that will not decode starts a new one, and says why.
+        eframe::Storage::set_string(&mut storage, eframe::APP_KEY, "(not a session".to_owned());
+        let replaced = AppState::restore_eframe_session(&storage).expect("a stored session");
+        let entries: Vec<_> = replaced.log_buffer.entries().collect();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].severity,
+            crate::diagnostics::LogSeverity::Warning
+        );
+        assert!(
+            entries[0].message.starts_with(
+                "The previous session could not be restored, so a new one was started: "
+            ),
+            "{}",
+            entries[0].message
         );
     }
 }

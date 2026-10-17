@@ -558,22 +558,8 @@ fn render_legal_privacy(ui: &mut egui::Ui) {
 
 fn export_support_bundle(app: &mut RSpiceApp, ctx: &Context, include_session_log: bool) {
     let documents = crate::workbench::chrome::document_bar::document_descriptors(&app.state);
-    let home = dirs::home_dir().map(|path| path.display().to_string());
     let logs = if include_session_log {
-        app.state
-            .log_buffer
-            .entries()
-            .map(|entry| {
-                serde_json::json!({
-                    "id": entry.id,
-                    "timestamp": entry.format_timestamp(),
-                    "severity": format!("{:?}", entry.severity),
-                    "source": format!("{:?}", entry.source),
-                    "message": redact_support_text(&entry.message, home.as_deref()),
-                    "context": entry.context.as_deref().map(|value| redact_support_text(value, home.as_deref())),
-                })
-            })
-            .collect::<Vec<_>>()
+        support_bundle_log(&app.state, crate::diagnostics::home_directory().as_deref())
     } else {
         Vec::new()
     };
@@ -660,20 +646,24 @@ fn export_support_bundle(app: &mut RSpiceApp, ctx: &Context, include_session_log
     }
 }
 
-fn redact_support_text(value: &str, home: Option<&str>) -> String {
-    let mut redacted = home
-        .filter(|home| !home.is_empty())
-        .map_or_else(|| value.to_owned(), |home| value.replace(home, "<HOME>"));
-    const MAX_SUPPORT_TEXT_BYTES: usize = 2_048;
-    if redacted.len() > MAX_SUPPORT_TEXT_BYTES {
-        let mut boundary = MAX_SUPPORT_TEXT_BYTES;
-        while !redacted.is_char_boundary(boundary) {
-            boundary -= 1;
-        }
-        redacted.truncate(boundary);
-        redacted.push_str("\u{2026}<truncated>");
-    }
-    redacted
+/// The session log as the support bundle carries it, each message redacted.
+fn support_bundle_log(
+    state: &crate::workbench::app_state::AppState,
+    home: Option<&str>,
+) -> Vec<serde_json::Value> {
+    state
+        .log_buffer
+        .entries()
+        .map(|entry| {
+            serde_json::json!({
+                "id": entry.id,
+                "timestamp": entry.format_timestamp(),
+                "severity": format!("{:?}", entry.severity),
+                "source": format!("{:?}", entry.source),
+                "message": crate::diagnostics::redact_log_message(&entry.message, home),
+            })
+        })
+        .collect()
 }
 
 fn section_heading(ui: &mut egui::Ui, text: &str) {
@@ -691,11 +681,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn support_text_redacts_home_and_preserves_utf8_boundaries_when_truncated() {
-        let text = format!(r"C:\Users\James\project\deck.sp {}", "μ".repeat(2_100));
-        let redacted = redact_support_text(&text, Some(r"C:\Users\James"));
-        assert!(redacted.starts_with(r"<HOME>\project\deck.sp"));
-        assert!(redacted.ends_with("\u{2026}<truncated>"));
-        assert!(redacted.is_char_boundary(redacted.len()));
+    fn the_support_bundle_log_carries_no_home_directory() {
+        let mut state = crate::workbench::app_state::AppState::default();
+        state.record(
+            crate::diagnostics::LogSeverity::Info,
+            crate::diagnostics::LogSource::Studio,
+            r"Opened project amp (C:\Users\James\designs\amp.rspiceproj).",
+        );
+
+        let log = support_bundle_log(&state, Some(r"C:\Users\James"));
+
+        let message = log
+            .last()
+            .and_then(|entry| entry["message"].as_str())
+            .expect("the line is carried");
+        assert_eq!(
+            message,
+            r"Opened project amp (<HOME>\designs\amp.rspiceproj)."
+        );
     }
 }

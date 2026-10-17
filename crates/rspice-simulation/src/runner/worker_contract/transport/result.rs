@@ -52,6 +52,7 @@ impl WorkerSimulationResultTransport {
                 convergence,
                 events,
                 spectra,
+                testbench_errors,
             } => Self::Transient {
                 time: WorkerF64Series::from_vec(time, buffers),
                 waveforms: transport_waveforms(waveforms, buffers),
@@ -64,6 +65,7 @@ impl WorkerSimulationResultTransport {
                 }),
                 events,
                 spectra: WorkerRecordedFftSpectrumTransport::from_spectra(spectra, buffers),
+                testbench_errors,
             },
             WorkerSimulationResult::Fft {
                 spectrum,
@@ -398,6 +400,7 @@ impl WorkerSimulationResultTransport {
                 convergence,
                 events,
                 spectra,
+                testbench_errors,
             } => Ok(WorkerSimulationResult::Transient {
                 time: time.into_vec(buffers)?,
                 waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
@@ -411,6 +414,7 @@ impl WorkerSimulationResultTransport {
                     .transpose()?,
                 events,
                 spectra: WorkerRecordedFftSpectrumTransport::into_spectra(spectra, buffers)?,
+                testbench_errors,
             }),
             Self::Fft {
                 spectrum,

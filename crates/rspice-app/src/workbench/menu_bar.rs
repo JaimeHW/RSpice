@@ -15,7 +15,7 @@ mod waveform_export;
 
 pub(crate) use export_actions::{
     action_export_generated_netlist_with_options, action_export_netlist_with_io,
-    action_view_netlist, build_menu_netlist,
+    action_view_netlist, build_menu_netlist, netlist_failure_text, record_netlist_warnings,
 };
 pub(crate) use file_menu::{FileMenuAction, dispatch_file_menu_action};
 pub(crate) use simulate_menu::open_simulation_options;

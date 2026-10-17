@@ -507,8 +507,11 @@ impl RSpiceApp {
             .map_err(|error| format!("project library rollback metadata is invalid: {error}"))?;
         self.state = candidate;
         for warning in execution_warnings {
-            self.state
-                .push_user_message(crate::diagnostics::ConsoleMessage::warning(warning));
+            self.state.record(
+                crate::diagnostics::LogSeverity::Warning,
+                crate::diagnostics::LogSource::Studio,
+                warning,
+            );
         }
         Ok(())
     }

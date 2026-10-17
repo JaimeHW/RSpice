@@ -39,7 +39,7 @@ use rspice_project::lifecycle::ProjectLifecycle;
 use rspice_project::lifecycle::{PreparedBrowserSave, StagedBrowserSave};
 pub(crate) use rspice_project::lifecycle::{ProjectLifecycleError, RevertReviewToken, SaveScope};
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::io::ProjectSnapshot;
 #[cfg(target_arch = "wasm32")]
 use crate::product::ContentDigest;
@@ -331,31 +331,39 @@ pub(crate) fn initialize_from_session(state: &mut AppState) {
                                     reason: error.to_string(),
                                 });
                         }
-                        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
+                        state.record(
+                            LogSeverity::Warning,
+                            LogSource::Studio,
                             format!(
-                                "Canonical native project was not restored: {error}. The remembered file was left untouched; open it explicitly or save an independent project copy"
+                                "The project file from the last session was not reopened: {error}. The file was left untouched; open it, or save a copy of the project."
                             ),
-                        ));
+                        );
                     }
                 }
             }
             (Some(path), None) if path.exists() => {
                 let canonical_path =
                     persistence::normalize_native_path(&path).unwrap_or_else(|_| path.clone());
-                let reason = "the legacy session has no exact native binding receipt".to_owned();
+                let reason = "the saved session does not record the file's binding".to_owned();
                 state.project_lifecycle.unreadable_native_binding =
                     Some(persistence::UnreadableNativeBinding {
                         canonical_path,
                         reason: reason.clone(),
                     });
-                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                    "Canonical native project was not restored because {reason}; open it explicitly to accept its current bytes"
-                )));
+                state.record(
+                    LogSeverity::Warning,
+                    LogSource::Studio,
+                    format!(
+                        "The project file from the last session was not reopened because {reason}; open it to accept its current contents."
+                    ),
+                );
             }
             (None, Some(_)) => {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                    "Ignored a native binding receipt without its exact restored pathname",
-                ));
+                state.record(
+                    LogSeverity::Warning,
+                    LogSource::Studio,
+                    "Ignored a saved project-file binding that has no path.",
+                );
             }
             (Some(_), None) | (None, None) => {}
         }
@@ -366,9 +374,11 @@ pub(crate) fn initialize_from_session(state: &mut AppState) {
             let project_id = state.workspace.content.project.id().to_string();
             if receipt.project_id != project_id {
                 state.browser_project_binding_receipt = None;
-                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                    "Ignored a stale browser binding receipt for a different project identity",
-                ));
+                state.record(
+                    LogSeverity::Warning,
+                    LogSource::Studio,
+                    "Ignored a saved browser file binding that belongs to a different project.",
+                );
             } else {
                 state.project_lifecycle.authority.begin_browser_restore();
                 let context = browser_operation_context(state);
@@ -401,16 +411,20 @@ pub(crate) fn poll_browser_binding_restore(state: &mut AppState) {
     match completion.result {
         persistence::BrowserRestoreResult::Missing => {
             state.browser_project_binding_receipt = None;
-            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                "The browser canonical-binding receipt has no matching restoration record; choose Save to establish a new canonical binding",
-            ));
+            state.record(
+                LogSeverity::Warning,
+                LogSource::Studio,
+                "The browser has no record of the project's file; choose Save to pick a file again.",
+            );
         }
         persistence::BrowserRestoreResult::Restored { baseline, binding } => {
             if baseline.file.workspace.project.id() != state.workspace.content.project.id() {
                 release_browser_binding_handle(&binding);
-                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                    "Ignored a stale browser project binding for a different project identity",
-                ));
+                state.record(
+                    LogSeverity::Warning,
+                    LogSource::Studio,
+                    "Ignored a saved browser file binding that belongs to a different project.",
+                );
                 return;
             }
             state
@@ -421,9 +435,11 @@ pub(crate) fn poll_browser_binding_restore(state: &mut AppState) {
         }
         persistence::BrowserRestoreResult::ReconnectRequired { binding } => {
             state.project_lifecycle.browser_reconnect_binding = Some(binding);
-            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                "The canonical browser project needs permission again. Choose Save to reconnect under browser user activation; no bytes will be overwritten unless the accepted digest still matches.",
-            ));
+            state.record(
+                LogSeverity::Warning,
+                LogSource::Studio,
+                "The browser needs permission to write the project file again. Choose Save to reconnect; nothing is overwritten unless the file is unchanged.",
+            );
         }
         persistence::BrowserRestoreResult::Conflict {
             binding,
@@ -434,25 +450,39 @@ pub(crate) fn poll_browser_binding_restore(state: &mut AppState) {
                 binding,
                 observed_digest,
             });
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "Canonical browser project conflict: {reason}. Ordinary Save is blocked; reopen it or save an independent project copy"
-            )));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!(
+                    "The project file changed outside RSpice: {reason}. Save is blocked; reopen the project or save a copy."
+                ),
+            );
         }
         persistence::BrowserRestoreResult::Evicted(reason) => {
             state.browser_project_binding_receipt = None;
-            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                "Canonical browser project binding was removed: {reason}. Choose Save to select a canonical file again; download fallback remains copy-only."
-            )));
+            state.record(
+                LogSeverity::Warning,
+                LogSource::Studio,
+                format!(
+                    "The browser removed the project's file binding: {reason}. Choose Save to pick a file again; downloads remain copies only."
+                ),
+            );
         }
         persistence::BrowserRestoreResult::Retryable(reason) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                "Canonical browser project could not be restored yet: {reason}. Its restoration record was retained"
-            )));
+            state.record(
+                LogSeverity::Warning,
+                LogSource::Studio,
+                format!(
+                    "The project file could not be reconnected yet: {reason}. Its binding was kept."
+                ),
+            );
         }
         persistence::BrowserRestoreResult::Unsupported(reason) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                "Canonical browser saves are unavailable: {reason}"
-            )));
+            state.record(
+                LogSeverity::Warning,
+                LogSource::Studio,
+                format!("Saving to a file is unavailable in this browser: {reason}"),
+            );
         }
     }
 }
@@ -963,9 +993,13 @@ fn finish_successful_save(
         Ok(registry) => registry,
         Err(error) => {
             let registry = state.project_lifecycle.authority.unverified_registry();
-            state.push_user_message(ConsoleMessage::warning(format!(
-                "The saved snapshot was accepted, but the current draft could not be compared with it: {error}. Current edits remain pending; resolve the draft error before saving or closing."
-            )));
+            state.record(
+                LogSeverity::Warning,
+                LogSource::Studio,
+                format!(
+                    "The project was saved, but the current draft could not be compared with it: {error}. Current edits remain unsaved; resolve the draft error before saving or closing."
+                ),
+            );
             registry
         }
     };
@@ -1126,22 +1160,28 @@ fn report_design_checks_after_save(state: &mut AppState) {
     let result = match state.run_active_design_checks() {
         Ok(result) => result,
         Err(error) => {
-            state.push_user_message(ConsoleMessage::warning(format!(
-                "Design checks on save could not create current evidence: {error}"
-            )));
+            state.record(
+                LogSeverity::Warning,
+                LogSource::Studio,
+                format!("Design checks on save could not run: {error}"),
+            );
             return;
         }
     };
     let summary = result.summary();
-    let message = format!(
-        "Design checks on save: {} critical, {} errors, {} warnings \u{00b7} the saved revision is already published",
+    let counts = format!(
+        "Design checks on save: {} critical, {} errors, {} warnings.",
         summary.critical, summary.errors, summary.warnings
     );
-    state.push_user_message(if result.passed() {
-        ConsoleMessage::info(message)
+    if result.passed() {
+        state.record(LogSeverity::Info, LogSource::Studio, counts);
     } else {
-        ConsoleMessage::warning(message)
-    });
+        state.record(
+            LogSeverity::Warning,
+            LogSource::Studio,
+            format!("{counts} See Problems."),
+        );
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1357,7 +1397,7 @@ fn revert_document_in_place(
                     .map_err(ProjectLifecycleError::InvalidState)?;
             state.model_library_manager = manager;
             for warning in warnings {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(warning));
+                state.record(LogSeverity::Warning, LogSource::Studio, warning);
             }
         }
         ProjectDocumentId::ResultHistory => {

@@ -8,7 +8,7 @@
 use egui::containers::menu::MenuButton;
 use egui::{Align, Layout, Ui, vec2};
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::design_system::{Problem, WorkbenchIcon, icon_button, paint_problem_mark};
@@ -726,12 +726,12 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
                     )
                 });
             if let Err(error) = result {
-                app.state.push_user_message(ConsoleMessage::error(error));
+                app.state.prompt(error);
             }
         }
         Some(NetlistToolbarAction::ManageTopDecks) => {
             if let Err(error) = crate::workbench::app::open_source_document_dialog(&mut app.state) {
-                app.state.push_user_message(ConsoleMessage::error(error));
+                app.state.prompt(error);
             }
         }
         Some(NetlistToolbarAction::OpenGenerated) => {
@@ -760,10 +760,16 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
             match crate::workbench::documents::netlist_document::copy_active_dependency_to_project(
                 &mut app.state,
             ) {
-                Ok(_) => app.state.push_user_message(ConsoleMessage::info(
-                    messages.text(MessageId::NetlistCopySucceeded),
-                )),
-                Err(error) => app.state.push_user_message(ConsoleMessage::error(error)),
+                Ok(_) => {
+                    app.state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        messages.text(MessageId::NetlistCopySucceeded),
+                    );
+                }
+                Err(error) => {
+                    app.state.record(LogSeverity::Error, LogSource::Studio, error);
+                }
             }
         }
         Some(NetlistToolbarAction::RelinkDependency) => {
@@ -790,20 +796,18 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
             crate::workbench::commands::vocabulary::Command::FindCodeDocument.execute(app);
         }
         Some(NetlistToolbarAction::GoToDefinition) => {
-            match crate::workbench::documents::netlist_document::language::go_to_definition_at_cursor(
-                &mut app.state,
-            ) {
-                Ok(message) => app.state.push_user_message(ConsoleMessage::info(message)),
-                Err(error) => app.state.push_user_message(ConsoleMessage::warning(error)),
-            }
+            let answer =
+                crate::workbench::documents::netlist_document::language::go_to_definition_at_cursor(
+                    &mut app.state,
+                );
+            app.state.prompt(answer.unwrap_or_else(|refusal| refusal));
         }
         Some(NetlistToolbarAction::GoToDeclaration) => {
-            match crate::workbench::documents::netlist_document::language::go_to_declaration_at_cursor(
-                &mut app.state,
-            ) {
-                Ok(message) => app.state.push_user_message(ConsoleMessage::info(message)),
-                Err(error) => app.state.push_user_message(ConsoleMessage::warning(error)),
-            }
+            let answer =
+                crate::workbench::documents::netlist_document::language::go_to_declaration_at_cursor(
+                    &mut app.state,
+                );
+            app.state.prompt(answer.unwrap_or_else(|refusal| refusal));
         }
         Some(NetlistToolbarAction::SignatureHelp) => {
             match crate::workbench::documents::netlist_document::language::show_signature_help_at_cursor(
@@ -815,41 +819,38 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
                             crate::workbench::documents::netlist_document::editor_id(&app.state),
                         );
                     });
-                    app.state.push_user_message(ConsoleMessage::info(message));
+                    app.state.prompt(message);
                 }
-                Err(error) => app.state.push_user_message(ConsoleMessage::warning(error)),
+                Err(error) => app.state.prompt(error),
             }
         }
         Some(NetlistToolbarAction::FindReferences) => {
-            match crate::workbench::documents::netlist_document::language::find_references_at_cursor(
-                &mut app.state,
-            ) {
-                Ok(message) => app.state.push_user_message(ConsoleMessage::info(message)),
-                Err(error) => app.state.push_user_message(ConsoleMessage::warning(error)),
-            }
+            let answer =
+                crate::workbench::documents::netlist_document::language::find_references_at_cursor(
+                    &mut app.state,
+                );
+            app.state.prompt(answer.unwrap_or_else(|refusal| refusal));
         }
         Some(NetlistToolbarAction::RenameSymbol) => {
             if let Err(error) = crate::workbench::documents::netlist_document::language::begin_rename_at_cursor(
                 &mut app.state,
             ) {
-                app.state.push_user_message(ConsoleMessage::warning(error));
+                app.state.prompt(error);
             }
         }
         Some(NetlistToolbarAction::WorkspaceSymbols) => {
-            match crate::workbench::documents::netlist_document::language::open_workspace_symbols(
-                &mut app.state,
-            ) {
-                Ok(message) => app.state.push_user_message(ConsoleMessage::info(message)),
-                Err(error) => app.state.push_user_message(ConsoleMessage::warning(error)),
-            }
+            let answer =
+                crate::workbench::documents::netlist_document::language::open_workspace_symbols(
+                    &mut app.state,
+                );
+            app.state.prompt(answer.unwrap_or_else(|refusal| refusal));
         }
         Some(NetlistToolbarAction::ApplyQuickFix) => {
-            match crate::workbench::documents::netlist_document::language::apply_preferred_quick_fix(
-                &mut app.state,
-            ) {
-                Ok(message) => app.state.push_user_message(ConsoleMessage::info(message)),
-                Err(error) => app.state.push_user_message(ConsoleMessage::warning(error)),
-            }
+            let answer =
+                crate::workbench::documents::netlist_document::language::apply_preferred_quick_fix(
+                    &mut app.state,
+                );
+            app.state.prompt(answer.unwrap_or_else(|refusal| refusal));
         }
         Some(NetlistToolbarAction::FormatDocument) => {
             crate::workbench::documents::text_editor_commands::queue_format_document(

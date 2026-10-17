@@ -593,7 +593,26 @@ pub fn build_prepared_manual_deck<R, A>(
         inputs.project_sources,
         expanded,
     );
-    reject_unresolved_device_models(&expanded, has_project_technology)?;
+    // One parse serves the model check and the deck's own warnings (a dropped
+    // control command, a shadowed definition), which the run advises as a
+    // headless run of the same deck does. It is the parse the deck's queue is
+    // read from, control regions and all. Each is worded as the engine words
+    // the parse warnings it also logs, "line 5: …", so a run can tell the
+    // engine repeating one from news.
+    let parsed = rspice_core::Netlist::parse(&expanded).ok();
+    if let Some(parsed) = &parsed {
+        reject_unresolved_models_in(parsed, has_project_technology)?;
+    }
+    let advisories = parsed.map_or_else(Vec::new, |parsed| {
+        parsed
+            .diagnostics
+            .into_iter()
+            .map(|diagnostic| match diagnostic.line {
+                0 => diagnostic.message,
+                line => format!("line {line}: {}", diagnostic.message),
+            })
+            .collect()
+    });
     let project_model_sources =
         prepared_project_model_sources(inputs.technology.models, &expanded)?;
     let project_veriloga_runtimes = project_veriloga_runtimes_referenced_by(
@@ -705,7 +724,7 @@ pub fn build_prepared_manual_deck<R, A>(
         project_veriloga_runtimes,
         target: ExecutionTargetCapabilities::current(),
         receipt: RunSourceReceipt::ManualSourceCheck(receipt_digest),
-        advisories: Vec::new(),
+        advisories,
         manual_source: Some(source.to_owned()),
         cross_probe: None,
         touchstone_export,
@@ -740,10 +759,17 @@ pub(crate) fn reject_unresolved_device_models(
     // Parseability and hierarchy resolution belong to earlier stages, which
     // report them in their own words; this check contributes nothing when
     // either fails.
-    let Ok(parsed) = rspice_core::netlist::parse_netlist(executable_netlist) else {
-        return Ok(());
-    };
-    let Ok(unresolved) = rspice_core::netlist::unresolved_device_model_references(&parsed) else {
+    match rspice_core::netlist::parse_netlist(executable_netlist) {
+        Ok(parsed) => reject_unresolved_models_in(&parsed, technology_in_effect),
+        Err(_) => Ok(()),
+    }
+}
+
+fn reject_unresolved_models_in(
+    parsed: &rspice_core::Netlist,
+    technology_in_effect: bool,
+) -> Result<(), PreparationError> {
+    let Ok(unresolved) = rspice_core::netlist::unresolved_device_model_references(parsed) else {
         return Ok(());
     };
     if unresolved.is_empty() {

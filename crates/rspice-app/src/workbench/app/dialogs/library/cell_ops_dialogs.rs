@@ -4,7 +4,7 @@
 
 use super::shared::{LIBRARY_CATALOG_STALE_MESSAGE, validate_lcv_name};
 use super::{Context, RSpiceApp};
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, input_row, kv_row};
@@ -221,9 +221,11 @@ impl RSpiceApp {
             let name = self.state.dialogs.copy_cell_name.trim().to_owned();
             match self.state.commit_copy_cell_dialog() {
                 Ok(views) => {
-                    self.state.push_user_message(ConsoleMessage::info(format!(
-                        "Copied '{source_cell}' to '{target}/{name}' ({views} views)"
-                    )));
+                    self.state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        format!("Copied '{source_cell}' to '{target}/{name}' ({views} views)."),
+                    );
                     self.state.dialogs.copy_cell_error = None;
                     should_close = true;
                 }
@@ -294,10 +296,14 @@ impl RSpiceApp {
             let name = self.state.dialogs.rename_cell_name.trim().to_owned();
             match self.state.commit_rename_cell_dialog() {
                 Ok(Some(remapped)) => {
-                    self.state.push_user_message(ConsoleMessage::info(format!(
-                        "Renamed '{current}' to '{name}' — {remapped} instance \
-                         references remapped"
-                    )));
+                    self.state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        format!(
+                            "Renamed cell '{current}' to '{name}'; {remapped} instance \
+                             references now name it."
+                        ),
+                    );
                     self.state.dialogs.rename_cell_error = None;
                     should_close = true;
                 }

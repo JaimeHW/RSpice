@@ -12,7 +12,6 @@ use rspice_design::drc::{
     DeckIssue, DesignRuleDeck, DrcRuleCategory, DrcSeverity, DrcViolationType,
 };
 
-use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
@@ -39,9 +38,7 @@ pub(crate) struct RuleSetupDialogState {
 
 pub(crate) fn open_rule_setup(state: &mut AppState) {
     if !state.project_lifecycle.is_open() {
-        state.push_user_message(ConsoleMessage::warning(
-            "Design rule setup requires an open project.",
-        ));
+        state.prompt("Design rule setup requires an open project.");
         return;
     }
     state.dialogs.rule_setup = RuleSetupDialogState {

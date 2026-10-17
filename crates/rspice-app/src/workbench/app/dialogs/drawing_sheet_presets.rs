@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use egui::{Context, Id};
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::io::file_exchange::{self, FileKind};
 use crate::state::{
     AuthoredDrawingSheetSize, DesignManagementCatalog, DrawingSheetPreset,
@@ -282,9 +282,11 @@ impl RSpiceApp {
             format: format.as_reusable_drawing_sheet_preset(),
         };
         self.publish_project_preset(copy, "Duplicate custom sheet size")?;
-        self.state.push_user_message(ConsoleMessage::info(format!(
-            "Created project custom size '{name}' from an exact snapshot."
-        )));
+        self.state.record(
+            LogSeverity::Info,
+            LogSource::Studio,
+            format!("Created project custom size '{name}'."),
+        );
         Ok(())
     }
 
@@ -379,7 +381,8 @@ impl RSpiceApp {
         match choice {
             DialogChoice::Primary => match self.apply_preset_editor() {
                 Ok(message) => {
-                    self.state.push_user_message(ConsoleMessage::info(message));
+                    self.state
+                        .record(LogSeverity::Info, LogSource::Studio, message);
                     self.state.dialogs.drawing_sheet_presets.return_to_library();
                 }
                 Err(error) => {
@@ -504,7 +507,8 @@ impl RSpiceApp {
         match choice {
             DialogChoice::Primary => match self.delete_preset(&key) {
                 Ok(message) => {
-                    self.state.push_user_message(ConsoleMessage::info(message));
+                    self.state
+                        .record(LogSeverity::Info, LogSource::Studio, message);
                     self.state.dialogs.drawing_sheet_presets.return_to_library();
                 }
                 Err(error) => self.state.dialogs.drawing_sheet_presets.error = Some(error),
@@ -666,7 +670,8 @@ impl RSpiceApp {
                 };
                 match result {
                     Ok(Some(message)) => {
-                        self.state.push_user_message(ConsoleMessage::info(message));
+                        self.state
+                            .record(LogSeverity::Info, LogSource::Studio, message);
                         self.state.dialogs.drawing_sheet_presets.return_to_library();
                     }
                     Ok(None) => {}
@@ -988,13 +993,17 @@ impl RSpiceApp {
         match outcome {
             Ok(Some(saved)) => {
                 if let Some(pending) = pending {
-                    self.state.push_user_message(ConsoleMessage::info(format!(
-                        "Exported {} custom size{} to {} with digest {}.",
-                        pending.preset_count,
-                        if pending.preset_count == 1 { "" } else { "s" },
-                        saved.name,
-                        pending.digest
-                    )));
+                    self.state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        format!(
+                            "Exported {} custom size{} to {} (SHA-256 {}).",
+                            pending.preset_count,
+                            if pending.preset_count == 1 { "" } else { "s" },
+                            saved.name,
+                            pending.digest
+                        ),
+                    );
                 }
                 self.state.dialogs.drawing_sheet_presets.return_to_library();
             }

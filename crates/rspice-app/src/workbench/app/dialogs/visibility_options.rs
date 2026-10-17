@@ -7,7 +7,6 @@
 
 use egui::{Context, Frame, Margin, Stroke, Ui, vec2};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::WireRoutingMode;
 use crate::state::{
     SchematicAnnotationVisibility, SchematicBackAnnotationContent, SchematicHierarchyVisibility,
@@ -70,10 +69,9 @@ impl RSpiceApp {
                 }
                 publish_visibility_policy(&mut self.state, policy);
                 self.state.dialogs.schematic_visibility.close();
-                self.state.push_user_message(ConsoleMessage::info(
-                    "Schematic visibility was applied to this device session; design data was unchanged."
-                        .to_owned(),
-                ));
+                self.state.prompt(
+                    "Schematic visibility applied on this device; the design is unchanged.",
+                );
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.state.dialogs.schematic_visibility.close();
@@ -81,12 +79,11 @@ impl RSpiceApp {
             DialogChoice::Secondary => match restore_visibility_recovery(&mut self.state) {
                 Ok(()) => {
                     self.state.dialogs.schematic_visibility.close();
-                    self.state.push_user_message(ConsoleMessage::info(
-                        "Restored the prior device-local schematic visibility state.".to_owned(),
-                    ));
+                    self.state
+                        .prompt("Restored the previous schematic visibility on this device.");
                 }
                 Err(error) => {
-                    self.state.push_user_message(ConsoleMessage::warning(error));
+                    self.state.prompt(error);
                 }
             },
             DialogChoice::None => {}
@@ -145,7 +142,7 @@ pub(crate) fn publish_visibility_policy(state: &mut AppState, policy: SchematicV
     state.schematic.session.editor.wire_drawing.routing_mode = routing_mode;
     state.schematic.session.editor.bus_drawing.routing_mode = routing_mode;
     state.ui.schematic_routing_mode = routing_mode;
-    if policy.net_highlighting != SchematicNetHighlighting::SelectedAcrossHierarchy {
+    if policy.net_highlighting != SchematicNetHighlighting::SelectedNet {
         state.schematic.session.editor.net_highlight.clear();
     }
     let selectable_note_ids = state
@@ -287,16 +284,16 @@ fn visibility_body(ui: &mut Ui, draft: &mut SchematicVisibilityPolicy) -> egui::
     let highlighting = enum_row(
         ui,
         "Net highlighting",
-        "Temporary highlighting inside the available hierarchy geometry.",
+        "Temporary highlighting of nets in the open view.",
         "schematic-visibility-net-highlighting",
         net_highlighting_label(draft.net_highlighting),
-        &["Selected net across hierarchy", "Net class colors", "Off"],
+        &["Selected net", "Net class colors", "Off"],
     );
     if let Some(index) = highlighting.0 {
         draft.net_highlighting = match index {
             1 => SchematicNetHighlighting::NetClassColors,
             2 => SchematicNetHighlighting::Off,
-            _ => SchematicNetHighlighting::SelectedAcrossHierarchy,
+            _ => SchematicNetHighlighting::SelectedNet,
         };
     }
 
@@ -429,7 +426,7 @@ const fn routing_label(value: SchematicWireRoutingStyle) -> &'static str {
 
 const fn net_highlighting_label(value: SchematicNetHighlighting) -> &'static str {
     match value {
-        SchematicNetHighlighting::SelectedAcrossHierarchy => "Selected net across hierarchy",
+        SchematicNetHighlighting::SelectedNet => "Selected net",
         SchematicNetHighlighting::NetClassColors => "Net class colors",
         SchematicNetHighlighting::Off => "Off",
     }
@@ -570,5 +567,24 @@ mod tests {
                 .has_component(selected)
         );
         assert!(state.ui.schematic_visibility_recovery.is_none());
+    }
+
+    /// The default highlight lights the selected net in the open view only:
+    /// nothing carries it into a child or back up to the parent, so it is not
+    /// named for the hierarchy. A preference saved under the old name still
+    /// reads as this policy.
+    #[test]
+    fn the_net_highlight_policy_is_named_for_what_it_lights() {
+        let selected = SchematicNetHighlighting::default();
+        assert_eq!(net_highlighting_label(selected), "Selected net");
+        assert_eq!(
+            serde_json::from_str::<SchematicNetHighlighting>("\"selected-across-hierarchy\"")
+                .expect("a saved policy reads"),
+            selected
+        );
+        assert_eq!(
+            serde_json::to_string(&selected).expect("the policy writes"),
+            "\"selected-net\""
+        );
     }
 }

@@ -11,7 +11,6 @@
 //! retires selection and net highlighting — stale identities from the sheet
 //! being left must never reach a command run on the sheet being entered.
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{
     CrossSheetDiscipline, CrossSheetPortAnchor, CrossSheetPortDefinition, CrossSheetPortDirection,
     CrossSheetPortEndpoint, CrossSheetSignalType, DesignManagementCatalog, DrawingSheetInheritance,
@@ -604,8 +603,7 @@ fn commit(
 
 fn report(state: &mut AppState, outcome: Result<String, String>) -> Result<String, String> {
     match &outcome {
-        Ok(message) => state.push_user_message(ConsoleMessage::info(message.clone())),
-        Err(error) => state.push_user_message(ConsoleMessage::warning(error.clone())),
+        Ok(message) | Err(message) => state.prompt(message.clone()),
     }
     outcome
 }

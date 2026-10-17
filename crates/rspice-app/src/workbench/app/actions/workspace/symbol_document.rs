@@ -17,11 +17,12 @@ mod tests;
 use rspice_schematic_editor::symbol_editor::interaction::SymbolRequestSource;
 use std::collections::BTreeMap;
 
-use crate::diagnostics::{ConsoleMessage, LogAnchor};
+use crate::diagnostics::{LogAnchor, LogSeverity, LogSource};
 use crate::state::{
     CellViewRef, ModelBoundSymbolDefinition, PinFindingKind, PortSpec,
     SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument, SymbolEditorMetadata,
 };
+use crate::ui::accessibility::counted;
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::design_checks::location_key;
 use crate::workbench::app_state::diagnostic_store::{
@@ -478,10 +479,11 @@ impl AppState {
         self.apply_symbol_parent_edit(document, &intent.renames);
         let renamed = self.apply_symbol_pin_renames(&reference, &intent.renames);
         if renamed > 0 {
-            self.push_user_message(ConsoleMessage::info(format!(
-                "Renamed {renamed} instance terminal(s) across placed instances of {}",
+            self.prompt(format!(
+                "Renamed {} across placed instances of {}.",
+                counted(renamed, "instance terminal", "instance terminals"),
                 reference.display_path()
-            )));
+            ));
         }
         // The undo entry this edit sits on top of has to be able to put the
         // names back, so it carries the reverse of what was just applied.
@@ -849,13 +851,13 @@ impl AppState {
         let found = visitable.swap_remove(index);
         self.diagnostics.set_current_finding(Some(found.identity));
         self.jump_to_log_anchor(found.anchor);
-        self.push_user_message(ConsoleMessage::info(format!(
+        self.prompt(format!(
             "Finding {}/{} — {} · {}",
             index + 1,
             len,
             found.level.display_name(),
             found.message,
-        )));
+        ));
         true
     }
 
@@ -864,7 +866,11 @@ impl AppState {
         let inputs = match self.symbol_pin_check_inputs(&reference) {
             Ok(inputs) => inputs,
             Err(error) => {
-                self.push_user_message(ConsoleMessage::warning(error));
+                self.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    format!("Symbol pin checks could not run: {error}"),
+                );
                 return;
             }
         };
@@ -873,24 +879,27 @@ impl AppState {
         rspice_design::drc::CheckWaivers::for_subject(&inputs.document.waivers).apply(&mut result);
         let found = result.total_count();
         if let Err(error) = self.publish_active_symbol_pin_check_result(&result) {
-            self.push_user_message(ConsoleMessage::warning(format!(
-                "Findings could not be recorded: {error}"
-            )));
+            self.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Symbol pin check findings could not be published: {error}"),
+            );
             return;
         }
         // One Console line records that the check ran, at the severity of an
         // event rather than of a finding: an error line here would stand on
         // the Problems page as a problem of its own, beside the findings it
-        // counts. The findings themselves are canonical records now, which is
-        // what the page, the counts and the canvas tour all read.
-        if found == 0 {
-            self.push_user_message(ConsoleMessage::info("Symbol pins match schematic"));
-            return;
-        }
-        self.push_user_message(ConsoleMessage::info(format!(
-            "Symbol pin checks · {found} finding{}",
-            if found == 1 { "" } else { "s" },
-        )));
+        // counts. The findings themselves are what the page, the counts and
+        // the canvas tour all read.
+        let summary = if found == 0 {
+            "Symbol pin check: pins match the schematic.".to_owned()
+        } else {
+            format!(
+                "Symbol pin check: {}. See Problems.",
+                counted(found, "finding", "findings")
+            )
+        };
+        self.record(LogSeverity::Info, LogSource::Studio, summary);
     }
 }
 

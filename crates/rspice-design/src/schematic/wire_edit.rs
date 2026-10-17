@@ -6,6 +6,7 @@ use super::{
     wire::{Wire, WireSegment},
 };
 use rspice_design_model::Point;
+use std::collections::HashSet;
 
 /// Add a wire
 pub fn add_wire(
@@ -275,6 +276,215 @@ pub fn split_wires_under_pins(
         }
     }
     changed
+}
+
+/// Lay single-segment wires that run along each other on one line as one
+/// conductor, so no stretch of wire is drawn twice and no dot marks a
+/// branch that is not there. With `join_end_to_end`, wires that meet end to
+/// end on one line with nothing else at the meeting point are joined too.
+///
+/// A pair takes part only when one of them is in `seeds`, or always when
+/// `seeds` is `None`. The pair becomes one wire over their combined extent,
+/// under the lower id. An end of either that falls inside that extent stays
+/// a vertex when anything else meets it there (another wire, a pin, a dot,
+/// a label or a tap end), so whatever met it still meets a vertex.
+pub fn merge_collinear_wires(
+    document: &mut SchematicDocument,
+    identity: &mut SchematicIdentity,
+    seeds: Option<&HashSet<u64>>,
+    join_end_to_end: bool,
+) -> bool {
+    let pins = super::junction_edit::placed_pins(document)
+        .into_iter()
+        .collect::<HashSet<_>>();
+    let mut seeds = seeds.cloned();
+    let mut changed = false;
+    while let Some((first, second)) =
+        next_collinear_pair(document, seeds.as_ref(), &pins, join_end_to_end)
+    {
+        let laid = merge_wire_pair(document, identity, first, second, &pins);
+        if let Some(seeds) = seeds.as_mut() {
+            seeds.extend(laid);
+        }
+        changed = true;
+    }
+    changed
+}
+
+/// Which line a segment lies on: its reduced direction and its offset.
+fn line_key(start: Point, end: Point) -> Option<((i64, i64), i64)> {
+    let mut dx = i64::from(end.x) - i64::from(start.x);
+    let mut dy = i64::from(end.y) - i64::from(start.y);
+    if dx == 0 && dy == 0 {
+        return None;
+    }
+    let divisor = greatest_common_divisor(dx.abs(), dy.abs());
+    dx /= divisor;
+    dy /= divisor;
+    if dx < 0 || (dx == 0 && dy < 0) {
+        dx = -dx;
+        dy = -dy;
+    }
+    Some(((dx, dy), dy * i64::from(start.x) - dx * i64::from(start.y)))
+}
+
+fn greatest_common_divisor(mut a: i64, mut b: i64) -> i64 {
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a
+}
+
+/// Whether anything but wires `first` and `second` meets `point`.
+fn meets_anything_else(
+    document: &SchematicDocument,
+    pins: &HashSet<Point>,
+    point: Point,
+    first: u64,
+    second: u64,
+) -> bool {
+    pins.contains(&point)
+        || document
+            .wires
+            .iter()
+            .any(|wire| wire.id != first && wire.id != second && wire.contains_point(point))
+        || document
+            .junctions
+            .iter()
+            .any(|junction| junction.pos == point)
+        || document.net_labels.iter().any(|label| label.pos == point)
+        || document
+            .bus_taps
+            .iter()
+            .any(|tap| tap.connection_point == point)
+}
+
+fn next_collinear_pair(
+    document: &SchematicDocument,
+    seeds: Option<&HashSet<u64>>,
+    pins: &HashSet<Point>,
+    join_end_to_end: bool,
+) -> Option<(u64, u64)> {
+    let mut lines: std::collections::HashMap<_, Vec<&Wire>> = std::collections::HashMap::new();
+    for wire in &document.wires {
+        if let [start, end] = wire.points.as_slice()
+            && let Some(key) = line_key(*start, *end)
+        {
+            lines.entry(key).or_default().push(wire);
+        }
+    }
+    let mut keys = lines.keys().copied().collect::<Vec<_>>();
+    keys.sort_unstable();
+    for key in keys {
+        let wires = &lines[&key];
+        for (index, left) in wires.iter().enumerate() {
+            for right in &wires[index + 1..] {
+                if seeds
+                    .is_some_and(|seeds| !seeds.contains(&left.id) && !seeds.contains(&right.id))
+                {
+                    continue;
+                }
+                let (a, b) = (left.points[0], left.points[1]);
+                let (c, d) = (right.points[0], right.points[1]);
+                let left_segment = WireSegment::new(a, b);
+                let right_segment = WireSegment::new(c, d);
+                let shared = [a, b].into_iter().find(|point| *point == c || *point == d);
+                let overlap = left_segment.contains_point(c) && c != a && c != b
+                    || left_segment.contains_point(d) && d != a && d != b
+                    || right_segment.contains_point(a) && a != c && a != d
+                    || right_segment.contains_point(b) && b != c && b != d
+                    || (a == c && b == d)
+                    || (a == d && b == c);
+                let end_to_end = !overlap
+                    && shared.is_some_and(|point| {
+                        !meets_anything_else(document, pins, point, left.id, right.id)
+                    });
+                if overlap || (join_end_to_end && end_to_end) {
+                    return Some((left.id, right.id));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Replace two collinear wires with the pieces of their combined extent,
+/// broken only where something else meets a former end. Returns the ids
+/// of the pieces. Pin connections on either wire move to the piece that
+/// keeps their vertex.
+fn merge_wire_pair(
+    document: &mut SchematicDocument,
+    identity: &mut SchematicIdentity,
+    first: u64,
+    second: u64,
+    pins: &HashSet<Point>,
+) -> Vec<u64> {
+    let old = document
+        .wires
+        .iter()
+        .filter(|wire| wire.id == first || wire.id == second)
+        .map(|wire| (wire.id, wire.points.clone()))
+        .collect::<Vec<_>>();
+    let mut ends = old
+        .iter()
+        .flat_map(|(_, points)| points.iter().copied())
+        .collect::<Vec<_>>();
+    ends.sort_by_key(|point| (point.x, point.y));
+    ends.dedup();
+    let (Some(&start), Some(&end)) = (ends.first(), ends.last()) else {
+        return Vec::new();
+    };
+    let mut breaks = vec![start];
+    breaks.extend(
+        ends[1..ends.len() - 1]
+            .iter()
+            .copied()
+            .filter(|point| meets_anything_else(document, pins, *point, first, second)),
+    );
+    breaks.push(end);
+    let mut ids = vec![first.min(second), first.max(second)];
+    while ids.len() < breaks.len() - 1 {
+        ids.push(identity.allocate(document));
+    }
+    ids.truncate(breaks.len() - 1);
+    let pieces = breaks
+        .windows(2)
+        .zip(&ids)
+        .map(|(pair, id)| Wire::new(*id, pair.to_vec()))
+        .collect::<Vec<_>>();
+    let position = document
+        .wires
+        .iter()
+        .position(|wire| wire.id == first || wire.id == second)
+        .unwrap_or(document.wires.len());
+    document
+        .wires
+        .retain(|wire| wire.id != first && wire.id != second);
+    let position = position.min(document.wires.len());
+    document
+        .wires
+        .splice(position..position, pieces.iter().cloned());
+    document.connections.retain_mut(|connection| {
+        let Some((_, points)) = old.iter().find(|(id, _)| *id == connection.wire_id) else {
+            return true;
+        };
+        let Some(point) = points.get(connection.point_index) else {
+            return false;
+        };
+        let Some((piece, index)) = pieces.iter().find_map(|piece| {
+            piece
+                .points
+                .iter()
+                .position(|vertex| vertex == point)
+                .map(|index| (piece.id, index))
+        }) else {
+            return false;
+        };
+        connection.wire_id = piece;
+        connection.point_index = index;
+        true
+    });
+    ids
 }
 
 /// Existing wires crossing a point without a vertex, in document order.

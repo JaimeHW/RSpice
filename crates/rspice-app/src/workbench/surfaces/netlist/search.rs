@@ -7,7 +7,6 @@
 use egui::Ui;
 use std::ops::Range;
 
-use crate::diagnostics::ConsoleMessage;
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
@@ -877,21 +876,18 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
             Ok(count) if count > 0 => {
                 app.state.ui.netlist.find.selected_match = 0;
                 let count_text = count.to_string();
-                app.state
-                    .push_user_message(ConsoleMessage::info(messages.format(
-                        if count == 1 {
-                            MessageId::NetlistFindReplacedSingular
-                        } else {
-                            MessageId::NetlistFindReplaced
-                        },
-                        &[("count", &count_text)],
-                    )));
+                app.state.prompt(messages.format(
+                    if count == 1 {
+                        MessageId::NetlistFindReplacedSingular
+                    } else {
+                        MessageId::NetlistFindReplaced
+                    },
+                    &[("count", &count_text)],
+                ));
             }
             Ok(_) => {}
-            Err(error) => {
-                app.state.ui.netlist.find.error = Some(error.clone());
-                app.state.push_user_message(ConsoleMessage::error(error));
-            }
+            // The find window states the refusal in place.
+            Err(error) => app.state.ui.netlist.find.error = Some(error),
         }
         return;
     }
@@ -908,7 +904,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                         deck_id,
                     )
             {
-                app.state.push_user_message(ConsoleMessage::error(error));
+                app.state.prompt(error);
                 return;
             }
             match target.active_document {
@@ -929,7 +925,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                         identity,
                     )
             {
-                app.state.push_user_message(ConsoleMessage::error(error));
+                app.state.prompt(error);
                 return;
             }
             app.state.ui.netlist.requested_line = Some(target.line);
@@ -952,7 +948,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                         identity,
                     )
             {
-                app.state.push_user_message(ConsoleMessage::error(error));
+                app.state.prompt(error);
                 return;
             }
             match replace_source_ranges(
@@ -1001,8 +997,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                         ) {
                             Ok(_) => true,
                             Err(error) => {
-                                app.state.ui.netlist.find.error = Some(error.clone());
-                                app.state.push_user_message(ConsoleMessage::error(error));
+                                app.state.ui.netlist.find.error = Some(error);
                                 false
                             }
                         }
@@ -1014,7 +1009,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                                 deck_id,
                             )
                         {
-                            app.state.push_user_message(ConsoleMessage::error(error));
+                            app.state.prompt(error);
                             return;
                         }
                         if let Some(identity) = target.dependency_identity.as_deref()
@@ -1023,21 +1018,20 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                                 identity,
                             )
                         {
-                            app.state.push_user_message(ConsoleMessage::error(error));
+                            app.state.prompt(error);
                             return;
                         }
                         app.state.ui.netlist.requested_line = Some(target.line);
                         app.state.ui.netlist.find.selected_match = 0;
                         let count_text = count.to_string();
-                        app.state
-                            .push_user_message(ConsoleMessage::info(messages.format(
-                                if count == 1 {
-                                    MessageId::NetlistFindReplacedSingular
-                                } else {
-                                    MessageId::NetlistFindReplaced
-                                },
-                                &[("count", &count_text)],
-                            )));
+                        app.state.prompt(messages.format(
+                            if count == 1 {
+                                MessageId::NetlistFindReplacedSingular
+                            } else {
+                                MessageId::NetlistFindReplaced
+                            },
+                            &[("count", &count_text)],
+                        ));
                     }
                 }
                 Err(error) => app.state.ui.netlist.find.error = Some(error.to_string()),

@@ -8,7 +8,7 @@
 
 use egui::{Align, Layout, Sense, Stroke, Ui, Vec2};
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
@@ -109,8 +109,7 @@ fn handle_veriloga_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
             .ui
             .messages()
             .text(MessageId::VerilogADropOneSource);
-        app.state
-            .push_user_message(ConsoleMessage::warning(message));
+        app.state.prompt(message);
         return;
     }
     let file = &dropped[0];
@@ -136,7 +135,7 @@ fn handle_veriloga_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            Err("Browser drop did not provide immutable file bytes.".to_owned())
+            Err("The browser did not provide the dropped file's contents.".to_owned())
         }
     };
     let result = bytes.and_then(|bytes| {
@@ -153,9 +152,11 @@ fn handle_veriloga_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
         )
     });
     if let Err(error) = result {
-        app.state.push_user_message(ConsoleMessage::error(format!(
-            "Verilog-A drop import failed: {error}"
-        )));
+        app.state.record(
+            LogSeverity::Error,
+            LogSource::Studio,
+            format!("Verilog-A drop import failed: {error}"),
+        );
     }
 }
 
@@ -299,13 +300,9 @@ fn source_editor(
                 ) {
                     Ok(true) => {}
                     Ok(false) => {}
-                    Err(error) => {
-                        app.state
-                            .push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                                "Could not update {}: {error}",
-                                active_path
-                            )))
-                    }
+                    Err(error) => app
+                        .state
+                        .prompt(format!("Could not update {active_path}: {error}")),
                 }
             }
             interaction
@@ -357,9 +354,7 @@ fn source_editor(
                         crate::workbench::documents::code_workspace::LanguageToolView::CodeActions;
                 }
             }
-            Err(error) => app
-                .state
-                .push_user_message(crate::diagnostics::ConsoleMessage::error(error)),
+            Err(error) => app.state.prompt(error),
         }
     }
     drop(preceding_input);
@@ -373,8 +368,7 @@ fn source_editor(
                 active_path,
             )
         {
-            app.state
-                .push_user_message(crate::diagnostics::ConsoleMessage::error(error));
+            app.state.prompt(error);
         }
         input.route(
             ui.ctx(),
@@ -522,12 +516,12 @@ fn interface_strip(
         StripAction::UpdateSymbol => state.update_active_veriloga_symbol(),
         StripAction::Place(_) => match state.place_offered_veriloga_device() {
             Ok(armed) => {
-                state.push_user_message(ConsoleMessage::info(armed));
+                state.prompt(armed);
                 // The canvas takes the keyboard, as the shelf leaves it, so
                 // R, M and Esc work before the pointer reaches the sheet.
                 rspice_schematic_editor::view::canvas::request_focus(ui.ctx());
             }
-            Err(error) => state.push_user_message(ConsoleMessage::warning(error)),
+            Err(error) => state.prompt(error),
         },
     }
 }

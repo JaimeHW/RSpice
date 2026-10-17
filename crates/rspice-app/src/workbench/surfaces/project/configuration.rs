@@ -260,23 +260,13 @@ fn apply_context_intent(ctx: &Context, app: &mut RSpiceApp, intent: ContextInten
                     data.remove::<String>(egui::Id::new(ACTIVATION_ERROR_ID));
                 });
                 app.state
-                    .push_user_message(ConsoleMessage::info(receipt.clone()));
-                app.state
-                    .ui
-                    .toasts
-                    .success(ctx, "Configuration activated", receipt);
+                    .record(LogSeverity::Info, LogSource::Studio, receipt);
             }
+            // The page states the refusal under the selector.
             Err(error) => {
                 ctx.data_mut(|data| {
-                    data.insert_temp(egui::Id::new(ACTIVATION_ERROR_ID), error.clone());
+                    data.insert_temp(egui::Id::new(ACTIVATION_ERROR_ID), error);
                 });
-                app.state
-                    .push_user_message(ConsoleMessage::error(error.clone()));
-                app.state.ui.toasts.error_with_title(
-                    ctx,
-                    "Configuration activation blocked",
-                    error,
-                );
             }
         },
         ContextIntent::Manage => Command::ConfigurationSets.execute(app),

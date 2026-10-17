@@ -21,14 +21,14 @@
 
 use egui::Context;
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::model_hub::durable::{PersistedHubState, start_browser_pack_restore};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::state::ModelsOperationalState;
 
 thread_local! {
     /// The restore, once storage has answered. At most one ever arrives.
-    static COMPLETION: std::cell::RefCell<Option<Result<PersistedHubState, String>>> =
+    static COMPLETION: std::cell::RefCell<Option<Result<(PersistedHubState, Vec<String>), String>>> =
         const { std::cell::RefCell::new(None) };
 }
 
@@ -48,7 +48,13 @@ impl RSpiceApp {
             return;
         };
         match completion {
-            Ok(persisted) => self.apply_restored_packs(persisted),
+            Ok((persisted, unrestored)) => {
+                for reason in unrestored {
+                    self.state
+                        .record(LogSeverity::Warning, LogSource::Studio, reason);
+                }
+                self.apply_restored_packs(persisted);
+            }
             Err(error) => {
                 // Storage that will not open is not a failed operation — this
                 // session simply keeps its packs in memory, which is what it
@@ -57,31 +63,35 @@ impl RSpiceApp {
                 // standing this failure recorded, so the console carries the
                 // reason and the workspace is not put into a failure state
                 // over something no reader asked for.
-                self.state
-                    .push_user_message(ConsoleMessage::warning(format!(
-                        "Installed model packs cannot be kept between sessions: {error}"
-                    )));
+                self.state.record(
+                    LogSeverity::Warning,
+                    LogSource::Studio,
+                    format!("Installed model packs cannot be kept between sessions: {error}"),
+                );
             }
         }
     }
 
     fn apply_restored_packs(&mut self, persisted: PersistedHubState) {
-        let Some(report) = self.model_hub.restore_persisted_packs(persisted) else {
+        let Some((report, reload_error)) = self.model_hub.restore_persisted_packs(persisted) else {
             return;
         };
+        if let Some(error) = reload_error {
+            self.state
+                .record(LogSeverity::Error, LogSource::Studio, error);
+        }
         if report.is_empty() {
             return;
         }
         if report.restored > 0 {
-            let packs = if report.restored == 1 {
-                "1 model pack".to_owned()
-            } else {
-                format!("{} model packs", report.restored)
-            };
-            self.state.push_user_message(ConsoleMessage::info(format!(
-                "{packs} kept by this browser were re-proved under this build's signing key and \
-                 are installed."
-            )));
+            self.state.record(
+                LogSeverity::Info,
+                LogSource::Studio,
+                format!(
+                    "Restored {} kept by this browser; each signature was verified.",
+                    crate::ui::accessibility::counted(report.restored, "model pack", "model packs")
+                ),
+            );
         }
         // A discarded archive is a real refusal and is depicted as one: the
         // bytes claimed to be a pack, did not prove, and were dropped. It goes
@@ -101,7 +111,7 @@ impl RSpiceApp {
             self.state.workbench.models_view.operational_state =
                 ModelsOperationalState::from_failure(&refusal);
             self.state
-                .push_user_message(ConsoleMessage::warning(refusal));
+                .record(LogSeverity::Warning, LogSource::Studio, refusal);
         }
     }
 }

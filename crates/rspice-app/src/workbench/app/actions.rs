@@ -21,7 +21,6 @@ pub(in crate::workbench) mod workspace;
 
 use egui::{Context, Popup};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::workbench::commands::vocabulary::Command as ShortcutCommand;
 
 use crate::workbench::app::RSpiceApp;
@@ -132,36 +131,28 @@ impl RSpiceApp {
 
     fn try_project_design_undo(&mut self) -> bool {
         match self.state.undo_project_design() {
-            Ok(Some(description)) => {
-                self.invalidate_simulation_preflight();
-                self.state
-                    .push_user_message(ConsoleMessage::info(format!("Undo: {description}")));
-            }
+            Ok(Some(_)) => self.invalidate_simulation_preflight(),
             Ok(None) if self.state.project_undo_sequence().is_some() => {
-                self.state.push_user_message(ConsoleMessage::warning(
+                self.state.prompt(
                     "Undo is unavailable because the latest project edit's document or references changed.",
-                ));
+                );
             }
             Ok(None) => return false,
-            Err(error) => self.state.push_user_message(ConsoleMessage::warning(error)),
+            Err(error) => self.state.prompt(error),
         }
         true
     }
 
     fn try_project_design_redo(&mut self) -> bool {
         match self.state.redo_project_design() {
-            Ok(Some(description)) => {
-                self.invalidate_simulation_preflight();
-                self.state
-                    .push_user_message(ConsoleMessage::info(format!("Redo: {description}")));
-            }
+            Ok(Some(_)) => self.invalidate_simulation_preflight(),
             Ok(None) if self.state.project_redo_sequence().is_some() => {
-                self.state.push_user_message(ConsoleMessage::warning(
+                self.state.prompt(
                     "Redo is unavailable because the latest project edit's document or references changed.",
-                ));
+                );
             }
             Ok(None) => return false,
-            Err(error) => self.state.push_user_message(ConsoleMessage::warning(error)),
+            Err(error) => self.state.prompt(error),
         }
         true
     }
@@ -190,14 +181,9 @@ impl RSpiceApp {
     fn try_active_document_undo(&mut self) -> bool {
         if self.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
             return match self.state.undo_active_symbol_document() {
-                Ok(true) => {
-                    self.state
-                        .push_user_message(ConsoleMessage::info("Undo: symbol edit"));
-                    true
-                }
-                Ok(false) => false,
+                Ok(stepped) => stepped,
                 Err(error) => {
-                    self.state.push_user_message(ConsoleMessage::warning(error));
+                    self.state.prompt(error);
                     true
                 }
             };
@@ -205,17 +191,9 @@ impl RSpiceApp {
         if !self.state.schematic.can_undo() {
             return false;
         }
-        let description = self
-            .state
-            .schematic
-            .undo_description()
-            .unwrap_or("schematic edit")
-            .to_owned();
         if self.state.schematic.undo() {
             self.state.ui.schematic_snap = self.state.schematic.session.editor.snap_engine.clone();
             self.state.sync_active_schematic_to_workspace();
-            self.state
-                .push_user_message(ConsoleMessage::info(format!("Undo: {description}")));
             return true;
         }
         false
@@ -224,14 +202,9 @@ impl RSpiceApp {
     fn try_active_document_redo(&mut self) -> bool {
         if self.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
             return match self.state.redo_active_symbol_document() {
-                Ok(true) => {
-                    self.state
-                        .push_user_message(ConsoleMessage::info("Redo: symbol edit"));
-                    true
-                }
-                Ok(false) => false,
+                Ok(stepped) => stepped,
                 Err(error) => {
-                    self.state.push_user_message(ConsoleMessage::warning(error));
+                    self.state.prompt(error);
                     true
                 }
             };
@@ -239,17 +212,9 @@ impl RSpiceApp {
         if !self.state.schematic.can_redo() {
             return false;
         }
-        let description = self
-            .state
-            .schematic
-            .redo_description()
-            .unwrap_or("schematic edit")
-            .to_owned();
         if self.state.schematic.redo() {
             self.state.ui.schematic_snap = self.state.schematic.session.editor.snap_engine.clone();
             self.state.sync_active_schematic_to_workspace();
-            self.state
-                .push_user_message(ConsoleMessage::info(format!("Redo: {description}")));
             return true;
         }
         false
@@ -296,30 +261,26 @@ impl RSpiceApp {
         {
             match crate::workbench::documents::netlist_document::undo_netlist_edit(&mut self.state)
             {
-                Ok(Some(description)) => {
-                    self.state
-                        .push_user_message(ConsoleMessage::info(format!("Undo: {description}")));
-                    return;
-                }
+                Ok(Some(_)) => return,
                 Err(error) => {
-                    self.state.push_user_message(ConsoleMessage::warning(error));
+                    self.state.prompt(error);
                     return;
                 }
                 Ok(None) => {}
             }
         }
+        // The history holding the newer step takes it. With nothing to undo
+        // the command is silent: the Edit menu already shows it disabled.
         let project_first = project_step_is_newer(
             self.state.project_undo_sequence(),
             self.active_document_undo_sequence(),
         );
-        if (project_first && self.try_project_design_undo())
-            || self.try_active_document_undo()
-            || (!project_first && self.try_project_design_undo())
-        {
+        if project_first && self.try_project_design_undo() {
             return;
         }
-        self.state
-            .push_user_message(ConsoleMessage::info("Nothing to undo"));
+        if !self.try_active_document_undo() && !project_first {
+            self.try_project_design_undo();
+        }
     }
 
     fn step_redo(&mut self) {
@@ -334,13 +295,9 @@ impl RSpiceApp {
         {
             match crate::workbench::documents::netlist_document::redo_netlist_edit(&mut self.state)
             {
-                Ok(Some(description)) => {
-                    self.state
-                        .push_user_message(ConsoleMessage::info(format!("Redo: {description}")));
-                    return;
-                }
+                Ok(Some(_)) => return,
                 Err(error) => {
-                    self.state.push_user_message(ConsoleMessage::warning(error));
+                    self.state.prompt(error);
                     return;
                 }
                 Ok(None) => {}
@@ -350,14 +307,12 @@ impl RSpiceApp {
             self.state.project_redo_sequence(),
             self.active_document_redo_sequence(),
         );
-        if (project_first && self.try_project_design_redo())
-            || self.try_active_document_redo()
-            || (!project_first && self.try_project_design_redo())
-        {
+        if project_first && self.try_project_design_redo() {
             return;
         }
-        self.state
-            .push_user_message(ConsoleMessage::info("Nothing to redo"));
+        if !self.try_active_document_redo() && !project_first {
+            self.try_project_design_redo();
+        }
     }
 
     pub(in crate::workbench) fn action_edit_paste(&mut self) {
@@ -367,8 +322,7 @@ impl RSpiceApp {
             Ok(false) => "Paste could not be completed at the current canvas target".to_owned(),
             Err(reason) => reason,
         };
-        self.state
-            .push_user_message(ConsoleMessage::warning(message));
+        self.state.prompt(message);
     }
 }
 

@@ -3544,11 +3544,15 @@ impl Engine {
                 .chunks(chunk_len)
                 .map(|chunk| (circuit.clone(), chunk.to_vec()))
                 .collect();
+            // A column's period integration logs to the run, on whichever pool
+            // thread solves it.
+            let log_scope = crate::log_scope::capture();
 
             let chunk_columns: Result<Vec<Vec<Vec<Value>>>, SimulationError> = self
                 .install_parallel(|| {
                     work.into_par_iter()
                         .map(|(mut worker_circuit, chunk)| {
+                            let _log_scope = crate::log_scope::enter(log_scope.clone());
                             let matrix = self.build_matrix(&worker_circuit)?;
                             worker_circuit.link_indices(&matrix);
                             let mut worker_matrix = matrix;

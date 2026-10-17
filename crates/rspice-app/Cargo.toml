@@ -168,6 +168,11 @@ rspice-cloud-client = { workspace = true }
 time = { workspace = true }
 url = { workspace = true }
 
+# The local zone's offset, for times written on the reader's own clock.
+# `time` answers that only in a single-threaded process on Unix, and this one
+# never is; chrono reads the zone database itself. The browser asks `Date`.
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
 # Model Hub trust: the crate that signs a pack in RSpice Cloud is the crate
 # that verifies it here, so one code path reaches every trust verdict.
 rspice-pack = { workspace = true }

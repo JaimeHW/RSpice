@@ -38,10 +38,22 @@ impl ViewerCapability {
 }
 
 impl AppState {
-    /// Replace all execution context, including project-owned marker identity.
-    pub(crate) fn clear_project_execution_context(&mut self) {
+    /// Replace all execution context, including project-owned marker identity,
+    /// and state the replacement in the Console.
+    ///
+    /// The Console carries on across a project switch: it is the session's
+    /// log, not the project's. So `announcement`, "Opened project amp (…)",
+    /// is where one project's history ends and the next one's begins, and
+    /// every replacement passes through here so that each states itself
+    /// exactly once however it was reached.
+    pub(crate) fn replace_project_execution_context(&mut self, announcement: impl Into<String>) {
         self.clear_design_execution_context();
         self.ui.results.clear_project_scoped_state();
+        self.record(
+            crate::diagnostics::LogSeverity::Info,
+            crate::diagnostics::LogSource::Studio,
+            announcement,
+        );
     }
 
     /// Clear execution and viewer state tied to the previous design document.
@@ -67,16 +79,17 @@ impl AppState {
         self.dialogs.drc_results = None;
         self.dialogs.drc_checked_version = 0;
         self.clear_all_design_checks();
-        // Console, Problems, and debugger evidence are project-scoped under
-        // the source-workspace contract. Clear them in the same transaction
-        // as documents and results so a replacement can never render one
-        // frame containing two projects' evidence.
+        // Problems and debugger evidence are project-scoped under the
+        // source-workspace contract. Clear them in the same transaction as
+        // documents and results so a replacement can never render one frame
+        // containing two designs' findings. The Console is not cleared: it
+        // is the session's chronological record, and keeps the history from
+        // before the replacement.
         self.diagnostics.clear();
         // The reading position goes with the findings it was read over: a
         // filter carried into another design hides conditions nobody there
         // chose to hide.
         self.problems_view = Default::default();
-        self.log_buffer.clear();
         self.clear_specialized_viewer_data();
     }
 
@@ -523,7 +536,7 @@ mod tests {
             .expect("test DRC receipt must publish");
         state
             .log_buffer
-            .log(LogSeverity::Error, LogSource::Drc, "old DRC anchor", None);
+            .log(LogSeverity::Error, LogSource::Studio, "old DRC anchor");
     }
 
     #[test]
@@ -724,6 +737,7 @@ mod tests {
         let mut state = AppState::default();
         seed_blocking_drc_result(&mut state);
         assert!(state.current_blocking_drc_result().is_some());
+        let logged = state.log_buffer.entries().count();
 
         state.clear_design_execution_context();
 
@@ -731,13 +745,14 @@ mod tests {
         assert!(state.diagnostics.current_finding().is_none());
         assert!(state.current_blocking_drc_result().is_none());
         assert_eq!(
-            state.log_buffer.entries_by_source(LogSource::Drc).count(),
-            0
+            state.log_buffer.entries().count(),
+            logged,
+            "the findings go; the Console's record of the check stays"
         );
     }
 
     #[test]
-    fn clearing_design_execution_context_atomically_clears_source_and_console_runtime() {
+    fn clearing_design_execution_context_clears_source_runtime_and_keeps_the_console() {
         let mut state = AppState::default();
         state.ui.code_workspace.page =
             crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
@@ -761,7 +776,7 @@ mod tests {
         );
         state
             .log_buffer
-            .warning(LogSource::Simulation, "old project warning");
+            .warning(LogSource::Run, "old project warning");
         state.clear_design_execution_context();
 
         assert_eq!(
@@ -770,7 +785,13 @@ mod tests {
         );
         assert!(state.ui.code_workspace.automation.debug.watches.is_empty());
         assert_eq!(state.ui.netlist.diagnostics.summary().total(), 0);
-        assert!(state.log_buffer.is_empty());
+        assert!(
+            state
+                .log_buffer
+                .entries()
+                .any(|entry| entry.message == "old project warning"),
+            "the Console is the session's record and keeps its history"
+        );
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 use egui::{ComboBox, Context, Grid, RichText, ScrollArea, TextEdit, Ui, Vec2};
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::engineering_table::active_schematic_dataset;
 use crate::state::{
     EngineeringDataset, EngineeringFilterGrammar, EngineeringSortRule, EngineeringTableView,
@@ -249,9 +249,7 @@ impl RSpiceApp {
                     }
                 };
                 if deleted {
-                    self.state.push_user_message(ConsoleMessage::info(
-                        "Saved engineering table view deleted.",
-                    ));
+                    self.state.prompt("Saved engineering table view deleted.");
                 }
             }
             BodyAction::MakeDefault(id, scope) => {
@@ -273,9 +271,7 @@ impl RSpiceApp {
                     }
                 };
                 if changed {
-                    self.state.push_user_message(ConsoleMessage::info(
-                        "Default engineering table view updated.",
-                    ));
+                    self.state.prompt("Default engineering table view updated.");
                 }
             }
             BodyAction::OpenDetails(id) => {
@@ -357,9 +353,8 @@ impl RSpiceApp {
             .engineering_table_views
             .set_working(view, dataset);
         self.state.dialogs.engineering_table.close();
-        self.state.push_user_message(ConsoleMessage::info(
-            "Engineering table view applied to this device session; project engineering data was unchanged.",
-        ));
+        self.state
+            .prompt("Engineering table view applied on this device; the project is unchanged.");
     }
 
     fn copy_engineering_table(&mut self, dataset: &EngineeringDataset) {
@@ -379,10 +374,10 @@ impl RSpiceApp {
             Ok(text) => {
                 let rows = dataset.project_selected(view, false, selected).rows.len();
                 self.state.ui.clipboard_text_request = Some(text);
-                self.state.push_user_message(ConsoleMessage::info(format!(
+                self.state.prompt(format!(
                     "{rows} engineering table row{} copied with headers and displayed units.",
                     if rows == 1 { "" } else { "s" }
-                )));
+                ));
             }
             Err(error) => self.state.dialogs.engineering_table.error = Some(error),
         }
@@ -427,8 +422,7 @@ impl RSpiceApp {
                 self.state.dialogs.engineering_table.page = EngineeringTableDialogPage::Manager;
                 self.state.dialogs.engineering_table.save_name.clear();
                 self.state.dialogs.engineering_table.error = None;
-                self.state
-                    .push_user_message(ConsoleMessage::info("Engineering table view saved."));
+                self.state.prompt("Engineering table view saved.");
             }
             Err(error) => self.state.dialogs.engineering_table.error = Some(error),
         }
@@ -623,10 +617,11 @@ impl RSpiceApp {
         match result {
             Ok(()) => {
                 self.state.dialogs.engineering_table.close();
-                self.state.push_user_message(ConsoleMessage::info(format!(
-                    "Engineering table exported to {}.",
-                    destination.display()
-                )));
+                self.state.record(
+                    LogSeverity::Info,
+                    LogSource::Studio,
+                    format!("Engineering table exported to {}.", destination.display()),
+                );
             }
             Err(error) => self.state.dialogs.engineering_table.error = Some(error),
         }
@@ -749,9 +744,8 @@ impl RSpiceApp {
         if selected {
             self.state.dialogs.engineering_table.close();
             self.state.workbench.inspector_visible = true;
-            self.state.push_user_message(ConsoleMessage::info(
-                "The source schematic object was selected and opened in the Inspector.",
-            ));
+            self.state
+                .prompt("The source schematic object was selected and opened in the Inspector.");
         } else {
             self.state.dialogs.engineering_table.error =
                 Some("The source object no longer exists in the active schematic.".to_owned());
@@ -869,9 +863,11 @@ impl RSpiceApp {
         match result {
             Ok(_) => {
                 self.state.dialogs.engineering_table.error = None;
-                self.state.push_user_message(ConsoleMessage::info(
-                    "Engineering table view imported and validated.",
-                ));
+                self.state.record(
+                    LogSeverity::Info,
+                    LogSource::Studio,
+                    "Imported an engineering table view.",
+                );
             }
             Err(error) => self.state.dialogs.engineering_table.error = Some(error),
         }
@@ -912,10 +908,16 @@ impl RSpiceApp {
             .observe_destination(&path)
             .and_then(|destination| io.write_text_file_observed(&destination, &source));
         match result {
-            Ok(()) => self.state.push_user_message(ConsoleMessage::info(format!(
-                "Saved engineering table view exported to {}.",
-                path.display()
-            ))),
+            Ok(()) => {
+                self.state.record(
+                    LogSeverity::Info,
+                    LogSource::Studio,
+                    format!(
+                        "Saved engineering table view exported to {}.",
+                        path.display()
+                    ),
+                );
+            }
             Err(error) => self.state.dialogs.engineering_table.error = Some(error),
         }
     }

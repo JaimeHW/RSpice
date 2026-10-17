@@ -15,7 +15,6 @@ use rspice_results_ui::document_dialogs::{
 };
 use rspice_ui_kit::widgets::DialogChoice;
 
-use crate::diagnostics::ConsoleMessage;
 use crate::product::{DatasetBinding, ResultDocumentId};
 use crate::results::viewer_catalog::{VIEWER_DOCUMENTS, ViewerReleaseClass, viewer_document};
 use crate::results::visualization_document::{
@@ -99,7 +98,7 @@ fn reading_analysis(state: &AppState) -> Result<(&SimulationRun, &AnalysisResult
 
 fn report(state: &mut AppState, result: Result<(), String>) {
     if let Err(error) = result {
-        state.push_user_message(ConsoleMessage::error(error));
+        state.prompt(error);
     }
 }
 
@@ -162,7 +161,7 @@ fn commit_open_dialog(state: &mut AppState) {
     };
     match result {
         Ok(next) => state.workbench.result_document_dialog = next,
-        Err(error) => state.push_user_message(ConsoleMessage::error(error)),
+        Err(error) => state.prompt(error),
     }
 }
 

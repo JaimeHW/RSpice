@@ -621,7 +621,7 @@ pub(super) fn debug_fail(app: &mut RSpiceApp, message: &str) {
     debug.last_error = Some(message.to_owned());
     let _ = push_debug_output(debug, "error", "adapter-failed", message);
     app.state
-        .push_user_message(ConsoleMessage::error(message.to_owned()));
+        .record(LogSeverity::Error, LogSource::Studio, message);
 }
 
 pub(super) fn push_debug_output(

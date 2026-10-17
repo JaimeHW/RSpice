@@ -40,6 +40,7 @@ use super::{
     ALL_TRACES_HIDDEN_MESSAGE, NO_ACTIVE_ANALYSIS_MESSAGE, NO_SAMPLES_MESSAGE, exported_waveforms,
     note_result_export_failure, note_result_export_success,
 };
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
@@ -104,7 +105,7 @@ pub(super) fn export_matlab(
     let prepared = match prepared {
         Ok(prepared) => prepared,
         Err(message) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(message));
+            state.prompt(message);
             return;
         }
     };
@@ -114,9 +115,11 @@ pub(super) fn export_matlab(
         Ok(bytes) => bytes,
         Err(error) => {
             note_result_export_failure(state, format!("{LABEL} encoding failed: {error}"));
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "{LABEL} export failed before destination selection: {error}"
-            )));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("{LABEL} export failed: {error}"),
+            );
             return;
         }
     };
@@ -141,20 +144,24 @@ pub(super) fn export_matlab(
     match export {
         Ok(()) => {
             note_result_export_success(state, LABEL);
-            state.push_user_message(crate::diagnostics::ConsoleMessage::info(
+            state.record(
+                LogSeverity::Info,
+                LogSource::Studio,
                 crate::workbench::workflows::export_workflow::export_completion_message(
                     LABEL,
                     &published_path,
                     Some(completion_detail(&prepared)),
                     io,
                 ),
-            ));
+            );
         }
         Err(error) => {
             note_result_export_failure(state, format!("{LABEL} export failed: {error}"));
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "{LABEL} export failed: {error}"
-            )));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("{LABEL} export failed: {error}"),
+            );
         }
     }
 }

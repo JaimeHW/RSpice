@@ -323,7 +323,7 @@ pub(super) fn insert_analysis_instance(
                         |issue| format!("Preflight remains blocked: {issue}"),
                     );
                     app.state.record_plan_receipt(format!(
-                        "Receipts #{} and #{} committed for instance {id}. {} {} {readiness} Prior datasets remain immutable.",
+                        "Receipts #{} and #{} committed for instance {id}. {} {} {readiness}",
                         insert_receipt.sequence(),
                         bind_receipt.sequence(),
                         insert_receipt.detail(),
@@ -332,7 +332,7 @@ pub(super) fn insert_analysis_instance(
                 }
                 Some(Err(error)) => {
                     app.state.record_plan_refusal(format!(
-                        "Receipt #{} committed for instance {id}. {} Automatic dependency binding was rejected fail-closed: {error}. The inserted instance remains selected and preflight blocked; prior datasets remain immutable.",
+                        "Receipt #{} committed for instance {id}. {} Automatic dependency binding was rejected fail-closed: {error}. The inserted instance remains selected and preflight blocked.",
                         insert_receipt.sequence(),
                         insert_receipt.detail(),
                     ));
@@ -430,7 +430,7 @@ pub(super) fn apply_analysis_action(
                 Ok((repair, receipt)) => {
                     refresh_analysis_projections(app);
                     app.state.record_plan_receipt(format!(
-                        "Receipt #{} committed for instance {id}. Prerequisite repair completed atomically: {} added, {} enabled, {} moved earlier, {} exact bindings updated, and {} invalid bindings removed. Prior datasets remain immutable.",
+                        "Receipt #{} committed for instance {id}. Prerequisites repaired: {} added, {} enabled, {} moved earlier, {} bindings updated, and {} invalid bindings removed.",
                         receipt.sequence(),
                         repair.inserted().len(),
                         repair.enabled().len(),
@@ -796,7 +796,7 @@ pub(super) fn record_receipt(state: &mut AppState, receipt: &AnalysisLifecycleRe
         .related_instance_id()
         .map_or_else(String::new, |id| format!(" · related instance {id}"));
     state.record_plan_receipt(format!(
-        "Receipt #{} · {} committed for instance {}{related} · revision {} to {} · outcome {}. {} Prior datasets remain immutable.",
+        "Receipt #{} · {} committed for instance {}{related} · revision {} to {} · outcome {}. {}",
         receipt.sequence(),
         lifecycle_command_label(receipt.command()),
         receipt.instance_id(),
@@ -809,7 +809,7 @@ pub(super) fn record_receipt(state: &mut AppState, receipt: &AnalysisLifecycleRe
 
 pub(super) fn record_failure(state: &mut AppState, action: &str, error: &str) {
     state.record_plan_refusal(format!(
-        "{action} rejected fail-closed: {error}. The stable plan is unchanged and prior datasets remain immutable."
+        "{action} rejected fail-closed: {error}. The stable plan is unchanged."
     ));
 }
 

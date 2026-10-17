@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::stimulus_library::definition::{
     RetainedPwlFile, StimulusDefinition, StimulusFamily, StimulusKind,
 };
@@ -41,11 +41,9 @@ pub(crate) fn new_definition(state: &mut AppState) {
             let name = definition.name().to_owned();
             state.workbench.selected_stimulus_definition = Some(name.clone());
             state.workbench.stimulus_editor.focus_name();
-            state.push_user_message(ConsoleMessage::info(format!(
-                "Stimulus definition '{name}' created at r1"
-            )));
+            state.prompt(format!("Stimulus definition '{name}' created at r1."));
         }
-        Err(error) => state.push_user_message(ConsoleMessage::warning(error.to_string())),
+        Err(error) => state.prompt(error.to_string()),
     }
 }
 
@@ -63,11 +61,11 @@ pub(crate) fn duplicate_definition(state: &mut AppState) {
         Ok(copy) => {
             let copy = copy.name().to_owned();
             state.workbench.selected_stimulus_definition = Some(copy.clone());
-            state.push_user_message(ConsoleMessage::info(format!(
-                "Stimulus definition '{name}' duplicated as '{copy}' at r1"
-            )));
+            state.prompt(format!(
+                "Stimulus definition '{name}' duplicated as '{copy}' at r1."
+            ));
         }
-        Err(error) => state.push_user_message(ConsoleMessage::warning(error.to_string())),
+        Err(error) => state.prompt(error.to_string()),
     }
 }
 
@@ -94,19 +92,23 @@ pub(crate) fn delete_definition(state: &mut AppState) {
         .definitions()
         .first()
         .map(|definition| definition.name().to_owned());
-    state.push_user_message(ConsoleMessage::info(if adopters == 0 {
-        format!("Stimulus definition '{name}' deleted")
-    } else {
-        format!(
-            "Stimulus definition '{name}' deleted; {} and now {} 'definition removed'",
-            counted(
-                adopters,
-                "placed source keeps its card",
-                "placed sources keep their cards"
-            ),
-            if adopters == 1 { "reads" } else { "read" }
-        )
-    }));
+    state.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        if adopters == 0 {
+            format!("Stimulus definition '{name}' deleted.")
+        } else {
+            format!(
+                "Stimulus definition '{name}' deleted; {} and now {} 'definition removed'.",
+                counted(
+                    adopters,
+                    "placed source keeps its card",
+                    "placed sources keep their cards"
+                ),
+                if adopters == 1 { "reads" } else { "read" }
+            )
+        },
+    );
 }
 
 /// Whether deleting the selection needs to be confirmed first.
@@ -171,7 +173,7 @@ pub(crate) fn apply_draft(state: &mut AppState) {
             .stimulus_library
             .rename(&name, &renamed)
     {
-        state.push_user_message(ConsoleMessage::warning(error.to_string()));
+        state.prompt(error.to_string());
         return;
     }
     let revision = state
@@ -197,14 +199,19 @@ pub(crate) fn apply_draft(state: &mut AppState) {
     }
     state.workbench.selected_stimulus_definition = Some(renamed.clone());
     let behind = design_adopters(state, &renamed).len();
-    state.push_user_message(ConsoleMessage::info(if behind == 0 {
-        format!("Stimulus definition '{renamed}' published at r{revision}; no adopter")
-    } else {
-        format!(
-            "Stimulus definition '{renamed}' published at r{revision}; {} behind until re-adopted",
-            counted(behind, "placed source now reads", "placed sources now read")
-        )
-    }));
+    state.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        if behind == 0 {
+            format!("Stimulus definition '{renamed}' published at r{revision}; no adopter.")
+        } else {
+            format!(
+                "Stimulus definition '{renamed}' published at r{revision}; {} behind until \
+                 re-adopted.",
+                counted(behind, "placed source now reads", "placed sources now read")
+            )
+        },
+    );
 }
 
 /// Throw the draft away, as one undoable step.
@@ -272,7 +279,11 @@ pub(crate) fn import_data_file(state: &mut AppState) {
         Ok(Some(reference)) => reference,
         Ok(None) => return,
         Err(error) => {
-            state.push_user_message(ConsoleMessage::warning(error));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Data file import failed: {error}"),
+            );
             return;
         }
     };
@@ -283,10 +294,14 @@ pub(crate) fn import_data_file(state: &mut AppState) {
     let bytes = match std::fs::read(&absolute) {
         Ok(bytes) => bytes,
         Err(error) => {
-            state.push_user_message(ConsoleMessage::warning(format!(
-                "Cannot read '{}': {error}",
-                absolute.display()
-            )));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!(
+                    "Data file import failed: cannot read '{}': {error}",
+                    absolute.display()
+                ),
+            );
             return;
         }
     };
@@ -300,9 +315,11 @@ pub(crate) fn import_data_file(state: &mut AppState) {
     if let Some(refusal) =
         crate::simulation::table_route::engine_refusal(&absolute.to_string_lossy())
     {
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "'{name}' is not a table the engine reads: {refusal}"
-        )));
+        state.record(
+            LogSeverity::Error,
+            LogSource::Studio,
+            format!("Data file import failed: '{name}' is not a table the engine reads: {refusal}"),
+        );
         return;
     }
     let retained = match retained_table(
@@ -312,7 +329,11 @@ pub(crate) fn import_data_file(state: &mut AppState) {
     ) {
         Ok(retained) => retained,
         Err(refusal) => {
-            state.push_user_message(ConsoleMessage::warning(refusal));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Data file import failed: {refusal}"),
+            );
             return;
         }
     };
@@ -323,9 +344,11 @@ pub(crate) fn import_data_file(state: &mut AppState) {
             working.pwl_file = Some(retained.clone());
         });
     });
-    state.push_user_message(ConsoleMessage::info(format!(
-        "Retained '{name}' ({retained_bytes} B) in the stimulus definition"
-    )));
+    state.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        format!("Retained '{name}' ({retained_bytes} B) in the stimulus definition."),
+    );
 }
 
 /// One picked file as a definition's retained table, or why it is not one.
@@ -358,22 +381,20 @@ pub(crate) fn retained_table(
 ///
 /// The transaction is [`crate::workbench::app::commit_readoption`] — the one
 /// the link dialog, the Studio's Excitations rows and the component editor all
-/// commit through — and this adds only the console sentence it hands back. The
-/// instrument used to own a second re-adoption with its own undo group and its
-/// own wording, so the same verb on two surfaces produced two different
+/// commit through — and this adds only the status-bar sentence it hands back.
+/// The instrument used to own a second re-adoption with its own undo group and
+/// its own wording, so the same verb on two surfaces produced two different
 /// receipts for one edit.
 pub(crate) fn readopt_adopter(state: &mut AppState, component_id: u64, definition: &str) {
-    let outcome = crate::workbench::app::commit_readoption(state, component_id, definition);
-    state.push_user_message(match outcome {
-        Ok(line) => ConsoleMessage::info(line),
-        Err(refusal) => ConsoleMessage::warning(refusal),
-    });
+    match crate::workbench::app::commit_readoption(state, component_id, definition) {
+        Ok(line) | Err(line) => state.prompt(line),
+    }
 }
 
 /// Arm the next placement with the selected definition's saved revision.
 ///
-/// A definition with an unapplied draft is armed anyway, and the console says
-/// which revision the pointer is carrying. Refusing would be the wrong trade:
+/// A definition with an unapplied draft is armed anyway, and the status bar
+/// says which revision the pointer is carrying. Refusing would be the wrong trade:
 /// the reader asked to place the definition, the library's published revision
 /// is the only thing anything can adopt, and a verb that declines rather than
 /// stating what it did sends them looking for a setting.
@@ -387,14 +408,15 @@ pub(crate) fn place_selected_definition(state: &mut AppState) {
         .stimulus_library
         .get(&name)
         .map_or(0, StimulusDefinition::revision);
-    if state.workbench.stimulus_editor.is_dirty(&name) {
-        state.push_user_message(ConsoleMessage::warning(format!(
+    match crate::workbench::app::arm_placement_from_definition(state, &name) {
+        // Issued after arming, so it replaces the arming prompt rather than
+        // being replaced by it: which revision is armed is the news.
+        Ok(()) if state.workbench.stimulus_editor.is_dirty(&name) => state.prompt(format!(
             "Placement copies the saved r{saved} of '{name}'; apply the draft first to place what \
-             you are editing"
-        )));
-    }
-    if let Err(refusal) = crate::workbench::app::arm_placement_from_definition(state, &name) {
-        state.push_user_message(ConsoleMessage::warning(refusal));
+             you are editing."
+        )),
+        Ok(()) => {}
+        Err(refusal) => state.prompt(refusal),
     }
 }
 
@@ -425,12 +447,16 @@ pub(crate) fn validate_library(state: &mut AppState) {
             }
         }
     }
-    state.push_user_message(ConsoleMessage::info(format!(
-        "Stimulus library checked: {}, {}, {}",
-        counted(definitions.len(), "definition", "definitions"),
-        counted(errors, "error", "errors"),
-        counted(advisories, "advisory", "advisories")
-    )));
+    state.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        format!(
+            "Stimulus library checked: {}, {}, {}.",
+            counted(definitions.len(), "definition", "definitions"),
+            counted(errors, "error", "errors"),
+            counted(advisories, "advisory", "advisories")
+        ),
+    );
 }
 
 /// What the engine contract says about one record.

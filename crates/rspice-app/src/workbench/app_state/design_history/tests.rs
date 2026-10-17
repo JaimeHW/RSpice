@@ -414,9 +414,8 @@ fn undo_activates_the_document_its_compensation_names_and_says_so() {
     let announcement = format!("Undo switched to {}", parent.display_path());
     assert!(
         state
-            .log_buffer
-            .entries()
-            .any(|entry| entry.message.contains(&announcement)),
+            .prompt_text()
+            .is_some_and(|text| text.contains(&announcement)),
         "an undo that moves the operator has to say where it went"
     );
 }

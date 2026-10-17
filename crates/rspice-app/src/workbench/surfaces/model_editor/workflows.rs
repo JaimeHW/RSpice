@@ -95,15 +95,8 @@ pub(super) fn save_revision_workflow(
     match choice {
         DialogChoice::Primary if writable && dirty => {
             match crate::workbench::documents::model_editor::save_open_candidate(app) {
-                Ok(revision) => {
-                    app.state.push_user_message(
-                        crate::diagnostics::ConsoleMessage::info(format!(
-                            "Model revision r{} was saved with its exact source and qualification state.",
-                            revision.get()
-                        )),
-                    );
-                    close_model_editor_workflow();
-                }
+                // The save records its own line.
+                Ok(_) => close_model_editor_workflow(),
                 Err(error) => set_model_editor_workflow_error(error),
             }
         }

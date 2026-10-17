@@ -2216,7 +2216,6 @@ fn a_logged_failure_is_not_a_problem() {
         crate::diagnostics::LogSeverity::Error,
         crate::diagnostics::LogSource::Engine,
         "the engine printed a failure",
-        None,
     );
 
     assert_eq!(active_problem_count(&state, 0), ProblemCount::default());

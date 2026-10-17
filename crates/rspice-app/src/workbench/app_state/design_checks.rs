@@ -339,9 +339,11 @@ impl AppState {
             let result = receipt.result.clone();
             let config = self.design_check_config(&subject);
             if let Err(error) = self.publish_design_check_result(subject, config, result) {
-                self.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                    "Findings could not be stated again against the waivers: {error}"
-                )));
+                self.record(
+                    crate::diagnostics::LogSeverity::Warning,
+                    crate::diagnostics::LogSource::Studio,
+                    format!("Findings could not be stated again against the waivers: {error}"),
+                );
             }
         }
     }

@@ -236,7 +236,7 @@ pub fn validate_open_candidate(app: &mut RSpiceApp) -> bool {
         app.state.workspace.content.project.revision(),
     );
     let message = if valid {
-        ConsoleMessage::info("Model candidate is valid and bound to the current source revision.")
+        "Model candidate is valid against the current source revision.".to_owned()
     } else {
         let summary = app
             .state
@@ -247,9 +247,9 @@ pub fn validate_open_candidate(app: &mut RSpiceApp) -> bool {
             .map_or("Model candidate is invalid.", |diagnostic| {
                 diagnostic.message.as_str()
             });
-        ConsoleMessage::warning(format!("Model candidate validation failed: {summary}"))
+        format!("Model candidate validation failed: {summary}")
     };
-    app.state.push_user_message(message);
+    app.state.prompt(message);
     valid
 }
 
@@ -740,21 +740,27 @@ pub fn save_open_candidate(app: &mut RSpiceApp) -> Result<ObjectRevision, String
         // the save failed or leave a stale editable draft behind merely
         // because the post-commit convenience reopen could not be rebuilt.
         app.state.workbench.model_editor = ModelEditorState::default();
-        app.state.push_user_message(ConsoleMessage::warning(format!(
-            "Saved the model revision, but the editor could not reopen it: {error}"
-        )));
+        app.state.record(
+            LogSeverity::Warning,
+            LogSource::Studio,
+            format!("Saved the model revision, but the editor could not reopen it: {error}"),
+        );
     }
     let saved_kind = if definition_changed {
         "model revision"
     } else {
         "model qualification"
     };
-    app.state.push_user_message(ConsoleMessage::info(format!(
-        "Saved {saved_kind} {}/{} at project revision {}.",
-        draft.library_name,
-        definition.base.name,
-        committed_revision.get()
-    )));
+    app.state.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        format!(
+            "Saved {saved_kind} {}/{} at project revision {}.",
+            draft.library_name,
+            definition.base.name,
+            committed_revision.get()
+        ),
+    );
     Ok(committed_revision)
 }
 

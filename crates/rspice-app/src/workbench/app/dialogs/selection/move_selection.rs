@@ -10,7 +10,6 @@
 //! can be changed with the command already running. A modal in front of a
 //! drag is a modal the reader dismisses without reading.
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::Tool;
 
 use crate::workbench::app::SchematicEditAuthority;
@@ -22,12 +21,9 @@ const COMMAND: &str = "Move";
 /// call this single boundary so palette, menu and shortcut activation cannot
 /// drift.
 pub(crate) fn arm_move_selection(state: &mut AppState) {
-    if state.schematic_edit_read_only() {
-        state.push_user_message(ConsoleMessage::warning("The schematic is read-only."));
-        return;
-    }
-    if !state.schematic.has_live_movable_selection() {
-        state.push_user_message(ConsoleMessage::warning("Select something to move first."));
+    // Move is greyed on a read-only schematic and with nothing movable
+    // selected, so neither is answered.
+    if state.schematic_edit_read_only() || !state.schematic.has_live_movable_selection() {
         return;
     }
     if state.dialogs.stretch_selection.armed {

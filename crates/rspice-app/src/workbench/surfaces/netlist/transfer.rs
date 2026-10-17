@@ -5,7 +5,7 @@
 //! bytes before the exact source identity it was opened against is confirmed
 //! to still be current.
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
@@ -153,9 +153,11 @@ pub(super) fn external_change_dialog_window(ctx: &egui::Context, app: &mut RSpic
                 &mut app.state,
             ) {
                 Ok(()) => {
-                    app.state.push_user_message(ConsoleMessage::info(
-                        "External source resolution applied as a journaled project revision.",
-                    ));
+                    app.state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        "Applied the resolved external change to the SPICE source.",
+                    );
                 }
                 Err(error) => {
                     if let Some(current) = app.state.ui.netlist.external_change.as_mut() {

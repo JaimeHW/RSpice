@@ -3,7 +3,7 @@
 
 use super::shared::{DialogActionOutcome, LIBRARY_CATALOG_STALE_MESSAGE, validate_lcv_name};
 use super::{Context, RSpiceApp, VERILOGA_LIBRARY_NAME};
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, chip, input_row, kv_row};
@@ -306,10 +306,11 @@ impl RSpiceApp {
                 }
                 self.state
                     .publish_project_library_mutation(project_mutation);
-                self.state.push_user_message(ConsoleMessage::info(format!(
-                    "Created view '{}' in cell '{}'",
-                    view_name, cell
-                )));
+                self.state.record(
+                    LogSeverity::Info,
+                    LogSource::Studio,
+                    format!("Created view '{view_name}' in cell '{cell}'."),
+                );
                 if matches!(
                     view_type,
                     crate::state::ViewType::Schematic
@@ -433,9 +434,11 @@ impl RSpiceApp {
             .publish_project_library_mutation(project_mutation);
         self.state.dialogs.new_view_error = None;
         self.state.open_workspace_view(reference);
-        self.state.push_user_message(ConsoleMessage::info(format!(
-            "Created Layout view '{view_name}' for cell '{cell}' under the exact signed project PDK."
-        )));
+        self.state.record(
+            LogSeverity::Info,
+            LogSource::Studio,
+            format!("Created Layout view '{view_name}' for cell '{cell}' under the project PDK."),
+        );
         outcome.close = true;
         outcome
     }
@@ -590,9 +593,13 @@ impl RSpiceApp {
             .workbench
             .activate(crate::workbench::state::Workspace::Design);
         self.state.ui.code_workspace.veriloga.receipt = Some(receipt);
-        self.state.push_user_message(ConsoleMessage::info(format!(
-            "Created Verilog-A view '{view_name}' for cell '{cell}' and opened its project-owned source."
-        )));
+        self.state.record(
+            LogSeverity::Info,
+            LogSource::Studio,
+            format!(
+                "Created Verilog-A view '{view_name}' for cell '{cell}' and opened its source."
+            ),
+        );
         outcome.close = true;
         outcome.persist_global_veriloga = library == VERILOGA_LIBRARY_NAME;
         outcome

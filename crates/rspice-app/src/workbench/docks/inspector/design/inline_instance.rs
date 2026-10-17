@@ -855,13 +855,9 @@ pub(super) fn edit_row_with_hint(
         match stage_component_tuning(app, component.id) {
             Ok(()) => tuning.execute(app),
             Err(error) => {
-                app.state.workbench.verification.action_problem =
-                    Some(format!("Could not tune {}: {error}", component.name));
-                app.state
-                    .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                        "Could not tune {}: {error}",
-                        component.name
-                    )));
+                let problem = format!("Could not tune {}: {error}", component.name);
+                app.state.workbench.verification.action_problem = Some(problem.clone());
+                app.state.prompt(problem);
             }
         }
     }
@@ -1141,7 +1137,6 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
                 let label = format!("Plot {display}");
                 if Button::new(&label).icon(Icon::Results).show(ui).clicked() {
                     let configuration_changed = crate::schematic::view::toggle_probe_with_feedback(
-                        ui,
                         &mut app.state,
                         &net_name,
                         &display,

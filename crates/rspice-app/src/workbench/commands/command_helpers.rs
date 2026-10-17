@@ -9,9 +9,7 @@ pub(super) fn open_command_palette(state: &mut AppState) {
             .workbench
             .navigate(route, super::super::RouteTransitionSource::User)
     {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-            "The Command Palette could not be opened: {error}"
-        )));
+        state.prompt(format!("The Command Palette could not be opened: {error}"));
         return;
     }
     state.dialogs.command_palette.open_routed();
@@ -24,9 +22,7 @@ pub(super) fn open_help_center(state: &mut AppState, page: crate::workbench::app
             .workbench
             .navigate(route, super::super::RouteTransitionSource::User)
     {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-            "The Help Center could not be opened: {error}"
-        )));
+        state.prompt(format!("The Help Center could not be opened: {error}"));
         return;
     }
     state.dialogs.help_center.open_routed(page);

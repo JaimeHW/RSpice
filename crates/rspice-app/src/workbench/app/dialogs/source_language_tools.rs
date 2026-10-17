@@ -13,7 +13,7 @@
 
 use egui::{Context, Grid, RichText, ScrollArea, Ui};
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
@@ -136,7 +136,7 @@ pub(crate) fn navigate_active_source(
             _ => None,
         };
         if let Some(message) = message {
-            app.state.push_user_message(ConsoleMessage::info(message));
+            app.state.prompt(message);
         }
         return Ok(());
     };
@@ -362,11 +362,12 @@ impl RSpiceApp {
         };
         let Some(tools) = self.state.ui.code_workspace.language_tools.as_mut() else {
             if let Err(error) = outcome {
-                self.state.push_user_message(ConsoleMessage::error(error));
+                self.state
+                    .record(LogSeverity::Error, LogSource::Studio, error);
             }
             return;
         };
-        // A completed action is already in the console and on the page; only
+        // A completed action is already on the status bar and the page; only
         // a refusal is the dialog's to state.
         tools.error = outcome.err();
     }

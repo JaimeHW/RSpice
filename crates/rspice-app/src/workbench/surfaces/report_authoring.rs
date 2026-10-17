@@ -42,10 +42,7 @@ pub(crate) fn open(app: &mut RSpiceApp) {
         .workbench
         .navigate(route, RouteTransitionSource::User)
     {
-        app.state
-            .push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                error.to_string(),
-            ));
+        app.state.prompt(error.to_string());
     }
 }
 
@@ -77,10 +74,7 @@ pub(crate) fn can_edit_page_properties(state: &AppState) -> bool {
 
 pub(crate) fn save_document(app: &mut RSpiceApp) {
     if !report_mutation_allowed(&app.state) {
-        app.state
-            .push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                report_mutation_block_reason(&app.state),
-            ));
+        app.state.prompt(report_mutation_block_reason(&app.state));
         return;
     }
     let invalid = app
@@ -92,9 +86,7 @@ pub(crate) fn save_document(app: &mut RSpiceApp) {
         .find_map(|document| document.validate().err());
     if let Some(error) = invalid {
         app.state
-            .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                "Report document save was blocked before publication: {error}"
-            )));
+            .prompt(format!("The report was not saved: {error}"));
         return;
     }
     Command::Save.execute(app);
@@ -161,9 +153,7 @@ fn can_move_selected_page(state: &AppState, direction: PageMoveDirection) -> boo
 fn move_selected_page(app: &mut RSpiceApp, direction: PageMoveDirection) {
     if !report_mutation_allowed(&app.state) {
         let reason = report_mutation_block_reason(&app.state).to_owned();
-        app.state.workbench.report_authoring.transaction_error = Some(reason.clone());
-        app.state
-            .push_user_message(crate::diagnostics::ConsoleMessage::warning(reason));
+        app.state.workbench.report_authoring.transaction_error = Some(reason);
         return;
     }
     let selected_page =
@@ -213,9 +203,7 @@ fn move_selected_page(app: &mut RSpiceApp, direction: PageMoveDirection) {
             app.state.workspace.content.report_documents_dirty |= changed;
         }
         Err(error) => {
-            app.state.workbench.report_authoring.transaction_error = Some(error.clone());
-            app.state
-                .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+            app.state.workbench.report_authoring.transaction_error = Some(error);
         }
     }
 }
@@ -223,9 +211,7 @@ fn move_selected_page(app: &mut RSpiceApp, direction: PageMoveDirection) {
 fn commit_page_setting(app: &mut RSpiceApp, page_id: ReportPageId, setting: PageSettingEdit) {
     if !report_mutation_allowed(&app.state) {
         let reason = report_mutation_block_reason(&app.state).to_owned();
-        app.state.workbench.report_authoring.transaction_error = Some(reason.clone());
-        app.state
-            .push_user_message(crate::diagnostics::ConsoleMessage::warning(reason));
+        app.state.workbench.report_authoring.transaction_error = Some(reason);
         return;
     }
     if let PageSettingEdit::Title(title) = &setting
@@ -303,9 +289,7 @@ fn commit_page_setting(app: &mut RSpiceApp, page_id: ReportPageId, setting: Page
             app.state.workspace.content.report_documents_dirty |= changed;
         }
         Err(error) => {
-            app.state.workbench.report_authoring.transaction_error = Some(error.clone());
-            app.state
-                .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+            app.state.workbench.report_authoring.transaction_error = Some(error);
         }
     }
 }
@@ -317,9 +301,7 @@ fn commit_document_publication_setting(
 ) {
     if !report_mutation_allowed(&app.state) {
         let reason = report_mutation_block_reason(&app.state).to_owned();
-        app.state.workbench.report_authoring.transaction_error = Some(reason.clone());
-        app.state
-            .push_user_message(crate::diagnostics::ConsoleMessage::warning(reason));
+        app.state.workbench.report_authoring.transaction_error = Some(reason);
         return;
     }
     let result = active_document_mut(&mut app.state).and_then(|document| {
@@ -366,9 +348,7 @@ fn commit_document_publication_setting(
             app.state.workbench.report_authoring.transaction_error = None;
         }
         Err(error) => {
-            app.state.workbench.report_authoring.transaction_error = Some(error.clone());
-            app.state
-                .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+            app.state.workbench.report_authoring.transaction_error = Some(error);
         }
     }
 }
@@ -381,9 +361,7 @@ fn set_report_block_enabled(
 ) {
     if !report_mutation_allowed(&app.state) {
         let reason = report_mutation_block_reason(&app.state).to_owned();
-        app.state.workbench.report_authoring.transaction_error = Some(reason.clone());
-        app.state
-            .push_user_message(crate::diagnostics::ConsoleMessage::warning(reason));
+        app.state.workbench.report_authoring.transaction_error = Some(reason);
         return;
     }
     let timestamp = timestamp_unix_ms();
@@ -425,9 +403,7 @@ fn set_report_block_enabled(
             app.state.workspace.content.report_documents_dirty |= changed;
         }
         Err(error) => {
-            app.state.workbench.report_authoring.transaction_error = Some(error.clone());
-            app.state
-                .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+            app.state.workbench.report_authoring.transaction_error = Some(error);
         }
     }
 }
@@ -693,9 +669,7 @@ fn open_release_cockpit(app: &mut RSpiceApp) {
         RouteTransitionSource::User,
     ) {
         app.state
-            .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                "Cannot open release package assembly: {error}"
-            )));
+            .prompt(format!("Cannot open release package assembly: {error}"));
     }
 }
 

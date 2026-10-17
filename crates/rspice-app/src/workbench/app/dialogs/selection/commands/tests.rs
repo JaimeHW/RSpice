@@ -1,31 +1,22 @@
 //! What the four immediate edit commands do, and what they say afterwards.
 //!
 //! The assertions are the document after the command, the number of undo
-//! entries it cost, and the exact console line — because with no dialog in
-//! front of them the console line is the whole report.
+//! entries it cost, and the status-bar prompt — because with no dialog in
+//! front of them the prompt is the whole report. None of it is logged: an
+//! edit is answered, and undo is its record.
 
 use super::*;
 
-use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{Bus, BusDeclaration, Component, ComponentType, NetLabel, SchematicProbe, Wire};
 
-fn last_console(state: &AppState) -> String {
+fn last_prompt(state: &AppState) -> String {
     state
-        .log_buffer
-        .entries_by_source(LogSource::User)
-        .last()
-        .expect("the command reports to the console")
-        .message
+        .workbench
+        .prompt
+        .as_ref()
+        .expect("the command answers on the status bar")
+        .text
         .clone()
-}
-
-fn last_console_severity(state: &AppState) -> LogSeverity {
-    state
-        .log_buffer
-        .entries_by_source(LogSource::User)
-        .last()
-        .expect("the command reports to the console")
-        .severity
 }
 
 fn probe(id: u64, position: Point, reference: &str, expression: Option<&str>) -> SchematicProbe {
@@ -71,10 +62,9 @@ fn delete_removes_the_selection_immediately_as_one_undo_entry() {
     assert_eq!(state.schematic.undo_description(), Some("delete selection"));
     // The current topology resolver includes the two unlabelled terminal nets.
     assert_eq!(
-        last_console(&state),
+        last_prompt(&state),
         "Deleted 1 object. Nets affected: net1, net2."
     );
-    assert_eq!(last_console_severity(&state), LogSeverity::Warning);
     assert!(state.schematic.undo());
     assert_eq!(state.schematic.document().components.len(), 2);
     assert!(!state.schematic.can_undo());
@@ -106,7 +96,7 @@ fn delete_promotes_a_wire_handle_to_its_whole_conductor() {
 
     assert!(state.schematic.document().wires.is_empty());
     assert_eq!(
-        last_console(&state),
+        last_prompt(&state),
         "Deleted 1 object. Nets affected: net1."
     );
     assert_eq!(state.schematic.undo_description(), Some("delete selection"));
@@ -134,7 +124,7 @@ fn a_stale_wire_handle_deletes_nothing_and_says_so() {
     assert!(!state.delete_schematic_selection());
 
     assert_eq!(state.schematic.document().wires.len(), 1);
-    assert_eq!(last_console(&state), "Select something first.");
+    assert_eq!(last_prompt(&state), "Select something first.");
 }
 
 #[test]
@@ -155,10 +145,9 @@ fn delete_names_the_nets_it_took_away() {
     assert!(state.delete_schematic_selection());
 
     assert_eq!(
-        last_console(&state),
+        last_prompt(&state),
         "Deleted 1 object. Nets affected: DATA[3:0]."
     );
-    assert_eq!(last_console_severity(&state), LogSeverity::Warning);
 }
 
 #[test]
@@ -186,13 +175,12 @@ fn delete_counts_the_records_that_still_reference_what_went() {
 
     assert!(state.delete_schematic_selection());
 
-    let reported = last_console(&state);
+    let reported = last_prompt(&state);
     assert!(reported.starts_with("Deleted 1 object."), "{reported}");
     assert!(
         reported.ends_with("Still referenced by 1 probe."),
         "{reported}"
     );
-    assert_eq!(last_console_severity(&state), LogSeverity::Warning);
 }
 
 #[test]
@@ -244,13 +232,55 @@ fn cut_copies_the_selection_and_then_removes_it() {
         state.schematic.session.editor.clipboard.components[0].name,
         "R1"
     );
-    assert_eq!(last_console(&state), "Cut 1 object.");
+    assert_eq!(last_prompt(&state), "Cut 1 object.");
     assert!(state.schematic.undo());
     assert_eq!(state.schematic.document().components.len(), 2);
 }
 
+/// Duplicate landed everything two world units off its anchor, off every
+/// grid pitch, and the copy it carried was measured from the selection's
+/// unsnapped middle, so even a whole-grid offset left parts between grid
+/// points (audit E-6).
 #[test]
-fn the_console_clauses_are_plural_correct() {
+fn a_duplicate_lands_on_the_grid_one_step_off_its_anchor() {
+    let mut state = state_with_two_resistors();
+    let capacitor = Component::new(43, ComponentType::Capacitor, Point::new(40, 70));
+    state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(capacitor);
+    let selection = &mut state.schematic.session.editor.selection;
+    for id in [41, 42, 43] {
+        selection.select_component(id);
+    }
+    let grid = state.schematic.document().grid_size;
+    let anchor = state.schematic_paste_anchor();
+
+    assert!(state.duplicate_schematic_selection());
+
+    let copies: Vec<Point> = state
+        .schematic
+        .document()
+        .components
+        .iter()
+        .filter(|component| ![41, 42, 43].contains(&component.id))
+        .map(|component| component.pos)
+        .collect();
+    assert_eq!(copies.len(), 3);
+    assert!(
+        copies
+            .iter()
+            .all(|pos| pos.x % grid == 0 && pos.y % grid == 0),
+        "a duplicate left the grid of {grid}: {copies:?}"
+    );
+    // The copy's grid-snapped middle (50, 40) lands one grid step past the
+    // anchor, so the first resistor at (20, 30) lands 30 left and 10 up of it.
+    assert!(copies.contains(&Point::new(anchor.x + grid - 30, anchor.y + grid - 10)));
+}
+
+#[test]
+fn the_prompt_clauses_are_plural_correct() {
     assert_eq!(open_nets_clause(1), "1 net is now open");
     assert_eq!(open_nets_clause(3), "3 nets are now open");
     assert_eq!(named_net_connections(1), "1 named-net connection");
@@ -286,7 +316,7 @@ fn duplicate_leaves_the_clipboard_byte_identical() {
         before,
         "Duplicate borrows the clipboard and must hand it back untouched"
     );
-    assert_eq!(last_console(&state), "Duplicated 1 object.");
+    assert_eq!(last_prompt(&state), "Duplicated 1 object.");
 }
 
 #[test]
@@ -354,9 +384,9 @@ fn duplicate_honours_the_persisted_external_net_preference() {
             "{preference:?}"
         );
         assert!(
-            last_console(&state).starts_with("Duplicated 1 object"),
+            last_prompt(&state).starts_with("Duplicated 1 object"),
             "{preference:?}: {}",
-            last_console(&state)
+            last_prompt(&state)
         );
     }
 }
@@ -393,7 +423,7 @@ fn select_all_takes_every_class_the_filter_admits_including_annotations() {
         state.schematic.session.editor.selection.has_probe(4),
         "probes are annotations and Select all takes them"
     );
-    assert_eq!(last_console(&state), "Selected 4 objects.");
+    assert_eq!(last_prompt(&state), "Selected 4 objects.");
 
     for (class, present) in [
         ("instances", 1_u64),
@@ -415,7 +445,7 @@ fn select_all_takes_every_class_the_filter_admits_including_annotations() {
             1,
             "{class}"
         );
-        assert_eq!(last_console(&state), "Selected 1 object.", "{class}");
+        assert_eq!(last_prompt(&state), "Selected 1 object.", "{class}");
         assert!(
             state
                 .schematic
@@ -444,10 +474,7 @@ fn select_all_says_when_the_filter_admits_nothing() {
     state.sync_active_schematic_to_workspace();
 
     assert!(!state.select_all_schematic_objects());
-    assert_eq!(
-        last_console(&state),
-        "Nothing matches the selection filter."
-    );
+    assert_eq!(last_prompt(&state), "Nothing matches the selection filter.");
 }
 
 #[test]
@@ -462,13 +489,17 @@ fn a_read_only_schematic_refuses_every_mutating_command_without_touching_it() {
     state.schematic.session.read_only = true;
     state.sync_active_schematic_to_workspace();
 
+    // Every place these are offered greys them on a read-only schematic, so
+    // reaching one anyway is answered by nothing at all.
+    let logged = state.log_buffer.len();
     for command in [
         AppState::delete_schematic_selection as fn(&mut AppState) -> bool,
         AppState::cut_schematic_selection,
         AppState::duplicate_schematic_selection,
     ] {
         assert!(!command(&mut state));
-        assert_eq!(last_console(&state), "The schematic is read-only.");
+        assert!(state.workbench.prompt.is_none());
+        assert_eq!(state.log_buffer.len(), logged);
     }
     assert_eq!(state.schematic.document().components.len(), 2);
     assert!(state.schematic.session.editor.clipboard.is_empty());
@@ -488,12 +519,12 @@ fn an_empty_selection_refuses_with_one_plain_line() {
         AppState::duplicate_schematic_selection,
     ] {
         assert!(!command(&mut state));
-        assert_eq!(last_console(&state), "Select something first.");
+        assert_eq!(last_prompt(&state), "Select something first.");
     }
     assert_eq!(state.schematic.document().components.len(), 2);
 }
 
-/// The copy these commands ship is the console line, so the words the review
+/// The copy these commands ship is the prompt, so the words the review
 /// surface used must not come back through it.
 #[test]
 fn no_shipped_copy_here_speaks_the_old_review_vocabulary() {

@@ -49,7 +49,9 @@ pub use stimulus_placement::PendingStimulusPlacement;
 // Constants
 // =============================================================================
 
-pub use rspice_design::schematic::movement::{MoveSelectionError, MoveSelectionMode};
+pub use rspice_design::schematic::movement::{
+    DragRubberBand, MoveSelectionError, MoveSelectionMode,
+};
 
 pub use rspice_design::schematic::stretch::{
     StretchOrthogonalPolicy, StretchSelectionError, StretchTarget,

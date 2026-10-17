@@ -814,42 +814,42 @@ fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryInten
                     },
                 );
             });
-            app.state.push_user_message(ConsoleMessage::info(format!(
+            app.state.prompt(format!(
                 "{} has {count} loaded schematic consumer{}.",
                 reference.display_path(),
                 if count == 1 { "" } else { "s" }
-            )));
+            ));
         }
         LibraryIntent::NewLibrary => app.state.open_new_library_dialog(),
         LibraryIntent::RenameLibrary(library) => {
             if let Err(error) = app.state.open_rename_library_dialog(&library) {
-                app.state.push_user_message(ConsoleMessage::error(error));
+                app.state.prompt(error);
             }
         }
         LibraryIntent::DeleteLibrary(library) => {
             if let Err(error) = app.state.open_delete_library_review(&library) {
-                app.state.push_user_message(ConsoleMessage::error(error));
+                app.state.prompt(error);
             }
         }
         LibraryIntent::NewCell => Command::NewCell.execute(app),
         LibraryIntent::NewView { library, cell } => {
             if let Err(error) = app.state.open_new_view_dialog(&library, &cell) {
-                app.state.push_user_message(ConsoleMessage::error(error));
+                app.state.prompt(error);
             }
         }
         LibraryIntent::CopyCell { library, cell } => {
             if let Err(error) = app.state.open_copy_cell_dialog(&library, &cell) {
-                app.state.push_user_message(ConsoleMessage::error(error));
+                app.state.prompt(error);
             }
         }
         LibraryIntent::RenameCell { library, cell } => {
             if let Err(error) = app.state.open_rename_cell_dialog(&library, &cell) {
-                app.state.push_user_message(ConsoleMessage::error(error));
+                app.state.prompt(error);
             }
         }
         LibraryIntent::DeleteCell { library, cell } => {
             if let Err(error) = app.state.open_library_cell_deletion_review(&library, &cell) {
-                app.state.push_user_message(ConsoleMessage::error(error));
+                app.state.prompt(error);
             }
         }
         LibraryIntent::RenameView(reference) => {
@@ -858,7 +858,7 @@ fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryInten
                 &reference.cell,
                 &reference.view,
             ) {
-                app.state.push_user_message(ConsoleMessage::error(error));
+                app.state.prompt(error);
             }
         }
         LibraryIntent::DeleteView(reference) => {
@@ -867,7 +867,7 @@ fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryInten
                 &reference.cell,
                 &reference.view,
             ) {
-                app.state.push_user_message(ConsoleMessage::error(error));
+                app.state.prompt(error);
             }
         }
         LibraryIntent::ShowAuditHistory => {

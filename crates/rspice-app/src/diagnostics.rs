@@ -1,18 +1,14 @@
-//! Diagnostics the application reports about itself.
+//! Diagnostics the application reports about itself: the session's log, which
+//! the Console shows, the engine's lines forwarded into each run's own log, and
+//! the redaction applied when a log leaves the machine.
 //!
-//! Two models had grown for the same concern in two different places: the
-//! console message the shell prints, and the structured, filterable log the
-//! console panel reads. They lived three layers apart — one in the
-//! application root, one under the panel that renders it — so the simulation
-//! and schematic layers had to reach up through the whole shell to report a
-//! diagnostic about their own work.
-//!
-//! They are one model and they live here, below everything that produces a
-//! diagnostic and above `state`, which a log entry may anchor to.
+//! They live here, below everything that produces a diagnostic and above
+//! `state`, which a log entry may anchor to, so the simulation and schematic
+//! layers report about their own work without reaching up through the shell.
 
-mod console;
 pub(crate) mod engine_log;
 mod log;
+mod redaction;
 
-pub use console::{ConsoleLevel, ConsoleMessage};
 pub use log::{LogAnchor, LogBuffer, LogEntry, LogSeverity, LogSource};
+pub(crate) use redaction::{home_directory, redact_log_message};

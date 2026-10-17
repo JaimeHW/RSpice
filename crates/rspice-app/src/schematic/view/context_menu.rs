@@ -8,7 +8,6 @@
 
 use egui::{Context, Response};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{Point, Tool, ViewType};
 use crate::workbench::app_state::{AppState, ContextTarget};
 use crate::workbench::commands::vocabulary::Command;
@@ -25,9 +24,8 @@ use crate::workbench::{
 use super::SchematicSymbolContext;
 use super::coordinates::{screen_to_grid, screen_to_schematic};
 use super::interaction::{PointerHit, PointerTarget, pointer_target};
-use super::sheet_visibility::{
-    retain_selection_on_active_sheet, with_hidden_wire_topology_preserved,
-};
+use super::selection_transform::{SelectionTransform, transform_selection_on_active_sheet};
+use super::sheet_visibility::retain_selection_on_active_sheet;
 use super::viewport::Viewport;
 
 use rspice_schematic_editor::view::context_menu::{
@@ -888,7 +886,6 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         && all_whole_object_ids_are_live
         && all_junctions_are_live
         && !has_wire_sub_object;
-    let has_component = has_live_component;
     let writable = !state.schematic.session.read_only && !state.active_view_read_only();
     match action {
         ContextAction::Properties => (
@@ -896,8 +893,8 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             "Select one editable component, bus, bus tap, net label, design note, or documentation shape to open its properties",
         ),
         ContextAction::Rotate | ContextAction::Mirror => (
-            writable && has_component,
-            "Select at least one editable component",
+            writable && has_copyable_object,
+            "Select at least one editable object",
         ),
         ContextAction::AdoptStimulus
         | ContextAction::ReadoptStimulus
@@ -1003,14 +1000,20 @@ fn execute_context_action(
         ContextAction::Properties => {
             crate::workbench::app::open_selected_object_properties(state);
         }
-        ContextAction::Rotate => with_hidden_wire_topology_preserved(state, |schematic| {
-            schematic
-                .rotate_selection_resolved(|component| symbol_context.terminal_points(component))
-        }),
-        ContextAction::Mirror => with_hidden_wire_topology_preserved(state, |schematic| {
-            schematic
-                .mirror_selection_h_resolved(|component| symbol_context.terminal_points(component))
-        }),
+        ContextAction::Rotate => {
+            transform_selection_on_active_sheet(
+                state,
+                symbol_context,
+                SelectionTransform::RotateClockwise,
+            );
+        }
+        ContextAction::Mirror => {
+            transform_selection_on_active_sheet(
+                state,
+                symbol_context,
+                SelectionTransform::MirrorHorizontal,
+            );
+        }
         ContextAction::AdoptStimulus
         | ContextAction::ReadoptStimulus
         | ContextAction::SaveStimulus
@@ -1019,7 +1022,8 @@ fn execute_context_action(
             state.copy_active_schematic_selection();
         }
         ContextAction::Duplicate => {
-            state.duplicate_schematic_selection_at(click_pos + Point::new(2, 2));
+            let step = state.schematic_grid_step();
+            state.duplicate_schematic_selection_at(click_pos + step);
         }
         ContextAction::Delete => {
             state.delete_schematic_selection();
@@ -1035,9 +1039,9 @@ fn execute_context_action(
                 &state.library_manager,
                 &state.workspace.content.schematic_buffers,
             );
-            state.push_user_message(match outcome {
-                Ok(summary) => ConsoleMessage::info(summary),
-                Err(error) => ConsoleMessage::warning(error.to_string()),
+            state.prompt(match outcome {
+                Ok(summary) => summary,
+                Err(error) => error.to_string(),
             });
         }
         ContextAction::ReplaceInstance => open_replace_instance_dialog(state),

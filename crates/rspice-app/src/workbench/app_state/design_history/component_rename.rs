@@ -74,9 +74,7 @@ impl AppState {
         match self.commit_inline_component_edit() {
             Ok(_) => true,
             Err(error) => {
-                self.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                    "Inspector edit was not applied: {error}"
-                )));
+                self.prompt(format!("Inspector edit was not applied: {error}"));
                 false
             }
         }

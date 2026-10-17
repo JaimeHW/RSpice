@@ -1485,64 +1485,139 @@ impl PreflightDialogState {
     }
 }
 
-/// What the Console page is narrowed to, and the producer that narrowing is
-/// about.
+/// Which log the Console page shows.
 ///
-/// The results navigator's "Reveal producer log" used to print one info line
-/// and open the console unfiltered, which stated the producer and then handed
-/// back every entry in the session. The filter is what makes that row do what
-/// it says.
-///
-/// Two rules match, and they are deliberately different in kind. The first is
-/// exact: an entry tagged with this producer's stable path. Nothing emits that
-/// tag yet — the simulation controller writes `None` for every entry's context
-/// — so the second rule carries the row today: a simulation entry that names
-/// the producer's own quantity, which is how the measurement and
-/// operating-point echoes name what they are reporting. The chip says which
-/// producer is being matched, and the empty state says plainly when nothing
-/// does.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConsoleProducerFilter {
-    /// Stable `dataset/…/analysis/…/…` path of the revealed producer.
-    pub producer: String,
-    /// The producer's own quantity or artifact name, as an emitted entry
-    /// would write it. Empty leaves only the exact tag rule.
-    pub quantity: String,
-    /// Ask the console body to scroll to the newest matching entry once.
-    /// Consumed by the renderer, the way a preflight run request is.
-    pub scroll_to_newest: bool,
+/// The session's log holds studio events and one start and one end line per
+/// run; a run's own log holds everything that run wrote. The reader chooses
+/// between them and nothing chooses for them: a run starting never takes the
+/// page away from the log being read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ConsoleChannel {
+    #[default]
+    Session,
+    /// One run's own log, by the run's display sequence.
+    Run(u64),
 }
 
-impl ConsoleProducerFilter {
-    pub fn new(producer: impl Into<String>, quantity: impl Into<String>) -> Self {
+/// The Console page's three severity toggles.
+///
+/// Debug and trace lines count as Info: they are notes, and a fourth toggle
+/// would be a control for lines most runs never write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConsoleSeverity {
+    Errors,
+    Warnings,
+    Info,
+}
+
+impl ConsoleSeverity {
+    pub const ALL: [Self; 3] = [Self::Errors, Self::Warnings, Self::Info];
+
+    pub const fn of(severity: crate::diagnostics::LogSeverity) -> Self {
+        use crate::diagnostics::LogSeverity;
+        match severity {
+            LogSeverity::Error => Self::Errors,
+            LogSeverity::Warning => Self::Warnings,
+            LogSeverity::Info | LogSeverity::Debug | LogSeverity::Trace => Self::Info,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Errors => "Errors",
+            Self::Warnings => "Warnings",
+            Self::Info => "Info",
+        }
+    }
+
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Errors => 0,
+            Self::Warnings => 1,
+            Self::Info => 2,
+        }
+    }
+}
+
+/// The selected lines of a channel: every shown line from the one the
+/// selection started on to the one it was extended to, both included.
+///
+/// Lines are addressed by the channel's own keys, which only grow down the
+/// log, so the range survives lines arriving under it and a filter hiding
+/// part of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConsoleSelection {
+    pub anchor: u64,
+    pub cursor: u64,
+}
+
+impl ConsoleSelection {
+    pub const fn single(key: u64) -> Self {
         Self {
-            producer: producer.into(),
-            quantity: quantity.into(),
-            scroll_to_newest: true,
+            anchor: key,
+            cursor: key,
         }
     }
 
-    /// What the chip calls this producer: its quantity name when it has one,
-    /// and the stable path otherwise. Never a truncation of the path — a
-    /// reader cannot check a partial identity.
-    pub fn label(&self) -> &str {
-        if self.quantity.is_empty() {
-            &self.producer
-        } else {
-            &self.quantity
-        }
+    pub fn contains(self, key: u64) -> bool {
+        (self.anchor.min(self.cursor)..=self.anchor.max(self.cursor)).contains(&key)
+    }
+}
+
+/// Where the Console body has been asked to scroll, once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConsoleReveal {
+    Line(u64),
+    End,
+}
+
+/// The reader's place on the Console page: the channel, what it is narrowed
+/// to, and what is selected in it.
+///
+/// Transient. It is a reading position over logs, and a reopened session
+/// starts at the end of its own.
+#[derive(Debug, Clone, Default)]
+pub struct ConsoleView {
+    pub channel: ConsoleChannel,
+    /// The severities switched off, by [`ConsoleSeverity::index`].
+    hidden: [bool; 3],
+    /// Case-insensitive text a shown line contains.
+    pub find: String,
+    pub selection: Option<ConsoleSelection>,
+    pub reveal: Option<ConsoleReveal>,
+}
+
+impl ConsoleView {
+    /// Show `channel` from its latest line, with nothing selected.
+    pub fn open(&mut self, channel: ConsoleChannel) {
+        self.channel = channel;
+        self.selection = None;
+        self.reveal = Some(ConsoleReveal::End);
     }
 
-    pub fn matches(&self, entry: &crate::diagnostics::LogEntry) -> bool {
-        if entry.context.as_deref() == Some(self.producer.as_str()) {
-            return true;
-        }
-        !self.quantity.is_empty()
-            && entry.source == crate::diagnostics::LogSource::Simulation
-            && entry
-                .message
-                .to_ascii_lowercase()
-                .contains(&self.quantity.to_ascii_lowercase())
+    /// Select the session line `key` and bring it into view, clearing the
+    /// find text and showing its severity, so nothing the reader set earlier
+    /// hides the line they were sent to.
+    pub fn show_session_line(&mut self, key: u64, severity: crate::diagnostics::LogSeverity) {
+        self.channel = ConsoleChannel::Session;
+        self.find.clear();
+        self.hidden[ConsoleSeverity::of(severity).index()] = false;
+        self.selection = Some(ConsoleSelection::single(key));
+        self.reveal = Some(ConsoleReveal::Line(key));
+    }
+
+    pub fn shows(&self, severity: ConsoleSeverity) -> bool {
+        !self.hidden[severity.index()]
+    }
+
+    pub fn toggle(&mut self, severity: ConsoleSeverity) {
+        let hidden = &mut self.hidden[severity.index()];
+        *hidden = !*hidden;
+    }
+
+    /// The severities switched off, by [`ConsoleSeverity::index`].
+    pub fn hidden(&self) -> [bool; 3] {
+        self.hidden
     }
 }
 

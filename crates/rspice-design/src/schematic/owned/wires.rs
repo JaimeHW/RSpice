@@ -27,6 +27,23 @@ impl Schematic {
         }
         changed
     }
+    /// See [`wire_edit::merge_collinear_wires`].
+    pub fn merge_collinear_wires(
+        &mut self,
+        seeds: Option<&std::collections::HashSet<u64>>,
+        join_end_to_end: bool,
+    ) -> bool {
+        let changed = wire_edit::merge_collinear_wires(
+            &mut self.document,
+            &mut self.identity,
+            seeds,
+            join_end_to_end,
+        );
+        if changed {
+            self.invalidate_topology();
+        }
+        changed
+    }
     pub fn optimize_all_wires(&mut self) -> bool {
         let changed = wire_edit::optimize_all_wires(&mut self.document);
         if changed {

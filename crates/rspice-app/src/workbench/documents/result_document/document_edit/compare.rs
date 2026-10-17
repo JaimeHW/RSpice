@@ -54,13 +54,10 @@ pub(crate) fn open_compare(state: &mut AppState) {
         Ok((run, analysis)) => baselines(state, run, analysis)
             .first()
             .map(|(baseline, _)| baseline.dataset_id),
-        Err(refusal) => {
-            state.push_user_message(ConsoleMessage::warning(refusal));
-            return;
-        }
+        // Compare datasets is disabled while either is missing.
+        Err(_) => return,
     };
     let Some(baseline) = baseline else {
-        state.push_user_message(ConsoleMessage::warning(NO_BASELINE));
         return;
     };
     state.workbench.result_document_dialog = Some(ResultDocumentDialog::Compare(CompareDraft {

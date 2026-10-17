@@ -128,6 +128,28 @@ fn a_part_dropped_on_an_unmarked_crossing_splits_neither_wire() {
     );
 }
 
+/// A route drawn along Sheet 2's wire lies on another page: the two are not
+/// folded into one, and the hidden wire keeps its id and points.
+#[test]
+fn a_route_drawn_along_another_sheets_wire_is_not_folded_into_it() {
+    let mut state = two_sheet_state(&[], &[1]);
+    let hidden = Wire::segment(1, Point::new(0, 0), Point::new(40, 0));
+    state
+        .schematic
+        .document_mut_for_test()
+        .wires
+        .push(hidden.clone());
+    state.schematic.init_undo_history();
+
+    state.schematic.start_wire(Point::new(20, 0));
+    state.schematic.extend_wire(Point::new(60, 0));
+    finish_wire_on_active_sheet(&mut state).expect("the route is drawn");
+
+    let wires = &state.schematic.document().wires;
+    assert_eq!(wires.iter().find(|wire| wire.id == 1), Some(&hidden));
+    assert_eq!(wires.len(), 2);
+}
+
 /// Only this sheet's wires can cross under the label: Sheet 2's wire through
 /// the same point is on another page.
 #[test]

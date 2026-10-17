@@ -8,7 +8,7 @@
 
 use egui::Context;
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::services::license::{self, LicenseInfo};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -171,7 +171,7 @@ impl RSpiceApp {
                 LicensePhase::Verified(_) if already_active => {
                     self.state.dialogs.license_dialog.open = false;
                 }
-                LicensePhase::Verified(info) => self.activate_license(ctx, info),
+                LicensePhase::Verified(info) => self.activate_license(info),
             },
         }
     }
@@ -184,31 +184,25 @@ impl RSpiceApp {
         };
     }
 
-    fn activate_license(&mut self, ctx: &Context, info: LicenseInfo) {
+    fn activate_license(&mut self, info: LicenseInfo) {
         let key = self.state.dialogs.license_dialog.text.trim().to_owned();
         #[cfg(not(target_arch = "wasm32"))]
         if let Err(error) = license::store_key(&key) {
-            self.state
-                .push_user_message(ConsoleMessage::warning(format!(
-                    "License active for this session, but storing it failed: {error}"
-                )));
+            self.state.record(
+                LogSeverity::Warning,
+                LogSource::Studio,
+                format!("The license is active for this session but could not be saved: {error}"),
+            );
         }
         self.state.license_key = Some(key);
         let message = format!(
-            "License activated — {} until {}",
-            info.tier, info.updates_until
-        );
-        let toast_detail = format!(
-            "{} updates are available until {}.",
+            "License activated: {} updates are available until {}.",
             info.tier, info.updates_until
         );
         self.state.license = Some(info);
         self.state.dialogs.license_dialog.open = false;
         self.state
-            .ui
-            .toasts
-            .success(ctx, "License activated", toast_detail);
-        self.state.push_user_message(ConsoleMessage::info(message));
+            .record(LogSeverity::Info, LogSource::Studio, message);
     }
 
     fn remove_license(&mut self) {
@@ -219,8 +213,11 @@ impl RSpiceApp {
         self.state.license_key = None;
         self.state.license = None;
         self.state.dialogs.license_dialog.open = false;
-        self.state
-            .push_user_message(ConsoleMessage::info("License removed from this machine"));
+        self.state.record(
+            LogSeverity::Info,
+            LogSource::Studio,
+            "License removed from this machine.",
+        );
     }
 }
 

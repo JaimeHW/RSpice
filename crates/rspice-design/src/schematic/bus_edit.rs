@@ -287,17 +287,25 @@ fn build_bus_property_candidates(
     let connectivity = bus_connectivity(document, expected.id, on_sheet);
     let connected = &connectivity.connected;
     let mut candidate_taps = document.bus_taps.clone();
+    // Buses drawn touching the edited one are the same vector connection, so
+    // they take its declaration whole, range included, or lose it with it.
+    let touching = &connectivity.touching;
     let Some(selected_declaration) = declaration else {
         let has_dependency = document.bus_taps.iter().any(|tap| {
-            tap.bus_id == expected.id
+            touching.contains(&tap.bus_id)
                 || (tap.target_kind() == BusTargetKind::Bus
                     && connectivity
                         .targets_by_tap
                         .get(&tap.id)
-                        .is_some_and(|targets| targets.contains(&expected.id)))
+                        .is_some_and(|targets| targets.iter().any(|id| touching.contains(id))))
         });
         if has_dependency {
             return Err(BusParseError::UndeclaredBus);
+        }
+        for bus in &mut candidate_buses {
+            if touching.contains(&bus.id) {
+                bus.declaration = None;
+            }
         }
         let impact = property_impact(document, &candidate_buses, &candidate_taps, connected.len());
         return Ok((candidate_buses, candidate_taps, impact));
@@ -307,14 +315,18 @@ fn build_bus_property_candidates(
         if bus.id == expected.id || !connected.contains(&bus.id) {
             continue;
         }
+        if touching.contains(&bus.id) {
+            bus.declaration = Some(selected_declaration.clone());
+            continue;
+        }
         let declaration = bus
             .declaration
             .as_mut()
             .ok_or(BusParseError::UndeclaredBus)?;
         declaration.name.clone_from(&selected_declaration.name);
         declaration.notation = selected_declaration.notation;
-        // Apply the selected bus's direction *delta* to the whole connected
-        // vector network. A pure rename/notation edit must preserve each
+        // Apply the selected bus's direction *delta* to the rest of the
+        // network, joined through taps. A pure rename/notation edit must preserve each
         // connected declaration's own orientation; an intentional reversal
         // reverses every connected declaration exactly once.
         if selected_direction_reversed {
@@ -461,11 +473,24 @@ pub fn simplify_polyline(points: Vec<Point>) -> Vec<Point> {
 #[derive(Debug, Default)]
 struct BusConnectivity {
     connected: std::collections::HashSet<u64>,
+    /// The seed and the buses drawn touching it, directly or through one
+    /// another: one vector connection, which carries one declaration.
+    touching: std::collections::HashSet<u64>,
     targets_by_tap: std::collections::HashMap<u64, Vec<u64>>,
 }
 
-/// The buses joined to `seed` on its sheet, and where each multi-bit tap there
-/// lands. Another sheet's buses and taps are not part of the network.
+/// Whether two buses are drawn as one connection: a vertex of either lies on
+/// the other. A shared end, a T or a collinear overlap joins them; an X
+/// crossing, interior to interior, does not. This is the rule under which
+/// the extractor requires touching buses to carry identical declarations.
+fn buses_touch(left: &Bus, right: &Bus) -> bool {
+    left.points.iter().any(|point| right.contains_point(*point))
+        || right.points.iter().any(|point| left.contains_point(*point))
+}
+
+/// The buses joined to `seed` on its sheet, by touch or by a multi-bit tap,
+/// and where each multi-bit tap there lands. Another sheet's buses and taps
+/// are not part of the network.
 fn bus_connectivity(
     document: &SchematicDocument,
     seed: u64,
@@ -476,8 +501,17 @@ fn bus_connectivity(
         .iter()
         .filter(|bus| on_sheet(bus.id))
         .collect();
-    let mut adjacency: std::collections::HashMap<u64, Vec<u64>> =
-        buses.iter().map(|bus| (bus.id, Vec::new())).collect();
+    let mut touch_adjacency: std::collections::HashMap<u64, Vec<u64>> =
+        std::collections::HashMap::new();
+    for (index, left) in buses.iter().enumerate() {
+        for right in &buses[index + 1..] {
+            if buses_touch(left, right) {
+                touch_adjacency.entry(left.id).or_default().push(right.id);
+                touch_adjacency.entry(right.id).or_default().push(left.id);
+            }
+        }
+    }
+    let mut adjacency = touch_adjacency.clone();
     let mut targets_by_tap = std::collections::HashMap::new();
     for tap in document.bus_taps.iter().filter(|tap| on_sheet(tap.id)) {
         if tap.target_kind() != BusTargetKind::Bus {
@@ -495,20 +529,28 @@ fn bus_connectivity(
         targets_by_tap.insert(tap.id, targets);
     }
 
-    let mut connected = std::collections::HashSet::new();
+    BusConnectivity {
+        connected: reachable(seed, &adjacency),
+        touching: reachable(seed, &touch_adjacency),
+        targets_by_tap,
+    }
+}
+
+fn reachable(
+    seed: u64,
+    adjacency: &std::collections::HashMap<u64, Vec<u64>>,
+) -> std::collections::HashSet<u64> {
+    let mut reached = std::collections::HashSet::new();
     let mut pending = std::collections::VecDeque::from([seed]);
     while let Some(bus_id) = pending.pop_front() {
-        if !connected.insert(bus_id) {
+        if !reached.insert(bus_id) {
             continue;
         }
         if let Some(neighbors) = adjacency.get(&bus_id) {
             pending.extend(neighbors.iter().copied());
         }
     }
-    BusConnectivity {
-        connected,
-        targets_by_tap,
-    }
+    reached
 }
 
 fn property_impact(
@@ -587,6 +629,7 @@ fn destination_matches_slice(destination_buses: &[&Bus], slice: &BusSlice) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::connectivity::bus::{BusDiagnosticKind, analyze_bus_connectivity};
 
     /// A bus routed out to (40, 0) and back to (20, 0) still reaches (40, 0).
     #[test]
@@ -678,5 +721,207 @@ mod tests {
         assert_eq!(document.buses, before_buses);
         assert_eq!(document.bus_taps, before_taps);
         assert_eq!(identity.cursor(), 43);
+    }
+
+    fn declared(text: &str) -> Option<BusDeclaration> {
+        Some(BusDeclaration::parse(text).unwrap())
+    }
+
+    fn declarations(document: &SchematicDocument) -> Vec<Option<BusDeclaration>> {
+        document
+            .buses
+            .iter()
+            .map(|bus| bus.declaration.clone())
+            .collect()
+    }
+
+    fn has_range_conflict(document: &SchematicDocument) -> bool {
+        analyze_bus_connectivity(document)
+            .diagnostics
+            .iter()
+            .any(|diagnostic| matches!(diagnostic.kind, BusDiagnosticKind::RangeConflict))
+    }
+
+    /// Bus 1 `DATA[7:0]` from (0, 0) to (200, 0). Bus 2 meets its interior
+    /// in a T, bus 3 continues it from its end, and bus 4 crosses it with no
+    /// end on it. All are `DATA[7:0]`, and none is joined by a tap.
+    fn touching_buses() -> SchematicDocument {
+        let mut document = SchematicDocument::default();
+        let data = declared("DATA[7:0]");
+        document.buses = vec![
+            Bus::segment(1, Point::new(0, 0), Point::new(200, 0), data.clone()).unwrap(),
+            Bus::segment(2, Point::new(100, 0), Point::new(100, 100), data.clone()).unwrap(),
+            Bus::segment(3, Point::new(200, 0), Point::new(300, 0), data.clone()).unwrap(),
+            Bus::segment(4, Point::new(150, -50), Point::new(150, 50), data).unwrap(),
+        ];
+        assert!(!has_range_conflict(&document));
+        document
+    }
+
+    #[test]
+    fn a_bus_rename_carries_every_bus_drawn_touching_it() {
+        let mut document = touching_buses();
+        let edited = document.buses[0].clone();
+        let renamed = BusDeclaration::parse("ADDR[7:0]").unwrap();
+
+        let impact =
+            validate_bus_properties(&document, &edited, Some(&renamed), &|_| true).unwrap();
+        assert_eq!(
+            impact.buses_changed, 3,
+            "the T and the continuation rename with it"
+        );
+        let impact =
+            validate_bus_properties(&document, &edited, Some(&renamed), &|id| id != 2).unwrap();
+        assert_eq!(
+            impact.buses_changed, 2,
+            "a bus on another sheet is not touching"
+        );
+
+        BusPropertyEdit::prepare(&mut document, &edited, Some(&renamed), &|_| true)
+            .unwrap()
+            .unwrap()
+            .commit();
+        let addr = declared("ADDR[7:0]");
+        assert_eq!(
+            declarations(&document),
+            vec![addr.clone(), addr.clone(), addr, declared("DATA[7:0]")]
+        );
+        assert!(!has_range_conflict(&document));
+    }
+
+    #[test]
+    fn a_bus_drawn_touching_takes_the_edited_declaration_whole() {
+        let mut document = touching_buses();
+        let edited = document.buses[0].clone();
+        let widened = declared("DATA[15:0]");
+        BusPropertyEdit::prepare(&mut document, &edited, widened.as_ref(), &|_| true)
+            .unwrap()
+            .unwrap()
+            .commit();
+        assert_eq!(
+            declarations(&document),
+            vec![
+                widened.clone(),
+                widened.clone(),
+                widened,
+                declared("DATA[7:0]")
+            ]
+        );
+        assert!(!has_range_conflict(&document));
+
+        let mut document = touching_buses();
+        let edited = document.buses[0].clone();
+        BusPropertyEdit::prepare(&mut document, &edited, None, &|_| true)
+            .unwrap()
+            .unwrap()
+            .commit();
+        assert_eq!(
+            declarations(&document),
+            vec![None, None, None, declared("DATA[7:0]")]
+        );
+        assert!(!has_range_conflict(&document));
+    }
+
+    /// The rename's touch rule and the extractor's agree: two buses with
+    /// different declarations are a range conflict exactly where the rename
+    /// would carry one with the other.
+    #[test]
+    fn the_rename_touch_rule_matches_the_extractors_range_conflict() {
+        let p = Point::new;
+        let cases = [
+            (
+                "T on the interior",
+                vec![p(0, 0), p(200, 0)],
+                vec![p(100, 0), p(100, 100)],
+                true,
+            ),
+            (
+                "shared end",
+                vec![p(0, 0), p(200, 0)],
+                vec![p(200, 0), p(200, 100)],
+                true,
+            ),
+            (
+                "end to end",
+                vec![p(0, 0), p(100, 0)],
+                vec![p(100, 0), p(200, 0)],
+                true,
+            ),
+            (
+                "collinear overlap",
+                vec![p(0, 0), p(150, 0)],
+                vec![p(100, 0), p(300, 0)],
+                true,
+            ),
+            (
+                "one inside the other",
+                vec![p(0, 0), p(300, 0)],
+                vec![p(100, 0), p(200, 0)],
+                true,
+            ),
+            (
+                "corner on the interior",
+                vec![p(0, 0), p(200, 0)],
+                vec![p(50, 100), p(100, 0), p(150, 100)],
+                true,
+            ),
+            (
+                "diagonal T",
+                vec![p(0, 0), p(100, 100)],
+                vec![p(50, 50), p(100, 0)],
+                true,
+            ),
+            (
+                "X crossing",
+                vec![p(0, 0), p(200, 0)],
+                vec![p(100, -100), p(100, 100)],
+                false,
+            ),
+            (
+                "diagonal X off the grid",
+                vec![p(0, 0), p(3, 1)],
+                vec![p(0, 1), p(3, 0)],
+                false,
+            ),
+            (
+                "polyline crossing twice",
+                vec![p(0, 0), p(200, 0)],
+                vec![p(50, -50), p(100, 50), p(150, -50)],
+                false,
+            ),
+            (
+                "collinear apart",
+                vec![p(0, 0), p(100, 0)],
+                vec![p(110, 0), p(200, 0)],
+                false,
+            ),
+            (
+                "parallel",
+                vec![p(0, 0), p(100, 0)],
+                vec![p(0, 10), p(100, 10)],
+                false,
+            ),
+            (
+                "end short of the other",
+                vec![p(0, 0), p(200, 0)],
+                vec![p(100, 1), p(100, 90)],
+                false,
+            ),
+        ];
+        for (case, left, right, touching) in cases {
+            let left = Bus::new(1, left, declared("DATA[7:0]")).unwrap();
+            let right = Bus::new(2, right, declared("ADDR[7:0]")).unwrap();
+            let document = SchematicDocument {
+                buses: vec![left.clone(), right.clone()],
+                ..SchematicDocument::default()
+            };
+            assert_eq!(has_range_conflict(&document), touching, "{case}: extractor");
+            assert_eq!(buses_touch(&left, &right), touching, "{case}: rename");
+            assert_eq!(
+                buses_touch(&right, &left),
+                touching,
+                "{case}: rename, reversed"
+            );
+        }
     }
 }

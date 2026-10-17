@@ -125,8 +125,8 @@ pub use selection::{
 };
 pub use snap::{SnapEngine, SnapResult};
 pub use state::{
-    ActiveSheetTopology, MoveSelectionMode, PendingStimulusPlacement, SchematicState,
-    StretchOrthogonalPolicy, StretchTarget,
+    ActiveSheetTopology, DragRubberBand, MoveSelectionMode, PendingStimulusPlacement,
+    SchematicState, StretchOrthogonalPolicy, StretchTarget,
 };
 pub(crate) use state::{SchematicEditorMut, SchematicEditorRef, SchematicSession};
 pub use tool::Tool;

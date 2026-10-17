@@ -10,7 +10,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use egui::{Context, Grid, RichText, ScrollArea, Ui, Vec2};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::workspace::DesignProjection;
 use crate::state::{
     BundleWidthMismatchPolicy, BusDeclaration, BusDirection, BusTargetKind, CellViewRef,
@@ -244,19 +243,15 @@ enum ConnectivityBodyAction {
 }
 
 pub(crate) fn open_connectivity_manager(state: &mut AppState) {
+    // The command is greyed with no project open.
     if !state.project_lifecycle.is_open() {
-        state.push_user_message(ConsoleMessage::warning(
-            "Connectivity and bus manager requires an open project.",
-        ));
         return;
     }
     if !matches!(
         state.workspace.content.active_view_type(),
         crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
     ) {
-        state.push_user_message(ConsoleMessage::warning(
-            "Connectivity and bus manager requires a schematic or testbench view.",
-        ));
+        state.prompt("Connectivity and bus manager needs a schematic or testbench view.");
         return;
     }
     crate::schematic::view::retain_selection_on_active_sheet(state);
@@ -381,11 +376,10 @@ fn build_report(
         &state.workspace.content.active_view.key(),
     );
     let drc = check_projected_open_view(state, policy, &projection)?;
-    // Typed-bus geometry, the bus rows, and every reveal anchor below stay on
-    // the document the canvas paints: a materialized page carries namespaced
-    // coordinates that would scroll the editor off the design.
-    let bus_analysis =
-        rspice_design::connectivity::bus::analyze_bus_connectivity(state.schematic.document());
+    // The bus rows and every reveal anchor below stay on the document the
+    // canvas paints: a materialized page carries namespaced coordinates that
+    // would scroll the editor off the design.
+    let bus_analysis = canvas_bus_analysis(state, subject);
     let nets = design_nets
         .iter()
         .map(|net| build_net_row(net, subject, &drc))
@@ -460,6 +454,41 @@ fn build_report(
         repairs,
         drc,
     })
+}
+
+/// The open view's typed-bus findings as the design check judges them, each
+/// located where its sheet draws it.
+///
+/// The judgement reads the projected page, which lays the sheets apart: a bus
+/// drawn where another sheet's bus runs touches nothing, while one stem
+/// declared in two notations is still one deck name across sheets. Each
+/// finding's point is then taken back off its sheet's stride, onto the canvas.
+fn canvas_bus_analysis(
+    state: &AppState,
+    subject: &rspice_design::projection::ProjectedSchematic,
+) -> rspice_design::connectivity::bus::BusConnectivityAnalysis {
+    let mut analysis =
+        rspice_design::connectivity::bus::analyze_bus_connectivity(subject.document());
+    let key = state.workspace.content.active_schematic_reference().key();
+    let Some(sheets) = state
+        .workspace
+        .content
+        .design_management
+        .sheet_catalog(&key)
+    else {
+        return analysis;
+    };
+    let on_canvas = |point| {
+        rspice_design::schematic::owned::projected_point_sheet(sheets, point)
+            .map_or(point, |(_, point)| point)
+    };
+    for diagnostic in &mut analysis.diagnostics {
+        diagnostic.point = on_canvas(diagnostic.point);
+    }
+    for binding in &mut analysis.scalar_taps {
+        binding.point = on_canvas(binding.point);
+    }
+    analysis
 }
 
 fn build_net_row(
@@ -1412,9 +1441,8 @@ impl RSpiceApp {
         self.state.schematic.session.editor.bus_drawing.declaration = Some(declaration);
         self.state.schematic.session.editor.tool = Tool::Bus;
         self.state.dialogs.connectivity_manager.close();
-        self.state.push_user_message(ConsoleMessage::info(
-            "Typed bus placement armed. Click the first point, route the vector, then finish the bus.",
-        ));
+        self.state
+            .prompt("Bus placement armed. Click the first point, route the bus, then finish it.");
         Ok(())
     }
 
@@ -1457,10 +1485,11 @@ impl RSpiceApp {
         self.state.schematic.arm_tool(Tool::Wire);
         self.state.start_canvas_wire(ctx, choice.start);
         self.state.schematic.session.editor.center_request = Some(choice.destination);
-        self.state.push_user_message(ConsoleMessage::info(format!(
-            "Wire routing armed from {}, {} to {}. The destination is centered; route deliberately and finish on that exact endpoint.",
+        self.state.prompt(format!(
+            "Wire routing armed from {}, {} to {}. The destination is centred; finish the wire on \
+             its endpoint.",
             choice.start.x, choice.start.y, choice.label
-        )));
+        ));
         Ok(())
     }
 }
@@ -1529,13 +1558,24 @@ fn validate_repair_candidate(
     candidate: &SchematicState,
     policy: &ConnectivityPolicy,
 ) -> Result<(), String> {
-    let check = |open_view: &SchematicState| -> Result<DrcResult, String> {
+    // Typed-bus findings are counted on the same projected page as the check,
+    // so neither count pairs buses drawn on different sheets.
+    let check = |open_view: &SchematicState| -> Result<(DrcResult, usize), String> {
         let projection = projection_with_open_view(state, policy, open_view)?;
-        check_projected_open_view(state, policy, &projection)
+        let bus_findings = rspice_design::connectivity::bus::analyze_bus_connectivity(
+            projected_open_view(state, &projection)?.document(),
+        )
+        .diagnostics
+        .len();
+        Ok((
+            check_projected_open_view(state, policy, &projection)?,
+            bus_findings,
+        ))
     };
-    let before = severe_drc_counts(&check(&state.schematic)?);
-    let after = severe_drc_counts(&check(candidate)?);
-    for (kind, count) in after {
+    let (before, before_bus) = check(&state.schematic)?;
+    let (after, after_bus) = check(candidate)?;
+    let before = severe_drc_counts(&before);
+    for (kind, count) in severe_drc_counts(&after) {
         if count > before.get(&kind).copied().unwrap_or_default() {
             return Err(format!(
                 "Candidate validation introduced a new {} finding; no changes were applied.",
@@ -1543,14 +1583,6 @@ fn validate_repair_candidate(
             ));
         }
     }
-    let before_bus =
-        rspice_design::connectivity::bus::analyze_bus_connectivity(state.schematic.document())
-            .diagnostics
-            .len();
-    let after_bus =
-        rspice_design::connectivity::bus::analyze_bus_connectivity(candidate.document())
-            .diagnostics
-            .len();
     if after_bus > before_bus {
         return Err(
             "Candidate validation introduced a new typed-bus diagnostic; no changes were applied."

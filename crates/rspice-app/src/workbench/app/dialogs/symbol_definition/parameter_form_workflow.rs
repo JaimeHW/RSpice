@@ -4,7 +4,7 @@ use egui::{
     Align, ComboBox, Context, Frame, Grid, Layout, Margin, ScrollArea, Stroke, TextEdit, Ui, vec2,
 };
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{
     CellViewRef, ParameterInheritance, PropertyType, SymbolParameterConstraints,
     SymbolParameterDefault, SymbolParameterField, SymbolParameterForm, SymbolParameterSection,
@@ -202,10 +202,14 @@ impl RSpiceApp {
         })();
         match result {
             Ok(revision) => {
-                self.state.push_user_message(ConsoleMessage::info(format!(
-                    "Saved parameter form revision {revision} for {}/{}",
-                    target.library, target.cell
-                )));
+                self.state.record(
+                    LogSeverity::Info,
+                    LogSource::Studio,
+                    format!(
+                        "Saved the parameter form of {}/{} at revision {revision}.",
+                        target.library, target.cell
+                    ),
+                );
                 self.state.dialogs.symbol_parameter_form.close_and_discard();
             }
             Err(error) => self.state.dialogs.symbol_parameter_form.validation_error = Some(error),

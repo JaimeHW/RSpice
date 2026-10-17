@@ -3,9 +3,6 @@
 use super::{document::SchematicDocument, wire::WireConnection};
 use rspice_design_model::Point;
 
-/// Snap distance in grid units for terminal connections.
-const SNAP_DISTANCE: i32 = 1;
-
 /// Rebuild all wire connections based on current positions
 pub fn rebuild_connections(document: &mut SchematicDocument) {
     let terminals = document
@@ -44,11 +41,12 @@ pub fn rebuild_connections_from_terminals(
         })
         .collect();
 
+    // Exactly on the pin, as the extractor joins them: a wire end one unit
+    // away leaves the pin open, so it is no connection to carry either.
     for (wire_id, pos, point_index) in wire_endpoints {
-        if let Some((comp_id, term_name, _)) = terminals.iter().find(|(_, _, terminal)| {
-            (pos.x - terminal.x).abs() <= SNAP_DISTANCE
-                && (pos.y - terminal.y).abs() <= SNAP_DISTANCE
-        }) {
+        if let Some((comp_id, term_name, _)) =
+            terminals.iter().find(|(_, _, terminal)| *terminal == pos)
+        {
             document.connections.push(WireConnection::new(
                 wire_id,
                 point_index,
@@ -56,5 +54,54 @@ pub fn rebuild_connections_from_terminals(
                 term_name.clone(),
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schematic::wire::Wire;
+
+    /// A wire end one unit off a pin is not on it: the extractor leaves the
+    /// pin open, so the record that rubber-bands it must not claim it either.
+    #[test]
+    fn only_a_wire_end_exactly_on_a_pin_is_recorded_as_connected() {
+        let pin = Point::new(40, 0);
+        let mut document = SchematicDocument {
+            wires: vec![
+                Wire::segment(1, Point::new(41, 0), Point::new(100, 0)),
+                Wire::segment(2, Point::new(40, 1), Point::new(40, 100)),
+                Wire::segment(3, pin, Point::new(-100, 0)),
+            ],
+            ..SchematicDocument::default()
+        };
+
+        rebuild_connections_from_terminals(&mut document, &[(7, "1".to_owned(), pin)]);
+
+        assert_eq!(
+            document.connections,
+            vec![WireConnection::new(3, 0, 7, "1".to_owned())]
+        );
+    }
+
+    /// Wire ends at the far corners of the coordinate range are compared,
+    /// not subtracted.
+    #[test]
+    fn extreme_coordinates_compare_without_overflow() {
+        let mut document = SchematicDocument {
+            wires: vec![Wire::segment(
+                1,
+                Point::new(i32::MIN, i32::MIN),
+                Point::new(i32::MAX, i32::MIN),
+            )],
+            ..SchematicDocument::default()
+        };
+
+        rebuild_connections_from_terminals(
+            &mut document,
+            &[(7, "1".to_owned(), Point::new(i32::MAX, i32::MAX))],
+        );
+
+        assert!(document.connections.is_empty());
     }
 }

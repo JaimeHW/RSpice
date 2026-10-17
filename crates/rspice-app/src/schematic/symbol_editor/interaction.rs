@@ -1,6 +1,5 @@
 //! App validation, undo and publication for symbol canvas requests.
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{SymbolDocument, SymbolEditorMetadata};
 use crate::workbench::AppState;
 use rspice_schematic_editor::symbol_editor::SymbolViewport;
@@ -62,7 +61,7 @@ fn apply_canvas_request(
         state.deny_read_only_edit();
     }
     if let Some(refusal) = outcome.refusal {
-        state.push_user_message(ConsoleMessage::warning(refusal));
+        state.prompt(refusal);
     }
     if let Some(before) = outcome.undo_before {
         // A new gesture: whatever an earlier one held open is over.
@@ -71,7 +70,7 @@ fn apply_canvas_request(
     }
     if outcome.changed {
         if let Err(error) = state.store_symbol_canvas_frame(document, metadata) {
-            state.push_user_message(ConsoleMessage::warning(error));
+            state.prompt(error);
         } else {
             // Advancing our own revision keeps every event of this drag on one undo entry.
             state.ui.symbol.editor.canvas_source = Some(state.symbol_editor_request_source());

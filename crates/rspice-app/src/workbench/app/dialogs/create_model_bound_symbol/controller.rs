@@ -1,6 +1,6 @@
 //! Create-symbol dialog flow.
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::model_library::ModelType;
 use crate::state::{
     CellViewRef, GeneratedSymbolViews, ModelBoundSymbolDefinition, ParameterInheritance,
@@ -36,9 +36,7 @@ pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
                 .map(|library| library.name.clone())
         });
     let Some(library) = library else {
-        state.push_user_message(ConsoleMessage::warning(
-            "Create symbol requires a writable design library.".to_owned(),
-        ));
+        state.prompt("Create symbol needs a writable design library.");
         return;
     };
 
@@ -965,7 +963,7 @@ pub(super) fn commit_create_model_bound_symbol(state: &mut AppState) -> Result<(
     let library_name = definition.identity.library.clone();
     let cell_name = definition.identity.cell.clone();
     let revision = definition.identity.revision;
-    let digest = definition
+    definition
         .validation_digest()
         .map_err(|error| error.to_string())?;
     let mut candidate = state.library_manager.clone();
@@ -1015,8 +1013,10 @@ pub(super) fn commit_create_model_bound_symbol(state: &mut AppState) -> Result<(
     state
         .workbench
         .activate(crate::workbench::state::Workspace::Design);
-    state.push_user_message(ConsoleMessage::info(format!(
-        "Created {library_name}/{cell_name}/symbol revision {revision} ({digest})"
-    )));
+    state.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        format!("Created symbol {library_name}/{cell_name} at revision {revision}."),
+    );
     Ok(())
 }

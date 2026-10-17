@@ -61,11 +61,10 @@ fn incompatible_result_viewer_command_is_disabled_and_cannot_navigate() {
         app.state.ui.results.session.viewer,
         crate::workbench::ResultViewer::Waves
     );
-    assert!(
-        app.state
-            .log_buffer
-            .entries()
-            .any(|message| message.message.contains("cannot be opened"))
+    assert_eq!(
+        app.state.prompt_text(),
+        None,
+        "a disabled command is silent"
     );
 }
 

@@ -34,7 +34,7 @@ use super::new_view_dialog::{
     starter_veriloga_source, verilog_module_name, verilog_port_declaration,
 };
 use super::{RSpiceApp, VERILOGA_LIBRARY_NAME};
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::workspace::VERILOGA_VIEW;
 use crate::state::{
     Cell, CellViewRef, LibraryManager, PortDirection, PortSpec, ProjectSourceBundle,
@@ -434,10 +434,14 @@ impl RSpiceApp {
             .workbench
             .activate(crate::workbench::state::Workspace::Design);
         self.state.ui.code_workspace.veriloga.receipt = Some(receipt);
-        self.state.push_user_message(ConsoleMessage::info(format!(
-            "Created {} with a starter module and the symbol generated from its ports. Write the module and compile it.",
-            reference.display_path()
-        )));
+        self.state.record(
+            LogSeverity::Info,
+            LogSource::Studio,
+            format!(
+                "Created {} with a starter module and the symbol generated from its ports. Write the module and compile it.",
+                reference.display_path()
+            ),
+        );
         Ok(reference)
     }
 }

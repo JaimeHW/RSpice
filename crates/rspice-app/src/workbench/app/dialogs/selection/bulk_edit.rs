@@ -9,7 +9,6 @@ use std::collections::{BTreeSet, HashSet};
 
 use egui::{ComboBox, Context, Grid, RichText, ScrollArea, TextEdit, Ui, Vec2};
 
-use crate::diagnostics::ConsoleMessage;
 pub(crate) use crate::state::bulk_edit::{SelectionBulkProperty, SelectionBulkUnsetBehavior};
 use crate::state::bulk_edit::{
     apply_bulk_edit, mutate_component, parameter_key_from_filter, validate_bulk_value,
@@ -503,13 +502,13 @@ impl RSpiceApp {
         }
         self.state.sync_active_schematic_to_workspace();
         let analyses = self.state.sim_setup.enabled_analysis_instance_count();
-        self.state.push_user_message(ConsoleMessage::info(format!(
-            "Bulk edit committed {} object{} in one undo transaction; {} enabled analysis task{} affected.",
+        self.state.prompt(format!(
+            "Bulk edit changed {} object{} as one undo step; {} enabled analys{} affected.",
             receipt.changed,
             if receipt.changed == 1 { "" } else { "s" },
             analyses,
-            if analyses == 1 { "" } else { "s" },
-        )));
+            if analyses == 1 { "is" } else { "es" },
+        ));
         self.state.dialogs.selection_bulk_edit.close();
         Ok(())
     }

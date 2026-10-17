@@ -184,6 +184,7 @@ pub enum Command {
     SymbolSave,
     Place(ComponentType),
     RotateSelection,
+    RotateSelectionCounterClockwise,
     MirrorSelectionHorizontal,
     MirrorSelectionVertical,
     AlignSelectionLeft,
@@ -659,6 +660,9 @@ impl Command {
             Self::Place(ComponentType::Port) => Self::PlacePin.spec(),
             Self::Place(_) => spec("place-component", "Place component", "Design"),
             Self::RotateSelection => spec("rotate-selection", "Rotate clockwise", "Design"),
+            Self::RotateSelectionCounterClockwise => {
+                spec("rotate-selection-ccw", "Rotate counter-clockwise", "Design")
+            }
             Self::MirrorSelectionHorizontal => spec(
                 "mirror-selection-horizontal",
                 "Mirror about vertical axis",
@@ -786,7 +790,7 @@ impl Command {
             ),
             Self::OpenTaskDeck => spec("open-task-deck", OPEN_TASK_DECK, "Results"),
             Self::RevealProducerLog => {
-                spec("reveal-producer-log", "Reveal producer log", "Results")
+                spec("reveal-producer-log", "Open producing run log", "Results")
             }
             Self::CreateResultDocument => spec(
                 "create-result-document",
@@ -1281,6 +1285,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::Place(ComponentType::VoltageSource),
     Command::Place(ComponentType::CurrentSource),
     Command::RotateSelection,
+    Command::RotateSelectionCounterClockwise,
     Command::MirrorSelectionHorizontal,
     Command::MirrorSelectionVertical,
     Command::AlignSelectionLeft,

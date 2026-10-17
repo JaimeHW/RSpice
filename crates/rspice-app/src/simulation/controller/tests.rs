@@ -487,8 +487,7 @@ fn plan_owned_runtime_retention_enforces_authenticated_storage_ceiling() {
         .retain_completed_analysis(&mut state, Some(run_sequence), analysis, provenance)
         .expect_err("oversized evidence must not enter the retained run");
 
-    assert!(error.contains("authenticated"));
-    assert!(error.contains("storage ceiling"));
+    assert!(error.contains("storage limit"));
     assert!(
         state
             .simulation
@@ -532,7 +531,7 @@ fn provisional_live_result_obeys_the_authenticated_storage_ceiling() {
         )
         .expect_err("live evidence must obey the same immutable storage ceiling");
 
-    assert!(error.contains("storage ceiling"));
+    assert!(error.contains("storage limit"));
     assert!(
         state
             .simulation
@@ -796,9 +795,11 @@ fn stale_cancellation_request_never_mutates_run_lifecycle() {
     assert!(state.simulation.execution.abort_request.is_none());
     assert!(
         state
-            .log_buffer
-            .entries()
-            .any(|entry| entry.message.contains("stale or unbound"))
+            .workbench
+            .prompt
+            .as_ref()
+            .is_some_and(|prompt| prompt.text.starts_with("Nothing to cancel")),
+        "a stale request is answered on the status bar, not logged"
     );
 }
 
@@ -1199,7 +1200,7 @@ fn failed_prerequisite_skips_dependent_prepared_task_with_exact_provenance() {
         skipped
             .error_message
             .as_deref()
-            .is_some_and(|message| message.contains("prerequisite analysis result"))
+            .is_some_and(|message| message.contains("which did not complete"))
     );
     assert_eq!(
         skipped
@@ -1288,5 +1289,6 @@ fn browser_worker_transfer_protocol_matches_rust_transport() {
 
 mod autonomous_periodic;
 mod periodic_port_noise;
+mod run_log;
 
 mod pvt_family;

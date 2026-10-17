@@ -5,7 +5,7 @@
 //! deliberately excluded, so a restored session cannot resume authority it
 //! no longer holds.
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
 use crate::workbench::app_state::AppState;
 
@@ -15,11 +15,24 @@ const LEGACY_SESSION_PROJECT_ID_NAMESPACE: uuid::Uuid =
 impl AppState {
     /// Restore eframe's RON session, including receipts emitted before their
     /// writer and independently recoverable decoder shared a wire format.
+    ///
+    /// `None` only when nothing was stored. A stored session that will not
+    /// decode is replaced by a new one whose Console says so, with the cause:
+    /// otherwise the reader's project and layout vanish without a word.
     pub(crate) fn restore_eframe_session(storage: &dyn eframe::Storage) -> Option<Self> {
         let text = storage.get_string(eframe::APP_KEY)?;
-        Self::from_session_ron(&text)
-            .inspect_err(|error| log::warn!("Failed to restore RSpice session: {error}"))
-            .ok()
+        Some(Self::from_session_ron(&text).unwrap_or_else(|error| {
+            let mut state = Self::default();
+            state.record(
+                LogSeverity::Warning,
+                LogSource::Studio,
+                format!(
+                    "The previous session could not be restored, so a new one was started: \
+                     {error}"
+                ),
+            );
+            state
+        }))
     }
 
     fn from_session_ron(text: &str) -> Result<Self, ron::error::SpannedError> {
@@ -316,14 +329,23 @@ impl<'de> serde::Deserialize<'de> for AppState {
             browser_project_binding_receipt,
             ..Default::default()
         };
-        match annotation_restoration {
-            Ok(0) => {}
-            Ok(count) => state.push_user_message(ConsoleMessage::warning(format!(
-                "Applied approved reference annotation to {count} component(s) and updated their live references."
-            ))),
-            Err(error) => state.push_user_message(ConsoleMessage::error(format!(
-                "Session reference annotation restoration failed: {error}. Recovered documents were preserved. Correct the references, then check the design to retry."
-            ))),
+        let annotation_outcome = match annotation_restoration {
+            Ok(0) => None,
+            Ok(count) => Some((
+                LogSeverity::Warning,
+                format!(
+                    "Applied approved reference annotation to {count} component(s) and updated their live references."
+                ),
+            )),
+            Err(error) => Some((
+                LogSeverity::Error,
+                format!(
+                    "Session reference annotation restoration failed: {error}. Recovered documents were preserved. Correct the references, then check the design to retry."
+                ),
+            )),
+        };
+        if let Some((severity, text)) = annotation_outcome {
+            state.record(severity, LogSource::Studio, text);
         }
         // Snap targets and unfinished-conductor routing are session-owned
         // editor presentation. Schematic documents deliberately skip them,
@@ -393,20 +415,14 @@ impl<'de> serde::Deserialize<'de> for AppState {
                     "Simulation results were not restored because their persisted session data is invalid: {error}"
                 )
             });
-        if let Some(warning) = simulation_results_warning {
-            state.push_user_message(ConsoleMessage::warning(warning));
-        }
-        for warning in execution_warnings {
-            state.push_user_message(ConsoleMessage::warning(warning));
-        }
-        for warning in [native_receipt_warning, browser_receipt_warning]
+        for warning in simulation_results_warning
             .into_iter()
-            .flatten()
+            .chain(execution_warnings)
+            .chain(native_receipt_warning)
+            .chain(browser_receipt_warning)
+            .chain(navigation_warning)
         {
-            state.push_user_message(ConsoleMessage::warning(warning));
-        }
-        if let Some(warning) = navigation_warning {
-            state.push_user_message(ConsoleMessage::warning(warning));
+            state.record(LogSeverity::Warning, LogSource::Studio, warning);
         }
         if let Some(recovery) = state.workbench.model_editor_recovery.clone() {
             match recovery.restore(
@@ -416,9 +432,11 @@ impl<'de> serde::Deserialize<'de> for AppState {
                 Ok(draft) => state.workbench.model_editor.draft = Some(draft),
                 Err(error) => {
                     state.workbench.model_editor_recovery = None;
-                    state.push_user_message(ConsoleMessage::warning(format!(
-                        "Unsaved model-editor recovery was not reopened because {error}."
-                    )));
+                    state.record(
+                        LogSeverity::Warning,
+                        LogSource::Studio,
+                        format!("Unsaved model-editor recovery was not reopened because {error}."),
+                    );
                 }
             }
         }

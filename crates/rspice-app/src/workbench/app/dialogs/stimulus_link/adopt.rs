@@ -325,7 +325,7 @@ pub(super) fn render(
             let Some(definition) = picked else { return };
             match super::commit_adoption(state, session.component_id, &definition) {
                 Ok(line) => {
-                    state.push_user_message(crate::diagnostics::ConsoleMessage::info(line));
+                    state.prompt(line);
                     state.dialogs.stimulus_link.close();
                 }
                 Err(refusal) => state.dialogs.stimulus_link.error = Some(refusal),

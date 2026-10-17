@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 #[cfg(test)]
 use std::path::PathBuf;
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::LogSeverity;
 #[cfg(test)]
 use crate::simulation::config::NoiseSweepType;
 use crate::simulation::execution::TouchstoneExportPolicy;
@@ -80,6 +80,8 @@ mod projection_ratchet;
 mod results_convert;
 mod results_post;
 mod results_update;
+mod run_lines;
+use run_lines::write_run_line;
 #[cfg(test)]
 pub(crate) mod test_execution;
 mod touchstone;
@@ -186,6 +188,11 @@ pub struct SimulationController {
     current_source_domain: AnalysisResultSourceDomain,
     /// Stable run ID that owns the in-flight batch.
     current_run_id: Option<u64>,
+    /// When the runner took the active task, for its line in the run's log.
+    current_task_started: Option<crate::time_compat::Instant>,
+    /// What the run advised when it started, which its tasks' engine logs
+    /// repeat and its log states once.
+    current_advisories: Vec<String>,
     /// Exact accepted samples observed for the current transient task. These
     /// back both adaptive live presentation and a truthful partial result if
     /// the task terminates before returning a full engine result.
@@ -255,6 +262,8 @@ impl SimulationController {
                 crate::simulation::execution::SavePolicy::RetainEngineProducedResults,
             current_source_domain: AnalysisResultSourceDomain::SimulationPlan,
             current_run_id: None,
+            current_task_started: None,
+            current_advisories: Vec::new(),
             live_transient: LiveTransientAccumulator::default(),
             pending_analyses: VecDeque::new(),
             successful_analysis_instances: HashSet::new(),
@@ -318,9 +327,11 @@ impl SimulationController {
                     })
                     .and_then(|run| run.mark_cancelling());
                 if let Err(error) = cancellation_result {
-                    state.push_sim_message(ConsoleMessage::error(format!(
-                        "Simulation cancellation was rejected: {error}"
-                    )));
+                    self.run_line(
+                        state,
+                        LogSeverity::Error,
+                        format!("Cancellation was refused: {error}"),
+                    );
                 } else {
                     self.runner.abort();
                     // Stop the batch from dispatching any additional task, but
@@ -333,15 +344,10 @@ impl SimulationController {
                         campaign.cancelled = true;
                     }
                     state.simulation.execution.status = "Cancelling".to_owned();
-                    state.push_sim_message(ConsoleMessage::warning(
-                        "Simulation cancellation requested".to_owned(),
-                    ));
+                    self.run_line(state, LogSeverity::Info, "Cancellation requested");
                 }
             } else {
-                state.push_sim_message(ConsoleMessage::warning(
-                    "Ignored a stale or unbound simulation cancellation request; the active execution was left intact"
-                        .to_owned(),
-                ));
+                state.prompt("Nothing to cancel: the run this request named is no longer running.");
             }
         }
 
@@ -432,10 +438,7 @@ impl SimulationController {
 
     fn start_authorized_snapshot(&mut self, state: &mut AppState) {
         if self.has_active_batch() {
-            state.push_sim_message(ConsoleMessage::warning(
-                "A simulation batch is already active; wait for it to finish or abort it before starting another run"
-                    .to_owned(),
-            ));
+            state.prompt("A run is already in progress. Wait for it to finish, or cancel it.");
             return;
         }
 
@@ -445,7 +448,7 @@ impl SimulationController {
                 if state.simulation.execution.run_intent == SimulationRunIntent::SimulateRunSet {
                     state.workbench.preflight.invalidate();
                 }
-                state.push_sim_message(ConsoleMessage::warning(error.to_string()));
+                state.prompt(error.to_string());
                 state.simulation.execution.status = "Run blocked".to_owned();
                 return;
             }
@@ -457,17 +460,25 @@ impl SimulationController {
             state.workbench.preflight.invalidate();
         }
         if let Err(error) = self.start_authorized_dispatch(state, dispatch, None) {
-            state.push_sim_message(ConsoleMessage::error(error.to_string()));
+            state.record(
+                LogSeverity::Error,
+                crate::diagnostics::LogSource::Run,
+                format!("The run could not start: {error}"),
+            );
             state.simulation.execution.status = "Run blocked".to_owned();
         }
     }
 
+    /// Open a run for an authorized dispatch and start its first task.
+    ///
+    /// A campaign member names its membership and the plan it runs.
     fn start_authorized_dispatch(
         &mut self,
         state: &mut AppState,
         mut dispatch: crate::simulation::execution::AuthorizedRunDispatch,
-        campaign_membership: Option<crate::state::SimulationCampaignMembership>,
+        campaign_member: Option<(crate::state::SimulationCampaignMembership, &str)>,
     ) -> Result<(), crate::simulation::execution::PreparationError> {
+        let (campaign_membership, member_plan) = campaign_member.unzip();
         if let Some(membership) = campaign_membership.as_ref() {
             membership.validate().map_err(|error| {
                 crate::simulation::execution::PreparationError::new(
@@ -510,7 +521,20 @@ impl SimulationController {
         self.current_analysis_idx = 0;
         self.cached_netlist = Some(dispatch.executable_netlist().to_owned());
 
-        if let Some(cross_probe) = dispatch.take_cross_probe()
+        // The design a schematic run solves is the cell its cross-probe map
+        // was read off; a typed deck is its file.
+        let cross_probe = dispatch.take_cross_probe();
+        let design = match &cross_probe {
+            Some(cross_probe) => Some(cross_probe.source_reference.cell.clone()),
+            None => state
+                .workspace
+                .content
+                .netlist_source_path
+                .as_deref()
+                .and_then(std::path::Path::file_name)
+                .map(|name| name.to_string_lossy().into_owned()),
+        };
+        if let Some(cross_probe) = cross_probe
             && campaign_membership.is_none()
         {
             state.simulation.source.cross_probe.update(
@@ -521,10 +545,32 @@ impl SimulationController {
                 cross_probe.topology_version,
             );
         }
+        let mut analyses: Vec<&str> = Vec::new();
+        for task in dispatch.tasks() {
+            let analysis = Self::analysis_name_for_spec(task.spec());
+            if !analyses.contains(&analysis) {
+                analyses.push(analysis);
+            }
+        }
+        run_lines::announce_run_start(state, run_id, design.as_deref(), &analyses);
+        if let (Some(membership), Some(plan)) = (campaign_membership.as_ref(), member_plan) {
+            write_run_line(
+                state,
+                Some(run_id),
+                LogSeverity::Info,
+                format!(
+                    "Campaign '{}', member {} of {}: plan '{plan}'",
+                    membership.name(),
+                    membership.member_index(),
+                    membership.member_count()
+                ),
+            );
+        }
         self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
         for advisory in dispatch.advisories() {
-            state.push_sim_message(ConsoleMessage::warning(advisory.clone()));
+            write_run_line(state, Some(run_id), LogSeverity::Warning, advisory.clone());
         }
+        self.current_advisories = dispatch.advisories().to_vec();
 
         self.point_families.clear();
         for task in dispatch.tasks() {
@@ -582,17 +628,8 @@ impl SimulationController {
             let manual_source = dispatch.manual_source().unwrap_or_default().to_owned();
             state.ui.netlist.pending_manual_run_id = Some(run_id);
             state.ui.netlist.pending_run_buffer = Some(manual_source);
-            state.push_sim_message(ConsoleMessage::info(
-                "Running sealed manually edited netlist source".to_owned(),
-            ));
         }
 
-        if self.total_analyses > 1 {
-            state.push_sim_message(ConsoleMessage::info(format!(
-                "Starting simulation batch: {} analyses",
-                self.total_analyses
-            )));
-        }
         self.pending_analyses = dispatch.into_tasks();
         self.start_next_analysis(state);
         Ok(())
@@ -635,9 +672,8 @@ impl SimulationController {
         if let Some(run_sequence) = interrupted {
             // An interruption is a run failure like any other: the verdict
             // flips, a terminal lifecycle is sealed, and the generation moves
-            // once, after both. The reader is told only when the seal took —
-            // a lifecycle this run could not enter is an internal fault, not
-            // news about their simulation.
+            // once, after both. The run's log says which happened: the
+            // interruption, or why the run could not be closed.
             let errors = self.seal_failed_run(
                 state,
                 Some(run_sequence),
@@ -645,15 +681,23 @@ impl SimulationController {
                 Some(SimulationRunLifecycle::Interrupted),
             );
             if errors.is_empty() {
-                state.push_sim_message(ConsoleMessage::warning(
-                    "Simulation execution was interrupted because its design context changed"
-                        .to_owned(),
-                ));
+                write_run_line(
+                    state,
+                    Some(run_sequence),
+                    LogSeverity::Error,
+                    "Interrupted: the design it was running was closed or replaced",
+                );
             } else {
                 for error in errors {
-                    log::error!("Failed to seal interrupted simulation run lifecycle: {error}");
+                    write_run_line(
+                        state,
+                        Some(run_sequence),
+                        LogSeverity::Error,
+                        format!("The interrupted run could not be closed: {error}"),
+                    );
                 }
             }
+            run_lines::announce_run_end(state, run_sequence);
         }
         self.reset_for_design_replacement();
         state.simulation.execution.active_execution = None;
@@ -752,13 +796,24 @@ impl SimulationController {
             skipped_blocked_task = true;
             self.current_analysis_idx += 1;
             let analysis_name = candidate.label().to_owned();
+            // Named by the results the run retained for them, which a failed
+            // or skipped prerequisite leaves too.
+            let run = self
+                .current_run_id
+                .and_then(|run_sequence| state.simulation.retained.run_by_sequence(run_sequence));
             let unavailable = unavailable_dependencies
                 .iter()
-                .map(ToString::to_string)
+                .map(|dependency| {
+                    run.and_then(|run| run.find_analysis_by_source_instance(*dependency))
+                        .map_or_else(
+                            || "an earlier analysis".to_owned(),
+                            |analysis| analysis.label.clone(),
+                        )
+                })
                 .collect::<Vec<_>>()
                 .join(", ");
             let message = format!(
-                "Skipped {analysis_name}: prerequisite analysis result(s) {unavailable} did not complete successfully"
+                "Skipped {analysis_name}: it depends on {unavailable}, which did not complete"
             );
             let provenance = match AnalysisResultProvenance::new_with_authored_source_domain(
                 self.current_source_domain,
@@ -772,17 +827,17 @@ impl SimulationController {
             {
                 Ok(provenance) => provenance,
                 Err(error) => {
-                    let internal = format!(
-                        "Prepared dependent analysis '{analysis_name}' has invalid provenance: {error}"
+                    self.run_line(
+                        state,
+                        LogSeverity::Error,
+                        format!("{analysis_name} could not be identified: {error}"),
                     );
-                    log::error!("{internal}");
-                    state.push_sim_message(ConsoleMessage::error(internal));
                     // Nothing to retain — the provenance the result would have
                     // carried is what failed — but the verdict still flips,
                     // and that is a new generation of the run all the same.
                     let target_run_id = self.target_run_id(state);
                     let errors = self.seal_failed_run(state, target_run_id, None, None);
-                    Self::report_seal_errors(state, errors);
+                    self.report_seal_errors(state, errors);
                     self.pending_analyses.clear();
                     self.finish_simulation_batch(state);
                     return;
@@ -798,8 +853,8 @@ impl SimulationController {
             retain_plan_saved_outputs(&mut failed, candidate.saved_output_contracts());
             let target_run_id = self.target_run_id(state);
             let errors = self.seal_failed_run(state, target_run_id, Some(failed), None);
-            Self::report_seal_errors(state, errors);
-            state.push_sim_message(ConsoleMessage::warning(message));
+            self.report_seal_errors(state, errors);
+            self.run_line(state, LogSeverity::Warning, message);
         };
         log::info!(
             "Starting queued analysis {} ({:?}, instance {}, source revision {}, {} dependencies, config {}, snapshot {})",
@@ -827,18 +882,17 @@ impl SimulationController {
         {
             Ok(provenance) => provenance,
             Err(error) => {
-                let message = format!(
-                    "Prepared analysis '{}' has invalid result provenance: {error}",
-                    analysis_name
+                self.run_line(
+                    state,
+                    LogSeverity::Error,
+                    format!("{analysis_name} could not be identified: {error}"),
                 );
-                log::error!("{message}");
-                state.push_sim_message(ConsoleMessage::error(message));
                 // Nothing to retain — the provenance the result would have
                 // carried is what failed — but the verdict still flips, and
                 // that is a new generation of the run all the same.
                 let target_run_id = self.target_run_id(state);
                 let errors = self.seal_failed_run(state, target_run_id, None, None);
-                Self::report_seal_errors(state, errors);
+                self.report_seal_errors(state, errors);
                 self.pending_analyses.clear();
                 self.finish_simulation_batch(state);
                 return;
@@ -896,28 +950,24 @@ impl SimulationController {
         };
         state.simulation.execution.status = status_msg.clone();
 
-        // Log to console
-        state.push_sim_message(ConsoleMessage::info(format!(
-            "Starting {}...",
+        self.run_line(
+            state,
+            LogSeverity::Info,
             if self.total_analyses > 1 {
                 format!(
-                    "{} ({}/{})",
-                    analysis_name, self.current_analysis_idx, self.total_analyses
+                    "Starting {analysis_name} (analysis {} of {})",
+                    self.current_analysis_idx, self.total_analyses
                 )
             } else {
-                analysis_name.clone()
-            }
-        )));
+                format!("Starting {analysis_name}")
+            },
+        );
 
         // Use cached netlist. If this is unexpectedly missing, fail gracefully
         // instead of panicking so the UI can recover.
         if self.cached_netlist.is_none() {
-            let message = format!(
-                "Internal error: missing cached netlist while starting {}",
-                analysis_name
-            );
-            log::error!("{}", message);
-            state.push_sim_message(ConsoleMessage::error(message.clone()));
+            let message = format!("{analysis_name} could not be started: the run has no netlist");
+            self.run_line(state, LogSeverity::Error, message.clone());
             let target_run_id = self.target_run_id(state);
             let failed_analysis = self.current_provenance.take().map(|provenance| {
                 AnalysisResult::failed(1, self.spec_to_analysis_type(&spec), analysis_name, message)
@@ -928,7 +978,7 @@ impl SimulationController {
                 analysis
             });
             let errors = self.seal_failed_run(state, target_run_id, failed_analysis, None);
-            Self::report_seal_errors(state, errors);
+            self.report_seal_errors(state, errors);
             self.pending_analyses.clear();
             self.finish_simulation_batch(state);
             state.simulation.execution.status = "Error".to_string();
@@ -967,12 +1017,16 @@ impl SimulationController {
             });
         match start_result {
             Ok(()) => {
+                self.current_task_started = Some(crate::time_compat::Instant::now());
                 if let Some(run_id) = self.target_run_id(state)
                     && let Some(run) = state.simulation.retained.run_by_sequence_mut(run_id)
                     && let Err(error) = run.mark_running()
                 {
-                    log::error!("Failed to advance simulation run lifecycle: {error}");
-                    state.push_sim_message(ConsoleMessage::error(error));
+                    self.run_line(
+                        state,
+                        LogSeverity::Error,
+                        format!("The run could not be marked running: {error}"),
+                    );
                 }
                 log::info!(
                     "Analysis {}/{} started successfully",
@@ -981,8 +1035,7 @@ impl SimulationController {
                 );
             }
             Err(e) => {
-                log::error!("Failed to start simulation: {}", e);
-                let error_message = format!("Failed to start simulation: {e}");
+                let error_message = format!("{analysis_name} could not be started: {e}");
                 // Mark run as failed but continue with remaining analyses
                 let target_run_id = self.target_run_id(state);
                 // An analysis the engine would not start is a failure of the
@@ -1009,7 +1062,7 @@ impl SimulationController {
                     analysis
                 });
                 let errors = self.seal_failed_run(state, target_run_id, failed_analysis, None);
-                Self::report_seal_errors(state, errors);
+                self.report_seal_errors(state, errors);
                 // Try to start next analysis if any remain
                 if !self.pending_analyses.is_empty() {
                     self.start_next_analysis(state);
@@ -1037,7 +1090,7 @@ impl SimulationController {
         let target_run_id = self.target_run_id(state);
         let assembled = target_run_id
             .and_then(|run_id| state.simulation.retained.run_by_sequence(run_id))
-            .ok_or_else(|| "PVT family has no target simulation run".to_owned())
+            .ok_or_else(|| "the analysis belongs to no run".to_owned())
             .and_then(|run| self.point_families.family_for(declaration, run));
         let mut analysis = match assembled {
             Ok(result) => self.convert_to_analysis_result_with_metadata_owned(
@@ -1046,7 +1099,11 @@ impl SimulationController {
                 analysis_name,
             ),
             Err(error) => {
-                state.push_sim_message(ConsoleMessage::error(format!("{analysis_name}: {error}")));
+                self.run_line(
+                    state,
+                    LogSeverity::Error,
+                    format!("{analysis_name} failed: {error}"),
+                );
                 AnalysisResult::failed(1, analysis_type, analysis_name, error)
             }
         };
@@ -1057,10 +1114,13 @@ impl SimulationController {
         if let Err(error) =
             self.retain_completed_analysis(state, target_run_id, analysis, provenance)
         {
-            log::error!("{error}");
-            state.push_sim_message(ConsoleMessage::error(error));
+            self.run_line(
+                state,
+                LogSeverity::Error,
+                format!("{analysis_name}: the result was not kept: {error}"),
+            );
             let errors = self.seal_failed_run(state, target_run_id, None, None);
-            Self::report_seal_errors(state, errors);
+            self.report_seal_errors(state, errors);
         }
         if let Some(run_id) = target_run_id {
             state
@@ -1102,8 +1162,7 @@ impl SimulationController {
         analysis: AnalysisResult,
         provenance: AnalysisResultProvenance,
     ) -> Result<bool, String> {
-        let run_id = target_run_id
-            .ok_or_else(|| "completed analysis has no target simulation run".to_owned())?;
+        let run_id = target_run_id.ok_or_else(|| "the analysis belongs to no run".to_owned())?;
         let completed_instance = provenance.source_instance_id();
         let succeeded = analysis.success;
         let analysis = analysis.with_provenance(provenance);
@@ -1111,7 +1170,7 @@ impl SimulationController {
             .simulation
             .retained
             .run_by_sequence_mut(run_id)
-            .ok_or_else(|| format!("completed analysis target run {run_id} does not exist"))?;
+            .ok_or_else(|| format!("run {run_id} is no longer in the result history"))?;
         self.retain_analysis_under_current_policy(run, analysis)?;
         if succeeded {
             self.successful_analysis_instances
@@ -1139,7 +1198,7 @@ impl SimulationController {
             partial,
             Some(SimulationRunLifecycle::Aborted),
         );
-        Self::report_seal_errors(state, errors);
+        self.report_seal_errors(state, errors);
     }
 
     /// Seal a run's failure, as one event.
@@ -1213,12 +1272,11 @@ impl SimulationController {
         errors
     }
 
-    /// Report every error [`Self::seal_failed_run`] returned, the way the
-    /// console reports any other failure.
-    fn report_seal_errors(state: &mut AppState, errors: Vec<String>) {
+    /// Report every error [`Self::seal_failed_run`] returned in the run's log,
+    /// the way it reports any other failure.
+    fn report_seal_errors(&self, state: &mut AppState, errors: Vec<String>) {
         for error in errors {
-            log::error!("{error}");
-            state.push_sim_message(ConsoleMessage::error(error));
+            self.run_line(state, LogSeverity::Error, error);
         }
     }
 
@@ -1306,8 +1364,7 @@ impl SimulationController {
             let requested = already_retained.saturating_add(analysis.retained_storage_bytes());
             if requested > maximum {
                 return Err(format!(
-                    "Run {} retention requires {}, exceeding the authenticated {} storage ceiling",
-                    run.id,
+                    "the run's results would take {}, more than its {} storage limit",
                     rspice_simulation_contract::run_set::format_bytes(requested),
                     rspice_simulation_contract::run_set::format_bytes(maximum),
                 ));
@@ -1316,18 +1373,43 @@ impl SimulationController {
         Ok(())
     }
 
-    /// Write what the engine logged since the previous frame into the Console.
+    /// Write what the engine logged since the previous frame into the run's
+    /// own log.
     ///
     /// Drained beside the live transient samples because it is the same kind of
     /// thing: evidence the running analysis published that the UI thread owns
-    /// presenting. The severity and the `ENG` source are the queue's own
-    /// (`diagnostics::engine_log`), so the projection has one reader.
+    /// presenting. The run's log rather than the session's: a verbose solve
+    /// must not push the session's history out of the Console, and the run
+    /// keeps its account of itself after the session ends.
     fn publish_engine_log(&mut self, state: &mut AppState) {
         let lines = self.runner.drain_engine_log();
         if lines.is_empty() {
             return;
         }
-        crate::diagnostics::engine_log::publish(lines, &mut state.log_buffer);
+        if let Some(run) = self
+            .current_run_id
+            .and_then(|run_sequence| state.simulation.retained.run_by_sequence_mut(run_sequence))
+        {
+            crate::diagnostics::engine_log::publish(
+                lines,
+                &mut run.log,
+                crate::time_compat::checked_unix_time_ms().unwrap_or_default(),
+                &self.current_advisories,
+            );
+        }
+    }
+
+    /// Carry a finished task's withheld and suppressed counts into the run's
+    /// log, once per task, before the next dispatch clears them.
+    fn absorb_engine_log_tally(&mut self, state: &mut AppState) {
+        let tally = self.runner.engine_log_tally();
+        if let Some(run) = self
+            .current_run_id
+            .and_then(|run_sequence| state.simulation.retained.run_by_sequence_mut(run_sequence))
+        {
+            run.log
+                .absorb_engine_seal(tally.withheld, tally.suppressed_warnings);
+        }
     }
 
     fn publish_live_transient_samples(&mut self, state: &mut AppState) {
@@ -1345,13 +1427,28 @@ impl SimulationController {
         if !self.current_save_policy.live_streaming_enabled() {
             return;
         }
+        self.publish_live_preview(state);
+    }
+
+    /// Show the samples accepted so far as the running analysis's live
+    /// result.
+    ///
+    /// A preview that cannot be shown stops for the rest of the task, and its
+    /// reason is written once: this runs every frame, and the solve goes on
+    /// regardless, its result replacing the preview when it completes.
+    fn publish_live_preview(&mut self, state: &mut AppState) {
+        if self.live_transient.preview_stopped() {
+            return;
+        }
         if self.live_transient.take_event_loss_notice() {
-            state.push_sim_message(ConsoleMessage::warning(
+            self.run_line(
+                state,
+                LogSeverity::Warning,
                 "Live event preview stopped because some event data could not be retained or delivered. The preview ends at its last complete point. Final results use the solver's retained event history.",
-            ));
+            );
         }
         let Some(provenance) = self.current_provenance.clone() else {
-            log::error!("Accepted transient samples have no prepared-task provenance");
+            self.stop_live_preview(state, "the running analysis could not be identified");
             return;
         };
         let analysis_type = self
@@ -1389,12 +1486,23 @@ impl SimulationController {
             None => partial,
         };
         let Some(run_id) = self.target_run_id(state) else {
-            log::error!("Accepted transient samples have no target simulation run");
+            self.stop_live_preview(state, "the running analysis belongs to no run");
             return;
         };
         if let Err(error) = self.retain_live_transient_analysis(state, run_id, partial) {
-            log::error!("Could not publish live transient samples: {error}");
+            self.stop_live_preview(state, &error);
         }
+    }
+
+    /// Stop the live preview for the rest of the task, saying why in the
+    /// run's log, or in the session's when there is no run to say it in.
+    fn stop_live_preview(&mut self, state: &mut AppState, reason: &str) {
+        self.live_transient.stop_preview();
+        self.run_line(
+            state,
+            LogSeverity::Warning,
+            format!("Live preview stopped: {reason}"),
+        );
     }
 
     fn retain_live_transient_analysis(
@@ -1407,7 +1515,7 @@ impl SimulationController {
             .simulation
             .retained
             .run_by_sequence_mut(run_id)
-            .ok_or_else(|| format!("live transient target run {run_id} does not exist"))
+            .ok_or_else(|| format!("run {run_id} is no longer in the result history"))
             .and_then(|run| {
                 self.preserve_live_checkpoints(run, &mut partial);
                 self.validate_analysis_retention(run, &partial)?;
@@ -1421,13 +1529,11 @@ impl SimulationController {
 
     /// Record the failure twice, for the two readers it has.
     ///
-    /// The Console gets the session's log of what happened, anchored to the
-    /// objects the engine named for it. The diagnostic store gets the
-    /// condition: this design does not simulate, which stands until the
-    /// inputs it was measured against move. What the engine named used to be
-    /// a second console row; it is now the record's own detail, because a
-    /// restatement of a finding in the log is exactly what made the Problems
-    /// page a list of everything that had ever gone wrong.
+    /// The run's log gets what happened, in the engine's words. The
+    /// diagnostic store gets the condition: this design does not simulate,
+    /// which stands until the inputs it was measured against move, tied to
+    /// the objects the engine named for it so the Problems page can go to
+    /// them. A log line is a record of the event, not a place to jump from.
     fn report_failed_analysis(
         state: &mut AppState,
         analysis: &str,
@@ -1435,26 +1541,7 @@ impl SimulationController {
         attribution: &Option<crate::state::ConvergenceAttribution>,
         run_sequence: Option<u64>,
     ) {
-        // The record checks the attribution against this failure before it
-        // adopts it, and the Console row must name the same objects: an
-        // attribution recorded for a solve a convergence aid later rescued
-        // describes that solve, not this failure.
-        let anchor = attribution
-            .as_ref()
-            .filter(|attribution| attribution.describes(message))
-            .and_then(|attribution| {
-                let nets: Vec<String> = attribution.nets().map(str::to_owned).collect();
-                let devices: Vec<String> = attribution.devices().map(str::to_owned).collect();
-                (!nets.is_empty() || !devices.is_empty())
-                    .then_some(crate::diagnostics::LogAnchor::Simulation { nets, devices })
-            });
-        state.log_buffer.log_anchored(
-            crate::diagnostics::LogSeverity::Error,
-            crate::diagnostics::LogSource::Simulation,
-            message,
-            None,
-            anchor,
-        );
+        write_run_line(state, run_sequence, LogSeverity::Error, message);
         if let Some(run_sequence) = run_sequence {
             state.publish_run_failure(analysis, message, attribution.as_ref(), run_sequence);
         }
@@ -1482,7 +1569,6 @@ impl SimulationController {
 
     /// Finish the simulation batch and clean up state
     fn finish_simulation_batch(&mut self, state: &mut AppState) {
-        let completed_analysis_count = self.total_analyses;
         let completed_run_id = self.target_run_id(state);
         self.point_families.clear();
         let run_success = completed_run_id
@@ -1500,8 +1586,12 @@ impl SimulationController {
                 SimulationRunLifecycle::Failed
             };
             if let Err(error) = run.finish_lifecycle(terminal) {
-                log::error!("Failed to seal completed run lifecycle: {error}");
-                state.push_sim_message(ConsoleMessage::error(error));
+                write_run_line(
+                    state,
+                    Some(run_id),
+                    LogSeverity::Error,
+                    format!("The run could not be closed: {error}"),
+                );
             }
         }
 
@@ -1509,17 +1599,22 @@ impl SimulationController {
         if let Some(run_id) = completed_run_id {
             if state.simulation.select_run_by_sequence(run_id) {
                 state.simulation.complete_run();
+                run_lines::announce_run_end(state, run_id);
             } else {
-                let message = format!(
-                    "Simulation batch target run {run_id} disappeared; no existing result dataset was modified"
+                state.record(
+                    LogSeverity::Error,
+                    crate::diagnostics::LogSource::Run,
+                    format!(
+                        "Run {run_id} left the result history before it finished; no other run's results were changed"
+                    ),
                 );
-                log::error!("{message}");
-                state.push_sim_message(ConsoleMessage::error(message));
             }
         } else {
-            let message = "Simulation batch lost its exact target run; no existing result dataset was modified";
-            log::error!("{message}");
-            state.push_sim_message(ConsoleMessage::error(message.to_owned()));
+            state.record(
+                LogSeverity::Error,
+                crate::diagnostics::LogSource::Run,
+                "A run finished without the run it belonged to; no run's results were changed",
+            );
         }
         Self::promote_manual_deck_baseline(state, run_success, completed_run_id);
 
@@ -1554,30 +1649,6 @@ impl SimulationController {
         } else {
             "Completed with errors".to_string()
         };
-        let summary = if run_success {
-            if completed_analysis_count > 1 {
-                ConsoleMessage::info(format!(
-                    "All {completed_analysis_count} analyses completed successfully"
-                ))
-            } else {
-                ConsoleMessage::info("Simulation completed successfully".to_owned())
-            }
-        } else if completed_analysis_count > 1 {
-            ConsoleMessage::error(format!(
-                "Analysis batch completed with errors ({completed_analysis_count} planned)"
-            ))
-        } else {
-            ConsoleMessage::error("Simulation completed with errors".to_owned())
-        };
-        // Anchored to the run rather than left as prose. This line and the
-        // session notice the shell raises describe the same completion, and
-        // the anchor is what lets the two recognise each other instead of
-        // both being kept as separate activity.
-        state.push_sim_message_anchored(
-            summary,
-            completed_run_id
-                .map(|run_sequence| crate::diagnostics::LogAnchor::ResultRun { run_sequence }),
-        );
 
         self.complete_campaign_member(state, run_success);
 
@@ -1799,10 +1870,14 @@ impl SimulationController {
         // Check for completion
         if let Some(result) = self.runner.poll_result() {
             // Polling may observe completion after the frame's first stream
-            // drain. Adopt its final journal before taking provenance or
-            // dispatching the next task (which clears the runner queue).
+            // drain. Adopt its final journal and its last engine lines before
+            // taking provenance or dispatching the next task (which clears the
+            // runner queue): the task's sink has dropped by now, so the row
+            // closing a bounded log is in the queue too.
             self.publish_monte_carlo_checkpoint(state);
             self.publish_transient_checkpoint(state);
+            self.publish_engine_log(state);
+            self.absorb_engine_log_tally(state);
             let result = match self.current_transient_checkpoint_error.take() {
                 Some(error) => Err(SimulationError::InvalidConfig(error)),
                 None => result,

@@ -140,7 +140,7 @@ pub fn draw_content(
         }
 
         let highlight_color = match view.net_highlighting {
-            SchematicNetHighlighting::SelectedAcrossHierarchy => view
+            SchematicNetHighlighting::SelectedNet => view
                 .editor
                 .net_highlight
                 .is_wire_highlighted(wire.id)

@@ -46,24 +46,24 @@ impl SimulationRun {
 
     /// Create current run evidence and start its live monotonic clock.
     pub fn new(run_number: u64) -> Self {
+        let timestamp = Self::current_timestamp();
         Self {
-            data: RetainedRun::new(
-                run_number,
-                Self::current_timestamp(),
-                ExecutionTarget::current(),
-            ),
+            data: RetainedRun::new(run_number, timestamp, ExecutionTarget::current())
+                .with_local_start_label(Self::local_offset(timestamp)),
             elapsed_started_at: Some(crate::time_compat::Instant::now()),
         }
     }
 
     pub(crate) fn new_prepared(run_number: u64, receipt: PreparedRunReceipt) -> Self {
+        let timestamp = Self::current_timestamp();
         Self {
             data: RetainedRun::new_prepared(
                 run_number,
-                Self::current_timestamp(),
+                timestamp,
                 ExecutionTarget::current(),
                 receipt,
-            ),
+            )
+            .with_local_start_label(Self::local_offset(timestamp)),
             elapsed_started_at: Some(crate::time_compat::Instant::now()),
         }
     }
@@ -184,6 +184,11 @@ impl SimulationRun {
 
     fn current_timestamp() -> f64 {
         crate::time_compat::unix_epoch().as_secs_f64()
+    }
+
+    /// The reader's zone at the run's start, which its label states it in.
+    fn local_offset(timestamp: f64) -> i32 {
+        crate::time_compat::local_offset_seconds(timestamp as i64)
     }
 }
 

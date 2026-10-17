@@ -372,12 +372,7 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) -> bool {
         match crate::workbench::documents::netlist_document::language::apply_quick_fix_for_finding(
             state, finding,
         ) {
-            Ok(applied) => {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::info(applied));
-            }
-            Err(refused) => {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(refused));
-            }
+            Ok(text) | Err(text) => state.prompt(text),
         }
     }
     intent
@@ -398,11 +393,7 @@ fn apply_waiver_edit(state: &mut AppState, edit: WaiverEdit) -> bool {
             .map(|()| state.problems_view.waiving = None),
         WaiverEdit::Remove(target) => state.remove_finding_waiver(&target),
     };
-    outcome
-        .map_err(|refused| {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(refused));
-        })
-        .is_ok()
+    outcome.map_err(|refused| state.prompt(refused)).is_ok()
 }
 
 /// Everything the table needs to draw itself, so the row loop takes one

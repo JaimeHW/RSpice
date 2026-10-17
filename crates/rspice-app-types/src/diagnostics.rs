@@ -135,3 +135,55 @@ impl LogSeverity {
         }
     }
 }
+
+/// The part of the product a log line came from.
+///
+/// One vocabulary for both logs the Console reads: the session's transcript
+/// holds studio, plan, netlist and run start and end lines, and each run's own
+/// log holds that run's lines and those of the engines it drove.
+///
+/// Design checks have no source here: their findings are the Problems page's,
+/// tied to the place they were found, not lines in a transcript.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum LogSource {
+    /// Every studio event, whether the user asked for it or a background
+    /// service did it: opened, saved, exported, imported, restored, failed.
+    #[serde(alias = "User", alias = "System", alias = "Drc")]
+    Studio,
+    /// Simulation-plan lifecycle outcomes: the receipt a committed plan
+    /// command left, or the refusal that kept one from committing.
+    ///
+    /// Its own source because the Console is this product's session log of
+    /// plan commands, the way a Spectre log records every command with its
+    /// outcome, and because the activity mirror has to be able to leave these
+    /// where they are. A receipt is a record of what was committed, not a
+    /// notice to chase the reader with.
+    Plan,
+    /// A run's lifecycle: started, each analysis finished, completed or
+    /// failed.
+    #[serde(alias = "Simulation")]
+    Run,
+    /// The circuit engine's own account of a solve.
+    Engine,
+    /// Netlist import and parse notices.
+    Netlist,
+    /// The digital (HDL) engine's own account of a co-simulation.
+    Hdl,
+    /// The Verilog-A compiler and runtime.
+    VerilogA,
+}
+
+impl LogSource {
+    /// The tag the Console's source column prints.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Studio => "APP",
+            Self::Plan => "PLAN",
+            Self::Run => "RUN",
+            Self::Engine => "ENG",
+            Self::Netlist => "NET",
+            Self::Hdl => "HDL",
+            Self::VerilogA => "VA",
+        }
+    }
+}

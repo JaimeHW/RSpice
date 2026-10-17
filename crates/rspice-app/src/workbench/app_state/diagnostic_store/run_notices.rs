@@ -246,9 +246,11 @@ impl AppState {
             None => self.publish_diagnostics(inputs, records),
         };
         if let Err(error) = published {
-            self.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                "Findings could not be recorded: {error}"
-            )));
+            self.record(
+                crate::diagnostics::LogSeverity::Warning,
+                crate::diagnostics::LogSource::Studio,
+                format!("Findings could not be recorded: {error}"),
+            );
         }
     }
 

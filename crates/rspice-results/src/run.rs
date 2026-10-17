@@ -17,6 +17,7 @@ use crate::waveform::RetainedWaveform;
 use rspice_app_types::product::{
     AnalysisInstanceId, ContentDigest, DatasetId, JobId, RunId, SimulationCampaignId,
 };
+use rspice_app_types::run_log::RunLog;
 
 /// Immutable membership of one run in a reviewed multi-plan campaign.
 ///
@@ -237,7 +238,8 @@ pub struct SimulationRun<A = AnalysisResult> {
     /// Human-facing run sequence (monotonically increasing within a project).
     /// It is a label/order value, not persistent object identity.
     pub id: u64,
-    /// Human-readable label with timestamp (e.g., "Run 3 (1:04:01 PM)")
+    /// Human-readable label, with the time the run started on the clock of
+    /// the host that started it (e.g., "Run 3 (1:04:01 PM)").
     pub label: String,
     /// Unix timestamp when run started
     pub timestamp: f64,
@@ -261,6 +263,11 @@ pub struct SimulationRun<A = AnalysisResult> {
     specification_verdicts: Option<Vec<SpecificationVerdict>>,
     /// Optional immutable grouping identity for a multi-plan campaign.
     campaign_membership: Option<SimulationCampaignMembership>,
+    /// What the run said about itself and what the engines it drove said,
+    /// in order. Kept from `Preparing` on, so a run that failed or was
+    /// cancelled keeps its account of why. It is not result content: no
+    /// digest or identity of the run reads it.
+    pub log: RunLog,
 }
 
 impl<A> AsRef<SimulationRun<A>> for SimulationRun<A> {
@@ -294,6 +301,7 @@ impl<A> SimulationRun<A> {
             success,
             specification_verdicts,
             campaign_membership,
+            log,
         } = self;
         SimulationRun {
             job_id,
@@ -311,6 +319,7 @@ impl<A> SimulationRun<A> {
             success,
             specification_verdicts,
             campaign_membership,
+            log,
         }
     }
 
@@ -340,6 +349,7 @@ impl<A> SimulationRun<A> {
             success: true,
             specification_verdicts: None,
             campaign_membership: None,
+            log: RunLog::default(),
         }
     }
 
@@ -364,7 +374,6 @@ impl<A> SimulationRun<A> {
 
     /// Create retained run evidence using the host-supplied timestamp and target.
     pub fn new(run_number: u64, timestamp: f64, execution_target: ExecutionTarget) -> Self {
-        let time_str = Self::format_time(timestamp);
         Self {
             job_id: Some(JobId::new()),
             run_id: RunId::new(),
@@ -372,7 +381,7 @@ impl<A> SimulationRun<A> {
             execution_target: Some(execution_target),
             lifecycle: SimulationRunLifecycle::Preparing,
             id: run_number,
-            label: format!("Run {} ({})", run_number, time_str),
+            label: format!("Run {run_number}"),
             timestamp,
             analyses: Vec::new(),
             provenance: None,
@@ -381,6 +390,7 @@ impl<A> SimulationRun<A> {
             success: true,
             specification_verdicts: None,
             campaign_membership: None,
+            log: RunLog::default(),
         }
     }
 
@@ -869,24 +879,53 @@ impl<A> SimulationRun<A> {
         })
     }
 
-    /// Format timestamp as human-readable time string (e.g., "1:04:01 PM")
-    fn format_time(timestamp: f64) -> String {
-        use std::time::{Duration, UNIX_EPOCH};
-        let _datetime = UNIX_EPOCH + Duration::from_secs_f64(timestamp);
-        // Use chrono-free approach for portability
-        let secs = timestamp as u64;
-        let hours = (secs / 3600) % 24;
-        let minutes = (secs / 60) % 60;
-        let seconds = secs % 60;
-        let (hour_12, am_pm) = if hours == 0 {
-            (12, "AM")
-        } else if hours < 12 {
-            (hours, "AM")
-        } else if hours == 12 {
-            (12, "PM")
-        } else {
-            (hours - 12, "PM")
+    /// Label the run with the time it started on the host's clock,
+    /// `utc_offset_seconds` east of UTC: `Run 3 (1:04:01 PM)`.
+    ///
+    /// The zone is the host's to know, so a run is labelled `Run 3` until the
+    /// host says it. A start the clock cannot place leaves the label as is.
+    #[must_use]
+    pub fn with_local_start_label(mut self, utc_offset_seconds: i32) -> Self {
+        if !(self.timestamp.is_finite() && self.timestamp >= 0.0) {
+            return self;
+        }
+        let local = (self.timestamp as i64).saturating_add(i64::from(utc_offset_seconds));
+        let of_day = local.rem_euclid(86_400);
+        let (hours, minutes, seconds) = (of_day / 3_600, of_day / 60 % 60, of_day % 60);
+        let hour_12 = match hours % 12 {
+            0 => 12,
+            hour => hour,
         };
-        format!("{}:{:02}:{:02} {}", hour_12, minutes, seconds, am_pm)
+        let meridiem = if hours < 12 { "AM" } else { "PM" };
+        self.label = format!(
+            "Run {} ({hour_12}:{minutes:02}:{seconds:02} {meridiem})",
+            self.id
+        );
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_run_is_labelled_with_its_start_on_the_hosts_clock() {
+        // 13:04:01 UTC.
+        let started = 1_792_155_841.0;
+        let run: SimulationRun = SimulationRun::new(3, started, ExecutionTarget::LocalDesktop);
+        assert_eq!(run.label, "Run 3", "the zone is the host's to say");
+        assert_eq!(
+            run.clone().with_local_start_label(0).label,
+            "Run 3 (1:04:01 PM)"
+        );
+        assert_eq!(
+            run.clone().with_local_start_label(-7 * 3_600).label,
+            "Run 3 (6:04:01 AM)"
+        );
+        assert_eq!(
+            run.with_local_start_label(11 * 3_600).label,
+            "Run 3 (12:04:01 AM)"
+        );
     }
 }

@@ -155,7 +155,7 @@ fn keep_first(slot: &mut Option<RecoveryIntent>, candidate: Option<RecoveryInten
 
 pub(super) fn recovery(ui: &mut Ui, app: &mut RSpiceApp) {
     #[cfg(target_arch = "wasm32")]
-    poll_browser_manual_checkpoint(ui.ctx(), &mut app.state);
+    poll_browser_manual_checkpoint(&mut app.state);
     ensure_project_recovery_catalog(ui.ctx(), &mut app.state);
     let snapshot = RecoverySnapshot::capture(&app.state);
     let mut intent = None;
@@ -762,59 +762,63 @@ fn manual_checkpoint_pending() -> bool {
     BROWSER_MANUAL_CHECKPOINT_PENDING.with(std::cell::Cell::get)
 }
 
-fn create_manual_checkpoint(ctx: &Context, state: &mut AppState) {
-    #[cfg(not(target_arch = "wasm32"))]
+/// Create a checkpoint the reader asked for. The Console line is its record;
+/// a failure also reaches the notice centre through the activity mirror.
+#[cfg(not(target_arch = "wasm32"))]
+fn create_manual_checkpoint(_: &Context, state: &mut AppState) {
     match crate::workbench::lifecycle::project_checkpoint::create(
         state,
         crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::Manual,
     ) {
         Ok(checkpoint) => {
             state.dialogs.project_checkpoint_recovery.initialized = false;
-            let receipt = format!(
-                "Created full-project checkpoint {} for revision {}",
-                short_identity(&checkpoint.checkpoint_id().to_string()),
-                checkpoint.project_revision()
-            );
-            state.push_user_message(ConsoleMessage::info(receipt.clone()));
-            state.ui.toasts.success(ctx, "Checkpoint created", receipt);
+            record_manual_checkpoint(state, &checkpoint);
         }
         Err(error) => {
-            state.push_user_message(ConsoleMessage::error(error.clone()));
-            state
-                .ui
-                .toasts
-                .error_with_title(ctx, "Checkpoint failed", error);
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        let project_id = state.workspace.content.project.id().to_string();
-        let repaint = ctx.clone();
-        BROWSER_MANUAL_CHECKPOINT_PENDING.with(|pending| pending.set(true));
-        if let Err(error) = crate::workbench::lifecycle::project_checkpoint::start_create(
-            state,
-            crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::Manual,
-            move |result| {
-                BROWSER_MANUAL_CHECKPOINT_COMPLETIONS.with(|queue| {
-                    queue
-                        .borrow_mut()
-                        .push_back(BrowserManualCheckpointCompletion { project_id, result });
-                });
-                repaint.request_repaint();
-            },
-        ) {
-            BROWSER_MANUAL_CHECKPOINT_PENDING.with(|pending| pending.set(false));
-            state
-                .ui
-                .toasts
-                .error_with_title(ctx, "Checkpoint failed", error);
+            state.record(LogSeverity::Error, LogSource::Studio, error);
         }
     }
 }
 
+fn record_manual_checkpoint(
+    state: &mut AppState,
+    checkpoint: &crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
+) {
+    state.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        format!(
+            "Created project checkpoint {} at revision {}.",
+            short_identity(&checkpoint.checkpoint_id().to_string()),
+            checkpoint.project_revision()
+        ),
+    );
+}
+
 #[cfg(target_arch = "wasm32")]
-fn poll_browser_manual_checkpoint(ctx: &Context, state: &mut AppState) {
+fn create_manual_checkpoint(ctx: &Context, state: &mut AppState) {
+    let project_id = state.workspace.content.project.id().to_string();
+    let repaint = ctx.clone();
+    BROWSER_MANUAL_CHECKPOINT_PENDING.with(|pending| pending.set(true));
+    if let Err(error) = crate::workbench::lifecycle::project_checkpoint::start_create(
+        state,
+        crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::Manual,
+        move |result| {
+            BROWSER_MANUAL_CHECKPOINT_COMPLETIONS.with(|queue| {
+                queue
+                    .borrow_mut()
+                    .push_back(BrowserManualCheckpointCompletion { project_id, result });
+            });
+            repaint.request_repaint();
+        },
+    ) {
+        BROWSER_MANUAL_CHECKPOINT_PENDING.with(|pending| pending.set(false));
+        state.record(LogSeverity::Error, LogSource::Studio, error);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn poll_browser_manual_checkpoint(state: &mut AppState) {
     let current_project_id = state.workspace.content.project.id().to_string();
     let completions = BROWSER_MANUAL_CHECKPOINT_COMPLETIONS
         .with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
@@ -829,20 +833,10 @@ fn poll_browser_manual_checkpoint(ctx: &Context, state: &mut AppState) {
         match completion.result {
             Ok(checkpoint) => {
                 state.dialogs.project_checkpoint_recovery.initialized = false;
-                let receipt = format!(
-                    "Created full-project checkpoint {} for revision {}",
-                    short_identity(&checkpoint.checkpoint_id().to_string()),
-                    checkpoint.project_revision()
-                );
-                state.push_user_message(ConsoleMessage::info(receipt.clone()));
-                state.ui.toasts.success(ctx, "Checkpoint created", receipt);
+                record_manual_checkpoint(state, &checkpoint);
             }
             Err(error) => {
-                state.push_user_message(ConsoleMessage::error(error.clone()));
-                state
-                    .ui
-                    .toasts
-                    .error_with_title(ctx, "Checkpoint failed", error);
+                state.record(LogSeverity::Error, LogSource::Studio, error);
             }
         }
     }
@@ -869,58 +863,59 @@ pub(super) fn recovery_copy_filename(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn export_project_checkpoint_copy(
+    _: &Context,
+    state: &mut AppState,
+    checkpoint: crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
+) {
+    let filename = recovery_copy_filename(&checkpoint);
+    let Some(destination) = rfd::FileDialog::new()
+        .add_filter("RSpice Project", &["rspiceproj"])
+        .set_file_name(&filename)
+        .save_file()
+    else {
+        return;
+    };
+    match crate::workbench::lifecycle::project_checkpoint::publish_recovery_copy(
+        &checkpoint,
+        &destination,
+    ) {
+        Ok(()) => {
+            state.record(
+                LogSeverity::Info,
+                LogSource::Studio,
+                format!("Saved a recovery copy to {}.", destination.display()),
+            );
+        }
+        Err(error) => {
+            state.record(LogSeverity::Error, LogSource::Studio, error);
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 pub(super) fn export_project_checkpoint_copy(
     ctx: &Context,
     state: &mut AppState,
     checkpoint: crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
 ) {
     let filename = recovery_copy_filename(&checkpoint);
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let Some(destination) = rfd::FileDialog::new()
-            .add_filter("RSpice Project", &["rspiceproj"])
-            .set_file_name(&filename)
-            .save_file()
-        else {
-            return;
-        };
-        match crate::workbench::lifecycle::project_checkpoint::publish_recovery_copy(
-            &checkpoint,
-            &destination,
-        ) {
-            Ok(()) => {
-                let receipt = format!("Saved independent recovery copy: {}", destination.display());
-                state.push_user_message(ConsoleMessage::info(receipt.clone()));
-                state.ui.toasts.success(ctx, "Recovery copy saved", receipt);
-            }
-            Err(error) => {
-                state.push_user_message(ConsoleMessage::error(error.clone()));
-                state
-                    .ui
-                    .toasts
-                    .error_with_title(ctx, "Recovery copy failed", error);
-            }
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        let project_id = state.workspace.content.project.id().to_string();
-        let queued_filename = filename.clone();
-        let repaint = ctx.clone();
-        crate::workbench::lifecycle::project_checkpoint::start_recovery_copy_bytes(
-            checkpoint,
-            std::path::PathBuf::from(&filename),
-            move |result| {
-                BROWSER_RECOVERY_COPY_COMPLETIONS.with(|queue| {
-                    queue.borrow_mut().push_back(BrowserRecoveryCopyCompletion {
-                        project_id,
-                        filename: queued_filename,
-                        result,
-                    });
+    let project_id = state.workspace.content.project.id().to_string();
+    let queued_filename = filename.clone();
+    let repaint = ctx.clone();
+    crate::workbench::lifecycle::project_checkpoint::start_recovery_copy_bytes(
+        checkpoint,
+        std::path::PathBuf::from(&filename),
+        move |result| {
+            BROWSER_RECOVERY_COPY_COMPLETIONS.with(|queue| {
+                queue.borrow_mut().push_back(BrowserRecoveryCopyCompletion {
+                    project_id,
+                    filename: queued_filename,
+                    result,
                 });
-                repaint.request_repaint();
-            },
-        );
-    }
+            });
+            repaint.request_repaint();
+        },
+    );
 }

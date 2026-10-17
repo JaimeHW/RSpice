@@ -129,9 +129,7 @@ fn plot_expression(ctx: &Context, app: &mut RSpiceApp) {
     }
     let Some(analysis_index) = app.state.simulation.view.active_analysis_idx else {
         app.state
-            .push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                "Select a retained result analysis before plotting an expression.",
-            ));
+            .prompt("Select a retained result analysis before plotting an expression.");
         return;
     };
     let Some(run) = app.state.simulation.active_run() else {
@@ -147,9 +145,7 @@ fn plot_expression(ctx: &Context, app: &mut RSpiceApp) {
     app.state.calculator_panel.evaluate(&app.state.simulation);
     if let Some(Err(error)) = app.state.calculator_panel.outcome.as_ref() {
         app.state
-            .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                "Expression was not plotted: {error}"
-            )));
+            .prompt(format!("Expression was not plotted: {error}"));
         return;
     }
     let added = app.state.ui.results.add_expression_trace(
@@ -160,8 +156,7 @@ fn plot_expression(ctx: &Context, app: &mut RSpiceApp) {
     let added = match added {
         Ok(added) => added,
         Err(error) => {
-            app.state
-                .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+            app.state.prompt(error);
             return;
         }
     };

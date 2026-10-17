@@ -515,12 +515,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     }
     if let Some((line, section)) = use_section {
         match lib_sections::use_section(&mut app.state, line, &section) {
-            Ok(applied) => app
-                .state
-                .push_user_message(crate::diagnostics::ConsoleMessage::info(applied)),
-            Err(error) => app
-                .state
-                .push_user_message(crate::diagnostics::ConsoleMessage::warning(error)),
+            Ok(text) | Err(text) => app.state.prompt(text),
         }
     }
     if let Some(reference) = open_in_design {
@@ -551,8 +546,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                         &identity,
                     )
                 {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+                    app.state.prompt(error);
                 }
             }
             Some((identity, false)) => {
@@ -562,10 +556,9 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                 );
             }
             None => {
-                app.state
-                    .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                        "Include {requested:?} is not retained in the active dependency closure."
-                    )));
+                app.state.prompt(format!(
+                    "Include '{requested}' is no longer one of the active netlist's includes."
+                ));
             }
         }
     }
@@ -576,8 +569,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                 &location,
             )
     {
-        app.state
-            .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+        app.state.prompt(error);
     }
 }
 
@@ -2189,8 +2181,7 @@ pub(super) fn netlist_source_mapping(ui: &mut Ui, app: &mut RSpiceApp, active_li
                         ("component", &component_id.to_string()),
                     ],
                 );
-                app.state
-                    .push_user_message(crate::diagnostics::ConsoleMessage::info(announced));
+                app.state.prompt(announced);
             }
         });
 }

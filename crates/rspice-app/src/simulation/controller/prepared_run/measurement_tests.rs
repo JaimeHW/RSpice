@@ -195,8 +195,9 @@ fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
             .unwrap();
     let generated =
-        crate::workbench::menu_bar::build_menu_netlist(&mut state, crate::io::NetlistFormat::Spice)
-            .unwrap();
+        crate::workbench::menu_bar::build_menu_netlist(&state, crate::io::NetlistFormat::Spice)
+            .unwrap()
+            .source;
     let inspection = SimulationController::prepare_design_netlist_for_inspection(&state).unwrap();
     assert_ne!(
         baseline_generation,

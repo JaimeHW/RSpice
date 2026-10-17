@@ -4,7 +4,7 @@
 //! legacy-unattributed external evidence. They become immutable retained runs,
 //! but never claim native-solver provenance or prepared-plan authority.
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 pub(crate) use crate::state::ResultImportFormat;
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType,
@@ -130,7 +130,7 @@ pub(crate) struct ParsedResultDataset {
 
 pub(crate) fn import_result_dataset(state: &mut AppState) -> bool {
     if let Some(reason) = result_import_block_reason(state) {
-        state.push_user_message(ConsoleMessage::warning(reason));
+        state.prompt(reason);
         return false;
     }
 
@@ -152,9 +152,7 @@ pub(crate) fn import_result_dataset(state: &mut AppState) -> bool {
         }) {
             Ok(()) => true,
             Err(error) => {
-                state.push_user_message(ConsoleMessage::error(format!(
-                    "Result dataset import failed: {error}"
-                )));
+                record_import_failure(state, &error);
                 false
             }
         }
@@ -165,13 +163,19 @@ pub(crate) fn import_result_dataset(state: &mut AppState) -> bool {
         match start_browser_result_dataset_import() {
             Ok(()) => true,
             Err(error) => {
-                state.push_user_message(ConsoleMessage::error(format!(
-                    "Result dataset import failed: {error}"
-                )));
+                record_import_failure(state, &error);
                 false
             }
         }
     }
+}
+
+fn record_import_failure(state: &mut AppState, error: &str) {
+    state.record(
+        LogSeverity::Error,
+        LogSource::Studio,
+        format!("Result dataset import failed: {error}"),
+    );
 }
 
 fn result_import_block_reason(state: &AppState) -> Option<String> {
@@ -425,14 +429,13 @@ fn commit_parsed_result_dataset(
     let previous_simulation = state.simulation.clone();
     let previous_workbench = state.workbench.clone();
 
-    let (run_sequence, run_id, dataset_id) = {
+    let (run_sequence, dataset_id) = {
         let run = state.simulation.start_imported_run()?;
         run.job_id = None;
         run.execution_target = None;
         run.label = format!("Imported · {source_name}");
         run.add_analysis(analysis);
         let run_sequence = run.id;
-        let run_id = run.run_id;
         let dataset_id = run.dataset_id;
         // Reading a dataset does not establish the foreign solver's lifecycle
         // or elapsed time. Keep that absence explicit, as with other imported
@@ -444,7 +447,7 @@ fn commit_parsed_result_dataset(
             state.simulation = previous_simulation;
             return Err(format!("could not seal imported result history: {error}"));
         }
-        (run_sequence, run_id, dataset_id)
+        (run_sequence, dataset_id)
     };
 
     state.simulation.complete_run();
@@ -466,22 +469,28 @@ fn commit_parsed_result_dataset(
         crate::workbench::ResultViewer::Waves
     };
     state.synchronize_specialized_viewer_cache_authority();
-    state.push_user_message(ConsoleMessage::info(format!(
-        "Imported {source_name} as immutable dataset {dataset_id}: {signal_count} signals × {sample_count} samples ({}){}",
-        analysis_domain_label(analysis_type),
-        match bus_count {
-            0 => String::new(),
-            1 => ", with 1 declared digital bus".to_owned(),
-            count => format!(", with {count} declared digital buses"),
-        }
-    )));
-    state.push_user_message(ConsoleMessage::warning(format!(
-        "Dataset {dataset_id} / run {run_id} (Run {run_sequence}) is external legacy-unattributed evidence, not native RSpice solver output"
-    )));
+    // One line says what arrived and that RSpice did not simulate it; the
+    // run history carries the run as imported, so nothing more is owed here.
+    state.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        format!(
+            "Imported {source_name} as Run {run_sequence}: {signal_count} signals \u{00d7} \
+             {sample_count} samples ({}){}. It was not simulated by RSpice.",
+            analysis_domain_label(analysis_type),
+            match bus_count {
+                0 => String::new(),
+                1 => ", with 1 digital bus".to_owned(),
+                count => format!(", with {count} digital buses"),
+            }
+        ),
+    );
     for note in notes {
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "Dataset {dataset_id}: {note}"
-        )));
+        state.record(
+            LogSeverity::Warning,
+            LogSource::Studio,
+            format!("{source_name}: {note}"),
+        );
     }
     Ok(())
 }
@@ -1107,17 +1116,13 @@ pub(crate) fn poll_browser_result_dataset_import(state: &mut AppState) -> bool {
             match stage_imported_result_dataset(state, &file.name, bytes) {
                 Ok(()) => true,
                 Err(error) => {
-                    state.push_user_message(ConsoleMessage::error(format!(
-                        "Result dataset import failed: {error}"
-                    )));
+                    record_import_failure(state, &error);
                     false
                 }
             }
         }
         BrowserResultDatasetImportResult::Failed(error) => {
-            state.push_user_message(ConsoleMessage::error(format!(
-                "Result dataset import failed: {error}"
-            )));
+            record_import_failure(state, &error);
             false
         }
         BrowserResultDatasetImportResult::Cancelled => false,

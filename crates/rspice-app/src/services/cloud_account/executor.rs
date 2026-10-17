@@ -551,7 +551,11 @@ impl Executor {
             });
             record.refresh_token = Some(refresh_token);
             if let Err(error) = store::save(record) {
-                log::warn!("cloud session record save failed: {error}");
+                let _ = self.events.send(storage_failure(
+                    "Your cloud sign-in could not be saved on this device, so the next session \
+                     asks you to sign in again",
+                    &error,
+                ));
             }
         }
         self.next_deadline = self.access.as_ref().map(|access| access.refresh_at);
@@ -1371,7 +1375,10 @@ impl Executor {
             record.principal_email = None;
             record.principal_display_name = None;
             if let Err(error) = store::save(record) {
-                log::warn!("cloud session record save failed: {error}");
+                let _ = self.events.send(storage_failure(
+                    "Your cloud sign-in could not be cleared from this device",
+                    &error,
+                ));
             }
         }
         self.set_signed_out(None);
@@ -1521,7 +1528,10 @@ impl Executor {
             .unwrap_or_else(uuid::Uuid::new_v4);
         record.lease_request_id = Some(request_id.to_string());
         if let Err(error) = store::save(record) {
-            log::warn!("cloud session record save failed: {error}");
+            let _ = self.events.send(storage_failure(
+                "The license request could not be saved on this device",
+                &error,
+            ));
         }
         let request = IssueLicenseLeaseRequest {
             request_id,
@@ -1553,10 +1563,19 @@ impl Executor {
         record.lease_request_id = None;
         record.license_jwks = serde_json::to_string(&jwks).ok();
         if let Err(error) = store::save(record) {
-            log::warn!("cloud session record save failed: {error}");
+            let _ = self.events.send(storage_failure(
+                "The license lease could not be saved on this device, so the next session \
+                 requests it again",
+                &error,
+            ));
         }
         Some(native_license_summary(&license))
     }
+}
+
+/// The Console line for a sign-in record this device would not keep.
+fn storage_failure(what: &str, error: &dyn std::fmt::Display) -> CloudAccountEvent {
+    CloudAccountEvent::StorageFailed(format!("{what}: {error}"))
 }
 
 // -- bootstrap reads (pure client calls) ------------------------------------

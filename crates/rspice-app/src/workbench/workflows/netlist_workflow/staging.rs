@@ -6,7 +6,7 @@
 use super::bundle::{decode_import_bytes, parse_generated_netlist_bundle};
 use super::import::{
     NetlistImportMetadata, NetlistImportMode, apply_netlist_import_result,
-    netlist_import_start_block_reason, sha256,
+    netlist_import_start_block_reason, record_import_failure, sha256,
 };
 use super::*;
 
@@ -226,10 +226,13 @@ pub(super) fn stage_netlist_import(
 
     if bytes.len() as u64 > crate::io::project_io::MAX_PROJECT_FILE_BYTES {
         crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
-        state.push_user_message(ConsoleMessage::error(format!(
-            "SPICE deck import failed: selected file exceeds the supported {}-byte size limit",
-            crate::io::project_io::MAX_PROJECT_FILE_BYTES
-        )));
+        record_import_failure(
+            state,
+            &format!(
+                "the selected file exceeds the {} B size limit",
+                crate::io::project_io::MAX_PROJECT_FILE_BYTES
+            ),
+        );
         return false;
     }
     if let Err(error) = crate::workbench::lifecycle::project_lifecycle::validate_project_replacement(
@@ -237,10 +240,10 @@ pub(super) fn stage_netlist_import(
         transaction,
     ) {
         crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
-        state.push_user_message(ConsoleMessage::error(format!(
+        state.prompt(format!(
             "{} was cancelled because the project changed: {error}",
             mode.dialog_title()
-        )));
+        ));
         return false;
     }
     if bytes.starts_with(b"PK\x03\x04") {
@@ -257,9 +260,7 @@ pub(super) fn stage_netlist_import(
         Ok(decoded) => decoded,
         Err(error) => {
             crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
-            state.push_user_message(ConsoleMessage::error(format!(
-                "SPICE deck import failed: {error}"
-            )));
+            record_import_failure(state, &error);
             return false;
         }
     };
@@ -624,18 +625,16 @@ fn stage_dropped_netlist(
     display_name: String,
 ) -> bool {
     if let Some(reason) = netlist_import_start_block_reason(state, mode) {
-        state.push_user_message(ConsoleMessage::error(format!(
-            "Dropped SPICE source is unavailable: {reason}"
-        )));
+        state.prompt(format!(
+            "The dropped SPICE file was not imported: {reason}."
+        ));
         return false;
     }
     let transaction =
         match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
             Ok(transaction) => transaction,
             Err(error) => {
-                state.push_user_message(ConsoleMessage::error(format!(
-                    "Dropped SPICE source is unavailable: {error}"
-                )));
+                state.prompt(format!("The dropped SPICE file was not imported: {error}."));
                 return false;
             }
         };
@@ -659,9 +658,11 @@ pub(super) fn stage_netlist_bundle_import(
         Ok(bundle) => bundle,
         Err(error) => {
             crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
-            state.push_user_message(ConsoleMessage::error(format!(
-                "RSpice netlist bundle import failed: {error}"
-            )));
+            state.record(
+                LogSeverity::Error,
+                LogSource::Netlist,
+                format!("Netlist bundle import failed: {error}"),
+            );
             return false;
         }
     };
@@ -831,9 +832,7 @@ pub(crate) fn begin_owned_netlist_profile_review(state: &mut AppState) -> bool {
     ) = match candidate {
         Ok(candidate) => candidate,
         Err(error) => {
-            state.push_user_message(ConsoleMessage::error(format!(
-                "Execution-profile review is unavailable: {error}"
-            )));
+            state.prompt(format!("Execution-profile review is unavailable: {error}"));
             return false;
         }
     };
@@ -841,9 +840,7 @@ pub(crate) fn begin_owned_netlist_profile_review(state: &mut AppState) -> bool {
         match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
             Ok(transaction) => transaction,
             Err(error) => {
-                state.push_user_message(ConsoleMessage::error(format!(
-                    "Execution-profile review is unavailable: {error}"
-                )));
+                state.prompt(format!("Execution-profile review is unavailable: {error}"));
                 return false;
             }
         };
@@ -1084,10 +1081,14 @@ pub(super) fn commit_owned_netlist_profile_review(
         return false;
     }
     *state = committed;
-    state.push_user_message(ConsoleMessage::info(format!(
-        "Recorded execution profile {} for the exact owned netlist source.",
-        profile.id()
-    )));
+    state.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        format!(
+            "Recorded execution profile {} for the netlist.",
+            profile.id()
+        ),
+    );
     true
 }
 

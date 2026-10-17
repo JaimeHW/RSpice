@@ -11,7 +11,6 @@
 
 use egui::{Context, Grid, RichText, ScrollArea, Ui};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::ProjectSourceLanguage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -148,7 +147,7 @@ impl RSpiceApp {
                     if let Some(search) = self.state.ui.code_workspace.source_search.as_mut() {
                         search.error = Some(error);
                     } else {
-                        self.state.push_user_message(ConsoleMessage::error(error));
+                        self.state.prompt(error);
                     }
                 }
             }

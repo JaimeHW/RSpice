@@ -12,7 +12,6 @@
 //! instance stamped from one would read `modified` against a definition the
 //! library never published.
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{PendingStimulusPlacement, Tool};
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::Workspace;
@@ -46,9 +45,9 @@ pub(crate) fn arm_placement_from_definition(
         .arm_tool(Tool::Place(placement.component_type));
     state.schematic.session.editor.pending_stimulus = Some(placement);
     state.workbench.activate(Workspace::Design);
-    state.push_user_message(ConsoleMessage::info(format!(
+    state.prompt(format!(
         "{reference}\u{2026} from {armed} follows the pointer; click to place, Esc cancels."
-    )));
+    ));
     Ok(())
 }
 

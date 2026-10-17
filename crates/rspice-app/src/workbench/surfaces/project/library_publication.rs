@@ -311,7 +311,8 @@ fn show_publication_dialog(ctx: &Context, app: &mut RSpiceApp) {
             #[cfg(not(target_arch = "wasm32"))]
             match publish_native(app, &draft) {
                 Ok(PublicationAction::Published(message)) => {
-                    app.state.push_user_message(ConsoleMessage::info(message));
+                    app.state
+                        .record(LogSeverity::Info, LogSource::Studio, message);
                     ctx.data_mut(|data| {
                         data.remove::<PublicationDraft>(id);
                     });
@@ -323,11 +324,7 @@ fn show_publication_dialog(ctx: &Context, app: &mut RSpiceApp) {
                             .to_owned(),
                     );
                 }
-                Err(error) => {
-                    app.state
-                        .push_user_message(ConsoleMessage::error(error.clone()));
-                    draft.error = Some(error);
-                }
+                Err(error) => draft.error = Some(error),
             }
             #[cfg(target_arch = "wasm32")]
             match start_browser_publication(ctx, app, &draft) {
@@ -335,11 +332,7 @@ fn show_publication_dialog(ctx: &Context, app: &mut RSpiceApp) {
                     draft.busy = true;
                     draft.active_publication_id = Some(publication_id);
                 }
-                Err(error) => {
-                    app.state
-                        .push_user_message(ConsoleMessage::error(error.clone()));
-                    draft.error = Some(error);
-                }
+                Err(error) => draft.error = Some(error),
             }
         }
         DialogChoice::Secondary | DialogChoice::Cancelled => {
@@ -445,11 +438,7 @@ fn show_rollback_dialog(ctx: &Context, app: &mut RSpiceApp) {
                 draft.error =
                     Some("Artifact selection was cancelled; no project state changed.".to_owned());
             }
-            Err(error) => {
-                app.state
-                    .push_user_message(ConsoleMessage::error(error.clone()));
-                draft.error = Some(error);
-            }
+            Err(error) => draft.error = Some(error),
         }
         #[cfg(target_arch = "wasm32")]
         match start_browser_rollback_picker(ctx) {
@@ -457,11 +446,7 @@ fn show_rollback_dialog(ctx: &Context, app: &mut RSpiceApp) {
                 draft.busy = true;
                 draft.active_picker_id = Some(picker_id);
             }
-            Err(error) => {
-                app.state
-                    .push_user_message(ConsoleMessage::error(error.clone()));
-                draft.error = Some(error);
-            }
+            Err(error) => draft.error = Some(error),
         }
     }
 
@@ -479,19 +464,23 @@ fn show_rollback_dialog(ctx: &Context, app: &mut RSpiceApp) {
                 draft.reason.clone(),
             ) {
                 Ok(()) => {
-                    let message = format!(
-                        "Library publication {} was restored atomically; a new rollback audit receipt was appended.",
-                        draft.publication_id
+                    app.state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        format!(
+                            "Rolled the project library back to {}; the rollback is in the audit history.",
+                            draft
+                                .artifact_name
+                                .as_deref()
+                                .unwrap_or("the chosen publication")
+                        ),
                     );
-                    app.state.push_user_message(ConsoleMessage::info(message));
                     ctx.data_mut(|data| {
                         data.remove::<RollbackDraft>(id);
                     });
                     return;
                 }
                 Err(error) => {
-                    app.state
-                        .push_user_message(ConsoleMessage::error(error.clone()));
                     draft.error = Some(error);
                     clear_rollback_artifact(&mut draft);
                 }
@@ -755,12 +744,10 @@ fn publish_native(
     )?;
     let receipt = app.commit_project_library_publication(candidate)?;
     Ok(PublicationAction::Published(format!(
-        "Published library artifact '{}' and committed receipt #{:04} {} ({} bytes \u{00b7} {}).",
+        "Published the project library to {} (publication #{:04}, {} bytes).",
         destination.path().display(),
         receipt.sequence(),
-        receipt.publication_id(),
-        receipt.snapshot_byte_len(),
-        receipt.snapshot_digest()
+        receipt.snapshot_byte_len()
     )))
 }
 
@@ -812,6 +799,7 @@ fn poll_browser_publication_completions(ctx: &Context, app: &mut RSpiceApp) {
         .with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
     for completion in completions {
         let publication_id = completion.candidate.publication_id();
+        let cancelled = matches!(completion.result, BrowserWriteResult::Cancelled);
         let result = match completion.result {
             BrowserWriteResult::Saved {
                 handle_id,
@@ -828,18 +816,16 @@ fn poll_browser_publication_completions(ctx: &Context, app: &mut RSpiceApp) {
                 release_browser_handle(handle_id);
                 if digest != completion.candidate.snapshot_digest() {
                     Err(
-                        "Browser publication read-back digest did not match the prepared artifact; no receipt was committed."
+                        "The published file did not read back as written; no receipt was committed."
                             .to_owned(),
                     )
                 } else {
                     app.commit_project_library_publication(completion.candidate)
                         .map(|receipt| {
                             format!(
-                                "Published library artifact '{display_name}' and committed receipt #{:04} {} ({} bytes \u{00b7} {}).",
+                                "Published the project library to {display_name} (publication #{:04}, {} bytes).",
                                 receipt.sequence(),
-                                receipt.publication_id(),
-                                receipt.snapshot_byte_len(),
-                                receipt.snapshot_digest()
+                                receipt.snapshot_byte_len()
                             )
                         })
                 }
@@ -847,16 +833,18 @@ fn poll_browser_publication_completions(ctx: &Context, app: &mut RSpiceApp) {
             BrowserWriteResult::Cancelled => {
                 Err("Publication was cancelled; no receipt was committed.".to_owned())
             }
-            BrowserWriteResult::ExternalChange { observed_digest } => Err(format!(
-                "The chosen publication file changed before commit (observed {observed_digest}); no receipt was committed."
-            )),
+            BrowserWriteResult::ExternalChange { .. } => Err(
+                "The chosen publication file changed before it was committed; no receipt was committed."
+                    .to_owned(),
+            ),
             BrowserWriteResult::Failed(error) => Err(format!(
-                "Durable browser publication failed: {error}. No receipt was committed."
+                "Publishing the project library failed: {error}. No receipt was committed."
             )),
         };
         match result {
             Ok(message) => {
-                app.state.push_user_message(ConsoleMessage::info(message));
+                app.state
+                    .record(LogSeverity::Info, LogSource::Studio, message);
                 ctx.data_mut(|data| {
                     if data
                         .get_temp::<PublicationDraft>(egui::Id::new(PUBLICATION_DIALOG_ID))
@@ -867,8 +855,12 @@ fn poll_browser_publication_completions(ctx: &Context, app: &mut RSpiceApp) {
                 });
             }
             Err(error) => {
-                app.state
-                    .push_user_message(ConsoleMessage::error(error.clone()));
+                // The dialog may have been closed while the browser wrote, so
+                // a failure is recorded as well as shown in it.
+                if !cancelled {
+                    app.state
+                        .record(LogSeverity::Error, LogSource::Studio, error.clone());
+                }
                 ctx.data_mut(|data| {
                     let id = egui::Id::new(PUBLICATION_DIALOG_ID);
                     if let Some(mut draft) = data.get_temp::<PublicationDraft>(id)
@@ -1003,10 +995,6 @@ fn poll_browser_rollback_completions(ctx: &Context, app: &mut RSpiceApp) {
             BrowserOpenResult::Failed(error) => {
                 current.error = Some(format!("Browser artifact selection failed: {error}"));
             }
-        }
-        if let Some(error) = current.error.as_ref() {
-            app.state
-                .push_user_message(ConsoleMessage::error(error.clone()));
         }
         ctx.data_mut(|data| data.insert_temp(id, current));
     }

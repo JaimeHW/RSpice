@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use egui::{Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::pdk_config::{PdkDisplayFillStyle, PdkDisplayLayerStyle};
 use crate::state::{
     CellViewRef, LayoutEdit, LayoutGeometry, LayoutLayerPurpose, LayoutObjectId, LayoutPoint,
@@ -144,10 +144,8 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     session.selected = None;
                 }
             }
-            Err(error) => {
-                session.status = Some(error.clone());
-                app.state.push_user_message(ConsoleMessage::error(error));
-            }
+            // The editor's status line states the refusal.
+            Err(error) => session.status = Some(error),
         }
     }
 
@@ -171,11 +169,17 @@ fn show_missing_document(ui: &mut Ui, app: &mut RSpiceApp, owner: &CellViewRef) 
                 ui.add_enabled(enabled, egui::Button::new("Initialize from project PDK"));
             if initialize.clicked() {
                 match app.state.initialize_physical_layout_document(owner.clone()) {
-                    Ok(_) => app.state.push_user_message(ConsoleMessage::info(format!(
-                        "Initialized {} from the exact signed project PDK.",
-                        owner.display_path()
-                    ))),
-                    Err(error) => app.state.push_user_message(ConsoleMessage::error(error)),
+                    Ok(_) => {
+                        app.state.record(
+                            LogSeverity::Info,
+                            LogSource::Studio,
+                            format!(
+                                "Initialized {} from the signed project PDK.",
+                                owner.display_path()
+                            ),
+                        );
+                    }
+                    Err(error) => app.state.prompt(error),
                 }
             }
             if !enabled {

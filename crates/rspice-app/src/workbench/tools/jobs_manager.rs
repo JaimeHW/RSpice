@@ -11,7 +11,7 @@ use egui::{
 };
 use serde_json::json;
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::product::RunId;
 use crate::state::{
     AnalysisResultSourceDomain, ExecutionTarget, SimulationRun, SimulationRunLifecycle,
@@ -315,7 +315,7 @@ impl JobsSnapshot {
 pub(crate) fn open(state: &mut AppState) {
     let route = SurfaceRoute::surface(SurfaceId::JobsManager);
     if let Err(error) = state.workbench.navigate(route, RouteTransitionSource::User) {
-        state.push_user_message(ConsoleMessage::warning(error.to_string()));
+        state.prompt(error.to_string());
     }
 }
 
@@ -431,15 +431,15 @@ fn open_run_in_results(app: &mut RSpiceApp, run_id: RunId) {
         .iter()
         .position(|run| run.run_id == run_id)
     else {
-        app.state.push_user_message(ConsoleMessage::warning(format!(
+        app.state.prompt(format!(
             "Run {run_id} is no longer retained, so it could not be opened in Results."
-        )));
+        ));
         return;
     };
     if !app.state.simulation.select_run(index) {
-        app.state.push_user_message(ConsoleMessage::warning(format!(
+        app.state.prompt(format!(
             "Run {run_id} could not be selected, so Results was left unchanged."
-        )));
+        ));
         return;
     }
     close_to_source(&mut app.state);
@@ -527,9 +527,9 @@ fn close_to_source(state: &mut AppState) {
         .workbench
         .replace_route(fallback, RouteTransitionSource::User)
     {
-        state.push_user_message(ConsoleMessage::warning(format!(
+        state.prompt(format!(
             "Could not close Jobs, targets & run history: {error}"
-        )));
+        ));
     }
 }
 
@@ -1373,18 +1373,19 @@ fn export_selected_manifest(app: &mut RSpiceApp) {
     let selected_id = app.state.workbench.jobs_manager.selected_run_id;
     let Some(run) = selected_id.and_then(|id| app.state.simulation.retained.run_by_stable_id(id))
     else {
-        app.state.push_user_message(ConsoleMessage::warning(
-            "No retained run is selected for manifest export.",
-        ));
+        app.state
+            .prompt("No retained run is selected for manifest export.");
         return;
     };
     let sequence = run.id;
     let payload = match serialize_manifest(run) {
         Ok(payload) => payload,
         Err(error) => {
-            app.state.push_user_message(ConsoleMessage::error(format!(
-                "Run manifest export failed: {error}"
-            )));
+            app.state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Run manifest export failed: {error}"),
+            );
             return;
         }
     };
@@ -1399,9 +1400,11 @@ fn export_selected_manifest(app: &mut RSpiceApp) {
     let Some(mut path) = (match io.show_save_dialog(config) {
         Ok(path) => path,
         Err(error) => {
-            app.state.push_user_message(ConsoleMessage::error(format!(
-                "Run manifest export picker failed: {error}"
-            )));
+            app.state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Run manifest export picker failed: {error}"),
+            );
             return;
         }
     }) else {
@@ -1411,20 +1414,25 @@ fn export_selected_manifest(app: &mut RSpiceApp) {
     let result = io
         .observe_destination(&path)
         .and_then(|destination| io.write_text_file_observed(&destination, &payload));
-    match result {
-        Ok(()) => app.state.push_user_message(ConsoleMessage::info(
+    let (severity, text) = match result {
+        Ok(()) => (
+            LogSeverity::Info,
             crate::workbench::workflows::export_workflow::export_completion_message(
                 "Run manifest",
                 &path,
                 None,
                 io,
             ),
-        )),
-        Err(error) => app.state.push_user_message(ConsoleMessage::error(format!(
-            "Run manifest export failed for '{}': {error}",
-            path.display()
-        ))),
-    }
+        ),
+        Err(error) => (
+            LogSeverity::Error,
+            format!(
+                "Run manifest export failed for '{}': {error}",
+                path.display()
+            ),
+        ),
+    };
+    app.state.record(severity, LogSource::Studio, text);
 }
 
 fn serialize_manifest(run: &SimulationRun) -> Result<String, String> {
@@ -1632,7 +1640,13 @@ mod tests {
             crate::workbench::state::Workspace::Simulate,
             "a pruned run must not move the reader"
         );
-        assert!(app.state.log_buffer.revision() > before);
+        assert!(
+            app.state
+                .prompt_text()
+                .is_some_and(|text| text.contains("no longer retained")),
+            "the refusal answers the gesture"
+        );
+        assert_eq!(app.state.log_buffer.revision(), before);
     }
 
     #[test]

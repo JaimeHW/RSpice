@@ -5,7 +5,6 @@
 
 use egui::{Context, Ui};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
@@ -271,7 +270,8 @@ impl RSpiceApp {
         match choice {
             DialogChoice::Primary if can_stop => {
                 if let Err(error) = self.state.simulation.request_abort_active_run() {
-                    self.state.push_sim_message(ConsoleMessage::warning(error));
+                    self.state
+                        .prompt(format!("The run was not stopped: {error}."));
                 }
             }
             DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled => {

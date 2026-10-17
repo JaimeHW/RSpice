@@ -1,49 +1,49 @@
 //! Result side effects.
 //!
-//! What a completed run changes beyond the waveforms themselves: run
-//! history, the active viewer selection, and the console and log entries
-//! that record what happened.
+//! What a completed analysis changes beyond the waveforms themselves: the
+//! derived viewers that read it, and the `.MEAS` results the log prints.
+//! Result values are the Results workspace's to show; the log says what was
+//! measured, the way a Spectre log does, and nothing else about them.
 
 use super::*;
 
-/// Echo evaluated `.MEAS` results to the console, the way the CLI prints
-/// them — value lines for successes, warnings for failures.
-fn echo_measurements(state: &mut AppState, measurements: &[rspice_core::MeasureResult]) {
-    if measurements.is_empty() {
-        return;
-    }
-    state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-        "Measurements ({}):",
-        measurements.len()
-    )));
-    for m in measurements {
-        match (m.value, m.passed) {
-            (Some(value), true) => {
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "  {} = {:.6e}",
-                    m.name, value
-                )));
-            }
-            (Some(value), false) => {
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                    "  {} = {:.6e} FAILED ({})",
-                    m.name,
-                    value,
-                    m.error.as_deref().unwrap_or("verification contract failed")
-                )));
-            }
-            (None, _) => {
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                    "  {} = FAILED ({})",
-                    m.name,
-                    m.error.as_deref().unwrap_or("unknown")
-                )));
-            }
+impl SimulationController {
+    /// Echo evaluated `.MEAS` results into the run's log, the way the CLI
+    /// prints them — value lines for successes, warnings for failures.
+    fn echo_measurements(&self, state: &mut AppState, measurements: &[rspice_core::MeasureResult]) {
+        if measurements.is_empty() {
+            return;
+        }
+        self.run_line(
+            state,
+            LogSeverity::Info,
+            format!("Measurements ({}):", measurements.len()),
+        );
+        for m in measurements {
+            let (severity, line) = match (m.value, m.passed) {
+                (Some(value), true) => (LogSeverity::Info, format!("  {} = {:.6e}", m.name, value)),
+                (Some(value), false) => (
+                    LogSeverity::Warning,
+                    format!(
+                        "  {} = {:.6e} FAILED ({})",
+                        m.name,
+                        value,
+                        m.error.as_deref().unwrap_or("verification contract failed")
+                    ),
+                ),
+                (None, _) => (
+                    LogSeverity::Warning,
+                    format!(
+                        "  {} = FAILED ({})",
+                        m.name,
+                        m.error.as_deref().unwrap_or("unknown")
+                    ),
+                ),
+            };
+            self.run_line(state, severity, line);
         }
     }
-}
 
-impl SimulationController {
     pub(super) fn apply_result_side_effects(
         &mut self,
         state: &mut AppState,
@@ -52,50 +52,11 @@ impl SimulationController {
         use crate::simulation::SimulationResult;
 
         match result {
-            SimulationResult::DcOp(dc_result) => {
-                // DC OP: Display voltages in console
-                // Note: DC annotation overlay requires position mapping from schematic
-                // which is handled separately when the schematic state is available
-                log::info!(
-                    "DC OP result has {} node voltages",
-                    dc_result.node_voltages.len()
-                );
-                // Node voltages live in the DC-OP results view; echo them
-                // to the console only for small circuits so one large run
-                // doesn't flood the whole log buffer.
-                const DC_OP_CONSOLE_ECHO_LIMIT: usize = 24;
-                if dc_result.node_voltages.len() <= DC_OP_CONSOLE_ECHO_LIMIT {
-                    for (node, voltage) in &dc_result.node_voltages {
-                        state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                            "V({}) = {:.6} V",
-                            node, voltage
-                        )));
-                    }
-                }
-
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "DC OP: {} node voltages computed",
-                    dc_result.node_voltages.len()
-                )));
-            }
-
-            SimulationResult::Transient {
-                time,
-                waveforms,
-                measurements,
-                ..
-            } => {
+            SimulationResult::Transient { measurements, .. } => {
                 self.invalidate_transient_post_views(state);
                 self.prime_transient_fft_source_selection(state);
-
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "Transient: {} points, {} waveforms",
-                    time.len(),
-                    waveforms.len()
-                )));
-                echo_measurements(state, measurements);
+                self.echo_measurements(state, measurements);
             }
-
             SimulationResult::Stb {
                 response,
                 measurements,
@@ -104,431 +65,65 @@ impl SimulationController {
                     response.bode_points.iter().map(|p| p.frequency).collect();
                 match SimulationResult::stb_waveforms(response) {
                     Ok(waveforms) => self.populate_ac_post_views(state, &frequencies, &waveforms),
-                    Err(error) => {
-                        state.push_sim_message(crate::diagnostics::ConsoleMessage::error(error))
-                    }
+                    Err(error) => self.run_line(state, LogSeverity::Error, error),
                 }
                 for warning in &response.warnings {
-                    state.push_sim_message(crate::diagnostics::ConsoleMessage::warning(
-                        warning.clone(),
-                    ));
+                    self.run_line(state, LogSeverity::Warning, warning.clone());
                 }
-                echo_measurements(state, measurements);
+                self.echo_measurements(state, measurements);
             }
             SimulationResult::Ac {
                 frequencies,
                 waveforms,
                 measurements,
                 ..
-            } => {
-                self.populate_ac_post_views(state, frequencies, waveforms);
-
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "AC: {} points, {} waveforms",
-                    frequencies.len(),
-                    waveforms.len()
-                )));
-                echo_measurements(state, measurements);
             }
-
-            SimulationResult::Pstb {
-                modes,
-                floquet_evidence,
-                orbit_kind,
-                stability_threshold,
-                probe_instance,
-                detect_subharmonics,
-                trivial_multiplier_index,
-                stability_verdict,
-                stability_classification,
-                min_stability_margin_db,
-                num_unstable,
-                subharmonics,
-                converged,
-                iterations,
-                mode_indices,
+            | SimulationResult::HarmonicBalance {
+                frequencies,
+                waveforms,
+                measurements,
                 ..
             } => {
-                let margin = min_stability_margin_db
-                    .map(|value| format!("{value:.3} dB"))
-                    .unwrap_or_else(|| "not applicable".to_owned());
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "PSTB: {} authenticated modes ({} displayed), {} unstable, margin {margin}",
-                    modes.len(),
-                    mode_indices.len(),
-                    num_unstable,
-                )));
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "  verdict={stability_verdict:?}, classification={stability_classification:?}, orbit={orbit_kind:?}, threshold={stability_threshold:.9}, probe={probe_instance}, detect_subharmonics={detect_subharmonics}, trivial_mode={trivial_multiplier_index:?}, subharmonics={subharmonics:?}, converged={converged}, iterations={iterations}, evidence={floquet_evidence:?}"
-                )));
+                self.populate_ac_post_views(state, frequencies, waveforms);
+                self.echo_measurements(state, measurements);
             }
-
             SimulationResult::Qpnoise {
                 frequencies,
                 waveforms,
-                response,
-            } => {
-                self.populate_ac_post_views(state, frequencies, waveforms);
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "QPNOISE: {} frequencies, {} outputs, {} physical noise mechanisms. Plots use each output's physical frequency; full correlations and measurement statuses are retained.",
-                    response.points.len(),response.outputs.len(),response.sources.len())));
+                ..
             }
-            SimulationResult::Qpxf {
+            | SimulationResult::Qpxf {
                 frequencies,
                 waveforms,
-                response,
-            } => {
-                self.populate_ac_post_views(state, frequencies, waveforms);
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "QPXF: {} physical output frequencies, {} sources × {} input sidebands; output {:?} at {:?}. Transfers are per unit input; sampled delay retains undefined statuses.",
-                    frequencies.len(), response.metadata.input_sources.len(), response.metadata.input_lattices.len(), response.metadata.request.output, response.metadata.request.output_lattice,
-                )));
+                ..
             }
-            SimulationResult::Qpac {
+            | SimulationResult::Qpac {
                 frequencies,
                 waveforms,
-                response,
-            } => {
-                self.populate_ac_post_views(state, frequencies, waveforms);
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "QPAC: {} probe offsets, {} signed tuples; source {} {:?}, input tuple {:?}, output tuple {:?}. Plot x is probe offset; translated input/output frequencies are retained in the result and export.",
-                    frequencies.len(), response.metadata.tuples.len(), response.metadata.request.input_source,
-                    response.metadata.input_quantity, response.metadata.request.input_lattice, response.metadata.request.output_lattice,
-                )));
+                ..
             }
-            SimulationResult::Qpss {
+            | SimulationResult::Qpss {
                 frequencies,
                 waveforms,
-                operating_point,
                 ..
-            } => {
-                self.populate_ac_post_views(state, frequencies, waveforms);
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "QPSS: {} independent tones, {} spectral components, {} waveforms; {} Newton iterations, normalized residual {:.3e}",
-                    operating_point.config().grid.frequencies_hz.len(), frequencies.len(), waveforms.len(),
-                    operating_point.iterations(), operating_point.normalized_residual(),
-                )));
+            } => self.populate_ac_post_views(state, frequencies, waveforms),
+            SimulationResult::DcSweep { measurements, .. }
+            | SimulationResult::Noise { measurements, .. } => {
+                self.echo_measurements(state, measurements);
             }
-
-            SimulationResult::HarmonicBalance {
-                frequencies,
-                waveforms,
-                measurements,
-                ..
-            } => {
-                self.populate_ac_post_views(state, frequencies, waveforms);
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "Harmonic Balance: {} components, {} waveforms",
-                    frequencies.len(),
-                    waveforms.len()
-                )));
-                echo_measurements(state, measurements);
-            }
-
-            SimulationResult::DcSweep {
-                sweep_var,
-                sweep_values,
-                waveforms,
-                measurements,
-                ..
-            } => {
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "DC Sweep ({}): {} points, {} waveforms",
-                    sweep_var,
-                    sweep_values.len(),
-                    waveforms.len()
-                )));
-                echo_measurements(state, measurements);
-            }
-
-            SimulationResult::Noise {
-                frequencies,
-                summary,
-                measurements,
-                ..
-            } => {
-                let integrated = summary
-                    .as_ref()
-                    .and_then(|summary| summary.total_rms)
-                    .map_or(String::new(), |rms| {
-                        format!(", integrated output: {rms:.3e} V rms")
-                    });
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "Noise: {} points{integrated}",
-                    frequencies.len()
-                )));
-                echo_measurements(state, measurements);
-            }
-
-            SimulationResult::PoleZero {
-                poles,
-                zeros,
-                pole_evidence,
-                zero_evidence,
-                gain,
-            } => {
-                // The immutable retained result is the sole plot authority.
-                // Console output is a secondary execution log only.
-                let gain = gain
-                    .map(|gain| format!("{gain:.4}"))
-                    .unwrap_or_else(|| "unavailable".to_owned());
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "Pole-Zero Analysis: DC gain = {gain}"
-                )));
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "Evidence: poles {} · zeros {}",
-                    pole_evidence.label(),
-                    zero_evidence.label()
-                )));
-
-                for (i, (re, im)) in poles.iter().enumerate() {
-                    if im.abs() < 1e-10 {
-                        // Real pole
-                        let freq = re.abs() / (2.0 * std::f64::consts::PI);
-                        state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                            "  Pole {}: {:.3e} rad/s ({:.3e} Hz)",
-                            i + 1,
-                            re,
-                            freq
-                        )));
-                    } else {
-                        // Complex pole
-                        state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                            "  Pole {}: {:.3e} +/- j{:.3e} rad/s",
-                            i + 1,
-                            re,
-                            im.abs()
-                        )));
-                    }
-                }
-
-                for (i, (re, im)) in zeros.iter().enumerate() {
-                    if im.abs() < 1e-10 {
-                        state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                            "  Zero {}: {:.3e} rad/s",
-                            i + 1,
-                            re
-                        )));
-                    } else {
-                        state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                            "  Zero {}: {:.3e} +/- j{:.3e} rad/s",
-                            i + 1,
-                            re,
-                            im.abs()
-                        )));
-                    }
-                }
-            }
-
-            SimulationResult::SensitivityStudy { evidence } => {
-                use rspice_core::analysis::sensitivity::SensitivityValue;
-                let points = evidence.point_count();
-                let unavailable = evidence
-                    .rows
-                    .iter()
-                    .flat_map(|row| &row.normalized)
-                    .filter(|value| value.value().is_none())
-                    .count();
-                let band = if points > 1 {
-                    format!(", {points} frequencies")
-                } else {
-                    String::new()
-                };
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "Sensitivity: {} variables{band}, {unavailable} normalized values unavailable",
-                    evidence.rows.len()
-                )));
-                // The listing is read at the first solved point, which is the
-                // point the sheet opens at. Ten rows of one frequency is a
-                // summary; ten rows times sixty-one frequencies is a log.
-                let mut sorted: Vec<_> = evidence.rows.iter().collect();
-                sorted.sort_by(|left, right| {
-                    use std::cmp::Ordering;
-                    let magnitude = |row: &crate::state::SensitivityStudyRow| {
-                        row.normalized
-                            .first()
-                            .copied()
-                            .and_then(|value| value.value())
-                    };
-                    match (magnitude(left), magnitude(right)) {
-                        (Some(left), Some(right)) => right.abs().total_cmp(&left.abs()),
-                        (Some(_), None) => Ordering::Less,
-                        (None, Some(_)) => Ordering::Greater,
-                        _ => Ordering::Equal,
-                    }
-                    .then_with(|| left.parameter.cmp(&right.parameter))
-                });
-                let format_quantity = |quantity: Option<SensitivityValue<f64>>| match quantity {
-                    Some(SensitivityValue::Available(value)) => format!("{value:.3e}"),
-                    Some(SensitivityValue::Unavailable { unavailable }) => {
-                        format!("unavailable ({})", unavailable.as_str())
-                    }
-                    None => "not retained".to_owned(),
-                };
-                for row in sorted.into_iter().take(10) {
-                    state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                        "  {}: derivative = {}, normalized = {}",
-                        row.parameter,
-                        format_quantity(row.raw.first().copied()),
-                        format_quantity(row.normalized.first().copied())
-                    )));
-                }
-            }
-
-            SimulationResult::DcMismatch { evidence } => {
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "DC mismatch: {} nominal {:.6e}, sigma {:.6e}, {} sigma {:.6e}",
-                    evidence.output,
-                    evidence.nominal_value,
-                    evidence.sigma_total,
-                    evidence.sigma_multiplier,
-                    evidence.quoted_sigma()
-                )));
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "  {} of {} contributors retained",
-                    evidence.retained_contributors(),
-                    evidence.evaluated_contributors
-                )));
-            }
-
-            SimulationResult::TransferFunction {
-                input_source,
-                output_expression,
-                gain,
-                input_resistance,
-                output_resistance,
-                ..
-            } => {
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "Transfer function: {} -> {}",
-                    input_source, output_expression
-                )));
-                for (label, value) in [
-                    ("gain", gain.as_ref()),
-                    ("input resistance", input_resistance.as_ref()),
-                    ("output resistance", output_resistance.as_ref()),
-                ] {
-                    if let Some(value) = value {
-                        let rendered = match value {
-                            rspice_simulation::results::TransferFunctionScalar::Finite(value) => {
-                                format!("{value:.6e}")
-                            }
-                            rspice_simulation::results::TransferFunctionScalar::PositiveInfinity => {
-                                "+infinity".to_owned()
-                            }
-                            rspice_simulation::results::TransferFunctionScalar::NegativeInfinity => {
-                                "-infinity".to_owned()
-                            }
-                        };
-                        state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                            "  {label} = {rendered}"
-                        )));
-                    }
-                }
-            }
-
-            SimulationResult::MonteCarlo {
-                seed,
-                runs_requested,
-                runs_completed,
-                num_failures,
-                all_converged,
-                variables,
-                ..
-            } => {
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "Monte Carlo: {}/{} runs converged ({} failed), seed={}, all_converged={}",
-                    runs_completed, runs_requested, num_failures, seed, all_converged
-                )));
-
-                for var in variables.iter().take(8) {
-                    state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                        "  {}: mean={:.6e}, sigma={:.6e}, min={:.6e}, max={:.6e}",
-                        var.name, var.mean, var.std_dev, var.min, var.max
-                    )));
-                }
-            }
-
-            SimulationResult::Parametric {
-                target,
-                sweep_values,
-                waveforms,
-                num_failures,
-                ..
-            } => {
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "Parametric ({}): {} points, {} waveforms, {} failed points",
-                    target,
-                    sweep_values.len(),
-                    waveforms.len(),
-                    num_failures
-                )));
-            }
-
-            SimulationResult::Corner {
-                x_values,
-                waveforms,
-                num_failures,
-                ..
-            } => {
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "Corner sweep: {} points, {} waveforms, {} failed corners",
-                    x_values.len(),
-                    waveforms.len(),
-                    num_failures
-                )));
-            }
-
-            SimulationResult::Optimization {
-                iterations,
-                waveforms: _,
-                best_cost,
-                best_variables,
-                best_objectives: _,
-                best_constraints: _,
-                converged,
-            } => {
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "Optimization: {} iterations, best cost {:.6e}, converged={}",
-                    iterations.len(),
-                    best_cost,
-                    converged
-                )));
-                for (name, value) in best_variables.iter().take(8) {
-                    state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                        "  {} = {:.6e}",
-                        name, value
-                    )));
-                }
-            }
-
-            SimulationResult::Soa {
-                time,
-                waveforms: _,
-                violations,
-                ..
-            } => {
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "SOA: {} reporting points, {} violations",
-                    time.len(),
-                    violations.len()
-                )));
-            }
-
-            SimulationResult::Fft { spectrum, .. } => {
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "FFT: {} coefficients of {} over {} points",
-                    spectrum.frequency.len(),
-                    spectrum.evidence.output,
-                    spectrum.evidence.point_count
-                )));
-            }
-
-            SimulationResult::MeasurementsOnly { .. } => {
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(
-                    "Analysis complete (scalar result evidence retained)".to_string(),
-                ));
-            }
+            SimulationResult::DcOp(_)
+            | SimulationResult::Pstb { .. }
+            | SimulationResult::PoleZero { .. }
+            | SimulationResult::SensitivityStudy { .. }
+            | SimulationResult::DcMismatch { .. }
+            | SimulationResult::TransferFunction { .. }
+            | SimulationResult::MonteCarlo { .. }
+            | SimulationResult::Parametric { .. }
+            | SimulationResult::Corner { .. }
+            | SimulationResult::Optimization { .. }
+            | SimulationResult::Soa { .. }
+            | SimulationResult::Fft { .. }
+            | SimulationResult::MeasurementsOnly { .. } => {}
         }
     }
 }

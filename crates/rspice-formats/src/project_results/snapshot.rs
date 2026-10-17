@@ -90,6 +90,24 @@ impl ProjectSimulationResults {
         self.content.data.is_empty()
     }
 
+    /// These results as their content fingerprint reads them: without the
+    /// runs' logs.
+    ///
+    /// A run's log is its account of itself, not result content, so two
+    /// histories that differ only in their logs are the same history.
+    /// Borrowed when no run has a log, which is every history written before
+    /// runs kept one, so their fingerprints do not move.
+    pub fn without_run_logs(&self) -> std::borrow::Cow<'_, Self> {
+        if self.runs.iter().all(|run| run.log.is_empty()) {
+            return std::borrow::Cow::Borrowed(self);
+        }
+        let mut stripped = self.clone();
+        for run in &mut stripped.runs {
+            run.log = RunLog::default();
+        }
+        std::borrow::Cow::Owned(stripped)
+    }
+
     pub fn shares_content_with(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.content, &other.content)
     }

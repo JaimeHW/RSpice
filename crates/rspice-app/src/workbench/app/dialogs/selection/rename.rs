@@ -12,7 +12,6 @@
 
 use egui::{Context, Id};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::schematic::view::sheet_visibility::object_is_on_active_sheet;
 use crate::state::{BusDeclaration, Component, NetLabel, SchematicState};
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
@@ -139,9 +138,8 @@ impl RSpiceApp {
         }
         let Some(target) = self.state.dialogs.rename_selection.target.as_ref() else {
             self.state.dialogs.rename_selection.close();
-            self.state.push_user_message(ConsoleMessage::warning(
-                "Rename closed because its stable target was unavailable.".to_owned(),
-            ));
+            self.state
+                .prompt("Rename closed: the object it was renaming is gone.");
             return;
         };
 
@@ -224,9 +222,8 @@ impl RSpiceApp {
                             Ok(true) => {
                                 let renamed =
                                     self.state.dialogs.rename_selection.draft.trim().to_owned();
-                                self.state.push_user_message(ConsoleMessage::info(format!(
-                                    "Renamed {previous} to {renamed}."
-                                )));
+                                self.state
+                                    .prompt(format!("Renamed {previous} to {renamed}."));
                                 self.state.dialogs.rename_selection.close();
                             }
                             Ok(false) => {

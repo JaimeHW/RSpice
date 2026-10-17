@@ -1,7 +1,9 @@
 //! Process-level logging and correlation metadata.
 
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use rspice_simulation::engine_log::{WarningLimiter, WarningVerdict, last_warning};
 
 use crate::cli::{CliError, LogFormat};
 
@@ -137,9 +139,62 @@ pub fn init(level: Option<&str>, format: LogFormat) -> Result<(), CliError> {
         });
     }
 
-    builder.try_init().map_err(|error| CliError::InternalError {
+    let inner = builder.build();
+    let max_level = inner.filter();
+    log::set_boxed_logger(Box::new(LimitedLogger {
+        inner,
+        warnings: Mutex::new(WarningLimiter::default()),
+    }))
+    .map(|()| log::set_max_level(max_level))
+    .map_err(|error| CliError::InternalError {
         message: format!("failed to initialize diagnostic logging: {error}"),
     })
+}
+
+/// The process logger: `env_logger`'s filter and format, with each call site
+/// held to the engine's warning limit for the life of the command, as a
+/// studio run's Console is.
+struct LimitedLogger {
+    inner: env_logger::Logger,
+    warnings: Mutex<WarningLimiter>,
+}
+
+impl log::Log for LimitedLogger {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        self.inner.enabled(metadata)
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if !self.inner.matches(record) {
+            return;
+        }
+        let verdict = self
+            .warnings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .judge(record);
+        match verdict {
+            WarningVerdict::Show => self.inner.log(record),
+            WarningVerdict::ShowLast => {
+                let message = last_warning(record.args());
+                self.inner.log(
+                    &log::Record::builder()
+                        .level(record.level())
+                        .target(record.target())
+                        .module_path(record.module_path())
+                        .file(record.file())
+                        .line(record.line())
+                        .args(format_args!("{message}"))
+                        .build(),
+                );
+            }
+            WarningVerdict::Withhold => {}
+        }
+    }
+
+    fn flush(&self) {
+        self.inner.flush();
+    }
 }
 
 #[cfg(test)]

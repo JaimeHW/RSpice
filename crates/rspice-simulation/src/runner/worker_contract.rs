@@ -583,6 +583,12 @@ pub(crate) enum WorkerSimulationResult {
         /// this contract with the truth: it carried no card.
         #[serde(default)]
         spectra: Vec<WorkerRecordedFftSpectrum>,
+        /// The records the testbench's `$error` and `$fatal` calls left, which
+        /// fail the run. The rest of its output reached the run log as it
+        /// streamed, so it stays off the result. Defaulted, so a response
+        /// without the field reads as a testbench that reported no error.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        testbench_errors: Vec<rspice_core::config::HdlOutputRecord>,
     },
     /// One recorded `.FFT` spectrum, selected from the transient that computed
     /// it. The task runs no solve, so no netlist and no time axis cross here.
@@ -1090,6 +1096,7 @@ impl WorkerSimulationResult {
                 measurements,
                 events,
                 spectra,
+                testbench_errors,
             } => sum_payload_bytes([
                 convergence.as_ref().map_or(0, |quality| {
                     f64_payload_bytes(quality.transfer_value_count())
@@ -1104,6 +1111,12 @@ impl WorkerSimulationResult {
                         .map(WorkerRecordedFftSpectrum::numeric_value_count)
                         .sum(),
                 ),
+                // A testbench formats its messages as it runs, so their size
+                // is not the deck's; they count where the deck's names do not.
+                testbench_errors
+                    .iter()
+                    .map(|record| record.text.len())
+                    .sum(),
             ]),
             WorkerSimulationResult::Fft {
                 spectrum,
@@ -1403,6 +1416,26 @@ pub(crate) struct WorkerResponseTransport {
     pub buffers: Vec<Vec<f64>>,
 }
 
+/// The records of a transient's HDL output that fail its testbench: what its
+/// `$error` and `$fatal` calls reported, in emission order.
+fn testbench_errors(
+    hdl_output: Vec<rspice_core::config::HdlOutputRecord>,
+) -> Vec<rspice_core::config::HdlOutputRecord> {
+    use rspice_core::config::{HdlSeverity, HdlStream};
+
+    hdl_output
+        .into_iter()
+        .filter(|record| {
+            matches!(
+                record.stream,
+                HdlStream::Diagnostic {
+                    severity: HdlSeverity::Error | HdlSeverity::Fatal
+                }
+            )
+        })
+        .collect()
+}
+
 impl TryFrom<SimulationResult> for WorkerSimulationResult {
     type Error = SimulationError;
 
@@ -1446,9 +1479,7 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 convergence,
                 events,
                 spectra,
-                // The worker forwards HDL output on its own cadence (design
-                // P2 section 4.3, P4.7), not inside the result transport.
-                hdl_output: _,
+                hdl_output,
             } => match periodic_state {
                 Some(operating_point) => {
                     if convergence.is_some() {
@@ -1476,6 +1507,7 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                     convergence: convergence.map(std::sync::Arc::unwrap_or_clone),
                     events: events.into(),
                     spectra: worker_recorded_fft::worker_spectra(spectra),
+                    testbench_errors: testbench_errors(hdl_output),
                 }),
             },
             SimulationResult::Ac {
@@ -1843,6 +1875,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 convergence,
                 events,
                 spectra,
+                testbench_errors,
             } => Self::Transient {
                 time,
                 waveforms: waveform_map(waveforms),
@@ -1851,7 +1884,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 convergence: convergence.map(std::sync::Arc::new),
                 events: events.into(),
                 spectra: worker_recorded_fft::recorded_spectra(spectra),
-                hdl_output: Vec::new(),
+                hdl_output: testbench_errors,
             },
             WorkerSimulationResult::Fft {
                 spectrum,

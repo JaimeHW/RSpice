@@ -6,7 +6,7 @@
 //! of the same pass, which is what lets a generated line name the schematic
 //! object that produced it.
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{
     GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry, GenerationInput,
     NetlistDocument, NetlistDocumentId,
@@ -36,9 +36,12 @@ pub(super) fn reconcile_documents(app: &mut RSpiceApp) {
         && crate::workbench::documents::netlist_document::active_dependency(&app.state).is_none()
     {
         crate::workbench::documents::netlist_document::close_active_dependency(&mut app.state);
-        app.state.push_user_message(ConsoleMessage::warning(
-            "The previously open dependency is no longer in the canonical source closure; its root document was restored.",
-        ));
+        app.state.record(
+            LogSeverity::Warning,
+            LogSource::Netlist,
+            "The open include file is no longer part of the netlist; the top-level deck is shown \
+             instead.",
+        );
     }
 
     refresh_generated_artifact(app);
@@ -109,78 +112,89 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
             Some("Add a circuit before generating the primary netlist.".to_owned());
         return;
     }
+    // This runs every frame the page is shown. Inputs that already failed
+    // fail the same way, and the page still states why.
+    if app.state.ui.netlist.failed_generation_input_digest == Some(input_digest) {
+        return;
+    }
 
-    let previous_message_count = app.state.log_buffer.len();
-    let generated = crate::workbench::menu_bar::build_menu_netlist(
-        &mut app.state,
-        crate::io::NetlistFormat::Spice,
-    );
+    let generated =
+        crate::workbench::menu_bar::build_menu_netlist(&app.state, crate::io::NetlistFormat::Spice);
+    let failed =
+        |netlist: &mut crate::workbench::documents::netlist_document::NetlistDocumentState,
+         error: String| {
+            netlist.failed_generation_input_digest = Some(input_digest);
+            netlist.generation_error = Some(error);
+        };
     match generated {
-        Some(source) => match publish_generated_document(&app.state, input_digest, source) {
-            Ok((generated_document, owned_document)) => {
-                if let (Some(previous), Some(current)) = (
-                    app.state
-                        .ui
-                        .netlist
-                        .generated_document
-                        .as_ref()
-                        .and_then(crate::state::NetlistDocument::generated_artifact),
-                    generated_document.generated_artifact(),
-                ) && previous.content_digest() != current.content_digest()
-                {
-                    let predecessor = previous.clone();
-                    if app
-                        .state
-                        .ui
-                        .netlist
-                        .generated_history
-                        .last()
-                        .is_none_or(|artifact| {
-                            artifact.content_digest() != predecessor.content_digest()
-                        })
+        Ok(generated) => {
+            match publish_generated_document(&app.state, input_digest, generated.source) {
+                Ok((generated_document, owned_document)) => {
+                    if let (Some(previous), Some(current)) = (
+                        app.state
+                            .ui
+                            .netlist
+                            .generated_document
+                            .as_ref()
+                            .and_then(crate::state::NetlistDocument::generated_artifact),
+                        generated_document.generated_artifact(),
+                    ) && previous.content_digest() != current.content_digest()
                     {
-                        app.state.ui.netlist.generated_history.push(predecessor);
-                        const RETAINED_GENERATED_REVISIONS: usize = 16;
-                        let excess = app
+                        let predecessor = previous.clone();
+                        if app
                             .state
                             .ui
                             .netlist
                             .generated_history
-                            .len()
-                            .saturating_sub(RETAINED_GENERATED_REVISIONS);
-                        if excess > 0 {
-                            app.state.ui.netlist.generated_history.drain(..excess);
+                            .last()
+                            .is_none_or(|artifact| {
+                                artifact.content_digest() != predecessor.content_digest()
+                            })
+                        {
+                            app.state.ui.netlist.generated_history.push(predecessor);
+                            const RETAINED_GENERATED_REVISIONS: usize = 16;
+                            let excess = app
+                                .state
+                                .ui
+                                .netlist
+                                .generated_history
+                                .len()
+                                .saturating_sub(RETAINED_GENERATED_REVISIONS);
+                            if excess > 0 {
+                                app.state.ui.netlist.generated_history.drain(..excess);
+                            }
                         }
                     }
-                }
-                let Some(generated_artifact) = generated_document.generated_artifact() else {
-                    app.state.ui.netlist.generation_error = Some(
-                        "Generated document publication returned no generated artifact.".to_owned(),
+                    let Some(generated_artifact) = generated_document.generated_artifact() else {
+                        failed(
+                            &mut app.state.ui.netlist,
+                            "Generated document publication returned no generated artifact."
+                                .to_owned(),
+                        );
+                        return;
+                    };
+                    app.state.ui.netlist.generated_source = generated_artifact.source().to_owned();
+                    app.state.ui.netlist.generated_document = Some(generated_document);
+                    app.state.workspace.content.netlist_document = owned_document.clone();
+                    app.state.ui.netlist.owned_document = owned_document;
+                    app.state.ui.netlist.generated_input_digest = Some(input_digest);
+                    app.state.ui.netlist.generation_error = None;
+                    app.state.ui.netlist.failed_generation_input_digest = None;
+                    crate::workbench::menu_bar::record_netlist_warnings(
+                        &mut app.state,
+                        generated.warnings,
                     );
-                    return;
-                };
-                app.state.ui.netlist.generated_source = generated_artifact.source().to_owned();
-                app.state.ui.netlist.generated_document = Some(generated_document);
-                app.state.workspace.content.netlist_document = owned_document.clone();
-                app.state.ui.netlist.owned_document = owned_document;
-                app.state.ui.netlist.generated_input_digest = Some(input_digest);
-                app.state.ui.netlist.generation_error = None;
+                }
+                Err(error) => failed(&mut app.state.ui.netlist, error),
             }
-            Err(error) => {
-                app.state.ui.netlist.generation_error = Some(error);
-            }
-        },
-        None => {
-            let detail = app
-                .state
-                .log_buffer
-                .entries()
-                .skip(previous_message_count)
-                .filter(|entry| entry.severity == crate::diagnostics::LogSeverity::Error)
-                .last()
-                .map(|entry| entry.message.clone())
-                .unwrap_or_else(|| "Netlist generation failed; review Problems.".to_owned());
-            app.state.ui.netlist.generation_error = Some(detail);
+        }
+        Err(reasons) => {
+            app.state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                crate::workbench::menu_bar::netlist_failure_text("Netlist generation", &reasons),
+            );
+            failed(&mut app.state.ui.netlist, reasons.join("; "));
         }
     }
 }
@@ -503,7 +517,7 @@ fn source_line_component(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{Component, ComponentType, Point, SchematicState};
+    use crate::state::{Component, ComponentType, LibraryCellInstance, Point, SchematicState};
 
     /// The line `YMEMRISTOR MR1 …` is the memristor drawn `MR1`: a
     /// keyword-headed card names its element after the keyword.
@@ -543,6 +557,71 @@ mod tests {
             mapped(3),
             (None, None),
             "a keyword card names no component of another kind"
+        );
+    }
+
+    /// A deck that cannot be written is built once per set of inputs, its
+    /// failure is recorded once, and the page states the generator's own
+    /// reason even with the Console's ring full.
+    ///
+    /// The page used to recover that reason by reading the log entries a
+    /// build had added. Once the ring held its capacity, the count it skipped
+    /// past never grew, so it found nothing and the page said only that
+    /// generation had failed — while the build ran, and wrote its failure
+    /// again, every frame.
+    #[test]
+    fn a_failed_generation_states_its_reason_with_a_full_ring_and_is_not_rebuilt() {
+        let mut app = RSpiceApp::test_instance();
+        let mut absent = LibraryCellInstance::new("work", "absent", "schematic");
+        absent.terminal_order = vec!["a".to_owned(), "b".to_owned()];
+        app.state
+            .schematic
+            .add_library_cell_component(Point::new(100, 0), absent);
+        app.state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(0, 0));
+        for index in 0..10_000 {
+            app.state.log_buffer.log(
+                LogSeverity::Info,
+                LogSource::Studio,
+                format!("line {index}"),
+            );
+        }
+
+        refresh_generated_artifact(&mut app);
+        let error = app
+            .state
+            .ui
+            .netlist
+            .generation_error
+            .clone()
+            .expect("the failure is stated on the page");
+        let newest = app
+            .state
+            .log_buffer
+            .entries()
+            .last()
+            .expect("the failure is recorded")
+            .clone();
+        assert_eq!(newest.severity, LogSeverity::Error);
+        assert_eq!(
+            newest.message,
+            format!("Netlist generation failed: {error}"),
+            "the page states the generator's own reason, which the Console records"
+        );
+        let recorded = app.state.log_buffer.revision();
+
+        for _ in 0..3 {
+            refresh_generated_artifact(&mut app);
+        }
+        assert_eq!(
+            app.state.log_buffer.revision(),
+            recorded,
+            "the same inputs are neither rebuilt nor reported again"
+        );
+        assert_eq!(
+            app.state.ui.netlist.generation_error.as_deref(),
+            Some(error.as_str())
         );
     }
 }

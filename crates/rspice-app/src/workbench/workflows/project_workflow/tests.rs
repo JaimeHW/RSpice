@@ -421,7 +421,7 @@ fn browser_import_applies_project_clears_runs_and_skips_recents() {
     assert!(state.log_buffer.entries().any(|entry| {
         entry
             .message
-            .contains("Imported project: browser-import.rspiceproj")
+            .contains("Imported project browser-import (browser-import.rspiceproj).")
     }));
 }
 
@@ -636,7 +636,7 @@ fn a_project_whose_plan_needs_no_technology_opens_without_a_blocked_run_warning(
     let blocked = state
         .log_buffer
         .entries()
-        .filter(|entry| entry.message.contains("simulation execution blocked"))
+        .filter(|entry| entry.message.contains("Simulation is blocked"))
         .map(|entry| entry.message.clone())
         .collect::<Vec<_>>();
     assert!(blocked.is_empty(), "{blocked:#?}");
@@ -947,7 +947,7 @@ fn invalid_execution_context_does_not_partially_replace_open_project() {
     assert!(state.log_buffer.entries().any(|entry| {
         entry
             .message
-            .contains("persisted execution context is invalid")
+            .contains("its saved simulation setup is invalid")
             && entry.message.contains("appears more than once")
     }));
 }
@@ -1023,10 +1023,9 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
         )
         .unwrap(),
     );
-    state.log_buffer.warning(
-        crate::diagnostics::LogSource::Simulation,
-        "old project warning",
-    );
+    state
+        .log_buffer
+        .warning(crate::diagnostics::LogSource::Run, "old project warning");
     let project = project_named_with_results("browser-import.rspiceproj");
 
     assert!(apply_loaded_project(
@@ -1050,12 +1049,24 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
     );
     assert!(state.ui.code_workspace.automation.debug.watches.is_empty());
     assert_eq!(state.ui.netlist.diagnostics.summary().total(), 0);
-    assert!(
-        !state
-            .log_buffer
-            .entries()
-            .any(|entry| entry.message == "old project warning")
-    );
+    // The Console is the session's record: the old project's history stays,
+    // and the replacement states itself once after it.
+    let messages: Vec<_> = state
+        .log_buffer
+        .entries()
+        .map(|entry| entry.message.as_str())
+        .collect();
+    let old = messages
+        .iter()
+        .position(|message| *message == "old project warning")
+        .expect("the old project's history is kept");
+    let opened: Vec<_> = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, message)| message.starts_with("Imported project "))
+        .collect();
+    assert_eq!(opened.len(), 1, "{messages:?}");
+    assert!(opened[0].0 > old, "{messages:?}");
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1628,9 +1639,9 @@ fn an_invalid_identity_creates_nothing_and_names_the_field() {
     assert_eq!(state.workspace.content.project.id(), before);
     assert!(
         state
-            .log_buffer
-            .entries()
-            .any(|entry| entry.message.contains("New project blocked"))
+            .prompt_text()
+            .is_some_and(|prompt| prompt.starts_with("New project not created")),
+        "the refusal answers on the status bar"
     );
 }
 

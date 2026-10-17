@@ -1,18 +1,40 @@
-//! Engine log publication into the Console and desktop logger installation.
+//! Engine log publication into the run's own log and desktop logger
+//! installation.
 
-use super::{LogBuffer, LogSource};
-use rspice_simulation::engine_log::EngineLogLine;
+use super::LogSource;
+use rspice_app_types::run_log::{RunLog, RunLogLine};
+use rspice_simulation::engine_log::{EngineLogLine, EngineLogOrigin};
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_simulation::engine_log::{admits, note_stderr_level, offer};
 
-/// Write one run's drained lines into the Console.
+/// Write a run's drained lines into its own log, stamped `unix_ms`.
 ///
-/// The engine's text is carried unchanged: the `ENG` tag is what distinguishes
-/// an engine line from the studio's own, so nothing is prefixed to say it
-/// again.
-pub(crate) fn publish(lines: Vec<EngineLogLine>, buffer: &mut LogBuffer) {
+/// The text is carried unchanged: the source tag says whose words a line is —
+/// the engine's, the testbench's or the Verilog-A compiler's — so nothing is
+/// prefixed to say it again.
+///
+/// An engine line that says what the run already advised when it started is
+/// left out: each task parses the deck again, and logs the parse warnings the
+/// run has already stated once.
+pub(crate) fn publish(
+    lines: Vec<EngineLogLine>,
+    log: &mut RunLog,
+    unix_ms: u64,
+    advised: &[String],
+) {
     for line in lines {
-        buffer.log(line.severity, LogSource::Engine, line.message, None);
+        let source = match line.origin {
+            EngineLogOrigin::Engine if advised.contains(&line.message) => continue,
+            EngineLogOrigin::Engine => LogSource::Engine,
+            EngineLogOrigin::Hdl => LogSource::Hdl,
+            EngineLogOrigin::VerilogA => LogSource::VerilogA,
+        };
+        log.push(RunLogLine {
+            unix_ms,
+            severity: line.severity,
+            source,
+            message: line.message,
+        });
     }
 }
 
@@ -147,7 +169,7 @@ mod tests {
     }
 
     #[test]
-    fn a_captured_info_line_becomes_an_engine_row_in_the_console() {
+    fn a_captured_info_line_becomes_an_engine_line_in_the_runs_log() {
         let queue = Arc::new(Mutex::new(EngineLogQueue::default()));
         {
             let _guard = install(RunLogSink::queued(Arc::clone(&queue), false));
@@ -163,23 +185,88 @@ mod tests {
             vec![EngineLogLine {
                 severity: LogSeverity::Info,
                 message: "Transient noise: 2 device noise source(s)".to_owned(),
+                origin: EngineLogOrigin::Engine,
             }]
         );
 
-        let mut buffer = LogBuffer::default();
-        publish(lines, &mut buffer);
-        let rows: Vec<_> = buffer.entries_by_source(LogSource::Engine).collect();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].severity, LogSeverity::Info);
+        let mut log = RunLog::default();
+        publish(lines, &mut log, 1_760_613_845_250, &[]);
         assert_eq!(
-            rows[0].message, "Transient noise: 2 device noise source(s)",
+            log.lines(),
+            [RunLogLine {
+                unix_ms: 1_760_613_845_250,
+                severity: LogSeverity::Info,
+                source: LogSource::Engine,
+                message: "Transient noise: 2 device noise source(s)".to_owned(),
+            }],
             "the engine's text is carried unchanged"
+        );
+    }
+
+    /// A testbench's output and a compiler finding are tagged as theirs, not
+    /// the engine's.
+    #[test]
+    fn a_line_is_tagged_with_the_part_of_the_run_that_said_it() {
+        let line = |origin, message: &str| EngineLogLine {
+            severity: LogSeverity::Warning,
+            message: message.to_owned(),
+            origin,
+        };
+        let mut log = RunLog::default();
+        publish(
+            vec![
+                line(EngineLogOrigin::Hdl, "edge 1 \u{2014} tb (tb.v:9)"),
+                line(
+                    EngineLogOrigin::VerilogA,
+                    "model.va:4:5: [VA-SEM-X] dropped",
+                ),
+            ],
+            &mut log,
+            0,
+            &[],
+        );
+        let sources: Vec<_> = log.lines().iter().map(|line| line.source).collect();
+        assert_eq!(sources, vec![LogSource::Hdl, LogSource::VerilogA]);
+    }
+
+    /// The engine's repeat of a parse warning the run advised when it started
+    /// is left out; its other lines are not.
+    #[test]
+    fn an_engine_line_the_run_already_advised_is_left_out() {
+        let advised = "line 5: unsupported dot-command '.FOO' ignored".to_owned();
+        let line = |origin, message: &str| EngineLogLine {
+            severity: LogSeverity::Warning,
+            message: message.to_owned(),
+            origin,
+        };
+        let mut log = RunLog::default();
+        publish(
+            vec![
+                line(EngineLogOrigin::Engine, &advised),
+                line(EngineLogOrigin::Engine, "Circuit: 1 node"),
+                line(EngineLogOrigin::Hdl, &advised),
+            ],
+            &mut log,
+            0,
+            std::slice::from_ref(&advised),
+        );
+        let kept: Vec<_> = log
+            .lines()
+            .iter()
+            .map(|line| (line.source, line.message.as_str()))
+            .collect();
+        assert_eq!(
+            kept,
+            [
+                (LogSource::Engine, "Circuit: 1 node"),
+                (LogSource::Hdl, advised.as_str())
+            ]
         );
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn a_core_info_line_logged_on_the_run_thread_reaches_the_console_as_an_engine_row() {
+    fn a_core_info_line_logged_on_the_run_thread_reaches_the_runs_log_as_an_engine_line() {
         studio_logger_for_tests();
         let queue = Arc::new(Mutex::new(EngineLogQueue::default()));
         {
@@ -192,10 +279,11 @@ mod tests {
             );
         }
 
-        let mut buffer = LogBuffer::default();
-        crate::diagnostics::engine_log::publish(lock_queue(&queue).drain(), &mut buffer);
-        let rows: Vec<_> = buffer.entries_by_source(LogSource::Engine).collect();
-        assert_eq!(rows.len(), 1, "one engine row: {rows:?}");
+        let mut log = RunLog::default();
+        crate::diagnostics::engine_log::publish(lock_queue(&queue).drain(), &mut log, 0, &[]);
+        let rows = log.lines();
+        assert_eq!(rows.len(), 1, "one engine line: {rows:?}");
+        assert_eq!(rows[0].source, LogSource::Engine);
         assert_eq!(rows[0].severity, LogSeverity::Info);
         assert_eq!(
             rows[0].message,

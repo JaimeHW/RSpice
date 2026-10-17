@@ -6,7 +6,7 @@
 //! browser-print, or native-spool boundary.
 
 use super::HardcopyWorkflow;
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app::RSpiceApp;
 
 thread_local! {
@@ -218,10 +218,8 @@ pub(crate) fn open_hardcopy_workflow(app: &mut RSpiceApp, workflow: HardcopyWork
     let (source_key, scope) = match active_retained_source_selection(app) {
         Ok(selection) => selection,
         Err(error) => {
-            app.state.push_user_message(ConsoleMessage::warning(format!(
-                "{} is unavailable: {error}.",
-                workflow.title()
-            )));
+            app.state
+                .prompt(format!("{} is unavailable: {error}.", workflow.title()));
             return;
         }
     };
@@ -233,10 +231,8 @@ pub(crate) fn open_hardcopy_workflow(app: &mut RSpiceApp, workflow: HardcopyWork
         ) {
             Ok(prepared) => prepared,
             Err(error) => {
-                app.state.push_user_message(ConsoleMessage::warning(format!(
-                    "{} is unavailable: {error}.",
-                    workflow.title()
-                )));
+                app.state
+                    .prompt(format!("{} is unavailable: {error}.", workflow.title()));
                 return;
             }
         };
@@ -478,7 +474,7 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
                     match finish_page_setup_authentication(app, resolved) {
                         Ok(message) => {
                             app.state.dialogs.hardcopy.busy = false;
-                            app.state.push_user_message(ConsoleMessage::info(message));
+                            app.state.prompt(message);
                             app.state.dialogs.hardcopy.close();
                         }
                         Err(error) => {
@@ -607,7 +603,7 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
                     match finish_page_setup_authentication(app, resolved) {
                         Ok(message) => {
                             app.state.dialogs.hardcopy.busy = false;
-                            app.state.push_user_message(ConsoleMessage::info(message));
+                            app.state.prompt(message);
                             app.state.dialogs.hardcopy.close();
                         }
                         Err(error) => {
@@ -2111,16 +2107,13 @@ fn poll_native_finalization(app: &mut RSpiceApp) -> bool {
     app.state.dialogs.hardcopy.busy = false;
     match completion {
         Ok(message) => {
-            let message = app.state.dialogs.hardcopy.last_receipt.as_ref().map_or(
-                message.clone(),
-                |receipt| {
-                    format!(
-                        "{message} Receipt {} recorded in project history.",
-                        receipt.id()
-                    )
-                },
-            );
-            app.state.push_user_message(ConsoleMessage::info(message));
+            let message = if app.state.dialogs.hardcopy.last_receipt.is_some() {
+                format!("{message} It is recorded in the project history.")
+            } else {
+                message
+            };
+            app.state
+                .record(LogSeverity::Info, LogSource::Studio, message);
             if app.state.dialogs.hardcopy.open {
                 app.state.dialogs.hardcopy.close();
             }
@@ -2129,7 +2122,8 @@ fn poll_native_finalization(app: &mut RSpiceApp) -> bool {
             if app.state.dialogs.hardcopy.open {
                 app.state.dialogs.hardcopy.error = Some(error);
             } else if !error.contains("was cancelled") {
-                app.state.push_user_message(ConsoleMessage::warning(error));
+                app.state
+                    .record(LogSeverity::Error, LogSource::Studio, error);
             }
         }
     }

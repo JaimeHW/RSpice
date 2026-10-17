@@ -4,7 +4,6 @@ use super::{
     SchematicSymbolContext, requests::editor_request_source,
     sheet_visibility::with_active_wire_topology, viewport::Viewport,
 };
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{Point, Tool};
 use crate::workbench::{
     app::{armed_stretch_selection_authority, cancel_armed_stretch_selection},
@@ -33,9 +32,7 @@ pub(super) fn handle_armed_stretch_selection(
         return;
     }
     if let Err(message) = armed_stretch_selection_authority(state) {
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "Stretch selection cancelled: {message}"
-        )));
+        state.prompt(format!("Stretch cancelled: {message}"));
         cancel_armed_stretch_selection(state);
         return;
     }
@@ -91,9 +88,7 @@ fn apply(state: &mut AppState, symbols: &SchematicSymbolContext, request: Stretc
 
 fn commit_armed_stretch_selection(state: &mut AppState, symbol_context: &SchematicSymbolContext) {
     if let Err(message) = armed_stretch_selection_authority(state) {
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "Stretch selection cancelled: {message}"
-        )));
+        state.prompt(format!("Stretch cancelled: {message}"));
         cancel_armed_stretch_selection(state);
         return;
     }
@@ -107,9 +102,7 @@ fn commit_armed_stretch_selection(state: &mut AppState, symbol_context: &Schemat
     {
         let draft = &mut state.dialogs.stretch_selection;
         draft.canvas.gesture.reset_candidate();
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "Stretch selection was not committed: {message}"
-        )));
+        state.prompt(format!("Stretch not committed: {message}"));
         return;
     }
     let delta = state.dialogs.stretch_selection.canvas.gesture.preview_delta;
@@ -121,10 +114,7 @@ fn commit_armed_stretch_selection(state: &mut AppState, symbol_context: &Schemat
         .target
         .expect("validated stretch target");
     if delta == Point::origin() {
-        state.push_user_message(ConsoleMessage::info(
-            "Stretch selection finished without changing geometry; no undo record was created."
-                .to_owned(),
-        ));
+        state.prompt("Nothing stretched.");
         cancel_armed_stretch_selection(state);
         return;
     }
@@ -146,25 +136,21 @@ fn commit_armed_stretch_selection(state: &mut AppState, symbol_context: &Schemat
         Ok(true) => {
             let recorded = state.schematic.end_operation();
             state.sync_active_schematic_to_workspace();
-            state.push_user_message(ConsoleMessage::info(format!(
-                "Stretched the selected geometry by ({}, {}) with {}; {}.",
-                delta.x,
-                delta.y,
-                policy.label(),
-                if recorded {
-                    "one undo record committed"
-                } else {
-                    "geometry was unchanged"
-                }
-            )));
+            state.prompt(if recorded {
+                format!(
+                    "Stretched the selection by ({}, {}) with {}.",
+                    delta.x,
+                    delta.y,
+                    policy.label(),
+                )
+            } else {
+                "Nothing stretched.".to_owned()
+            });
             cancel_armed_stretch_selection(state);
         }
         Ok(false) => {
             state.schematic.cancel_operation();
-            state.push_user_message(ConsoleMessage::info(
-                "Stretch selection produced no geometry change; no undo record was created."
-                    .to_owned(),
-            ));
+            state.prompt("Nothing stretched.");
             cancel_armed_stretch_selection(state);
         }
         Err(error) => {
@@ -172,9 +158,7 @@ fn commit_armed_stretch_selection(state: &mut AppState, symbol_context: &Schemat
             let draft = &mut state.dialogs.stretch_selection;
             draft.canvas.gesture.preview_error = Some(error.to_string());
             draft.canvas.gesture.reset_candidate();
-            state.push_user_message(ConsoleMessage::warning(format!(
-                "Stretch selection was not committed: {error}"
-            )));
+            state.prompt(format!("Stretch not committed: {error}"));
         }
     }
 }
@@ -378,6 +362,51 @@ mod tests {
             state.schematic.undo_description(),
             Some("stretch selection")
         );
+    }
+
+    /// A drawn route stretches with the segment beside it, which is its own
+    /// wire. Sheet 2's wire ends on the other corner: it is another sheet's
+    /// wiring, so it neither follows the corner nor pins it.
+    #[test]
+    fn a_route_stretches_with_its_neighbour_and_leaves_another_sheets_wire() {
+        let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[7, 8], &[21]);
+        let hidden = Wire::segment(21, Point::new(20, 20), Point::new(20, 0));
+        state.schematic.document_mut_for_test().wires = vec![
+            Wire::segment(8, Point::new(0, 0), Point::new(0, 20)),
+            Wire::segment(7, Point::new(0, 20), Point::new(20, 20)),
+            hidden.clone(),
+        ];
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_wire_segment(7, 0);
+        state.schematic.init_undo_history();
+        arm_test_stretch(&mut state);
+        state.dialogs.stretch_selection.canvas.gesture.preview_delta = Point::new(0, 10);
+        let symbols = schematic_symbol_context(&state);
+
+        commit_armed_stretch_selection(&mut state, &symbols);
+
+        let wire = |id: u64| {
+            state
+                .schematic
+                .document()
+                .wires
+                .iter()
+                .find(|wire| wire.id == id)
+                .cloned()
+        };
+        assert_eq!(
+            wire(7).map(|wire| wire.points),
+            Some(vec![Point::new(0, 30), Point::new(20, 30)])
+        );
+        assert_eq!(
+            wire(8).map(|wire| wire.points),
+            Some(vec![Point::new(0, 0), Point::new(0, 30)])
+        );
+        assert_eq!(wire(21), Some(hidden));
     }
 
     /// The preview runs with the other sheets out of reach, as the commit

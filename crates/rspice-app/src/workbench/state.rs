@@ -836,18 +836,59 @@ pub enum AnalysisLifecycleSeverity {
     Refusal,
 }
 
+/// The status bar's answer to the gesture just made.
+///
+/// Feedback, not a record: it is never logged and never notified, the next
+/// prompt replaces it, and it is gone [`StatusPrompt::LIFETIME`] after it was
+/// given.
+#[derive(Debug, Clone)]
+pub struct StatusPrompt {
+    pub text: String,
+    pub issued: crate::time_compat::Instant,
+}
+
+impl StatusPrompt {
+    pub const LIFETIME: std::time::Duration = std::time::Duration::from_secs(6);
+
+    /// How long the prompt has left on the bar, or `None` once it has expired.
+    pub fn remaining(&self) -> Option<std::time::Duration> {
+        Self::LIFETIME
+            .checked_sub(self.issued.elapsed())
+            .filter(|remaining| !remaining.is_zero())
+    }
+}
+
+/// Failures of the per-frame drawing sync that the Console already holds.
+#[derive(Debug, Clone, Default)]
+pub struct SyncFailures {
+    pub sheet_membership: Option<String>,
+    pub generated_symbol: Option<String>,
+}
+
+impl SyncFailures {
+    /// Note `failure` in `slot`, answering whether it is new and so is to be
+    /// recorded. `None` clears the slot, so the same failure returning later
+    /// is recorded again.
+    pub fn observe(slot: &mut Option<String>, failure: Option<&str>) -> bool {
+        if slot.as_deref() == failure {
+            return false;
+        }
+        *slot = failure.map(str::to_owned);
+        failure.is_some()
+    }
+}
+
 /// The last outcome any Simulation Studio plan command announced.
 ///
-/// Only the Analyses route draws this; the other seven routes drain refusals
-/// out of it into the toast system. That drain is keyed on `sequence`, which is
-/// why the sequence advances on a *change* of outcome and not on every
+/// Only the Analyses route draws this; the Console holds the record of each
+/// outcome. An outcome is new only when it *changes*, not on every
 /// restatement: three of the writers sit on the render path rather than in a
-/// click handler, and a per-frame bump would toast the same refusal forever.
+/// click handler, and recording each restatement would record the same
+/// refusal forever.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnalysisLifecycleOutcome {
     severity: AnalysisLifecycleSeverity,
     message: String,
-    sequence: u64,
 }
 
 impl Default for AnalysisLifecycleOutcome {
@@ -857,7 +898,6 @@ impl Default for AnalysisLifecycleOutcome {
         Self {
             severity: AnalysisLifecycleSeverity::Receipt,
             message: "No lifecycle command has been committed this session.".to_owned(),
-            sequence: 0,
         }
     }
 }
@@ -865,12 +905,6 @@ impl Default for AnalysisLifecycleOutcome {
 impl AnalysisLifecycleOutcome {
     pub fn message(&self) -> &str {
         &self.message
-    }
-
-    /// Advances only when the announced outcome differs from the one already
-    /// held. Readers compare it against the last value they acted on.
-    pub const fn sequence(&self) -> u64 {
-        self.sequence
     }
 
     pub const fn is_refusal(&self) -> bool {
@@ -894,8 +928,8 @@ impl AnalysisLifecycleOutcome {
     ///
     /// Three announcing sites sit on the render path rather than in a click
     /// handler, so a standing refusal is restated every frame. Restating it is
-    /// not an event: the sequence does not advance, and a reporter reading the
-    /// answer does not report it again.
+    /// not an event, and a reporter reading the answer does not report it
+    /// again.
     fn record(&mut self, severity: AnalysisLifecycleSeverity, message: impl Into<String>) -> bool {
         let message = message.into();
         if self.severity == severity && self.message == message {
@@ -903,7 +937,6 @@ impl AnalysisLifecycleOutcome {
         }
         self.severity = severity;
         self.message = message;
-        self.sequence += 1;
         true
     }
 }
@@ -1091,10 +1124,10 @@ pub struct WorkbenchState {
     workspace_preset: WorkspacePreset,
     #[serde(default)]
     pub console_page: ConsolePage,
-    /// The producer the Console page is narrowed to. Transient: a reading
-    /// position over a log that does not survive the session.
+    /// The reader's place on the Console page. Transient: a reading position
+    /// over logs, not a layout preference.
     #[serde(skip)]
-    pub console_producer_filter: Option<ConsoleProducerFilter>,
+    pub console_view: ConsoleView,
     #[serde(default)]
     pub design_panel: DesignPanel,
     /// Active and locally closed document presentations in each workspace.
@@ -1163,12 +1196,15 @@ pub struct WorkbenchState {
     /// Last analysis lifecycle outcome announced by the transaction owner.
     #[serde(skip)]
     pub analysis_lifecycle_status: AnalysisLifecycleOutcome,
-    /// Sequence of the outcome the Simulation Studio has already surfaced away
-    /// from the Analyses page. Runtime-only, and deliberately not part of the
-    /// outcome itself: the writers announce, and this records what a reader did
-    /// about it.
+    /// The status bar's feedback on the gesture just made.
     #[serde(skip)]
-    pub analysis_lifecycle_toasted_sequence: u64,
+    pub prompt: Option<StatusPrompt>,
+    /// The sheet-membership and generated-symbol failures last recorded.
+    ///
+    /// The drawing is synced every frame, so a failure that stands is
+    /// recorded when it first appears or changes, not sixty times a second.
+    #[serde(skip)]
+    pub recorded_sync_failures: SyncFailures,
     /// Active Simulation Studio transaction. Drafts are runtime-only and are
     /// committed atomically by the dialog's primary action.
     #[serde(skip)]
@@ -1416,7 +1452,7 @@ impl Default for WorkbenchState {
             workspace_layouts: HashMap::new(),
             workspace_preset: WorkspacePreset::default(),
             console_page: ConsolePage::Console,
-            console_producer_filter: None,
+            console_view: ConsoleView::default(),
             design_panel: DesignPanel::Navigator,
             documents: WorkspaceDocumentRegistry::default(),
             netlist_open_documents: HashSet::new(),
@@ -1437,7 +1473,8 @@ impl Default for WorkbenchState {
             simulation_surface_pending_scroll_delta_y: 0.0,
             simulation_surface_editor_anchor_y: None,
             analysis_lifecycle_status: AnalysisLifecycleOutcome::default(),
-            analysis_lifecycle_toasted_sequence: 0,
+            prompt: None,
+            recorded_sync_failures: SyncFailures::default(),
             simulation_workflow: None,
             selected_specification: None,
             specification_editor_route_pending: false,
@@ -1485,6 +1522,14 @@ impl Default for WorkbenchState {
 }
 
 impl WorkbenchState {
+    /// Show the bottom dock, at its own height and out of focus mode, on
+    /// whichever page it last showed.
+    pub(crate) fn open_console(&mut self) {
+        self.focus_mode = false;
+        self.console_visible = true;
+        self.console_maximized = false;
+    }
+
     pub(crate) fn capture_authoring_recovery(&mut self) {
         self.model_editor_recovery = self
             .model_editor

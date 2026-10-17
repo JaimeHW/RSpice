@@ -24,7 +24,6 @@ pub(crate) fn apply_imported_netlist(
         source,
         source_path,
         display_name,
-        false,
         metadata,
         Vec::new(),
     )
@@ -39,7 +38,58 @@ pub(super) struct NetlistImportMetadata {
     pub(super) raw_sha256: [u8; 32],
 }
 
+/// Why a deck was not installed.
+///
+/// Returned rather than reported, because the caller decides which state
+/// hears about it: opening a netlist as a project installs the deck into a
+/// candidate it discards on failure, so a reason reported there would be
+/// discarded with it.
+#[derive(Debug)]
+enum ImportFailure {
+    /// The gesture was refused before anything was read.
+    Refused(&'static str),
+    /// The deck could not be installed.
+    Failed(String),
+}
+
+/// Import a SPICE deck into the open project, reporting the outcome.
 pub(super) fn apply_imported_netlist_transaction(
+    state: &mut AppState,
+    source: String,
+    source_path: Option<std::path::PathBuf>,
+    display_name: &str,
+    metadata: NetlistImportMetadata,
+    dependencies: Vec<crate::state::DependencyMetadata>,
+) -> bool {
+    match install_imported_netlist(
+        state,
+        source,
+        source_path,
+        display_name,
+        false,
+        metadata,
+        dependencies,
+    ) {
+        Ok(()) => {
+            state.record(
+                LogSeverity::Info,
+                LogSource::Netlist,
+                format!("Imported SPICE deck {display_name}."),
+            );
+            true
+        }
+        Err(ImportFailure::Refused(refusal)) => {
+            state.prompt(refusal);
+            false
+        }
+        Err(ImportFailure::Failed(error)) => {
+            record_import_failure(state, &error);
+            false
+        }
+    }
+}
+
+fn install_imported_netlist(
     state: &mut AppState,
     source: String,
     source_path: Option<std::path::PathBuf>,
@@ -47,59 +97,40 @@ pub(super) fn apply_imported_netlist_transaction(
     initializing_netlist_project: bool,
     metadata: NetlistImportMetadata,
     dependencies: Vec<crate::state::DependencyMetadata>,
-) -> bool {
+) -> Result<(), ImportFailure> {
     if source.trim().is_empty() {
-        state.push_user_message(ConsoleMessage::error(format!(
-            "SPICE deck import failed: {display_name} is empty"
-        )));
-        return false;
+        return Err(ImportFailure::Failed(format!("{display_name} is empty")));
     }
 
     if !state.project_lifecycle.is_open() {
-        state.push_user_message(ConsoleMessage::error(
-            "SPICE deck import requires an open project",
+        return Err(ImportFailure::Refused(
+            "SPICE deck import needs an open project.",
         ));
-        return false;
     }
     if state.workbench.safe_mode.project_read_only() && !initializing_netlist_project {
-        state.push_user_message(ConsoleMessage::error(
-            "SPICE deck import is unavailable because the project is open read-only",
+        return Err(ImportFailure::Refused(
+            "SPICE deck import is unavailable: the project is open read-only.",
         ));
-        return false;
     }
     if state.simulation.execution.has_active_execution() {
-        state.push_user_message(ConsoleMessage::error(
-            "SPICE deck import is blocked while a simulation execution owns the project",
+        return Err(ImportFailure::Refused(
+            "SPICE deck import is unavailable while a simulation is running.",
         ));
-        return false;
     }
 
-    let (document, mut descriptor) = match canonical_import_document(
+    let (document, mut descriptor) = canonical_import_document(
         state,
         &source,
         source_path.as_deref(),
         display_name,
         metadata,
         dependencies,
-    ) {
-        Ok(canonical) => canonical,
-        Err(error) => {
-            state.push_user_message(ConsoleMessage::error(format!(
-                "SPICE deck import failed: {error}"
-            )));
-            return false;
-        }
-    };
+    )
+    .map_err(ImportFailure::Failed)?;
     let mut candidate = state.clone();
-    if !initializing_netlist_project
-        && candidate.workspace.content.netlist_document.is_some()
-        && let Err(error) =
-            crate::workbench::documents::netlist_document::retain_active_top_deck(&mut candidate)
-    {
-        state.push_user_message(ConsoleMessage::error(format!(
-            "SPICE deck import failed: {error}"
-        )));
-        return false;
+    if !initializing_netlist_project && candidate.workspace.content.netlist_document.is_some() {
+        crate::workbench::documents::netlist_document::retain_active_top_deck(&mut candidate)
+            .map_err(ImportFailure::Failed)?;
     }
     descriptor.artifact_name =
         crate::workbench::documents::netlist_document::available_top_deck_path(
@@ -132,21 +163,21 @@ pub(super) fn apply_imported_netlist_transaction(
     candidate
         .workbench
         .activate(crate::workbench::state::Workspace::Netlist);
-    if let Err(error) = candidate
+    candidate
         .workspace
         .content
         .validate_simulation_configuration()
-    {
-        state.push_user_message(ConsoleMessage::error(format!(
-            "SPICE deck import failed: {error}"
-        )));
-        return false;
-    }
+        .map_err(|error| ImportFailure::Failed(error.to_string()))?;
     *state = candidate;
-    state.push_user_message(ConsoleMessage::info(format!(
-        "Imported SPICE deck: {display_name}"
-    )));
-    true
+    Ok(())
+}
+
+pub(super) fn record_import_failure(state: &mut AppState, error: &str) {
+    state.record(
+        LogSeverity::Error,
+        LogSource::Netlist,
+        format!("SPICE deck import failed: {error}"),
+    );
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,42 +221,29 @@ pub(super) fn apply_opened_netlist_project(
     dependencies: Vec<crate::state::DependencyMetadata>,
 ) -> bool {
     if source.trim().is_empty() {
-        state.push_user_message(ConsoleMessage::error(format!(
-            "Netlist project open failed: {display_name} is empty"
-        )));
+        state.record(
+            LogSeverity::Error,
+            LogSource::Netlist,
+            format!("Netlist project open failed: {display_name} is empty"),
+        );
         return false;
     }
     if state.simulation.execution.has_active_execution() {
-        state.push_user_message(ConsoleMessage::error(
-            "Netlist project open is blocked while a simulation execution owns the project",
-        ));
+        state.prompt("A netlist project cannot be opened while a simulation is running.");
         return false;
     }
 
     // Construct and validate the replacement off to the side. The currently
     // open project, its dirty documents and all retained evidence remain
     // untouched unless the complete netlist-first project is ready to commit.
+    // The candidate states the opened netlist when it is created, so the line
+    // reaches the Console only if the candidate is committed.
     let mut candidate = state.clone();
-    crate::workbench::workflows::project_workflow::create_new_project(&mut candidate);
-    let proposed_name = std::path::Path::new(display_name)
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .filter(|stem| !stem.trim().is_empty())
-        .unwrap_or("Netlist Project");
-    if candidate
-        .workspace
-        .content
-        .project
-        .rename(proposed_name.to_owned())
-        .is_err()
-    {
-        let _ = candidate
-            .workspace
-            .content
-            .project
-            .rename("Netlist Project".to_owned());
-    }
-    if !apply_imported_netlist_transaction(
+    crate::workbench::workflows::project_workflow::create_netlist_project(
+        &mut candidate,
+        display_name,
+    );
+    if let Err(failure) = install_imported_netlist(
         &mut candidate,
         source,
         source_path,
@@ -234,14 +252,19 @@ pub(super) fn apply_opened_netlist_project(
         metadata,
         dependencies,
     ) {
-        state.push_user_message(ConsoleMessage::error(
-            "Netlist project open failed; the current project was left unchanged",
-        ));
+        let reason = match failure {
+            ImportFailure::Refused(refusal) => refusal.trim_end_matches('.').to_owned(),
+            ImportFailure::Failed(error) => error,
+        };
+        state.record(
+            LogSeverity::Error,
+            LogSource::Netlist,
+            format!(
+                "Netlist project open failed: {reason}. The current project was left unchanged."
+            ),
+        );
         return false;
     }
-    candidate.push_user_message(ConsoleMessage::info(format!(
-        "Opened netlist-first project: {display_name}"
-    )));
     *state = candidate;
     true
 }
@@ -269,7 +292,6 @@ pub(super) fn apply_netlist_import_result(
             source,
             source_path,
             display_name,
-            false,
             metadata,
             dependencies,
         ),

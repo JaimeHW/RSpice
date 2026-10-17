@@ -9,7 +9,6 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use uuid::Uuid;
 
 use super::schema::DecodedShortcutArtifact;
 use super::{canonical_json_bytes, sha256};
@@ -1361,7 +1360,6 @@ pub fn shortcut_library_digest(
 /// bindings have not moved on since.
 #[derive(Debug, Clone)]
 pub struct ShortcutImportReceipt {
-    id: Uuid,
     source_name: String,
     applied_revision: u64,
     applied_digest: [u8; 32],
@@ -1369,10 +1367,6 @@ pub struct ShortcutImportReceipt {
 }
 
 impl ShortcutImportReceipt {
-    #[must_use]
-    pub const fn id(&self) -> Uuid {
-        self.id
-    }
     #[must_use]
     pub fn source_name(&self) -> &str {
         &self.source_name
@@ -1433,7 +1427,6 @@ pub fn apply_shortcut_import(
         .map_err(|error| ShortcutImportApplyError::Serialization(error.to_string()))?;
     *library = published;
     Ok(ShortcutImportReceipt {
-        id: Uuid::new_v4(),
         source_name: plan.source_name.clone(),
         applied_revision,
         applied_digest,

@@ -153,16 +153,32 @@ use rspice_core::analysis::harmonic_balance::{
 // The census was 5,703.
 // `netlist::lexer::is_xyce_device_name` adds one: the design crate's DRC
 // extraction (`drc/extraction.rs`) judges a card's name by the parser's own
-// rule rather than a copy of it.
-// Twelve statements for the notices a run raises and completes with, read
-// by the simulation service's run sink and the Problems page:
-// `notice::EngineNotice` and the three types its variants carry
-// (`ParameterReplacement`, `ParameterScope`, `TimestepFloor`); the
-// `RecordedNotice` a run delivers; and the `NoticeCollector`, its
-// `CollectorGuard` and its four methods (`new`, `install`, `current`,
-// `take`), which the run sink installs on the solving thread and drains when
-// the run ends. The census is 5,716, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5716;
+// rule rather than a copy of it. The census was 5,704.
+// Twenty-four statements came in with the Console and the Problems page
+// together (a `pub mod` line is not counted):
+// - The log scope that carries a run onto the engine's worker threads, eight,
+//   for the simulation service's run log (`rspice-simulation` engine_log.rs):
+//   `LogScope` with `new`, which the run's sink is installed through, `owner`
+//   and `point`, which every offered record is read through, and `at_point`,
+//   which its worker test labels a sample with; `capture` and `enter`; and
+//   `LogScopeGuard`, which `enter` returns.
+// - `LogScope::collecting`, one: the run sink keeps the run's notice
+//   collector in that scope, so a notice raised on a worker reaches the run
+//   that spawned it.
+// - The notices a run raises and completes with, nine, read by the run sink
+//   and the Problems page: `notice::EngineNotice` and the three types its
+//   variants carry (`ParameterReplacement`, `ParameterScope`,
+//   `TimestepFloor`); the `RecordedNotice` a run delivers; and the
+//   `NoticeCollector` with `new`, `install` and `take`.
+// - The engine refusals the Problems page states before a run, five, read by
+//   the simulation service's preflight (`rspice-simulation`
+//   execution/snapshot/engine_refusals.rs): `DcBranchVoltageLoop`, its
+//   re-export from `introspection` and `Circuit::dc_branch_voltage_loops`;
+//   `ModelBinCoverageGap` and the builder's `model_bin_coverage_gaps`.
+// - `ParameterRedefinitionPolicy::binding_definition`, one, a method of a
+//   public policy type that the parser and the source map read in this crate.
+// The census is 5,728, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5728;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

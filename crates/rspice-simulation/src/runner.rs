@@ -22,7 +22,7 @@ use crate::error::SimulationError;
 use crate::execution_options::SpecExecutionOptions;
 pub(crate) use rspice_simulation_contract::worker_protocol::AnalysisExecutionEnvironment;
 
-use crate::engine_log::{EngineLogLine, EngineLogQueue, RunLogSink};
+use crate::engine_log::{EngineLogLine, EngineLogQueue, EngineLogSeal, RunLogSink};
 
 use super::execution::ResolvedTaskDispatch;
 use super::status::{SimulationProgress, SimulationStatus};
@@ -243,6 +243,16 @@ impl SimulationRunner {
     /// to.
     pub fn drain_engine_notices(&self) -> Vec<rspice_core::notice::RecordedNotice> {
         crate::engine_log::lock_queue(&self.engine_log).drain_notices()
+    }
+
+    /// What the current task's engine log withheld and suppressed, for the
+    /// run's own log to account for before the next task clears the queue.
+    pub fn engine_log_tally(&self) -> EngineLogSeal {
+        let queue = crate::engine_log::lock_queue(&self.engine_log);
+        EngineLogSeal {
+            withheld: queue.withheld(),
+            suppressed_warnings: queue.suppressed_warnings(),
+        }
     }
 
     /// Latest complete journal, available independently of terminal success.
@@ -972,6 +982,7 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
     limits.max_netlist_bytes = limits.max_expanded_source_bytes;
     let bridge = EngineBridge::new()
         .with_resource_limits(limits)
+        .with_run_log()
         .with_measurement_references(input.measurement_references.clone());
 
     // Update status: building
@@ -1270,6 +1281,124 @@ mod tests {
             "the receipt counts what it injected: {}",
             receipt.message
         );
+    }
+
+    /// A digital testbench's `$display` reaches the run's log as the design's
+    /// own words, and the run states the circuit it built once, although it
+    /// elaborates it for the operating point and again for the transient.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_testbench_display_and_the_circuit_inventory_reach_the_run_log() {
+        let directory =
+            std::env::temp_dir().join(format!("rspice_runner_hdl_log_{}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("create the model directory");
+        let model = directory.join("ticker.va");
+        std::fs::write(
+            &model,
+            "`timescale 1ns/1ns\n\
+             module ticker(p, n);\n\
+             \x20 inout p, n;\n\
+             \x20 electrical p, n;\n\
+             \x20 reg clk;\n\
+             \x20 integer count;\n\
+             \x20 initial begin clk = 0; count = 0; end\n\
+             \x20 always #5 clk = ~clk;\n\
+             \x20 always @(posedge clk) begin count = count + 1; $display(\"edge %0d\", count); end\n\
+             \x20 analog I(p, n) <+ V(p, n) / 1000.0;\n\
+             endmodule\n",
+        )
+        .expect("write the model");
+        let deck = format!(
+            "* testbench run log\nV1 a 0 1\nR1 a p 1k\nx1 p 0 ticker\n.va \"{}\" ticker\n.end\n",
+            model.display().to_string().replace('\\', "/")
+        );
+        let lines = engine_log_of_run(
+            AnalysisSpec::Transient {
+                stop_time: 32e-9,
+                step_time: 1e-9,
+                start_time: 0.0,
+                max_timestep: None,
+                uic: false,
+            },
+            &deck,
+        );
+        let messages = || lines.iter().map(|line| &line.message).collect::<Vec<_>>();
+        let edge = lines
+            .iter()
+            .find(|line| line.message.starts_with("edge 1"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "the testbench's display is not in the log: {:?}",
+                    messages()
+                )
+            });
+        assert_eq!(edge.origin, crate::engine_log::EngineLogOrigin::Hdl);
+        assert_eq!(
+            edge.severity,
+            rspice_app_types::diagnostics::LogSeverity::Info
+        );
+        assert_eq!(
+            lines
+                .iter()
+                .filter(|line| line.message.starts_with("Circuit: "))
+                .count(),
+            1,
+            "{:?}",
+            messages()
+        );
+    }
+
+    /// A model the compiler accepted with a caveat says so in the run's log:
+    /// an analog `$strobe` is parsed and dropped, and the author must not be
+    /// left believing the model prints.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_verilog_a_compiler_warning_reaches_the_run_log() {
+        let directory =
+            std::env::temp_dir().join(format!("rspice_runner_va_log_{}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("create the model directory");
+        let model = directory.join("strober.va");
+        std::fs::write(
+            &model,
+            "module strober(p, n);\n\
+             \x20 inout p, n;\n\
+             \x20 electrical p, n;\n\
+             \x20 analog begin\n\
+             \x20   I(p, n) <+ V(p, n) / 1000.0;\n\
+             \x20   $strobe(\"v=%g\", V(p, n));\n\
+             \x20 end\n\
+             endmodule\n",
+        )
+        .expect("write the model");
+        let deck = format!(
+            "* compiler warning run log\nV1 a 0 1\nR1 a p 1k\nx1 p 0 strober\n.va \"{}\" strober\n.end\n",
+            model.display().to_string().replace('\\', "/")
+        );
+        let lines = engine_log_of_run(
+            AnalysisSpec::Transient {
+                stop_time: 10e-9,
+                step_time: 1e-9,
+                start_time: 0.0,
+                max_timestep: None,
+                uic: false,
+            },
+            &deck,
+        );
+        let finding = lines
+            .iter()
+            .find(|line| line.message.contains("[VA-SEM-NO-EFFECT-SYSTEM-TASK]"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "the compiler's finding is not in the log: {:?}",
+                    lines.iter().map(|line| &line.message).collect::<Vec<_>>()
+                )
+            });
+        assert_eq!(finding.origin, crate::engine_log::EngineLogOrigin::VerilogA);
+        assert_eq!(
+            finding.severity,
+            rspice_app_types::diagnostics::LogSeverity::Warning
+        );
+        assert!(finding.message.contains("'$strobe'"), "{}", finding.message);
     }
 
     /// A one-tone nonlinear HB solve traces its Newton iterations when the

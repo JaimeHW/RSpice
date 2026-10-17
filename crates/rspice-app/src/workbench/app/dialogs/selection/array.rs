@@ -12,7 +12,6 @@
 
 use egui::{Context, Id};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{
     Point, SchematicArrayCount, SchematicArrayKind, SchematicArrayNaming, SchematicArrayPlacement,
     SchematicArrayPlan, Tool,
@@ -133,16 +132,11 @@ impl DraftValidation {
 }
 
 pub(crate) fn open_array_selection_dialog(state: &mut AppState) {
-    if state.schematic_edit_read_only() {
-        state.push_user_message(ConsoleMessage::warning(
-            "Create array is unavailable because the active schematic is read-only.".to_owned(),
-        ));
-        return;
-    }
-    if let Err(error) = state.schematic.validate_array_source_selection() {
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "Create array requires one complete eligible selection: {error}"
-        )));
+    // Create array is greyed on a read-only schematic and on a selection it
+    // cannot repeat, so those two return without a word.
+    if state.schematic_edit_read_only()
+        || state.schematic.validate_array_source_selection().is_err()
+    {
         return;
     }
     let count = SchematicArrayCount::parse(DEFAULT_COUNT)
@@ -150,9 +144,7 @@ pub(crate) fn open_array_selection_dialog(state: &mut AppState) {
     let naming = match state.schematic.default_array_naming(count) {
         Ok(naming) => naming.to_string(),
         Err(error) => {
-            state.push_user_message(ConsoleMessage::warning(format!(
-                "Create array could not derive a collision-free naming policy: {error}"
-            )));
+            state.prompt(format!("Create array could not find unused names: {error}"));
             return;
         }
     };

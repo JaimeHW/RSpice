@@ -3,18 +3,22 @@
 //! The engine says these things in its log, as prose, for whoever is watching
 //! the run. A notice is the same event in a shape a reader can act on: the
 //! element, the parameter, the value asked for and the value used. The host
-//! that runs an analysis installs a [`NoticeCollector`] on the solving thread;
-//! where none is installed, recording a notice costs one thread-local read.
+//! that runs an analysis keeps a [`NoticeCollector`] in the run's
+//! [`log_scope`](crate::log_scope), which the engine enters on every thread it
+//! hands part of the run to; where no run collects, recording a notice costs
+//! one thread-local read.
 //!
 //! Notices are deduplicated as they are recorded. A shared model card is
 //! clamped once per bind, but a sweep or a Monte Carlo run binds it once per
 //! point, and the reader needs the clamp once with the points it occurred at,
-//! not ten thousand times.
+//! not ten thousand times. The point is the scope's, the label the run's log
+//! lines carry: `sample 12`.
 
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 
 use crate::ContinuationAid;
+use crate::log_scope::{self, LogScope, LogScopeGuard};
 
 /// The sweep points one notice lists by name. Past this many, it counts.
 const MAX_NAMED_POINTS: usize = 8;
@@ -133,8 +137,8 @@ impl RecordedNotice {
 /// Where one run's notices are recorded.
 ///
 /// Shared, because a run may solve on more than one thread: a Monte Carlo run
-/// evaluates its trials on workers, and each worker installs the run's
-/// collector before it binds anything.
+/// evaluates its samples on workers, and a parallel sweep its chunks, each
+/// inside the run's log scope.
 #[derive(Debug, Clone, Default)]
 pub struct NoticeCollector(Arc<Mutex<Vec<RecordedNotice>>>);
 
@@ -143,24 +147,16 @@ impl NoticeCollector {
         Self::default()
     }
 
-    /// Record on this thread until the guard is dropped.
+    /// Record on this thread, and on every thread it hands work to, until
+    /// the guard is dropped.
+    ///
+    /// Into the run this thread is executing; on a thread outside any run,
+    /// into a scope of the collector's own. A host that keeps the run's log
+    /// scope itself sets the collector there with [`LogScope::collecting`].
     #[must_use]
-    pub fn install(&self) -> CollectorGuard {
-        let previous = ACTIVE
-            .try_with(|active| active.borrow_mut().replace(self.clone()))
-            .unwrap_or(None);
-        CollectorGuard {
-            previous,
-            _thread_bound: std::marker::PhantomData,
-        }
-    }
-
-    /// The collector recording on this thread, for a thread the run spawns.
-    pub fn current() -> Option<Self> {
-        ACTIVE
-            .try_with(|active| active.borrow().clone())
-            .ok()
-            .flatten()
+    pub fn install(&self) -> LogScopeGuard {
+        let scope = log_scope::capture().unwrap_or_else(|| LogScope::new(Arc::new(())));
+        log_scope::enter(Some(scope.collecting(self.clone())))
     }
 
     /// Everything recorded so far, in the order first raised, leaving the
@@ -195,20 +191,6 @@ impl NoticeCollector {
     }
 }
 
-/// Restores the collector a thread had before [`NoticeCollector::install`].
-pub struct CollectorGuard {
-    previous: Option<NoticeCollector>,
-    // Dropping a guard restores thread-local state, so it must stay on its thread.
-    _thread_bound: std::marker::PhantomData<std::rc::Rc<()>>,
-}
-
-impl Drop for CollectorGuard {
-    fn drop(&mut self) {
-        let previous = self.previous.take();
-        let _ = ACTIVE.try_with(|active| *active.borrow_mut() = previous);
-    }
-}
-
 /// The element being bound on this thread and the card it is bound to.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Binding {
@@ -217,12 +199,10 @@ pub(crate) struct Binding {
 }
 
 thread_local! {
-    static ACTIVE: RefCell<Option<NoticeCollector>> = const { RefCell::new(None) };
     static BINDING: RefCell<Binding> = RefCell::new(Binding::default());
-    static POINT: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
-/// Restores the thread's previous binding or point when dropped.
+/// Restores the thread's previous binding when dropped.
 pub(crate) struct ContextGuard<T: 'static> {
     key: &'static std::thread::LocalKey<RefCell<T>>,
     previous: Option<T>,
@@ -263,22 +243,19 @@ pub(crate) fn binding(element: &str, model: Option<&str>) -> ContextGuard<Bindin
     )
 }
 
-/// Name the sweep point being solved, for every notice raised while the
-/// guard lives.
-pub(crate) fn point(label: String) -> ContextGuard<Option<String>> {
-    replace_context(&POINT, Some(label))
+/// Whether the run on this thread records its notices.
+fn collecting() -> bool {
+    log_scope::with_current(|scope| scope.notices().is_some()).unwrap_or(false)
 }
 
-/// Record `notice` with the collector on this thread, if there is one.
+/// Record `notice` with the collector of the run on this thread, if it has
+/// one, at the point of the run this thread is solving.
 pub(crate) fn record(notice: EngineNotice) {
-    let Some(collector) = NoticeCollector::current() else {
-        return;
-    };
-    let point = POINT
-        .try_with(|point| point.borrow().clone())
-        .ok()
-        .flatten();
-    collector.record(notice, point.as_deref());
+    let _ = log_scope::with_current(|scope| {
+        if let Some(collector) = scope.notices() {
+            collector.record(notice, scope.point());
+        }
+    });
 }
 
 /// Record that `family` replaced `parameter` of the element or card being
@@ -291,7 +268,7 @@ pub(crate) fn parameter_replaced(
     applied: f64,
     limit: Option<f64>,
 ) {
-    if NoticeCollector::current().is_none() {
+    if !collecting() {
         return;
     }
     let binding = BINDING
@@ -331,7 +308,7 @@ mod tests {
         let collector = NoticeCollector::new();
         let _installed = collector.install();
         for index in 0..12 {
-            let _point = point(format!("trial {}", index + 1));
+            let _point = log_scope::enter_point(|| format!("sample {}", index + 1));
             let _binding = binding(if index == 0 { "M1" } else { "M2" }, Some("nch"));
             clamp("PBS");
         }
@@ -344,7 +321,7 @@ mod tests {
         assert_eq!(recorded.len(), 2, "{recorded:#?}");
         assert_eq!(recorded[0].occurrences, 12);
         assert_eq!(recorded[0].points.len(), MAX_NAMED_POINTS);
-        assert_eq!(recorded[0].points[0], "trial 1");
+        assert_eq!(recorded[0].points[0], "sample 1");
         assert_eq!(recorded[0].unnamed_points, 12 - MAX_NAMED_POINTS);
         let EngineNotice::ParameterReplaced(first) = &recorded[0].notice else {
             panic!("a replacement")
@@ -352,25 +329,51 @@ mod tests {
         assert_eq!(first.parameter, "pbs");
         assert_eq!(first.element.as_deref(), Some("M1"));
         assert_eq!(recorded[1].occurrences, 1);
+        assert!(recorded[1].points.is_empty(), "raised outside any point");
         assert!(collector.take().is_empty(), "taking empties the collector");
     }
 
-    /// A worker thread the run spawns records into the run's collector once
-    /// it installs it, and the guard puts the thread back as it found it.
+    /// A worker the run hands work to records into the run's collector once
+    /// it enters the run's scope, and the guard puts the thread back as it
+    /// found it.
     #[test]
-    fn a_worker_records_into_the_collector_it_installs() {
+    fn a_worker_records_into_the_collector_of_the_scope_it_enters() {
         let collector = NoticeCollector::new();
-        let shared = {
+        let captured = {
             let _installed = collector.install();
-            NoticeCollector::current().expect("installed on this thread")
+            log_scope::capture()
         };
-        assert!(NoticeCollector::current().is_none(), "the guard restores");
-        std::thread::spawn(move || {
-            let _installed = shared.install();
-            record(EngineNotice::ConvergenceAid(ContinuationAid::GminStepping));
-        })
-        .join()
-        .expect("the worker completes");
+        assert!(!collecting(), "the guard restores");
+        std::thread::scope(|threads| {
+            threads.spawn(|| {
+                record(EngineNotice::ConvergenceAid(
+                    ContinuationAid::SourceStepping,
+                ));
+                let _run = log_scope::enter(captured.clone());
+                let _sample = log_scope::enter_point(|| "sample 3".to_owned());
+                record(EngineNotice::ConvergenceAid(ContinuationAid::GminStepping));
+            });
+        });
+        let recorded = collector.take();
+        assert_eq!(
+            recorded.len(),
+            1,
+            "only the line inside the run: {recorded:#?}"
+        );
+        assert_eq!(recorded[0].points, ["sample 3"]);
+    }
+
+    /// Installed on a thread already executing a run, the collector joins
+    /// that run's scope rather than replacing it.
+    #[test]
+    fn installing_inside_a_run_keeps_the_run() {
+        let _run = log_scope::enter(Some(LogScope::new(Arc::new("run"))));
+        let collector = NoticeCollector::new();
+        let _installed = collector.install();
+        let owner =
+            log_scope::capture().and_then(|scope| scope.owner().downcast_ref::<&str>().copied());
+        assert_eq!(owner, Some("run"));
+        record(EngineNotice::ConvergenceAid(ContinuationAid::GminStepping));
         assert_eq!(collector.take().len(), 1);
     }
 }

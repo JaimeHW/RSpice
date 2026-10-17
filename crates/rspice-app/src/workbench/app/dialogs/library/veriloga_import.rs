@@ -11,7 +11,7 @@
 
 use egui::Context;
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::workspace::{
     DeclaredModule, declared_cell_interface, place_veriloga_view, veriloga_cell_for_module,
     veriloga_view,
@@ -216,7 +216,8 @@ impl RSpiceApp {
                         self,
                     )
                 {
-                    self.state.push_user_message(ConsoleMessage::error(error));
+                    self.state
+                        .record(LogSeverity::Error, LogSource::Studio, error);
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
@@ -299,10 +300,14 @@ impl RSpiceApp {
             .map(|(_, reference, _)| reference.display_path())
             .collect::<Vec<_>>()
             .join(", ");
-        self.state.push_user_message(ConsoleMessage::info(format!(
-            "Imported {} as {created}; compile is required.",
-            form.file_name
-        )));
+        self.state.record(
+            LogSeverity::Info,
+            LogSource::Studio,
+            format!(
+                "Imported {} as {created}; compile it before use.",
+                form.file_name
+            ),
+        );
         Ok(first)
     }
 }

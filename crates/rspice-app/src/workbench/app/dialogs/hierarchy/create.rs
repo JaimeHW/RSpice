@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 use egui::{Align, Context, Frame, Label, Layout, Margin, Sense, Stroke, Ui, UiBuilder, vec2};
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::schematic::view::schematic_symbol_context;
 use crate::state::{
     Cell, CellViewRef, HierarchyExtractionPlan, HierarchyExtractionTerminal,
@@ -84,19 +84,14 @@ pub(crate) fn create_hierarchy_available(state: &AppState) -> bool {
 }
 
 pub(crate) fn open_create_hierarchy_dialog(state: &mut AppState) {
+    // The command is greyed whenever this does not hold.
     if !create_hierarchy_available(state) {
-        state.push_user_message(ConsoleMessage::warning(
-            "Create hierarchy requires one or more complete, writable schematic instances and no other selected objects."
-                .to_owned(),
-        ));
         return;
     }
     let plan = match source_plan(state) {
         Ok(plan) => plan,
         Err(error) => {
-            state.push_user_message(ConsoleMessage::warning(format!(
-                "Create hierarchy cannot open: {error}"
-            )));
+            state.prompt(format!("Create hierarchy cannot open: {error}"));
             return;
         }
     };
@@ -155,9 +150,9 @@ impl RSpiceApp {
         });
         match response.choice {
             DialogChoice::Primary => {
+                // The dialog states the refusal in place.
                 if let Err(error) = commit_create_hierarchy(&mut self.state) {
-                    self.state.dialogs.create_hierarchy.validation_error = Some(error.clone());
-                    self.state.push_user_message(ConsoleMessage::warning(error));
+                    self.state.dialogs.create_hierarchy.validation_error = Some(error);
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
@@ -775,10 +770,14 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
         hierarchy_instances_after,
     });
     state.dialogs.create_hierarchy.close();
-    state.push_user_message(ConsoleMessage::info(format!(
-        "Created hierarchical cell {library_name}/{cell_name} and descended into {}",
-        target_view_type.display_name()
-    )));
+    state.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        format!(
+            "Created hierarchical cell {library_name}/{cell_name} and descended into its {}.",
+            target_view_type.display_name()
+        ),
+    );
     Ok(())
 }
 

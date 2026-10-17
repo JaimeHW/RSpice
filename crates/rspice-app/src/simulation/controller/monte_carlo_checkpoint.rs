@@ -20,9 +20,11 @@ impl SimulationController {
             // A requested durable snapshot cannot silently become transient
             // data. Stop further work and preserve the last admitted journal.
             self.runner.abort();
-            state.push_sim_message(ConsoleMessage::error(format!(
-                "Could not retain Monte Carlo checkpoint: {error}"
-            )));
+            self.run_line(
+                state,
+                LogSeverity::Error,
+                format!("Could not retain Monte Carlo checkpoint: {error}"),
+            );
         }
     }
 

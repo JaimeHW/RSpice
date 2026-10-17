@@ -48,7 +48,7 @@ fn touchstone_auto_export_uses_export_workflow_io() {
         .prepare_touchstone_export(&synthetic_sparameter_result(), 1)
         .expect("valid Touchstone export")
         .expect("enabled Touchstone export");
-    SimulationController::commit_touchstone_export(&mut state, &export_io, prepared);
+    controller.commit_touchstone_export(&mut state, &export_io, prepared);
 
     assert!(export_io.writes.borrow().is_empty());
     let writes = export_io.create_only_writes.borrow();
@@ -121,7 +121,7 @@ fn the_exported_file_is_the_version_that_was_chosen() {
             .prepare_touchstone_export(&synthetic_sparameter_result(), 1)
             .expect("valid Touchstone export")
             .expect("enabled Touchstone export");
-        SimulationController::commit_touchstone_export(&mut state, &export_io, prepared);
+        controller.commit_touchstone_export(&mut state, &export_io, prepared);
 
         let writes = export_io.create_only_writes.borrow();
         assert_eq!(writes.len(), 1);
@@ -696,7 +696,7 @@ fn sensitivity_spec_projects_frequency_only_in_ac_mode() {
 }
 
 #[test]
-fn sensitivity_completion_preserves_unavailable_results_and_finite_console_values() {
+fn sensitivity_completion_preserves_unavailable_results_and_logs_no_values() {
     use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
     let mut controller = SimulationController::new();
     let result = crate::simulation::SimulationResult::SensitivityStudy {
@@ -726,22 +726,9 @@ fn sensitivity_completion_preserves_unavailable_results_and_finite_console_value
     };
     let mut state = AppState::default();
     controller.apply_result_side_effects(&mut state, &result);
-    let messages: Vec<_> = state
-        .log_buffer
-        .entries()
-        .map(|entry| entry.message.as_str())
-        .collect();
     assert!(
-        messages
-            .iter()
-            .any(|text| text.contains("normalized = unavailable (out-of-range)")),
-        "{messages:?}"
-    );
-    assert!(
-        messages
-            .iter()
-            .any(|text| text.contains("normalized = 1.000e308")),
-        "{messages:?}"
+        state.log_buffer.is_empty(),
+        "result values are the Results workspace's to show, not the log's"
     );
     let retained = controller.convert_to_analysis_result_with_metadata_owned(
         result,
@@ -1737,7 +1724,7 @@ fn a_wholesale_catalogue_replacement_cannot_reuse_an_inspection_key_it_did_not_e
 }
 
 #[test]
-fn a_failed_run_anchors_its_console_row_to_the_objects_the_engine_named() {
+fn a_failed_analysis_is_written_once_in_its_runs_log_and_filed_in_problems() {
     let mut state = AppState::default();
     state.project_lifecycle.authority.open_session();
     let attribution = rspice_results::convergence_attribution::from_core(
@@ -1760,42 +1747,57 @@ fn a_failed_run_anchors_its_console_row_to_the_objects_the_engine_named() {
         },
     );
 
+    let run_sequence = state.simulation.start_run().id;
     SimulationController::report_failed_analysis(
         &mut state,
         "Transient",
-        "Analysis failed: Convergence failed after 100 iterations",
+        "Transient failed: Convergence failed after 100 iterations",
         &Some(attribution),
-        Some(3),
+        Some(run_sequence),
     );
 
-    let entries: Vec<&crate::diagnostics::LogEntry> = state.log_buffer.entries().collect();
     assert_eq!(
-        entries.len(),
-        1,
-        "the Console records the event once; the condition is a record"
+        run_log_messages(&state, run_sequence),
+        vec![(
+            crate::diagnostics::LogSeverity::Error,
+            "Transient failed: Convergence failed after 100 iterations".to_owned()
+        )],
+        "the run's log records the event once, in the engine's own prose"
     );
+    assert!(
+        state.log_buffer.is_empty(),
+        "a run's failure is its own log's, not the session's"
+    );
+    // The objects the engine named are the Problems record's route, which
+    // `app_state::diagnostic_store` covers; the log's job here is the event.
     assert_eq!(
-        entries[0].message, "Analysis failed: Convergence failed after 100 iterations",
-        "the engine's own prose must reach the console unchanged"
+        state.diagnostics.published_run_failures(run_sequence).len(),
+        1
     );
-    assert_eq!(
-        entries[0].anchor,
-        Some(crate::diagnostics::LogAnchor::Simulation {
-            nets: vec!["OUT".to_owned()],
-            devices: vec!["V1".to_owned()],
-        }),
-        "the failure row must carry the objects it named"
-    );
-    // What the engine named used to be a second console row. It is now the
-    // canonical record's own detail, which `app_state::diagnostic_store`
-    // covers; the Console's job here is the event, once.
+}
+
+/// The lines a run's own log holds, as (severity, text).
+fn run_log_messages(
+    state: &AppState,
+    run_sequence: u64,
+) -> Vec<(crate::diagnostics::LogSeverity, String)> {
+    state
+        .simulation
+        .retained
+        .run_by_sequence(run_sequence)
+        .expect("the run is retained")
+        .log
+        .lines()
+        .iter()
+        .map(|line| (line.severity, line.message.clone()))
+        .collect()
 }
 
 #[test]
-fn a_real_operating_point_refusal_anchors_the_conductor_the_engine_named() {
+fn a_real_operating_point_refusal_is_filed_with_the_conductor_the_engine_named() {
     // Nothing here is injected: the deck is refused by the solver, the
     // attribution is the one `rspice-core` recorded (`engine/core.rs:1309`),
-    // and the console row is written by the same call the run loop makes.
+    // and the failure is written by the same call the run loop makes.
     let mut runner = crate::simulation::controller::test_execution::start_manual_deck(
         "current-driven floating node\ni1 0 out dc 1m\nc1 out 0 1u\n.op\n.end\n",
     );
@@ -1809,51 +1811,55 @@ fn a_real_operating_point_refusal_anchors_the_conductor_the_engine_named() {
         .cloned()
         .expect("the operating point is the analysis that names its refusals");
 
+    assert!(
+        attribution
+            .nets()
+            .any(|net| net.eq_ignore_ascii_case("out")),
+        "the engine names the floating node"
+    );
+
     let mut state = AppState::default();
     state.project_lifecycle.authority.open_session();
+    let run_sequence = state.simulation.start_run().id;
+    let message = format!("Operating point failed: {error}");
     SimulationController::report_failed_analysis(
         &mut state,
         "Operating point",
-        &format!("Analysis failed: {error}"),
+        &message,
         &Some(attribution),
-        Some(1),
+        Some(run_sequence),
     );
 
-    let entries: Vec<&crate::diagnostics::LogEntry> = state.log_buffer.entries().collect();
-    let Some(crate::diagnostics::LogAnchor::Simulation { nets, .. }) = entries[0].anchor.clone()
-    else {
-        panic!(
-            "the refusal row must be anchored to what the engine named, got {:?}",
-            entries[0].anchor
-        );
-    };
-    assert!(
-        nets.iter().any(|net| net.eq_ignore_ascii_case("out")),
-        "the floating node must reach the console anchor by name: {nets:?}"
+    assert_eq!(
+        run_log_messages(&state, run_sequence),
+        vec![(crate::diagnostics::LogSeverity::Error, message)],
+        "an attributed failure writes the engine's prose once; the attribution is the record's"
     );
     assert_eq!(
-        entries.len(),
-        1,
-        "an attributed failure writes the engine's prose once; the attribution is the record's"
+        state.diagnostics.published_run_failures(run_sequence).len(),
+        1
     );
 }
 
 #[test]
-fn a_failure_that_named_nothing_writes_the_row_it_always_did() {
+fn a_failure_that_named_nothing_writes_one_line() {
     let mut state = AppState::default();
     state.project_lifecycle.authority.open_session();
+    let run_sequence = state.simulation.start_run().id;
 
     SimulationController::report_failed_analysis(
         &mut state,
         "Transient",
-        "Analysis failed: Parse error: unterminated .subckt",
+        "Transient failed: Parse error: unterminated .subckt",
         &None,
-        Some(1),
+        Some(run_sequence),
     );
 
-    let entries: Vec<&crate::diagnostics::LogEntry> = state.log_buffer.entries().collect();
-    assert_eq!(entries.len(), 1, "no attribution, no second row");
-    assert!(entries[0].anchor.is_none());
+    assert_eq!(
+        run_log_messages(&state, run_sequence).len(),
+        1,
+        "no attribution, no second line"
+    );
 }
 
 /// A hand-written deck's `.param` values are read with the engineering

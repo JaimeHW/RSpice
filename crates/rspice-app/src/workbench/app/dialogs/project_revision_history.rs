@@ -7,7 +7,6 @@
 
 use egui::{Context, Frame, Grid, RichText, ScrollArea, Stroke, TextEdit, Ui};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::model_library::ModelSourceAuthority;
 use crate::state::{
     ValidatedRevisionJournal, ValidatedRevisionObjectDelta, ValidatedRevisionSemanticDelta,
@@ -200,10 +199,8 @@ enum HistoryAction {
 }
 
 pub(crate) fn open_project_revision_history(state: &mut AppState) {
+    // The command is greyed with no project open.
     if !state.project_lifecycle.is_open() {
-        state.push_user_message(ConsoleMessage::warning(
-            "Project revision history requires an open project.",
-        ));
         return;
     }
     if let Err(error) = state.schematic.document().validated_revisions.validate() {

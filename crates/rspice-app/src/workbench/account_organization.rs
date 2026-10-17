@@ -12,7 +12,6 @@
 
 use egui::{Align2, Color32, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::services::cloud_account::{
     CloudAccountAvailability, CloudSessionPhase, CloudSessionSnapshot,
 };
@@ -516,8 +515,7 @@ fn execute_action(app: &mut RSpiceApp, action: AccountAction) {
                 .workbench
                 .navigate(route, RouteTransitionSource::User)
             {
-                app.state
-                    .push_user_message(ConsoleMessage::warning(error.to_string()));
+                app.state.prompt(error.to_string());
             }
         }
         AccountAction::ActivateLicense | AccountAction::ManageLicense => {
@@ -548,7 +546,7 @@ fn execute_action(app: &mut RSpiceApp, action: AccountAction) {
 pub(crate) fn open(state: &mut AppState) {
     let route = SurfaceRoute::surface(SurfaceId::AccountOrganization);
     if let Err(error) = state.workbench.navigate(route, RouteTransitionSource::User) {
-        state.push_user_message(ConsoleMessage::warning(error.to_string()));
+        state.prompt(error.to_string());
     }
 }
 
@@ -616,9 +614,9 @@ fn close_to_source(state: &mut AppState) {
         .workbench
         .replace_route(fallback, RouteTransitionSource::User)
     {
-        state.push_user_message(ConsoleMessage::warning(format!(
+        state.prompt(format!(
             "Could not close Account and administration: {error}"
-        )));
+        ));
     }
 }
 

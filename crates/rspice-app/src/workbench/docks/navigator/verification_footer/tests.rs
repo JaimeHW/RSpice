@@ -1289,92 +1289,34 @@ fn periodic_payload_artifacts_report_their_counts_and_verdicts() {
     }
 }
 
-/// "Reveal producer log" has to reveal something.
-///
-/// It used to push one info line naming the producer and open the console
-/// unfiltered, which left the reader to find that producer's entries in the
-/// whole session's log by eye.
+/// A quantity's "Open run log" opens the log of the run that produced it, and
+/// is not offered once the session no longer holds that run.
 #[test]
-fn revealing_a_producer_log_narrows_the_console_to_that_producer() {
-    use crate::diagnostics::{LogSeverity, LogSource};
+fn a_quantitys_run_log_is_the_log_of_the_run_that_produced_it() {
+    use crate::workbench::commands::result_navigation::{open_run_log, producing_run};
+    use crate::workbench::state::{ConsoleChannel, ConsolePage};
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.console_visible = false;
-    app.state.workbench.console_page = crate::workbench::state::ConsolePage::Problems;
-    app.state.log_buffer.clear();
-    app.state.log_buffer.log(
-        LogSeverity::Info,
-        LogSource::Simulation,
-        "  gain = 1.234000e1",
-        None,
-    );
-    app.state.log_buffer.log(
-        LogSeverity::Info,
-        LogSource::Simulation,
-        "Transient: 512 points, 3 waveforms",
-        None,
-    );
+    app.state.workbench.console_page = ConsolePage::Problems;
+    let run = SimulationRun::new(7);
+    let dataset = run.dataset_id;
+    app.state.simulation.retained.runs.push(run);
 
-    crate::workbench::commands::result_navigation::reveal_producer_log(
-        &mut app,
-        "dataset/7/analysis/3/artifact/gain".to_owned(),
-        "gain",
-    );
-
+    let producer = producing_run(&app.state.simulation.retained.runs, dataset)
+        .expect("the session holds the producing run");
+    open_run_log(&mut app.state, producer);
     assert!(app.state.workbench.console_visible);
+    assert_eq!(app.state.workbench.console_page, ConsolePage::Console);
     assert_eq!(
-        app.state.workbench.console_page,
-        crate::workbench::state::ConsolePage::Console
-    );
-    let filter = app
-        .state
-        .workbench
-        .console_producer_filter
-        .as_ref()
-        .expect("the row installs a producer filter");
-    assert_eq!(filter.producer, "dataset/7/analysis/3/artifact/gain");
-    assert_eq!(filter.label(), "gain");
-    assert!(
-        filter.scroll_to_newest,
-        "the reader asked to be shown the newest entry"
-    );
-    let matched: Vec<&str> = app
-        .state
-        .log_buffer
-        .entries()
-        .filter(|entry| filter.matches(entry))
-        .map(|entry| entry.message.as_str())
-        .collect();
-    assert_eq!(matched, vec!["  gain = 1.234000e1"]);
-}
-
-/// An entry tagged with the producer's own identity matches regardless of
-/// what it says. Nothing emits that tag today, which is exactly why the rule
-/// has to exist before an emission site can be worth adding.
-#[test]
-fn a_producer_tagged_entry_matches_without_naming_its_quantity() {
-    use crate::diagnostics::{LogSeverity, LogSource};
-
-    let mut app = RSpiceApp::test_instance();
-    app.state.log_buffer.clear();
-    app.state.log_buffer.log(
-        LogSeverity::Info,
-        LogSource::Engine,
-        "solved in 4 iterations",
-        Some("dataset/7/analysis/3/quantity/V(out)".to_owned()),
-    );
-    let filter = crate::workbench::state::ConsoleProducerFilter::new(
-        "dataset/7/analysis/3/quantity/V(out)",
-        "V(out)",
+        app.state.workbench.console_view.channel,
+        ConsoleChannel::Run(7)
     );
 
+    app.state.simulation.retained.runs.clear();
     assert_eq!(
-        app.state
-            .log_buffer
-            .entries()
-            .filter(|entry| filter.matches(entry))
-            .count(),
-        1
+        producing_run(&app.state.simulation.retained.runs, dataset),
+        None
     );
 }
 

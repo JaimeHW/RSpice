@@ -595,7 +595,9 @@ impl Engine {
         type RunOutcome<T> = Result<Option<T>, SimulationError>;
         let evaluate_run = |engine: &Engine, offset: usize| -> RunOutcome<T> {
             let index = first_trial + offset;
-            let _point = crate::notice::point(format!("Monte Carlo trial {}", index + 1));
+            // Serial or on a worker, a sample's lines and notices say which
+            // sample raised them.
+            let _sample = crate::log_scope::enter_point(|| format!("sample {}", index + 1));
             if let Some(outcome) = journal
                 .as_ref()
                 .and_then(|journal| (journal.restore)(index))
@@ -644,16 +646,13 @@ impl Engine {
             // worker budget. Keep each child engine serial so the selected
             // analysis and its prerequisites cannot multiply the thread count.
             worker_config.resource_limits.max_parallel_workers = 1;
-            // A trial a worker solves is the run's trial all the same, so
-            // what it raises is recorded where the run's other notices are.
-            let notices = crate::notice::NoticeCollector::current();
+            // A worker's lines and notices belong to the run that spawned it.
+            let log_scope = crate::log_scope::capture();
 
             std::thread::scope(|scope| {
                 for _ in 0..workers {
                     scope.spawn(|| {
-                        let _notices = notices
-                            .as_ref()
-                            .map(crate::notice::NoticeCollector::install);
+                        let _log_scope = crate::log_scope::enter(log_scope.clone());
                         let engine = Self::new(worker_config.clone());
                         loop {
                             if stopped.load(Ordering::Acquire) || abort.is_aborted() {
@@ -1012,6 +1011,47 @@ mod tests {
             ),
             Err(SimulationError::Aborted)
         ));
+    }
+
+    /// A sample logs into the run that started it, labelled with its number,
+    /// whether a worker thread solves it or the run's own thread does.
+    #[test]
+    fn every_sample_executes_in_the_run_scope_at_its_own_point() {
+        let deck = Netlist::parse("scoped divider\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.end\n")
+            .expect("divider parses");
+        for workers in [1, 4] {
+            let mut config = SimulationConfig::default();
+            config.resource_limits.max_parallel_workers = workers;
+            let _run = crate::log_scope::enter(Some(crate::log_scope::LogScope::new(
+                std::sync::Arc::new("this run"),
+            )));
+            let options = MonteCarloRunConfig {
+                first_trial: 2,
+                num_runs: 6,
+                seed: 7,
+                distribution: Distribution::Gaussian { sigma: 0.01 },
+                variation_source: MonteCarloVariationSource::ParameterTolerance,
+                parameter_filter: None,
+                environment: None,
+            };
+            let (outcomes, _) = Engine::new(config)
+                .run_monte_carlo_trials_with_abort(&deck, &options, &NoAbort, |_, _, _, _| {
+                    let scope = crate::log_scope::capture().expect("a sample runs in the run");
+                    let owner = scope.owner().downcast_ref::<&str>().copied();
+                    Ok((owner, scope.point().map(str::to_owned)))
+                })
+                .expect("the trials run");
+            let seen: Vec<_> = outcomes.into_iter().flatten().collect();
+            let expected: Vec<_> = (3..=8)
+                .map(|sample| (Some("this run"), Some(format!("sample {sample}"))))
+                .collect();
+            assert_eq!(seen, expected, "{workers} workers");
+            assert_eq!(
+                crate::log_scope::capture().and_then(|scope| scope.point().map(str::to_owned)),
+                None,
+                "a sample's label does not outlive the sample"
+            );
+        }
     }
 
     #[test]

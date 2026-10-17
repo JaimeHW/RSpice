@@ -827,7 +827,7 @@ fn disabled_dependents_can_prepare_required_prerequisites_in_one_action() {
             .workbench
             .analysis_lifecycle_status
             .message()
-            .contains("Prerequisite repair completed atomically")
+            .contains("Prerequisites repaired")
     );
 }
 
@@ -1852,13 +1852,6 @@ fn an_unattributed_measurement_never_answers_a_narrowed_specification() {
 
 /// Run one frame: the studio on `page`, or the overlay host alone when there
 /// is no page because the reader is not on this workspace at all.
-///
-/// Both halves, because the drain is no longer in the surface. It moved to
-/// `show_workflow_dialogs` when the plan manager gained routes off this
-/// workspace altogether — refused from the toolbar's plan chip, which is
-/// chrome everywhere, it would otherwise sit queued until the reader next
-/// opened Simulate and then arrive as one toast for however many accumulated.
-/// `None` is that case: the whole of what a reader on Results is given.
 fn simulate_frame(app: &mut RSpiceApp, page: Option<crate::workbench::state::SimulationPage>) {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
@@ -1881,174 +1874,12 @@ fn simulate_frame(app: &mut RSpiceApp, page: Option<crate::workbench::state::Sim
     );
 }
 
-/// A refusal raised off the Simulate workspace is reported where it happened.
-///
-/// The plan manager opens from the toolbar's run configuration chip and from
-/// `Command::ManageSimulationPlans`, both of which are reachable from every
-/// workspace, so a plan edit can be refused while Simulate is not on screen at
-/// all. The drain that carries it is in the frame's overlay host for exactly
-/// that reason.
-#[test]
-fn a_refusal_raised_off_the_simulate_workspace_is_reported_without_visiting_it() {
-    use crate::ui::widgets::ToastKind;
-    use crate::workbench::state::Workspace;
-
-    let mut app = RSpiceApp::test_instance();
-    app.state.workbench.activate(Workspace::Results);
-    app.state
-        .workbench
-        .analysis_lifecycle_status
-        .record_refusal("Rename rejected fail-closed: that name is already in the plan.");
-    simulate_frame(&mut app, None);
-    let reported = app.state.ui.toasts.activity();
-    assert_eq!(
-        reported.len(),
-        1,
-        "the reader is told where they are, not the next time they open Simulate"
-    );
-    assert_eq!(reported[0].kind(), ToastKind::Error);
-    assert!(
-        reported[0].message().contains("already in the plan"),
-        "{}",
-        reported[0].message()
-    );
-}
-
-/// Seven of the eight routes never draw the lifecycle strip, so a refusal on
-/// one of them has to leave the surface to be seen at all. A receipt must not:
-/// the registry pages commit routinely, and toasting every one of them would
-/// bury the refusals among them.
-#[test]
-fn a_refusal_away_from_the_analyses_page_is_reported_and_a_receipt_is_not() {
-    use crate::ui::widgets::ToastKind;
-    use crate::workbench::state::SimulationPage;
-
-    let mut app = RSpiceApp::test_instance();
-    app.state
-        .workbench
-        .analysis_lifecycle_status
-        .record_receipt("Receipt #3 · Edit committed for instance 1.");
-    simulate_frame(&mut app, Some(SimulationPage::Variables));
-    assert!(
-        app.state.ui.toasts.activity().is_empty(),
-        "a committed receipt is not an error the reader has to be chased with"
-    );
-
-    app.state
-        .workbench
-        .analysis_lifecycle_status
-        .record_refusal("Remove rejected fail-closed: another analysis is bound to it.");
-    simulate_frame(&mut app, Some(SimulationPage::Variables));
-    let reported = app.state.ui.toasts.activity();
-    assert_eq!(
-        reported.len(),
-        1,
-        "the refusal reaches the reader exactly once"
-    );
-    assert_eq!(reported[0].kind(), ToastKind::Error);
-    assert!(
-        reported[0].message().contains("another analysis is bound"),
-        "{}",
-        reported[0].message()
-    );
-}
-
-/// The guard is a sequence, not a snapshot of the message, and it has to hold
-/// for as long as the outcome stands. Three of the announcing sites sit on the
-/// render path, so an unguarded drain would repeat the same refusal every
-/// frame for as long as the plan stayed broken.
-#[test]
-fn a_standing_refusal_is_reported_once_and_not_again_on_the_next_frame() {
-    use crate::workbench::state::SimulationPage;
-
-    let mut app = RSpiceApp::test_instance();
-    app.state
-        .workbench
-        .analysis_lifecycle_status
-        .record_refusal("Reorder rejected fail-closed: the position is out of range.");
-    simulate_frame(&mut app, Some(SimulationPage::Outputs));
-    assert_eq!(app.state.ui.toasts.activity().len(), 1);
-
-    simulate_frame(&mut app, Some(SimulationPage::Outputs));
-    simulate_frame(&mut app, Some(SimulationPage::Outputs));
-    assert_eq!(
-        app.state.ui.toasts.activity().len(),
-        1,
-        "a refusal that is merely still true is not a new refusal"
-    );
-
-    // Restating it verbatim is the render path doing its job, not a new event.
-    app.state
-        .workbench
-        .analysis_lifecycle_status
-        .record_refusal("Reorder rejected fail-closed: the position is out of range.");
-    simulate_frame(&mut app, Some(SimulationPage::Outputs));
-    assert_eq!(app.state.ui.toasts.activity().len(), 1);
-}
-
-/// Two refusals in a row are two events, and the second must not be swallowed
-/// by the guard that suppresses the first one's restatement.
-#[test]
-fn two_different_refusals_in_a_row_are_both_reported() {
-    use crate::workbench::state::SimulationPage;
-
-    let mut app = RSpiceApp::test_instance();
-    app.state
-        .workbench
-        .analysis_lifecycle_status
-        .record_refusal("Design-variable import refused · line 3 · out of range");
-    simulate_frame(&mut app, Some(SimulationPage::RunSet));
-    app.state
-        .workbench
-        .analysis_lifecycle_status
-        .record_refusal("Run set · blocked · the declared space exceeds the task budget");
-    simulate_frame(&mut app, Some(SimulationPage::RunSet));
-
-    let reported = app.state.ui.toasts.activity();
-    assert_eq!(reported.len(), 2);
-    // The activity centre lists the newest record first.
-    assert!(reported[0].message().contains("task budget"));
-    assert!(reported[1].message().contains("line 3"));
-}
-
-/// A receipt between two refusals must not let the earlier one through again
-/// silently: the guard advances on every outcome, refusal or not.
-#[test]
-fn a_receipt_advances_the_guard_without_reporting_anything() {
-    use crate::workbench::state::SimulationPage;
-
-    let mut app = RSpiceApp::test_instance();
-    app.state
-        .workbench
-        .analysis_lifecycle_status
-        .record_refusal("Clone rejected fail-closed: the instance no longer exists.");
-    simulate_frame(&mut app, Some(SimulationPage::Specifications));
-    app.state
-        .workbench
-        .analysis_lifecycle_status
-        .record_receipt("Receipt #4 · Edit committed for instance 2.");
-    simulate_frame(&mut app, Some(SimulationPage::Specifications));
-    app.state
-        .workbench
-        .analysis_lifecycle_status
-        .record_refusal("Clone rejected fail-closed: the instance no longer exists.");
-    simulate_frame(&mut app, Some(SimulationPage::Specifications));
-
-    assert_eq!(
-        app.state.ui.toasts.activity().len(),
-        2,
-        "the refusal is a fresh event once a receipt has replaced it"
-    );
-}
-
 /// The field is `#[serde(skip)]`, so serde fills it from `Default` and never
 /// from the struct literal.
 ///
-/// Two things follow and both are pinned. A restore must not carry a receipt
-/// from the session that wrote it — a lifecycle outcome is an event, and a
-/// restored one would announce a change nobody just made — and the toasted
-/// sequence has to come back at zero beside it, or the first frame after a
-/// restore would compare a fresh outcome against a guard from the old session.
+/// A restore must not carry a receipt from the session that wrote it — a
+/// lifecycle outcome is an event, and a restored one would announce a change
+/// nobody just made.
 #[test]
 fn a_restored_session_starts_from_the_default_lifecycle_outcome() {
     use crate::workbench::state::{AnalysisLifecycleOutcome, WorkbenchState};
@@ -2068,16 +1899,15 @@ fn a_restored_session_starts_from_the_default_lifecycle_outcome() {
         AnalysisLifecycleOutcome::default(),
         "the outcome is runtime-only, so a restore starts from the default line"
     );
-    assert_eq!(restored.analysis_lifecycle_toasted_sequence, 0);
 }
 
 /// Three announcing sites sit on the render path rather than in a click
 /// handler: the surface resolves the active instance, the editor resolves the
 /// selection, and the editor re-serializes the draft, each of them every frame.
 /// A plan that stays unavailable therefore restates the same refusal forever,
-/// and the sequence must not move with it.
+/// and that must stay one event.
 #[test]
-fn a_render_path_refusal_restated_every_frame_does_not_spin_the_sequence() {
+fn a_render_path_refusal_restated_every_frame_is_one_event() {
     use crate::workbench::state::SimulationPage;
 
     let mut app = RSpiceApp::test_instance();
@@ -2088,12 +1918,10 @@ fn a_render_path_refusal_restated_every_frame_does_not_spin_the_sequence() {
 
     let outcome = &app.state.workbench.analysis_lifecycle_status;
     assert!(outcome.is_refusal(), "{}", outcome.message());
-    assert_eq!(
-        outcome.sequence(),
-        1,
-        "four frames of the same standing refusal are one event"
+    assert!(
+        app.state.ui.toasts.activity().is_empty(),
+        "a refusal raises no notice"
     );
-    assert_eq!(app.state.ui.toasts.activity().len(), 1);
     assert_eq!(
         app.state
             .log_buffer

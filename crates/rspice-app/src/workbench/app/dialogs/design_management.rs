@@ -8,7 +8,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use egui::{Align, Context, Frame, Layout, Margin, Sense, Stroke, Ui, Vec2, vec2};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{
     AnnotationCollisionPolicy, AnnotationObject, AnnotationPosition, AnnotationPrefixAllocation,
     AnnotationRangeScope, AnnotationReservedRange, AssemblyVariantDraft, AssemblyVariantId,
@@ -420,19 +419,15 @@ impl DesignManagementDialogState {
 }
 
 pub(crate) fn open_design_management_dialog(state: &mut AppState) {
+    // The command is greyed with no project open.
     if !state.project_lifecycle.is_open() {
-        state.push_user_message(ConsoleMessage::warning(
-            "Design Management requires an open project.".to_owned(),
-        ));
         return;
     }
     if !matches!(
         state.workspace.content.active_view_type(),
         crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
     ) {
-        state.push_user_message(ConsoleMessage::warning(
-            "Design Management requires a schematic or testbench design context.".to_owned(),
-        ));
+        state.prompt("Design Management needs a schematic or testbench view.");
         return;
     }
     crate::schematic::view::retain_selection_on_active_sheet(state);
@@ -459,12 +454,10 @@ pub(crate) fn open_design_management_dialog(state: &mut AppState) {
             all_object_ids,
             selection_summary,
             default_sheet_name,
-            error: Some(error.clone()),
+            // The dialog opens on the failure and states it in place.
+            error: Some(error),
             ..DesignManagementDialogState::default()
         };
-        state.push_user_message(ConsoleMessage::error(format!(
-            "Design Management could not open: {error}"
-        )));
     }
 }
 

@@ -472,9 +472,11 @@ impl SimulationController {
             cancelled: false,
             pending: members,
         });
-        state.push_sim_message(ConsoleMessage::info(format!(
-            "Queued campaign '{name}' ({member_count} plans, {task_count} authenticated tasks)"
-        )));
+        state.record(
+            LogSeverity::Info,
+            crate::diagnostics::LogSource::Run,
+            format!("Campaign '{name}' queued: {member_count} plans, {task_count} analyses"),
+        );
         self.dispatch_next_campaign_member(state)?;
         Ok(super::SimulationCampaignDispatchReceipt {
             campaign_id,
@@ -492,17 +494,21 @@ impl SimulationController {
                 return Ok(());
             };
             let Some(member) = campaign.pending.pop_front() else {
-                let outcome = if campaign.cancelled {
-                    "cancelled"
+                let (outcome, severity) = if campaign.cancelled {
+                    ("cancelled", LogSeverity::Warning)
                 } else if campaign.failed_count == 0 {
-                    "completed"
+                    ("completed", LogSeverity::Info)
                 } else {
-                    "completed with errors"
+                    ("completed with errors", LogSeverity::Error)
                 };
-                state.push_sim_message(ConsoleMessage::info(format!(
-                    "Campaign '{}' {outcome}: {} completed, {} failed",
-                    campaign.name, campaign.completed_count, campaign.failed_count
-                )));
+                state.record(
+                    severity,
+                    crate::diagnostics::LogSource::Run,
+                    format!(
+                        "Campaign '{}' {outcome}: {} completed, {} failed",
+                        campaign.name, campaign.completed_count, campaign.failed_count
+                    ),
+                );
                 state.simulation.execution.status = format!("Campaign {outcome}");
                 return Ok(());
             };
@@ -517,10 +523,14 @@ impl SimulationController {
                 Err(error) => {
                     let member_index = campaign.dispatched_count;
                     self.active_campaign = Some(campaign);
-                    state.push_sim_message(ConsoleMessage::error(format!(
-                        "Campaign member '{}' has invalid membership metadata: {error}",
-                        member.plan_name
-                    )));
+                    state.record(
+                        LogSeverity::Error,
+                        crate::diagnostics::LogSource::Run,
+                        format!(
+                            "Campaign member '{}' could not start: {error}",
+                            member.plan_name
+                        ),
+                    );
                     self.refuse_campaign_member(
                         state,
                         member_index,
@@ -539,9 +549,11 @@ impl SimulationController {
             let dispatch = match dispatch {
                 Ok(dispatch) => dispatch,
                 Err(error) => {
-                    state.push_sim_message(ConsoleMessage::error(format!(
-                        "Campaign member '{member_name}' could not be authorized: {error}"
-                    )));
+                    state.record(
+                        LogSeverity::Error,
+                        crate::diagnostics::LogSource::Run,
+                        format!("Campaign member '{member_name}' could not be authorized: {error}"),
+                    );
                     self.refuse_campaign_member(
                         state,
                         membership.member_index(),
@@ -552,18 +564,16 @@ impl SimulationController {
                     continue;
                 }
             };
-            state.push_sim_message(ConsoleMessage::info(format!(
-                "Dispatching campaign member {} of {}: '{member_name}'",
-                membership.member_index(),
-                membership.member_count()
-            )));
             let member_index = membership.member_index();
-            match self.start_authorized_dispatch(state, dispatch, Some(membership)) {
+            match self.start_authorized_dispatch(state, dispatch, Some((membership, &member_name)))
+            {
                 Ok(()) => return Ok(()),
                 Err(error) => {
-                    state.push_sim_message(ConsoleMessage::error(format!(
-                        "Campaign member '{member_name}' could not start: {error}"
-                    )));
+                    state.record(
+                        LogSeverity::Error,
+                        crate::diagnostics::LogSource::Run,
+                        format!("Campaign member '{member_name}' could not start: {error}"),
+                    );
                     self.refuse_campaign_member(
                         state,
                         member_index,
@@ -615,9 +625,11 @@ impl SimulationController {
             campaign.failed_count = campaign.failed_count.saturating_add(1);
         }
         if let Err(error) = self.dispatch_next_campaign_member(state) {
-            state.push_sim_message(ConsoleMessage::error(format!(
-                "Campaign scheduling stopped safely: {error}"
-            )));
+            state.record(
+                LogSeverity::Error,
+                crate::diagnostics::LogSource::Run,
+                format!("Campaign stopped: {error}"),
+            );
             self.active_campaign = None;
             state.simulation.execution.status = "Campaign stopped".to_owned();
         }

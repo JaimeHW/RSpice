@@ -388,16 +388,11 @@ fn settle_surface_scroll(ui: &Ui, state: &mut AppState, offset_y: f32) {
 /// shortcut in the application with it and left no painted modal to press
 /// Escape on. A host that runs once a frame wherever the reader is standing
 /// cannot arm an overlay that no pass draws.
-///
-/// The refusal drain is here for the same reason and not a weaker one: the
-/// plan manager commits from any workspace, and the strip that would have
-/// stated its refusal is drawn on one route.
 pub(in crate::workbench) fn show_workflow_dialogs(ctx: &egui::Context, app: &mut RSpiceApp) {
     checkpoint_exchange::poll(ctx, app);
     transient_checkpoint_exchange::poll(ctx, app);
     simulation_workflow_dialog(ctx, app);
     analysis_catalog(ctx, app);
-    drain_lifecycle_refusal(ctx, &mut app.state);
 }
 
 /// Host the analysis catalogue, and act on the kind it chose.
@@ -429,35 +424,6 @@ fn analysis_catalog(ctx: &egui::Context, app: &mut RSpiceApp) {
     app.state.workbench.active_analysis_instance = Some(id);
     app.state.workbench.simulation_page = SimulationPage::Analyses;
     app.state.workbench.activate(Workspace::Simulate);
-}
-
-/// Carry a refused plan command to the reader wherever they are.
-///
-/// A plan command can be refused from any route and any workspace, so it is
-/// reported where the reader is, from the single entry point every route
-/// passes through — which keeps the drain out of the twenty-odd places that
-/// announce an outcome. This is the notice; the Console record of the same
-/// refusal is `AppState::record_plan_refusal`'s.
-///
-/// The guard is the outcome's sequence, not its text: three of the announcing
-/// sites are on the render path rather than in a click handler, and a text
-/// comparison would let a restated refusal toast again the moment an unrelated
-/// receipt passed through. A receipt advances the guard without toasting, so a
-/// registry edit never becomes noise.
-fn drain_lifecycle_refusal(ctx: &egui::Context, state: &mut AppState) {
-    let outcome = &state.workbench.analysis_lifecycle_status;
-    if outcome.sequence() <= state.workbench.analysis_lifecycle_toasted_sequence {
-        return;
-    }
-    let refusal = outcome.is_refusal().then(|| outcome.message().to_owned());
-    state.workbench.analysis_lifecycle_toasted_sequence =
-        state.workbench.analysis_lifecycle_status.sequence();
-    if let Some(message) = refusal {
-        state
-            .ui
-            .toasts
-            .error_with_title(ctx, "Plan change refused", message);
-    }
 }
 
 /// The Analyses route with the stack and the editor side by side.

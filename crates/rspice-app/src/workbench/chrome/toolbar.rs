@@ -1077,17 +1077,12 @@ fn results_tracking_button(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Layou
             .map(|_| ())
             .map_err(|error| error.to_string());
         match result {
-            Ok(()) => {
-                app.state
-                    .push_user_message(crate::diagnostics::ConsoleMessage::info(if pinned {
-                        "Result document now tracks the latest exact plan run."
-                    } else {
-                        "Result document is pinned to its current immutable dataset."
-                    }));
-            }
-            Err(error) => app
-                .state
-                .push_user_message(crate::diagnostics::ConsoleMessage::error(error)),
+            Ok(()) => app.state.prompt(if pinned {
+                "Result document now follows the latest plan run."
+            } else {
+                "Result document is pinned to its current dataset."
+            }),
+            Err(error) => app.state.prompt(error),
         }
     }
     true
@@ -1939,17 +1934,13 @@ fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
                                     .clicked()
                                 {
                                     match commit_reference_pvt(app, process, temperature) {
-                                        Ok(true) => app.state.push_user_message(
-                                            crate::diagnostics::ConsoleMessage::info(format!(
-                                                "Reference PVT changed to {label}"
-                                            )),
-                                        ),
+                                        Ok(true) => app
+                                            .state
+                                            .prompt(format!("Reference PVT changed to {label}.")),
                                         Ok(false) => {}
-                                        Err(error) => app.state.push_user_message(
-                                            crate::diagnostics::ConsoleMessage::warning(format!(
-                                                "Reference PVT was not changed: {error}"
-                                            )),
-                                        ),
+                                        Err(error) => app.state.prompt(format!(
+                                            "Reference PVT was not changed: {error}"
+                                        )),
                                     }
                                     ui.close();
                                 }

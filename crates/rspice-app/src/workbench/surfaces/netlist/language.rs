@@ -1,6 +1,5 @@
 //! Purpose-built semantic source actions.
 
-use crate::diagnostics::ConsoleMessage;
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
 use crate::workbench::{MessageId, RSpiceApp};
@@ -51,12 +50,10 @@ pub(super) fn rename_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
             match crate::workbench::documents::netlist_document::language::commit_rename(
                 &mut app.state,
             ) {
-                Ok(count) => app
-                    .state
-                    .push_user_message(ConsoleMessage::info(messages.format(
-                        MessageId::NetlistRenameSucceeded,
-                        &[("count", &count.to_string())],
-                    ))),
+                Ok(count) => app.state.prompt(messages.format(
+                    MessageId::NetlistRenameSucceeded,
+                    &[("count", &count.to_string())],
+                )),
                 Err(error) => app.state.ui.netlist.rename_dialog.error = Some(error),
             }
         }

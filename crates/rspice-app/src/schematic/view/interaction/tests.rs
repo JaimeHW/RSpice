@@ -1186,7 +1186,7 @@ fn every_documentation_shape_gesture_commits_once_and_remains_non_electrical() {
 
         for (index, point) in points.iter().copied().enumerate() {
             let finish = finish_on_last_click && index + 1 == points.len();
-            with_test_ui(|ui| handle_documentation_shape_click(ui, &mut state, point, finish));
+            handle_documentation_shape_click(&mut state, point, finish);
         }
 
         assert_eq!(
@@ -1368,9 +1368,7 @@ fn stale_documentation_shape_authority_is_consumed_without_document_mutation() {
                     },
                 );
             } else {
-                with_test_ui(|ui| {
-                    handle_documentation_shape_click(ui, &mut state, Point::new(0, 0), true)
-                });
+                handle_documentation_shape_click(&mut state, Point::new(0, 0), true);
             }
 
             assert!(
@@ -1475,7 +1473,7 @@ fn queued_shape_input_cannot_edit_a_replaced_gesture_or_changed_context() {
             .editor
             .pending_documentation_shape
             .clone();
-        with_test_ui(|ui| apply_shape_input(ui, &mut state, request.clone()));
+        apply_shape_input(&mut state, request.clone());
         if change == "none" {
             assert_eq!(state.schematic.document().documentation_shapes.len(), 1);
             assert!(state.schematic.undo());

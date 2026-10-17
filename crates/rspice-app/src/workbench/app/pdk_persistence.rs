@@ -9,7 +9,7 @@ use std::collections::VecDeque;
 
 use egui::Context;
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::model_library::ModelLibraryManager;
 use crate::state::pdk_config::{
     BrowserPdkConfigReceipt, BrowserPdkConfigRestore, BrowserPdkStorageDurability,
@@ -54,7 +54,6 @@ type AfterBrowserPdkCommit = Option<Box<dyn FnOnce(&Context)>>;
 
 enum BrowserPdkPublicationIntent {
     Administration {
-        title: String,
         message: String,
         after_commit: AfterBrowserPdkCommit,
     },
@@ -123,7 +122,6 @@ impl RSpiceApp {
         &mut self,
         ctx: &Context,
         candidate: PdkConfig,
-        title: impl Into<String>,
         message: impl Into<String>,
         after_commit: impl FnOnce(&Context) + 'static,
     ) -> Result<(), String> {
@@ -131,7 +129,6 @@ impl RSpiceApp {
             ctx,
             candidate,
             BrowserPdkPublicationIntent::Administration {
-                title: title.into(),
                 message: message.into(),
                 after_commit: Some(Box::new(after_commit)),
             },
@@ -235,7 +232,6 @@ impl RSpiceApp {
                     publication_error,
                     result,
                 } => self.finish_rejected_browser_pdk_settings_rollback(
-                    ctx,
                     operation_generation,
                     &publication_error,
                     result,
@@ -288,23 +284,32 @@ impl RSpiceApp {
                     emit_browser_pdk_storage_warning(self, ctx, storage_status);
                 }
                 if restored.migrated_legacy_record {
-                    self.state.push_user_message(ConsoleMessage::info(
-                        "PDK configuration migrated from legacy browser Web Storage to the content-addressed IndexedDB store."
-                            .to_owned(),
-                    ));
+                    self.state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        "PDK configuration moved from the browser's Web Storage to its IndexedDB \
+                         store.",
+                    );
                 }
                 if let Err(errors) = validation {
                     for error in errors {
-                        self.state.push_user_message(ConsoleMessage::error(format!(
-                            "PDK technology trust blocked during browser restore: {error}"
-                        )));
+                        self.state.record(
+                            LogSeverity::Error,
+                            LogSource::Studio,
+                            format!(
+                                "PDK technology restored from browser storage was not trusted: \
+                                 {error}"
+                            ),
+                        );
                     }
                 }
                 if let Err(errors) = model_load {
                     for error in errors {
-                        self.state.push_user_message(ConsoleMessage::error(format!(
-                            "PDK model library restore failed: {error}"
-                        )));
+                        self.state.record(
+                            LogSeverity::Error,
+                            LogSource::Studio,
+                            format!("PDK model library restore failed: {error}"),
+                        );
                     }
                 }
             }
@@ -314,15 +319,14 @@ impl RSpiceApp {
                     owner.phase = BrowserPdkPhase::Failed;
                     owner.last_error = Some(error.clone());
                 });
-                let message = format!(
-                    "PDK browser storage could not be restored. No persisted PDK authority was loaded: {error}"
+                self.state.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    format!(
+                        "The saved PDK configuration could not be restored from browser storage, \
+                         so no PDK was loaded: {error}"
+                    ),
                 );
-                self.state
-                    .push_user_message(ConsoleMessage::error(message.clone()));
-                self.state
-                    .ui
-                    .toasts
-                    .error_with_title(ctx, "PDK storage unavailable", message);
             }
         }
     }
@@ -349,7 +353,6 @@ impl RSpiceApp {
                 let storage_status = receipt.storage_status;
                 match intent {
                     BrowserPdkPublicationIntent::Administration {
-                        title,
                         message,
                         after_commit,
                     } => {
@@ -360,8 +363,7 @@ impl RSpiceApp {
                             after_commit(ctx);
                         }
                         self.state
-                            .push_user_message(ConsoleMessage::info(message.clone()));
-                        self.state.ui.toasts.success(ctx, title, message);
+                            .record(LogSeverity::Info, LogSource::Studio, message);
                     }
                     BrowserPdkPublicationIntent::Settings(settings) => {
                         let BrowserPdkSettingsIntent {
@@ -389,17 +391,16 @@ impl RSpiceApp {
                                 error.clone(),
                             ) {
                                 fail_browser_pdk_owner(format!(
-                                    "{error}; durable PDK rollback could not start: {rollback_error}"
+                                    "{error}; browser storage rollback could not start: {rollback_error}"
                                 ));
-                                let message = format!(
-                                    "PDK settings could not be published after durable storage committed, and rollback could not start: {error}; {rollback_error}"
-                                );
-                                self.state
-                                    .push_user_message(ConsoleMessage::error(message.clone()));
-                                self.state.ui.toasts.error_with_title(
-                                    ctx,
-                                    "PDK transaction requires recovery",
-                                    message,
+                                self.state.record(
+                                    LogSeverity::Error,
+                                    LogSource::Studio,
+                                    format!(
+                                        "PDK settings were saved to browser storage but the \
+                                         project could not take them, and the saved settings \
+                                         could not be rolled back: {error}; {rollback_error}"
+                                    ),
                                 );
                             }
                             return;
@@ -408,16 +409,14 @@ impl RSpiceApp {
                         self.state.pdk_config = candidate;
                         self.invalidate_simulation_preflight();
                         emit_browser_pdk_storage_warning(self, ctx, storage_status);
-                        let message = format!(
-                            "PDK settings applied: {loaded} librar{} loaded and durably read back",
-                            if loaded == 1 { "y" } else { "ies" }
+                        self.state.record(
+                            LogSeverity::Info,
+                            LogSource::Studio,
+                            format!(
+                                "PDK settings applied: {} loaded.",
+                                crate::ui::accessibility::counted(loaded, "library", "libraries")
+                            ),
                         );
-                        self.state
-                            .push_user_message(ConsoleMessage::info(message.clone()));
-                        self.state
-                            .ui
-                            .toasts
-                            .success(ctx, "PDK settings applied", message);
                     }
                 }
             }
@@ -428,15 +427,14 @@ impl RSpiceApp {
                     owner.last_error = Some(error.clone());
                 });
                 let _ = intent;
-                let message = format!(
-                    "PDK technology operation was not applied because durable browser publication failed: {error}"
+                self.state.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    format!(
+                        "PDK change was not applied because saving it to browser storage failed: \
+                         {error}"
+                    ),
                 );
-                self.state
-                    .push_user_message(ConsoleMessage::error(message.clone()));
-                self.state
-                    .ui
-                    .toasts
-                    .error_with_title(ctx, "PDK publication failed", message);
                 // Re-read the authoritative head after a conflict or storage
                 // failure. A candidate that did not commit is never retried
                 // implicitly and never becomes live state.
@@ -447,7 +445,6 @@ impl RSpiceApp {
 
     fn finish_rejected_browser_pdk_settings_rollback(
         &mut self,
-        ctx: &Context,
         operation_generation: u64,
         publication_error: &str,
         result: Result<BrowserPdkConfigReceipt, String>,
@@ -463,30 +460,29 @@ impl RSpiceApp {
         match result {
             Ok(receipt) => {
                 accept_browser_pdk_receipt(receipt);
-                let message = format!(
-                    "PDK settings were not applied because project publication failed; the durable browser configuration was rolled back exactly: {publication_error}"
+                self.state.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    format!(
+                        "PDK settings were not applied because the project could not take them; \
+                         browser storage was rolled back: {publication_error}"
+                    ),
                 );
-                self.state
-                    .push_user_message(ConsoleMessage::error(message.clone()));
-                self.state
-                    .ui
-                    .toasts
-                    .error_with_title(ctx, "PDK settings not applied", message);
             }
             Err(rollback_error) => {
                 let failure = format!(
-                    "project publication failed: {publication_error}; durable browser rollback failed: {rollback_error}"
+                    "the project could not take them: {publication_error}; browser storage \
+                     rollback failed: {rollback_error}"
                 );
                 fail_browser_pdk_owner(failure.clone());
-                let message = format!(
-                    "PDK settings could not be published and the durable browser rollback failed. Live state remains unchanged; recover browser PDK storage before continuing: {failure}"
-                );
-                self.state
-                    .push_user_message(ConsoleMessage::error(message.clone()));
-                self.state.ui.toasts.error_with_title(
-                    ctx,
-                    "PDK transaction requires recovery",
-                    message,
+                self.state.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    format!(
+                        "PDK settings were not applied, and browser storage could not be rolled \
+                         back. The open session is unchanged; recover browser PDK storage before \
+                         continuing: {failure}"
+                    ),
                 );
             }
         }
@@ -518,7 +514,7 @@ fn emit_browser_pdk_storage_warning(
 ) {
     if let Some(warning) = storage_durability_warning(storage_status) {
         app.state
-            .push_user_message(ConsoleMessage::warning(warning.to_owned()));
+            .record(LogSeverity::Warning, LogSource::Studio, warning);
         app.state
             .ui
             .toasts

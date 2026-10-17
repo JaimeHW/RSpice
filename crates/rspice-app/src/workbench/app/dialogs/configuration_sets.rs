@@ -3,7 +3,7 @@
 use egui::{Align, Context, Frame, Layout, Margin, TextEdit, Ui, vec2};
 use sha2::{Digest as _, Sha256};
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{
     CellViewRef, ConfigurationBlackBoxPolicy, ConfigurationCloneScope, ConfigurationModelProfile,
     ConfigurationPlatform, ConfigurationSetCatalog, ConfigurationSetDefinition, ConfigurationSetId,
@@ -184,10 +184,8 @@ impl ConfigurationSetsDialogState {
 }
 
 pub(crate) fn open_configuration_sets_dialog(state: &mut AppState) {
+    // The command is greyed with no project open.
     if !state.project_lifecycle.is_open() {
-        state.push_user_message(ConsoleMessage::warning(
-            "Configuration sets require an open project.".to_owned(),
-        ));
         return;
     }
     let catalog = state.workspace.content.configuration_sets.clone();
@@ -579,7 +577,7 @@ impl RSpiceApp {
         );
         if !generated.errors.is_empty() {
             return Err(format!(
-                "Configuration cannot be published because exact netlist generation failed: {}",
+                "Configuration cannot be published because netlist generation failed: {}",
                 generated.errors.join("; ")
             ));
         }
@@ -613,7 +611,8 @@ impl RSpiceApp {
             .map_err(|error| error.to_string())?;
         self.invalidate_simulation_preflight();
         self.state.ui.netlist.current_generation_input_digest = None;
-        self.state.push_user_message(ConsoleMessage::info(message));
+        self.state
+            .record(LogSeverity::Info, LogSource::Studio, message);
         let dialog = &mut self.state.dialogs.configuration_sets;
         dialog.page = ConfigurationDialogPage::Manager;
         dialog.selected_id = Some(selected);

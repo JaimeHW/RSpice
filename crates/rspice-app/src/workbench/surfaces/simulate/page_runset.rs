@@ -9,7 +9,6 @@
 
 use egui::{Rect, Sense, Ui, vec2};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::simulation::plan::AnalysisKind;
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
@@ -1511,10 +1510,10 @@ pub(super) fn open_point_in_family(
         return;
     };
     if !app.state.simulation.select_analysis(analysis_index) {
-        app.state.push_user_message(ConsoleMessage::warning(
+        app.state.prompt(
             "The retained analysis that holds the family could not be selected, so the family \
              view was left unchanged.",
-        ));
+        );
         return;
     }
     // Results first, so the form opens somewhere the reader can see it rather
@@ -1550,10 +1549,10 @@ pub(super) fn family_query_for_point(
             .flatten()
         });
     let Some(manifest) = manifest else {
-        state.push_user_message(ConsoleMessage::warning(
-            "The retained analysis no longer expands to a family manifest, so this point could \
-             not be opened in the family view.",
-        ));
+        state.prompt(
+            "The retained analysis is no longer a family, so this point could not be opened in \
+             the family view.",
+        );
         return None;
     };
     let clauses: Vec<String> = coordinates
@@ -1566,25 +1565,25 @@ pub(super) fn family_query_for_point(
         })
         .collect();
     if clauses.is_empty() {
-        state.push_user_message(ConsoleMessage::warning(
+        state.prompt(
             "The retained family declares none of this point's axes, so there is no member to \
              open. The dataset was produced from a different declared space.",
-        ));
+        );
         return None;
     }
     let query = clauses.join(" · ");
     match manifest.matching_source_indices(&query) {
         Ok(indices) if indices.is_empty() => {
-            state.push_user_message(ConsoleMessage::warning(format!(
+            state.prompt(format!(
                 "The retained family holds no member at {query}, so nothing was opened."
-            )));
+            ));
             None
         }
         Ok(_) => Some(query),
         Err(error) => {
-            state.push_user_message(ConsoleMessage::warning(format!(
+            state.prompt(format!(
                 "This point could not be expressed against the retained family: {error}"
-            )));
+            ));
             None
         }
     }
@@ -1914,9 +1913,8 @@ fn commit(app: &mut RSpiceApp, action: RunSetAction) {
         Ok(prunes) => prunes,
         Err(reason) => {
             app.state.sim_setup.run_set = before;
-            app.state.record_plan_refusal(format!(
-                "{reason} The run set is unchanged and prior datasets remain immutable."
-            ));
+            app.state
+                .record_plan_refusal(format!("{reason} The run set is unchanged."));
             return;
         }
     };

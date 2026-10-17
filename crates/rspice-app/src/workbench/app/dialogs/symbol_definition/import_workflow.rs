@@ -2,7 +2,7 @@
 
 use egui::{Align, ComboBox, Context, Frame, Grid, Layout, Margin, Stroke, TextEdit, Ui, vec2};
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{CellViewRef, ModelBoundSymbolDefinition, SymbolDefinitionImport};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -151,22 +151,27 @@ impl RSpiceApp {
                 self.state
                     .library_manager
                     .select_view(&library_name, &cell_name, "symbol");
-                let message = if imported
+                let format = imported.report.format_label();
+                if imported
                     .definition
                     .source
                     .is_explicitly_unbound_for_review()
                 {
-                    format!(
-                        "Imported {cell_name} from {} as a review-only vector graphic; placement and netlisting remain unavailable until it receives an explicit electrical contract",
-                        imported.report.format_label()
-                    )
+                    self.state.record(
+                        LogSeverity::Warning,
+                        LogSource::Studio,
+                        format!(
+                            "Imported symbol {cell_name} from {format} as graphics only; it \
+                             cannot be placed or netlisted until its pins are bound."
+                        ),
+                    );
                 } else {
-                    format!(
-                        "Imported {cell_name} from {} with validated symbol, pin, parameter-form, and netlist contracts",
-                        imported.report.format_label()
-                    )
-                };
-                self.state.push_user_message(ConsoleMessage::info(message));
+                    self.state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        format!("Imported symbol {cell_name} from {format}."),
+                    );
+                }
                 self.state.dialogs.symbol_import.close_and_discard();
             }
             Err(error) => self.state.dialogs.symbol_import.validation_error = Some(error),

@@ -6,7 +6,6 @@
 
 use egui::{Align, Context, Frame, Layout, RichText, ScrollArea, Stroke, TextEdit, Ui, Vec2};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{DesignNote, DesignNoteKind, DesignReviewMutation, DesignReviewState, Point};
 use crate::time_compat::checked_unix_time_ms;
 use crate::ui::theme::{self, FontWeight};
@@ -135,19 +134,13 @@ enum ReviewAction {
 }
 
 pub(crate) fn open_design_review_comments(state: &mut AppState) {
-    if !state.project_lifecycle.is_open() {
-        state.push_user_message(ConsoleMessage::warning(
-            "Design review comments require an open project.",
-        ));
-        return;
-    }
-    if !matches!(
-        state.workspace.content.active_view_type(),
-        crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
-    ) {
-        state.push_user_message(ConsoleMessage::warning(
-            "Design review comments require a schematic or testbench view.",
-        ));
+    // The command is greyed without an open project and a schematic editor.
+    if !state.project_lifecycle.is_open()
+        || !matches!(
+            state.workspace.content.active_view_type(),
+            crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
+        )
+    {
         return;
     }
     let selected_note_id = state

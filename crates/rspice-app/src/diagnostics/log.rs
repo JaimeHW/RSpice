@@ -1,81 +1,24 @@
-//! Simulation Log Panel
+//! The session log the Console page shows.
 //!
-//! Professional-grade logging infrastructure for RSpice following Spectre conventions.
-//! Provides structured log entries with severity levels, timestamps, and source attribution.
-//!
-//! # Architecture
+//! A chronological, verbatim transcript of the session: each entry carries its
+//! severity, the part of the product that wrote it and the wall-clock time it
+//! was written. A run writes two lines here, its start and its end, both
+//! anchored to it; everything else it says is in its own log, which the run
+//! owns.
 //!
 //! ```text
-//! SimulationController ─┐
-//! EngineBridge ─────────┼──► LogBuffer ──► LogPanel (UI)
-//! DRC Checker ──────────┘
+//! studio events ──────────┐
+//! run start and end ──────┼──► LogBuffer ──► Console page
+//! plan and netlist ───────┘
+//! run lines, engine log ─────► SimulationRun::log
 //! ```
-//!
-//! # Features
-//!
-//! - Ring buffer for memory-efficient log storage
-//! - Severity-based filtering (Error, Warning, Info, Debug, Trace)
-//! - Source attribution (Simulation, Engine, Netlist, DRC, User)
-//! - Timestamp with sub-millisecond precision
-//! - Search/filter by text pattern
 
-use crate::time_compat::Instant;
 use std::collections::VecDeque;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-// =============================================================================
-// Log Severity Levels
-// =============================================================================
-
-pub use rspice_app_types::diagnostics::LogSeverity;
-
-// =============================================================================
-// Log Source Attribution
-// =============================================================================
-
-/// Source of the log entry for filtering and attribution
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
-pub enum LogSource {
-    /// Simulation controller events (start, stop, progress)
-    Simulation,
-    /// Core engine events (convergence, timestep adaptation)
-    Engine,
-    /// Netlist parsing and validation
-    Netlist,
-    /// Design rule checking
-    Drc,
-    /// User-initiated actions
-    User,
-    /// Simulation-plan lifecycle outcomes: the receipt a committed plan
-    /// command left, or the refusal that kept one from committing.
-    ///
-    /// Its own source because the Console is this product's session log of
-    /// plan commands, the way a Spectre log records every command with its
-    /// outcome, and because the activity mirror has to be able to leave these
-    /// where they are. A receipt is a record of what was committed, not a
-    /// notice to chase the reader with.
-    Plan,
-    /// System/infrastructure messages
-    #[default]
-    System,
-}
-
-impl LogSource {
-    /// Display name for the source
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::Simulation => "SIM",
-            Self::Engine => "ENG",
-            Self::Netlist => "NET",
-            Self::Drc => "DRC",
-            Self::User => "USR",
-            Self::Plan => "PLAN",
-            Self::System => "SYS",
-        }
-    }
-}
+pub use rspice_app_types::diagnostics::{LogSeverity, LogSource};
 
 // =============================================================================
 // Log Entry
@@ -133,7 +76,7 @@ pub enum LogAnchor {
 pub struct LogEntry {
     /// Unique sequential ID for ordering
     pub id: u64,
-    /// Timestamp relative to session start
+    /// Wall-clock time the entry was written, since the Unix epoch.
     pub timestamp: Duration,
     /// Severity level
     pub severity: LogSeverity,
@@ -141,22 +84,27 @@ pub struct LogEntry {
     pub source: LogSource,
     /// Main message text
     pub message: String,
-    /// Optional context (analysis name, component, etc.)
-    pub context: Option<String>,
     /// Optional jump target — anchored rows render clickable in the console.
     #[serde(default)]
     pub anchor: Option<LogAnchor>,
 }
 
 impl LogEntry {
-    /// Format timestamp as HH:MM:SS.mmm
+    /// The time on the reader's clock, as HH:MM:SS.mmm.
     pub fn format_timestamp(&self) -> String {
-        let total_secs = self.timestamp.as_secs();
-        let hours = total_secs / 3600;
-        let mins = (total_secs % 3600) / 60;
-        let secs = total_secs % 60;
-        let millis = self.timestamp.subsec_millis();
-        format!("{:02}:{:02}:{:02}.{:03}", hours, mins, secs, millis)
+        u64::try_from(self.timestamp.as_millis())
+            .ok()
+            .and_then(crate::time_compat::local_date_time)
+            .map(|local| {
+                format!(
+                    "{:02}:{:02}:{:02}.{:03}",
+                    local.hour(),
+                    local.minute(),
+                    local.second(),
+                    local.millisecond()
+                )
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -176,24 +124,10 @@ pub struct LogBuffer {
     capacity: usize,
     /// Next entry ID (monotonically increasing)
     next_id: u64,
-    /// Session start time for relative timestamps
-    session_start: Instant,
-    /// Minimum severity level to store
-    min_severity: LogSeverity,
-    /// Running per-severity counts — the console header reads these every
-    /// frame, so they must not be O(buffer) scans.
-    severity_counts: [usize; 5],
-}
-
-/// Index into `severity_counts`.
-fn severity_index(severity: LogSeverity) -> usize {
-    match severity {
-        LogSeverity::Error => 0,
-        LogSeverity::Warning => 1,
-        LogSeverity::Info => 2,
-        LogSeverity::Debug => 3,
-        LogSeverity::Trace => 4,
-    }
+    /// Entries dropped to stay within the capacity since the buffer was last
+    /// cleared, so the Console can say that earlier history is gone rather
+    /// than present a truncated log as the whole session.
+    evicted: u64,
 }
 
 impl Default for LogBuffer {
@@ -209,64 +143,52 @@ impl LogBuffer {
             entries: VecDeque::with_capacity(capacity.min(1024)), // Pre-allocate up to 1K
             capacity,
             next_id: 0,
-            session_start: Instant::now(),
-            min_severity: LogSeverity::Trace, // Store all by default
-            severity_counts: [0; 5],
+            evicted: 0,
         }
     }
 
-    /// Log a message with full parameters
+    /// Append an entry and return its id.
     pub fn log(
         &mut self,
         severity: LogSeverity,
         source: LogSource,
         message: impl Into<String>,
-        context: Option<String>,
-    ) {
-        self.log_anchored(severity, source, message, context, None);
+    ) -> u64 {
+        self.log_anchored(severity, source, message, None)
     }
 
-    /// Log with a jump target — the console renders anchored rows
-    /// clickable and jumps to the anchor on click.
+    /// Append an entry with a jump target and return its id — the console
+    /// renders anchored rows clickable and jumps to the anchor on click.
     pub fn log_anchored(
         &mut self,
         severity: LogSeverity,
         source: LogSource,
         message: impl Into<String>,
-        context: Option<String>,
         anchor: Option<LogAnchor>,
-    ) {
-        // Filter by minimum severity
-        if severity > self.min_severity {
-            return;
-        }
-
+    ) -> u64 {
+        let id = self.next_id;
         let entry = LogEntry {
-            id: self.next_id,
-            timestamp: self.session_start.elapsed(),
+            id,
+            timestamp: crate::time_compat::unix_epoch(),
             severity,
             source,
             message: message.into(),
-            context,
             anchor,
         };
         self.next_id += 1;
 
         // Remove oldest if at capacity
-        if self.entries.len() >= self.capacity
-            && let Some(evicted) = self.entries.pop_front()
-        {
-            self.severity_counts[severity_index(evicted.severity)] -= 1;
+        if self.entries.len() >= self.capacity && self.entries.pop_front().is_some() {
+            self.evicted = self.evicted.saturating_add(1);
         }
-
-        self.severity_counts[severity_index(entry.severity)] += 1;
         self.entries.push_back(entry);
+        id
     }
 
     /// Convenience: Log a warning
     #[cfg(test)]
     pub fn warning(&mut self, source: LogSource, message: impl Into<String>) {
-        self.log(LogSeverity::Warning, source, message, None);
+        self.log(LogSeverity::Warning, source, message);
     }
 
     /// Get all entries
@@ -280,20 +202,6 @@ impl LogBuffer {
         self.next_id
     }
 
-    /// Elapsed time on the same session clock used by [`LogEntry::timestamp`].
-    ///
-    /// UI projections can subtract an entry timestamp from this value to
-    /// preserve the event's original age when mapping it onto another clock.
-    pub fn session_elapsed(&self) -> Duration {
-        self.session_start.elapsed()
-    }
-
-    /// Get entries filtered by source
-    #[cfg(test)]
-    pub fn entries_by_source(&self, source: LogSource) -> impl Iterator<Item = &LogEntry> {
-        self.entries.iter().filter(move |e| e.source == source)
-    }
-
     /// Get entry count
     pub fn len(&self) -> usize {
         self.entries.len()
@@ -304,23 +212,30 @@ impl LogBuffer {
         self.entries.is_empty()
     }
 
-    /// Clear all entries
+    /// The most entries the buffer keeps.
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    /// Entries dropped to stay within [`Self::capacity`] since the buffer was
+    /// last cleared.
+    pub fn evicted(&self) -> u64 {
+        self.evicted
+    }
+
+    /// Clear all entries. What was cleared was removed on purpose, so it is
+    /// not counted as evicted.
     pub fn clear(&mut self) {
         self.entries.clear();
-        self.severity_counts = [0; 5];
+        self.evicted = 0;
     }
 
-    /// Count entries by severity (O(1) — maintained on log/evict/clear).
-    ///
-    /// No shipping surface counts the log by severity any more: the Problems
-    /// page is the only one that ever did, and it now counts exactly the rows
-    /// it lists rather than asking the whole buffer.
+    /// Count entries of one severity.
     #[cfg(test)]
     pub fn count_by_severity(&self, severity: LogSeverity) -> usize {
-        self.severity_counts[severity_index(severity)]
+        self.entries
+            .iter()
+            .filter(|entry| entry.severity == severity)
+            .count()
     }
 }
-
-// =============================================================================
-// Tests
-// =============================================================================

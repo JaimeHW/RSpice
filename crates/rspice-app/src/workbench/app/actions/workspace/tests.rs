@@ -8,7 +8,7 @@ mod physical_layouts;
 mod sheet_membership;
 mod show_in_netlist;
 
-use crate::diagnostics::{LogAnchor, LogSource};
+use crate::diagnostics::LogAnchor;
 use crate::state::{
     Cell, CellViewRef, Component, ComponentType, LayoutEdit, LayoutInstance, LayoutObjectId,
     LayoutOrientation, LayoutPoint, LayoutTransform, Library, LibraryCellInstance, Point,
@@ -1467,12 +1467,7 @@ fn read_only_symbol_edit_paths_use_consistent_refusal_text() {
     );
 
     assert!(state.deny_read_only_edit());
-    let warning = state
-        .log_buffer
-        .entries()
-        .last()
-        .expect("read-only warning is logged");
-    assert_eq!(warning.message, expected);
+    assert_eq!(state.prompt_text(), Some(expected));
 }
 
 #[test]
@@ -2380,13 +2375,8 @@ fn state_with_probed_conductors() -> AppState {
     state
 }
 
-fn console_text(state: &AppState) -> String {
-    state
-        .log_buffer
-        .entries()
-        .map(|entry| entry.message.clone())
-        .collect::<Vec<_>>()
-        .join("\n")
+fn prompt_text(state: &AppState) -> String {
+    state.prompt_text().unwrap_or_default().to_owned()
 }
 
 #[test]
@@ -2434,9 +2424,9 @@ fn a_simulation_anchor_refuses_a_schematic_that_moved() {
         "a refusal must not navigate away from what the author was reading"
     );
     assert!(
-        console_text(&state).contains("changed since this result was produced"),
+        prompt_text(&state).contains("changed since this result was produced"),
         "the refusal must say why, in the sentence every stale cross-probe uses: {}",
-        console_text(&state)
+        prompt_text(&state)
     );
 }
 
@@ -2453,10 +2443,10 @@ fn a_simulation_anchor_says_which_named_objects_this_sheet_does_not_draw() {
         state.schematic.session.editor.selection.wires,
         [91].into_iter().collect()
     );
-    let console = console_text(&state);
+    let prompt = prompt_text(&state);
     assert!(
-        console.contains("ELSEWHERE") && console.contains("Marked 1 of 2"),
-        "a partial marking must say how partial it is: {console}"
+        prompt.contains("ELSEWHERE") && prompt.contains("Marked 1 of 2"),
+        "a partial marking must say how partial it is: {prompt}"
     );
 }
 

@@ -561,19 +561,24 @@ pub(crate) enum CloudAccountEvent {
     OpenBrowser(String),
     /// A publish committed: the UI persists this binding into the project.
     PublishCompleted(Box<PublishReceipt>),
+    /// The device would not keep the sign-in record: the UI records why.
+    #[cfg(not(target_arch = "wasm32"))]
+    StorageFailed(String),
 }
 
 /// Fixed-size, coalescing executor-to-UI mailbox. Only the newest value of
 /// each event class can be useful to the application: snapshots supersede
 /// snapshots, a later browser request replaces an unopened predecessor, and
-/// the service itself exposes only the newest unconsumed publication receipt.
-/// Keeping those three slots here prevents a paused/minimized UI from growing
-/// an unbounded cross-thread queue.
+/// the service itself exposes only the newest unconsumed publication receipt
+/// and storage failure. Keeping one slot per class here prevents a
+/// paused/minimized UI from growing an unbounded cross-thread queue.
 #[derive(Default)]
 struct CloudAccountEventSlots {
     snapshot: Option<Box<CloudSessionSnapshot>>,
     browser_url: Option<String>,
     publish_receipt: Option<Box<PublishReceipt>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    storage_failure: Option<String>,
 }
 
 #[derive(Clone)]
@@ -608,6 +613,8 @@ impl CloudAccountEventSender {
             CloudAccountEvent::PublishCompleted(receipt) => {
                 slots.publish_receipt = Some(receipt);
             }
+            #[cfg(not(target_arch = "wasm32"))]
+            CloudAccountEvent::StorageFailed(failure) => slots.storage_failure = Some(failure),
         }
         Ok(())
     }
@@ -627,6 +634,10 @@ impl CloudAccountEventReceiver {
         }
         if let Some(receipt) = slots.publish_receipt.take() {
             return Ok(CloudAccountEvent::PublishCompleted(receipt));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(failure) = slots.storage_failure.take() {
+            return Ok(CloudAccountEvent::StorageFailed(failure));
         }
         Err(std::sync::mpsc::TryRecvError::Empty)
     }
@@ -689,6 +700,8 @@ pub(crate) struct CloudAccountService {
     /// A presentation-safe local service error awaiting the application
     /// message center. It never replaces a still-valid authenticated snapshot.
     pending_local_error: Option<String>,
+    /// Why the device would not keep the sign-in record, awaiting the Console.
+    pending_storage_failure: Option<String>,
     pending_commands: std::collections::VecDeque<CloudAccountCommand>,
     #[cfg(target_arch = "wasm32")]
     commands: Option<tokio::sync::mpsc::Sender<CloudAccountCommand>>,
@@ -715,6 +728,7 @@ impl CloudAccountService {
                         pending_publish_receipt: None,
                         pending_live_relay: None,
                         pending_local_error: None,
+                        pending_storage_failure: None,
                         pending_commands: std::collections::VecDeque::new(),
                         commands: Some(commands),
                         events: Some(events),
@@ -728,6 +742,7 @@ impl CloudAccountService {
                     pending_publish_receipt: None,
                     pending_live_relay: None,
                     pending_local_error: None,
+                    pending_storage_failure: None,
                     pending_commands: std::collections::VecDeque::new(),
                     commands: None,
                     events: None,
@@ -747,6 +762,7 @@ impl CloudAccountService {
                         pending_publish_receipt: None,
                         pending_live_relay: None,
                         pending_local_error: None,
+                        pending_storage_failure: None,
                         pending_commands: std::collections::VecDeque::new(),
                         commands: Some(commands),
                         events: Some(events),
@@ -760,6 +776,7 @@ impl CloudAccountService {
                     pending_publish_receipt: None,
                     pending_live_relay: None,
                     pending_local_error: None,
+                    pending_storage_failure: None,
                     pending_commands: std::collections::VecDeque::new(),
                     commands: None,
                     events: None,
@@ -780,6 +797,7 @@ impl CloudAccountService {
             pending_publish_receipt: None,
             pending_live_relay: None,
             pending_local_error: None,
+            pending_storage_failure: None,
             pending_commands: std::collections::VecDeque::new(),
             commands: None,
             events: None,
@@ -857,9 +875,19 @@ impl CloudAccountService {
                     self.pending_publish_receipt = Some(*receipt);
                     changed = true;
                 }
+                #[cfg(not(target_arch = "wasm32"))]
+                CloudAccountEvent::StorageFailed(failure) => {
+                    self.pending_storage_failure = Some(failure);
+                    changed = true;
+                }
             }
         }
         changed
+    }
+
+    /// Why the device would not keep the sign-in record, at most once.
+    pub(crate) fn take_storage_failure(&mut self) -> Option<String> {
+        self.pending_storage_failure.take()
     }
 
     /// A sign-in URL the UI should open in the system browser, at most once.

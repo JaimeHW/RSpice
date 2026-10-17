@@ -455,6 +455,20 @@ const PLACE_PIN: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, true
 const PLACE_TEXT: &[ShortcutBinding] =
     &[primary(chord(Key::T, false, false, true, "Shift+T"), ALL)];
 const MOVE_SELECTION: &[ShortcutBinding] = &[primary(chord(Key::M, false, false, false, "M"), ALL)];
+// The symbol canvas gives Ctrl+R and Ctrl+M the same meaning for its pins;
+// the two contexts never match the same view.
+const ROTATE_SELECTION: &[ShortcutBinding] =
+    &[primary(chord(Key::R, true, false, false, "Ctrl+R"), ALL)];
+const ROTATE_SELECTION_CCW: &[ShortcutBinding] = &[primary(
+    chord(Key::R, true, false, true, "Ctrl+Shift+R"),
+    ALL,
+)];
+const MIRROR_SELECTION_HORIZONTAL: &[ShortcutBinding] =
+    &[primary(chord(Key::M, true, false, false, "Ctrl+M"), ALL)];
+const MIRROR_SELECTION_VERTICAL: &[ShortcutBinding] = &[primary(
+    chord(Key::M, true, false, true, "Ctrl+Shift+M"),
+    ALL,
+)];
 /// Virtuoso's `z`.
 const ZOOM_BOX: &[ShortcutBinding] = &[primary(chord(Key::Z, false, false, false, "Z"), ALL)];
 const STRETCH_SELECTION: &[ShortcutBinding] =
@@ -751,6 +765,7 @@ impl Command {
             | Self::CreateHierarchy
             | Self::Place(_)
             | Self::RotateSelection
+            | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical
             | Self::NextSheet
@@ -907,6 +922,10 @@ impl Command {
             Self::ZoomFit => ZOOM_FIT,
             Self::FitSchematicContent => FIT_SCHEMATIC_CONTENT,
             Self::ZoomBox => ZOOM_BOX,
+            Self::RotateSelection => ROTATE_SELECTION,
+            Self::RotateSelectionCounterClockwise => ROTATE_SELECTION_CCW,
+            Self::MirrorSelectionHorizontal => MIRROR_SELECTION_HORIZONTAL,
+            Self::MirrorSelectionVertical => MIRROR_SELECTION_VERTICAL,
             Self::CycleGrid => GRID,
             Self::GridSnapRouting => NONE,
             Self::DrawingSheetLayers => NONE,
@@ -1112,6 +1131,7 @@ impl Command {
             | Self::ReplaceInstance
             | Self::CreateHierarchy
             | Self::RotateSelection
+            | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical
                 if !super::active_schematic_editor(app) =>
@@ -1124,6 +1144,7 @@ impl Command {
             | Self::ReplaceInstance
             | Self::CreateHierarchy
             | Self::RotateSelection
+            | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical
                 if app.state.schematic_edit_read_only() =>
@@ -1140,6 +1161,7 @@ impl Command {
             | Self::ReplaceInstance
             | Self::CreateHierarchy
             | Self::RotateSelection
+            | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical => "select an editable object",
             Self::NextSheet | Self::PreviousSheet if !super::active_schematic_editor(app) => {

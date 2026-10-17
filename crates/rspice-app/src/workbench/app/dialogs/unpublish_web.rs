@@ -7,7 +7,6 @@
 
 use egui::Context;
 
-use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
@@ -110,10 +109,8 @@ impl RSpiceApp {
                     let publication_id = dialog.publication_id.clone();
                     let url_path = dialog.url_path.clone();
                     self.cloud_account.unpublish(circuit_id, publication_id);
-                    self.state.push_user_message(ConsoleMessage::info(format!(
-                        "Unpublish requested — {url_path} will answer 410 once the service \
-                         confirms."
-                    )));
+                    self.state
+                        .prompt(format!("Unpublish requested for {url_path}."));
                     self.state.dialogs.unpublish_web.open = false;
                 }
             }

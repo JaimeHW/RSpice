@@ -16,7 +16,7 @@ use std::sync::{Mutex, OnceLock};
 
 use egui::Context;
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::design_history::{
@@ -24,6 +24,9 @@ use crate::workbench::app_state::design_history::{
 };
 use crate::workbench::app_state::session::pdk_settings::PdkSettingsDialogResult;
 use crate::workbench::state::{ModelsAttemptedOperation, ModelsOperationalState};
+
+/// The refusal every model operation gives while another one is running.
+const MODEL_OPERATION_RUNNING: &str = "A model import or refresh is already running.";
 
 /// Records what the workspace is attempting, so a later receipt can name it.
 ///
@@ -327,29 +330,35 @@ fn publish_prepared_pdk_configuration_with_persistence(
 }
 
 fn emit_pdk_save_warning(state: &mut AppState, operation: &str, error: impl AsRef<str>) {
-    state.push_user_message(ConsoleMessage::warning(format!(
-        "PDK configuration {} but could not be persisted: {}",
-        operation,
-        error.as_ref()
-    )));
+    state.record(
+        LogSeverity::Warning,
+        LogSource::Studio,
+        format!(
+            "PDK configuration {} but could not be saved: {}",
+            operation,
+            error.as_ref()
+        ),
+    );
 }
 
 fn emit_pdk_apply_messages(state: &mut AppState, load_result: Result<usize, Vec<String>>) {
     match load_result {
         Ok(count) => {
-            state.push_user_message(ConsoleMessage::info(format!(
-                "PDK settings applied: {} libraries loaded",
-                count
-            )));
+            state.record(
+                LogSeverity::Info,
+                LogSource::Studio,
+                format!("PDK settings applied: {count} libraries loaded"),
+            );
         }
         Err(errors) => {
-            state.push_user_message(ConsoleMessage::warning(format!(
-                "PDK settings were not applied; no configured model libraries changed ({} errors)",
-                errors.len()
-            )));
-            for error in errors {
-                state.push_user_message(ConsoleMessage::error(error));
-            }
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!(
+                    "PDK settings were not applied; no model library changed: {}",
+                    errors.join("; ")
+                ),
+            );
         }
     }
 }
@@ -365,26 +374,23 @@ fn emit_pdk_file_load_success_message(
         emit_pdk_save_warning(state, "was updated", err.to_string());
     }
 
-    state.push_user_message(ConsoleMessage::info(format!(
-        "Loaded library '{}' from {}",
-        library_name,
-        path.display()
-    )));
-
-    if let Some((model_count, corner_count)) = library_stats {
-        state.push_user_message(ConsoleMessage::info(format!(
-            "  {} models, {} corners available",
-            model_count, corner_count
-        )));
-    }
+    let contents = library_stats.map_or_else(String::new, |(models, corners)| {
+        format!(": {models} models, {corners} corners")
+    });
+    state.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        format!(
+            "Loaded library '{library_name}' from {}{contents}",
+            path.display()
+        ),
+    );
 }
 
 impl RSpiceApp {
     pub(in crate::workbench) fn start_model_source_import(&mut self, _ctx: &Context) {
         if self.state.workbench.models_view.model_import_in_progress {
-            self.state.push_user_message(ConsoleMessage::warning(
-                "A model-source import is already authenticating and parsing.".to_owned(),
-            ));
+            self.state.prompt(MODEL_OPERATION_RUNNING);
             return;
         }
         #[cfg(target_arch = "wasm32")]
@@ -396,7 +402,11 @@ impl RSpiceApp {
             if let Err(error) = start_browser_model_import(_ctx, &self.state, None) {
                 self.state.workbench.models_view.model_import_in_progress = false;
                 self.state.workbench.models_view.model_import_label = None;
-                self.state.push_user_message(ConsoleMessage::error(error));
+                self.state.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    format!("Model import could not start: {error}"),
+                );
             }
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -421,9 +431,8 @@ impl RSpiceApp {
     ) {
         let pending = BROWSER_PENDING_MODEL_ROOT.with(|pending| pending.borrow_mut().take());
         let Some(pending) = pending else {
-            self.state.push_user_message(ConsoleMessage::error(
-                "The pending browser model source selection is no longer available.".to_owned(),
-            ));
+            self.state
+                .prompt("The model source selection is gone; choose the files again.");
             self.state.workbench.models_view.dialog = None;
             return;
         };
@@ -432,9 +441,9 @@ impl RSpiceApp {
             .iter()
             .any(|candidate| candidate == &root_name)
         {
-            self.state.push_user_message(ConsoleMessage::error(format!(
-                "Browser model source '{root_name}' is not an available entry file."
-            )));
+            self.state.prompt(format!(
+                "'{root_name}' is not one of the selected entry files."
+            ));
             BROWSER_PENDING_MODEL_ROOT.with(|slot| *slot.borrow_mut() = Some(pending));
             return;
         }
@@ -454,7 +463,11 @@ impl RSpiceApp {
             browser_model_import_worker::start(metadata, buffers, authority, ctx.clone())
         {
             BROWSER_PENDING_MODEL_ROOT.with(|slot| *slot.borrow_mut() = Some(pending));
-            self.state.push_user_message(ConsoleMessage::error(error));
+            self.state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Model import could not start: {error}"),
+            );
             return;
         }
         self.state.workbench.models_view.dialog = None;
@@ -495,15 +508,14 @@ impl RSpiceApp {
             .get_library(&library_name)
             .cloned()
         else {
-            self.state.push_user_message(ConsoleMessage::error(format!(
-                "Model library '{library_name}' no longer exists."
-            )));
+            self.state
+                .prompt(format!("Model library '{library_name}' no longer exists."));
             return;
         };
         let Some(root) = library.root_path.clone() else {
-            self.state.push_user_message(ConsoleMessage::error(format!(
-                "Model library '{library_name}' has no refreshable source root."
-            )));
+            self.state.prompt(format!(
+                "Model library '{library_name}' was not read from source files, so it cannot be refreshed."
+            ));
             return;
         };
         #[cfg(not(target_arch = "wasm32"))]
@@ -519,9 +531,7 @@ impl RSpiceApp {
         #[cfg(target_arch = "wasm32")]
         {
             if self.state.workbench.models_view.model_import_in_progress {
-                self.state.push_user_message(ConsoleMessage::warning(
-                    "A model-source operation is already authenticating and parsing.".to_owned(),
-                ));
+                self.state.prompt(MODEL_OPERATION_RUNNING);
                 return;
             }
             note_models_operation(
@@ -537,7 +547,11 @@ impl RSpiceApp {
             if let Err(error) = start_browser_model_import(ctx, &self.state, Some(library_name)) {
                 self.state.workbench.models_view.model_import_in_progress = false;
                 self.state.workbench.models_view.model_import_label = None;
-                self.state.push_user_message(ConsoleMessage::error(error));
+                self.state.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    format!("Model library refresh could not start: {error}"),
+                );
             }
             let _ = root;
         }
@@ -605,18 +619,17 @@ impl RSpiceApp {
 
     /// Records a shipped-tree operation this host cannot perform.
     ///
-    /// It ends in the same three places every other refusal does — the
+    /// It ends in the same places every other refusal does — the
     /// attempted-operation record, the receipt the exception banner reads, and
-    /// the console — because a refusal arriving by a private route would be a
-    /// second failure vocabulary for one platform.
+    /// the status bar — because a refusal arriving by a private route would be
+    /// a second failure vocabulary for one platform.
     #[cfg(target_arch = "wasm32")]
     fn refuse_shipped_tree_operation(&mut self, attempted: String, reason: String) {
         note_models_operation(&mut self.state, attempted, false, None);
         self.state.workbench.models_view.operational_state =
             ModelsOperationalState::from_failure(&reason);
         self.state.workbench.models_view.action_receipt = Some(Err(reason.clone()));
-        self.state
-            .push_user_message(ConsoleMessage::warning(reason));
+        self.state.prompt(reason);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -664,7 +677,7 @@ impl RSpiceApp {
         poll_native_model_imports(ctx, &mut self.state, &mut self.model_hub);
         #[cfg(target_arch = "wasm32")]
         {
-            poll_browser_model_imports(ctx, &mut self.state);
+            poll_browser_model_imports(&mut self.state);
             poll_browser_model_hub_operations(ctx, &mut self.state, &mut self.model_hub);
         }
         self.state.workbench.models_view.model_import_progress = self
@@ -721,12 +734,16 @@ impl RSpiceApp {
             return;
         }
         for pin in &recalled {
-            self.state.push_user_message(ConsoleMessage::warning(format!(
-                "'{}' is pinned to {} {}, which the publisher recalled, giving the reason '{}'. \
-                 The bytes this project retained are unchanged and still solve; nothing further \
-                 can be taken from that release.",
-                pin.library, pin.pack_id, pin.version, pin.reason
-            )));
+            self.state.record(
+                LogSeverity::Warning,
+                LogSource::Studio,
+                format!(
+                    "'{}' is pinned to {} {}, which the publisher recalled, giving the reason \
+                     '{}'. The models this project kept are unchanged and still solve; nothing \
+                     further can be taken from that release.",
+                    pin.library, pin.pack_id, pin.version, pin.reason
+                ),
+            );
         }
         self.state.ui.toasts.warn_with_title(
             ctx,
@@ -762,8 +779,7 @@ impl RSpiceApp {
             self.state.workbench.models_view.operational_state =
                 ModelsOperationalState::from_failure(&reason);
             self.state.workbench.models_view.action_receipt = Some(Err(reason.clone()));
-            self.state
-                .push_user_message(ConsoleMessage::warning(reason));
+            self.state.prompt(reason);
             return;
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -782,9 +798,7 @@ impl RSpiceApp {
         operation: NativeModelCatalogOperation,
     ) {
         if self.state.workbench.models_view.model_import_in_progress {
-            self.state.push_user_message(ConsoleMessage::warning(
-                "A model-source operation is already authenticating and parsing.".to_owned(),
-            ));
+            self.state.prompt(MODEL_OPERATION_RUNNING);
             return;
         }
         let authority = capture_native_model_import_authority(&self.state);
@@ -839,7 +853,8 @@ impl RSpiceApp {
             self.state.workbench.models_view.operational_state =
                 ModelsOperationalState::from_failure(&message);
             self.state.workbench.models_view.action_receipt = Some(Err(message.clone()));
-            self.state.push_user_message(ConsoleMessage::error(message));
+            self.state
+                .record(LogSeverity::Error, LogSource::Studio, message);
         }
     }
 
@@ -1107,12 +1122,12 @@ fn poll_native_model_imports(
             && !native_model_import_authority_is_current(&completion.authority, state)
         {
             let error = format!(
-                "The {} finished after the project or model catalog changed; its parsed candidate was discarded without mutation. Retry against the current project.",
+                "The {} finished after the project or model catalog changed, so its result was discarded and nothing changed. Run it again against the current project.",
                 completion.operation.description()
             );
             state.workbench.models_view.operational_state = ModelsOperationalState::Stale;
             state.workbench.models_view.action_receipt = Some(Err(error.clone()));
-            state.push_user_message(ConsoleMessage::warning(error.clone()));
+            state.record(LogSeverity::Warning, LogSource::Studio, error.clone());
             state
                 .ui
                 .toasts
@@ -1134,14 +1149,10 @@ fn poll_native_model_imports(
                 Ok(receipt) => {
                     state.workbench.models_view.operational_state = ModelsOperationalState::Ready;
                     state.workbench.models_view.action_receipt = Some(Ok(receipt.clone()));
-                    state.push_user_message(ConsoleMessage::info(receipt.clone()));
-                    state
-                        .ui
-                        .toasts
-                        .success(ctx, "Model catalog updated", receipt);
+                    state.record(LogSeverity::Info, LogSource::Studio, receipt);
                 }
                 Err(errors) => {
-                    emit_native_model_catalog_errors(ctx, state, errors);
+                    emit_native_model_catalog_errors(state, errors);
                 }
             },
             Ok(NativeModelCatalogOutput::ModelHub(output)) => {
@@ -1149,7 +1160,6 @@ fn poll_native_model_imports(
                     NativeModelCatalogOperation::ModelHub(request) => request.clone(),
                     _ => {
                         emit_native_model_catalog_errors(
-                            ctx,
                             state,
                             vec!["Internal model-hub operation/result mismatch.".to_owned()],
                         );
@@ -1166,11 +1176,11 @@ fn poll_native_model_imports(
                     loaded,
                 } = *output;
                 if state.pdk_config != previous {
-                    let error = "PDK settings changed while configured sources were loading; the stale candidate was discarded without mutation. Apply the current settings again."
+                    let error = "PDK settings changed while their model sources were loading, so the loaded result was discarded and nothing changed. Apply the current settings again."
                         .to_owned();
                     state.workbench.models_view.operational_state = ModelsOperationalState::Stale;
                     state.workbench.models_view.action_receipt = Some(Err(error.clone()));
-                    state.push_user_message(ConsoleMessage::warning(error.clone()));
+                    state.record(LogSeverity::Warning, LogSource::Studio, error.clone());
                     state
                         .ui
                         .toasts
@@ -1188,45 +1198,44 @@ fn poll_native_model_imports(
                 match result {
                     Ok(loaded) => {
                         emit_pdk_apply_messages(state, Ok(loaded));
-                        let receipt = format!(
-                            "Applied PDK settings from a background-authenticated candidate ({loaded} libraries loaded)."
-                        );
+                        let receipt = format!("Applied PDK settings ({loaded} libraries loaded).");
                         state.workbench.models_view.operational_state =
                             ModelsOperationalState::Ready;
-                        state.workbench.models_view.action_receipt = Some(Ok(receipt.clone()));
-                        state
-                            .ui
-                            .toasts
-                            .success(ctx, "PDK settings applied", receipt);
+                        state.workbench.models_view.action_receipt = Some(Ok(receipt));
                     }
                     Err(errors) => {
+                        // The settings line already names every reason; the
+                        // workspace takes the same failure without a second
+                        // record of it.
                         emit_pdk_apply_messages(state, Err(errors.clone()));
-                        emit_native_model_catalog_errors(ctx, state, errors);
+                        note_native_model_catalog_failure(state, &errors);
                     }
                 }
             }
             Err(errors) => {
-                emit_native_model_catalog_errors(ctx, state, errors);
+                emit_native_model_catalog_errors(state, errors);
             }
         }
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn emit_native_model_catalog_errors(ctx: &Context, state: &mut AppState, errors: Vec<String>) {
-    let first = errors
-        .first()
-        .cloned()
-        .unwrap_or_else(|| "The model-source operation failed without a diagnostic.".to_owned());
+fn emit_native_model_catalog_errors(state: &mut AppState, errors: Vec<String>) {
     for error in &errors {
-        state.push_user_message(ConsoleMessage::error(error.clone()));
+        state.record(LogSeverity::Error, LogSource::Studio, error.clone());
     }
-    state.workbench.models_view.operational_state = ModelsOperationalState::from_failure(&first);
+    note_native_model_catalog_failure(state, &errors);
+}
+
+/// Puts a failed model-source operation on the Models workspace's banner.
+#[cfg(not(target_arch = "wasm32"))]
+fn note_native_model_catalog_failure(state: &mut AppState, errors: &[String]) {
+    let first = errors.first().map_or(
+        "The model-source operation failed without a diagnostic.",
+        String::as_str,
+    );
+    state.workbench.models_view.operational_state = ModelsOperationalState::from_failure(first);
     state.workbench.models_view.action_receipt = Some(Err(errors.join("; ")));
-    state
-        .ui
-        .toasts
-        .error_with_title(ctx, "Model-source operation failed", first);
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -1584,15 +1593,12 @@ impl RSpiceApp {
     /// else can see, queue the completion, and wake the frame loop.
     fn start_browser_model_hub_operation(&mut self, ctx: &Context, request: ModelHubRequest) {
         if self.state.workbench.models_view.model_import_in_progress {
-            self.state.push_user_message(ConsoleMessage::warning(
-                "A model-source operation is already authenticating and parsing.".to_owned(),
-            ));
+            self.state.prompt(MODEL_OPERATION_RUNNING);
             return;
         }
         let Some(store) = self.model_hub.store().cloned() else {
-            self.state.push_user_message(ConsoleMessage::warning(
-                "The model hub is unavailable in this browser session.".to_owned(),
-            ));
+            self.state
+                .prompt("The model hub is unavailable in this browser session.");
             return;
         };
         let authority = BrowserModelImportAuthority {
@@ -1661,13 +1667,13 @@ fn poll_browser_model_hub_operations(
                         == state.model_library_manager.execution_catalog_digest();
                 if output.part.is_some() && !authority_current {
                     let error = format!(
-                        "The {} finished after the project changed; its retained candidate was \
-                         discarded without mutation. Retry against the current project.",
+                        "The {} finished after the project changed, so its result was discarded \
+                         and nothing changed. Run it again against the current project.",
                         completion.request.description()
                     );
                     state.workbench.models_view.operational_state = ModelsOperationalState::Stale;
                     state.workbench.models_view.action_receipt = Some(Err(error.clone()));
-                    state.push_user_message(ConsoleMessage::warning(error.clone()));
+                    state.record(LogSeverity::Warning, LogSource::Studio, error.clone());
                     state
                         .ui
                         .toasts
@@ -1678,7 +1684,7 @@ fn poll_browser_model_hub_operations(
             }
             Err(error) => {
                 model_hub::note_pack_verification(state, &completion.request, Err(error.clone()));
-                model_hub::emit_model_hub_errors(ctx, state, vec![error]);
+                model_hub::emit_model_hub_errors(state, vec![error]);
             }
         }
     }
@@ -1690,7 +1696,7 @@ fn queue_browser_model_import(completion: BrowserModelImport) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn poll_browser_model_imports(ctx: &Context, state: &mut AppState) {
+fn poll_browser_model_imports(state: &mut AppState) {
     let completions =
         BROWSER_MODEL_IMPORTS.with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
     for completion in completions {
@@ -1737,7 +1743,7 @@ fn poll_browser_model_imports(ctx: &Context, state: &mut AppState) {
                     .to_owned();
                 state.workbench.models_view.operational_state = ModelsOperationalState::Stale;
                 state.workbench.models_view.action_receipt = Some(Err(error.clone()));
-                state.push_user_message(ConsoleMessage::error(error));
+                state.record(LogSeverity::Error, LogSource::Studio, error);
             }
             continue;
         }
@@ -1803,22 +1809,13 @@ fn poll_browser_model_imports(ctx: &Context, state: &mut AppState) {
         match result {
             Ok(Some((library, file_count, replaced))) => {
                 let message = format!(
-                    "{} browser model library '{library}' from {file_count} authenticated source file{} with exact retained bytes",
+                    "{} model library '{library}' from {file_count} source file{}",
                     if replaced { "Refreshed" } else { "Imported" },
                     if file_count == 1 { "" } else { "s" }
                 );
                 state.workbench.models_view.operational_state = ModelsOperationalState::Ready;
                 state.workbench.models_view.action_receipt = Some(Ok(message.clone()));
-                state.push_user_message(ConsoleMessage::info(message.clone()));
-                state.ui.toasts.success(
-                    ctx,
-                    if replaced {
-                        "Model library refreshed"
-                    } else {
-                        "Model library imported"
-                    },
-                    message,
-                );
+                state.record(LogSeverity::Info, LogSource::Studio, message);
             }
             Ok(None) => {
                 state.workbench.models_view.operational_state = ModelsOperationalState::Cancelled;
@@ -1833,11 +1830,7 @@ fn poll_browser_model_imports(ctx: &Context, state: &mut AppState) {
                     ModelsOperationalState::Stale
                 };
                 state.workbench.models_view.action_receipt = Some(Err(error.clone()));
-                state.push_user_message(ConsoleMessage::error(error.clone()));
-                state
-                    .ui
-                    .toasts
-                    .error_with_title(ctx, "Model import failed", error);
+                state.record(LogSeverity::Error, LogSource::Studio, error);
             }
         }
     }

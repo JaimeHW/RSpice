@@ -266,12 +266,14 @@ fn a_click_on_a_stack_row_selects_it_and_a_click_on_its_switch_enables_it() {
         "and selecting a row must not also enable or disable it"
     );
 
-    let receipts_before = studio
-        .app
-        .state
-        .workbench
-        .analysis_lifecycle_status
-        .sequence();
+    let plan_records = |app: &RSpiceApp| {
+        app.state
+            .log_buffer
+            .entries()
+            .filter(|entry| entry.source == crate::diagnostics::LogSource::Plan)
+            .count()
+    };
+    let receipts_before = plan_records(&studio.app);
     studio.click(|label| label.starts_with("Enable ") && label.contains(&target));
     assert_eq!(
         studio
@@ -287,13 +289,7 @@ fn a_click_on_a_stack_row_selects_it_and_a_click_on_its_switch_enables_it() {
         "a click on the switch moves the plan"
     );
     assert!(
-        studio
-            .app
-            .state
-            .workbench
-            .analysis_lifecycle_status
-            .sequence()
-            > receipts_before,
+        plan_records(&studio.app) > receipts_before,
         "and it goes through the lifecycle command, which receipts what it did"
     );
 }

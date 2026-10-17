@@ -72,8 +72,8 @@ pub(super) fn reveal(state: &mut crate::workbench::AppState, run_id: u64) {
     if crate::workbench::documents::netlist_document::reveal_executed_deck(state, run_id, 0) {
         return;
     }
-    state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+    state.prompt(format!(
         "The source Run {run_id} executed cannot be opened: {}.",
         crate::state::absent_deck_reason()
-    )));
+    ));
 }

@@ -5,6 +5,9 @@
 //! UI does not advertise speculative or placeholder capability.
 
 use crate::schematic::view::schematic_symbol_context;
+use crate::schematic::view::selection_transform::{
+    SelectionTransform, transform_selection_on_active_sheet,
+};
 use crate::state::{ComponentType, Tool};
 use crate::workbench::app::sheets as sheet_actions;
 use crate::workbench::commands::vocabulary::Command;
@@ -15,7 +18,8 @@ use rspice_schematic_editor::view::navigation::ZoomRequest;
 use std::cell::RefCell;
 
 use super::state::{
-    ConsolePage, ProjectLauncherFilter, SpecificationEvidenceFilter, WorkbenchState, Workspace,
+    ConsoleChannel, ConsolePage, ProjectLauncherFilter, SpecificationEvidenceFilter,
+    WorkbenchState, Workspace,
 };
 
 pub(crate) mod code_context;
@@ -65,22 +69,22 @@ fn model_library_rescan_diagnostic(app: &RSpiceApp) -> (String, bool) {
     let discovered_files = app.state.pdk_config.discovered_files.len();
     let scan_errors = &app.state.pdk_config.scan_errors;
     let pack_definitions = app.state.model_library_manager.pack_definition_count();
-    let summary = format!(
+    let mut summary = format!(
         "Model library rescan found {discovered_files} configured model file(s) and \
          {pack_definitions} shipped pack part(s)"
     );
-    if scan_errors.is_empty() {
-        (summary, false)
-    } else {
-        (
-            format!(
-                "{summary}; {} configured path error(s): {}",
-                scan_errors.len(),
-                scan_errors.join("; ")
-            ),
-            true,
-        )
+    let pack_error = app.state.model_library_manager.spice_pack_error();
+    if let Some(error) = pack_error {
+        summary = format!("{summary}; {error}");
     }
+    if !scan_errors.is_empty() {
+        summary = format!(
+            "{summary}; {} configured path error(s): {}",
+            scan_errors.len(),
+            scan_errors.join("; ")
+        );
+    }
+    (summary, pack_error.is_some() || !scan_errors.is_empty())
 }
 
 fn selection_layout_command(
@@ -135,6 +139,7 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::CheckAndSave
             | Command::Place(_)
             | Command::RotateSelection
+            | Command::RotateSelectionCounterClockwise
             | Command::MirrorSelectionHorizontal
             | Command::MirrorSelectionVertical
             | Command::AlignSelectionLeft
@@ -578,17 +583,12 @@ impl Command {
                     && !state.ui.symbol.editor.effective_selection().is_empty()
             }
             Self::RotateSelection
+            | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical => {
                 active_schematic_editor(app)
                     && !state.schematic_edit_read_only()
-                    && state.schematic.session.editor.selection.components.iter().any(|id| {
-                        state
-                            .schematic
-                            .document().components
-                            .iter()
-                            .any(|component| component.id == *id)
-                    })
+                    && schematic_selection_has_live_object(&state.schematic)
             }
             Self::AlignSelectionLeft
             | Self::AlignSelectionCenter
@@ -1104,8 +1104,12 @@ impl Command {
             Self::RevealProducerLog => result_navigation::producer_log_hop(app).is_ok(),
             Self::ExpressionDiagnostics => state.simulation.retained.has_results(),
             Self::ExportWaveformsCsv => result_navigation::dataset_export_is_resolvable(state),
+            // A run's log is a record; only the session's log is cleared.
             Self::ClearConsole => match state.workbench.console_page {
-                ConsolePage::Console => !state.log_buffer.is_empty(),
+                ConsolePage::Console => {
+                    state.workbench.console_view.channel == ConsoleChannel::Session
+                        && !state.log_buffer.is_empty()
+                }
                 ConsolePage::Problems | ConsolePage::Measurements | ConsolePage::TaskLog => false,
             },
             _ => true,
@@ -1170,20 +1174,14 @@ impl Command {
         if dispatch_probe::intercept(self) {
             return;
         }
+        // Both guards are also `is_enabled`'s, so the command is drawn
+        // disabled and a shortcut for it is silent, as in any desktop app.
         if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(&app.state)
             && self.blocked_by_project_operation()
         {
-            app.state
-                .push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                    "Wait for the current project operation to finish before starting another.",
-                ));
             return;
         }
         if self.requires_open_project() && !app.state.project_lifecycle.is_open() {
-            app.state
-                .push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                    "Open a project before using this command.",
-                ));
             return;
         }
         if let Some(request) = self.source_editor_request()
@@ -1229,8 +1227,7 @@ impl Command {
                 if let Some((library, cell)) = app.state.new_view_target()
                     && let Err(error) = app.state.open_new_view_dialog(&library, &cell)
                 {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+                    app.state.prompt(error);
                 }
             }
             Self::NewVerilogADevice => {
@@ -1265,29 +1262,19 @@ impl Command {
                     );
                 }
             }
+            // Page setup and custom sheet sizes are disabled whenever they
+            // would refuse, so a refusal here needs no words.
             Self::PageSetup => {
-                if !crate::workbench::app::open_drawing_sheet_setup_for_state(&mut app.state) {
-                    app.state.push_user_message(
-                        crate::diagnostics::ConsoleMessage::warning(
-                            "Page setup is available only for an active schematic or testbench drawing sheet.",
-                        ),
-                    );
-                }
+                crate::workbench::app::open_drawing_sheet_setup_for_state(&mut app.state);
             }
             Self::SheetFormatManager => {
                 if let Err(error) = crate::workbench::app::open_sheet_format_manager(&mut app.state)
                 {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+                    app.state.prompt(error);
                 }
             }
             Self::CustomSheetSizes => {
-                if !crate::workbench::app::open_custom_sheet_size_library(&mut app.state) {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                            "Custom sheet sizes is already open.",
-                        ));
-                }
+                crate::workbench::app::open_custom_sheet_size_library(&mut app.state);
             }
             Self::PrintHardcopy => crate::workbench::app::open_hardcopy_workflow(
                 app,
@@ -1334,8 +1321,7 @@ impl Command {
             }
             Self::Duplicate => {
                 if active_symbol_editor(app) {
-                    app.copy_selected_symbol_shape();
-                    app.paste_symbol_shape();
+                    app.duplicate_selected_symbol_shape();
                 } else {
                     app.state.duplicate_schematic_selection();
                 }
@@ -1389,10 +1375,7 @@ impl Command {
                     .workbench
                     .navigate(route, super::RouteTransitionSource::User)
                 {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                            error.to_string(),
-                        ));
+                    app.state.prompt(error.to_string());
                 }
             }
             Self::ZoomIn => {
@@ -1489,10 +1472,7 @@ impl Command {
                     let workspace = app.state.workbench.workspace;
                     reset_active_view(app);
                     app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
-                            "{} view reset.",
-                            workspace.label()
-                        )));
+                        .prompt(format!("{} view reset.", workspace.label()));
                 }
             }
             Self::EngineeringTableView => {
@@ -1548,11 +1528,7 @@ impl Command {
                 app.state.workbench.console_maximized = false;
                 app.state.workbench.console_page = super::state::ConsolePage::Problems;
             }
-            Self::OpenConsole => {
-                app.state.workbench.focus_mode = false;
-                app.state.workbench.console_visible = true;
-                app.state.workbench.console_maximized = false;
-            }
+            Self::OpenConsole => app.state.workbench.open_console(),
             Self::OpenNotifications => app.state.workbench.notification_center_open = true,
             Self::ToggleConsoleMaximized => {
                 app.state.workbench.focus_mode = false;
@@ -1564,7 +1540,12 @@ impl Command {
             // labelled for the visible one would discard work the user cannot
             // see, so the command owns the same page scope the control shows.
             Self::ClearConsole => match app.state.workbench.console_page {
-                ConsolePage::Console => app.state.clear_primary_log(),
+                ConsolePage::Console
+                    if app.state.workbench.console_view.channel == ConsoleChannel::Session =>
+                {
+                    app.state.clear_primary_log()
+                }
+                ConsolePage::Console => {}
                 ConsolePage::Problems | ConsolePage::Measurements | ConsolePage::TaskLog => {}
             },
             Self::ToggleFocusMode => {
@@ -1607,18 +1588,16 @@ impl Command {
             Self::CloseOtherDocuments => {
                 let count =
                     crate::workbench::chrome::document_bar::close_other_documents(&mut app.state);
-                app.state
-                    .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
-                        "Closed {count} other document presentation(s); project data was retained"
-                    )));
+                app.state.prompt(format!(
+                    "Closed {count} other document tab(s); the project data is kept."
+                ));
             }
             Self::CloseAllDocuments => {
                 let count =
                     crate::workbench::chrome::document_bar::close_all_documents(&mut app.state);
-                app.state
-                    .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
-                        "Closed {count} document presentation(s); pinned project data was retained"
-                    )));
+                app.state.prompt(format!(
+                    "Closed {count} document tab(s); the project data is kept."
+                ));
             }
             Self::WorkspaceLayouts => {
                 let preset = app
@@ -1699,16 +1678,16 @@ impl Command {
                     &app.state.library_manager,
                     &app.state.workspace.content.schematic_buffers,
                 );
-                app.state.push_user_message(match outcome {
-                    Ok(summary) => crate::diagnostics::ConsoleMessage::info(summary),
-                    Err(error) => crate::diagnostics::ConsoleMessage::warning(error.to_string()),
+                app.state.prompt(match outcome {
+                    Ok(summary) => summary,
+                    Err(error) => error.to_string(),
                 });
             }
             Self::CreateHierarchy => {
                 crate::workbench::app::open_create_hierarchy_dialog(&mut app.state);
             }
-            // Each of these reports its own outcome to the console, including
-            // the catalog's refusal text, so the result is never discarded.
+            // Each of these reports its own outcome, including the catalog's
+            // refusal text, so the result is never discarded.
             Self::NextSheet => {
                 let _ = sheet_actions::next_sheet(&mut app.state);
             }
@@ -1734,12 +1713,7 @@ impl Command {
                     .navigate(route, super::RouteTransitionSource::User)
                 {
                     Ok(_) => crate::workbench::app::open_design_management_dialog(&mut app.state),
-                    Err(error) => {
-                        app.state
-                            .push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                                error.to_string(),
-                            ))
-                    }
+                    Err(error) => app.state.prompt(error.to_string()),
                 }
             }
             Self::SelectionBulkEdit => {
@@ -1772,21 +1746,14 @@ impl Command {
             ),
             Self::SymbolUpdatePinsFromContract => {
                 match app.state.update_active_symbol_pins_from_contract() {
-                    Ok(summary) => app
-                        .state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::info(summary)),
-                    Err(error) => app
-                        .state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(error)),
+                    Ok(text) | Err(text) => app.state.prompt(text),
                 }
             }
             // The checks run before the dialog opens, so a symbol that cannot
             // be published says which row blocked it instead of presenting a
             // save transaction with a disabled primary control.
             Self::SymbolSave => match app.state.refuse_unsavable_active_symbol() {
-                Some(refusal) => app
-                    .state
-                    .push_user_message(crate::diagnostics::ConsoleMessage::warning(refusal)),
+                Some(refusal) => app.state.prompt(refusal),
                 None => {
                     app.state.ui.symbol.editor.save_dialog_open = true;
                     app.state.ui.symbol.editor.save_error = None;
@@ -1803,47 +1770,20 @@ impl Command {
             Self::MirrorSelectionVertical if active_symbol_editor(app) => {
                 app.transform_selected_symbol_item(SymbolTransform::MirrorVertical);
             }
-            Self::RotateSelection => {
+            Self::RotateSelection
+            | Self::RotateSelectionCounterClockwise
+            | Self::MirrorSelectionHorizontal
+            | Self::MirrorSelectionVertical => {
+                let transform = match self {
+                    Self::RotateSelectionCounterClockwise => {
+                        SelectionTransform::RotateCounterClockwise
+                    }
+                    Self::MirrorSelectionHorizontal => SelectionTransform::MirrorHorizontal,
+                    Self::MirrorSelectionVertical => SelectionTransform::MirrorVertical,
+                    _ => SelectionTransform::RotateClockwise,
+                };
                 let symbol_context = schematic_symbol_context(&app.state);
-                crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
-                    &mut app.state,
-                );
-                crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
-                    &mut app.state,
-                    |schematic| {
-                        schematic.rotate_selection_resolved(|component| {
-                            symbol_context.terminal_points(component)
-                        })
-                    },
-                );
-            }
-            Self::MirrorSelectionHorizontal => {
-                let symbol_context = schematic_symbol_context(&app.state);
-                crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
-                    &mut app.state,
-                );
-                crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
-                    &mut app.state,
-                    |schematic| {
-                        schematic.mirror_selection_h_resolved(|component| {
-                            symbol_context.terminal_points(component)
-                        })
-                    },
-                );
-            }
-            Self::MirrorSelectionVertical => {
-                let symbol_context = schematic_symbol_context(&app.state);
-                crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
-                    &mut app.state,
-                );
-                crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
-                    &mut app.state,
-                    |schematic| {
-                        schematic.mirror_selection_v_resolved(|component| {
-                            symbol_context.terminal_points(component)
-                        })
-                    },
-                );
+                transform_selection_on_active_sheet(&mut app.state, &symbol_context, transform);
             }
             Self::AlignSelectionLeft
             | Self::AlignSelectionCenter
@@ -1861,26 +1801,14 @@ impl Command {
                     &symbol_context,
                     command,
                 ) {
-                    Ok(true) => {
-                        app.state
-                            .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
-                                "{} completed as one undoable transaction.",
-                                command.label()
-                            )))
-                    }
-                    Ok(false) => {
-                        app.state
-                            .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
-                                "{} produced no geometry change.",
-                                command.label()
-                            )))
-                    }
-                    Err(error) => {
-                        app.state
-                            .push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                                format!("{} was not applied: {error}.", command.label()),
-                            ))
-                    }
+                    // The moved selection is the answer to a completed layout.
+                    Ok(true) => {}
+                    Ok(false) => app
+                        .state
+                        .prompt(format!("{} produced no geometry change.", command.label())),
+                    Err(error) => app
+                        .state
+                        .prompt(format!("{} was not applied: {error}.", command.label())),
                 }
             }
             Self::Cancel => {
@@ -1962,26 +1890,15 @@ impl Command {
                     app.state.workbench.preflight.request_run_and_queue();
                 }
             }
+            // Stop is disabled, and names why, while the run cannot take it.
             Self::StopSimulation => {
                 if app.state.workbench.preflight.checking.is_some() {
                     // The frame loop stops it before it looks for a verdict.
                     app.state.workbench.preflight.request_check_cancel();
-                } else if stop_simulation_enabled(&app.state.simulation) {
-                    if let Err(error) = app.state.simulation.request_abort_active_run() {
-                        app.state
-                            .push_sim_message(crate::diagnostics::ConsoleMessage::warning(error));
-                    }
-                } else if app.state.simulation.execution.has_active_execution() {
-                    let reason = match Self::StopSimulation.availability(app) {
-                        CommandAvailability::Disabled(reason) => reason,
-                        CommandAvailability::Available | CommandAvailability::Hidden => {
-                            "the active simulation execution cannot accept cancellation"
-                        }
-                    };
-                    app.state
-                        .push_sim_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                            "Stop request ignored: {reason}; the active run was left intact"
-                        )));
+                } else if stop_simulation_enabled(&app.state.simulation)
+                    && let Err(error) = app.state.simulation.request_abort_active_run()
+                {
+                    app.state.prompt(error);
                 }
             }
             Self::JobsManager => crate::workbench::tools::jobs_manager::open(&mut app.state),
@@ -2006,9 +1923,7 @@ impl Command {
                                 ),
                             ));
                     }
-                    Err(error) => app
-                        .state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(error)),
+                    Err(error) => app.state.prompt(error),
                 }
             }
             Self::AddAnalysis => app.state.open_analysis_catalog(),
@@ -2031,8 +1946,7 @@ impl Command {
                 if let Err(error) =
                     crate::workbench::documents::code_workspace::open_active_source_search(app)
                 {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+                    app.state.prompt(error);
                 }
             }
             Self::ValidateCodeDocument => {
@@ -2042,14 +1956,12 @@ impl Command {
                 if let Err(error) =
                     crate::workbench::app::open_source_document_dialog(&mut app.state)
                 {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+                    app.state.prompt(error);
                 }
             }
             Self::SourceLanguageTools => {
                 if let Err(error) = crate::workbench::app::open_active_language_tools(app) {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+                    app.state.prompt(error);
                 }
             }
             // Routed to the active source editor above; with none on screen
@@ -2070,8 +1982,7 @@ impl Command {
             | Self::UnfoldAll => {}
             Self::GoToDefinition | Self::FindReferences | Self::RenameSymbol => {
                 if let Err(error) = crate::workbench::app::navigate_active_source(app, self) {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+                    app.state.prompt(error);
                 }
             }
             Self::CompareGeneratedRevisions => {
@@ -2088,14 +1999,9 @@ impl Command {
                     .len()
                     .saturating_sub(1);
             }
+            // Disabled while a run is executing.
             Self::ClearResults => {
-                if app.state.simulation.execution.has_active_execution() {
-                    app.state
-                        .push_sim_message(crate::diagnostics::ConsoleMessage::warning(
-                        "Result history cannot be cleared while a simulation execution owns a run"
-                            .to_owned(),
-                    ));
-                } else {
+                if !app.state.simulation.execution.has_active_execution() {
                     app.state.clear_simulation_results();
                 }
             }
@@ -2123,17 +2029,6 @@ impl Command {
                 {
                     app.state.ui.results.session.viewer = viewer;
                     activate_workspace(app, Workspace::Results);
-                } else {
-                    let reason =
-                        crate::workbench::documents::result_document::viewer_unavailability_reason(
-                            &app.state, viewer,
-                        )
-                        .unwrap_or("the active dataset is incompatible with this viewer");
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                            "{} cannot be opened: {reason}.",
-                            viewer.label()
-                        )));
                 }
             }
             Self::EditSpecifications => {
@@ -2158,8 +2053,9 @@ impl Command {
                 app.state.workbench.simulation_page = page;
             }
             Self::ModelBrowser => app.state.model_browser_state.open = true,
-            Self::ModelCreateProjectCopy => match selected_model_for_project_copy(app) {
-                Ok((library_name, model_name)) => {
+            // Disabled, with the reason, while nothing can be copied.
+            Self::ModelCreateProjectCopy => {
+                if let Ok((library_name, model_name)) = selected_model_for_project_copy(app) {
                     let library_name = library_name.to_owned();
                     let model_name = model_name.to_owned();
                     match crate::workbench::documents::model_editor::create_editable_project_copy_and_open(
@@ -2167,27 +2063,24 @@ impl Command {
                         &library_name,
                         &model_name,
                     ) {
-                        Ok((project_library, project_model)) => app.state.push_user_message(
-                            crate::diagnostics::ConsoleMessage::info(format!(
-                                "Created editable project model '{project_library}/{project_model}'."
-                            )),
-                        ),
-                        Err(error) => app.state.push_user_message(
-                            crate::diagnostics::ConsoleMessage::warning(format!(
-                                "Cannot create editable project model: {error}"
-                            )),
-                        ),
+                        Ok((project_library, project_model)) => {
+                            app.state.record(
+                                crate::diagnostics::LogSeverity::Info,
+                                crate::diagnostics::LogSource::Studio,
+                                format!(
+                                    "Created editable project model '{project_library}/{project_model}'."
+                                ),
+                            );
+                        }
+                        Err(error) => app
+                            .state
+                            .prompt(format!("Cannot create editable project model: {error}")),
                     }
                 }
-                Err(reason) => {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                            "Cannot create editable project model: {reason}."
-                        )))
-                }
-            },
-            Self::ModelEditor => match selected_project_model_for_editor(app) {
-                Ok((library_name, model_name)) => {
+            }
+            // Disabled, with the reason, while no project model is selected.
+            Self::ModelEditor => {
+                if let Ok((library_name, model_name)) = selected_project_model_for_editor(app) {
                     let library_name = library_name.to_owned();
                     let model_name = model_name.to_owned();
                     if let Err(error) =
@@ -2198,60 +2091,30 @@ impl Command {
                         )
                     {
                         app.state
-                            .push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                                format!("Cannot open device model editor: {error}"),
-                            ));
+                            .prompt(format!("Cannot open device model editor: {error}"));
                     }
                 }
-                Err(reason) => {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                            "Cannot open device model editor: {reason}."
-                        )))
-                }
-            },
-            Self::ModelCorrelation => match selected_project_model_for_editor(app) {
-                Ok(_) => {
-                    if let Err(error) = app.state.workbench.navigate(
+            }
+            Self::ModelCorrelation => {
+                if selected_project_model_for_editor(app).is_ok()
+                    && let Err(error) = app.state.workbench.navigate(
                         super::SurfaceRoute::surface(super::SurfaceId::ModelCorrelation),
                         super::RouteTransitionSource::User,
-                    ) {
-                        app.state
-                            .push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                                format!("Cannot open measurement correlation: {error}"),
-                            ));
-                    }
-                }
-                Err(reason) => {
+                    )
+                {
                     app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                            "Cannot open measurement correlation: {reason}."
-                        )))
+                        .prompt(format!("Cannot open measurement correlation: {error}"));
                 }
-            },
+            }
+            // The three model workflows are disabled while no candidate is open.
             Self::ModelSaveRevision => {
-                if !request_model_editor_workflow(app, ModelEditorWorkflow::SaveRevision) {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                            "Model revision cannot be reviewed: no project-owned candidate is open",
-                        ));
-                }
+                request_model_editor_workflow(app, ModelEditorWorkflow::SaveRevision);
             }
             Self::ModelValidate => {
-                if !request_model_editor_workflow(app, ModelEditorWorkflow::ValidateCandidate) {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                        "Model validation cannot be reviewed: no project-owned candidate is open",
-                    ));
-                }
+                request_model_editor_workflow(app, ModelEditorWorkflow::ValidateCandidate);
             }
             Self::ModelRunQualificationTests => {
-                if !request_model_editor_workflow(app, ModelEditorWorkflow::RunQualification) {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                            "Qualification cannot be reviewed: no project-owned candidate is open",
-                        ));
-                }
+                request_model_editor_workflow(app, ModelEditorWorkflow::RunQualification);
             }
             Self::ModelCompareRelease => {
                 app.state.workbench.model_editor.comparison_open = true;
@@ -2289,13 +2152,13 @@ impl Command {
                 crate::state::pdk_config::discover_model_files(&mut app.state.pdk_config);
                 app.state.model_library_manager.discover_spice_packs();
                 let (message, has_errors) = model_library_rescan_diagnostic(app);
-                if has_errors {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(message));
+                let severity = if has_errors {
+                    crate::diagnostics::LogSeverity::Warning
                 } else {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::info(message));
-                }
+                    crate::diagnostics::LogSeverity::Info
+                };
+                app.state
+                    .record(severity, crate::diagnostics::LogSource::Studio, message);
             }
             Self::CompileVerilogA => {
                 // The command compiles the active Verilog-A cell view and
@@ -2308,15 +2171,13 @@ impl Command {
                 if let Err(error) =
                     crate::workbench::documents::code_workspace::request_veriloga_compile(app)
                 {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::error(error));
+                    app.state.prompt(error);
                 }
             }
             Self::VerilogABuildSettings => {
                 activate_workspace(app, Workspace::Design);
                 if let Err(error) = crate::workbench::app::open_veriloga_build_settings(app) {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::error(error));
+                    app.state.prompt(error);
                 }
             }
             Self::AutomationConsole => {
@@ -2358,24 +2219,20 @@ impl Command {
                     // producing instance is gone used to leave the previously
                     // highlighted one selected, so the page arrived showing an
                     // analysis that produced nothing the reader was looking at
-                    // — while the console note said nothing had been selected.
+                    // — while the note said nothing had been selected.
                     app.state.workbench.active_analysis_instance = hop.instance;
-                    if let Some(note) = hop.selected_note {
-                        app.state
-                            .push_user_message(crate::diagnostics::ConsoleMessage::info(note));
-                    }
-                    if let Some(note) = hop.instance_note {
-                        app.state
-                            .push_user_message(crate::diagnostics::ConsoleMessage::warning(note));
+                    let notes = [hop.selected_note, hop.instance_note]
+                        .into_iter()
+                        .flatten()
+                        .collect::<Vec<_>>();
+                    if !notes.is_empty() {
+                        app.state.prompt(notes.join(" "));
                     }
                     Self::SimulationPage(super::state::SimulationPage::Analyses).execute(app);
                 }
-                Err(reason) => {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                            "Could not open the producing simulation plan: {reason}."
-                        )));
-                }
+                Err(reason) => app.state.prompt(format!(
+                    "Could not open the producing simulation plan: {reason}."
+                )),
             },
             // Both re-resolve rather than trusting the availability read that
             // drew the row: the palette is not modal, and a run can be pruned
@@ -2385,23 +2242,15 @@ impl Command {
                 Ok(sequence) => {
                     result_navigation::open_task_deck(&mut app.state, sequence);
                 }
-                Err(reason) => {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                            "Could not open the task deck: {reason}."
-                        )));
-                }
+                Err(reason) => app
+                    .state
+                    .prompt(format!("Could not open the task deck: {reason}.")),
             },
             Self::RevealProducerLog => match result_navigation::producer_log_hop(app) {
-                Ok((producer, quantity)) => {
-                    result_navigation::reveal_producer_log(app, producer, &quantity);
-                }
-                Err(reason) => {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                            "Could not reveal the producer log: {reason}."
-                        )));
-                }
+                Ok(run_sequence) => result_navigation::open_run_log(&mut app.state, run_sequence),
+                Err(reason) => app
+                    .state
+                    .prompt(format!("Could not open the run log: {reason}.")),
             },
             Self::VisualizationDocumentProperties => {
                 crate::workbench::documents::result_document::open_properties(&mut app.state);

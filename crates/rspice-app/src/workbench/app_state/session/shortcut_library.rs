@@ -130,7 +130,7 @@ impl AppState {
         match startup {
             Ok(startup) => self.install_shortcut_library_startup(startup),
             Err(error) => {
-                log::error!("Could not initialize canonical shortcut library: {error}");
+                self.record_shortcut_library_unavailable(&error);
                 self.shortcut_library_persistence =
                     ShortcutLibraryPersistenceRuntime::Unavailable(error.to_string());
             }
@@ -313,7 +313,11 @@ impl AppState {
             }
             Err(error) => {
                 if let Some(predecessor) = predecessor {
-                    log::error!("Could not publish canonical shortcut library: {error}");
+                    self.record(
+                        crate::diagnostics::LogSeverity::Error,
+                        crate::diagnostics::LogSource::Studio,
+                        format!("Shortcut changes could not be saved: {error}"),
+                    );
                     if error.is_commit_in_doubt() {
                         let message = format!(
                             "Canonical shortcut storage is commit-in-doubt and has been made read-only until RSpice reloads it: {error}"
@@ -333,7 +337,7 @@ impl AppState {
                             };
                     }
                 } else {
-                    log::error!("Could not initialize canonical shortcut library: {error}");
+                    self.record_shortcut_library_unavailable(&error);
                     self.shortcut_library_persistence =
                         ShortcutLibraryPersistenceRuntime::Unavailable(error.to_string());
                 }
@@ -355,12 +359,12 @@ impl AppState {
                         ShortcutLibraryPersistenceRuntime::Missing;
                 }
                 crate::workbench::shortcuts::library_persistence::ShortcutProfileLibraryStartup::Incompatible(raw) => {
-                    log::error!("Canonical shortcut library is incompatible: {}", raw.reason());
+                    self.record_shortcut_library_unreadable("comes from an incompatible RSpice version", raw.reason());
                     self.shortcut_library_persistence =
                         ShortcutLibraryPersistenceRuntime::Incompatible(raw);
                 }
                 crate::workbench::shortcuts::library_persistence::ShortcutProfileLibraryStartup::Corrupt(raw) => {
-                    log::error!("Canonical shortcut library is corrupt: {}", raw.reason());
+                    self.record_shortcut_library_unreadable("is damaged", raw.reason());
                     self.shortcut_library_persistence =
                         ShortcutLibraryPersistenceRuntime::Corrupt(raw);
                 }
@@ -379,17 +383,42 @@ impl AppState {
                         ShortcutLibraryPersistenceRuntime::Missing;
                 }
                 crate::workbench::shortcuts::library_persistence::BrowserShortcutProfileLibraryStartup::Incompatible(raw) => {
-                    log::error!("Canonical shortcut library is incompatible: {}", raw.reason());
+                    self.record_shortcut_library_unreadable("comes from an incompatible RSpice version", raw.reason());
                     self.shortcut_library_persistence =
                         ShortcutLibraryPersistenceRuntime::Incompatible(raw);
                 }
                 crate::workbench::shortcuts::library_persistence::BrowserShortcutProfileLibraryStartup::Corrupt(raw) => {
-                    log::error!("Canonical shortcut library is corrupt: {}", raw.reason());
+                    self.record_shortcut_library_unreadable("is damaged", raw.reason());
                     self.shortcut_library_persistence =
                         ShortcutLibraryPersistenceRuntime::Corrupt(raw);
                 }
             },
         }
+    }
+
+    fn record_shortcut_library_unavailable(&mut self, error: &dyn std::fmt::Display) {
+        self.record(
+            crate::diagnostics::LogSeverity::Error,
+            crate::diagnostics::LogSource::Studio,
+            format!(
+                "Keyboard shortcuts could not be loaded from storage, so changes to them cannot \
+                 be saved: {error}"
+            ),
+        );
+    }
+
+    fn record_shortcut_library_unreadable(
+        &mut self,
+        condition: &str,
+        reason: impl std::fmt::Display,
+    ) {
+        self.record(
+            crate::diagnostics::LogSeverity::Error,
+            crate::diagnostics::LogSource::Studio,
+            format!(
+                "The stored keyboard shortcut library {condition} and was not loaded: {reason}"
+            ),
+        );
     }
 
     fn report_shortcut_library_persistence_state(&self) {

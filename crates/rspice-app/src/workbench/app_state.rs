@@ -33,7 +33,6 @@ mod technology_demand_tests;
 pub(in crate::workbench) mod viewer_capabilities;
 pub(in crate::workbench) mod waivers;
 
-use crate::diagnostics::{ConsoleLevel, ConsoleMessage};
 use crate::product::{AnalysisInstanceId, DatasetId};
 use crate::state::{SchematicState, SimulationState};
 use crate::workbench::app::DialogState;
@@ -1040,31 +1039,53 @@ impl AppState {
         self.simulation.execution.request_simulate_run_set();
     }
 
-    fn log_severity_for_console(level: ConsoleLevel) -> crate::diagnostics::LogSeverity {
-        match level {
-            ConsoleLevel::Info => crate::diagnostics::LogSeverity::Info,
-            ConsoleLevel::Warning => crate::diagnostics::LogSeverity::Warning,
-            ConsoleLevel::Error => crate::diagnostics::LogSeverity::Error,
-        }
+    /// Answer the gesture just made, on the status bar.
+    ///
+    /// For a refusal or transient feedback: "The schematic is read-only.",
+    /// "Select a retained result first." It is shown until the next prompt
+    /// replaces it or it expires, and it is never logged or notified, because
+    /// it is about the gesture, not an event in the session.
+    pub fn prompt(&mut self, text: impl Into<String>) {
+        self.workbench.prompt = Some(crate::workbench::state::StatusPrompt {
+            text: text.into(),
+            issued: crate::time_compat::Instant::now(),
+        });
     }
 
-    /// Push a legacy console message and mirror it into the structured log.
-    pub fn push_console_message(&mut self, message: ConsoleMessage) {
-        self.push_console_message_with_source(crate::diagnostics::LogSource::System, message);
+    /// The prompt on the status bar, if one is showing.
+    #[cfg(test)]
+    pub(crate) fn prompt_text(&self) -> Option<&str> {
+        self.workbench
+            .prompt
+            .as_ref()
+            .map(|prompt| prompt.text.as_str())
     }
 
-    /// Push a console message with an explicit structured-log source.
-    pub fn push_console_message_with_source(
+    /// Record an event in the Console and return its log id.
+    ///
+    /// Error: something the user asked for, or a background job, failed.
+    /// Warning: it completed, but the reader must know something. Info: a
+    /// record of what happened. A refusal is never recorded; it is a
+    /// [`Self::prompt`].
+    pub fn record(
         &mut self,
+        severity: crate::diagnostics::LogSeverity,
         source: crate::diagnostics::LogSource,
-        message: ConsoleMessage,
-    ) {
-        let severity = Self::log_severity_for_console(message.level);
-        self.log_buffer.log(severity, source, message.message, None);
+        text: impl Into<String>,
+    ) -> u64 {
+        self.log_buffer.log(severity, source, text)
     }
 
-    pub fn push_user_message(&mut self, message: ConsoleMessage) {
-        self.push_console_message_with_source(crate::diagnostics::LogSource::User, message);
+    /// [`Self::record`], with a place the Console row jumps to.
+    pub fn record_anchored(
+        &mut self,
+        severity: crate::diagnostics::LogSeverity,
+        source: crate::diagnostics::LogSource,
+        text: impl Into<String>,
+        anchor: crate::diagnostics::LogAnchor,
+    ) -> u64 {
+        self.log_buffer
+            .log_anchored(severity, source, text, Some(anchor))
     }
 
     /// Announce a committed plan command on the lifecycle status line and
@@ -1097,15 +1118,18 @@ impl AppState {
                 crate::diagnostics::LogSeverity::Info,
                 crate::diagnostics::LogSource::Plan,
                 message,
-                None,
             );
         }
     }
 
     /// Announce a refused plan command, as [`Self::record_plan_receipt`] does,
-    /// at warning severity so the Problems page lists it. The notice a refusal
-    /// also raises is the plan drain's titled toast, which is a separate
-    /// reporter: this is the record, and that is the notice.
+    /// at warning severity, and answer the gesture on the status bar.
+    ///
+    /// The lifecycle status line is drawn only on the Analyses route, and a
+    /// plan command can be refused from the plan manager in any workspace, so
+    /// the prompt is what answers the user wherever they are. It is issued
+    /// with the record, when the outcome changes, because a standing refusal
+    /// restated every frame would otherwise hold the prompt up forever.
     pub(crate) fn record_plan_refusal(&mut self, message: impl Into<String>) {
         let message = message.into();
         if self
@@ -1113,11 +1137,11 @@ impl AppState {
             .analysis_lifecycle_status
             .record_refusal(message.as_str())
         {
+            self.prompt(message.clone());
             self.log_buffer.log(
                 crate::diagnostics::LogSeverity::Warning,
                 crate::diagnostics::LogSource::Plan,
                 message,
-                None,
             );
         }
     }
@@ -1131,30 +1155,10 @@ impl AppState {
         match self.model_library_manager.select_library(name) {
             Ok(()) => true,
             Err(refusal) => {
-                self.push_user_message(ConsoleMessage::warning(refusal));
+                self.prompt(refusal);
                 false
             }
         }
-    }
-
-    pub fn push_sim_message(&mut self, message: ConsoleMessage) {
-        self.push_console_message_with_source(crate::diagnostics::LogSource::Simulation, message);
-    }
-
-    /// A simulation message that names something the reader can go to.
-    pub(crate) fn push_sim_message_anchored(
-        &mut self,
-        message: ConsoleMessage,
-        anchor: Option<crate::diagnostics::LogAnchor>,
-    ) {
-        let severity = Self::log_severity_for_console(message.level);
-        self.log_buffer.log_anchored(
-            severity,
-            crate::diagnostics::LogSource::Simulation,
-            message.message,
-            None,
-            anchor,
-        );
     }
 
     pub fn clear_primary_log(&mut self) {

@@ -81,36 +81,244 @@ fn descend_requires_a_resolved_schematic_master() {
 
 #[test]
 fn transform_commands_keep_wires_attached_to_authored_symbol_pins() {
-    use crate::state::{Point, Rotation};
+    use crate::state::Rotation;
 
+    // The part turns about the middle of the selection rather than its own
+    // origin (audit E-2), so the pin's new place is read back from the
+    // resolved symbol rather than written down.
     let cases = [
-        (Command::RotateSelection, Point::new(110, 10), Rotation::R90),
+        (Command::RotateSelection, Rotation::R90, false, false),
         (
             Command::MirrorSelectionHorizontal,
-            Point::new(140, 40),
             Rotation::R0,
+            true,
+            false,
         ),
-        (
-            Command::MirrorSelectionVertical,
-            Point::new(60, 60),
-            Rotation::R0,
-        ),
+        (Command::MirrorSelectionVertical, Rotation::R0, false, true),
     ];
 
-    for (command, expected_wire_endpoint, expected_rotation) in cases {
+    for (command, rotation, mirror_h, mirror_v) in cases {
         let mut app = app_with_selected_authored_symbol();
 
         command.execute(&mut app);
 
+        let document = app.state.schematic.document();
+        let part = &document.components[0];
         assert_eq!(
-            app.state.schematic.document().wires[0].points[0],
-            expected_wire_endpoint
+            (part.rotation, part.mirror_h, part.mirror_v),
+            (rotation, mirror_h, mirror_v),
+            "{command:?}"
         );
-        assert_eq!(
-            app.state.schematic.document().components[0].rotation,
-            expected_rotation
+        let pins =
+            crate::schematic::view::schematic_symbol_context(&app.state).terminal_points(part);
+        let end = document.wires[0].points[0];
+        assert!(
+            pins.contains(&end),
+            "{command:?} left the wire at {end:?}, on no pin"
         );
     }
+}
+
+/// Two resistors, the wire between their facing pins and a label on it, all
+/// selected, plus `stub`: a wire from R2's right pin running on to the
+/// right, left unselected.
+fn app_with_selected_resistor_pair() -> (RSpiceApp, u64) {
+    use crate::state::{Component, ComponentType, NetLabel, Point, Wire};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    let first = Component::new(1, ComponentType::Resistor, Point::new(0, 0));
+    let second = Component::new(2, ComponentType::Resistor, Point::new(200, 0));
+    let symbols = crate::schematic::view::schematic_symbol_context(&app.state);
+    let first_pins = symbols.terminal_points(&first);
+    let second_pins = symbols.terminal_points(&second);
+    let document = app.state.schematic.document_mut_for_test();
+    document.components.extend([first, second]);
+    let joint = Wire::segment(3, first_pins[1], second_pins[0]);
+    let label_at = Point::new((first_pins[1].x + second_pins[0].x) / 2, first_pins[1].y);
+    document.wires.push(joint);
+    document.wires.push(Wire::segment(
+        4,
+        second_pins[1],
+        Point::new(second_pins[1].x + 100, second_pins[1].y),
+    ));
+    document.net_labels.push(NetLabel::new(5, label_at, "MID"));
+    let selection = &mut app.state.schematic.session.editor.selection;
+    selection.select_component(1);
+    selection.select_component(2);
+    selection.select_wire(3);
+    selection.select_net_label(5);
+    (app, 4)
+}
+
+fn rotated_cw(vector: crate::state::Point) -> crate::state::Point {
+    crate::state::Point::new(-vector.y, vector.x)
+}
+
+/// Rotate used to turn each selected part about its own origin and leave
+/// wires, labels and notes where they were, scrambling the layout. The whole
+/// selection turns as one body about one pivot.
+#[test]
+fn rotate_turns_the_whole_selection_as_one_body() {
+    let (mut app, _) = app_with_selected_resistor_pair();
+    let before = app.state.schematic.document().clone();
+
+    Command::RotateSelection.execute(&mut app);
+
+    let after = app.state.schematic.document();
+    let pos = |document: &rspice_design::schematic::document::SchematicDocument, id: u64| {
+        document
+            .components
+            .iter()
+            .find(|component| component.id == id)
+            .map(|component| component.pos)
+            .expect("component")
+    };
+    assert_eq!(
+        pos(after, 2) - pos(after, 1),
+        rotated_cw(pos(&before, 2) - pos(&before, 1)),
+        "the parts keep their places relative to each other"
+    );
+    assert_eq!(
+        after.net_labels[0].pos - pos(after, 1),
+        rotated_cw(before.net_labels[0].pos - pos(&before, 1)),
+        "the label turns with the parts"
+    );
+    let symbols = crate::schematic::view::schematic_symbol_context(&app.state);
+    let pins: Vec<_> = after
+        .components
+        .iter()
+        .flat_map(|component| symbols.terminal_points(component))
+        .collect();
+    let joint = after.wires.iter().find(|wire| wire.id == 3).expect("joint");
+    assert!(
+        joint.points.iter().all(|point| pins.contains(point)),
+        "the selected wire still joins the two pins"
+    );
+}
+
+/// Rotate and Mirror were offered only when a part was selected, so a label,
+/// a note or a wire on its own could not be turned.
+#[test]
+fn rotate_and_mirror_are_offered_for_any_selected_object() {
+    let (mut app, _) = app_with_selected_resistor_pair();
+    app.state.schematic.session.editor.selection.clear();
+    app.state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_net_label(5);
+    for command in [
+        Command::RotateSelection,
+        Command::MirrorSelectionHorizontal,
+        Command::MirrorSelectionVertical,
+    ] {
+        assert!(command.is_enabled(&app), "{command:?}");
+    }
+}
+
+/// A wire left attached to a turned part was dragged to the new pin and went
+/// slanted. It is rerouted with square corners, as Move reroutes it.
+#[test]
+fn a_wire_attached_to_a_turned_part_keeps_square_corners() {
+    let (mut app, stub) = app_with_selected_resistor_pair();
+    Command::RotateSelection.execute(&mut app);
+    let after = app.state.schematic.document();
+    let wire = after
+        .wires
+        .iter()
+        .find(|wire| wire.id == stub)
+        .expect("stub");
+    assert!(
+        wire.points
+            .windows(2)
+            .all(|pair| pair[0].x == pair[1].x || pair[0].y == pair[1].y),
+        "the attached wire went slanted: {:?}",
+        wire.points
+    );
+    let symbols = crate::schematic::view::schematic_symbol_context(&app.state);
+    let turned = after
+        .components
+        .iter()
+        .find(|component| component.id == 2)
+        .expect("R2");
+    assert!(
+        symbols.terminal_points(turned).contains(&wire.points[0])
+            || symbols
+                .terminal_points(turned)
+                .contains(wire.points.last().expect("end")),
+        "the attached wire still ends on R2's pin"
+    );
+}
+
+/// Ctrl+R turns the selection clockwise and Ctrl+Shift+R counter-clockwise;
+/// Ctrl+M mirrors it horizontally and Ctrl+Shift+M vertically. No key turned
+/// a placed selection before, and there was no counter-clockwise turn.
+#[test]
+fn rotate_and_mirror_have_their_keys_on_the_canvas() {
+    use crate::workbench::commands::vocabulary::CommandPlatform;
+
+    let counter_clockwise =
+        Command::from_stable_id("rotate-selection-ccw").expect("a counter-clockwise rotate");
+    for (command, key) in [
+        (Command::RotateSelection, "Ctrl+R"),
+        (counter_clockwise, "Ctrl+Shift+R"),
+        (Command::MirrorSelectionHorizontal, "Ctrl+M"),
+        (Command::MirrorSelectionVertical, "Ctrl+Shift+M"),
+    ] {
+        assert_eq!(
+            command.default_shortcut_label(CommandPlatform::Desktop),
+            key,
+            "{command:?}"
+        );
+        assert_eq!(
+            command.shortcut_context(),
+            ShortcutContext::EngineeringCanvas
+        );
+    }
+}
+
+/// While Move is carrying the selection, plain R turns what is being moved
+/// instead of arming the resistor tool, and the move carries on.
+#[test]
+fn plain_r_turns_the_selection_while_move_carries_it() {
+    let (mut app, _) = app_with_selected_resistor_pair();
+    crate::workbench::app::arm_move_selection(&mut app.state);
+    assert!(app.state.dialogs.move_selection.armed);
+    let before = app.state.schematic.document().components[1].pos
+        - app.state.schematic.document().components[0].pos;
+
+    let ctx = egui::Context::default();
+    let mut handled = false;
+    let _ = ctx.run_ui(
+        egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::R,
+                physical_key: Some(egui::Key::R),
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        },
+        |ctx| {
+            handled = crate::schematic::view::handle_pre_render_placement_transform(
+                ctx,
+                &mut app.state,
+                true,
+            );
+        },
+    );
+
+    assert!(handled, "R belonged to the floating selection");
+    let after = app.state.schematic.document().components[1].pos
+        - app.state.schematic.document().components[0].pos;
+    assert_eq!(after, rotated_cw(before));
+    assert!(
+        app.state.dialogs.move_selection.armed,
+        "the move carries on"
+    );
 }
 
 #[test]

@@ -174,7 +174,7 @@ fn discarded_array_preserves_document_and_allocators() {
     assert_eq!(identity.cursor(), 7);
     let mut expected_identity = identity.clone();
     assert_eq!(
-        expected_identity.generate_name(ComponentType::Resistor),
+        expected_identity.generate_name(&document, ComponentType::Resistor),
         "R2"
     );
 
@@ -190,7 +190,10 @@ fn discarded_array_preserves_document_and_allocators() {
     .commit();
     assert_eq!(objects.components, HashSet::from([1, 7]));
     assert_eq!(identity.cursor(), 8);
-    assert_eq!(identity.generate_name(ComponentType::Resistor), "R3");
+    assert_eq!(
+        identity.generate_name(&document, ComponentType::Resistor),
+        "R3"
+    );
     assert_eq!(document.components.len(), 2);
     assert_eq!(document.components[1].name, "R2");
     assert_eq!(document.components[1].pos, Point::new(101, 0));

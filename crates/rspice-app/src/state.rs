@@ -142,6 +142,7 @@ pub(crate) use simulation::RunHistoryRevision;
 pub use simulation::SensitivityBasisEvidence;
 #[cfg(test)]
 pub use simulation::SensitivityStudyEvidence;
+#[cfg(test)]
 pub use simulation::SensitivityStudyRow;
 #[cfg(test)]
 pub use simulation::TransientConvergenceEvidence;
