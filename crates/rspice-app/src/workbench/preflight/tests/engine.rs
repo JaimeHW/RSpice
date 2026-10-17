@@ -8,7 +8,7 @@ use rspice_simulation_contract::run_set::RunSetDimensionKind;
 /// and a PMOS family `pch` over a 6 x 6 grid of lengths and widths from
 /// 0.15 µm and 0.2 µm. The section and family `short_gap` names bins nothing
 /// below 0.25 µm.
-fn binned_library(short_gap: Option<(&str, &str)>) -> Vec<u8> {
+pub(super) fn binned_library(short_gap: Option<(&str, &str)>) -> Vec<u8> {
     const LENGTHS: [f64; 7] = [0.15e-6, 0.25e-6, 0.5e-6, 1e-6, 2e-6, 5e-6, 20e-6];
     const WIDTHS: [f64; 7] = [0.2e-6, 0.5e-6, 1e-6, 2e-6, 5e-6, 10e-6, 100e-6];
     let mut text = String::new();
@@ -41,13 +41,13 @@ fn binned_library(short_gap: Option<(&str, &str)>) -> Vec<u8> {
 }
 
 /// Leave enabled only the Run Set axes `kinds` names.
-fn enable_only(state: &mut AppState, kinds: &[RunSetDimensionKind]) {
+pub(super) fn enable_only(state: &mut AppState, kinds: &[RunSetDimensionKind]) {
     for dimension in &mut state.sim_setup.run_set.dimensions {
         dimension.enabled = kinds.contains(&dimension.kind);
     }
 }
 
-fn add_operating_point(state: &mut AppState) {
+pub(super) fn add_operating_point(state: &mut AppState) {
     use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
     let plan = state
         .sim_setup
@@ -66,7 +66,7 @@ fn add_operating_point(state: &mut AppState) {
 /// The CMOS inverter example, its transistors bound to `nch` and `pch` of a
 /// signed technology whose model library is `models`, run over the process
 /// sections alone, with an operating point.
-fn inverter_on_binned_pdk(models: Vec<u8>) -> RSpiceApp {
+pub(super) fn inverter_on_binned_pdk(models: Vec<u8>) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.project_lifecycle.authority.open_session();
     crate::workbench::examples::load_example("CMOS Inverter", &mut app.state.schematic);

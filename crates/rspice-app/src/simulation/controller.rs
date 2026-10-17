@@ -65,7 +65,7 @@ mod analysis_spec_build;
 mod completion;
 use analysis_spec_build::analysis_inputs;
 mod engine_check;
-pub(crate) use engine_check::EngineCheckOutcome;
+pub(crate) use engine_check::{PreflightOutcome, PreflightStage, PreflightVerdict};
 #[cfg(test)]
 pub(crate) mod dc_history_tests;
 #[cfg(test)]
@@ -218,8 +218,13 @@ pub struct SimulationController {
     design_execution_epoch: u64,
     /// Retained preflight and generation-safe dispatch authority.
     run_authorization: crate::simulation::execution::PreparedRunAuthorization,
-    /// Preflight's build pass over the retained run's decks, while it runs.
-    engine_check: Option<engine_check::PendingEngineCheck>,
+    /// Moves whenever the retained run is dropped or replaced, so a preflight
+    /// pipeline can tell whether the run it prepared is still wanted.
+    retained_run_generation: u64,
+    /// Preflight's preparation and engine pass, while they run.
+    preflight: Option<engine_check::PendingPreflight>,
+    #[cfg(test)]
+    preflight_test_hooks: engine_check::PreflightTestHooks,
     /// Run-bound automatic export policy captured by immutable preflight.
     touchstone_export_policy: TouchstoneExportPolicy,
     /// Frozen, declared-order multi-plan campaign. Each member is an
@@ -266,7 +271,10 @@ impl SimulationController {
             transient_post: transient_post::TransientPostCoordinator::default(),
             design_execution_epoch: 0,
             run_authorization: crate::simulation::execution::PreparedRunAuthorization::default(),
-            engine_check: None,
+            retained_run_generation: 0,
+            preflight: None,
+            #[cfg(test)]
+            preflight_test_hooks: engine_check::PreflightTestHooks::default(),
             touchstone_export_policy: TouchstoneExportPolicy::disabled(),
             active_campaign: None,
         }
@@ -672,7 +680,7 @@ impl SimulationController {
         self.point_families.clear();
         self.cached_netlist = None;
         self.clear_prepared_run();
-        self.cancel_engine_check();
+        self.cancel_preflight();
         self.current_config = None;
         self.current_spec = None;
         self.current_analysis_label = None;

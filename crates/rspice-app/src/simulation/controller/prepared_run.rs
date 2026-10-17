@@ -97,6 +97,185 @@ fn run_preparation_inputs(state: &AppState) -> RunPreparationInputs<'_> {
     }
 }
 
+/// What preparing the run set reads from the session, frozen at the press.
+///
+/// Owned, so the preparation can run on a worker while the reader goes on
+/// editing. Each field is a copy of what [`run_preparation_inputs`] borrows,
+/// and [`FrozenRunInputs::view`] lends it back in the same shape, so the run
+/// prepared from it is the run the synchronous path prepares from the state it
+/// was copied from. Freezing copies the design and setup, not the work: the
+/// retained runs' samples are shared rather than copied, and no model file is
+/// read, no deck generated and nothing parsed until the worker prepares.
+pub(crate) struct FrozenRunPreparation {
+    projection: rspice_design::projection::ConfigurationExecutionProjection,
+    inputs: FrozenRunInputs,
+}
+
+struct FrozenRunInputs {
+    sim_setup: SimulationSetup,
+    schematic: rspice_design::schematic::document::SchematicDocument,
+    schematic_file: Option<std::path::PathBuf>,
+    schematic_topology_revision: u64,
+    selected_components: HashSet<u64>,
+    selection_occurrence: Option<rspice_design::occurrence::DocumentOccurrence>,
+    runs: Vec<crate::state::SimulationRun>,
+    /// Which of `runs` the session had active.
+    active_run: Option<usize>,
+    plan_payloads: Vec<rspice_simulation_contract::plan_payload::SimulationPlanPayloadRecord>,
+    project: crate::state::ProjectDescriptor,
+    models: rspice_model_library::ModelCatalog,
+    resolutions: rspice_model_library::ModelResolutionRecords,
+    registry: rspice_simulation::pdk::PdkTechnologyRegistry,
+    layouts:
+        std::collections::BTreeMap<String, rspice_design::physical_layout::PhysicalLayoutDocument>,
+    libraries: rspice_design::library::LibraryCatalog,
+    project_sources: rspice_design::project_sources::ProjectSourceRegistry,
+    design_management: rspice_design_model::design_management::DesignManagementCatalog,
+    configuration_sets: rspice_design::configuration_set::ConfigurationSetCatalog,
+    stimulus_library: rspice_design::stimulus_library::library::StimulusLibrary,
+    imported_checkpoints: rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointLibrary,
+    imported_transient_checkpoints:
+        rspice_results::transient_checkpoint::TransientCheckpointLibrary,
+    max_parallel_workers: Option<usize>,
+    compilation: Option<rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt>,
+    design_checks: rspice_design::drc::DrcConfig,
+}
+
+impl FrozenRunPreparation {
+    /// Copy what preparing the run set reads. Fails as the synchronous path
+    /// does when the configured root cannot be projected.
+    pub(crate) fn freeze(state: &AppState) -> Result<Self, PreparationError> {
+        let projection = state
+            .workspace
+            .configuration_execution_projection(
+                &state.library_manager,
+                &state.workspace.content.active_view,
+                &state.schematic,
+            )
+            .map_err(|error| {
+                PreparationError::new(PreparationStage::DesignChecks, error.to_string())
+            })?;
+        let schematic =
+            rspice_design::projection::ProjectionSource::projection_source(&state.schematic);
+        let runs = state.simulation.retained.runs.to_vec();
+        let active_run = state.simulation.active_run().and_then(|active| {
+            state
+                .simulation
+                .retained
+                .runs
+                .iter()
+                .position(|run| std::ptr::eq(run, active))
+        });
+        Ok(Self {
+            projection,
+            inputs: FrozenRunInputs {
+                sim_setup: SimulationSetup::clone(&state.sim_setup),
+                schematic: state.schematic.document().clone(),
+                schematic_file: schematic.current_file.map(std::path::Path::to_path_buf),
+                schematic_topology_revision: schematic.schematic.topology_version(),
+                selected_components: state.schematic.session.editor.selection.components.clone(),
+                selection_occurrence: state.workspace.content.active_occurrence().cloned(),
+                runs,
+                active_run,
+                plan_payloads: state.workspace.content.simulation_plan_payloads.clone(),
+                project: state.workspace.content.project.clone(),
+                models: state.model_library_manager.catalog().clone(),
+                resolutions: state.model_library_manager.resolution_records().clone(),
+                registry: state.pdk_config.technology_registry.clone(),
+                layouts: state.workspace.content.physical_layout_documents().clone(),
+                libraries: state.library_manager.catalog().clone(),
+                project_sources: state.workspace.content.project_sources.clone(),
+                design_management: state.workspace.content.design_management.clone(),
+                configuration_sets: state.workspace.content.configuration_sets.clone(),
+                stimulus_library: state.workspace.content.stimulus_library.clone(),
+                imported_checkpoints: state
+                    .simulation
+                    .retained
+                    .imported_monte_carlo_checkpoints
+                    .clone(),
+                imported_transient_checkpoints: state
+                    .simulation
+                    .retained
+                    .imported_transient_checkpoints
+                    .clone(),
+                max_parallel_workers: state.ui.preferences.solver_worker_limit(),
+                compilation: state
+                    .ui
+                    .code_workspace
+                    .veriloga
+                    .receipt
+                    .as_ref()
+                    .map(|receipt| receipt.compilation.clone()),
+                design_checks: state.configured_root_design_check_config(),
+            },
+        })
+    }
+
+    /// Prepare the run set from what was frozen: the work
+    /// [`SimulationController::prepare_run_set_for_preflight`] does, stopping
+    /// between stages once `abort` is raised.
+    pub(crate) fn prepare(
+        self,
+        abort: &dyn rspice_core::abort_signal::AbortSignal,
+        progress: &dyn Fn(crate::simulation::execution::PreparationProgress),
+    ) -> Result<PreparedRunSnapshot, PreparationError> {
+        let Self { projection, inputs } = self;
+        crate::simulation::execution::preparation::build_prepared_run_set_reporting(
+            &inputs.view(),
+            projection,
+            abort,
+            progress,
+        )
+    }
+}
+
+impl FrozenRunInputs {
+    /// The frozen copy, lent in the shape [`run_preparation_inputs`] lends
+    /// the live state.
+    fn view(&self) -> RunPreparationInputs<'_> {
+        RunPreparationInputs {
+            analysis: rspice_simulation::analysis_preparation::AnalysisInputs {
+                sim_setup: &self.sim_setup,
+                schematic: &self.schematic,
+                selected_components: &self.selected_components,
+                selection_occurrence: self.selection_occurrence.as_ref(),
+                runs: &self.runs,
+                active_run: self
+                    .active_run
+                    .and_then(|index| self.runs.get(index))
+                    .map(|run| &run.data),
+                project_revision: self.project.revision(),
+                plan_payloads: &self.plan_payloads,
+            },
+            technology: rspice_simulation::project_technology::ProjectTechnologyInputs {
+                project: &self.project,
+                sim_setup: &self.sim_setup,
+                models: &self.models,
+                resolutions: &self.resolutions,
+                registry: &self.registry,
+                layouts: &self.layouts,
+            },
+            libraries: &self.libraries,
+            project_sources: &self.project_sources,
+            design_management: &self.design_management,
+            configuration_sets: &self.configuration_sets,
+            source_data: rspice_simulation::netlist_gen::NetlistSourceData {
+                files: &crate::simulation::table_route::SourceFiles,
+                data_root: self.project.data_root(),
+                stimulus_library: Some(&self.stimulus_library),
+            },
+            schematic_file: self.schematic_file.as_deref(),
+            schematic_topology_revision: self.schematic_topology_revision,
+            imported_checkpoints: &self.imported_checkpoints,
+            imported_transient_checkpoints: &self.imported_transient_checkpoints,
+            display_waveform_cache_samples: crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
+            max_parallel_workers: self.max_parallel_workers,
+            compilation: self.compilation.as_ref(),
+            design_checks: self.design_checks.clone(),
+        }
+    }
+}
+
 fn activate_campaign_plan(
     state: &mut AppState,
     plan_id: crate::product::SimulationPlanId,
@@ -380,20 +559,31 @@ impl SimulationController {
         self.clear_prepared_run();
         let snapshot = Self::build_prepared_snapshot(state, SimulationRunIntent::ManualDeck)?;
         let metadata = snapshot.metadata();
-        self.run_authorization.retain(snapshot)?;
+        self.retain_prepared_run(snapshot)?;
         Ok(metadata)
     }
 
     /// Produce and retain the exact run-set tuple the preflight report
-    /// authorizes. The caller runs DRC immediately before this method.
+    /// authorizes, in the caller's frame. The caller runs DRC immediately
+    /// before this method. Preflight itself prepares off the UI thread; see
+    /// [`Self::start_preflight`].
     pub(crate) fn prepare_run_set_for_preflight(
         &mut self,
         state: &AppState,
     ) -> Result<PreparedRunMetadata, PreparationError> {
         let snapshot = Self::build_prepared_snapshot(state, SimulationRunIntent::SimulateRunSet)?;
         let metadata = snapshot.metadata();
-        self.run_authorization.retain(snapshot)?;
+        self.retain_prepared_run(snapshot)?;
         Ok(metadata)
+    }
+
+    /// Retain `snapshot` for dispatch, replacing whatever was retained.
+    pub(super) fn retain_prepared_run(
+        &mut self,
+        snapshot: PreparedRunSnapshot,
+    ) -> Result<(), PreparationError> {
+        self.retained_run_generation = self.retained_run_generation.wrapping_add(1);
+        self.run_authorization.retain(snapshot)
     }
 
     /// Freeze and start a declared-order campaign of independent simulation
@@ -650,6 +840,7 @@ impl SimulationController {
     }
 
     pub(crate) fn clear_prepared_run(&mut self) {
+        self.retained_run_generation = self.retained_run_generation.wrapping_add(1);
         self.run_authorization.clear();
     }
 

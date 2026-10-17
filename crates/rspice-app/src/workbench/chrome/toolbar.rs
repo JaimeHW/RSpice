@@ -1623,8 +1623,8 @@ fn context_separator(ui: &mut egui::Ui, layout: LayoutSpec) {
 }
 
 fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    // A preflight whose decks the engine is building is stopped the way a run
-    // is: the control is Stop until it finishes.
+    // A preflight preparing its run or building its decks is stopped the way
+    // a run is: the control is Stop until it finishes.
     let checking = app.state.workbench.preflight.checking.is_some();
     let execution_active = app.state.simulation.execution.has_active_execution() || checking;
     let cancellation_pending = app.state.simulation.cancellation_is_pending();

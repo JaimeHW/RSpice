@@ -68,9 +68,9 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 .preflight
                 .checking
                 .as_ref()
-                .and(app.simulation_controller.engine_check_progress());
+                .and(app.simulation_controller.preflight_stage());
             let engine = match checking {
-                Some(progress) => Some(engine_check_status(progress)),
+                Some(stage) => Some(preflight_status(stage)),
                 None => simulation_engine_status(&app.state.simulation, &availability),
             };
             let engine_mark = engine_status_mark(
@@ -430,18 +430,25 @@ fn simulation_engine_status(
     ))
 }
 
-/// The engine segment while preflight has the engine building the run's
-/// decks: how many of them it has built, once it has counted them.
-fn engine_check_status(progress: crate::simulation::execution::DeckBuildProgress) -> String {
-    if progress.total == 0 {
-        return "Engine checking".to_owned();
+/// The engine segment while preflight prepares the run and then has the
+/// engine build its decks: the stage, and how far it has got once it has
+/// counted what it works through. A run of one point is not counted.
+fn preflight_status(stage: crate::simulation::controller::PreflightStage) -> String {
+    use crate::simulation::controller::PreflightStage;
+    match stage {
+        PreflightStage::Preparing(progress) if progress.total > 1 => format!(
+            "Preparing · {} of {} points",
+            progress.prepared, progress.total
+        ),
+        PreflightStage::Preparing(_) => "Preparing".to_owned(),
+        PreflightStage::EngineChecking(progress) if progress.total > 0 => format!(
+            "Engine checking · {} of {} deck{}",
+            progress.built,
+            progress.total,
+            if progress.total == 1 { "" } else { "s" }
+        ),
+        PreflightStage::EngineChecking(_) => "Engine checking".to_owned(),
     }
-    format!(
-        "Engine checking · {} of {} deck{}",
-        progress.built,
-        progress.total,
-        if progress.total == 1 { "" } else { "s" }
-    )
 }
 
 /// The mark in front of the engine segment: a failure when the engine cannot
@@ -1378,5 +1385,33 @@ mod tests {
             schematic_cursor_summary(&state, -15.0, -4.0),
             "x -2.5 · y 0 mm · off sheet"
         );
+    }
+
+    /// A preflight pass names its stage, and counts once it knows what it
+    /// works through: the run's points while preparing, its decks while the
+    /// engine builds them. A run of one point is not counted.
+    #[test]
+    fn a_preflight_pass_states_its_stage_and_how_far_it_has_got() {
+        use crate::simulation::controller::PreflightStage;
+        use crate::simulation::execution::{DeckBuildProgress, PreparationProgress};
+
+        let preparing = |prepared, total| {
+            preflight_status(PreflightStage::Preparing(PreparationProgress {
+                prepared,
+                total,
+            }))
+        };
+        let checking = |built, total| {
+            preflight_status(PreflightStage::EngineChecking(DeckBuildProgress {
+                built,
+                total,
+            }))
+        };
+        assert_eq!(preparing(0, 0), "Preparing");
+        assert_eq!(preparing(1, 1), "Preparing");
+        assert_eq!(preparing(3, 9), "Preparing · 3 of 9 points");
+        assert_eq!(checking(0, 0), "Engine checking");
+        assert_eq!(checking(0, 1), "Engine checking · 0 of 1 deck");
+        assert_eq!(checking(2, 3), "Engine checking · 2 of 3 decks");
     }
 }

@@ -13,17 +13,19 @@
 //! still owns is the pass itself: run the checks, prepare the immutable
 //! snapshot, and queue only what that snapshot authorizes.
 //!
-//! The last of the checks is the engine's own: every deck the prepared run
-//! dispatches is built, without solving, and what the engine refuses there
-//! blocks the run. That build runs off the UI thread over the decks frozen at
-//! the press; the pass finishes when the frame loop finds its verdict, and an
-//! edit made meanwhile leaves the verdict stale rather than racing it.
+//! The local checks run in the frame that takes the press. What follows them
+//! does not: the run is prepared from inputs frozen at the press, and then
+//! the engine builds every deck it dispatches, without solving, and what it
+//! refuses there blocks the run. Both run on one worker; the pass finishes
+//! when the frame loop finds its verdict, and an edit made meanwhile leaves
+//! the verdict stale rather than racing it.
 
 mod engine_refusals;
 
 use crate::diagnostics::ConsoleMessage;
 use crate::simulation::SimulationController;
-use crate::simulation::controller::EngineCheckOutcome;
+use crate::simulation::controller::{PreflightOutcome, PreflightVerdict};
+use crate::simulation::execution::PreparationError;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 
@@ -48,8 +50,8 @@ use super::state::{
 /// chrome draws and which the notice centre deliberately never lifts, so a
 /// clean pass with the Console collapsed said nothing anywhere.
 ///
-/// When the checks before it pass, the pass ends with the engine building the
-/// run's decks on a worker; [`poll`] finishes it.
+/// When the checks before it pass, the pass ends on a worker, which prepares
+/// the run and has the engine build its decks; [`poll`] finishes it.
 pub(crate) fn run(app: &mut RSpiceApp) {
     start(&mut app.state, &mut app.simulation_controller, false);
 }
@@ -76,58 +78,63 @@ fn start(state: &mut AppState, controller: &mut SimulationController, queue: boo
         )));
     }
     if report.blockers.is_empty() {
-        match controller.prepare_run_set_for_preflight(state) {
-            Ok(metadata) => {
-                report
-                    .advisories
-                    .extend(metadata.advisories.into_iter().map(PreflightAdvisory::from));
-                let contract = PreparedPreflightContract {
-                    snapshot_digest: metadata.snapshot_digest,
-                    source_digest: metadata.source_digest,
-                    receipt_digest: metadata.receipt_digest,
-                    receipt_label: metadata.receipt_label,
-                    analysis_ids: metadata.analysis_ids,
-                    task_count: metadata.task_count,
-                    saved_output_contract_count: metadata.saved_output_contract_count,
-                    pvt_point_count: metadata.pvt_point_count,
-                    target: metadata.target,
-                    save_policy: metadata.save_policy,
-                    model_identity_count: metadata.model_identity_count,
-                };
-                // What the engine refuses when it builds the decks this run
-                // dispatches. Only a prepared run has decks to build, so these
-                // are decided against exactly those decks, and they keep the
-                // run from being authorized until the build says otherwise.
-                if controller.start_engine_check() {
-                    state.workbench.preflight.checking = Some(PreflightCheck {
-                        report,
-                        contract,
-                        queue,
-                        inputs_at_press: state.dispatch_inputs_at_press().ok(),
-                    });
-                    return;
-                }
-                report.blockers.push(engine_refusals::no_verdict_issue());
+        // The run is prepared, and the engine builds the decks it dispatches,
+        // on a worker over a copy of the inputs taken here. Only a prepared
+        // run has decks to build, so what the engine refuses is decided
+        // against exactly those decks, and it keeps the run from being
+        // authorized until the build says otherwise.
+        match controller.start_preflight(state) {
+            Ok(()) => {
+                state.workbench.preflight.checking = Some(PreflightCheck {
+                    report,
+                    queue,
+                    inputs_at_press: state.dispatch_inputs_at_press().ok(),
+                });
+                return;
             }
-            Err(error) => report.blockers.push(PreflightIssue {
-                check: preparation_check_label(error.stage()).to_owned(),
-                observed: error.message().to_owned(),
-                required: preparation_requirement(error.stage()).to_owned(),
-                remediation: preparation_remediation(error.stage(), error.line()),
-            }),
+            Err(error) => report.blockers.push(preparation_issue(&error)),
         }
     }
     conclude(state, controller, report, None, queue);
 }
 
-/// Finish the pass whose decks the engine was building, once it has a
-/// verdict. Called once per frame; does nothing while the build runs.
+/// The blocker a preparation failure stands as.
+fn preparation_issue(error: &PreparationError) -> PreflightIssue {
+    PreflightIssue {
+        check: preparation_check_label(error.stage()).to_owned(),
+        observed: error.message().to_owned(),
+        required: preparation_requirement(error.stage()).to_owned(),
+        remediation: preparation_remediation(error.stage(), error.line()),
+    }
+}
+
+/// What a prepared run's report authorizes, if the engine refuses nothing.
+fn contract_of(
+    metadata: crate::simulation::execution::PreparedRunMetadata,
+) -> PreparedPreflightContract {
+    PreparedPreflightContract {
+        snapshot_digest: metadata.snapshot_digest,
+        source_digest: metadata.source_digest,
+        receipt_digest: metadata.receipt_digest,
+        receipt_label: metadata.receipt_label,
+        analysis_ids: metadata.analysis_ids,
+        task_count: metadata.task_count,
+        saved_output_contract_count: metadata.saved_output_contract_count,
+        pvt_point_count: metadata.pvt_point_count,
+        target: metadata.target,
+        save_policy: metadata.save_policy,
+        model_identity_count: metadata.model_identity_count,
+    }
+}
+
+/// Finish the pass whose run the worker was preparing and checking, once it
+/// has a verdict. Called once per frame; does nothing while the worker runs.
 ///
 /// A stop the reader asked for since the last frame is applied first, so a
 /// verdict that lands in between authorizes nothing.
 ///
-/// A pass whose run is no longer the one retained — an edit since the press
-/// dropped it, or another preparation replaced it — authorizes nothing. Its
+/// A pass whose run is no longer wanted — an edit since the press dropped the
+/// retained run, or another preparation replaced it — authorizes nothing. Its
 /// findings are still published, against the inputs as they stood at the
 /// press, so they read as stale rather than as current.
 pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) {
@@ -138,11 +145,11 @@ pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) 
     let Some(check) = state.workbench.preflight.checking.as_ref() else {
         // A pass whose state was dropped — a replaced session — has nothing
         // left to finish.
-        controller.cancel_engine_check();
+        controller.cancel_preflight();
         return;
     };
-    if controller.engine_check_progress().is_none() {
-        // The controller dropped the build: the design was replaced under it.
+    if controller.preflight_stage().is_none() {
+        // The controller dropped the worker: the design was replaced under it.
         let revision = check.report.project_revision;
         state.workbench.preflight.checking = None;
         state.push_user_message(ConsoleMessage::warning(format!(
@@ -151,32 +158,40 @@ pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) 
         )));
         return;
     }
-    let Some(outcome) = controller.poll_engine_check() else {
+    let Some(PreflightOutcome {
+        verdict,
+        current: retained,
+    }) = controller.poll_preflight()
+    else {
         return;
     };
     let Some(PreflightCheck {
         mut report,
-        contract,
         queue,
         inputs_at_press,
     }) = state.workbench.preflight.checking.take()
     else {
         return;
     };
-    let EngineCheckOutcome {
-        refusals,
-        current: retained,
-    } = outcome;
-    match refusals {
-        Some(refusals) => {
+    match verdict {
+        PreflightVerdict::NotPrepared(error) => report.blockers.push(preparation_issue(&error)),
+        PreflightVerdict::Checked {
+            mut metadata,
+            refusals,
+        } => {
+            report.advisories.extend(
+                std::mem::take(&mut metadata.advisories)
+                    .into_iter()
+                    .map(PreflightAdvisory::from),
+            );
             let refused = engine_refusals::engine_refusal_issues(state, &refusals);
             if refused.is_empty() {
-                report.prepared = Some(contract);
+                report.prepared = Some(contract_of(metadata));
             } else {
                 report.blockers.extend(refused);
             }
         }
-        None => report.blockers.push(engine_refusals::no_verdict_issue()),
+        PreflightVerdict::NoVerdict => report.blockers.push(engine_refusals::no_verdict_issue()),
     }
     let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
     let unedited = report.is_current_for(
@@ -190,7 +205,7 @@ pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) 
         conclude(state, controller, report, inputs_at_press, queue);
     } else {
         if retained {
-            // The run is still the one checked, but the design it was
+            // The run was retained as the one checked, but the design it was
             // prepared from has moved: it authorizes nothing now.
             controller.clear_prepared_run();
         }
@@ -198,13 +213,13 @@ pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) 
     }
 }
 
-/// Stop the pass whose decks the engine is building. Nothing it found is
-/// published, and the run it was checking is not authorized.
+/// Stop the pass whose run the worker is preparing or checking. Nothing it
+/// found is published, and the run it was checking is not authorized.
 fn cancel(state: &mut AppState, controller: &mut SimulationController) {
     let Some(check) = state.workbench.preflight.checking.take() else {
         return;
     };
-    controller.cancel_engine_check();
+    controller.cancel_preflight();
     controller.clear_prepared_run();
     state.push_user_message(ConsoleMessage::warning(format!(
         "Preflight cancelled · design revision {} was not checked · nothing was queued",

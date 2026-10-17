@@ -9,6 +9,7 @@ use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::diagnostic_routes::apply_remediation;
 
 mod engine;
+mod pipeline;
 mod rule_deck;
 mod variants;
 mod waivers;
