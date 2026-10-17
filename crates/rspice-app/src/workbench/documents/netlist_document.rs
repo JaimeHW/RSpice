@@ -298,10 +298,10 @@ fn replace_owned_sources_atomically_impl(
         .owned_document
         .as_ref()
         .or(state.workspace.content.netlist_document.as_ref())
-        .ok_or_else(|| "The canonical project-owned netlist document is unavailable.".to_owned())?;
+        .ok_or_else(|| "The project's netlist document is unavailable.".to_owned())?;
     if current_document.source() != root_source {
         return Err(
-            "The project root and canonical netlist document differ; no source was changed."
+            "The project's root deck and its netlist document differ; no source was changed."
                 .to_owned(),
         );
     }
@@ -376,24 +376,24 @@ fn replace_owned_sources_atomically_impl(
                     .iter_mut()
                     .find(|include| include.logical_identity == identity)
                     .ok_or_else(|| {
-                        format!("Owned include {identity:?} is no longer replacement-eligible.")
+                        format!("Owned include '{identity}' is no longer eligible for replacement.")
                     })?;
                 let index = original_dependencies
                     .iter()
                     .position(|dependency| dependency.locator().logical_identity() == identity)
                     .ok_or_else(|| {
                         format!(
-                            "Owned include {identity:?} is no longer in the dependency closure."
+                            "Owned include '{identity}' is no longer among the deck's dependencies."
                         )
                     })?;
                 let original = original_dependencies[index]
                     .source()
-                    .ok_or_else(|| format!("Owned include {identity:?} is no longer resolved."))?;
+                    .ok_or_else(|| format!("Owned include '{identity}' is no longer resolved."))?;
                 if crate::state::content_digest(original) != edit.expected_digest
                     || include.content_digest != edit.expected_digest
                 {
                     return Err(format!(
-                        "Owned include {identity:?} changed after search results were produced; no source was changed."
+                        "Owned include '{identity}' changed after search results were produced; no source was changed."
                     ));
                 }
                 if edit.replacement == original {
@@ -406,7 +406,7 @@ fn replace_owned_sources_atomically_impl(
                 include.revision = include
                     .revision
                     .checked_add(1)
-                    .ok_or_else(|| format!("Owned include {identity:?} revision overflowed."))?;
+                    .ok_or_else(|| format!("Owned include '{identity}' revision overflowed."))?;
                 include.content_digest = crate::state::content_digest(&edit.replacement);
                 dependencies_changed = true;
                 changed_count = changed_count
@@ -429,7 +429,7 @@ fn replace_owned_sources_atomically_impl(
                     || crate::state::content_digest(deck.document.source()) != edit.expected_digest
                 {
                     return Err(format!(
-                        "Retained top deck {:?} changed after search results were produced; no source was changed.",
+                        "Retained top deck '{}' changed after search results were produced; no source was changed.",
                         deck.descriptor.artifact_name
                     ));
                 }
@@ -446,7 +446,7 @@ fn replace_owned_sources_atomically_impl(
                     .map_err(|error| error.to_string())?;
                 if !same_include_graph(deck.document.include_directives(), &original_includes) {
                     return Err(format!(
-                        "Workspace-wide replacement would change the include graph of {:?}. Edit that top deck directly, then resolve its dependencies before retrying.",
+                        "Workspace-wide replacement would change the include graph of '{}'. Edit that top deck directly, then resolve its dependencies before retrying.",
                         deck.descriptor.artifact_name
                     ));
                 }
@@ -483,7 +483,7 @@ fn replace_owned_sources_atomically_impl(
                     })
                     .ok_or_else(|| {
                         format!(
-                            "Owned include {logical_identity:?} is no longer in retained top deck {:?}.",
+                            "Owned include '{logical_identity}' is no longer in retained top deck '{}'.",
                             deck.descriptor.artifact_name
                         )
                     })?;
@@ -491,7 +491,7 @@ fn replace_owned_sources_atomically_impl(
                     .source()
                     .ok_or_else(|| {
                         format!(
-                            "Owned include {logical_identity:?} in retained top deck {:?} is no longer resolved.",
+                            "Owned include '{logical_identity}' in retained top deck '{}' is no longer resolved.",
                             deck.descriptor.artifact_name
                         )
                     })?
@@ -503,7 +503,7 @@ fn replace_owned_sources_atomically_impl(
                     .find(|include| include.logical_identity == logical_identity)
                     .ok_or_else(|| {
                         format!(
-                            "Owned include {logical_identity:?} in retained top deck {:?} is no longer replacement-eligible.",
+                            "Owned include '{logical_identity}' in retained top deck '{}' is no longer eligible for replacement.",
                             deck.descriptor.artifact_name
                         )
                     })?;
@@ -511,7 +511,7 @@ fn replace_owned_sources_atomically_impl(
                     || include.content_digest != edit.expected_digest
                 {
                     return Err(format!(
-                        "Owned include {logical_identity:?} in retained top deck {:?} changed after search results were produced; no source was changed.",
+                        "Owned include '{logical_identity}' in retained top deck '{}' changed after search results were produced; no source was changed.",
                         deck.descriptor.artifact_name
                     ));
                 }
@@ -527,7 +527,7 @@ fn replace_owned_sources_atomically_impl(
                     .acknowledge_dependencies(deck.document.content_digest(), dependencies)
                     .map_err(|error| error.to_string())?;
                 include.revision = include.revision.checked_add(1).ok_or_else(|| {
-                    format!("Owned include {logical_identity:?} revision overflowed.")
+                    format!("Owned include '{logical_identity}' revision overflowed.")
                 })?;
                 include.content_digest = crate::state::content_digest(&edit.replacement);
                 changed_count = changed_count
@@ -2137,7 +2137,7 @@ impl NetlistImportReviewState {
                     Ok(())
                 } else {
                     Err(format!(
-                        "Detected {} markers cannot be relabeled as RSpice canonical SPICE. Remove or explicitly convert every foreign construct before importing.",
+                        "Detected {} markers cannot be relabeled as RSpice SPICE. Remove or convert every foreign statement before importing.",
                         self.detected_dialect.label()
                     ))
                 }
@@ -2173,7 +2173,7 @@ impl NetlistImportReviewState {
                     .validate_source(&self.source)
                     .map_err(|error| {
                         format!(
-                            "PSpice declarative compatibility is not qualified: {error}. The v2 profile requires a pre-.END .PROBE, .PROBE64, or .PROBE/CSDF source marker; admits typed DEV/LOT, .DISTRIBUTION, selected-analysis .MC collation, bounded immutable .MC LIST/OUTPUT results, and exact minimum-order Type-I E/G CHEBYSHEV LP/HP/BP/BR sources; and rejects unsupported .STIMULUS or FREQ sources and unknown output-format commands."
+                            "PSpice declarative compatibility is not qualified: {error}. The v2 profile requires a .PROBE, .PROBE64, or .PROBE/CSDF line before .END; accepts DEV/LOT, .DISTRIBUTION, .MC on a selected analysis, .MC LIST/OUTPUT results, and minimum-order Type-I E/G CHEBYSHEV LP/HP/BP/BR sources; and rejects unsupported .STIMULUS or FREQ sources and unknown output-format commands."
                         )
                     })?;
                 Ok(())
@@ -2211,7 +2211,7 @@ impl NetlistImportReviewState {
                     .adapt_source(&self.source)
                     .map_err(|error| {
                         format!(
-                            "Spectre SPICE interoperability is not qualified: {error}. The v1 adapter requires exact `simulator lang=spice` mode and rejects native Spectre parameters, AHDL includes, saveOptions, and language switches."
+                            "Spectre SPICE interoperability is not qualified: {error}. The v1 adapter requires `simulator lang=spice` mode and rejects native Spectre parameters, AHDL includes, saveOptions, and language switches."
                         )
                     })?;
                 Ok(())
@@ -2236,7 +2236,7 @@ impl NetlistImportReviewState {
                 Ok(())
             }
             NetlistSourceDialect::Unknown => Err(
-                "Ambiguous or unknown dialect evidence has no executable compatibility profile. Resolve the dialect and convert unsupported constructs before importing."
+                "The dialect is ambiguous or unknown, so no compatibility profile can run this source. Resolve the dialect and convert unsupported constructs before importing."
                     .to_owned(),
             ),
         }

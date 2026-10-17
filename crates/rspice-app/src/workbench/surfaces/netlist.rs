@@ -823,7 +823,7 @@ fn handle_netlist_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            Err("Browser drop did not provide immutable file bytes.".to_owned())
+            Err("The browser did not provide the dropped file's contents.".to_owned())
         }
     };
     match bytes {

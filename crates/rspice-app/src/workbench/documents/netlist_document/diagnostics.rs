@@ -250,7 +250,7 @@ impl NetlistDiagnosticCollection {
         for diagnostic in &records {
             if !diagnostic_ids.insert(diagnostic.canonical.diagnostic_id) {
                 return Err(format!(
-                    "Netlist diagnostic collection contains duplicate canonical ID {}.",
+                    "Netlist diagnostic collection contains duplicate diagnostic ID {}.",
                     diagnostic.canonical.diagnostic_id
                 ));
             }
@@ -1099,6 +1099,6 @@ mod tests {
         );
         let error = NetlistDiagnosticCollection::try_new(vec![diagnostic.clone(), diagnostic], "")
             .expect_err("duplicate canonical IDs must fail closed");
-        assert!(error.contains("duplicate canonical ID"));
+        assert!(error.contains("duplicate diagnostic ID"));
     }
 }

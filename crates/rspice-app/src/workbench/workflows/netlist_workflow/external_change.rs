@@ -358,7 +358,7 @@ pub(crate) fn apply_staged_external_netlist_change(state: &mut AppState) -> Resu
         .owned_document
         .as_ref()
         .cloned()
-        .ok_or_else(|| "The conflict resolution lost the canonical owned document.".to_owned())?;
+        .ok_or_else(|| "The conflict resolution lost the project's netlist document.".to_owned())?;
     candidate
         .workspace
         .content

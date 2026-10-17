@@ -717,7 +717,7 @@ pub(crate) fn symbol_hover(state: &mut AppState, name: &str) -> Option<ProjectSy
         [] if !references.is_empty() => Some(ProjectSymbolHover {
             title: format!("unresolved {name}"),
             detail: format!(
-                "{} semantic reference{} in the authenticated source closure; no definition is available",
+                "{} semantic reference{} in the project's sources; no definition is available",
                 references.len(),
                 if references.len() == 1 { "" } else { "s" }
             ),
@@ -726,7 +726,7 @@ pub(crate) fn symbol_hover(state: &mut AppState, name: &str) -> Option<ProjectSy
         _ => Some(ProjectSymbolHover {
             title: format!("ambiguous {name}"),
             detail: format!(
-                "{} definitions and {} semantic references in the authenticated source closure",
+                "{} definitions and {} semantic references in the project's sources",
                 definitions.len(),
                 references.len()
             ),
@@ -777,8 +777,8 @@ pub(crate) fn go_to_definition_at_cursor(state: &mut AppState) -> Result<String,
     .ok_or_else(|| {
         "Place the caret on a model, subcircuit, parameter, or function name.".to_owned()
     })?;
-    let index = project_index(state)
-        .ok_or_else(|| "The active source has no authenticated project index.".to_owned())?;
+    let index =
+        project_index(state).ok_or_else(|| "The active source has no project index.".to_owned())?;
     let definitions = index
         .definitions_named(&symbol)
         .into_iter()
@@ -786,7 +786,7 @@ pub(crate) fn go_to_definition_at_cursor(state: &mut AppState) -> Result<String,
         .collect::<Vec<_>>();
     match definitions.as_slice() {
         [] => Err(format!(
-            "No definition for {symbol:?} exists in the authenticated source closure."
+            "No definition for '{symbol}' exists in the project's sources."
         )),
         [definition] => {
             open_project_location(state, definition)?;
@@ -796,7 +796,7 @@ pub(crate) fn go_to_definition_at_cursor(state: &mut AppState) -> Result<String,
             state.workbench.navigator_visible = true;
             state.workbench.set_navigator_filter(symbol.clone());
             Ok(format!(
-                "Found {} definitions of {symbol}; the navigator lists each exact source location.",
+                "Found {} definitions of {symbol}; the navigator lists where each one is.",
                 definitions.len()
             ))
         }
@@ -810,41 +810,40 @@ pub(crate) fn go_to_declaration_at_cursor(state: &mut AppState) -> Result<String
 pub(crate) fn show_signature_help_at_cursor(state: &mut AppState) -> Result<String, String> {
     let source = state.simulation.source.netlist_content.clone();
     let cursor = state.ui.netlist.cursor_char_index;
-    let (title, detail) = if let Some((title, detail)) =
-        super::completion::directive_signature_at(&source, cursor)
-    {
-        (title, detail)
-    } else {
-        let symbol = symbol_at_cursor(&source, cursor).ok_or_else(|| {
-            "Place the caret on an analysis, subcircuit, model, parameter, or function name."
-                .to_owned()
-        })?;
-        let index = project_index(state)
-            .ok_or_else(|| "The active source has no authenticated project index.".to_owned())?;
-        let definitions = index.definitions_named(&symbol);
-        match definitions.as_slice() {
-            [definition] => (
-                format!("{} {}", definition.kind.label(), definition.name),
-                format!(
-                    "{} · declared at {}:{}",
-                    definition.detail,
-                    definition.definition.display_name,
-                    definition.definition.line
+    let (title, detail) =
+        if let Some((title, detail)) = super::completion::directive_signature_at(&source, cursor) {
+            (title, detail)
+        } else {
+            let symbol = symbol_at_cursor(&source, cursor).ok_or_else(|| {
+                "Place the caret on an analysis, subcircuit, model, parameter, or function name."
+                    .to_owned()
+            })?;
+            let index = project_index(state)
+                .ok_or_else(|| "The active source has no project index.".to_owned())?;
+            let definitions = index.definitions_named(&symbol);
+            match definitions.as_slice() {
+                [definition] => (
+                    format!("{} {}", definition.kind.label(), definition.name),
+                    format!(
+                        "{} · declared at {}:{}",
+                        definition.detail,
+                        definition.definition.display_name,
+                        definition.definition.line
+                    ),
                 ),
-            ),
-            [] => {
-                return Err(format!(
-                    "No signature for {symbol:?} exists in the authenticated source closure."
-                ));
+                [] => {
+                    return Err(format!(
+                        "No signature for '{symbol}' exists in the project's sources."
+                    ));
+                }
+                _ => {
+                    return Err(format!(
+                        "Signature help is ambiguous because '{symbol}' has {} declarations.",
+                        definitions.len()
+                    ));
+                }
             }
-            _ => {
-                return Err(format!(
-                    "Signature help is ambiguous because {symbol:?} has {} declarations.",
-                    definitions.len()
-                ));
-            }
-        }
-    };
+        };
     state.ui.netlist.signature_help = NetlistSignatureHelpState {
         open: true,
         revision: state.ui.netlist.revision,
@@ -856,14 +855,12 @@ pub(crate) fn show_signature_help_at_cursor(state: &mut AppState) -> Result<Stri
 }
 
 pub(crate) fn open_workspace_symbols(state: &mut AppState) -> Result<String, String> {
-    let index = project_index(state)
-        .ok_or_else(|| "The active source has no authenticated project index.".to_owned())?;
+    let index =
+        project_index(state).ok_or_else(|| "The active source has no project index.".to_owned())?;
     let count = index.symbols().len();
     state.workbench.navigator_visible = true;
     state.workbench.clear_navigator_filter();
-    Ok(format!(
-        "Showing {count} project symbol(s) from the authenticated source closure."
-    ))
+    Ok(format!("Showing {count} project symbol(s)."))
 }
 
 pub(crate) fn preferred_quick_fix_available(state: &AppState) -> bool {
@@ -983,13 +980,13 @@ pub(crate) fn find_references_at_cursor(state: &mut AppState) -> Result<String, 
     .ok_or_else(|| {
         "Place the caret on a model, subcircuit, parameter, or function name.".to_owned()
     })?;
-    let index = project_index(state)
-        .ok_or_else(|| "The active source has no authenticated project index.".to_owned())?;
+    let index =
+        project_index(state).ok_or_else(|| "The active source has no project index.".to_owned())?;
     let count = index.references_named(&symbol).len();
     state.workbench.navigator_visible = true;
     state.workbench.set_navigator_filter(symbol.clone());
     Ok(if count == 0 {
-        format!("No device references to {symbol} were found in the authenticated source closure.")
+        format!("No device references to {symbol} were found in the project's sources.")
     } else {
         format!("Found {count} device reference(s) to {symbol}.")
     })
@@ -1001,19 +998,19 @@ pub(crate) fn begin_rename_at_cursor(state: &mut AppState) -> Result<(), String>
         state.ui.netlist.cursor_char_index,
     )
     .ok_or_else(|| "Place the caret on a model or subcircuit name.".to_owned())?;
-    let index = project_index(state)
-        .ok_or_else(|| "The active source has no authenticated project index.".to_owned())?;
+    let index =
+        project_index(state).ok_or_else(|| "The active source has no project index.".to_owned())?;
     let definitions = index.definitions_named(&symbol);
     let definition = match definitions.as_slice() {
         [definition] => *definition,
         [] => {
             return Err(format!(
-                "No definition for {symbol:?} exists in the authenticated source closure."
+                "No definition for '{symbol}' exists in the project's sources."
             ));
         }
         _ => {
             return Err(format!(
-                "Rename is blocked because {symbol:?} has {} definitions.",
+                "Rename is blocked because '{symbol}' has {} definitions.",
                 definitions.len()
             ));
         }
@@ -1047,11 +1044,11 @@ pub(crate) fn commit_rename(state: &mut AppState) -> Result<usize, String> {
     if original.eq_ignore_ascii_case(&replacement) {
         return Err("Enter a different model or subcircuit name.".to_owned());
     }
-    let index = project_index(state)
-        .ok_or_else(|| "The active source has no authenticated project index.".to_owned())?;
+    let index =
+        project_index(state).ok_or_else(|| "The active source has no project index.".to_owned())?;
     if !index.definitions_named(&replacement).is_empty() {
         return Err(format!(
-            "A definition named {replacement:?} already exists in the authenticated source closure."
+            "A definition named '{replacement}' already exists in the project's sources."
         ));
     }
     let definitions = index.definitions_named(&original);
@@ -1107,7 +1104,7 @@ pub(crate) fn commit_rename(state: &mut AppState) -> Result<usize, String> {
             .iter()
             .find(|dependency| dependency.locator().logical_identity() == identity)
             .and_then(crate::state::DependencyMetadata::source)
-            .ok_or_else(|| format!("Owned include {identity:?} is no longer resolved."))?;
+            .ok_or_else(|| format!("Owned include '{identity}' is no longer resolved."))?;
         let include_locations = locations
             .iter()
             .filter(|location| location.dependency_identity.as_deref() == Some(identity.as_str()))
@@ -1146,7 +1143,7 @@ fn ensure_location_is_project_owned(
             .is_none()
     {
         return Err(format!(
-            "Rename is blocked because reference source {identity:?} is externally owned. Copy it into the project first."
+            "Rename is blocked because reference source '{identity}' is externally owned. Copy it into the project first."
         ));
     }
     Ok(())

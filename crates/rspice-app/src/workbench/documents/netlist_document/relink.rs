@@ -28,13 +28,13 @@ pub(crate) fn begin_dependency_relink(
         .active_dependency_root
         .unwrap_or(state.ui.netlist.active_document);
     let document = canonical_root_document(state, root)
-        .ok_or_else(|| "The selected source has no canonical dependency closure.".to_owned())?;
+        .ok_or_else(|| "The selected source has no dependency list.".to_owned())?;
     if !document
         .dependencies()
         .iter()
         .any(|dependency| dependency.locator().logical_identity() == logical_identity)
     {
-        return Err("The dependency is no longer in the canonical source closure.".to_owned());
+        return Err("The dependency is no longer among the source's dependencies.".to_owned());
     }
     state.ui.netlist.dependency_relink = Some(NetlistDependencyRelinkState {
         root,
@@ -76,7 +76,7 @@ pub(crate) fn commit_dependency_relink(
         .dependencies()
         .iter()
         .find(|dependency| dependency.locator().logical_identity() == transaction.logical_identity)
-        .ok_or_else(|| "The dependency is no longer in the canonical closure.".to_owned())?;
+        .ok_or_else(|| "The dependency is no longer among the source's dependencies.".to_owned())?;
     let locator = existing
         .locator()
         .clone()
