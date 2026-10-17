@@ -45,7 +45,8 @@ impl Schematic {
         changed
     }
     pub fn optimize_all_wires(&mut self) -> bool {
-        let changed = wire_edit::optimize_all_wires(&mut self.document);
+        let mut changed = wire_edit::optimize_all_wires(&mut self.document);
+        changed |= wire_edit::split_fold_backs(&mut self.document, &mut self.identity);
         if changed {
             self.invalidate_topology();
         }

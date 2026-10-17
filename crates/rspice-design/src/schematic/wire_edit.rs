@@ -344,6 +344,63 @@ fn stretch_can_go(
             .any(on_stretch)
 }
 
+/// Lay each turn a wire doubles back at as two wires, where the turn could
+/// not simply come out because something reaches the stretch it doubles
+/// over: the wire goes on without the turn, and that stretch stays as a
+/// wire of its own, from where the two runs meet out to the turn. Every
+/// point the wire reached it still reaches, and no wire doubles back.
+pub fn split_fold_backs(
+    document: &mut SchematicDocument,
+    identity: &mut SchematicIdentity,
+) -> bool {
+    let mut changed = false;
+    let mut index = 0;
+    while index < document.wires.len() {
+        let points = &document.wires[index].points;
+        let Some(turn) = (1..points.len().saturating_sub(1))
+            .find(|&turn| folds_back(points[turn - 1], points[turn], points[turn + 1]))
+        else {
+            index += 1;
+            continue;
+        };
+        let (before, vertex, after) = (points[turn - 1], points[turn], points[turn + 1]);
+        let reach = |point: Point| {
+            (i64::from(point.x) - i64::from(vertex.x)).abs()
+                + (i64::from(point.y) - i64::from(vertex.y)).abs()
+        };
+        let kept = if reach(before) <= reach(after) {
+            before
+        } else {
+            after
+        };
+        let mut route = points.clone();
+        let mut renumbered = (0..route.len()).collect::<Vec<_>>();
+        remove_route_vertex(&mut route, &mut renumbered, turn);
+        if before == after && turn + 1 < route.len() {
+            remove_route_vertex(&mut route, &mut renumbered, turn);
+        }
+        if route.len() < 2 || route.windows(2).any(|pair| pair[0] == pair[1]) {
+            index += 1;
+            continue;
+        }
+        let wire_id = document.wires[index].id;
+        document.wires[index].points = route;
+        for connection in document
+            .connections
+            .iter_mut()
+            .filter(|connection| connection.wire_id == wire_id)
+        {
+            if let Some(&moved_to) = renumbered.get(connection.point_index) {
+                connection.point_index = moved_to;
+            }
+        }
+        let stub = identity.allocate(document);
+        document.wires.push(Wire::new(stub, vec![kept, vertex]));
+        changed = true;
+    }
+    changed
+}
+
 /// Take vertex `index` out of `route` and renumber where the old vertices
 /// went: those past it move one place back, and one that went to it goes to
 /// the vertex that takes its place.
@@ -802,5 +859,36 @@ mod tests {
         assert!(optimize_all_wires(&mut document));
         assert_eq!(document.wires[0].points, vec![p(200, 120), p(160, 120)]);
         assert_eq!(document.connections[0].point_index, 1);
+    }
+
+    /// A turn that a T needs comes out of the wire, and the stretch it
+    /// doubled over stays as a wire of its own out to the T.
+    #[test]
+    fn a_fold_something_needs_is_laid_as_two_wires() {
+        let p = Point::new;
+        let mut document = SchematicDocument {
+            wires: vec![
+                Wire::new(
+                    1,
+                    vec![
+                        p(240, 60),
+                        p(240, 260),
+                        p(200, 260),
+                        p(200, 100),
+                        p(200, 140),
+                    ],
+                ),
+                Wire::new(2, vec![p(120, 100), p(280, 100)]),
+            ],
+            ..SchematicDocument::default()
+        };
+        let mut identity = SchematicIdentity::with_cursor(10);
+        assert!(split_fold_backs(&mut document, &mut identity));
+        assert_eq!(
+            document.wires[0].points,
+            vec![p(240, 60), p(240, 260), p(200, 260), p(200, 140)]
+        );
+        assert_eq!(document.wires[2].points, vec![p(200, 140), p(200, 100)]);
+        assert!(!split_fold_backs(&mut document, &mut identity));
     }
 }

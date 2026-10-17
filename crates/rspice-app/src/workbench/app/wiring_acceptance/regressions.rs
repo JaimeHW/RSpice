@@ -179,6 +179,23 @@ fn a_wire_never_runs_out_and_back_to_where_it_began() {
     ]);
 }
 
+/// The T's right branch turned, R2 and R4 moved, then R3 flipped top to
+/// bottom with a wire: the stem, which ends on R3's pin and starts at the
+/// T, was laid up to the T and straight back down to the pin, and the T
+/// still needs the stretch it doubles over:
+/// [(240, 60), (240, 260), (200, 260), (200, 100), (200, 140)].
+#[test]
+fn a_wire_doubled_back_to_a_t_is_laid_as_two_wires() {
+    holds(&[
+        Transform(vec![Pick::Wire(8)], Turn::Clockwise),
+        Move(vec![Pick::Part(2), Pick::Part(4)], p(-40, 0), false),
+        Transform(
+            vec![Pick::Part(3), Pick::Wire(39), Pick::Part(2)],
+            Turn::MirrorVertical,
+        ),
+    ]);
+}
+
 /// A junction-tool click on the dot where a wire tees into R3's moved
 /// stem took the dot away, though the wires still meet there and automatic
 /// junctions mark that point.
