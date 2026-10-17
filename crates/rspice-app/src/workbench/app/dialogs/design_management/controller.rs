@@ -218,7 +218,7 @@ impl RSpiceApp {
     }
 
     fn publish_design_management_draft(&mut self) -> Result<(), String> {
-        let before = self.state.workspace.content.design_management.clone();
+        let before = (*self.state.workspace.content.design_management).clone();
         let draft = self
             .state
             .dialogs
@@ -239,7 +239,7 @@ impl RSpiceApp {
             .map_err(|error| error.to_string())?;
         self.state
             .apply_design_management_schematic_transaction(&schematic_tx);
-        let candidate = self.state.workspace.content.design_management.clone();
+        let candidate = (*self.state.workspace.content.design_management).clone();
         self.state
             .record_design_management_transaction(DesignManagementHistoryEntry {
                 description: "apply reviewed design-management changes".to_owned(),

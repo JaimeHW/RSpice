@@ -17,13 +17,12 @@ use crate::state::{
 use crate::workbench::lifecycle::project_lifecycle::{
     SaveScope, accepted_generation, effective_save_scope, snapshot,
 };
-use rspice_design::drc::{
-    CheckReach, DrcLocation, DrcSeverity, DrcViolation, run_check_of_cellview,
-};
+use rspice_design::drc::{DrcLocation, DrcSeverity, DrcViolation};
 use rspice_design::hierarchy::HierarchySource;
 use rspice_simulation::netlist_gen::generate_netlist_hierarchical;
 
 use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::design_checks::CheckScope;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -337,13 +336,7 @@ impl CheckAndSaveValidationReport {
         };
         documents.sort_by(|left, right| left.0.cmp(&right.0));
         let root_schematic_key = state.workspace.content.simulation_root_reference().key();
-        // The cellviews the configured root's walk reaches, which it checks
-        // with everything below them as the configuration binds them.
-        let placed_by_root = hierarchy_bindings
-            .iter()
-            .filter(|binding| binding.status.is_resolved())
-            .map(|binding| binding.reference.key().to_ascii_lowercase())
-            .collect::<std::collections::HashSet<_>>();
+        let plan = DesignCheckPlan::of(state);
         // Every defect is stated once. A document in scope states its own
         // findings, below, where they can point at the canvas. A walk through
         // a hierarchy — the configured root's, or an unplaced document's —
@@ -363,33 +356,33 @@ impl CheckAndSaveValidationReport {
                 let configured_hierarchy = configured_hierarchy
                     .as_ref()
                     .expect("a resolved projection binds a hierarchy source");
-                // The configuration the run gate judges the same root under,
-                // so a validated save blocks on exactly what the run refuses.
-                let drc = run_check_of_cellview(
-                    root,
-                    projection.root(),
-                    configured_hierarchy,
-                    state.design_check_config(projection.root()),
-                    CheckReach::Hierarchy,
-                );
-                if !drc.completed {
-                    insert_finding(
+                // Check Design's receipt for the root: the check, the
+                // configuration and the waivers the page lists its findings
+                // under and the run gate judges the root under, so a
+                // validated save blocks on exactly what both say.
+                match plan
+                    .root
+                    .as_ref()
+                    .and_then(|root| state.current_design_check(root, CheckScope::Design))
+                {
+                    Some(drc) => walked_findings.push(WalkedFindings {
+                        key: projection.root().key(),
+                        source: "configured-root checks",
+                        label: "Configured root".to_owned(),
+                        discriminator: "configured-root".to_owned(),
+                        active: root_is_active,
+                        violations: drc.violations().to_vec(),
+                    }),
+                    None => insert_finding(
                         &mut findings,
                         CheckAndSaveFindingLevel::Blocker,
                         "checks",
                         "configured-root:incomplete",
-                        "Design checks did not complete for the configured simulation root."
+                        "Design checks have no result for the configured simulation root as it \
+                         stands."
                             .to_owned(),
-                    );
+                    ),
                 }
-                walked_findings.push(WalkedFindings {
-                    key: projection.root().key(),
-                    source: "configured-root checks",
-                    label: "Configured root".to_owned(),
-                    discriminator: "configured-root".to_owned(),
-                    active: root_is_active,
-                    violations: drc.violations().to_vec(),
-                });
                 let generated = generate_netlist_hierarchical(
                     root,
                     &[],
@@ -473,46 +466,26 @@ impl CheckAndSaveValidationReport {
                 );
             }
             // The root is already checked above, through the configured
-            // hierarchy. Every other document is checked as the projection
-            // materialized it — multi-sheet pages namespaced apart, the active
-            // variant applied — because that is the document a run would read.
-            //
-            // One the root's walk reaches is checked for its own findings
-            // only: the root's walk states what lies below it, bound as the
-            // configuration binds it. One the root does not place is checked
-            // through everything it places, as its own drawing binds it,
-            // because no other walk reaches that.
-            //
-            // Each is checked under the configuration the project checks that
-            // cellview under everywhere else, which is also what decides
-            // whether it is a design of its own that must reach a ground.
+            // hierarchy. Every other document the plan names is read off the
+            // check of it that the plan asks for, published as any check is.
             let projected = projected_document(execution_projection.as_ref().ok(), key)
                 .filter(|_| !key.eq_ignore_ascii_case(&root_schematic_key));
-            let reference = cell_view_reference(key);
-            if let (Some(hierarchy), Some(schematic), Some(reference)) =
-                (configured_hierarchy.as_ref(), projected, reference.as_ref())
-            {
-                let placed = placed_by_root.contains(&key.to_ascii_lowercase());
-                let drc = run_check_of_cellview(
-                    schematic,
-                    reference,
-                    hierarchy,
-                    state.design_check_config(reference),
-                    if placed {
-                        CheckReach::Cellview
-                    } else {
-                        CheckReach::Hierarchy
-                    },
+            let planned = plan
+                .documents
+                .iter()
+                .find(|(reference, _)| reference.key().eq_ignore_ascii_case(key));
+            let checked =
+                planned.map(|(reference, scope)| state.current_design_check(reference, *scope));
+            if let Some(None) = checked {
+                insert_finding(
+                    &mut findings,
+                    CheckAndSaveFindingLevel::Blocker,
+                    "checks",
+                    &format!("{key}:incomplete"),
+                    format!("Design checks have no result for {key} as it stands."),
                 );
-                if !drc.completed {
-                    insert_finding(
-                        &mut findings,
-                        CheckAndSaveFindingLevel::Blocker,
-                        "checks",
-                        &format!("{key}:incomplete"),
-                        format!("Design checks did not complete for {key}."),
-                    );
-                }
+            }
+            if let Some(Some(drc)) = checked {
                 let (below, own): (Vec<_>, Vec<_>) =
                     drc.violations().iter().cloned().partition(|violation| {
                         matches!(violation.location, DrcLocation::InsideInstance { .. })
@@ -527,7 +500,7 @@ impl CheckAndSaveValidationReport {
                             "{key}:{:?}:{:?}:{}",
                             violation.violation_type, violation.location, violation.message
                         ),
-                        format!("{key}: {}", violation.message),
+                        format!("{key}: {}", finding_message(violation)),
                         key.eq_ignore_ascii_case(&active_key)
                             .then(|| violation.location.clone()),
                     );
@@ -606,8 +579,10 @@ impl CheckAndSaveValidationReport {
                 // A finding inside an occurrence says which one, or two
                 // occurrences of one defect read as the same sentence twice.
                 let message = match path {
-                    Some(path) => format!("{}, {path}: {}", walked.label, violation.message),
-                    None => format!("{}: {}", walked.label, violation.message),
+                    Some(path) => {
+                        format!("{}, {path}: {}", walked.label, finding_message(violation))
+                    }
+                    None => format!("{}: {}", walked.label, finding_message(violation)),
                 };
                 insert_located_finding(
                     &mut findings,
@@ -724,6 +699,15 @@ impl CheckAndSaveValidationReport {
             dependencies,
             receipt_digest,
         })
+    }
+
+    /// The report the dialog opens on, its checks run first in a copy of
+    /// `state`, so the state a test built is left as it was.
+    #[cfg(test)]
+    pub(crate) fn validate(state: &AppState) -> Result<Self, String> {
+        let mut state = state.clone();
+        run_design_checks(&mut state);
+        Self::collect(&state)
     }
 
     pub(crate) fn can_save(&self) -> bool {
@@ -1027,6 +1011,106 @@ struct WalkedFindings {
     violations: Vec<DrcViolation>,
 }
 
+/// Run each design check a report decides from that does not describe the
+/// design as it stands, through the one path every check publishes through,
+/// so the page lists what the report reads.
+///
+/// A design checked since its last edit is not checked again, so a report
+/// re-derived at commit reads the evidence the reader reviewed. A check that
+/// cannot run leaves no current result, which the report states as a
+/// blocker of its own.
+pub(crate) fn run_design_checks(state: &mut AppState) {
+    let plan = DesignCheckPlan::of(state);
+    for (subject, scope) in plan
+        .root
+        .map(|root| (root, CheckScope::Design))
+        .into_iter()
+        .chain(plan.documents)
+    {
+        let _ = state.ensure_design_check(subject, scope);
+    }
+}
+
+/// The design checks a report decides from, and how far each reaches.
+///
+/// The configured root is checked as Check Design checks it. Every other
+/// document the save writes is checked as the projection materialized it —
+/// multi-sheet pages namespaced apart, the active variant applied — because
+/// that is the document a run would read: for its own findings where the
+/// root's walk reaches it, since that walk states what lies below it, bound
+/// as the configuration binds it; through everything it places where the
+/// root does not place it, since no other walk reaches that. Each is checked
+/// under the configuration the project checks that cellview under
+/// everywhere else, which is also what decides whether it is a design of its
+/// own that must reach a ground.
+///
+/// Nothing is checked where the configuration does not resolve: the report
+/// states that instead.
+struct DesignCheckPlan {
+    root: Option<CellViewRef>,
+    documents: Vec<(CellViewRef, CheckScope)>,
+}
+
+impl DesignCheckPlan {
+    fn of(state: &AppState) -> Self {
+        let active_view = state.workspace.content.active_schematic_reference();
+        let inspection = state.workspace.inspect_design_projection(
+            &state.library_manager,
+            &active_view,
+            &state.schematic,
+        );
+        let execution = inspection
+            .clone()
+            .and_then(|projection| projection.into_execution());
+        let (Ok(inspection), Ok(execution)) = (inspection, execution) else {
+            return Self {
+                root: None,
+                documents: Vec::new(),
+            };
+        };
+        let root = state.workspace.content.simulation_root_reference();
+        let placed_by_root = inspection
+            .hierarchy_resolution()
+            .bindings
+            .iter()
+            .filter(|binding| binding.status.is_resolved())
+            .map(|binding| binding.reference.key().to_ascii_lowercase())
+            .collect::<std::collections::HashSet<_>>();
+        let mut keys = match effective_save_scope(state, SaveScope::ActiveDocument) {
+            SaveScope::ActiveDocument => vec![active_view.key()],
+            SaveScope::AllDocuments => state
+                .workspace
+                .content
+                .schematic_buffers
+                .keys()
+                .cloned()
+                .chain(std::iter::once(active_view.key()))
+                .collect(),
+        };
+        keys.sort();
+        keys.dedup();
+        let documents = keys
+            .into_iter()
+            .filter(|key| {
+                !key.eq_ignore_ascii_case(&root.key())
+                    && projected_document(Some(&execution), key).is_some()
+            })
+            .filter_map(|key| {
+                let scope = if placed_by_root.contains(&key.to_ascii_lowercase()) {
+                    CheckScope::Cellview
+                } else {
+                    CheckScope::Hierarchy
+                };
+                Some((cell_view_reference(&key)?, scope))
+            })
+            .collect();
+        Self {
+            root: Some(root),
+            documents,
+        }
+    }
+}
+
 /// What makes two design-check findings one defect: the rule, the cellview it
 /// is drawn in, and the object it names there. A finding below the checked
 /// cellview names that cellview and object inside the occurrence; the path is
@@ -1044,11 +1128,23 @@ fn defect_identity(violation: &DrcViolation, checked: &str) -> String {
     )
 }
 
+/// A finding blocks the save when it counts as an error. A waived one is
+/// listed, as the page lists it, and blocks nothing: it used to block like
+/// any other, so a waiver the page and the run honoured still stopped a save.
 fn finding_level(violation: &DrcViolation) -> CheckAndSaveFindingLevel {
-    if violation.severity >= DrcSeverity::Error {
+    if violation.counts() && violation.severity >= DrcSeverity::Error {
         CheckAndSaveFindingLevel::Blocker
     } else {
         CheckAndSaveFindingLevel::Advisory
+    }
+}
+
+/// What a finding says, and that a waiver covers it where one does.
+fn finding_message(violation: &DrcViolation) -> std::borrow::Cow<'_, str> {
+    if violation.counts() {
+        std::borrow::Cow::Borrowed(&violation.message)
+    } else {
+        std::borrow::Cow::Owned(format!("{} (waived)", violation.message))
     }
 }
 
@@ -1110,7 +1206,7 @@ mod tests {
                 .get(ComponentType::CellInstance)
                 .is_none()
         );
-        let report = CheckAndSaveValidationReport::collect(&state).unwrap();
+        let report = CheckAndSaveValidationReport::validate(&state).unwrap();
         let parameters = report
             .blockers()
             .iter()
@@ -1122,7 +1218,7 @@ mod tests {
     #[test]
     fn omitted_instances_do_not_reappear_in_validated_save_hierarchy_findings() {
         let mut state = crate::workbench::examples::hierarchy_reference::build().state;
-        let baseline = CheckAndSaveValidationReport::collect(&state).unwrap();
+        let baseline = CheckAndSaveValidationReport::validate(&state).unwrap();
         assert!(
             baseline
                 .blockers()
@@ -1131,7 +1227,7 @@ mod tests {
         );
         crate::workbench::examples::hierarchy_reference::omit_missing_instance(&mut state);
         let authored = serde_json::to_value(&state.schematic).unwrap();
-        let report = CheckAndSaveValidationReport::collect(&state).unwrap();
+        let report = CheckAndSaveValidationReport::validate(&state).unwrap();
         assert!(
             report
                 .blockers()
@@ -1146,15 +1242,107 @@ mod tests {
     #[test]
     fn validation_is_deterministic_and_stales_after_design_change() {
         let mut state = AppState::default();
+        run_design_checks(&mut state);
         let first = CheckAndSaveValidationReport::collect(&state).expect("first report");
+        // As the commit re-derives it: the checks still describe the design.
+        run_design_checks(&mut state);
         let second = CheckAndSaveValidationReport::collect(&state).expect("second report");
         assert_eq!(first.receipt_digest(), second.receipt_digest());
 
         state
             .schematic
             .add_component(ComponentType::Resistor, Point::new(10, 10));
+        let unchecked = CheckAndSaveValidationReport::collect(&state).expect("unchecked report");
+        assert!(
+            unchecked
+                .blockers()
+                .iter()
+                .any(|finding| finding.source == "checks"
+                    && finding.message.contains("configured simulation root")),
+            "a design the checks no longer describe is not saved on their word"
+        );
+        run_design_checks(&mut state);
         let changed = CheckAndSaveValidationReport::collect(&state).expect("changed report");
         assert_ne!(first.receipt_digest(), changed.receipt_digest());
+    }
+
+    /// The report reads the checks the page lists, under the waivers the page
+    /// states them under: a waived error is listed and blocks nothing.
+    #[test]
+    fn a_save_decides_from_the_checks_the_page_lists_and_waivers_count() {
+        use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
+        use crate::workbench::app_state::waivers::WaiverAction;
+
+        let mut state = AppState::default();
+        state.project_lifecycle.authority.open_session();
+        // An open pin is an error under this deck, and one a waiver may cover.
+        state
+            .workspace
+            .content
+            .design_rules
+            .set_severity(
+                rspice_design::drc::DrcViolationType::UnconnectedPin,
+                DrcSeverity::Error,
+            )
+            .expect("an open pin may be promoted");
+        state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(10, 10));
+        run_design_checks(&mut state);
+        let report = CheckAndSaveValidationReport::collect(&state).expect("report");
+        let root = state.workspace.content.simulation_root_reference();
+        let published = state
+            .diagnostics
+            .batch(&DiagnosticInputs::DesignCheck { subject: root })
+            .expect("the checks the report read are on the page")
+            .records
+            .clone();
+        let rule_blockers = |report: &CheckAndSaveValidationReport| {
+            report
+                .blockers()
+                .iter()
+                .filter(|finding| {
+                    finding.source == "configured-root checks" || finding.source == "design checks"
+                })
+                .count()
+        };
+        let errors = published
+            .iter()
+            .filter(|record| record.level.is_error())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rule_blockers(&report),
+            errors.len(),
+            "{:?}",
+            report.blockers()
+        );
+
+        let targets = errors
+            .iter()
+            .filter_map(|record| match &record.waiver_action {
+                Some(WaiverAction::Waive(target)) => Some(target.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(!targets.is_empty(), "{errors:?}");
+        for target in &targets {
+            state
+                .waive_finding(target, "accepted for this design")
+                .expect("the waiver is recorded");
+        }
+        run_design_checks(&mut state);
+        let waived = CheckAndSaveValidationReport::collect(&state).expect("waived report");
+        assert_eq!(rule_blockers(&waived), errors.len() - targets.len());
+        assert_eq!(
+            waived
+                .advisories()
+                .iter()
+                .filter(|finding| finding.message.ends_with("(waived)"))
+                .count(),
+            targets.len(),
+            "{:?}",
+            waived.advisories()
+        );
     }
 
     #[test]
@@ -1163,7 +1351,7 @@ mod tests {
         state
             .schematic
             .add_component(ComponentType::Resistor, Point::new(10, 10));
-        let report = CheckAndSaveValidationReport::collect(&state).expect("report");
+        let report = CheckAndSaveValidationReport::validate(&state).expect("report");
         assert!(!report.can_save());
         assert!(
             report
@@ -1189,7 +1377,7 @@ mod tests {
             .expect("the placed resistor is retained");
         placed.name = "Q1".to_owned();
 
-        let report = CheckAndSaveValidationReport::collect(&state).expect("report");
+        let report = CheckAndSaveValidationReport::validate(&state).expect("report");
         // One refused designator is one finding. The netlister writes this
         // resistor as `RQ1` and the run starts, so it advises rather than
         // blocks.
@@ -1254,7 +1442,7 @@ mod tests {
             .add_library_cell_component(Point::new(300, 0), placed("mid"));
         state.sync_active_schematic_to_workspace();
 
-        let report = CheckAndSaveValidationReport::collect(&state).expect("report");
+        let report = CheckAndSaveValidationReport::validate(&state).expect("report");
         assert_eq!(report.effective_scope, SaveScope::AllDocuments);
 
         let open_legs = report
@@ -1391,7 +1579,7 @@ mod tests {
             })
             .expect("the fixture configuration is well formed");
 
-        let report = CheckAndSaveValidationReport::collect(&state).expect("report");
+        let report = CheckAndSaveValidationReport::validate(&state).expect("report");
 
         assert!(
             report
@@ -1473,7 +1661,7 @@ mod tests {
             .insert_schematic_editor("work/buffer/schematic".to_owned(), buffer);
         state.sync_active_schematic_to_workspace();
 
-        let report = CheckAndSaveValidationReport::collect(&state).expect("report");
+        let report = CheckAndSaveValidationReport::validate(&state).expect("report");
         assert_eq!(report.effective_scope, SaveScope::AllDocuments);
 
         let loops = report
@@ -1509,7 +1697,7 @@ mod tests {
     #[test]
     fn first_save_discloses_all_document_scope() {
         let state = AppState::default();
-        let report = CheckAndSaveValidationReport::collect(&state).expect("report");
+        let report = CheckAndSaveValidationReport::validate(&state).expect("report");
         assert_eq!(report.effective_scope, SaveScope::AllDocuments);
         assert!(
             report
@@ -1562,7 +1750,7 @@ mod tests {
             .expect("the placed instance is retained")
             .name = "X1".to_owned();
 
-        let report = CheckAndSaveValidationReport::collect(&state).expect("report");
+        let report = CheckAndSaveValidationReport::validate(&state).expect("report");
 
         assert_eq!(report.stale_interface_instances().len(), 1);
         assert_eq!(report.stale_interface_instances()[0], "X1");
@@ -1637,7 +1825,7 @@ mod tests {
     fn a_configuration_honoured_differently_than_it_reads_is_an_advisory() {
         let state = state_with_a_stop_view_warning();
 
-        let report = CheckAndSaveValidationReport::collect(&state).expect("report");
+        let report = CheckAndSaveValidationReport::validate(&state).expect("report");
 
         assert!(
             report.advisories().iter().any(|finding| {
@@ -1675,7 +1863,7 @@ mod tests {
             })
             .expect("the fixture configuration is well formed");
 
-        let report = CheckAndSaveValidationReport::collect(&state).expect("report");
+        let report = CheckAndSaveValidationReport::validate(&state).expect("report");
 
         assert!(
             report

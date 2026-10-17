@@ -304,6 +304,33 @@ impl<'a> DiagnosticListing<'a> {
         self.segments.iter().map(Segment::len).sum()
     }
 
+    /// How many rows the store's own batches hold. They come first, so every
+    /// index from here on is an editor's finding, read in place.
+    pub(in crate::workbench) fn stored_len(&self) -> usize {
+        self.segments
+            .iter()
+            .filter(|segment| matches!(segment, Segment::Stored { .. }))
+            .map(Segment::len)
+            .sum()
+    }
+
+    /// What the store's rows say about themselves, without a walk: each
+    /// batch's fingerprint, folded from its records when it was published, and
+    /// whether it stands current. Two listings with equal stamps list the same
+    /// stored rows the same way — a batch republished unchanged included —
+    /// which is what lets a reader skip walking them.
+    pub(in crate::workbench) fn stored_stamp(&self) -> Vec<(u64, bool)> {
+        self.segments
+            .iter()
+            .filter_map(|segment| match segment {
+                Segment::Stored { batch, standing } => {
+                    Some((batch.fingerprint, standing.is_current()))
+                }
+                Segment::Netlist { .. } | Segment::Code { .. } => None,
+            })
+            .collect()
+    }
+
     pub(in crate::workbench) const fn counts(&self) -> DiagnosticCounts {
         self.counts
     }
@@ -568,9 +595,8 @@ fn netlist_location(
 
 /// Assemble the list for the design in front of the reader.
 ///
-/// Every batch's standing is decided here, from the live design, which is
-/// exact and is not free: a design-check digest encodes and hashes the
-/// working set it covers. A surface drawn every frame reads
+/// Every batch's standing is decided here, from the live design, through the
+/// store's digest memo. A surface drawn every frame reads
 /// [`listing_in_pass`] instead, which decides them once per pass.
 pub(in crate::workbench) fn listing(state: &AppState) -> DiagnosticListing<'_> {
     if !state.project_lifecycle.is_open() {
@@ -603,9 +629,9 @@ pub(in crate::workbench) fn listing(state: &AppState) -> DiagnosticListing<'_> {
 /// mid-pass is never read with another batch's standing. Within one pass an
 /// edit to the design is not reflected until the next pass, which every
 /// edit requests; that is the price, and a frame that agrees with itself is
-/// what it buys. Across passes nothing is reused, because nothing in the
-/// session counts every change to every input a digest covers, and a memo
-/// whose key missed one would be a staleness bug.
+/// what it buys. Across passes each batch's digest is reused from the
+/// store's [digest memo](super::digest_memo) while the stamps and revisions
+/// it read stand, so a pass in which nothing was edited digests nothing.
 pub(in crate::workbench) fn listing_in_pass(state: &AppState, pass: u64) -> DiagnosticListing<'_> {
     if !state.project_lifecycle.is_open() {
         return closed_listing();
@@ -931,6 +957,7 @@ mod tests {
             inputs,
             input_digest: crate::product::ContentDigest::from_bytes([0; 32]),
             records: Vec::new(),
+            fingerprint: 0,
         };
         let dispatch = empty(DiagnosticInputs::Dispatch);
         let run = empty(DiagnosticInputs::Run { run_sequence: 4 });
@@ -1059,7 +1086,7 @@ mod tests {
         assert_eq!(
             row.standing,
             RowStanding::Stale(format!(
-                "the schematic working set behind {} has changed since this was reported",
+                "a cellview or binding the check of {} read has changed since this was reported",
                 subject.display_path()
             )),
             "a stale row says in one clause what moved under it, not merely that it is stale",
@@ -1257,6 +1284,7 @@ mod tests {
             inputs: DiagnosticInputs::Dispatch,
             input_digest: crate::product::ContentDigest::from_bytes([0; 32]),
             records: vec![record(&state, "T-ERROR", DiagnosticLevel::Error)],
+            fingerprint: 0,
         };
         let segments = vec![Segment::Stored {
             batch: &batch,

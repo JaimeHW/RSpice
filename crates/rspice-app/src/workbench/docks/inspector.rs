@@ -441,7 +441,7 @@ fn project_overview(ui: &mut Ui, app: &mut RSpiceApp) {
         ),
     );
 
-    let check_status = app.state.project_root_design_check_status();
+    let check_status = app.state.simulation_root_design_check_status();
     let check_meta = match &check_status {
         DesignCheckStatus::Current(_) => None,
         DesignCheckStatus::NotRun => Some("not run"),

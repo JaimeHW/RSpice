@@ -303,6 +303,7 @@ pub fn location_key(location: &DrcLocation) -> String {
             )
         }
         DrcLocation::Global => "global".to_owned(),
+        DrcLocation::CellView { reference } => format!("cellview:{}", reference.key()),
         DrcLocation::SymbolPin {
             reference,
             pin_name,
@@ -325,6 +326,8 @@ pub fn waiver_site(location: &DrcLocation) -> (Option<&CellViewRef>, String) {
             (Some(deeper), object) => (Some(deeper), object),
             (None, object) => (Some(view), object),
         },
+        // About the cellview itself, so it would be stored there.
+        DrcLocation::CellView { reference } => (Some(reference), "cellview".to_owned()),
         other => (None, location_key(other)),
     }
 }
@@ -402,6 +405,33 @@ impl CheckWaivers {
                         && violation.violation_type.rule_code() == waiver.rule
                 })
             })
+            .collect()
+    }
+
+    /// Every waiver this check applies that covers none of the findings in
+    /// `result`, with the cellview it is stored with: `None` for the checked
+    /// cellview, whose own come first, then each instantiated cellview's in
+    /// the order of its key. A waiver stored with an instantiated cellview is
+    /// matched by a finding at any occurrence of it.
+    pub fn unmatched_anywhere<'a>(
+        &'a self,
+        result: &DrcResult,
+    ) -> Vec<(Option<&'a CanonicalCellViewOwnerKey>, &'a DrcWaiver)> {
+        let covers = |waiver: &DrcWaiver| {
+            result.violations().iter().any(|violation| {
+                self.covering(violation)
+                    .is_some_and(|covering| std::ptr::eq(covering, waiver))
+            })
+        };
+        let mut instantiated = self.instantiated.iter().collect::<Vec<_>>();
+        instantiated.sort_by(|(left, _), (right, _)| left.cmp(right));
+        self.subject
+            .iter()
+            .map(|waiver| (None, waiver))
+            .chain(instantiated.into_iter().flat_map(|(cellview, waivers)| {
+                waivers.iter().map(move |waiver| (Some(cellview), waiver))
+            }))
+            .filter(|(_, waiver)| !covers(waiver))
             .collect()
     }
 }
@@ -634,6 +664,38 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["component:6"]
         );
+    }
+
+    /// Across the design, a waiver stored with an instantiated cellview is
+    /// matched by its finding at any occurrence, and one matched nowhere is
+    /// reported with the cellview it is stored with.
+    #[test]
+    fn a_waiver_matched_at_no_occurrence_is_unmatched_where_it_is_stored() {
+        let amp = CellViewRef::new("work", "amp", "schematic");
+        let applied =
+            CheckWaivers::for_subject(&stored(&[waiver("DRC-FLOATING-NODE", "component:1")]))
+                .instantiating(
+                    &amp,
+                    &stored(&[
+                        waiver("DRC-FLOATING-NODE", "component:5"),
+                        waiver("DRC-FLOATING-NODE", "component:6"),
+                    ]),
+                );
+        let mut result = DrcResult::new();
+        result.add_violation(finding(
+            DrcViolationType::FloatingNode,
+            DrcLocation::InsideInstance {
+                path: InstancePath::parse("/X2").expect("an instance path"),
+                view: amp.clone(),
+                inner: Box::new(component(5)),
+            },
+        ));
+        let unmatched = applied
+            .unmatched_anywhere(&result)
+            .into_iter()
+            .map(|(stored_with, waiver)| (stored_with.is_some(), waiver.object.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(unmatched, [(false, "component:1"), (true, "component:6")]);
     }
 
     /// A waiver has to say why, and the reason is stored as written, less

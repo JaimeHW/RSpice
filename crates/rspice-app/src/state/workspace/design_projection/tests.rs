@@ -121,7 +121,7 @@ fn workspace_with_two_cell_views() -> (
             owner: "projection fixture".to_owned(),
         })
         .expect("the fixture configuration is well formed");
-    workspace.content.configuration_sets = catalog;
+    *workspace.content.configuration_sets = catalog;
 
     (workspace, libraries, active_reference, top)
 }

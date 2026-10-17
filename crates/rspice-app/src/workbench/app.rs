@@ -1445,7 +1445,7 @@ impl eframe::App for RSpiceApp {
         self.autosave_tick(&ctx);
         self.render_frame_chrome(ui);
         self.render_secondary_application_windows(&ctx);
-        self.refresh_incremental_connectivity_checks();
+        self.refresh_live_checks(&ctx);
         self.render_frame_dialogs(&ctx);
         self.end_frame(&simulation_input_before_frame);
     }

@@ -1196,7 +1196,7 @@ fn apply_sheet_format_manager(app: &mut RSpiceApp) -> Result<String, String> {
         })
         .map_err(|error| error.to_string())?;
     format = format.without_project_owned_title_values();
-    let before = app.state.workspace.content.design_management.clone();
+    let before = (*app.state.workspace.content.design_management).clone();
     let mut candidate = before.clone();
     let mut changed = 0_usize;
     let mut applied_sheet_ids = Vec::new();
@@ -1422,7 +1422,7 @@ fn apply_title_block_fields(app: &mut RSpiceApp) -> Result<String, String> {
             }
         })
         .map_err(|error| error.to_string())?;
-    let before = app.state.workspace.content.design_management.clone();
+    let before = (*app.state.workspace.content.design_management).clone();
     let mut candidate = before.clone();
     let mut project_settings = candidate.drawing_sheet_settings().clone();
     let project_changed = project_settings.title_block_field_values != transaction.draft_project;
@@ -1495,7 +1495,7 @@ fn commit_candidate(
         .map_err(|error| error.to_string())?;
     app.state
         .apply_design_management_schematic_transaction(&schematic_tx);
-    let after = app.state.workspace.content.design_management.clone();
+    let after = (*app.state.workspace.content.design_management).clone();
     app.state
         .record_design_management_transaction(DesignManagementHistoryEntry {
             description: description.to_owned(),

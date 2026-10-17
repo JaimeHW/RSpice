@@ -21,7 +21,7 @@ impl Schematic {
 
     pub fn clone_with_hierarchy_document(&self, candidate: HierarchyDocument) -> Self {
         Self {
-            document: candidate.document,
+            document: candidate.document.into(),
             identity: candidate.identity,
             topology_version: self
                 .topology_version
@@ -33,7 +33,7 @@ impl Schematic {
 
     pub fn from_hierarchy_document(candidate: HierarchyDocument) -> Self {
         Self {
-            document: candidate.document,
+            document: candidate.document.into(),
             identity: candidate.identity,
             topology_version: candidate.topology_changes,
             content_version: 0,

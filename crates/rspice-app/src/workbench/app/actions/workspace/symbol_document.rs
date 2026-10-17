@@ -169,6 +169,28 @@ impl AppState {
             .unwrap_or_default()
     }
 
+    /// The [stamp](rspice_design::stamped) of the drawing [`Self::symbol_ports`]
+    /// reads the contract from first, or `None` where it reads only the
+    /// library, whose revision covers the rest.
+    ///
+    /// Beside [`Self::symbol_ports`] because it must take the same branches:
+    /// a stamp of any other drawing would let an edit to the contract leave
+    /// the pin findings reading current.
+    pub(in crate::workbench) fn symbol_contract_stamp(
+        &self,
+        reference: &CellViewRef,
+    ) -> Option<u64> {
+        let schematic_ref = CellViewRef::new(&reference.library, &reference.cell, "schematic");
+        if self.workspace.content.active_view == schematic_ref {
+            return Some(self.schematic.content_stamp());
+        }
+        self.workspace
+            .content
+            .schematic_buffers
+            .get(&schematic_ref.key())
+            .map(|schematic| schematic.content_stamp())
+    }
+
     pub(crate) fn load_active_symbol_document(&self) -> Result<SymbolDocument, String> {
         self.load_symbol_document(&self.workspace.content.active_view)
     }

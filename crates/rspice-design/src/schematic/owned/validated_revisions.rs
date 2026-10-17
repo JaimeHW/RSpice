@@ -58,7 +58,7 @@ impl Schematic {
             connections,
             validated_revisions,
             ..
-        } = &mut self.document;
+        } = &mut *self.document;
         let source = ValidatedRevisionSource {
             grid_size: *grid_size,
             document_policy: *document_policy,

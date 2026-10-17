@@ -205,7 +205,16 @@ pub enum Command {
     /// canvas context menu, the instance inspector and the design navigator
     /// all route here rather than each moving the workspace themselves.
     ShowInNetlist,
-    RunChecks,
+    /// The open cellview's own findings: what an author runs while drawing.
+    /// A symbol view checks its pins against the cell's interface.
+    CheckCellview,
+    /// The whole design, walked from the simulation root under its
+    /// configuration, with every cellview of the project's own libraries the
+    /// walk never reaches.
+    CheckDesign,
+    /// Check Design, then its findings written out for sign-off: a summary
+    /// with the verdict and a CSV of every finding.
+    ExportSignoffReport,
     CheckAndSave,
     ClearChecks,
     NextViolation,
@@ -364,6 +373,11 @@ impl Command {
         }
         if id == "visualization-document-properties" {
             return Some(Self::VisualizationDocumentProperties);
+        }
+        // The one check command became two; a shortcut bound to it keeps
+        // checking the cellview in front of the reader.
+        if id == "run-checks" {
+            return Some(Self::CheckCellview);
         }
         COMMAND_REGISTRY
             .iter()
@@ -712,7 +726,11 @@ impl Command {
                 "Design",
             ),
             Self::ShowInNetlist => spec("show-in-netlist", "Show in netlist", "Design"),
-            Self::RunChecks => spec("run-checks", "Run schematic checks", "Design"),
+            Self::CheckCellview => spec("check-cellview", "Check cellview", "Design"),
+            Self::CheckDesign => spec("check-design", "Check design", "Design"),
+            Self::ExportSignoffReport => {
+                spec("export-signoff-report", "Export sign-off report…", "Design")
+            }
             Self::CheckAndSave => spec("check-and-save", "Check and save", "Design"),
             Self::ClearChecks => spec("clear-checks", "Clear check results", "Design"),
             Self::NextViolation => spec("next-violation", "Next violation", "Verify"),
@@ -1300,7 +1318,9 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::DescendHierarchy,
     Command::DescendHierarchyDirect,
     Command::ShowInNetlist,
-    Command::RunChecks,
+    Command::CheckCellview,
+    Command::CheckDesign,
+    Command::ExportSignoffReport,
     Command::CheckAndSave,
     Command::ClearChecks,
     Command::NextViolation,

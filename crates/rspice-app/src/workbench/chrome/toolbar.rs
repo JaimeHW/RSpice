@@ -633,9 +633,17 @@ fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     toolbar_text_command(
         ui,
         app,
-        Command::RunChecks,
+        Command::CheckCellview,
         WorkbenchIcon::Check,
-        "Run schematic checks",
+        "Check cellview",
+        layout,
+    );
+    toolbar_text_command(
+        ui,
+        app,
+        Command::CheckDesign,
+        WorkbenchIcon::Check,
+        "Check design",
         layout,
     );
 }

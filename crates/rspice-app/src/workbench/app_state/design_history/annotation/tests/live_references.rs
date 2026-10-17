@@ -73,12 +73,13 @@ fn bulk_annotation_revision_exhaustion_preserves_source_and_history() {
         .unwrap();
     let mut definition = configuration.definition().clone();
     definition.dut_path = "/".to_owned();
+    let revision = configuration.revision();
     fixture
         .state
         .workspace
         .content
         .configuration_sets
-        .update(fixture.configuration, configuration.revision(), definition)
+        .update(fixture.configuration, revision, definition)
         .unwrap();
     let mut project = serde_json::to_value(&fixture.state.workspace.content.project).unwrap();
     project["revision"] = serde_json::json!(u64::MAX - 1);
@@ -352,8 +353,9 @@ fn bulk_annotation_history_includes_new_plan_outputs_in_both_directions() {
     let configuration = catalog.find(fixture.configuration).unwrap();
     let mut definition = configuration.definition().clone();
     definition.dut_path = "/".to_owned();
+    let revision = configuration.revision();
     catalog
-        .update(fixture.configuration, configuration.revision(), definition)
+        .update(fixture.configuration, revision, definition)
         .unwrap();
     publish(&mut fixture);
     let first = add_output(&mut fixture.state, fixture.plan, "I(V1)");

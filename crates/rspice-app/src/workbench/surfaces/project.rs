@@ -405,14 +405,10 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
             Command::OpenWorkspace(Workspace::Netlist).execute(app);
         }
     } else {
-        let root = crate::state::CellViewRef::new(
-            &app.state.workspace.content.project.root_library,
-            &app.state.workspace.content.project.top_cell,
-            crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
-        );
+        let root = app.state.workspace.content.simulation_root_reference();
         let (checks_label, checks_description, checks_problem) = match app
             .state
-            .project_root_design_check_status()
+            .simulation_root_design_check_status()
         {
             DesignCheckStatus::Current(receipt) => {
                 let summary = receipt.result.summary();
@@ -454,8 +450,8 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
         {
             app.state.open_workspace_view(root);
             Command::OpenWorkspace(Workspace::Design).execute(app);
-            if Command::RunChecks.is_enabled(app) {
-                Command::RunChecks.execute(app);
+            if Command::CheckDesign.is_enabled(app) {
+                Command::CheckDesign.execute(app);
             }
         }
     }

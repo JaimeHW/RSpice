@@ -274,7 +274,7 @@ fn apply_context_intent(ctx: &Context, app: &mut RSpiceApp, intent: ContextInten
 }
 
 fn activate_configuration(app: &mut RSpiceApp, id: ConfigurationSetId) -> Result<String, String> {
-    let current = &app.state.workspace.content.configuration_sets;
+    let current: &ConfigurationSetCatalog = &app.state.workspace.content.configuration_sets;
     let selected = current
         .find(id)
         .ok_or_else(|| "The selected configuration no longer exists.".to_owned())?;
@@ -307,7 +307,7 @@ fn validate_candidate_configuration(
     catalog: &ConfigurationSetCatalog,
 ) -> Result<(), String> {
     let mut workspace = app.state.workspace.clone();
-    workspace.content.configuration_sets = catalog.clone();
+    *workspace.content.configuration_sets = catalog.clone();
     let projection = workspace
         .configuration_execution_projection(
             &app.state.library_manager,

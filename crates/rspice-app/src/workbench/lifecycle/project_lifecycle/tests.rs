@@ -1679,7 +1679,7 @@ fn close_active_document_is_presentation_only() {
 #[cfg(not(target_arch = "wasm32"))]
 fn add_sheet(state: &mut AppState, reference: &CellViewRef, name: &str) {
     let key = reference.key();
-    let mut candidate = state.workspace.content.design_management.clone();
+    let mut candidate = (*state.workspace.content.design_management).clone();
     let catalog = candidate
         .sheet_catalog_mut(&key)
         .expect("the cell view is governed");

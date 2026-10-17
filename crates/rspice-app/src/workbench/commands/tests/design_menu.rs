@@ -89,6 +89,57 @@ fn design_menu_commands_explain_wrong_context_and_read_only_states() {
     );
 }
 
+/// The one check command became two, and a shortcut profile that bound the
+/// old one keeps checking the cellview in front of the reader.
+#[test]
+fn the_check_commands_name_their_reach_and_keep_the_check_family_keys() {
+    assert_eq!(Command::CheckCellview.stable_id(), "check-cellview");
+    assert_eq!(Command::CheckCellview.spec().label, "Check cellview");
+    assert_eq!(Command::CheckDesign.stable_id(), "check-design");
+    assert_eq!(Command::CheckDesign.spec().label, "Check design");
+    assert_eq!(
+        Command::from_stable_id("run-checks"),
+        Some(Command::CheckCellview)
+    );
+    for command in [Command::CheckCellview, Command::CheckDesign] {
+        assert_eq!(command.spec().group, "Design");
+        assert!(command.palette_visible(), "{command:?}");
+        assert!(
+            vocabulary::COMMAND_REGISTRY.contains(&command),
+            "{command:?}"
+        );
+    }
+    // The cellview check keeps the key the one check had, beside Check and
+    // Save's; the design check takes no chord the family has left, because
+    // Ctrl+Alt+E is AltGr+E on most European layouts.
+    assert_eq!(
+        Command::CheckCellview.shortcut_bindings()[0].chord.label,
+        "Ctrl+E"
+    );
+    assert_eq!(
+        Command::CheckAndSave.shortcut_bindings()[0].chord.label,
+        "Ctrl+Shift+E"
+    );
+    assert!(Command::CheckDesign.shortcut_bindings().is_empty());
+}
+
+/// Check Design checks the configured design whichever view is open; Check
+/// Cellview needs a drawing in front of the reader.
+#[test]
+fn check_design_is_offered_wherever_a_project_is_open() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.authority.open_session();
+    app.state.workbench.activate(Workspace::Results);
+    assert!(Command::CheckDesign.is_enabled(&app));
+    assert!(!Command::CheckCellview.is_enabled(&app));
+
+    app.state.workbench.activate(Workspace::Design);
+    assert!(Command::CheckCellview.is_enabled(&app));
+
+    app.state.project_lifecycle.authority.close_project();
+    assert!(!Command::CheckDesign.is_enabled(&app));
+}
+
 #[test]
 fn check_and_save_obeys_write_authority_and_opens_its_real_workflow() {
     let mut app = RSpiceApp::test_instance();

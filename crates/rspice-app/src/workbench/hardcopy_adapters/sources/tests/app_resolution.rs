@@ -73,14 +73,12 @@ fn ungoverned_current_sheet_and_worker_use_the_canvas_project_default() {
         DrawingSheetTitleFieldId::Organization,
         "RSpice Engineering".to_owned(),
     );
+    let revision = state.workspace.content.design_management.revision();
     state
         .workspace
         .content
         .design_management
-        .update_drawing_sheet_settings(
-            state.workspace.content.design_management.revision(),
-            settings,
-        )
+        .update_drawing_sheet_settings(revision, settings)
         .unwrap();
     assert!(
         state

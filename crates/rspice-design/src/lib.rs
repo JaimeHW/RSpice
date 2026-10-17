@@ -19,6 +19,7 @@ pub mod references;
 pub mod resolved_symbol;
 pub mod rf_ports;
 pub mod schematic;
+pub mod stamped;
 pub mod symbol;
 #[cfg(feature = "symbol-artwork")]
 pub mod symbol_artwork;

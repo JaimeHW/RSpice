@@ -256,7 +256,7 @@ pub(crate) fn open_connectivity_manager(state: &mut AppState) {
     }
     crate::schematic::view::retain_selection_on_active_sheet(state);
     state.sync_active_schematic_to_workspace();
-    let contract = state.workspace.content.connectivity.clone();
+    let contract = (*state.workspace.content.connectivity).clone();
     let (report, error) = match build_report(state, &contract.policy) {
         Ok(report) => (report, None),
         Err(error) => (ConnectivityReport::default(), Some(error)),
@@ -602,6 +602,7 @@ fn violation_targets_net(violation: &DrcViolation, net: &DesignNet) -> bool {
         | DrcLocation::Bus { .. }
         | DrcLocation::BusTap { .. }
         | DrcLocation::Global
+        | DrcLocation::CellView { .. }
         | DrcLocation::SymbolPin { .. } => false,
     }
 }
@@ -616,7 +617,7 @@ fn build_global_rows(
     policy: &ConnectivityPolicy,
     projection: &DesignProjection,
 ) -> Vec<GlobalNetRow> {
-    let mut preview_contract = state.workspace.content.connectivity.clone();
+    let mut preview_contract = (*state.workspace.content.connectivity).clone();
     preview_contract.policy = policy.clone();
     let contract = &preview_contract;
     let mut declarations = Vec::<LabelOccurrence>::new();
@@ -1146,10 +1147,10 @@ impl RSpiceApp {
             ConnectivityBodyAction::None => {}
             ConnectivityBodyAction::Refresh => {
                 self.state.sync_active_schematic_to_workspace();
-                let contract_changed = self.state.workspace.content.connectivity
+                let contract_changed = *self.state.workspace.content.connectivity
                     != self.state.dialogs.connectivity_manager.contract_at_open;
                 if contract_changed {
-                    let contract = self.state.workspace.content.connectivity.clone();
+                    let contract = (*self.state.workspace.content.connectivity).clone();
                     self.state.dialogs.connectivity_manager.policy = contract.policy.clone();
                     self.state.dialogs.connectivity_manager.contract_at_open = contract;
                 }
@@ -1363,7 +1364,7 @@ impl RSpiceApp {
         if selected.is_empty() && !policy_changed {
             return Err("Select at least one validated repair or change a policy.".to_owned());
         }
-        let mut contract_candidate = self.state.workspace.content.connectivity.clone();
+        let mut contract_candidate = (*self.state.workspace.content.connectivity).clone();
         contract_candidate.policy = dialog.policy.clone();
         validate_policy_authority(&contract_candidate.policy, &contract_candidate)?;
         contract_candidate.validate()?;
@@ -1390,7 +1391,7 @@ impl RSpiceApp {
             self.state.sync_active_schematic_to_workspace();
         }
         if policy_changed {
-            self.state.workspace.content.connectivity = contract_candidate;
+            *self.state.workspace.content.connectivity = contract_candidate;
             self.state.workspace.content.project_metadata_dirty = true;
         }
         self.invalidate_simulation_preflight();
@@ -1404,7 +1405,7 @@ impl RSpiceApp {
         let dialog = &mut self.state.dialogs.connectivity_manager;
         dialog.report = report;
         dialog.authority = Some(authority);
-        dialog.contract_at_open = self.state.workspace.content.connectivity.clone();
+        dialog.contract_at_open = (*self.state.workspace.content.connectivity).clone();
         dialog.policy = policy;
         dialog.selected_repairs.clear();
         dialog.error = None;
@@ -1431,11 +1432,11 @@ impl RSpiceApp {
             return Err("The active schematic or project is read-only.".to_owned());
         }
         let declaration = validate_bus_draft(&self.state.dialogs.connectivity_manager)?;
-        let mut contract = self.state.workspace.content.connectivity.clone();
+        let mut contract = (*self.state.workspace.content.connectivity).clone();
         contract.policy = self.state.dialogs.connectivity_manager.policy.clone();
         validate_policy_authority(&contract.policy, &contract)?;
         contract.validate()?;
-        self.state.workspace.content.connectivity = contract;
+        *self.state.workspace.content.connectivity = contract;
         self.state.workspace.content.project_metadata_dirty = true;
         self.state.schematic.session.editor.bus_drawing.cancel();
         self.state.schematic.session.editor.bus_drawing.declaration = Some(declaration);
@@ -1505,7 +1506,7 @@ fn connectivity_authority_error(state: &AppState) -> Option<String> {
             .snapshot
             .is_equal_document(state.schematic.document())
         || state.dialogs.connectivity_manager.contract_at_open
-            != state.workspace.content.connectivity;
+            != *state.workspace.content.connectivity;
     stale.then(|| {
         "The design changed after this report was extracted. Refresh the report before applying repairs or creating a bus.".to_owned()
     })
@@ -1693,6 +1694,7 @@ fn reveal_drc_location(schematic: &mut SchematicState, location: &DrcLocation) {
         // Centring on the instance would claim it is.
         DrcLocation::InsideInstance { .. }
         | DrcLocation::Global
+        | DrcLocation::CellView { .. }
         | DrcLocation::SymbolPin { .. } => {}
     }
 }

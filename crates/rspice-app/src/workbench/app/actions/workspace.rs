@@ -642,7 +642,7 @@ impl AppState {
             .is_some_and(|catalog| !catalog.cross_sheet_ports().is_empty())
             .then(|| {
                 (
-                    self.workspace.content.design_management.clone(),
+                    (*self.workspace.content.design_management).clone(),
                     self.workspace
                         .clone_schematic_editor(&active.key())
                         .unwrap_or_else(|| self.schematic.clone()),
@@ -681,7 +681,7 @@ impl AppState {
         let Some((before, before_schematic)) = before.filter(|_| removed_ports > 0) else {
             return;
         };
-        let after = self.workspace.content.design_management.clone();
+        let after = (*self.workspace.content.design_management).clone();
         self.record_design_management_transaction(DesignManagementHistoryEntry {
             description: "drop cross-sheet connections whose anchors were deleted".to_owned(),
             owner: active.clone(),

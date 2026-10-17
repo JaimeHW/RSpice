@@ -36,7 +36,10 @@ use std::collections::BTreeMap;
 /// remain with the editor; persisted content is read through an immutable view.
 #[derive(Debug, Clone)]
 pub struct Schematic {
-    document: SchematicDocument,
+    /// Stamped, so every edit — through any method below, a history step or
+    /// a cancelled gesture — names the content it leaves behind, and evidence
+    /// derived from the document can be reused exactly until it does.
+    document: crate::stamped::Stamped<SchematicDocument>,
     identity: SchematicIdentity,
     topology_version: u64,
     content_version: u64,
@@ -72,7 +75,7 @@ impl Default for Schematic {
 impl Schematic {
     pub fn from_document(document: SchematicDocument) -> Self {
         Self {
-            document,
+            document: crate::stamped::Stamped::new(document),
             identity: SchematicIdentity::with_cursor(1),
             topology_version: 0,
             content_version: 0,
@@ -92,7 +95,13 @@ impl Schematic {
         &self.document
     }
     pub fn into_document(self) -> SchematicDocument {
-        self.document
+        self.document.into_inner()
+    }
+    /// The stamp of the document as it stands: two schematics with equal
+    /// stamps hold equal documents, and every edit issues a new one. See
+    /// [`crate::stamped`].
+    pub const fn content_stamp(&self) -> u64 {
+        self.document.stamp()
     }
     pub fn history(&self) -> &SchematicHistory {
         &self.history.committed
@@ -129,7 +138,11 @@ impl Schematic {
 
     pub fn reconcile_grid_pitch(&mut self) -> i32 {
         let grid_size = self.document.document_policy.grid_pitch.canvas_grid_size();
-        self.document.grid_size = grid_size;
+        // Written only when it moves, so reconciling a document that already
+        // agrees with its policy is not an edit of it.
+        if self.document.grid_size != grid_size {
+            self.document.grid_size = grid_size;
+        }
         grid_size
     }
 

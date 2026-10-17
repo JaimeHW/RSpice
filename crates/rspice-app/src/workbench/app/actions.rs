@@ -401,7 +401,7 @@ mod shortcut_ownership_tests {
 
         state.project_lifecycle.authority.open_session();
         let owner = state.workspace.content.active_schematic_reference();
-        let before = state.workspace.content.design_management.clone();
+        let before = (*state.workspace.content.design_management).clone();
         let drawn = state
             .schematic
             .document()
@@ -418,7 +418,7 @@ mod shortcut_ownership_tests {
             .content
             .replace_design_management(candidate)
             .expect("publish reviewed catalog");
-        let after = state.workspace.content.design_management.clone();
+        let after = (*state.workspace.content.design_management).clone();
         state.record_design_management_transaction(DesignManagementHistoryEntry {
             description: "assign objects to the active sheet".to_owned(),
             owner: owner.clone(),

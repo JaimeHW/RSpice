@@ -262,10 +262,11 @@ fn seed_new_project_drawing_sheet_default(
         .clone();
     settings.default_format = project_default;
     if settings != *workspace.content.design_management.drawing_sheet_settings() {
+        let revision = workspace.content.design_management.revision();
         workspace
             .content
             .design_management
-            .update_drawing_sheet_settings(workspace.content.design_management.revision(), settings)
+            .update_drawing_sheet_settings(revision, settings)
             .expect("a new project accepts its validated personal drawing-sheet default");
     }
 }

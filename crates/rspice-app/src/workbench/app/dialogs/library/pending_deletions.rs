@@ -693,7 +693,7 @@ fn prepare_design_management_removal(
     cell: &str,
     view: Option<&str>,
 ) -> Result<Option<PendingDesignManagementRemoval>, String> {
-    let mut catalog = state.workspace.content.design_management.clone();
+    let mut catalog = (*state.workspace.content.design_management).clone();
     let receipt = match view {
         Some(view) => catalog.remove_sheet_catalog_for_view(
             &crate::state::CellViewRef::new(library, cell, view).key(),
@@ -723,7 +723,7 @@ fn apply_design_management_removal(
     let Some(removal) = removal else {
         return false;
     };
-    state.workspace.content.design_management = removal.catalog;
+    *state.workspace.content.design_management = removal.catalog;
     true
 }
 

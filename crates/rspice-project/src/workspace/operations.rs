@@ -62,11 +62,11 @@ impl ProjectWorkspace {
                 });
             }
         }
-        if candidate == self.configuration_sets {
+        if candidate == *self.configuration_sets {
             return Err(ProjectConfigurationMutationError::NoChanges);
         }
         let next_revision = self.project.advance_revision()?;
-        self.configuration_sets = candidate;
+        *self.configuration_sets = candidate;
         self.project_metadata_dirty = true;
         Ok(next_revision)
     }
@@ -133,7 +133,7 @@ impl ProjectWorkspace {
             }
             None => {}
         }
-        self.design_management =
+        *self.design_management =
             design_management_at_revision(&merged, source.design_management.revision())?;
         Ok(())
     }
@@ -709,7 +709,7 @@ impl ProjectWorkspace {
             .chain(schematic.as_ref().probes.iter().map(|object| object.id))
             .collect::<Vec<_>>();
 
-        let mut candidate = self.design_management.clone();
+        let mut candidate = (*self.design_management).clone();
         let catalog = candidate
             .sheet_catalog_mut(&key)
             .expect("the cloned catalog retains the validated cell/view key");

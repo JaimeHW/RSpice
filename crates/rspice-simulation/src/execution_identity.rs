@@ -661,6 +661,7 @@ fn drc_location_tag(location: &DrcLocation) -> u8 {
         DrcLocation::BusTap { .. } => 8,
         DrcLocation::Terminal { .. } => 9,
         DrcLocation::InsideInstance { .. } => 10,
+        DrcLocation::CellView { .. } => 11,
     }
 }
 
@@ -717,6 +718,11 @@ fn encode_drc_location(writer: &mut CanonicalWriter, location: &DrcLocation) {
             writer.string(pin_name);
             writer.i32(point.x);
             writer.i32(point.y);
+        }
+        DrcLocation::CellView { reference } => {
+            writer.string(&reference.library);
+            writer.string(&reference.cell);
+            writer.string(&reference.view);
         }
         DrcLocation::InsideInstance { path, view, inner } => {
             let segments = path.segments();
@@ -1258,6 +1264,7 @@ fn drc_violation_type_tag(violation_type: DrcViolationType) -> u8 {
         DrcViolationType::UndrivenNet => 31,
         DrcViolationType::GroundNotNodeZero => 32,
         DrcViolationType::SupplyTiedToGround => 33,
+        DrcViolationType::UnusedCellView => 34,
     }
 }
 

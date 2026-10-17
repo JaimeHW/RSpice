@@ -322,7 +322,7 @@ fn split_amp_across_sheets(
             .expect("the amp schematic was saved to the workspace"),
     );
 
-    let mut candidate = state.workspace.content.design_management.clone();
+    let mut candidate = (*state.workspace.content.design_management).clone();
     let first = candidate
         .bootstrap_for_cell_view(&key, AMP_SHEET_NAMES[0], objects)
         .expect("a fresh cell view accepts its first governed sheet");
@@ -576,7 +576,7 @@ fn stub_with_label(schematic: &mut SchematicState, origin: Point, terminal: Poin
 /// The active configuration: `top`'s schematic as the executable root, `X1` as
 /// the device under test, and one path-scoped override on `X2`.
 fn install_configuration(state: &mut AppState, top: &CellViewRef) -> ConfigurationSetId {
-    let mut candidate = state.workspace.content.configuration_sets.clone();
+    let mut candidate = (*state.workspace.content.configuration_sets).clone();
     let configuration = candidate
         .create(ConfigurationSetDefinition {
             name: "Reference hierarchy".to_owned(),
@@ -698,3 +698,9 @@ fn live_object_ids(
 }
 
 mod tests;
+
+#[cfg(test)]
+mod check_currency_tests;
+
+#[cfg(test)]
+mod check_scope_tests;

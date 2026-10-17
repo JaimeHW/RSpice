@@ -1660,7 +1660,7 @@ fn the_sheet_panel_holds_only_page_setup_and_checks() {
     let painted = painted_panel(|ui| sheet_panel(ui, &mut app));
     assert_eq!(
         painted,
-        "Drawing sheet\nPage setup…\nChecks\nnot run\nRun schematic checks\n"
+        "Drawing sheet\nPage setup…\nChecks\nnot run\nCheck cellview\n"
     );
 }
 

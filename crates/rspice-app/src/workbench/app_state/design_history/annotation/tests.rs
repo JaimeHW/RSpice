@@ -136,7 +136,7 @@ fn annotation_candidate(
         protected_reviewed: false,
         objects,
     };
-    let mut candidate = state.workspace.content.design_management.clone();
+    let mut candidate = (*state.workspace.content.design_management).clone();
     let preview = candidate
         .annotation()
         .preview_renumbering(&request)
@@ -150,7 +150,7 @@ fn annotation_candidate(
 
 fn publish(fixture: &mut Fixture) {
     let state = &mut fixture.state;
-    let before = state.workspace.content.design_management.clone();
+    let before = (*state.workspace.content.design_management).clone();
     let transaction = state
         .prepare_design_management_schematic_transaction(&fixture.candidate)
         .unwrap();
@@ -164,7 +164,7 @@ fn publish(fixture: &mut Fixture) {
         description: "renumber schematic references".to_owned(),
         owner: state.workspace.content.active_schematic_reference(),
         before,
-        after: state.workspace.content.design_management.clone(),
+        after: (*state.workspace.content.design_management).clone(),
         before_schematics: transaction.before,
         after_schematics: transaction.after,
         references: transaction.references,
@@ -482,11 +482,12 @@ fn reused_master_fixture(
         .unwrap();
     let mut definition = configuration.definition().clone();
     definition.dut_path = format!("/{}", original_names[0]);
+    let revision = configuration.revision();
     state
         .workspace
         .content
         .configuration_sets
-        .update(fixture.configuration, configuration.revision(), definition)
+        .update(fixture.configuration, revision, definition)
         .unwrap();
     state.schematic.clear_undo_history();
     state.sync_active_schematic_to_workspace();

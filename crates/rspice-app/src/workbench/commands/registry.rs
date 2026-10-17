@@ -503,7 +503,8 @@ const DESCEND_HIERARCHY: &[ShortcutBinding] =
     &[primary(chord(Key::H, false, false, false, "H"), ALL)];
 const DESCEND_HIERARCHY_DIRECT: &[ShortcutBinding] =
     &[primary(chord(Key::E, false, false, true, "Shift+E"), ALL)];
-const RUN_CHECKS: &[ShortcutBinding] = &[primary(chord(Key::E, true, false, false, "Ctrl+E"), ALL)];
+const CHECK_CELLVIEW: &[ShortcutBinding] =
+    &[primary(chord(Key::E, true, false, false, "Ctrl+E"), ALL)];
 const CHECK_AND_SAVE: &[ShortcutBinding] = &[primary(
     chord(Key::E, true, false, true, "Ctrl+Shift+E"),
     ALL,
@@ -582,6 +583,8 @@ impl Command {
                 | Self::ExportActiveView
                 | Self::FindInDesign
                 | Self::ToggleResultsSplit
+                | Self::CheckDesign
+                | Self::ExportSignoffReport
                 | Self::CheckAndSave
                 | Self::ConnectivityManager
                 | Self::DesignManagement
@@ -785,7 +788,9 @@ impl Command {
             | Self::GridSnapRouting
             | Self::DrawingSheetLayers
             | Self::VisibilityOptions
-            | Self::RunChecks
+            | Self::CheckCellview
+            | Self::CheckDesign
+            | Self::ExportSignoffReport
             | Self::CheckAndSave
             | Self::ConnectivityManager
             | Self::DesignManagement
@@ -994,7 +999,12 @@ impl Command {
             Self::AscendHierarchy => ASCEND_HIERARCHY,
             Self::DescendHierarchy => DESCEND_HIERARCHY,
             Self::DescendHierarchyDirect => DESCEND_HIERARCHY_DIRECT,
-            Self::RunChecks => RUN_CHECKS,
+            Self::CheckCellview => CHECK_CELLVIEW,
+            // Ctrl+Alt+E is AltGr+E, the euro sign, on most European
+            // layouts, and every other chord of the check family is taken;
+            // the Design menu, the toolbar and the palette are its routes.
+            Self::CheckDesign => NONE,
+            Self::ExportSignoffReport => NONE,
             Self::CheckAndSave => CHECK_AND_SAVE,
             Self::NextViolation => NEXT_VIOLATION,
             Self::RunSimulation => RUN_SIMULATION,

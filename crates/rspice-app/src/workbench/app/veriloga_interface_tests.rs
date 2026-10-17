@@ -634,7 +634,7 @@ fn a_module_that_differs_from_its_cells_schematic_is_refused_and_writes_nothing(
     );
     assert!(view(&app, &reference, GENERATED_SYMBOL_VIEW).is_none());
 
-    let report = super::dialogs::check_and_save_validation::CheckAndSaveValidationReport::collect(
+    let report = super::dialogs::check_and_save_validation::CheckAndSaveValidationReport::validate(
         &app.state,
     )
     .expect("the design check runs");

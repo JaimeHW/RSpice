@@ -199,8 +199,8 @@ impl FrozenRunPreparation {
                 layouts: state.workspace.content.physical_layout_documents().clone(),
                 libraries: state.library_manager.catalog().clone(),
                 project_sources: state.workspace.content.project_sources.clone(),
-                design_management: state.workspace.content.design_management.clone(),
-                configuration_sets: state.workspace.content.configuration_sets.clone(),
+                design_management: (*state.workspace.content.design_management).clone(),
+                configuration_sets: (*state.workspace.content.configuration_sets).clone(),
                 stimulus_library: state.workspace.content.stimulus_library.clone(),
                 imported_checkpoints: state
                     .simulation

@@ -40,6 +40,7 @@ fn fixture() -> (RSpiceApp, Component, ConfigurationSetId, SimulationPlanId) {
         .document_mut_for_test()
         .probes
         .push(probe);
+    let root = app.state.workspace.content.active_schematic_reference();
     let id = app
         .state
         .workspace
@@ -47,7 +48,7 @@ fn fixture() -> (RSpiceApp, Component, ConfigurationSetId, SimulationPlanId) {
         .configuration_sets
         .create(ConfigurationSetDefinition {
             name: "Rename test".to_owned(),
-            root: app.state.workspace.content.active_schematic_reference(),
+            root,
             dut_path: "/V1".to_owned(),
             executable_view_policy: vec!["schematic".to_owned()],
             stop_views: Vec::new(),

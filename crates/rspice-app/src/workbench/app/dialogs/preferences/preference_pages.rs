@@ -615,9 +615,9 @@ fn schematic(ui: &mut Ui, state: &mut AppState) {
         ui,
         state,
         TogglePreference::IncrementalConnectivityChecks,
-        "Connectivity checks",
-        "Refresh incrementally while editing.",
-        "Enable incremental connectivity checks",
+        "Live checking",
+        "Check open pins, floating nets, wiring and names as each edit settles.",
+        "Enable live checking",
     );
     section_heading(ui, "Editing and hierarchy");
     choice_row(

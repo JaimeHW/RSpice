@@ -142,6 +142,10 @@ pub enum DrcViolationType {
     /// through other cellviews. The design has no finite expansion, so nothing
     /// below the repeated occurrence is checked.
     RecursiveInstantiation,
+    /// A schematic in one of the project's own libraries that the walk from
+    /// the simulation root, under its configuration, never reaches. Only a
+    /// check of the whole design can say so.
+    UnusedCellView,
 
     //-------------------------------------------------------------------------
     // Naming Issues
@@ -190,7 +194,7 @@ impl DrcViolationType {
     /// The array's fixed length does not make it exhaustive — a variant added
     /// to the enum and not here still compiles — so a test in `rules` holds it
     /// to the variants serde's derive declares.
-    pub const ALL: [Self; 33] = [
+    pub const ALL: [Self; 34] = [
         Self::FloatingNode,
         Self::UnconnectedPin,
         Self::UndrivenInput,
@@ -213,6 +217,7 @@ impl DrcViolationType {
         Self::GroundNotNodeZero,
         Self::SupplyTiedToGround,
         Self::RecursiveInstantiation,
+        Self::UnusedCellView,
         Self::DuplicateName,
         Self::EmptyName,
         Self::InvalidName,
@@ -250,7 +255,7 @@ impl DrcViolationType {
             | Self::UndrivenNet
             | Self::GroundNotNodeZero
             | Self::SupplyTiedToGround => DrcRuleCategory::Electrical,
-            Self::RecursiveInstantiation => DrcRuleCategory::Hierarchy,
+            Self::RecursiveInstantiation | Self::UnusedCellView => DrcRuleCategory::Hierarchy,
             Self::DuplicateName
             | Self::EmptyName
             | Self::InvalidName
@@ -333,6 +338,7 @@ impl DrcViolationType {
             Self::GroundNotNodeZero => "Ground label's net is written under another name",
             Self::SupplyTiedToGround => "Global net is tied to ground in only one cellview",
             Self::RecursiveInstantiation => "Cellview reaches itself through its instances",
+            Self::UnusedCellView => "Cellview is not reached from the simulation root",
             Self::MissingGround => "Circuit has no ground reference (node 0)",
             Self::SourceToSource => "Voltage sources form a closed loop",
             Self::DuplicateName => "Multiple components have the same name",
@@ -387,6 +393,9 @@ impl DrcViolationType {
             }
             Self::RecursiveInstantiation => {
                 "Remove the instance that reaches its own cellview, or bind it to another view"
+            }
+            Self::UnusedCellView => {
+                "Instantiate the cellview, delete it, or move it to a reference library"
             }
             Self::MissingGround => "Add a ground symbol (GND) to the circuit",
             Self::SourceToSource => {
@@ -524,6 +533,9 @@ pub enum DrcLocation {
     Node { net_name: String },
     /// Global (no specific location)
     Global,
+    /// A whole cellview, for a finding about the cellview itself rather than
+    /// about anything drawn in it.
+    CellView { reference: CellViewRef },
     /// On a symbol pin in a cell's symbol view.
     SymbolPin {
         reference: CellViewRef,
@@ -559,6 +571,7 @@ impl DrcLocation {
             Self::NetLabel { name } => format!("Net '{}'", name),
             Self::Node { net_name } => format!("Node '{}'", net_name),
             Self::Global => "Global".to_string(),
+            Self::CellView { reference } => reference.display_path(),
             Self::SymbolPin {
                 reference,
                 pin_name,

@@ -124,6 +124,7 @@ pub fn anchor(view: &DesignView<'_>, location: &DrcLocation) -> Option<Point> {
         DrcLocation::InsideInstance { .. }
         | DrcLocation::Node { .. }
         | DrcLocation::Global
+        | DrcLocation::CellView { .. }
         | DrcLocation::SymbolPin { .. } => None,
     }
 }

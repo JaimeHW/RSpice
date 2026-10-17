@@ -2448,3 +2448,37 @@ fn the_arrangement_is_rebuilt_when_a_row_changes_in_place() {
         "a batch gone stale rebuilds it",
     );
 }
+
+/// A frame in which nothing was edited — the page, the canvas and the routes
+/// all drawn — digests no batch and no document, and the next edit is seen
+/// on the frame after it.
+#[test]
+fn a_frame_with_no_edit_digests_nothing_and_an_edit_is_seen_next_frame() {
+    use crate::workbench::app_state::diagnostic_store::digest_memo::{
+        computed_digests, reset_computed_digests,
+    };
+    use rspice_design::projection::{document_digest_counts, reset_document_digest_counts};
+
+    let mut app = design_app();
+    publish_design_findings(&mut app.state);
+    let harness = Harness::new();
+    let _ = app_frame(&harness.ctx, &mut app, sized(egui::RawInput::default()));
+    let _ = app_frame(&harness.ctx, &mut app, sized(egui::RawInput::default()));
+    reset_computed_digests();
+    reset_document_digest_counts();
+    let _ = app_frame(&harness.ctx, &mut app, sized(egui::RawInput::default()));
+    assert_eq!(computed_digests(), 0, "no batch was digested");
+    assert_eq!(document_digest_counts(), (0, 0), "no document was digested");
+    assert_eq!(listing(&app.state).counts().stale, 0);
+
+    app.state
+        .schematic
+        .add_component(ComponentType::Capacitor, Point::new(400, 400));
+    let _ = app_frame(&harness.ctx, &mut app, sized(egui::RawInput::default()));
+    assert!(computed_digests() > 0, "the edit was looked at");
+    assert_eq!(
+        listing(&app.state).counts().stale,
+        listing(&app.state).len(),
+        "the findings of the edited view went stale at once"
+    );
+}

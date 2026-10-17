@@ -10,13 +10,15 @@
 //!
 //! That pass, and the order and groups built from it, are kept between frames
 //! and rebuilt only when the list or the reading position changed. Each frame
-//! reads [`RowFacet`]s, which spell nothing out, and folds them into a stamp
-//! of what the arrangement was built from; a frame whose stamp and position
-//! match the last build allocates nothing per row, sorts nothing and spells
-//! out no row. A position that reads row text — a text filter, an order by
-//! subject, location or message, groups by subject — also folds that text into
-//! the stamp, because a row can be republished saying something else under
-//! the same identity.
+//! takes a stamp of what the arrangement was built from: the store's rows by
+//! each batch's fingerprint and standing, without a walk, and the editors'
+//! findings by folding their [`RowFacet`]s, which spell nothing out. A frame
+//! whose stamp and position match the last build visits no stored row, sorts
+//! nothing and spells out no row. A position that reads row text — a text
+//! filter, an order by subject, location or message, groups by subject — also
+//! folds the editors' row text into the stamp, because one of their rows can
+//! be republished saying something else under the same identity; a stored
+//! batch's fingerprint already covers what its rows say.
 //!
 //! When nothing is filtered, ordered or grouped, no order is built at all: the
 //! page draws the listing as its producers reported it, which is the order the
@@ -127,9 +129,15 @@ impl Tally {
 /// severity, standing and waiver in reported order — the identity is minted
 /// from the producer and the rule, so those are covered by it — and, where
 /// the reading position reads them, what each row says.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// The store's rows are stated by the listing itself, by each batch's
+/// fingerprint and standing, so a frame does not walk them; only the editors'
+/// findings, which are read in place and carry no fingerprint the list can
+/// see, are folded row by row.
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Stamp {
     rows: usize,
+    stored: Vec<(u64, bool)>,
     facets: u64,
     text: u64,
 }
@@ -174,39 +182,73 @@ pub(super) fn arrange(
     let reads_text = view.reads_row_text();
     let mut facets = std::collections::hash_map::DefaultHasher::new();
     let mut text = std::collections::hash_map::DefaultHasher::new();
-    let mut standing = None;
     let rows = listed.len();
-    for index in 0..rows {
+    for index in listed.stored_len()..rows {
         let Some(facet) = listed.facet(index) else {
             continue;
         };
         (facet.id, facet.level.rung(), facet.current, facet.waived).hash(&mut facets);
-        if current == Some(facet.id) {
-            standing = Some(index);
-        }
         if reads_text && let Some(row) = listed.row(index) {
             (&row.subject, &row.location, row.message).hash(&mut text);
         }
     }
     let stamp = Stamp {
         rows,
+        stored: listed.stored_stamp(),
         facets: facets.finish(),
         text: text.finish(),
     };
 
     let id = egui::Id::new("workbench.problems.arrangement");
     let arrangement = match ctx.data(|data| data.get_temp::<Arc<Arrangement>>(id)) {
-        Some(built) if built.stamp == Some(stamp) && built.view.arranges_like(view) => built,
+        Some(built) if built.stamp.as_ref() == Some(&stamp) && built.view.arranges_like(view) => {
+            built
+        }
         _ => {
             let mut built = Arrangement::build(listed, view);
-            built.stamp = Some(stamp);
+            built.stamp = Some(stamp.clone());
             let built = Arc::new(built);
             ctx.data_mut(|data| data.insert_temp(id, Arc::clone(&built)));
             built
         }
     };
+    // Where the current finding is, found by a walk only when the finding or
+    // the list moved: a frame in which neither did reads it back.
+    let found = egui::Id::new("workbench.problems.current-row");
+    let standing = match ctx.data(|data| data.get_temp::<CurrentRow>(found)) {
+        Some(row) if row.stamp == stamp && row.finding == current => row.index,
+        _ => {
+            let index = current.and_then(|current| {
+                (0..rows).find(|index| {
+                    listed
+                        .facet(*index)
+                        .is_some_and(|facet| facet.id == current)
+                })
+            });
+            ctx.data_mut(|data| {
+                data.insert_temp(
+                    found,
+                    CurrentRow {
+                        stamp,
+                        finding: current,
+                        index,
+                    },
+                );
+            });
+            index
+        }
+    };
     let current = standing.filter(|index| arrangement.admits(listed, *index));
     (arrangement, current)
+}
+
+/// The listing index of the current finding, and the list and finding it was
+/// found for.
+#[derive(Debug, Clone)]
+struct CurrentRow {
+    stamp: Stamp,
+    finding: Option<uuid::Uuid>,
+    index: Option<usize>,
 }
 
 impl Arrangement {

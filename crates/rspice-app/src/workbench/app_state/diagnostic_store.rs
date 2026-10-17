@@ -22,6 +22,7 @@
 //! [`listing`] reads them in place.
 
 mod current;
+pub(in crate::workbench) mod digest_memo;
 pub(in crate::workbench) mod listing;
 mod producers;
 mod run_notices;
@@ -35,10 +36,10 @@ use rspice_app_types::diagnostics::{CanonicalDiagnosticMetadata, DiagnosticSever
 
 use crate::diagnostics::LogAnchor;
 use crate::product::{ContentDigest, ProjectId};
-use crate::state::CellViewRef;
+use crate::state::{CanonicalCellViewOwnerKey, CellViewRef};
 use crate::workbench::state::PreflightRemediation;
 
-use super::AppState;
+use super::{AppState, design_checks};
 
 const DIAGNOSTIC_INPUT_DIGEST_DOMAIN: &[u8] = b"rspice-diagnostic-inputs/v1\0";
 
@@ -294,6 +295,12 @@ pub(in crate::workbench) struct DiagnosticRecord {
     /// the waiver covering it, or — `None` — nothing, because it is not a
     /// design-rule finding or its rule may not be waived.
     pub(in crate::workbench) waiver_action: Option<super::waivers::WaiverAction>,
+    /// The cellview the object a design-rule finding is about is drawn in,
+    /// which is not the checked subject for a finding stated inside an
+    /// instance. A later check that states that cellview's findings takes
+    /// this one over: see [`super::design_checks::RuleCoverage`]. `None` for
+    /// every other producer's records.
+    pub(in crate::workbench) drawn_in: Option<CanonicalCellViewOwnerKey>,
 }
 
 impl DiagnosticRecord {
@@ -321,7 +328,18 @@ impl DiagnosticRecord {
             rule: String::new(),
             route: None,
             waiver_action: None,
+            drawn_in: None,
         }
+    }
+
+    /// State the cellview the finding's object is drawn in.
+    pub(in crate::workbench) fn drawn_in(mut self, cell_view: &CellViewRef) -> Self {
+        self.drawn_in = Some(crate::state::canonical_cell_view_owner_key(
+            &cell_view.library,
+            &cell_view.cell,
+            &cell_view.view,
+        ));
+        self
     }
 
     pub(in crate::workbench) fn with_waiver_action(
@@ -449,9 +467,12 @@ const _: () = {
 /// is defined for them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workbench) enum DiagnosticInputs {
-    /// The complete live schematic working set behind one cell view's checks,
-    /// exactly as the check receipt digests it.
+    /// Everything one cell view's checks read, exactly as the check receipt
+    /// digests it.
     DesignCheck { subject: CellViewRef },
+    /// One cellview's drawing as the live rules read it while it is drawn:
+    /// the drawing itself and the interfaces of the masters it places.
+    LiveCheck { subject: CellViewRef },
     /// One symbol view's published artwork and the interface contract its
     /// pins are compared against — exactly what the pin checks read.
     SymbolPins { subject: CellViewRef },
@@ -477,7 +498,7 @@ pub(in crate::workbench) enum DiagnosticInputs {
 impl DiagnosticInputs {
     pub(in crate::workbench) const fn owner(&self) -> DiagnosticOwner {
         match self {
-            Self::DesignCheck { .. } => DiagnosticOwner::DesignRules,
+            Self::DesignCheck { .. } | Self::LiveCheck { .. } => DiagnosticOwner::DesignRules,
             Self::SymbolPins { .. } => DiagnosticOwner::SymbolPins,
             Self::Dispatch => DiagnosticOwner::Dispatch,
             Self::Run { .. } | Self::CampaignMember { .. } => DiagnosticOwner::Run,
@@ -494,7 +515,12 @@ impl DiagnosticInputs {
     pub(in crate::workbench) fn stale_reason(&self) -> String {
         match self {
             Self::DesignCheck { subject } => format!(
-                "the schematic working set behind {} has changed since this was reported",
+                "a cellview or binding the check of {} read has changed since this was reported",
+                subject.display_path()
+            ),
+            Self::LiveCheck { subject } => format!(
+                "the drawing of {}, or the interface of a cellview it places, has changed since \
+                 this was reported",
                 subject.display_path()
             ),
             Self::SymbolPins { subject } => format!(
@@ -536,6 +562,16 @@ impl DiagnosticInputs {
                 );
                 format!("{owner}\u{1f}{subject}")
             }
+            // Beside the explicit checks it shares an owner with, and never
+            // under the same key as the one of the same cellview.
+            Self::LiveCheck { subject } => {
+                let subject = crate::state::canonical_cell_view_owner_key(
+                    &subject.library,
+                    &subject.cell,
+                    &subject.view,
+                );
+                format!("{owner}\u{1f}live\u{1f}{subject}")
+            }
             Self::Dispatch | Self::RuleDeck => owner.to_owned(),
             Self::Run { run_sequence } => format!("{owner}\u{1f}{run_sequence:020}"),
             // After every run, and in the order the campaign dispatched them.
@@ -552,11 +588,14 @@ impl DiagnosticInputs {
     /// told in the producer's own words rather than having findings silently
     /// dropped or silently kept.
     fn digest(&self, scope: &DigestScope<'_>) -> Result<ContentDigest, String> {
+        #[cfg(test)]
+        digest_memo::count_computed();
         let state = scope.state;
         match self {
             Self::DesignCheck { subject } => {
                 super::design_checks::live_input_digest(state, subject)
             }
+            Self::LiveCheck { subject } => super::design_checks::live_check_digest(state, subject),
             // The artwork and the contract, through the one accessor the
             // checks themselves read them through: a digest taken over
             // anything else would be a second notion of staleness.
@@ -583,6 +622,24 @@ impl DiagnosticInputs {
             } => dispatched_setup_digest(scope, &(campaign, member_index)),
             Self::RuleDeck => super::rule_deck::live_input_digest(state),
         }
+    }
+
+    /// [`Self::digest`], read from the memo while nothing it reads has moved.
+    fn live_digest(&self, scope: &DigestScope<'_>) -> Result<ContentDigest, String> {
+        let state = scope.state;
+        let Some(key) = digest_memo::DigestKey::of(state, self) else {
+            return self.digest(scope);
+        };
+        let slot = self.key();
+        if let Some(remembered) = state.diagnostics.digests.get(&slot, &key) {
+            return remembered;
+        }
+        let digest = self.digest(scope);
+        state
+            .diagnostics
+            .digests
+            .remember(slot, key, digest.clone());
+        digest
     }
 }
 
@@ -711,6 +768,30 @@ pub(in crate::workbench) struct DiagnosticBatch {
     pub(in crate::workbench) inputs: DiagnosticInputs,
     input_digest: ContentDigest,
     pub(in crate::workbench) records: Vec<DiagnosticRecord>,
+    /// What the records say about themselves, folded once when the batch is
+    /// published: see [`fingerprint`].
+    fingerprint: u64,
+}
+
+/// A hash of everything a listed row reads off its record — identity,
+/// severity, waiver, subject, place and message — so a reader that arranges
+/// the rows can tell a batch republished unchanged from one that says
+/// something new without walking either.
+fn fingerprint(records: &[DiagnosticRecord]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for record in records {
+        (
+            record.canonical.diagnostic_id,
+            record.level.rung(),
+            record.waived(),
+            &record.subject.object,
+            record.subject.cell_view.as_ref().map(CellViewRef::key),
+            &record.message,
+        )
+            .hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 /// Where a published batch stands against the live design.
@@ -797,6 +878,8 @@ pub(crate) struct DiagnosticStore {
     generation: u64,
     /// What the current rendering pass decided about the list.
     pass_memo: PassMemoCell,
+    /// Each batch's live digest, by the key of what it read.
+    digests: digest_memo::DigestMemo,
 }
 
 /// The list's standings and counts for one rendering pass.
@@ -988,6 +1071,7 @@ impl DiagnosticStore {
         self.unresolved = None;
         self.run_baselines.clear();
         self.run_notices.clear();
+        self.digests.clear();
         self.generation = self.generation.wrapping_add(1);
     }
 
@@ -996,50 +1080,82 @@ impl DiagnosticStore {
     /// An empty batch is still evidence: it is what says the checks ran and
     /// found nothing, which the page states differently from "nobody has
     /// looked".
+    ///
+    /// With a `coverage`, the batch takes over every finding an earlier
+    /// design-rule batch states under it: those records leave the earlier
+    /// batch, so the finding is listed once, by the newest check that looked
+    /// at it, and the identity they shared with this batch's own record of
+    /// the same finding is this batch's.
     fn insert(
         &mut self,
         digest: ContentDigest,
         inputs: DiagnosticInputs,
         records: Vec<DiagnosticRecord>,
+        coverage: Option<&design_checks::RuleCoverage>,
     ) -> Result<(), String> {
         self.capture_current_key();
         let key = inputs.key();
-        let replaced = self.batches.remove(&key);
-        if let Some(replaced) = &replaced {
-            for record in &replaced.records {
-                self.owners.remove(&record.canonical.diagnostic_id);
-            }
-        }
-        // One pass answers both questions: an identity already claimed is
-        // either another batch's or one this batch minted twice.
-        let mut claimed = Vec::with_capacity(records.len());
+        let superseded: std::collections::HashSet<uuid::Uuid> =
+            coverage.map_or_else(Default::default, |coverage| {
+                self.batches
+                    .iter()
+                    .filter(|(other, batch)| {
+                        **other != key && batch.inputs.owner() == DiagnosticOwner::DesignRules
+                    })
+                    .flat_map(|(_, batch)| batch.records.iter())
+                    .filter(|record| coverage.covers(record))
+                    .map(|record| record.canonical.diagnostic_id)
+                    .collect()
+            });
+        // Decided before anything moves, so a refused publication leaves the
+        // store exactly as it found it. An identity already claimed is
+        // either another batch's or one this batch minted twice; one held by
+        // the batch this replaces, or by a record this batch supersedes, is
+        // free.
+        let mut claimed = std::collections::HashSet::with_capacity(records.len());
         for record in &records {
             let id = record.canonical.diagnostic_id;
-            if self.owners.contains_key(&id) {
-                // Put back what was taken out, so a refused publication
-                // leaves the store exactly as it found it.
-                for id in claimed {
-                    self.owners.remove(&id);
-                }
-                if let Some(replaced) = replaced {
-                    for record in &replaced.records {
-                        self.owners
-                            .insert(record.canonical.diagnostic_id, key.clone());
-                    }
-                    self.batches.insert(key, replaced);
-                }
+            let held_elsewhere = self
+                .owners
+                .get(&id)
+                .is_some_and(|owner| *owner != key && !superseded.contains(&id));
+            if held_elsewhere || !claimed.insert(id) {
                 return Err(format!(
                     "Diagnostic collection contains duplicate canonical ID {id}."
                 ));
             }
+        }
+        if !superseded.is_empty() {
+            for (other, batch) in &mut self.batches {
+                if *other == key {
+                    continue;
+                }
+                let before = batch.records.len();
+                batch
+                    .records
+                    .retain(|record| !superseded.contains(&record.canonical.diagnostic_id));
+                if batch.records.len() != before {
+                    batch.fingerprint = fingerprint(&batch.records);
+                }
+            }
+            for id in &superseded {
+                self.owners.remove(id);
+            }
+        }
+        if let Some(replaced) = self.batches.remove(&key) {
+            for record in &replaced.records {
+                self.owners.remove(&record.canonical.diagnostic_id);
+            }
+        }
+        for id in claimed {
             self.owners.insert(id, key.clone());
-            claimed.push(id);
         }
         self.batches.insert(
             key,
             DiagnosticBatch {
                 inputs,
                 input_digest: digest,
+                fingerprint: fingerprint(&records),
                 records,
             },
         );
@@ -1070,8 +1186,21 @@ impl AppState {
         inputs: DiagnosticInputs,
         records: Vec<DiagnosticRecord>,
     ) -> Result<(), String> {
-        let digest = inputs.digest(&DigestScope::new(self))?;
-        self.diagnostics.insert(digest, inputs, records)
+        let digest = inputs.live_digest(&DigestScope::new(self))?;
+        self.diagnostics.insert(digest, inputs, records, None)
+    }
+
+    /// Publish a design-rule pass that takes over every finding an earlier
+    /// pass states under `coverage`.
+    pub(in crate::workbench) fn publish_superseding(
+        &mut self,
+        inputs: DiagnosticInputs,
+        records: Vec<DiagnosticRecord>,
+        coverage: &design_checks::RuleCoverage,
+    ) -> Result<(), String> {
+        let digest = inputs.live_digest(&DigestScope::new(self))?;
+        self.diagnostics
+            .insert(digest, inputs, records, Some(coverage))
     }
 
     /// Withdraw a batch, for a producer whose evidence no longer exists at
@@ -1127,6 +1256,7 @@ impl AppState {
                     ..
                 } => campaign != Some(member_campaign),
                 DiagnosticInputs::DesignCheck { .. }
+                | DiagnosticInputs::LiveCheck { .. }
                 | DiagnosticInputs::SymbolPins { .. }
                 | DiagnosticInputs::Dispatch
                 | DiagnosticInputs::RuleDeck => false,
@@ -1159,6 +1289,7 @@ impl AppState {
                     .iter()
                     .all(|run| run.id != run_sequence),
                 DiagnosticInputs::DesignCheck { .. }
+                | DiagnosticInputs::LiveCheck { .. }
                 | DiagnosticInputs::SymbolPins { .. }
                 | DiagnosticInputs::Dispatch
                 | DiagnosticInputs::CampaignMember { .. }
@@ -1187,11 +1318,19 @@ impl AppState {
     ) -> BatchStanding {
         batch_standing(batch, &DigestScope::new(self))
     }
+
+    /// The live digest of `inputs`, as the store decides currency by.
+    pub(in crate::workbench) fn diagnostic_live_digest(
+        &self,
+        inputs: &DiagnosticInputs,
+    ) -> Result<ContentDigest, String> {
+        inputs.live_digest(&DigestScope::new(self))
+    }
 }
 
 /// Where one published batch stands, digested within one scope.
 fn batch_standing(batch: &DiagnosticBatch, scope: &DigestScope<'_>) -> BatchStanding {
-    match batch.inputs.digest(scope) {
+    match batch.inputs.live_digest(scope) {
         Ok(digest) if digest == batch.input_digest => BatchStanding::Current,
         Ok(_) => BatchStanding::Stale,
         Err(reason) => BatchStanding::Unavailable(reason),
@@ -1368,6 +1507,7 @@ mod tests {
             .filter_map(|batch| match batch.inputs {
                 DiagnosticInputs::Run { run_sequence } => Some(run_sequence),
                 DiagnosticInputs::DesignCheck { .. }
+                | DiagnosticInputs::LiveCheck { .. }
                 | DiagnosticInputs::SymbolPins { .. }
                 | DiagnosticInputs::Dispatch
                 | DiagnosticInputs::CampaignMember { .. }

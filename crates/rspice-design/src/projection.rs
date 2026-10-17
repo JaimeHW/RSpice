@@ -19,15 +19,17 @@
 //! exactly those. A counter-keyed memo therefore serves a stale design, which
 //! is the one failure this value must not have.
 //!
-//! So each cell view and each authority is digested, once per call, and the
-//! digests key both the projection and the per-cell-view materialization.
-//! Digesting is a fraction of what it replaces — one hierarchy walk plus a
-//! design-management projection and a deep clone per cell view — and one edit
-//! moves exactly one cell-view digest. A project whose authorities cannot be
-//! serialized bypasses the cache instead of risking a stale answer.
+//! So each cell view and each authority is digested, and the digests key both
+//! the projection and the per-cell-view materialization. A digest is taken
+//! once per [stamp](crate::stamped): every schematic document and every
+//! authority is stamped, and a stamp moves on every mutable access, through
+//! whichever method or `&mut` borrow made it — which is the coverage no
+//! counter had. A call in which nothing was edited therefore digests nothing,
+//! one edit digests exactly one cell view, and a project whose authorities
+//! cannot be serialized bypasses the cache instead of risking a stale answer.
 
 use std::any::Any;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use sha2::Digest as _;
 
@@ -49,6 +51,7 @@ use crate::schematic::{
     document::SchematicDocument,
     owned::Schematic,
 };
+use crate::stamped::Stamped;
 use crate::symbol_resolver::SymbolResolver;
 use rspice_app_types::product::{ContentDigest, ObjectRevision, ProjectId};
 use rspice_design_model::{
@@ -97,6 +100,7 @@ pub trait ProjectionSource: AsRef<SchematicDocument> {
             .materialize_design_management_schematic(design_management, cell_view_key)?;
         Ok(ProjectedSchematic {
             document: Arc::new(document),
+            content_digest: Arc::default(),
             modified: source.modified,
             current_file: source.current_file.map(Path::to_path_buf),
             topology_version: source
@@ -111,6 +115,11 @@ pub trait ProjectionSource: AsRef<SchematicDocument> {
 #[derive(Debug, Clone)]
 pub struct ProjectedSchematic {
     document: Arc<SchematicDocument>,
+    /// The document's digest, taken on first demand and shared by every
+    /// clone of this materialization, so a projection rebuilt around an
+    /// unchanged cell view does not digest it again. A variant replacement
+    /// makes a new document and, with it, a new slot.
+    content_digest: Arc<OnceLock<Option<ContentDigest>>>,
     modified: bool,
     current_file: Option<PathBuf>,
     topology_version: u64,
@@ -119,6 +128,37 @@ pub struct ProjectedSchematic {
 impl ProjectedSchematic {
     pub fn document(&self) -> &SchematicDocument {
         &self.document
+    }
+
+    /// The design-content digest of the document as projected — the drawing
+    /// a check reads, after design management placed its pages — or `None`
+    /// where it cannot be digested.
+    ///
+    /// Design content as a validated revision states it: the drawing and its
+    /// policy, not the waivers stored beside it, the revision journal or the
+    /// probes. A waiver changes whether a finding counts, not what was found,
+    /// so recording one leaves a check's findings current.
+    pub fn content_digest(&self) -> Option<ContentDigest> {
+        *self.content_digest.get_or_init(|| {
+            #[cfg(any(test, feature = "schematic-test-fixtures"))]
+            PROJECTED_DIGESTS.with(|count| count.set(count.get().wrapping_add(1)));
+            let document = &*self.document;
+            crate::schematic::validated_revision::ValidatedRevisionSource {
+                grid_size: document.grid_size,
+                document_policy: document.document_policy,
+                components: &document.components,
+                wires: &document.wires,
+                buses: &document.buses,
+                bus_taps: &document.bus_taps,
+                junctions: &document.junctions,
+                net_labels: &document.net_labels,
+                design_notes: &document.design_notes,
+                documentation_shapes: &document.documentation_shapes,
+                connections: &document.connections,
+            }
+            .design_content_digest()
+            .ok()
+        })
     }
 
     pub fn current_file(&self) -> Option<&Path> {
@@ -131,6 +171,7 @@ impl ProjectedSchematic {
 
     fn apply_variant_replacement(&mut self, prepared: PreparedVariantReplacement) {
         prepared.apply_to(Arc::make_mut(&mut self.document));
+        self.content_digest = Arc::default();
     }
 }
 
@@ -145,6 +186,13 @@ impl AsRef<SchematicDocument> for ProjectedSchematic {
 pub struct DesignProjectionCache {
     projection: RefCell<Option<Arc<DesignProjection>>>,
     materialized: RefCell<HashMap<String, (BufferMemoKey, ProjectedSchematic)>>,
+    /// The last measurement of every input, reused whole while no stamp it
+    /// was taken at has moved.
+    inputs: RefCell<Option<Arc<DesignInputs>>>,
+    /// The authorities' digest, by the stamps it was taken at.
+    authority: RefCell<Option<([u64; 3], ContentDigest)>>,
+    /// Each cell view's digest, by the stamp it was taken at.
+    cell_views: RefCell<HashMap<String, (CellViewStamp, ContentDigest)>>,
 }
 
 impl DesignProjectionCache {
@@ -156,6 +204,9 @@ impl DesignProjectionCache {
     pub fn clear(&self) {
         self.projection.borrow_mut().take();
         self.materialized.borrow_mut().clear();
+        self.inputs.borrow_mut().take();
+        self.authority.borrow_mut().take();
+        self.cell_views.borrow_mut().clear();
     }
 }
 
@@ -163,9 +214,9 @@ impl DesignProjectionCache {
 pub struct ProjectionContext<'a, M, F> {
     pub schematic_buffers: &'a HashMap<String, Schematic>,
     pub sources: M,
-    pub configuration_sets: &'a ConfigurationSetCatalog,
-    pub design_management: &'a DesignManagementCatalog,
-    pub connectivity: &'a ConnectivityContract,
+    pub configuration_sets: &'a Stamped<ConfigurationSetCatalog>,
+    pub design_management: &'a Stamped<DesignManagementCatalog>,
+    pub connectivity: &'a Stamped<ConnectivityContract>,
     pub project_id: ProjectId,
     pub project_revision: ObjectRevision,
     pub project_sources: &'a ProjectSourceRegistry,
@@ -346,23 +397,35 @@ pub struct DesignProjectionKey {
 }
 
 /// The digested inputs, retained across one call so the projection key and
-/// every per-cell-view memo key are read from the same measurement.
+/// every per-cell-view memo key are read from the same measurement, and
+/// across calls for as long as every stamp it was taken at stands.
+#[derive(Debug)]
 struct DesignInputs {
+    /// The stamps of the configuration, design-management, and connectivity
+    /// authorities, in that order.
+    authority: [u64; 3],
     /// Digest over the configuration, design-management, and connectivity
     /// authorities.
     authority_epoch: ContentDigest,
     /// Content digest per cell view, keyed exactly as the projection keys its
     /// buffers and ordered so the fold over them is deterministic.
     cell_views: BTreeMap<String, ContentDigest>,
+    /// What each cell view's digest was taken at, under the same keys.
+    stamps: HashMap<String, CellViewStamp>,
     /// Buffer spelling the live editor overlay occupies.
     active_key: String,
+    /// The fold of the authorities and every cell view.
+    design_epoch: ContentDigest,
 }
 
 impl DesignInputs {
-    fn design_epoch(&self) -> ContentDigest {
+    fn fold(
+        authority_epoch: ContentDigest,
+        cell_views: &BTreeMap<String, ContentDigest>,
+    ) -> ContentDigest {
         let mut hasher = sha2::Sha256::new();
-        hasher.update(self.authority_epoch.as_bytes());
-        for (cell_view_key, digest) in &self.cell_views {
+        hasher.update(authority_epoch.as_bytes());
+        for (cell_view_key, digest) in cell_views {
             hasher.update((cell_view_key.len() as u64).to_le_bytes());
             hasher.update(cell_view_key.as_bytes());
             hasher.update(digest.as_bytes());
@@ -370,11 +433,55 @@ impl DesignInputs {
         ContentDigest::from_bytes(hasher.finalize().into())
     }
 
+    /// Whether this measurement still describes the design: the same
+    /// authorities, the same overlay, and the same cell views at the same
+    /// stamps, origins and read-only markers.
+    fn stands<'s>(
+        &self,
+        authority: [u64; 3],
+        active_key: &str,
+        mut sources: impl ExactSizeIterator<Item = (&'s str, SchematicSource<'s>)>,
+    ) -> bool {
+        self.authority == authority
+            && self.active_key == active_key
+            && sources.len() == self.stamps.len()
+            && sources.all(|(key, source)| {
+                self.stamps
+                    .get(key)
+                    .is_some_and(|stamp| stamp.matches(&source))
+            })
+    }
+
     fn memo_key(&self, cell_view_key: &str) -> Option<BufferMemoKey> {
         Some(BufferMemoKey {
             source_epoch: *self.cell_views.get(cell_view_key)?,
             authority_epoch: self.authority_epoch,
         })
+    }
+}
+
+/// What one cell view's digest was taken at: the document's stamp and the
+/// two runtime fields the digest covers beside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CellViewStamp {
+    stamp: u64,
+    current_file: Option<PathBuf>,
+    read_only: bool,
+}
+
+impl CellViewStamp {
+    fn of(source: &SchematicSource<'_>) -> Self {
+        Self {
+            stamp: source.schematic.content_stamp(),
+            current_file: source.current_file.map(Path::to_path_buf),
+            read_only: source.read_only,
+        }
+    }
+
+    fn matches(&self, source: &SchematicSource<'_>) -> bool {
+        self.stamp == source.schematic.content_stamp()
+            && self.current_file.as_deref() == source.current_file
+            && self.read_only == source.read_only
     }
 }
 
@@ -413,6 +520,8 @@ fn hash_serialized<T: serde::Serialize>(hasher: &mut sha2::Sha256, value: &T) ->
 /// native origin, which relative `.include` paths resolve against, and its
 /// read-only marker.
 fn cell_view_digest(schematic: &impl ProjectionSource) -> Option<ContentDigest> {
+    #[cfg(any(test, feature = "schematic-test-fixtures"))]
+    CELL_VIEW_DIGESTS.with(|count| count.set(count.get().wrapping_add(1)));
     let source = schematic.projection_source();
     let mut hasher = sha2::Sha256::new();
     hash_serialized(&mut hasher, source.schematic.document())?;
@@ -449,6 +558,32 @@ pub fn materialization_count() -> u64 {
     MATERIALIZATIONS.with(std::cell::Cell::get)
 }
 
+// Counts of the documents digested since the last reset — the source
+// documents a projection is keyed on, and the projected documents a check's
+// evidence is keyed on — so a test can assert that a call with nothing edited
+// digests none, and that one edit digests one.
+#[cfg(any(test, feature = "schematic-test-fixtures"))]
+thread_local! {
+    static CELL_VIEW_DIGESTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static PROJECTED_DIGESTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// The source and projected documents digested on this thread since the
+/// last reset.
+#[cfg(any(test, feature = "schematic-test-fixtures"))]
+pub fn document_digest_counts() -> (u64, u64) {
+    (
+        CELL_VIEW_DIGESTS.with(std::cell::Cell::get),
+        PROJECTED_DIGESTS.with(std::cell::Cell::get),
+    )
+}
+
+#[cfg(any(test, feature = "schematic-test-fixtures"))]
+pub fn reset_document_digest_counts() {
+    CELL_VIEW_DIGESTS.with(|count| count.set(0));
+    PROJECTED_DIGESTS.with(|count| count.set(0));
+}
+
 impl<M: ProjectionSources, F: HierarchySourceFiles> ProjectionContext<'_, M, F> {
     /// Inspect the materialized circuit even when its configured hierarchy
     /// cannot execute. The receipt and execution route share this cache;
@@ -475,7 +610,7 @@ impl<M: ProjectionSources, F: HierarchySourceFiles> ProjectionContext<'_, M, F> 
             libraries,
             active_reference,
             active_schematic,
-            inputs.as_ref(),
+            inputs.as_deref(),
             key,
         )?);
         if projection.key.is_some() {
@@ -505,7 +640,7 @@ impl<M: ProjectionSources, F: HierarchySourceFiles> ProjectionContext<'_, M, F> 
         DesignProjectionKey {
             root: self.root.clone(),
             active_key: inputs.active_key.clone(),
-            design_epoch: inputs.design_epoch(),
+            design_epoch: inputs.design_epoch,
             library_revision: libraries.revision(),
             project_revision: self.project_revision,
         }
@@ -573,7 +708,7 @@ impl<M: ProjectionSources, F: HierarchySourceFiles> ProjectionContext<'_, M, F> 
             schematic_buffers,
             plan,
             resolution,
-            connectivity: (*self.connectivity).clone(),
+            connectivity: (**self.connectivity).clone(),
             key,
             nets: Mutex::new(HashMap::new()),
         };
@@ -745,39 +880,101 @@ impl<M: ProjectionSources, F: HierarchySourceFiles> ProjectionContext<'_, M, F> 
             .unwrap_or_else(|| active_reference.key())
     }
 
+    /// Every cell view the projection is made of, under the key it is
+    /// projected under: each stored buffer, with the live editor buffer in
+    /// place of its stored copy.
+    fn cell_view_sources<'s>(
+        &'s self,
+        active_key: &'s str,
+        active: SchematicSource<'s>,
+    ) -> std::vec::IntoIter<(&'s str, SchematicSource<'s>)> {
+        let mut sources = Vec::with_capacity(self.schematic_buffers.len() + 1);
+        for (cell_view_key, schematic) in self.schematic_buffers {
+            if cell_view_key != active_key {
+                sources.push((
+                    cell_view_key.as_str(),
+                    self.sources.schematic_source(cell_view_key, schematic),
+                ));
+            }
+        }
+        sources.push((active_key, active));
+        sources.into_iter()
+    }
+
     /// Digest every input the projection is derived from. `None` means one of
     /// them could not be serialized, which the caller reads as "this
     /// projection cannot be memoized".
+    ///
+    /// Each digest is taken once per stamp: a call in which no stamp moved
+    /// returns the last measurement whole, and one in which a cell view was
+    /// edited digests that cell view and folds the rest from memory.
     fn design_inputs(
         &self,
         active_reference: &CellViewRef,
         active_schematic: &impl ProjectionSource,
-    ) -> Option<DesignInputs> {
-        let mut hasher = sha2::Sha256::new();
-        hash_serialized(&mut hasher, &self.configuration_sets)?;
-        hasher.update([0xff]);
-        hash_serialized(&mut hasher, &self.design_management)?;
-        hasher.update([0xff]);
-        hash_serialized(&mut hasher, &self.connectivity)?;
-        let authority_epoch = ContentDigest::from_bytes(hasher.finalize().into());
-
+    ) -> Option<Arc<DesignInputs>> {
+        let authority = [
+            self.configuration_sets.stamp(),
+            self.design_management.stamp(),
+            self.connectivity.stamp(),
+        ];
         let active_key = self.active_buffer_key(active_reference);
-        let mut cell_views = BTreeMap::new();
-        for (cell_view_key, schematic) in self.schematic_buffers {
-            if *cell_view_key == active_key {
-                continue;
-            }
-            cell_views.insert(
-                cell_view_key.clone(),
-                cell_view_digest(&self.sources.schematic_source(cell_view_key, schematic))?,
-            );
+        let active = active_schematic.projection_source();
+        if let Some(last) = self.cache.inputs.borrow().as_ref()
+            && last.stands(
+                authority,
+                &active_key,
+                self.cell_view_sources(&active_key, active),
+            )
+        {
+            return Some(Arc::clone(last));
         }
-        cell_views.insert(active_key.clone(), cell_view_digest(active_schematic)?);
 
-        Some(DesignInputs {
+        let remembered = *self.cache.authority.borrow();
+        let authority_epoch = match remembered {
+            Some((stamps, epoch)) if stamps == authority => epoch,
+            _ => {
+                let mut hasher = sha2::Sha256::new();
+                hash_serialized(&mut hasher, &**self.configuration_sets)?;
+                hasher.update([0xff]);
+                hash_serialized(&mut hasher, &**self.design_management)?;
+                hasher.update([0xff]);
+                hash_serialized(&mut hasher, &**self.connectivity)?;
+                let epoch = ContentDigest::from_bytes(hasher.finalize().into());
+                *self.cache.authority.borrow_mut() = Some((authority, epoch));
+                epoch
+            }
+        };
+
+        let mut remembered = self.cache.cell_views.borrow_mut();
+        let mut cell_views = BTreeMap::new();
+        let mut stamps = HashMap::new();
+        for (cell_view_key, source) in self.cell_view_sources(&active_key, active) {
+            let digest = match remembered.get(cell_view_key) {
+                Some((stamp, digest)) if stamp.matches(&source) => *digest,
+                _ => {
+                    let digest = cell_view_digest(&source)?;
+                    remembered.insert(
+                        cell_view_key.to_owned(),
+                        (CellViewStamp::of(&source), digest),
+                    );
+                    digest
+                }
+            };
+            cell_views.insert(cell_view_key.to_owned(), digest);
+            stamps.insert(cell_view_key.to_owned(), CellViewStamp::of(&source));
+        }
+        remembered.retain(|cell_view_key, _| cell_views.contains_key(cell_view_key));
+
+        let inputs = Arc::new(DesignInputs {
+            authority,
             authority_epoch,
+            design_epoch: DesignInputs::fold(authority_epoch, &cell_views),
             cell_views,
+            stamps,
             active_key,
-        })
+        });
+        *self.cache.inputs.borrow_mut() = Some(Arc::clone(&inputs));
+        Some(inputs)
     }
 }

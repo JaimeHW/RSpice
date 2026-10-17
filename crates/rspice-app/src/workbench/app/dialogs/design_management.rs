@@ -436,7 +436,7 @@ pub(crate) fn open_design_management_dialog(state: &mut AppState) {
     let all_object_ids = all_stable_object_ids(&state.schematic);
     let selection_summary = selected_object_summary(&state.schematic, &selection_object_ids);
     let default_sheet_name = state.workspace.content.active_view.cell.clone();
-    let catalog = state.workspace.content.design_management.clone();
+    let catalog = (*state.workspace.content.design_management).clone();
     if let Err(error) = state.dialogs.design_management.open(
         &catalog,
         owner_key.clone(),

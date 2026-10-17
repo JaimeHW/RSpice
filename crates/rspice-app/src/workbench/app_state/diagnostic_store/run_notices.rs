@@ -242,7 +242,7 @@ impl AppState {
             .unwrap_or_default();
         records.extend(notice_records);
         let published = match dispatched {
-            Some(digest) => self.diagnostics.insert(digest, inputs, records),
+            Some(digest) => self.diagnostics.insert(digest, inputs, records, None),
             None => self.publish_diagnostics(inputs, records),
         };
         if let Err(error) = published {

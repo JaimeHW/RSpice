@@ -878,7 +878,7 @@ fn configured_exact_paths_materialize_distinct_schematic_and_source_views() {
             owner: "test".to_owned(),
         })
         .expect("configuration creates");
-    workspace.content.configuration_sets = catalog;
+    *workspace.content.configuration_sets = catalog;
 
     let active = workspace.content.active_view.clone();
     let projection = workspace
@@ -1039,7 +1039,7 @@ fn two_instances_with_different_descendant_bindings_emit_v2() {
             owner: "test".to_owned(),
         })
         .expect("configuration creates");
-    workspace.content.configuration_sets = catalog;
+    *workspace.content.configuration_sets = catalog;
 
     let active = workspace.content.active_view.clone();
     let projection = workspace

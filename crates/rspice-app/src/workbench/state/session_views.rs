@@ -1224,11 +1224,30 @@ pub struct PreflightAdvisory {
     /// Where this is repaired, when repairing it has a home. `None` for an
     /// advisory that states a fact rather than naming a thing to change.
     pub remediation: Option<PreflightRemediation>,
+    /// What it is about: the kind of fact it states and the object it states
+    /// it of. Two advisories of one pass are two findings by this, whatever
+    /// order the pass reported them in, so a pass that reports them in
+    /// another order keeps each one's identity.
+    pub about: (&'static str, String),
 }
 
+impl PreflightAdvisory {
+    /// An advisory of `kind` about `object`, with no destination of its own.
+    pub fn about(kind: &'static str, object: impl Into<String>, message: String) -> Self {
+        Self {
+            message,
+            remediation: None,
+            about: (kind, object.into()),
+        }
+    }
+}
+
+/// An advisory stated as prose alone, by a check that names no object: the
+/// sentence is all that tells it apart.
 impl From<String> for PreflightAdvisory {
     fn from(message: String) -> Self {
         Self {
+            about: ("statement", message.clone()),
             message,
             remediation: None,
         }

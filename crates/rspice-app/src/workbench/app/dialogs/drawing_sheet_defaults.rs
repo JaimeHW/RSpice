@@ -1683,7 +1683,7 @@ fn apply_drawing_sheet_defaults(app: &mut RSpiceApp) -> Result<String, String> {
 
     if project_changed {
         validate_project_authority(&app.state, &transaction)?;
-        let before = app.state.workspace.content.design_management.clone();
+        let before = (*app.state.workspace.content.design_management).clone();
         let mut candidate = before.clone();
         candidate
             .update_drawing_sheet_settings(candidate.revision(), transaction.draft_project.clone())
@@ -1742,7 +1742,7 @@ pub(super) fn commit_project_candidate(
         .map_err(|error| error.to_string())?;
     app.state
         .apply_design_management_schematic_transaction(&schematic_tx);
-    let after = app.state.workspace.content.design_management.clone();
+    let after = (*app.state.workspace.content.design_management).clone();
     app.state
         .record_design_management_transaction(DesignManagementHistoryEntry {
             description: description.to_owned(),

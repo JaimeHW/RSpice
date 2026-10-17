@@ -90,7 +90,7 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
 
                 // The real command the symbol editor runs, which routes to the
                 // pin checks because a symbol view is active.
-                Command::RunChecks.execute(&mut app);
+                Command::CheckCellview.execute(&mut app);
             }
             DiagnosticOwner::Dispatch => {
                 // The real command, on an empty design: a schematic with no

@@ -196,6 +196,242 @@ pub fn run_check_of_cellview(
     )
 }
 
+/// Everything a check of one cellview reads besides the rule deck, the
+/// connectivity contract and the library catalog.
+///
+/// A check's findings describe the design for as long as these stand: the
+/// cellviews its walk reaches; every cellview an instance in them names,
+/// whether the walk descends into it or reads a placed symbol's pins from it;
+/// how the plan bound each of those instances, where the walk follows the
+/// plan; and the deck's global nodes, which every cellview's nets are named
+/// by. An edit to anything else does not change what the check found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckReads {
+    /// Every cellview read, folded, sorted and once each, whether or not the
+    /// design holds it: a master that appears is as much a change as one
+    /// that is edited.
+    pub cellviews: Vec<String>,
+    /// How the plan bound each instance at the occurrence the walk asked it
+    /// about, sorted.
+    pub bindings: Vec<String>,
+    /// The deck's global node names, folded and sorted.
+    pub globals: Vec<String>,
+    /// The cellviews the walk itself descended into, the subject among them,
+    /// once each in the order of their folded keys: a subset of
+    /// [`Self::cellviews`], which also holds
+    /// every cellview an instance names whether or not the walk follows it.
+    pub reached: Vec<CellViewRef>,
+}
+
+/// What a check of `reference` reads, by the walk the check itself takes.
+pub fn check_reads(
+    schematic: &impl AsRef<SchematicDocument>,
+    reference: &CellViewRef,
+    hierarchy: &HierarchySource<'_>,
+) -> CheckReads {
+    let graph = InstanceGraph::walk(schematic.as_ref(), Some(reference.clone()), hierarchy);
+    let mut cellviews = std::collections::BTreeSet::new();
+    let mut bindings = std::collections::BTreeSet::new();
+    let mut walked = BTreeMap::new();
+    for view in &graph.views {
+        if let Some(reached) = &view.reference {
+            let key = reached.key().to_ascii_lowercase();
+            cellviews.insert(key.clone());
+            walked.entry(key).or_insert_with(|| reached.clone());
+        }
+        let instances = view
+            .document
+            .components
+            .iter()
+            .filter(|component| component.kind == ComponentType::CellInstance);
+        for instance in instances {
+            if let Some(binding) = instance.library_cell.as_ref() {
+                let named = CellViewRef::new(&binding.library, &binding.cell, &binding.view);
+                cellviews.insert(named.key().to_ascii_lowercase());
+                cellviews.insert(
+                    HierarchySource::placed_master(binding)
+                        .key()
+                        .to_ascii_lowercase(),
+                );
+            }
+            let Some(path) = view
+                .plan_path
+                .as_ref()
+                .and_then(|parent| parent.child(&instance.name).ok())
+            else {
+                continue;
+            };
+            let bound = match hierarchy.execution_binding(&path) {
+                None => "unbound".to_owned(),
+                Some(execution) => {
+                    let resolved = execution.resolved_reference().key().to_ascii_lowercase();
+                    let materialized = execution.materialized_binding();
+                    let bound = format!(
+                        "{resolved}|{:?}|stop={}|materialized={}|own-text={}|{:?}",
+                        execution.resolved_view_type(),
+                        execution.stop_boundary(),
+                        materialized.is_some(),
+                        materialized.is_some_and(writes_its_own_text),
+                        execution.binding_closure_digest(),
+                    );
+                    cellviews.insert(resolved);
+                    bound
+                }
+            };
+            bindings.insert(format!("{path}={bound}"));
+        }
+    }
+    let mut globals = global_nodes(hierarchy).into_iter().collect::<Vec<_>>();
+    globals.sort();
+    CheckReads {
+        cellviews: cellviews.into_iter().collect(),
+        bindings: bindings.into_iter().collect(),
+        globals,
+        reached: walked.into_values().collect(),
+    }
+}
+
+/// The rules a drawing is checked against while it is being drawn.
+///
+/// Each is decided by the one cellview's own extraction — its conductors, its
+/// labels and buses, and the interfaces of the masters its instances place —
+/// and none needs the hierarchy below walked, the deck written or a model
+/// bound: open pins in their three kinds, floating nets, dangling wires,
+/// orphan labels, bus and tap structure, and duplicate names. Whether the
+/// design reaches ground, whether a cycle runs through it, parameters,
+/// bindings and driver conflicts are left to a check that is asked for.
+pub const LIVE_RULES: [DrcViolationType; 13] = [
+    DrcViolationType::UnconnectedPin,
+    DrcViolationType::UndrivenInput,
+    DrcViolationType::UnloadedOutput,
+    DrcViolationType::FloatingNode,
+    DrcViolationType::DanglingWire,
+    DrcViolationType::OrphanNetLabel,
+    DrcViolationType::MalformedBus,
+    DrcViolationType::UnnamedBus,
+    DrcViolationType::BusRangeConflict,
+    DrcViolationType::DanglingBusTap,
+    DrcViolationType::MixedBusTap,
+    DrcViolationType::VectorWidthMismatch,
+    DrcViolationType::DuplicateName,
+];
+
+/// Check one cellview's drawing against the [`LIVE_RULES`] alone.
+///
+/// One extraction of the drawing and nothing below it. Each finding is the
+/// one a check of the cellview states for the same rule and object, in the
+/// same place and order, so the two name one finding.
+pub fn run_live_check(
+    schematic: &impl AsRef<SchematicDocument>,
+    reference: &CellViewRef,
+    hierarchy: &HierarchySource<'_>,
+    config: &DrcConfig,
+) -> DrcResult {
+    let start = web_time::Instant::now();
+    let schematic = schematic.as_ref();
+    let globals = global_nodes(hierarchy);
+    // Placed in the plan's terms where the plan is rooted here, as a check of
+    // the cellview places it.
+    let root = InstancePath::root();
+    let follows_plan = hierarchy
+        .execution_plan()
+        .is_some_and(|plan| plan.root().key().eq_ignore_ascii_case(&reference.key()));
+    let context = ViewContext {
+        plan_path: follows_plan.then_some(&root),
+        globals: &globals,
+    };
+    let (components, connectivity) = extract_view(schematic, hierarchy, &context);
+    let live = DrcConfig {
+        check_missing_ground: false,
+        check_component_parameters: false,
+        check_unknown_components: false,
+        check_shorted_outputs: false,
+        ..config.clone()
+    };
+    let report = check_one_view(schematic, &live, &components, &connectivity);
+    let mut result = DrcResult::new();
+    for finding in report
+        .violations()
+        .iter()
+        .filter(|finding| LIVE_RULES.contains(&finding.violation_type))
+    {
+        result.add_violation(restated(finding, result.total_count(), None, None));
+    }
+    config.waivers.apply(&mut result);
+    result.completed = true;
+    result.duration_ms = start.elapsed().as_millis() as u64;
+    result
+}
+
+/// The cellviews a live check of `schematic` reads besides the drawing
+/// itself: every cellview an instance in it names, whose interface decides
+/// what its pins are. Folded, sorted and once each.
+pub fn live_check_reads(schematic: &impl AsRef<SchematicDocument>) -> Vec<String> {
+    let mut named = std::collections::BTreeSet::new();
+    for component in &schematic.as_ref().components {
+        if component.kind != ComponentType::CellInstance {
+            continue;
+        }
+        if let Some(binding) = component.library_cell.as_ref() {
+            let cellview = CellViewRef::new(&binding.library, &binding.cell, &binding.view);
+            named.insert(cellview.key().to_ascii_lowercase());
+            named.insert(
+                HierarchySource::placed_master(binding)
+                    .key()
+                    .to_ascii_lowercase(),
+            );
+        }
+    }
+    named.into_iter().collect()
+}
+
+/// State as unused every one of `candidates` the walk behind `reads` never
+/// descended into, at the severity `config` sets for the rule.
+///
+/// The caller names the candidates — the schematics of the project's own
+/// libraries — because which libraries are the project's and which are
+/// references is the project's to say, not the check's. `root` is the
+/// cellview the walk started from, which the finding names.
+pub fn append_unused_cellviews(
+    result: &mut DrcResult,
+    root: &CellViewRef,
+    candidates: impl IntoIterator<Item = CellViewRef>,
+    reads: &CheckReads,
+    config: &DrcConfig,
+) {
+    let reached = reads
+        .reached
+        .iter()
+        .map(|reference| reference.key().to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    let unused = candidates
+        .into_iter()
+        .map(|candidate| (candidate.key().to_ascii_lowercase(), candidate))
+        .filter(|(key, _)| !reached.contains(key))
+        .collect::<BTreeMap<_, _>>();
+    let severity = config
+        .severity_overrides
+        .get(&DrcViolationType::UnusedCellView)
+        .copied();
+    for reference in unused.into_values() {
+        let message = format!(
+            "{} is not reached from {} under its configuration",
+            reference.display_path(),
+            root.display_path()
+        );
+        let mut violation = DrcViolation::new(
+            result.total_count(),
+            DrcViolationType::UnusedCellView,
+            message,
+            DrcLocation::CellView { reference },
+        );
+        if let Some(severity) = severity {
+            violation.severity = severity;
+        }
+        result.add_violation(violation);
+    }
+}
+
 fn check_subject(
     subject: &SchematicDocument,
     reference: Option<CellViewRef>,

@@ -52,7 +52,7 @@ fn seeded_app() -> RSpiceApp {
 
     // The checks log their own summary (Info) and one row per finding
     // (Error for the missing ground, Warning for each open pin).
-    Command::RunChecks.execute(&mut app);
+    Command::CheckCellview.execute(&mut app);
     // What the harmonic-balance solver logs per Krylov solve, at Debug.
     app.state.log_buffer.log(
         LogSeverity::Debug,

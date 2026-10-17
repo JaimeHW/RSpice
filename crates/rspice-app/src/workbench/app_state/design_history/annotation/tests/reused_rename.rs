@@ -368,12 +368,13 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
         .unwrap();
     let mut definition = configuration.definition().clone();
     definition.dut_path = "/".to_owned();
+    let revision = configuration.revision();
     fixture
         .state
         .workspace
         .content
         .configuration_sets
-        .update(fixture.configuration, configuration.revision(), definition)
+        .update(fixture.configuration, revision, definition)
         .unwrap();
     let first_output = fixture
         .state

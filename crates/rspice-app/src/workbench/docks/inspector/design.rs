@@ -773,9 +773,9 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp) {
         command_action(
             ui,
             app,
-            Command::RunChecks,
+            Command::CheckCellview,
             Icon::Check,
-            "Run schematic checks",
+            "Check cellview",
             false,
         );
     });

@@ -367,7 +367,7 @@ fn apply_governed_sheet_setup(
 ) -> Result<String, String> {
     let transaction = app.state.dialogs.drawing_sheet_setup.clone();
     let scope = transaction.draft.scope;
-    let before = app.state.workspace.content.design_management.clone();
+    let before = (*app.state.workspace.content.design_management).clone();
     let source_catalog = before
         .sheet_catalog(&authority.cell_view_key)
         .ok_or_else(|| "The governed sheet catalog is unavailable.".to_owned())?;
@@ -648,7 +648,7 @@ fn commit_governed_page_setup_candidate(
         .map_err(|error| error.to_string())?;
     app.state
         .apply_design_management_schematic_transaction(&schematic_tx);
-    let after = app.state.workspace.content.design_management.clone();
+    let after = (*app.state.workspace.content.design_management).clone();
     app.state
         .record_design_management_transaction(DesignManagementHistoryEntry {
             description: "Sheet format".to_owned(),
@@ -938,7 +938,7 @@ fn apply_legacy_sheet_setup(
     validated: ValidatedDrawingSheetDraft,
 ) -> Result<String, String> {
     let transaction = app.state.dialogs.drawing_sheet_setup.clone();
-    let before = app.state.workspace.content.design_management.clone();
+    let before = (*app.state.workspace.content.design_management).clone();
     let mut candidate = before.clone();
     let personal_before = app
         .state
@@ -1047,7 +1047,7 @@ fn apply_legacy_sheet_setup(
         .map_err(|error| error.to_string())?;
     app.state
         .apply_design_management_schematic_transaction(&schematic_tx);
-    let after = app.state.workspace.content.design_management.clone();
+    let after = (*app.state.workspace.content.design_management).clone();
     app.state
         .record_design_management_transaction(DesignManagementHistoryEntry {
             description: "Sheet format".to_owned(),
