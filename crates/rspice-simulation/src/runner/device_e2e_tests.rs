@@ -1005,6 +1005,46 @@ fn noise_current_source_bench_solves_tran() {
     solve_tran(&bench.netlist(), 1e-5, 1e-7);
 }
 
+/// The deck writes every ground name as node 0, so V1 from `vdd` to a ground
+/// symbol beside V2 from `vdd` to a `GND!` label is two sources across one
+/// pair of nodes. The engine refuses that loop, as the source-to-source rule
+/// does before it.
+#[test]
+fn sources_into_ground_and_into_a_ground_global_are_a_loop_the_engine_refuses() {
+    let mut bench = Bench::new();
+    let v1 = bench.place(ComponentType::VoltageSource, 0, 0, "V1", "1", "");
+    let v2 = bench.place(ComponentType::VoltageSource, 200, 0, "V2", "2", "");
+    let load = bench.place(ComponentType::Resistor, 400, 0, "RL", "1k", "");
+    bench.connect((v1, 0), (v2, 0));
+    bench.connect((v2, 0), (load, 0));
+    bench.ground((v1, 1));
+    bench.ground((load, 1));
+    bench.label((v2, 1), "GND!");
+    let netlist = bench.netlist();
+    let v2_card = netlist
+        .lines()
+        .find(|line| line.starts_with("V2 "))
+        .expect("V2 is written");
+    assert_eq!(v2_card.split_whitespace().nth(2), Some("0"), "{netlist}");
+
+    let refused = run_spec_request(
+        &EngineBridge::new(),
+        AnalysisSpec::LegacyDcOp,
+        SpecExecutionOptions::default(),
+        &netlist,
+        None,
+        &ResolvedExecutionDependencies::default(),
+        &rspice_core::abort_signal::NoAbort,
+    )
+    .expect_err("the engine refuses a loop of ideal sources");
+    assert!(
+        refused
+            .to_string()
+            .contains("loops of ideal voltage sources"),
+        "{refused}\n{netlist}"
+    );
+}
+
 /// A drawing returned through a `GND!` label is written with that net as node
 /// 0: the deck has no node named `GND!`, and the ngspice dialect it runs
 /// under does not fold that name onto ground itself. An objective a form
