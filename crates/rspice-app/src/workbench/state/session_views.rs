@@ -1618,7 +1618,18 @@ impl ConsoleView {
     /// find text and showing its severity, so nothing the reader set earlier
     /// hides the line they were sent to.
     pub fn show_session_line(&mut self, key: u64, severity: crate::diagnostics::LogSeverity) {
-        self.channel = ConsoleChannel::Session;
+        self.show_line(ConsoleChannel::Session, key, severity);
+    }
+
+    /// Select line `key` of `channel` and bring it into view, as
+    /// [`Self::show_session_line`] does on the session's log.
+    pub fn show_line(
+        &mut self,
+        channel: ConsoleChannel,
+        key: u64,
+        severity: crate::diagnostics::LogSeverity,
+    ) {
+        self.channel = channel;
         self.find.clear();
         self.hidden[ConsoleSeverity::of(severity).index()] = false;
         self.selection = Some(ConsoleSelection::single(key));

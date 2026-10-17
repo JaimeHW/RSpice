@@ -47,7 +47,10 @@ impl RunLineForwarder {
         if let Some(point) = point {
             line.message = format!("{point}: {}", line.message);
         }
-        run.deliver(|| line);
+        run.deliver(|ordinal| EngineLogLine {
+            ordinal: Some(ordinal),
+            ..line
+        });
     }
 
     /// One nonfatal compiler finding, in the words the command line prints it.
@@ -112,6 +115,7 @@ fn hdl_line(record: &HdlOutputRecord) -> Option<EngineLogLine> {
         severity,
         message,
         origin: EngineLogOrigin::Hdl,
+        ordinal: None,
     })
 }
 
@@ -126,6 +130,7 @@ fn compiler_line(diagnostic: &SourceCompileDiagnostic) -> EngineLogLine {
         },
         message: diagnostic.located().to_string(),
         origin: EngineLogOrigin::VerilogA,
+        ordinal: None,
     }
 }
 

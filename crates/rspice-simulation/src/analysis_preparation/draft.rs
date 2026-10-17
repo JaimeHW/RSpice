@@ -333,6 +333,16 @@ fn spell_references_as_the_deck(spec: &mut AnalysisSpec) {
         } => spell_expression_as_the_deck(output_expression),
         AnalysisSpec::Sensitivity { output_var, .. } => spell_expression_as_the_deck(output_var),
         AnalysisSpec::Fft { request } => spell_expression_as_the_deck(&mut request.output),
+        // Both terminals: a port names the drawn ground on either side, and
+        // a terminal the deck lacks is a port to a node nothing is wired to.
+        AnalysisSpec::SParameter { ports, .. }
+        | AnalysisSpec::Psp { ports, .. }
+        | AnalysisSpec::Hbsp { ports, .. } => {
+            for port in ports {
+                spell_as_the_deck(&mut port.node_pos);
+                spell_as_the_deck(&mut port.node_neg);
+            }
+        }
         _ => {}
     }
 }

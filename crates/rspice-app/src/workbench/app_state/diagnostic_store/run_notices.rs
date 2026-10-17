@@ -77,8 +77,18 @@ pub(crate) enum RunNotice {
     },
 }
 
+/// One thing an analysis of a run raised, and where the run's log states it.
+#[derive(Debug, Clone)]
+pub(super) struct RunNoticeFact {
+    analysis: String,
+    notice: RunNotice,
+    /// The line of the run's log that states it, by its position there, where
+    /// one does.
+    line: Option<usize>,
+}
+
 /// Everything one run's analyses raised, in the order they reported it.
-pub(super) type RunNoticeFacts = Vec<(String, RunNotice)>;
+pub(super) type RunNoticeFacts = Vec<RunNoticeFact>;
 
 /// Which drawn component the engine named: the occurrence it was solved in,
 /// the cell view that draws it, and the component.
@@ -116,6 +126,8 @@ struct Gathered<'a> {
     analyses: Named<String>,
     /// By the identity each analysis's record gives a point.
     points: Named<u64>,
+    /// The line of the run's log that states it: the first that did.
+    line: Option<usize>,
 }
 
 /// A short list of names and how many more there were.
@@ -183,29 +195,35 @@ impl AppState {
     /// the second analysis raises again is counted on the first one's record
     /// rather than listed twice.
     ///
-    /// `transient` is the convergence evidence of the transient this analysis
-    /// solved, where it solved one; `failed_measurements` its `.MEASURE`
-    /// results, of which only those that produced no value are kept.
+    /// Each notice comes with the position in the run's log of the line
+    /// that stated it, where the log kept one. `transient` is the convergence
+    /// evidence of the transient this analysis solved, where it solved one,
+    /// with the run's line that says it accepted points past its truncation
+    /// tolerance; `failed_measurements` its `.MEASURE` results, of which only
+    /// those that produced no value are kept. A measurement's failure is
+    /// stated in no line of the log.
     pub(crate) fn publish_run_notices(
         &mut self,
         analysis: &str,
-        notices: Vec<RecordedNotice>,
-        transient: Option<&TransientConvergenceEvidence>,
+        notices: Vec<(RecordedNotice, Option<usize>)>,
+        transient: Option<(&TransientConvergenceEvidence, Option<usize>)>,
         failed_measurements: &[rspice_core::MeasureResult],
         run_sequence: u64,
     ) {
-        let raised: Vec<RunNotice> = notices
+        let raised: Vec<(RunNotice, Option<usize>)> = notices
             .into_iter()
-            .map(RunNotice::Engine)
-            .chain(transient.and_then(truncation_exceeded))
+            .map(|(notice, line)| (RunNotice::Engine(notice), line))
+            .chain(transient.and_then(|(evidence, line)| {
+                truncation_exceeded(evidence).map(|notice| (notice, line))
+            }))
             .chain(failed_measurements.iter().filter_map(|measure| {
-                measure
-                    .error
-                    .as_ref()
-                    .map(|reason| RunNotice::MeasureFailed {
+                measure.error.as_ref().map(|reason| {
+                    let failed = RunNotice::MeasureFailed {
                         name: measure.name.clone(),
                         reason: reason.clone(),
-                    })
+                    };
+                    (failed, None)
+                })
             }))
             .collect();
         if raised.is_empty() {
@@ -219,11 +237,11 @@ impl AppState {
             .run_notices
             .entry(run_sequence)
             .or_default()
-            .extend(
-                raised
-                    .into_iter()
-                    .map(|notice| (analysis.to_owned(), notice)),
-            );
+            .extend(raised.into_iter().map(|(notice, line)| RunNoticeFact {
+                analysis: analysis.to_owned(),
+                notice,
+                line,
+            }));
         self.republish_run_notices(run_sequence);
     }
 
@@ -254,6 +272,11 @@ impl AppState {
             .zip(canonicals)
             .map(|(condition, canonical)| {
                 self.notice_record(project, condition, canonical, manual_deck)
+                    .with_log_place(
+                        condition
+                            .line
+                            .map(|line| super::RunLogPlace { run_sequence, line }),
+                    )
             })
             .collect();
 
@@ -472,9 +495,14 @@ fn is_notice(record: &DiagnosticRecord) -> bool {
 }
 
 /// The run's notices, one per condition, in the order first raised.
-fn gather<'a>(facts: &'a [(String, RunNotice)], scope: &str) -> Vec<Gathered<'a>> {
+fn gather<'a>(facts: &'a [RunNoticeFact], scope: &str) -> Vec<Gathered<'a>> {
     let mut gathered: Vec<Gathered<'a>> = Vec::new();
-    for (analysis, notice) in facts {
+    for RunNoticeFact {
+        analysis,
+        notice,
+        line,
+    } in facts
+    {
         let key = notice_key(notice, scope);
         let (occurrences, points, identities) = match notice {
             RunNotice::Engine(recorded) => (
@@ -498,6 +526,7 @@ fn gather<'a>(facts: &'a [(String, RunNotice)], scope: &str) -> Vec<Gathered<'a>
                     occurrences: 0,
                     analyses: Named::default(),
                     points: Named::default(),
+                    line: None,
                 });
                 gathered.len() - 1
             }
@@ -506,6 +535,7 @@ fn gather<'a>(facts: &'a [(String, RunNotice)], scope: &str) -> Vec<Gathered<'a>
         condition.occurrences = condition.occurrences.saturating_add(occurrences);
         condition.analyses.add(analysis);
         condition.points.add(points, identities);
+        condition.line = condition.line.or(*line);
     }
     gathered
 }
@@ -689,7 +719,15 @@ mod tests {
             occurrences: points.len().max(1),
             points: points.iter().map(|point| (*point).to_owned()).collect(),
             point_identities: points.iter().map(|point| identity(point)).collect(),
+            line: None,
         }
+    }
+
+    /// `notices`, which no line of the run's log states.
+    fn unstated(
+        notices: impl IntoIterator<Item = RecordedNotice>,
+    ) -> Vec<(RecordedNotice, Option<usize>)> {
+        notices.into_iter().map(|notice| (notice, None)).collect()
     }
 
     /// The notice records the run's batch holds, as (code, subject, details).
@@ -716,12 +754,24 @@ mod tests {
     fn a_rerun_replaces_the_runs_warnings() {
         let mut state = open_state(&[1, 2]);
         state.open_run_outcome(1);
-        state.publish_run_notices("Transient", vec![clamp("M1", "rdsw", &[])], None, &[], 1);
+        state.publish_run_notices(
+            "Transient",
+            unstated([clamp("M1", "rdsw", &[])]),
+            None,
+            &[],
+            1,
+        );
         assert_eq!(notices(&state).len(), 1);
 
         state.supersede_run_diagnostics(2);
         state.open_run_outcome(2);
-        state.publish_run_notices("Transient", vec![clamp("M2", "rdsw", &[])], None, &[], 2);
+        state.publish_run_notices(
+            "Transient",
+            unstated([clamp("M2", "rdsw", &[])]),
+            None,
+            &[],
+            2,
+        );
 
         let standing = notices(&state);
         assert_eq!(standing.len(), 1, "{standing:?}");
@@ -734,7 +784,13 @@ mod tests {
     fn an_edit_stales_the_runs_warnings_rather_than_withdrawing_them() {
         let mut state = open_state(&[1]);
         state.open_run_outcome(1);
-        state.publish_run_notices("Transient", vec![clamp("M1", "rdsw", &[])], None, &[], 1);
+        state.publish_run_notices(
+            "Transient",
+            unstated([clamp("M1", "rdsw", &[])]),
+            None,
+            &[],
+            1,
+        );
         let batch = state
             .diagnostics
             .batch(&DiagnosticInputs::Run { run_sequence: 1 })
@@ -766,22 +822,23 @@ mod tests {
         let trials: Vec<&str> = trials.iter().map(String::as_str).collect();
         state.publish_run_notices(
             "Monte Carlo",
-            vec![
+            unstated([
                 clamp("M1", "rdsw", &trials),
                 RecordedNotice {
                     notice: EngineNotice::ConvergenceAid(ContinuationAid::GminStepping),
                     occurrences: 3,
                     points: Vec::new(),
                     point_identities: Vec::new(),
+                    line: None,
                 },
-            ],
+            ]),
             None,
             &[],
             1,
         );
         state.publish_run_notices(
             "Transient",
-            vec![clamp("m1", "rdsw", &[]), clamp("M1", "prwg", &[])],
+            unstated([clamp("m1", "rdsw", &[]), clamp("M1", "prwg", &[])]),
             None,
             &[],
             1,
@@ -834,14 +891,14 @@ mod tests {
             state.open_run_outcome(1);
             state.publish_run_notices(
                 "Monte Carlo A",
-                vec![delivered("M1", "rdsw", &samples(1, 12))],
+                unstated([delivered("M1", "rdsw", &samples(1, 12))]),
                 None,
                 &[],
                 1,
             );
             state.publish_run_notices(
                 "Monte Carlo B",
-                vec![delivered("M1", "rdsw", &second)],
+                unstated([delivered("M1", "rdsw", &second)]),
                 None,
                 &[],
                 1,
@@ -928,7 +985,7 @@ mod tests {
         state.publish_run_notices(
             "Transient",
             Vec::new(),
-            Some(&transient_accepting(&[])),
+            Some((&transient_accepting(&[]), None)),
             &[],
             1,
         );
@@ -937,14 +994,14 @@ mod tests {
         state.publish_run_notices(
             "Transient",
             Vec::new(),
-            Some(&transient_accepting(&[3, 7])),
+            Some((&transient_accepting(&[3, 7]), Some(4))),
             &[],
             1,
         );
         state.publish_run_notices(
             "Transient 2",
             Vec::new(),
-            Some(&transient_accepting(&[5])),
+            Some((&transient_accepting(&[5]), Some(9))),
             &[],
             1,
         );
@@ -966,6 +1023,14 @@ mod tests {
              t = 3ns"
         );
         assert_eq!(record.details, "Raised 3 times in Transient, Transient 2");
+        assert_eq!(
+            record.log_place,
+            Some(super::super::RunLogPlace {
+                run_sequence: 1,
+                line: 4
+            }),
+            "the first line of the run's log that says so"
+        );
     }
 
     /// A root drawing that places `amp` twice, as `amp` and `amp2`, and a
@@ -1040,10 +1105,10 @@ mod tests {
         state.open_run_outcome(1);
         state.publish_run_notices(
             "Operating point",
-            vec![
+            unstated([
                 clamp("XAMP.M1", "rdsw", &[]),
                 clamp("XAMP2.M1", "rdsw", &[]),
-            ],
+            ]),
             None,
             &[],
             1,

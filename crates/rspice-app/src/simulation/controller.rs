@@ -195,6 +195,10 @@ pub struct SimulationController {
     /// What the run advised when it started, which its tasks' engine logs
     /// repeat and its log states once.
     current_advisories: Vec<String>,
+    /// Where the active task's numbered engine lines were kept in its run's
+    /// log, by the ordinal its sink gave each: what a notice the task raised
+    /// names the line that stated it by.
+    current_engine_lines: HashMap<u64, usize>,
     /// Exact accepted samples observed for the current transient task. These
     /// back both adaptive live presentation and a truthful partial result if
     /// the task terminates before returning a full engine result.
@@ -275,6 +279,7 @@ impl SimulationController {
             current_run_id: None,
             current_task_started: None,
             current_advisories: Vec::new(),
+            current_engine_lines: HashMap::new(),
             live_transient: LiveTransientAccumulator::default(),
             pending_analyses: VecDeque::new(),
             successful_analysis_instances: HashSet::new(),
@@ -1032,6 +1037,8 @@ impl SimulationController {
         match start_result {
             Ok(()) => {
                 self.current_task_started = Some(crate::time_compat::Instant::now());
+                // The runner numbers each task's lines from zero again.
+                self.current_engine_lines.clear();
                 if let Some(run_id) = self.target_run_id(state)
                     && let Some(run) = state.simulation.retained.run_by_sequence_mut(run_id)
                     && let Err(error) = run.mark_running()
@@ -1404,12 +1411,13 @@ impl SimulationController {
             .current_run_id
             .and_then(|run_sequence| state.simulation.retained.run_by_sequence_mut(run_sequence))
         {
-            crate::diagnostics::engine_log::publish(
+            let kept = crate::diagnostics::engine_log::publish(
                 lines,
                 &mut run.log,
                 crate::time_compat::checked_unix_time_ms().unwrap_or_default(),
                 &self.current_advisories,
             );
+            self.current_engine_lines.extend(kept);
         }
     }
 

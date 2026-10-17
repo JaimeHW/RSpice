@@ -15,13 +15,17 @@ use crate::analysis::error::{ContinuationAid, ContinuationFailure, ContinuationS
 /// outcome on.
 ///
 /// Reported where the aid answers rather than where the ladder tries it, so a
-/// rung that fails says nothing here: its failure is the run's to report.
+/// rung that fails says nothing here: its failure is the run's to report. No
+/// warning of its own states it, so it names no line of the run's log.
 fn recorded_aid(
     aid: ContinuationAid,
     solved: Result<Vec<Value>, SimulationError>,
 ) -> Result<Vec<Value>, SimulationError> {
     if solved.is_ok() {
-        crate::notice::record(crate::notice::EngineNotice::ConvergenceAid(aid));
+        crate::notice::record(
+            crate::notice::EngineNotice::ConvergenceAid(aid),
+            crate::log_scope::LogLine::NONE,
+        );
     }
     solved
 }

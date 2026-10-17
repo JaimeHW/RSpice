@@ -82,6 +82,8 @@ pub(in crate::workbench) struct DiagnosticRow<'a> {
     /// offered only through [`Self::place_route`], which withholds it from a
     /// finding that is not current, as [`Self::route`] is withheld.
     pub(in crate::workbench) related_places: &'a [super::RelatedPlace],
+    /// The line of a run's log that states this finding, where one does.
+    pub(in crate::workbench) log_place: Option<super::RunLogPlace>,
     /// The edits the producer offered, where it offered any.
     pub(in crate::workbench) quick_fixes: &'a [CanonicalQuickFix],
     /// The waiver that covers it, with the scope and justification the rule
@@ -445,6 +447,9 @@ fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<DiagnosticRow<
                 rule: record.rule.as_str(),
                 related: record.canonical.related_locations.as_slice(),
                 related_places: record.related_places.as_slice(),
+                // Offered stale or current: an edit to the design moves
+                // nothing in what a run logged.
+                log_place: record.log_place,
                 quick_fixes: record.canonical.quick_fixes.as_slice(),
                 suppression: record.canonical.suppression.as_ref(),
                 // A route captured when the finding was made addresses an
@@ -476,6 +481,7 @@ fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<DiagnosticRow<
                 rule: "",
                 related: diagnostic.canonical.related_locations.as_slice(),
                 related_places: &[],
+                log_place: None,
                 quick_fixes: diagnostic.canonical.quick_fixes.as_slice(),
                 suppression: diagnostic.canonical.suppression.as_ref(),
                 route: current.then_some(DiagnosticRoute::NetlistDiagnostic(
@@ -510,6 +516,7 @@ fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<DiagnosticRow<
                 rule: "",
                 related: diagnostic.canonical.related_locations.as_slice(),
                 related_places: &[],
+                log_place: None,
                 quick_fixes: diagnostic.canonical.quick_fixes.as_slice(),
                 suppression: diagnostic.canonical.suppression.as_ref(),
                 // A finding about source that has since moved names a line

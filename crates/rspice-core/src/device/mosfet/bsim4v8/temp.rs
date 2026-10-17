@@ -27,6 +27,7 @@ use super::common::{
 };
 use super::params::Bsim4v8Model;
 use crate::Value;
+use crate::log_scope::{LogLine, warn_line};
 use crate::notice::ParameterScope::{self, Instance, Model};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -132,8 +133,8 @@ impl Bsim4v8ModelTemp {
         let m = model;
         let clamp01 = |v: Value, name: &str| {
             if v < 0.1 {
-                log::warn!("BSIM4: given {name} is less than 0.1; set to 0.1");
-                replaced(Model, name, v, 0.1, Some(0.1));
+                let stated = warn_line!("BSIM4: given {name} is less than 0.1; set to 0.1");
+                replaced(Model, name, v, 0.1, Some(0.1), stated);
                 0.1
             } else {
                 v
@@ -149,8 +150,8 @@ impl Bsim4v8ModelTemp {
         // b4check.c always-on diode-card clamps (see module docs).
         let njs_clamp = |v: Value, name: &str| {
             if v < 0.1 {
-                log::warn!("BSIM4: {name} = {v} is less than 0.1; set to 0.1");
-                replaced(Model, name, v, 0.1, Some(0.1));
+                let stated = warn_line!("BSIM4: {name} = {v} is less than 0.1; set to 0.1");
+                replaced(Model, name, v, 0.1, Some(0.1), stated);
                 0.1
             } else {
                 if v < 0.7 {
@@ -163,8 +164,8 @@ impl Bsim4v8ModelTemp {
         let njd = njs_clamp(m.njd, "njd");
         let mj_clamp = |v: Value, name: &str| {
             if v >= 0.99 {
-                log::warn!("BSIM4: {name} = {v} is too big; set to 0.99");
-                replaced(Model, name, v, 0.99, Some(0.99));
+                let stated = warn_line!("BSIM4: {name} = {v} is too big; set to 0.99");
+                replaced(Model, name, v, 0.99, Some(0.99), stated);
                 0.99
             } else {
                 v
@@ -265,10 +266,10 @@ impl Bsim4v8ModelTemp {
             if t0 >= -1.0 {
                 c * (1.0 + t0)
             } else if c > 0.0 {
-                log::warn!(
+                let stated = warn_line!(
                     "BSIM4: temperature effect has caused {name} to be negative; clamped to zero"
                 );
-                replaced(Model, name, c * (1.0 + t0), 0.0, Some(0.0));
+                replaced(Model, name, c * (1.0 + t0), 0.0, Some(0.0), stated);
                 0.0
             } else {
                 c * (1.0 + t0)
@@ -276,15 +277,15 @@ impl Bsim4v8ModelTemp {
         };
         // CJSWS/CJSWD < 0 are clamped to 0 before scaling (b4temp.c:296-301).
         let cjsws = if m.cjsws < 0.0 {
-            log::warn!("BSIM4: CJSWS is negative; clamped to zero");
-            replaced(Model, "cjsws", m.cjsws, 0.0, Some(0.0));
+            let stated = warn_line!("BSIM4: CJSWS is negative; clamped to zero");
+            replaced(Model, "cjsws", m.cjsws, 0.0, Some(0.0), stated);
             0.0
         } else {
             m.cjsws
         };
         let cjswd = if m.cjswd < 0.0 {
-            log::warn!("BSIM4: CJSWD is negative; clamped to zero");
-            replaced(Model, "cjswd", m.cjswd, 0.0, Some(0.0));
+            let stated = warn_line!("BSIM4: CJSWD is negative; clamped to zero");
+            replaced(Model, "cjswd", m.cjswd, 0.0, Some(0.0), stated);
             0.0
         } else {
             m.cjswd
@@ -299,11 +300,11 @@ impl Bsim4v8ModelTemp {
         let phi = |pb: Value, tpb: Value, name: &str| {
             let v = pb - tpb * del_temp;
             if v < 0.01 {
-                log::warn!(
+                let stated = warn_line!(
                     "BSIM4: temperature effect has caused {name} to be less than 0.01; \
                      clamped to 0.01"
                 );
-                replaced(Model, name, v, 0.01, Some(0.01));
+                replaced(Model, name, v, 0.01, Some(0.01), stated);
                 0.01
             } else {
                 v
@@ -318,8 +319,8 @@ impl Bsim4v8ModelTemp {
 
         let reset0 = |v: Value, name: &str| {
             if v <= 0.0 {
-                log::warn!("BSIM4: {name} reset to 0");
-                replaced(Model, name, v, 0.0, Some(0.0));
+                let stated = warn_line!("BSIM4: {name} reset to 0");
+                replaced(Model, name, v, 0.0, Some(0.0), stated);
                 0.0
             } else {
                 v
@@ -411,7 +412,8 @@ impl Bsim4v8ModelTemp {
     }
 }
 
-/// Report a value BSIM4 replaced, beside the log line that says so in prose.
+/// Report a value BSIM4 replaced, stated by the warning that says so in
+/// prose: what [`warn_line!`] returned for it.
 ///
 /// A model-block value is the card's, shared by every instance of it; a size
 /// or instance value is the instance's being bound. A size knot is cached per
@@ -423,8 +425,9 @@ fn replaced(
     requested: Value,
     applied: Value,
     limit: Option<Value>,
+    stated: LogLine,
 ) {
-    crate::notice::parameter_replaced("BSIM4", scope, parameter, requested, applied, limit);
+    crate::notice::parameter_replaced("BSIM4", scope, parameter, requested, applied, limit, stated);
 }
 
 /// `T1 / (T1 - 1)^2 + 2 T1 MIN_EXP` exponential form used by `theta0vb0`,
@@ -850,23 +853,25 @@ impl Bsim4v8SizeDep {
             p.rdswmin = m.rdswmin * t10 * nf / pow_weff_wr;
         }
         if rd0_temp < 0.0 {
-            log::warn!("BSIM4: Rdw at current temperature is negative; set to zero");
-            replaced(Instance, "rdw", rd0_temp, 0.0, Some(0.0));
+            let stated = warn_line!("BSIM4: Rdw at current temperature is negative; set to zero");
+            replaced(Instance, "rdw", rd0_temp, 0.0, Some(0.0), stated);
             rd0_temp = 0.0;
         }
         if rdwmin_temp < 0.0 {
-            log::warn!("BSIM4: Rdwmin at current temperature is negative; set to zero");
-            replaced(Instance, "rdwmin", rdwmin_temp, 0.0, Some(0.0));
+            let stated =
+                warn_line!("BSIM4: Rdwmin at current temperature is negative; set to zero");
+            replaced(Instance, "rdwmin", rdwmin_temp, 0.0, Some(0.0), stated);
             rdwmin_temp = 0.0;
         }
         if rs0_temp < 0.0 {
-            log::warn!("BSIM4: Rsw at current temperature is negative; set to zero");
-            replaced(Instance, "rsw", rs0_temp, 0.0, Some(0.0));
+            let stated = warn_line!("BSIM4: Rsw at current temperature is negative; set to zero");
+            replaced(Instance, "rsw", rs0_temp, 0.0, Some(0.0), stated);
             rs0_temp = 0.0;
         }
         if rswmin_temp < 0.0 {
-            log::warn!("BSIM4: Rswmin at current temperature is negative; set to zero");
-            replaced(Instance, "rswmin", rswmin_temp, 0.0, Some(0.0));
+            let stated =
+                warn_line!("BSIM4: Rswmin at current temperature is negative; set to zero");
+            replaced(Instance, "rswmin", rswmin_temp, 0.0, Some(0.0), stated);
             rswmin_temp = 0.0;
         }
         p.rd0 = rd0_temp / pow_weff_wr;
@@ -881,13 +886,13 @@ impl Bsim4v8SizeDep {
         let t5 = 1.0 - p.up * (-p.leff / p.lp).exp();
         p.u0temp = p.u0 * t5 * tratio.powf(p.ute);
         if p.eu < 0.0 {
-            log::warn!("BSIM4: eu has been negative; reset to 0.0");
-            replaced(Instance, "eu", p.eu, 0.0, Some(0.0));
+            let stated = warn_line!("BSIM4: eu has been negative; reset to 0.0");
+            replaced(Instance, "eu", p.eu, 0.0, Some(0.0), stated);
             p.eu = 0.0;
         }
         if p.ucs < 0.0 {
-            log::warn!("BSIM4: ucs has been negative; reset to 0.0");
-            replaced(Instance, "ucs", p.ucs, 0.0, Some(0.0));
+            let stated = warn_line!("BSIM4: ucs has been negative; reset to 0.0");
+            replaced(Instance, "ucs", p.ucs, 0.0, Some(0.0), stated);
             p.ucs = 0.0;
         }
 
@@ -969,15 +974,15 @@ impl Bsim4v8SizeDep {
         };
         // 4.8.1+ behavior: negative dlcig/dlcigd are clamped to zero.
         let dlcig = if m.dlcig < 0.0 {
-            log::warn!("BSIM4: dlcig = {:e} is negative; set to zero", m.dlcig);
-            replaced(Model, "dlcig", m.dlcig, 0.0, Some(0.0));
+            let stated = warn_line!("BSIM4: dlcig = {:e} is negative; set to zero", m.dlcig);
+            replaced(Model, "dlcig", m.dlcig, 0.0, Some(0.0), stated);
             0.0
         } else {
             m.dlcig
         };
         let dlcigd = if m.dlcigd < 0.0 {
-            log::warn!("BSIM4: dlcigd = {:e} is negative; set to zero", m.dlcigd);
-            replaced(Model, "dlcigd", m.dlcigd, 0.0, Some(0.0));
+            let stated = warn_line!("BSIM4: dlcigd = {:e} is negative; set to zero", m.dlcigd);
+            replaced(Model, "dlcigd", m.dlcigd, 0.0, Some(0.0), stated);
             0.0
         } else {
             m.dlcigd
@@ -1096,8 +1101,8 @@ impl Bsim4v8SizeDep {
 
         // Stress-effect size precompute (b4temp.c:1574-1601).
         let wlod = if m.wlod < 0.0 {
-            log::warn!("BSIM4: WLOD = {} is less than zero; using zero", m.wlod);
-            replaced(Model, "wlod", m.wlod, 0.0, Some(0.0));
+            let stated = warn_line!("BSIM4: WLOD = {} is less than zero; using zero", m.wlod);
+            replaced(Model, "wlod", m.wlod, 0.0, Some(0.0), stated);
             0.0
         } else {
             m.wlod
@@ -1294,13 +1299,13 @@ impl Bsim4v8SizeDep {
         }
         // Always-on overlap C-V clamps.
         if p.ckappas < 0.02 {
-            log::warn!("BSIM4: ckappas = {} is too small; set to 0.02", p.ckappas);
-            replaced(Instance, "ckappas", p.ckappas, 0.02, Some(0.02));
+            let stated = warn_line!("BSIM4: ckappas = {} is too small; set to 0.02", p.ckappas);
+            replaced(Instance, "ckappas", p.ckappas, 0.02, Some(0.02), stated);
             p.ckappas = 0.02;
         }
         if p.ckappad < 0.02 {
-            log::warn!("BSIM4: ckappad = {} is too small; set to 0.02", p.ckappad);
-            replaced(Instance, "ckappad", p.ckappad, 0.02, Some(0.02));
+            let stated = warn_line!("BSIM4: ckappad = {} is too small; set to 0.02", p.ckappad);
+            replaced(Instance, "ckappad", p.ckappad, 0.02, Some(0.02), stated);
             p.ckappad = 0.02;
         }
         for (v, name) in [
@@ -1320,44 +1325,45 @@ impl Bsim4v8SizeDep {
         if m.param_chk == 1 {
             // Result-affecting fixups gated on paramChk (the default).
             if p.a2 < 0.01 {
-                log::warn!("BSIM4: A2 = {} is too small; set to 0.01", p.a2);
-                replaced(Instance, "a2", p.a2, 0.01, Some(0.01));
+                let stated = warn_line!("BSIM4: A2 = {} is too small; set to 0.01", p.a2);
+                replaced(Instance, "a2", p.a2, 0.01, Some(0.01), stated);
                 p.a2 = 0.01;
             } else if p.a2 > 1.0 {
-                log::warn!(
+                // One warning states both replacements.
+                let stated = warn_line!(
                     "BSIM4: A2 = {} is larger than 1; A2 set to 1, A1 set to 0",
                     p.a2
                 );
-                replaced(Instance, "a2", p.a2, 1.0, Some(1.0));
-                replaced(Instance, "a1", p.a1, 0.0, None);
+                replaced(Instance, "a2", p.a2, 1.0, Some(1.0), stated);
+                replaced(Instance, "a1", p.a1, 0.0, None, stated);
                 p.a2 = 1.0;
                 p.a1 = 0.0;
             }
             if p.prwg < 0.0 {
-                log::warn!("BSIM4: Prwg = {} is negative; set to zero", p.prwg);
-                replaced(Instance, "prwg", p.prwg, 0.0, Some(0.0));
+                let stated = warn_line!("BSIM4: Prwg = {} is negative; set to zero", p.prwg);
+                replaced(Instance, "prwg", p.prwg, 0.0, Some(0.0), stated);
                 p.prwg = 0.0;
             }
             if p.rdsw < 0.0 {
-                log::warn!("BSIM4: Rdsw = {} is negative; set to zero", p.rdsw);
-                replaced(Instance, "rdsw", p.rdsw, 0.0, Some(0.0));
+                let stated = warn_line!("BSIM4: Rdsw = {} is negative; set to zero", p.rdsw);
+                replaced(Instance, "rdsw", p.rdsw, 0.0, Some(0.0), stated);
                 p.rdsw = 0.0;
                 p.rds0 = 0.0;
             }
             if p.rds0 < 0.0 {
-                log::warn!(
+                let stated = warn_line!(
                     "BSIM4: Rds at current temperature = {} is negative; set to zero",
                     p.rds0
                 );
-                replaced(Instance, "rds0", p.rds0, 0.0, Some(0.0));
+                replaced(Instance, "rds0", p.rds0, 0.0, Some(0.0), stated);
                 p.rds0 = 0.0;
             }
             if p.rdswmin < 0.0 {
-                log::warn!(
+                let stated = warn_line!(
                     "BSIM4: Rdswmin at current temperature = {} is negative; set to zero",
                     p.rdswmin
                 );
-                replaced(Instance, "rdswmin", p.rdswmin, 0.0, Some(0.0));
+                replaced(Instance, "rdswmin", p.rdswmin, 0.0, Some(0.0), stated);
                 p.rdswmin = 0.0;
             }
             if m.cgdo < 0.0 || m.cgso < 0.0 || m.cgbo < 0.0 {
@@ -1833,8 +1839,8 @@ fn wpe_sceff(model: &Bsim4v8Model, geom: &Bsim4v8Geometry) -> Value {
     let scref = if model.scref > 0.0 {
         model.scref
     } else {
-        log::warn!("BSIM4: SCREF is not positive; using 1e-6 for WPE");
-        replaced(Model, "scref", model.scref, 1.0e-6, None);
+        let stated = warn_line!("BSIM4: SCREF is not positive; using 1e-6 for WPE");
+        replaced(Model, "scref", model.scref, 1.0e-6, None, stated);
         1.0e-6
     };
     let mut sc = geom.sc;
@@ -1869,23 +1875,23 @@ fn wpe_sceff(model: &Bsim4v8Model, geom: &Bsim4v8Geometry) -> Value {
     }
 
     if sca < 0.0 {
-        log::warn!("BSIM4: SCA is negative; set to zero");
-        replaced(Instance, "sca", sca, 0.0, Some(0.0));
+        let stated = warn_line!("BSIM4: SCA is negative; set to zero");
+        replaced(Instance, "sca", sca, 0.0, Some(0.0), stated);
         sca = 0.0;
     }
     if scb < 0.0 {
-        log::warn!("BSIM4: SCB is negative; set to zero");
-        replaced(Instance, "scb", scb, 0.0, Some(0.0));
+        let stated = warn_line!("BSIM4: SCB is negative; set to zero");
+        replaced(Instance, "scb", scb, 0.0, Some(0.0), stated);
         scb = 0.0;
     }
     if scc < 0.0 {
-        log::warn!("BSIM4: SCC is negative; set to zero");
-        replaced(Instance, "scc", scc, 0.0, Some(0.0));
+        let stated = warn_line!("BSIM4: SCC is negative; set to zero");
+        replaced(Instance, "scc", scc, 0.0, Some(0.0), stated);
         scc = 0.0;
     }
     if sc < 0.0 {
-        log::warn!("BSIM4: SC is negative; set to zero");
-        replaced(Instance, "sc", sc, 0.0, Some(0.0));
+        let stated = warn_line!("BSIM4: SC is negative; set to zero");
+        replaced(Instance, "sc", sc, 0.0, Some(0.0), stated);
         sc = 0.0;
     }
     let _ = sc;
@@ -2080,12 +2086,12 @@ impl Bsim4v8InstTemp {
             }
 
             let kvsat = if m.kvsat < -1.0 {
-                log::warn!("BSIM4: KVSAT = {} is too small; using -1", m.kvsat);
-                replaced(Model, "kvsat", m.kvsat, -1.0, Some(-1.0));
+                let stated = warn_line!("BSIM4: KVSAT = {} is too small; using -1", m.kvsat);
+                replaced(Model, "kvsat", m.kvsat, -1.0, Some(-1.0), stated);
                 -1.0
             } else if m.kvsat > 1.0 {
-                log::warn!("BSIM4: KVSAT = {} is too large; using 1", m.kvsat);
-                replaced(Model, "kvsat", m.kvsat, 1.0, Some(1.0));
+                let stated = warn_line!("BSIM4: KVSAT = {} is too large; using 1", m.kvsat);
+                replaced(Model, "kvsat", m.kvsat, 1.0, Some(1.0), stated);
                 1.0
             } else {
                 m.kvsat
@@ -2119,11 +2125,19 @@ impl Bsim4v8InstTemp {
             k2 += size.k2we * sceff;
             let mut mobility_scale = 1.0 + size.ku0we * sceff;
             if mobility_scale <= 0.0 {
-                log::warn!("BSIM4: KU0WE makes WPE mobility non-positive; clamped to zero");
+                let stated =
+                    warn_line!("BSIM4: KU0WE makes WPE mobility non-positive; clamped to zero");
                 // The factor held at zero is the one KU0WE = -1/SCEFF gives
                 // (sceff is nonzero here, or the factor would be 1).
                 let zeroing = -1.0 / sceff;
-                replaced(Instance, "ku0we", size.ku0we, zeroing, Some(zeroing));
+                replaced(
+                    Instance,
+                    "ku0we",
+                    size.ku0we,
+                    zeroing,
+                    Some(zeroing),
+                    stated,
+                );
                 mobility_scale = 0.0;
             }
             u0temp_pre *= mobility_scale;
@@ -2161,8 +2175,8 @@ impl Bsim4v8InstTemp {
             1.0 / rgeltd
         } else {
             if m.rgate_mod != 0 {
-                log::warn!("BSIM4: gate conductance reset to 1.0e3 mho");
-                replaced(Instance, "rgeltd", rgeltd, 1.0e-3, None);
+                let stated = warn_line!("BSIM4: gate conductance reset to 1.0e3 mho");
+                replaced(Instance, "rgeltd", rgeltd, 1.0e-3, None, stated);
             }
             1.0e3
         };
@@ -2195,8 +2209,15 @@ impl Bsim4v8InstTemp {
             if geom.source_perimeter == 0.0 {
                 0.0
             } else if geom.source_perimeter < 0.0 {
-                log::warn!("BSIM4: source perimeter is negative; set to zero");
-                replaced(Instance, "ps", geom.source_perimeter, 0.0, Some(0.0));
+                let stated = warn_line!("BSIM4: source perimeter is negative; set to zero");
+                replaced(
+                    Instance,
+                    "ps",
+                    geom.source_perimeter,
+                    0.0,
+                    Some(0.0),
+                    stated,
+                );
                 0.0
             } else if m.per_mod == 0 {
                 geom.source_perimeter
@@ -2207,16 +2228,16 @@ impl Bsim4v8InstTemp {
             geo_ps
         };
         if pseff < 0.0 {
-            log::warn!("BSIM4: Pseff is negative; set to zero");
-            replaced(Instance, "pseff", pseff, 0.0, Some(0.0));
+            let stated = warn_line!("BSIM4: Pseff is negative; set to zero");
+            replaced(Instance, "pseff", pseff, 0.0, Some(0.0), stated);
             pseff = 0.0;
         }
         let mut pdeff = if geom.drain_perimeter_given {
             if geom.drain_perimeter == 0.0 {
                 0.0
             } else if geom.drain_perimeter < 0.0 {
-                log::warn!("BSIM4: drain perimeter is negative; set to zero");
-                replaced(Instance, "pd", geom.drain_perimeter, 0.0, Some(0.0));
+                let stated = warn_line!("BSIM4: drain perimeter is negative; set to zero");
+                replaced(Instance, "pd", geom.drain_perimeter, 0.0, Some(0.0), stated);
                 0.0
             } else if m.per_mod == 0 {
                 geom.drain_perimeter
@@ -2227,8 +2248,8 @@ impl Bsim4v8InstTemp {
             geo_pd
         };
         if pdeff < 0.0 {
-            log::warn!("BSIM4: Pdeff is negative; set to zero");
-            replaced(Instance, "pdeff", pdeff, 0.0, Some(0.0));
+            let stated = warn_line!("BSIM4: Pdeff is negative; set to zero");
+            replaced(Instance, "pdeff", pdeff, 0.0, Some(0.0), stated);
             pdeff = 0.0;
         }
         let mut aseff = if geom.source_area_given {
@@ -2237,8 +2258,8 @@ impl Bsim4v8InstTemp {
             geo_as
         };
         if aseff < 0.0 {
-            log::warn!("BSIM4: Aseff is negative; set to zero");
-            replaced(Instance, "aseff", aseff, 0.0, Some(0.0));
+            let stated = warn_line!("BSIM4: Aseff is negative; set to zero");
+            replaced(Instance, "aseff", aseff, 0.0, Some(0.0), stated);
             aseff = 0.0;
         }
         let mut adeff = if geom.drain_area_given {
@@ -2247,8 +2268,8 @@ impl Bsim4v8InstTemp {
             geo_ad
         };
         if adeff < 0.0 {
-            log::warn!("BSIM4: Adeff is negative; set to zero");
-            replaced(Instance, "adeff", adeff, 0.0, Some(0.0));
+            let stated = warn_line!("BSIM4: Adeff is negative; set to zero");
+            replaced(Instance, "adeff", adeff, 0.0, Some(0.0), stated);
             adeff = 0.0;
         }
 
@@ -2422,13 +2443,15 @@ impl Bsim4v8InstTemp {
                     let mut t2 = mt.ijthsrev / source_sat_current;
                     if t2 < 1.0 {
                         t2 = 10.0;
-                        log::warn!("BSIM4: ijthsrev too small and set to 10 times IsbSat");
+                        let stated =
+                            warn_line!("BSIM4: ijthsrev too small and set to 10 times IsbSat");
                         replaced(
                             Instance,
                             "ijthsrev",
                             mt.ijthsrev,
                             10.0 * source_sat_current,
                             Some(source_sat_current),
+                            stated,
                         );
                     }
                     vjsm_rev = -mt.bvs - nvtms * ((t2 - 1.0) / m.xjbvs).ln();
@@ -2484,13 +2507,15 @@ impl Bsim4v8InstTemp {
                     let mut t2 = mt.ijthdrev / drain_sat_current;
                     if t2 < 1.0 {
                         t2 = 10.0;
-                        log::warn!("BSIM4: ijthdrev too small and set to 10 times IdbSat");
+                        let stated =
+                            warn_line!("BSIM4: ijthdrev too small and set to 10 times IdbSat");
                         replaced(
                             Instance,
                             "ijthdrev",
                             mt.ijthdrev,
                             10.0 * drain_sat_current,
                             Some(drain_sat_current),
+                            stated,
                         );
                     }
                     vjdm_rev = -mt.bvd - nvtmd * ((t2 - 1.0) / m.xjbvd).ln();
@@ -2504,8 +2529,10 @@ impl Bsim4v8InstTemp {
 
         // Reverse-bias trap-assisted saturation currents.
         let jtweff = if m.jtweff < 0.0 {
-            log::warn!("BSIM4: TAT width dependence effect is negative; Jtweff clamped to zero");
-            replaced(Model, "jtweff", m.jtweff, 0.0, Some(0.0));
+            let stated = warn_line!(
+                "BSIM4: TAT width dependence effect is negative; Jtweff clamped to zero"
+            );
+            replaced(Model, "jtweff", m.jtweff, 0.0, Some(0.0), stated);
             0.0
         } else {
             m.jtweff

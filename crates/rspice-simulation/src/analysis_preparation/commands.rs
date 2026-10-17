@@ -307,9 +307,15 @@ fn build_sp_command<R, A>(
             nets: &port.nets,
         })
         .collect();
-    let sp_cfg = sp_state
+    let mut sp_cfg = sp_state
         .to_config(Some(&placed))
         .map_err(|e| format!("invalid S-parameter settings: {}", e))?;
+    // Spelled as the request's ports are, so the card names the planes the
+    // run measures: a run around a transient state reads its ports from here.
+    for port in &mut sp_cfg.ports {
+        super::helpers::spell_as_the_deck(&mut port.node_pos);
+        super::helpers::spell_as_the_deck(&mut port.node_neg);
+    }
     Ok(sp_cfg.to_spice())
 }
 

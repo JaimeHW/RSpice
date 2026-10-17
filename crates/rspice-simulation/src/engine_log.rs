@@ -9,7 +9,7 @@
 use std::any::Any;
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rspice_app_types::diagnostics::LogSeverity;
@@ -41,6 +41,12 @@ pub struct EngineLogLine {
     /// without one is the engine's, which is all a line ever was before.
     #[serde(default)]
     pub origin: EngineLogOrigin,
+    /// Its place among the lines the task's sink delivered, counted from
+    /// zero: the number a notice the line states is recorded with
+    /// ([`RecordedNotice::line`]). `None` for the closing count, which no
+    /// sink delivered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ordinal: Option<u64>,
 }
 
 /// The part of a run a line came from, so the Console can say whose words
@@ -124,6 +130,7 @@ impl EngineLogQueue {
                 self.withheld
             ),
             origin: EngineLogOrigin::Engine,
+            ordinal: None,
         });
     }
 
@@ -364,6 +371,9 @@ struct ActiveRun {
     /// itself; a browser worker applies it here, before it formats and posts a
     /// line the UI would only have counted and dropped.
     unqueued: AtomicUsize,
+    /// Lines delivered so far, on every thread of the run: the next line's
+    /// [`EngineLogLine::ordinal`].
+    delivered: AtomicU64,
 }
 
 impl ActiveRun {
@@ -372,17 +382,21 @@ impl ActiveRun {
             sink,
             warnings: Mutex::new(WarningLimiter::default()),
             unqueued: AtomicUsize::new(0),
+            delivered: AtomicU64::new(0),
         }
     }
 
-    /// Deliver the line `line` builds, building it only if it will be sent.
-    fn deliver(&self, line: impl FnOnce() -> EngineLogLine) {
+    /// Deliver the line `line` builds from its ordinal, building it only if
+    /// it will be sent. Returns the ordinal, or `None` when it was not sent.
+    fn deliver(&self, line: impl FnOnce(u64) -> EngineLogLine) -> Option<u64> {
         if self.sink.queue.is_none()
             && self.unqueued.fetch_add(1, Ordering::Relaxed) >= MAX_ENGINE_LOG_LINES
         {
-            return;
+            return None;
         }
-        self.sink.deliver(&line());
+        let ordinal = self.delivered.fetch_add(1, Ordering::Relaxed);
+        self.sink.deliver(&line(ordinal));
+        Some(ordinal)
     }
 
     /// Close the run's log: a queue states what it withheld, and a worker
@@ -560,6 +574,10 @@ pub fn admits(metadata: &log::Metadata<'_>) -> bool {
 }
 
 /// Offer one record to this thread's run, if it has one that wants it.
+///
+/// Whatever becomes of a warning, the logging thread is told which line it
+/// was kept as ([`log_scope::logged`]), so the site that logged it raises the
+/// notice it states with that line, and with none when it was withheld.
 pub fn offer(record: &log::Record<'_>) {
     if !is_engine_target(record.target()) {
         return;
@@ -568,28 +586,31 @@ pub fn offer(record: &log::Record<'_>) {
         return;
     };
     with_current_run(|run, point| {
-        if !run.sink.admits(severity) {
-            return;
-        }
-        let verdict = run.judge(record);
-        if verdict == WarningVerdict::Withhold {
-            return;
-        }
-        run.deliver(|| {
-            let message = match point {
-                Some(point) => format!("{point}: {}", record.args()),
-                None => record.args().to_string(),
-            };
-            EngineLogLine {
-                severity,
-                message: if verdict == WarningVerdict::ShowLast {
-                    last_warning(message)
-                } else {
-                    message
-                },
-                origin: EngineLogOrigin::Engine,
+        let ordinal = if !run.sink.admits(severity) {
+            None
+        } else {
+            match run.judge(record) {
+                WarningVerdict::Withhold => None,
+                verdict => run.deliver(|ordinal| {
+                    let message = match point {
+                        Some(point) => format!("{point}: {}", record.args()),
+                        None => record.args().to_string(),
+                    };
+                    EngineLogLine {
+                        severity,
+                        message: if verdict == WarningVerdict::ShowLast {
+                            last_warning(message)
+                        } else {
+                            message
+                        },
+                        origin: EngineLogOrigin::Engine,
+                        ordinal: Some(ordinal),
+                    }
+                }),
             }
-        });
+        };
+        // Only a warning states a notice.
+        log_scope::logged(ordinal.filter(|_| severity == LogSeverity::Warning));
     });
 }
 
@@ -647,12 +668,14 @@ fn level_of_index(index: usize) -> log::LevelFilter {
 mod tests {
     use super::*;
 
-    fn core_record(level: log::Level, message: &str) -> EngineLogLine {
+    /// The engine line the run delivered `ordinal`-th, from zero.
+    fn core_record(ordinal: u64, level: log::Level, message: &str) -> EngineLogLine {
         let severity = severity_for_level(level).expect("the level reaches the Console");
         EngineLogLine {
             severity,
             message: message.to_owned(),
             origin: EngineLogOrigin::Engine,
+            ordinal: Some(ordinal),
         }
     }
 
@@ -742,7 +765,7 @@ mod tests {
         let message = "ddt() on both sides of a product; reactive AC contribution omitted";
         assert_eq!(
             captured_from("rspice_veriloga::ir", message),
-            vec![core_record(log::Level::Warn, message)]
+            vec![core_record(0, log::Level::Warn, message)]
         );
     }
 
@@ -752,7 +775,7 @@ mod tests {
         let message = "klu backend could not factor this system; using faer fallback";
         assert_eq!(
             captured_from("rspice_matrix::sparse", message),
-            vec![core_record(log::Level::Warn, message)]
+            vec![core_record(0, log::Level::Warn, message)]
         );
     }
 
@@ -764,7 +787,7 @@ mod tests {
                        available)";
         assert_eq!(
             captured_from("rspice_simulation::engine_services::transient", message),
-            vec![core_record(log::Level::Warn, message)]
+            vec![core_record(0, log::Level::Warn, message)]
         );
     }
 
@@ -784,7 +807,7 @@ mod tests {
         }
         assert_eq!(
             lock_queue(&quiet).drain(),
-            vec![core_record(log::Level::Info, "kept")]
+            vec![core_record(0, log::Level::Info, "kept")]
         );
 
         let verbose = Arc::new(Mutex::new(EngineLogQueue::default()));
@@ -811,8 +834,8 @@ mod tests {
         assert_eq!(
             lock_queue(&verbose).drain(),
             vec![
-                core_record(log::Level::Debug, "HB Newton step 1"),
-                core_record(log::Level::Info, "also kept"),
+                core_record(0, log::Level::Debug, "HB Newton step 1"),
+                core_record(1, log::Level::Info, "also kept"),
             ]
         );
     }
@@ -876,7 +899,7 @@ mod tests {
         }
         assert_eq!(
             lock_queue(&queue).drain(),
-            vec![core_record(log::Level::Info, "second run")]
+            vec![core_record(0, log::Level::Info, "second run")]
         );
     }
 
@@ -909,11 +932,11 @@ mod tests {
 
         assert_eq!(
             lock_queue(&first).drain(),
-            vec![core_record(log::Level::Debug, "first")]
+            vec![core_record(0, log::Level::Debug, "first")]
         );
         assert_eq!(
             lock_queue(&second).drain(),
-            vec![core_record(log::Level::Debug, "second")]
+            vec![core_record(0, log::Level::Debug, "second")]
         );
     }
 
@@ -1015,8 +1038,8 @@ mod tests {
         assert_eq!(
             lock_queue(&queue).drain(),
             vec![
-                core_record(log::Level::Warn, "sample 4: vds clamped to 5 V"),
-                core_record(log::Level::Info, "the run's own line"),
+                core_record(0, log::Level::Warn, "sample 4: vds clamped to 5 V"),
+                core_record(1, log::Level::Info, "the run's own line"),
             ]
         );
     }
@@ -1034,11 +1057,11 @@ mod tests {
 
         assert_eq!(
             lock_queue(&inner).drain(),
-            vec![core_record(log::Level::Info, "inner")]
+            vec![core_record(0, log::Level::Info, "inner")]
         );
         assert_eq!(
             lock_queue(&outer).drain(),
-            vec![core_record(log::Level::Info, "outer")]
+            vec![core_record(0, log::Level::Info, "outer")]
         );
     }
 

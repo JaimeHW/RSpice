@@ -214,8 +214,12 @@ use rspice_core::analysis::harmonic_balance::{
 // installed sealed runtimes without holding them and had no caller outside
 // the core. `hold_project_veriloga_sources_for_session` is now the only way
 // to install a sealed source.
-// The census is 5,732, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5732;
+// The census was 5,732, with no slack.
+// `log_scope::logged` adds one: the simulation service's run log
+// (`rspice-simulation` engine_log.rs) says which line it kept for each engine
+// record it is offered, so the engine site that logged a warning raises the
+// notice it states with that line. The census is 5,733, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5733;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
