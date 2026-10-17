@@ -149,7 +149,8 @@ pub fn prepare(
     command: SelectionLayoutCommand,
 ) -> Result<SelectionLayoutRequest, SelectionLayoutError> {
     let targets = selection_layout_targets(view, command)?;
-    let moves = layout_deltas(&targets, command)?;
+    let grid = i64::from(view.design.document.grid_size.max(1));
+    let moves = layout_deltas(&targets, command, grid)?;
     Ok(SelectionLayoutRequest {
         source,
         selection: view.selection.clone(),
@@ -265,20 +266,27 @@ fn require_active_sheet(view: &DesignView<'_>, object_id: u64) -> Result<(), Sel
     }
 }
 
+/// Every move is a whole number of `grid` steps, as a drag is, so a part on
+/// the grid stays on it with its pins. A body need not be a whole number of
+/// steps wide around its origin, so edges, centres and gaps then line up to
+/// within one step rather than exactly. A part already on the line, such as
+/// the outermost one an edge is aligned to, never moves.
 fn layout_deltas(
     targets: &[LayoutTarget],
     command: SelectionLayoutCommand,
+    grid: i64,
 ) -> Result<Vec<SelectionLayoutMove>, SelectionLayoutError> {
     match command {
-        SelectionLayoutCommand::DistributeHorizontal => distribute(targets, true),
-        SelectionLayoutCommand::DistributeVertical => distribute(targets, false),
-        _ => align(targets, command),
+        SelectionLayoutCommand::DistributeHorizontal => distribute(targets, true, grid),
+        SelectionLayoutCommand::DistributeVertical => distribute(targets, false, grid),
+        _ => align(targets, command, grid),
     }
 }
 
 fn align(
     targets: &[LayoutTarget],
     command: SelectionLayoutCommand,
+    grid: i64,
 ) -> Result<Vec<SelectionLayoutMove>, SelectionLayoutError> {
     let min_x = targets
         .iter()
@@ -319,7 +327,7 @@ fn align(
             };
             Ok(SelectionLayoutMove {
                 object: target.object,
-                delta: checked_delta(target, delta_x, delta_y)?,
+                delta: checked_delta(target, on_grid(delta_x, grid), on_grid(delta_y, grid))?,
             })
         })
         .collect()
@@ -328,6 +336,7 @@ fn align(
 fn distribute(
     targets: &[LayoutTarget],
     horizontal: bool,
+    grid: i64,
 ) -> Result<Vec<SelectionLayoutMove>, SelectionLayoutError> {
     let mut sorted = targets.to_vec();
     sorted.sort_by_key(|target| {
@@ -386,7 +395,7 @@ fn distribute(
         };
         result.push(SelectionLayoutMove {
             object: target.object,
-            delta: checked_delta(target, delta_x, delta_y)?,
+            delta: checked_delta(target, on_grid(delta_x, grid), on_grid(delta_y, grid))?,
         });
         preceding_size += if horizontal {
             target.width()
@@ -403,6 +412,19 @@ fn rounded_ratio(numerator: i64, denominator: i64) -> i64 {
         (numerator + denominator / 2) / denominator
     } else {
         -((-numerator + denominator / 2) / denominator)
+    }
+}
+
+/// `delta` to the nearest whole number of `grid` steps; a tie takes the
+/// shorter move.
+fn on_grid(delta: i64, grid: i64) -> i64 {
+    let below = delta.div_euclid(grid) * grid;
+    let above = below + grid;
+    match (delta - below).cmp(&(above - delta)) {
+        std::cmp::Ordering::Less => below,
+        std::cmp::Ordering::Greater => above,
+        std::cmp::Ordering::Equal if below.abs() <= above.abs() => below,
+        std::cmp::Ordering::Equal => above,
     }
 }
 
