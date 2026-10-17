@@ -397,6 +397,83 @@ fn a_selection_the_run_does_not_read_does_not_refuse_it() {
     stop_the_run(&mut app);
 }
 
+/// Selecting a device that writes a card names it in the operating point's
+/// report, so the operating point the check prepared is no longer the one the
+/// design asks for, and the dispatch is refused.
+#[test]
+fn selecting_a_device_refuses_a_run_with_an_operating_point() {
+    let mut app = inverter_over_a_run_set();
+    queued_by_its_check(&mut app);
+    let pull_down = app
+        .state
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.name == "MN")
+        .expect("the inverter draws MN")
+        .id;
+    app.state
+        .schematic
+        .session
+        .editor
+        .selection
+        .components
+        .insert(pull_down);
+
+    assert!(dispatch_frame(&mut app).is_empty());
+    assert_refused_for(&app, "the devices or results the operating point reports");
+}
+
+/// Automation prepares its run in its own frame, from the live session, and
+/// queues it; the frame that dispatches it checks it as it checks a run a
+/// Run press prepared. Unchanged, the run Automation prepared is the run that
+/// starts, and nothing is prepared again; edited, it is refused.
+#[test]
+fn the_run_automation_prepares_is_checked_at_dispatch_as_a_run_press_is() {
+    use crate::simulation::controller::prepared_run::thread_preparations;
+
+    fn prepared_as_automation_prepares(app: &mut RSpiceApp) -> crate::product::ContentDigest {
+        app.invalidate_simulation_preflight();
+        let prepared = app
+            .simulation_controller
+            .prepare_run_set_for_preflight(&app.state)
+            .expect("the inverter prepares");
+        app.state.request_run_set_simulation();
+        assert_eq!(
+            thread_preparations::take(),
+            [crate::simulation::execution::SimulationRunIntent::SimulateRunSet],
+            "Automation prepares its run in its own frame"
+        );
+        prepared.snapshot_digest
+    }
+
+    let mut unchanged = inverter_over_a_run_set();
+    let authorized = prepared_as_automation_prepares(&mut unchanged);
+    assert!(dispatch_frame(&mut unchanged).is_empty());
+    assert_eq!(
+        unchanged
+            .state
+            .simulation
+            .retained
+            .runs
+            .first()
+            .and_then(|run| run.prepared_receipt())
+            .map(|receipt| receipt.prepared_snapshot_digest()),
+        Some(authorized),
+        "the run is the snapshot Automation prepared"
+    );
+    stop_the_run(&mut unchanged);
+
+    let mut edited = inverter_over_a_run_set();
+    prepared_as_automation_prepares(&mut edited);
+    edited.state.schematic.document_mut_for_test().components[0]
+        .value
+        .push('0');
+    assert!(dispatch_frame(&mut edited).is_empty());
+    assert_refused_for(&edited, "the design");
+}
+
 /// The run the worker prepares from the inputs frozen at the press is the run
 /// the frame would have prepared from the live state: the same snapshot, by
 /// digest, and the same deck, byte for byte. One example runs a single point;
