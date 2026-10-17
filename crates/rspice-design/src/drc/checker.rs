@@ -185,6 +185,7 @@ impl DrcChecker {
             self.check_source_to_source(components, &mut result);
             self.check_shorted_outputs(&net_map, &mut result);
             self.check_duplicate_bus_member_drivers(&net_map, &mut result);
+            self.check_undriven_nets(&net_map, &mut result);
         }
 
         result.completed = true;
@@ -404,6 +405,13 @@ impl DrcChecker {
     /// `InOut` is a declaration that deliberately declines to say, and is read
     /// the same way as no declaration.
     ///
+    /// An open MOSFET bulk is that unclassified finding too, with the remedy
+    /// in its message. The deck still writes it, as a node of its own that
+    /// only the device's junctions reach, and the engine solves it, so it is
+    /// no more severe than any other open terminal; a bulk tied to a rail
+    /// other than its source's is deliberate body bias, and nothing here
+    /// judges it.
+    ///
     /// Two terminals are not open pins at all. An input the netlister writes
     /// `null` for when nothing meets it may legally stay open. And an
     /// interface port's own terminal is where the node leaves for the parent,
@@ -443,6 +451,14 @@ impl DrcChecker {
                     Some(PortDirection::Out) => (
                         DrcViolationType::UnloadedOutput,
                         format!("Output pin {}.{} drives nothing", component_name, pin.name),
+                    ),
+                    None | Some(PortDirection::InOut) if pin.bulk => (
+                        DrcViolationType::UnconnectedPin,
+                        format!(
+                            "Bulk pin {}.{} is not connected; tie it to the source or to its \
+                             well or substrate rail",
+                            component_name, pin.name
+                        ),
                     ),
                     None | Some(PortDirection::InOut) => (
                         DrcViolationType::UnconnectedPin,
@@ -835,6 +851,55 @@ impl DrcChecker {
         }
     }
 
+    /// Report every node that ties declared inputs together and nothing else.
+    ///
+    /// An input waits to be driven, and on this node nothing can drive it:
+    /// every terminal on it is a pin an interface declares an input.
+    /// Everything else counts as a driver here — a declared output, a
+    /// source's drive terminal, a bidirectional or supply pin, and every
+    /// terminal no interface classified, which is every passive leg and every
+    /// primitive device terminal, so one resistor to a rail is enough. A node
+    /// that continues outside the cellview is driven from there: an interface
+    /// port carries the parent's net in, and a global is one node with every
+    /// other cellview that names it. Node 0 is the reference itself.
+    ///
+    /// One input alone on its node is not this finding: unattached it is an
+    /// undriven input, and attached to a bare conductor it is a node of one
+    /// connection, and each of those already says so.
+    fn check_undriven_nets(&mut self, net_map: &HashMap<String, NetInfo>, result: &mut DrcResult) {
+        let mut names = net_map.keys().collect::<Vec<_>>();
+        names.sort();
+        for name in names {
+            let net = &net_map[name];
+            let receivers = &net.declared_inputs;
+            if receivers.len() < 2
+                || receivers.len() != net.connection_count
+                || net.continues_outside
+                || net.is_ground
+            {
+                continue;
+            }
+            let id = self.next_id();
+            self.add_violation(
+                result,
+                DrcViolation::new(
+                    id,
+                    DrcViolationType::UndrivenNet,
+                    format!(
+                        "Net '{}' joins {} declared inputs and nothing drives it: {}",
+                        net.display_name,
+                        receivers.len(),
+                        receivers.join(", ")
+                    ),
+                    DrcLocation::Node {
+                        net_name: name.clone(),
+                    },
+                )
+                .with_related(receivers.clone()),
+            );
+        }
+    }
+
     fn check_duplicate_bus_member_drivers(
         &mut self,
         net_map: &HashMap<String, NetInfo>,
@@ -1037,6 +1102,61 @@ pub(super) fn append_case_collision_violations(
     }
 }
 
+/// Report each net the drawing names as ground that the deck does not write
+/// as node 0, at the first label that names it so.
+///
+/// The canvas reads `GND!` as ground because Xyce's `REPLACEGROUND` folds it,
+/// but the netlister writes it as a global node of its own unless the
+/// project's technology global-net catalog promotes it onto a name the deck
+/// writes as node 0, so everything returned through it is returned to that
+/// node instead of the reference. A label spelled as node 0 can lose its net
+/// the same way to a name that claimed it first, an interface port's or an
+/// earlier label's, and the deck then writes that name. Either way the
+/// drawing says ground where the deck does not. A label on no net is the
+/// orphan-label rule's.
+pub(super) fn append_ground_not_node_zero(
+    schematic: &crate::schematic::document::SchematicDocument,
+    connectivity: &ExtractedConnectivity,
+    result: &mut DrcResult,
+    severity_overrides: &HashMap<DrcViolationType, DrcSeverity>,
+) {
+    let mut labels: Vec<&crate::schematic::net_label::NetLabel> =
+        schematic.net_labels.iter().collect();
+    labels.sort_by_key(|label| label.id);
+    let mut stated = std::collections::HashSet::new();
+    let mut next_id = result.total_count();
+    for label in labels {
+        if !label.is_ground() {
+            continue;
+        }
+        let Some(node) = connectivity.net_at(label.pos).map(|net| net.spice_name()) else {
+            continue;
+        };
+        if crate::schematic::ground_names::writes_node_zero(&node)
+            || !stated.insert(node.to_ascii_lowercase())
+        {
+            continue;
+        }
+        let mut violation = DrcViolation::new(
+            next_id,
+            DrcViolationType::GroundNotNodeZero,
+            format!(
+                "Net label '{}' reads as ground, but the deck writes its net as node '{node}', \
+                 not as node 0",
+                label.name.trim()
+            ),
+            DrcLocation::NetLabel {
+                name: label.name.clone(),
+            },
+        );
+        if let Some(severity) = severity_overrides.get(&DrcViolationType::GroundNotNodeZero) {
+            violation.severity = *severity;
+        }
+        result.add_violation(violation);
+        next_id += 1;
+    }
+}
+
 /// What a finding calls this component: the authored reference where there is
 /// one, and its identity otherwise, so a message never names an empty string.
 pub(super) fn component_identity(component: &ComponentInfo) -> String {
@@ -1057,6 +1177,9 @@ fn card_label(component: &ComponentInfo, card: &WrittenCard) -> String {
         CardRole::PrimaryWinding => "primary winding",
         CardRole::SecondaryWinding => "secondary winding",
         CardRole::Coupling => "coupling",
+        CardRole::SeriesResistance => "series resistance",
+        CardRole::ParallelResistance => "parallel resistance",
+        CardRole::ParallelCapacitance => "parallel capacitance",
     };
     format!("{identity}'s {part}")
 }

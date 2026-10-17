@@ -1,8 +1,8 @@
 //! Ground policy integration with the simulation engine.
 
+pub use rspice_design::schematic::ground_names::reserved_ground_name;
 #[cfg(test)]
-use rspice_design::schematic::ground_names::GROUND_ALIASES;
-pub use rspice_design::schematic::ground_names::{is_ground_reference, reserved_ground_name};
+use rspice_design::schematic::ground_names::{GROUND_ALIASES, is_ground_reference};
 
 #[cfg(test)]
 mod tests {

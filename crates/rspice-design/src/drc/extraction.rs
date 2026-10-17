@@ -5,8 +5,9 @@
 //! the deck will actually write, so a finding quotes what the engine sees.
 
 use super::checker::{
-    DrcChecker, DrcConfig, append_case_collision_violations, append_off_sheet_connector_violations,
-    append_vector_width_violations, component_identity, diagnostic_location,
+    DrcChecker, DrcConfig, append_case_collision_violations, append_ground_not_node_zero,
+    append_off_sheet_connector_violations, append_vector_width_violations, component_identity,
+    diagnostic_location,
 };
 use super::input::{BrokenReference, ComponentInfo, ParameterRangeIssue, PinInfo};
 use super::source_loops::{self, GROUND_KEY};
@@ -219,6 +220,7 @@ fn check_subject(
     let mut reports = Vec::with_capacity(graph.views.len());
     let mut drives = GlobalDrives::default();
     let mut touches = GlobalTouches::default();
+    let mut ties = GroundTies::default();
     let mut design_reaches_ground = false;
     let mut subject_inputs = None;
     for (index, view) in graph.views.iter().enumerate() {
@@ -243,6 +245,17 @@ fn check_subject(
         if index == SUBJECT || reach == CheckReach::Hierarchy {
             let mut report =
                 check_one_view(view.document, &view_config, &components, &connectivity);
+            // A ground mark the deck does not write as node 0 is a fact of the
+            // cellview that draws it, unlike whether the design reaches node 0
+            // at all, so it is stated with that cellview's findings.
+            if config.check_missing_ground {
+                append_ground_not_node_zero(
+                    view.document,
+                    &connectivity,
+                    &mut report,
+                    &config.severity_overrides,
+                );
+            }
             graph.append_recursive_findings(
                 index,
                 reach,
@@ -256,6 +269,16 @@ fn check_subject(
         }
         if reach == CheckReach::Hierarchy && config.check_floating_nodes {
             touches.collect(index, &components);
+        }
+        if reach == CheckReach::Hierarchy && config.check_missing_ground {
+            ties.collect(
+                index,
+                view.document,
+                &connectivity,
+                &components,
+                hierarchy,
+                &globals,
+            );
         }
         if index == SUBJECT {
             subject_inputs = Some((components, connectivity));
@@ -332,8 +355,13 @@ fn check_subject(
             next_id += 1;
         }
         // A global touched once has its one terminal in exactly one
-        // occurrence, and the finding is stated there.
-        for (view, mut finding) in touches.floating(&occurrences, config.min_connections) {
+        // occurrence, and the finding is stated there; a tie to ground is
+        // stated where it is drawn.
+        for (view, mut finding) in touches
+            .floating(&occurrences, config.min_connections)
+            .into_iter()
+            .chain(ties.parted())
+        {
             if let Some(severity) = config.severity_overrides.get(&finding.violation_type) {
                 finding.severity = *severity;
             }
@@ -428,6 +456,8 @@ fn restated(
 /// its own net map: a ground-named node is evidence only once some terminal
 /// that is not a drawn ground symbol's stands on it. Node 0 is global, so the
 /// evidence is about the whole design wherever in the hierarchy it is found.
+/// It is node 0 as the deck writes it: a terminal on a `GND!` the deck writes
+/// under its own name grounds nothing.
 fn reaches_ground(components: &[ComponentInfo]) -> bool {
     components
         .iter()
@@ -436,7 +466,7 @@ fn reaches_ground(components: &[ComponentInfo]) -> bool {
             component
                 .pins
                 .iter()
-                .any(|pin| crate::schematic::ground_names::is_ground_reference(&pin.net_name))
+                .any(|pin| crate::schematic::ground_names::writes_node_zero(&pin.net_name))
         })
 }
 
@@ -492,6 +522,10 @@ fn extract_components(
                 on_global: context
                     .globals
                     .contains(&terminal.net_name.to_ascii_lowercase()),
+                bulk: comp
+                    .kind
+                    .bulk_terminal()
+                    .is_some_and(|bulk| bulk.eq_ignore_ascii_case(&terminal.pin)),
             });
         }
         mark_optional_inputs(comp, &mut pins);
@@ -548,7 +582,7 @@ fn broken_references(component: &Component, cellview: &[Component]) -> Vec<Broke
         return Vec::new();
     };
     let ambiguous = match resolve_instance_reference(cellview, reference) {
-        InstanceReference::Names(_) => return Vec::new(),
+        InstanceReference::Names { .. } => return Vec::new(),
         InstanceReference::Ambiguous => true,
         InstanceReference::Unresolved => false,
     };
@@ -1024,7 +1058,7 @@ impl GlobalTouches {
             let Some((view, _, node)) = touched.touches.first() else {
                 continue;
             };
-            if touched.continues || crate::schematic::ground_names::is_ground_reference(node) {
+            if touched.continues || crate::schematic::ground_names::writes_node_zero(node) {
                 continue;
             }
             let total = touched
@@ -1048,6 +1082,95 @@ impl GlobalTouches {
             ));
         }
         findings
+    }
+}
+
+/// Globals a cellview ties to ground, and the globals the walk reaches as
+/// nodes of their own, gathered across the walk.
+///
+/// A ground symbol names its net `0` over every label on it, so a global label
+/// that shares a net with one is node 0 in that cellview, while every other
+/// cellview that names the global writes it as the global's own node. The deck
+/// shorts nothing: the tie the drawing shows is not in it, and the rail and
+/// that cellview's node 0 stay apart. Within one cellview the two cannot part,
+/// because each label of the name joins the one net; a source on it then
+/// stands across node 0, which the source rule states. And a global no other
+/// cellview reaches is only another name for node 0 where it is tied.
+#[derive(Default)]
+struct GroundTies {
+    /// By folded node name: the first cellview that ties the global to node
+    /// 0, the label there that ties it, and the global as the deck names it.
+    tied: BTreeMap<String, (usize, String, String)>,
+    /// Folded names of the globals a terminal stands on as a node of its own.
+    reached: HashSet<String>,
+}
+
+impl GroundTies {
+    fn collect(
+        &mut self,
+        view: usize,
+        schematic: &SchematicDocument,
+        connectivity: &ExtractedConnectivity,
+        components: &[ComponentInfo],
+        hierarchy: &HierarchySource<'_>,
+        globals: &HashSet<String>,
+    ) {
+        let reached = components
+            .iter()
+            .flat_map(|component| &component.pins)
+            .filter(|pin| pin.on_global)
+            .map(|pin| pin.net_name.to_ascii_lowercase());
+        self.reached.extend(reached);
+
+        let mut labels = schematic.net_labels.iter().collect::<Vec<_>>();
+        labels.sort_by_key(|label| label.id);
+        for label in labels {
+            // A ground-named global on a ground net is the ground it says.
+            if label.is_ground() {
+                continue;
+            }
+            let Some(global) = hierarchy.canonical_global_label(label.name.trim()) else {
+                continue;
+            };
+            let key = global.to_ascii_lowercase();
+            if !globals.contains(&key) || crate::schematic::ground_names::writes_node_zero(&global)
+            {
+                continue;
+            }
+            let grounded = connectivity.net_at(label.pos).is_some_and(|net| {
+                crate::schematic::ground_names::writes_node_zero(&net.spice_name())
+            });
+            if grounded {
+                self.tied
+                    .entry(key)
+                    .or_insert_with(|| (view, label.name.clone(), global));
+            }
+        }
+    }
+
+    /// Each global tied to ground in one cellview and reached as its own node
+    /// in another, at the cellview that ties it first.
+    fn parted(&self) -> Vec<(usize, DrcViolation)> {
+        self.tied
+            .iter()
+            .filter(|(key, _)| self.reached.contains(*key))
+            .map(|(_, (view, label, global))| {
+                (
+                    *view,
+                    DrcViolation::new(
+                        0,
+                        DrcViolationType::SupplyTiedToGround,
+                        format!(
+                            "Global net '{global}' is tied to ground here: the deck writes this \
+                             net as node 0, apart from '{global}' in the rest of the design"
+                        ),
+                        DrcLocation::NetLabel {
+                            name: label.clone(),
+                        },
+                    ),
+                )
+            })
+            .collect()
     }
 }
 

@@ -4,8 +4,10 @@
 //! [`Component::written_element_name`]. Some make the deck write others beside
 //! it or in its place: a current-controlled source or switch with no
 //! controlling element of its own senses its control current through a 0 V
-//! source the deck writes for it, and a transformer is written as two winding
-//! inductors and their coupling, with no card under its own name. A coupling
+//! source the deck writes for it, a transformer is written as two winding
+//! inductors and their coupling, with no card under its own name, and an
+//! independent source's series and parallel parasitics are written as a
+//! resistor or capacitor of their own beside it. A coupling
 //! is written once per winding set, whichever drawn component asks for it, so
 //! which couplings the deck writes, and under what names, is a question about
 //! the whole cellview.
@@ -22,6 +24,10 @@ use std::fmt;
 /// senses the component's control current through.
 const SENSE_SOURCE_PREFIX: &str = "VSENSE_";
 
+/// What the deck writes between an element letter and an independent source's
+/// id to name a parasitic it writes beside that source.
+const SOURCE_PARASITIC_STEM: &str = "__RSPICE_SOURCE_";
+
 /// What a written card is to the component that makes the deck write it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CardRole {
@@ -37,6 +43,14 @@ pub enum CardRole {
     /// A mutual-inductance card a component asks for without being one: a
     /// transformer's own, or the one an inductor's `coupled_to` names.
     Coupling,
+    /// The resistor a voltage source's `rs` writes in series with its `+`
+    /// terminal.
+    SeriesResistance,
+    /// The resistor an independent source's `rp` writes across its terminals.
+    ParallelResistance,
+    /// The capacitor an independent source's `cpar` writes across its
+    /// terminals.
+    ParallelCapacitance,
 }
 
 /// One card the deck writes.
@@ -57,6 +71,27 @@ pub struct TransformerCards {
     pub secondary: String,
     /// The coupling between the two.
     pub coupling: String,
+}
+
+/// One parasitic element the deck writes beside an independent source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceParasitic {
+    /// The name the deck heads the element's card with.
+    pub name: String,
+    /// The element's value as authored, without surrounding blanks.
+    pub value: String,
+}
+
+/// The parasitic elements the deck writes beside an independent source.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SourceParasitics {
+    /// A voltage source's `rs`, in series with its `+` terminal: the source
+    /// then drives a node of its own behind the resistor.
+    pub series_resistance: Option<SourceParasitic>,
+    /// `rp`, across the source's terminals.
+    pub parallel_resistance: Option<SourceParasitic>,
+    /// `cpar`, across the source's terminals.
+    pub parallel_capacitance: Option<SourceParasitic>,
 }
 
 impl Component {
@@ -107,6 +142,45 @@ impl Component {
         })
     }
 
+    /// The parasitic elements the deck writes beside this independent
+    /// source, or `None` for any other component.
+    ///
+    /// A voltage source's `rs` is written in series with its `+` terminal, and
+    /// any independent source's `rp` and `cpar` across its terminals. Each is
+    /// named from the component id rather than its drawn name, so a source
+    /// with id 7 and `rs=50` writes `R__RSPICE_SOURCE_7_RS`. A blank or zero
+    /// value writes nothing — except that a zero `rp` is a short across the
+    /// source, which the netlister refuses rather than leaves out.
+    pub fn source_parasitics(&self) -> Option<SourceParasitics> {
+        if !self.kind.is_source() {
+            return None;
+        }
+        let drives_voltage = match self.kind.spice_prefix() {
+            "V" => true,
+            "I" => false,
+            _ => return None,
+        };
+        let params = crate::parameters::parse_params_string(&self.params);
+        let written = |key: &str, element: ComponentType, suffix: &str| {
+            let value = params.get(key)?.trim();
+            (!crate::parameters::source_value_is_zero_or_blank(value)).then(|| SourceParasitic {
+                name: format!(
+                    "{}{SOURCE_PARASITIC_STEM}{}_{suffix}",
+                    element.spice_prefix(),
+                    self.id
+                ),
+                value: value.to_owned(),
+            })
+        };
+        Some(SourceParasitics {
+            series_resistance: drives_voltage
+                .then(|| written("rs", ComponentType::Resistor, "RS"))
+                .flatten(),
+            parallel_resistance: written("rp", ComponentType::Resistor, "RP"),
+            parallel_capacitance: written("cpar", ComponentType::Capacitor, "CPAR"),
+        })
+    }
+
     /// The cards this component makes the deck write on its own account: its
     /// own element where it has one, then the cards written beside or in
     /// place of it. A coupling is a question about the cellview, answered by
@@ -128,6 +202,20 @@ impl Component {
             self.sense_source_name()
                 .map(|name| card(name, CardRole::SenseSource)),
         );
+        if let Some(parasitics) = self.source_parasitics() {
+            cards.extend(
+                [
+                    (parasitics.series_resistance, CardRole::SeriesResistance),
+                    (parasitics.parallel_resistance, CardRole::ParallelResistance),
+                    (
+                        parasitics.parallel_capacitance,
+                        CardRole::ParallelCapacitance,
+                    ),
+                ]
+                .into_iter()
+                .filter_map(|(parasitic, role)| Some(card(parasitic?.name, role))),
+            );
+        }
         cards
     }
 }
@@ -646,6 +734,63 @@ mod tests {
         assert_eq!(
             drawn(9, ComponentType::TransmissionLine, "T1", "").transformer_cards(),
             None
+        );
+    }
+
+    #[test]
+    fn a_sources_parasitics_are_written_as_cards_named_from_its_id() {
+        let parasitics = |kind: ComponentType, params: &str| {
+            drawn(7, kind, "V1", params)
+                .source_parasitics()
+                .map(|parasitics| {
+                    [
+                        parasitics.series_resistance,
+                        parasitics.parallel_resistance,
+                        parasitics.parallel_capacitance,
+                    ]
+                    .map(|parasitic| parasitic.map(|parasitic| (parasitic.name, parasitic.value)))
+                })
+        };
+        let written = |name: &str, value: &str| Some((name.to_owned(), value.to_owned()));
+        assert_eq!(
+            parasitics(ComponentType::VoltageSourcePulse, "rs=' 5 ' rp=1k cpar=1p"),
+            Some([
+                written("R__RSPICE_SOURCE_7_RS", "5"),
+                written("R__RSPICE_SOURCE_7_RP", "1k"),
+                written("C__RSPICE_SOURCE_7_CPAR", "1p"),
+            ])
+        );
+        // Blank and every spelling of zero write nothing, and a current source
+        // has no series resistance to write.
+        assert_eq!(
+            parasitics(ComponentType::VoltageSource, "rs=0ohm rp= cpar=0f"),
+            Some([None, None, None])
+        );
+        assert_eq!(
+            parasitics(ComponentType::CurrentSourceSin, "rs=5 rp=10k"),
+            Some([None, written("R__RSPICE_SOURCE_7_RP", "10k"), None])
+        );
+        // Only an independent source writes them.
+        assert_eq!(parasitics(ComponentType::Vcvs, "rs=5"), None);
+        assert_eq!(parasitics(ComponentType::LoopProbe, "rs=5"), None);
+
+        let cards = written_cards(&[drawn(7, ComponentType::VoltageSource, "V1", "rs=5 cpar=1p")]);
+        assert_eq!(
+            cards[&7],
+            [
+                WrittenCard {
+                    name: "V1".to_owned(),
+                    role: CardRole::Element,
+                },
+                WrittenCard {
+                    name: "R__RSPICE_SOURCE_7_RS".to_owned(),
+                    role: CardRole::SeriesResistance,
+                },
+                WrittenCard {
+                    name: "C__RSPICE_SOURCE_7_CPAR".to_owned(),
+                    role: CardRole::ParallelCapacitance,
+                },
+            ]
         );
     }
 

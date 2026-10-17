@@ -336,6 +336,18 @@ pub fn carries_source_value(raw: Option<&str>) -> bool {
     })
 }
 
+/// Whether an independent source's parameter is blank or a spelling of zero,
+/// units and all.
+///
+/// The netlister writes no element and no excitation for such a value, so
+/// this is the one test both it and the account of the cards it writes ask.
+pub fn source_value_is_zero_or_blank(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "" | "0" | "+0" | "-0" | "0.0" | "0v" | "0a" | "0f" | "0ohm" | "0Ω"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

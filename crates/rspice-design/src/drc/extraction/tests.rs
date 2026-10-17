@@ -1269,6 +1269,43 @@ fn a_synthesized_sense_source_collides_with_a_drawn_one() {
     );
 }
 
+/// An independent source's parasitics are cards of their own, named from the
+/// source's id, so a part drawn under one of those names is a second card of
+/// it. A parasitic the source does not set writes nothing to collide with.
+#[test]
+fn a_source_parasitic_collides_with_a_part_drawn_under_its_name() {
+    let source = |kind: ComponentType, params: &str| with_params(part(7, kind, "V1"), params);
+    assert_eq!(
+        duplicates_of(vec![
+            source(ComponentType::VoltageSource, "rs=50"),
+            part(2, ComponentType::Resistor, "R__RSPICE_SOURCE_7_RS"),
+        ]),
+        vec![
+            "R__RSPICE_SOURCE_7_RS and V1's series resistance are both written \
+             R__RSPICE_SOURCE_7_RS"
+        ]
+    );
+    assert_eq!(
+        duplicates_of(vec![
+            source(ComponentType::CurrentSourcePulse, "rp=10k cpar=1p"),
+            part(2, ComponentType::Capacitor, "C__rspice_source_7_cpar"),
+        ]),
+        vec![
+            "C__rspice_source_7_cpar and V1's parallel capacitance are written \
+             C__RSPICE_SOURCE_7_CPAR and C__rspice_source_7_cpar, which the simulator reads \
+             as one name"
+        ]
+    );
+    assert_eq!(
+        duplicates_of(vec![
+            source(ComponentType::VoltageSource, "rs=0 rp="),
+            part(2, ComponentType::Resistor, "R__RSPICE_SOURCE_7_RS"),
+            part(3, ComponentType::Resistor, "R__RSPICE_SOURCE_7_RP"),
+        ]),
+        Vec::<String>::new()
+    );
+}
+
 /// An inductor's `coupled_to` asks for a coupling of a winding set, which the
 /// deck writes once, as `K` before the windings' names. That card collides
 /// with a coupling drawn under the same name, and two inductors that name each
@@ -1939,4 +1976,26 @@ fn a_controlling_reference_must_name_one_instance() {
             "F1 vref='sense' names more than one instance of this cellview".to_owned()
         )]
     );
+    // A source that names no controlling element of its own is written beside
+    // the sense source the deck makes for it, and that card is an element the
+    // engine has, whichever case names it.
+    for vref in ["VSENSE_H1", "vsense_h1"] {
+        assert_eq!(
+            check(vref, Some(part(3, ComponentType::Ccvs, "H1"))),
+            Vec::new(),
+            "{vref}"
+        );
+    }
+    // A transformer is written as its windings and their coupling, so its
+    // drawn name is no element of the deck.
+    assert_eq!(
+        check("T1", Some(part(3, ComponentType::Transformer, "T1"))),
+        vec![(
+            DrcSeverity::Error,
+            "F1 vref='T1' names no instance of this cellview".to_owned()
+        )]
+    );
 }
+
+mod electrical_rules;
+mod ground_rules;

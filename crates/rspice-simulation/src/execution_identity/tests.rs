@@ -1353,6 +1353,9 @@ fn drc_identity_tags_are_never_renumbered() {
         DrcViolationType::UnloadedOutput => 27,
         DrcViolationType::RecursiveInstantiation => 28,
         DrcViolationType::UnresolvedReference => 29,
+        DrcViolationType::UndrivenNet => 30,
+        DrcViolationType::GroundNotNodeZero => 31,
+        DrcViolationType::SupplyTiedToGround => 32,
     };
     let types = [
         DrcViolationType::FloatingNode,
@@ -1384,6 +1387,9 @@ fn drc_identity_tags_are_never_renumbered() {
         DrcViolationType::UnloadedOutput,
         DrcViolationType::RecursiveInstantiation,
         DrcViolationType::UnresolvedReference,
+        DrcViolationType::UndrivenNet,
+        DrcViolationType::GroundNotNodeZero,
+        DrcViolationType::SupplyTiedToGround,
     ];
     let mut seen = std::collections::BTreeSet::new();
     for violation_type in types {

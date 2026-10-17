@@ -120,6 +120,9 @@ pub struct PinInfo {
     /// The node this terminal stands on is a global the deck declares, so it
     /// continues into every other cellview that names it.
     pub on_global: bool,
+    /// The terminal is a MOSFET's bulk or substrate, which an open-pin
+    /// finding tells the author where to tie.
+    pub bulk: bool,
 }
 
 impl PinInfo {

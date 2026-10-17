@@ -19,9 +19,10 @@ use rspice_design::schematic::document::SchematicDocument;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::state::{Component, ComponentType, PortDirection, is_ground_reference};
+use crate::state::{Component, ComponentType, PortDirection};
 use crate::workbench::state::{PreflightIssue, PreflightRemediation};
 use rspice_design::connectivity::ExtractedConnectivity;
+use rspice_design::schematic::ground_names::writes_node_zero;
 
 /// Row labels the Solver surface states as enforced contract. The refusal and
 /// the statement of the rule use one vocabulary.
@@ -209,6 +210,10 @@ fn designator(component: &Component) -> String {
 /// The nodes no conducting chain ties to the reference, as one ordered
 /// refusal.
 ///
+/// The reference is the node the deck writes as 0. A global the netlister
+/// writes under its own name — `GND!` — is an ordinary node to the engine,
+/// however it reads on the canvas, so it is one here too.
+///
 /// A design with no reference node at all is not reported here: every node
 /// would be listed, burying the missing-ground finding that owns that state.
 fn no_dc_path_issue(
@@ -216,10 +221,10 @@ fn no_dc_path_issue(
     nodes: &Nodes,
     terminals: &HashMap<u64, Vec<TerminalNode>>,
 ) -> Option<PreflightIssue> {
-    let ground = (0..nodes.len()).find(|&node| is_ground_reference(nodes.name(node)))?;
+    let ground = (0..nodes.len()).find(|&node| writes_node_zero(nodes.name(node)))?;
     let mut sets = DisjointSets::new(nodes.len());
     for alias in (ground + 1)..nodes.len() {
-        if is_ground_reference(nodes.name(alias)) {
+        if writes_node_zero(nodes.name(alias)) {
             sets.union(ground, alias);
         }
     }
@@ -609,5 +614,51 @@ mod tests {
                 .iter()
                 .all(|issue| issue.check != NO_DC_PATH_CHECK)
         );
+    }
+
+    /// The reference is node 0 as the deck writes it. A capacitor into a net
+    /// labelled `GND` returns to it; into `GND!`, which the netlister writes
+    /// as a node of its own, it returns to nothing.
+    #[test]
+    fn only_the_node_the_deck_writes_as_zero_is_the_reference() {
+        let returned_through = |ground: &str| {
+            let mut schematic = SchematicState::default();
+            place(&mut schematic, ComponentType::Ground, Point::new(0, 40), "");
+            place(
+                &mut schematic,
+                ComponentType::VoltageSource,
+                Point::new(0, 10),
+                "V1",
+            );
+            place(
+                &mut schematic,
+                ComponentType::Resistor,
+                Point::new(100, -10),
+                "R1",
+            );
+            wire(&mut schematic, Point::new(0, -10), Point::new(80, -10));
+            wire(&mut schematic, Point::new(120, -10), Point::new(120, 30));
+            wire(&mut schematic, Point::new(120, 30), Point::new(0, 30));
+            place(
+                &mut schematic,
+                ComponentType::Capacitor,
+                Point::new(200, -10),
+                "C1",
+            );
+            wire(&mut schematic, Point::new(120, -10), Point::new(180, -10));
+            schematic
+                .document_mut_for_test()
+                .net_labels
+                .push(NetLabel::new(1, Point::new(220, -10), ground));
+            blockers(&schematic)
+        };
+
+        let issues = returned_through("GND");
+        assert!(issues.is_empty(), "{issues:?}");
+
+        let issues = returned_through("GND!");
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert_eq!(issues[0].check, NO_DC_PATH_CHECK);
+        assert!(issues[0].observed.contains("'GND!'"), "{issues:?}");
     }
 }

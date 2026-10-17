@@ -297,6 +297,29 @@ impl ComponentType {
         }
     }
 
+    /// The terminal a MOSFET's body is reached through, or `None` for any
+    /// other type.
+    ///
+    /// It is the M card's fourth node, and the terminal table lists a
+    /// MOSFET's terminals in card order: the bulk `B` of a bulk or vertical
+    /// device, and the substrate `E` of an SOI one — whose fifth node, the
+    /// body tie `P`, is not this terminal, because a floating body is a way
+    /// SOI devices are deliberately used.
+    pub fn bulk_terminal(&self) -> Option<&'static str> {
+        let mosfet = matches!(
+            self,
+            ComponentType::Nmos
+                | ComponentType::Pmos
+                | ComponentType::NVdmos
+                | ComponentType::PVdmos
+                | ComponentType::NmosSoi
+                | ComponentType::PmosSoi
+        );
+        mosfet
+            .then(|| self.terminal_offsets().get(3).map(|(name, _)| *name))
+            .flatten()
+    }
+
     /// Get symbol dimensions in grid units (width, height).
     pub const fn symbol_dimensions(&self) -> (i32, i32) {
         match self {
@@ -503,5 +526,24 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_mosfets_bulk_is_its_fourth_card_node() {
+        let bulk = ALL_TYPES
+            .iter()
+            .filter_map(|kind| Some((*kind, kind.bulk_terminal()?)))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            bulk,
+            [
+                (ComponentType::Nmos, "B"),
+                (ComponentType::Pmos, "B"),
+                (ComponentType::NVdmos, "B"),
+                (ComponentType::PVdmos, "B"),
+                (ComponentType::NmosSoi, "E"),
+                (ComponentType::PmosSoi, "E"),
+            ]
+        );
     }
 }
