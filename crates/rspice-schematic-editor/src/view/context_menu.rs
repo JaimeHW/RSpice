@@ -20,11 +20,11 @@ use rspice_ui_kit::{
 
 const DESKTOP_WIDTH: f32 = 286.0;
 /// Tall enough for the tallest menu there is without a scroller: a placed
-/// source's, at nineteen rows and five separators — 607 px with the header and
+/// source's, at twenty rows and five separators — 634 px with the header and
 /// the border. An instance's or a wire's menu is one separator shorter, and
-/// the empty canvas's two rows shorter again, its one verb standing in the
-/// slot an instance's three master rows take.
-const DESKTOP_MAX_HEIGHT: f32 = 608.0;
+/// the empty canvas's one row shorter again: its one verb stands in the slot
+/// an instance's three master rows take, and it adds the zoom box.
+const DESKTOP_MAX_HEIGHT: f32 = 635.0;
 const DESKTOP_VIEWPORT_INSET: f32 = 6.0;
 /// The mockup's `.menu-item { min-height: 27px }`. The row was drawn three
 /// pixels taller here, which cost the surface a row's worth of height for no
@@ -86,6 +86,32 @@ pub enum ContextAction {
     /// Make this one of the objects under a long press the selection: the
     /// overlapping-object chooser, on a finger (D1 section 9).
     Choose(PointerTarget),
+    /// Turn the menu to its Arrange page. A phone has no menu bar, so the
+    /// canvas menu is where its Arrange commands are.
+    Arrange,
+    /// A command on the Arrange page.
+    ArrangeCommand(ArrangeAction),
+    /// Arm the zoom box: the next drag frames the view. A finger has no
+    /// Z key.
+    ZoomBox,
+}
+
+/// The Arrange page's commands, in the Design menu's order: turn and flip,
+/// line up, space out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArrangeAction {
+    RotateClockwise,
+    RotateCounterClockwise,
+    MirrorHorizontal,
+    MirrorVertical,
+    AlignLeft,
+    AlignCenter,
+    AlignRight,
+    AlignTop,
+    AlignMiddle,
+    AlignBottom,
+    DistributeHorizontal,
+    DistributeVertical,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +131,12 @@ pub enum ContextIcon {
     VerilogA,
     /// The chosen object among those under a long press.
     Check,
+    /// Arrange, and the align and distribute rows on its page: bars lined
+    /// up on one edge.
+    Arrange,
+    /// The Arrange page's way back to the menu.
+    Back,
+    ZoomBox,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -154,20 +186,46 @@ pub struct ContextMenuView {
     /// The objects a long press landed on, in pick order, when two or more
     /// did. They head the menu, so a finger can take the one underneath.
     pub choices: Vec<ChooserRow>,
+    /// The Arrange page, which the `Arrange` row turns the menu to.
+    pub arrange: Vec<ContextEntry>,
 }
 
 impl ContextMenuView {
-    /// The rows and rules the menu shows, choices first.
-    fn shape(&self) -> Vec<ContextEntry<()>> {
-        let choices = self.choices.len().min(MAX_ROWS);
-        std::iter::repeat_n(ContextEntry::Command(()), choices)
-            .chain((choices > 0).then_some(ContextEntry::Separator))
-            .chain(self.entries.iter().map(|entry| match entry {
+    /// The rows and rules the menu shows: the choices and the entries, or
+    /// on the Arrange page its Back row and its commands.
+    fn shape(&self, arranging: bool) -> Vec<ContextEntry<()>> {
+        let (heading, entries) = if arranging {
+            (1, &self.arrange)
+        } else {
+            (self.choices.len().min(MAX_ROWS), &self.entries)
+        };
+        std::iter::repeat_n(ContextEntry::Command(()), heading)
+            .chain((heading > 0).then_some(ContextEntry::Separator))
+            .chain(entries.iter().map(|entry| match entry {
                 ContextEntry::Command(_) => ContextEntry::Command(()),
                 ContextEntry::Separator => ContextEntry::Separator,
             }))
             .collect()
     }
+}
+
+fn arrange_page_id() -> egui::Id {
+    egui::Id::new("rspice.schematic.context_menu.arrange_page")
+}
+
+/// Whether the open menu shows its Arrange page.
+fn arranging(ctx: &Context, view: &ContextMenuView) -> bool {
+    !view.arrange.is_empty() && ctx.data(|data| data.get_temp(arrange_page_id()).unwrap_or(false))
+}
+
+/// Turn the menu to its Arrange page or back, with the page's first row
+/// focused for the keyboard.
+fn turn_page(ctx: &Context, arrange: bool) {
+    ctx.data_mut(|data| {
+        data.insert_temp(arrange_page_id(), arrange);
+        data.insert_temp(arrange_page_id().with("focus"), true);
+    });
+    ctx.request_repaint();
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -208,6 +266,8 @@ pub fn close(response: &Response) {
         data.remove::<ContextInvocation>(popup_id.with("invocation"));
         data.remove::<egui::Pos2>(popup_id.with("surface-anchor"));
         data.remove::<ContextMenuBinding>(popup_id.with("source"));
+        data.remove::<bool>(arrange_page_id());
+        data.remove::<bool>(arrange_page_id().with("focus"));
     });
 }
 
@@ -224,7 +284,10 @@ pub fn show(
     let source_id = popup_id.with("source");
     let opened_this_frame = opening.secondary_clicked || opening.keyboard_open;
     if opened_this_frame {
-        ctx.data_mut(|data| data.insert_temp(source_id, view.binding.clone()));
+        ctx.data_mut(|data| {
+            data.insert_temp(source_id, view.binding.clone());
+            data.remove::<bool>(arrange_page_id());
+        });
         if opening.secondary_clicked {
             if let Some(anchor) = anchor {
                 let invocation = if response.long_touched() {
@@ -255,7 +318,8 @@ pub fn show(
     let invocation = ctx
         .data(|data| data.get_temp::<ContextInvocation>(invocation_id))
         .unwrap_or(ContextInvocation::Pointer);
-    let geometry = SurfaceGeometry::resolve(ctx, invocation, &view.shape());
+    let page = arranging(ctx, view);
+    let geometry = SurfaceGeometry::resolve(ctx, invocation, &view.shape(page));
     let t = Tokens::get(ctx);
     let frame = Frame::new()
         .fill(t.color.bg_elevated)
@@ -263,10 +327,14 @@ pub fn show(
         .corner_radius(CornerRadius::same(geometry.radius))
         .shadow(context_shadow(&t));
 
+    // Every row that acts closes the menu itself. A click on the Arrange row
+    // or Back turns the page instead, and a click on a disabled row or the
+    // header does nothing, so only a click outside dismisses the menu.
     let mut popup = Popup::context_menu(response)
         .id(popup_id)
         .width(geometry.width)
-        .frame(frame);
+        .frame(frame)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
     if opening.keyboard_open {
         popup = popup.open_memory(Some(egui::SetOpenCommand::Bool(true)));
     }
@@ -298,8 +366,9 @@ pub fn show(
         ui.set_max_width(content_width);
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
 
+        // Each page scrolls on its own, so a turned page opens at its top.
         ScrollArea::vertical()
-            .id_salt(popup_id.with("scroll"))
+            .id_salt(popup_id.with(("scroll", page)))
             // CSS max-height includes the one-pixel border on both sides;
             // egui's Frame adds those outside its content UI.
             .max_height((geometry.max_height - SURFACE_BORDER_WIDTH).max(1.0))
@@ -343,7 +412,41 @@ pub fn render_context_contents(
 
     let mut rows = Vec::with_capacity(16);
     let mut keyboard_or_pointer_action = None;
-    for (index, choice) in view.choices.iter().take(MAX_ROWS).enumerate() {
+    // A page turned on the last frame focuses its first row on this one.
+    let page_turned = ui.ctx().data_mut(|data| {
+        data.remove_temp::<bool>(arrange_page_id().with("focus"))
+            .unwrap_or(false)
+    });
+    let arranging = arranging(ui.ctx(), view);
+    let choices = if arranging {
+        &[][..]
+    } else {
+        &view.choices[..]
+    };
+    if arranging {
+        let back = ContextCommand {
+            action: ContextAction::Arrange,
+            icon: ContextIcon::Back,
+            label: "Back",
+            shortcut: String::new(),
+            enabled: true,
+            disabled_reason: "",
+        };
+        let response = ui
+            .push_id("schematic-context-back", |ui| {
+                menu_item(ui, &back, "", true, "", row_height)
+            })
+            .inner;
+        if menu_row_keyboard_activated(ui, &response) || response.clicked() {
+            turn_page(ui.ctx(), false);
+        }
+        rows.push(ContextRow {
+            response,
+            enabled: true,
+        });
+        menu_separator(ui);
+    }
+    for (index, choice) in choices.iter().take(MAX_ROWS).enumerate() {
         let selected = target_is_selected(&view.binding.selection, choice.target);
         let response = ui
             .push_id(("schematic-context-choice", index), |ui| {
@@ -359,10 +462,15 @@ pub fn render_context_contents(
             keyboard_or_pointer_action = Some(ContextAction::Choose(choice.target));
         }
     }
-    if !view.choices.is_empty() {
+    if !choices.is_empty() {
         menu_separator(ui);
     }
-    for entry in &view.entries {
+    let entries = if arranging {
+        &view.arrange
+    } else {
+        &view.entries
+    };
+    for entry in entries {
         match entry {
             ContextEntry::Separator => menu_separator(ui),
             ContextEntry::Command(command) => {
@@ -381,13 +489,16 @@ pub fn render_context_contents(
                 let activated =
                     enabled && (menu_row_keyboard_activated(ui, &response) || response.clicked());
                 rows.push(ContextRow { response, enabled });
-                if activated && keyboard_or_pointer_action.is_none() {
+                if activated && command.action == ContextAction::Arrange {
+                    // A page turn, not a command: the menu stays open.
+                    turn_page(ui.ctx(), true);
+                } else if activated && keyboard_or_pointer_action.is_none() {
                     keyboard_or_pointer_action = Some(command.action);
                 }
             }
         }
     }
-    manage_menu_focus(ui, &rows, focus_first);
+    manage_menu_focus(ui, &rows, focus_first || page_turned);
     keyboard_or_pointer_action.map(|action| {
         ui.close();
         ContextMenuRequest {
@@ -695,6 +806,18 @@ fn paint_copy_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
     );
 }
 
+/// Three bars of different lengths lined up on a left edge.
+fn paint_arrange_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let scale = rect.width().min(rect.height()) / 24.0;
+    let origin = rect.center() - vec2(12.0, 12.0) * scale;
+    let map = |x: f32, y: f32| origin + vec2(x, y) * scale;
+    let stroke = Stroke::new((1.7 * rect.width() / 16.0).max(1.0), color);
+    painter.line_segment([map(4.0, 3.0), map(4.0, 21.0)], stroke);
+    for (y, right) in [(7.0, 19.0), (12.0, 14.0), (17.0, 17.0)] {
+        painter.line_segment([map(7.0, y), map(right, y)], stroke);
+    }
+}
+
 fn fit_text(
     painter: &egui::Painter,
     text: &str,
@@ -766,6 +889,9 @@ impl ContextIcon {
             Self::Waveform => WorkbenchIcon::Simulate.paint(painter, rect, color),
             Self::VerilogA => WorkbenchIcon::VerilogA.paint(painter, rect, color),
             Self::Check => WorkbenchIcon::Check.paint(painter, rect, color),
+            Self::Arrange => paint_arrange_icon(painter, rect, color),
+            Self::Back => WorkbenchIcon::ArrowLeft.paint(painter, rect, color),
+            Self::ZoomBox => WorkbenchIcon::ZoomIn.paint(painter, rect, color),
         }
     }
 }

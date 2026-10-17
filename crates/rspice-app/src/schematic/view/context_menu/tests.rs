@@ -185,9 +185,10 @@ fn catalog_of(entries: &[ContextEntry]) -> Vec<(&'static str, Option<Command>)> 
 /// Each target's menu, row for row and rule for rule. Only the
 /// instance-master slot differs: an instance's three master rows, a Verilog-A
 /// instance's "Open Verilog-A view" in place of Descend, and the empty
-/// canvas's one verb, "New Verilog-A device…", in place of all three. The row
-/// and rule counts are the ones `rspice-schematic-editor`'s geometry test
-/// measures against the 608 px ceiling: 19 + 4 (598 px), 17 + 4 (544 px).
+/// canvas's one verb, "New Verilog-A device…", in place of all three, with
+/// the zoom box after Fit. The row and rule counts are the ones
+/// `rspice-schematic-editor`'s geometry test measures against the 635 px
+/// ceiling: 20 + 4 (625 px), 19 + 4 (598 px).
 #[test]
 fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
     let head = [
@@ -195,6 +196,8 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
         ("Rotate 90°", Some(Command::RotateSelection)),
         ("Mirror", Some(Command::MirrorSelectionHorizontal)),
         ("Mirror vertically", Some(Command::MirrorSelectionVertical)),
+        // G-12: the Arrange page, which a phone reaches only from here.
+        ("Arrange", None),
         ("Cut selection", Some(Command::Cut)),
         ("Copy selection", Some(Command::Copy)),
         ("Paste here", Some(Command::Paste)),
@@ -236,14 +239,17 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
     );
     let open_veriloga = ("Open Verilog-A view", Some(Command::DescendHierarchyDirect));
 
-    // The empty canvas.
+    // The empty canvas, which alone offers the zoom box: a finger has no Z.
     let state = AppState::default();
     let canvas = menu_entries(&state, ContextTarget::Canvas);
-    assert_eq!(
-        catalog_of(&canvas),
-        menu(&[("New Verilog-A device…", Some(Command::NewVerilogADevice))])
-    );
-    assert_eq!((catalog_of(&canvas).len(), separators_in(&canvas)), (17, 4));
+    let mut expected = menu(&[("New Verilog-A device…", Some(Command::NewVerilogADevice))]);
+    let fit = expected
+        .iter()
+        .position(|(label, _)| *label == "Fit schematic content")
+        .expect("the canvas menu fits the content");
+    expected.insert(fit + 1, ("Zoom box", Some(Command::ZoomBox)));
+    assert_eq!(catalog_of(&canvas), expected);
+    assert_eq!((catalog_of(&canvas).len(), separators_in(&canvas)), (19, 4));
 
     // A schematic instance, and a wire: the master rows, Descend first.
     let mut resistor = AppState::default();
@@ -264,7 +270,7 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
         );
         assert_eq!(
             (catalog_of(&entries).len(), separators_in(&entries)),
-            (19, 4)
+            (20, 4)
         );
     }
 
@@ -277,7 +283,7 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
     );
     assert_eq!(
         (catalog_of(&entries).len(), separators_in(&entries)),
-        (19, 4)
+        (20, 4)
     );
 }
 
@@ -414,7 +420,7 @@ fn a_placed_source_gets_the_stimulus_verbs_its_standing_calls_for() {
         // is what the canvas menu acts on.
         for target in [ContextTarget::Component(7), ContextTarget::Canvas] {
             let entries = menu_entries(state, target);
-            assert!(labels_of(&entries).len() <= 19, "{target:?}");
+            assert!(labels_of(&entries).len() <= 20, "{target:?}");
             assert_eq!(separators_in(&entries), 5, "{target:?}");
         }
         let entries = menu_entries(state, ContextTarget::Component(7));
@@ -429,7 +435,7 @@ fn a_placed_source_gets_the_stimulus_verbs_its_standing_calls_for() {
             assert!(!labels.contains(&master_row), "{labels:?}");
         }
         assert_eq!(separators_in(&entries), 5);
-        assert!(labels.len() <= 19);
+        assert!(labels.len() <= 20);
         assert!(
             !matches!(entries.first(), Some(ContextEntry::Separator))
                 && !matches!(entries.last(), Some(ContextEntry::Separator))

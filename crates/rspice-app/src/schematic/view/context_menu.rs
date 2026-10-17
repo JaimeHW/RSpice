@@ -28,9 +28,13 @@ use super::selection_transform::{SelectionTransform, transform_selection_on_acti
 use super::sheet_visibility::retain_selection_on_active_sheet;
 use super::viewport::Viewport;
 
+use super::selection_layout::{
+    SelectionLayoutCommand, apply_selection_layout, selection_layout_availability,
+};
+use super::shelf_drag::{PlacementTransform, something_floats, turn_what_floats};
 use rspice_schematic_editor::view::context_menu::{
-    self as context_surface, ContextAction, ContextIcon, ContextMenuBinding, ContextMenuRequest,
-    ContextMenuView,
+    self as context_surface, ArrangeAction, ContextAction, ContextIcon, ContextMenuBinding,
+    ContextMenuRequest, ContextMenuView,
 };
 use rspice_schematic_editor::view::pick_chooser::ChooserRow;
 use rspice_schematic_editor::view::selection_drag::target_is_selected;
@@ -72,6 +76,14 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         icon: ContextIcon::MirrorVertical,
         label: "Mirror vertically",
         shortcut_command: Some(Command::MirrorSelectionVertical),
+    }),
+    // The Design menu's Arrange submenu, as a page of this menu: a phone
+    // shows no menu bar, and Align and Distribute have no key.
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::Arrange,
+        icon: ContextIcon::Arrange,
+        label: "Arrange",
+        shortcut_command: None,
     }),
     // The stimulus-library group, which exists only in a placed source's menu
     // and states the verbs that source's standing with the library calls for;
@@ -198,6 +210,14 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         label: "Fit schematic content",
         shortcut_command: Some(Command::FitSchematicContent),
     }),
+    // Only on the empty canvas's menu: a finger has no Z key, and the next
+    // drag after this row frames the view.
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::ZoomBox,
+        icon: ContextIcon::ZoomBox,
+        label: "Zoom box",
+        shortcut_command: Some(Command::ZoomBox),
+    }),
     ContextEntry::Separator,
     ContextEntry::Command(ContextCommand {
         action: ContextAction::ShowInNetlist,
@@ -265,12 +285,111 @@ fn menu_subject(state: &AppState, target: ContextTarget) -> MenuSubject {
     }
 }
 
+/// The Arrange page: the Design menu's Arrange submenu, group by group.
+const ARRANGE_ENTRIES: &[ContextEntry] = &[
+    arrange(ArrangeAction::RotateClockwise, ContextIcon::Rotate),
+    arrange(ArrangeAction::RotateCounterClockwise, ContextIcon::Rotate),
+    arrange(ArrangeAction::MirrorHorizontal, ContextIcon::Mirror),
+    arrange(ArrangeAction::MirrorVertical, ContextIcon::MirrorVertical),
+    ContextEntry::Separator,
+    arrange(ArrangeAction::AlignLeft, ContextIcon::Arrange),
+    arrange(ArrangeAction::AlignCenter, ContextIcon::Arrange),
+    arrange(ArrangeAction::AlignRight, ContextIcon::Arrange),
+    arrange(ArrangeAction::AlignTop, ContextIcon::Arrange),
+    arrange(ArrangeAction::AlignMiddle, ContextIcon::Arrange),
+    arrange(ArrangeAction::AlignBottom, ContextIcon::Arrange),
+    ContextEntry::Separator,
+    arrange(ArrangeAction::DistributeHorizontal, ContextIcon::Arrange),
+    arrange(ArrangeAction::DistributeVertical, ContextIcon::Arrange),
+];
+
+const fn arrange(action: ArrangeAction, icon: ContextIcon) -> ContextEntry {
+    let command = arrange_command(action);
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::ArrangeCommand(action),
+        icon,
+        label: command.spec().label,
+        shortcut_command: Some(command),
+    })
+}
+
+/// The product command an Arrange row stands for.
+const fn arrange_command(action: ArrangeAction) -> Command {
+    match action {
+        ArrangeAction::RotateClockwise => Command::RotateSelection,
+        ArrangeAction::RotateCounterClockwise => Command::RotateSelectionCounterClockwise,
+        ArrangeAction::MirrorHorizontal => Command::MirrorSelectionHorizontal,
+        ArrangeAction::MirrorVertical => Command::MirrorSelectionVertical,
+        ArrangeAction::AlignLeft => Command::AlignSelectionLeft,
+        ArrangeAction::AlignCenter => Command::AlignSelectionCenter,
+        ArrangeAction::AlignRight => Command::AlignSelectionRight,
+        ArrangeAction::AlignTop => Command::AlignSelectionTop,
+        ArrangeAction::AlignMiddle => Command::AlignSelectionMiddle,
+        ArrangeAction::AlignBottom => Command::AlignSelectionBottom,
+        ArrangeAction::DistributeHorizontal => Command::DistributeSelectionHorizontal,
+        ArrangeAction::DistributeVertical => Command::DistributeSelectionVertical,
+    }
+}
+
+/// The selection layout an Arrange row asks for, when it is not a turn.
+fn arrange_layout(action: ArrangeAction) -> Option<SelectionLayoutCommand> {
+    use SelectionLayoutCommand as Layout;
+    Some(match action {
+        ArrangeAction::AlignLeft => Layout::AlignLeft,
+        ArrangeAction::AlignCenter => Layout::AlignCenter,
+        ArrangeAction::AlignRight => Layout::AlignRight,
+        ArrangeAction::AlignTop => Layout::AlignTop,
+        ArrangeAction::AlignMiddle => Layout::AlignMiddle,
+        ArrangeAction::AlignBottom => Layout::AlignBottom,
+        ArrangeAction::DistributeHorizontal => Layout::DistributeHorizontal,
+        ArrangeAction::DistributeVertical => Layout::DistributeVertical,
+        ArrangeAction::RotateClockwise
+        | ArrangeAction::RotateCounterClockwise
+        | ArrangeAction::MirrorHorizontal
+        | ArrangeAction::MirrorVertical => return None,
+    })
+}
+
+/// The turn an Arrange row asks for, when it is not a layout.
+const fn arrange_turn(action: ArrangeAction) -> Option<(SelectionTransform, PlacementTransform)> {
+    Some(match action {
+        ArrangeAction::RotateClockwise => (
+            SelectionTransform::RotateClockwise,
+            PlacementTransform::RotateClockwise,
+        ),
+        ArrangeAction::MirrorHorizontal => (
+            SelectionTransform::MirrorHorizontal,
+            PlacementTransform::ToggleHorizontalMirror,
+        ),
+        ArrangeAction::MirrorVertical => (
+            SelectionTransform::MirrorVertical,
+            PlacementTransform::ToggleVerticalMirror,
+        ),
+        ArrangeAction::RotateCounterClockwise => (
+            SelectionTransform::RotateCounterClockwise,
+            PlacementTransform::RotateCounterClockwise,
+        ),
+        _ => return None,
+    })
+}
+
+/// Turn what floats, the placement ghost or what Move carries, as R and M
+/// would; with nothing floating, turn the selection on the sheet.
+fn turn(state: &mut AppState, symbol_context: &SchematicSymbolContext, action: ArrangeAction) {
+    let Some((selection, floating)) = arrange_turn(action) else {
+        return;
+    };
+    if !turn_what_floats(state, floating) {
+        transform_selection_on_active_sheet(state, symbol_context, selection);
+    }
+}
+
 /// Whether the catalog's instance-master slot holds `action` for `subject`.
 fn master_slot_shows(action: ContextAction, subject: MenuSubject) -> bool {
     match action {
         ContextAction::DescendHierarchy => subject == MenuSubject::Object,
         ContextAction::OpenVerilogAView => subject == MenuSubject::VerilogAInstance,
-        ContextAction::NewVerilogADevice => subject == MenuSubject::Canvas,
+        ContextAction::NewVerilogADevice | ContextAction::ZoomBox => subject == MenuSubject::Canvas,
         ContextAction::UpdateInstanceInterface | ContextAction::ReplaceInstance => {
             matches!(subject, MenuSubject::Object | MenuSubject::VerilogAInstance)
         }
@@ -1004,9 +1123,38 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             crate::workbench::app::selected_object_properties_available(state),
             "Select one editable component, bus, bus tap, net label, design note, or documentation shape to open its properties",
         ),
+        // While a part is being placed, or Move carries the selection, these
+        // turn what floats, as R and M do (G-12: a finger has no R or M).
         ContextAction::Rotate | ContextAction::Mirror | ContextAction::MirrorVertical => (
-            writable && has_copyable_object,
+            writable && (has_copyable_object || something_floats(state)),
             "Select at least one editable object",
+        ),
+        ContextAction::Arrange => (
+            ARRANGE_ENTRIES.iter().any(|entry| {
+                matches!(entry, ContextEntry::Command(command)
+                    if action_availability(command.action, state).0)
+            }),
+            "Select at least one editable object",
+        ),
+        ContextAction::ArrangeCommand(arrangement) => match arrange_layout(arrangement) {
+            Some(layout) => match selection_layout_availability(state, layout) {
+                Ok(()) => (true, ""),
+                Err(_) => (
+                    false,
+                    "Select at least two editable objects to line up or space out",
+                ),
+            },
+            None => (
+                writable && (has_copyable_object || something_floats(state)),
+                "Select at least one editable object",
+            ),
+        },
+        ContextAction::ZoomBox => (
+            matches!(
+                state.workspace.content.active_view_type(),
+                ViewType::Schematic | ViewType::Testbench
+            ),
+            "The zoom box frames a schematic or testbench canvas",
         ),
         ContextAction::AdoptStimulus
         | ContextAction::ReadoptStimulus
@@ -1124,25 +1272,31 @@ fn execute_context_action(
             crate::workbench::app::open_selected_object_properties(state);
         }
         ContextAction::Rotate => {
-            transform_selection_on_active_sheet(
-                state,
-                symbol_context,
-                SelectionTransform::RotateClockwise,
-            );
+            turn(state, symbol_context, ArrangeAction::RotateClockwise);
         }
         ContextAction::Mirror => {
-            transform_selection_on_active_sheet(
-                state,
-                symbol_context,
-                SelectionTransform::MirrorHorizontal,
-            );
+            turn(state, symbol_context, ArrangeAction::MirrorHorizontal);
         }
         ContextAction::MirrorVertical => {
-            transform_selection_on_active_sheet(
-                state,
-                symbol_context,
-                SelectionTransform::MirrorVertical,
-            );
+            turn(state, symbol_context, ArrangeAction::MirrorVertical);
+        }
+        // A page turn, which the menu takes itself.
+        ContextAction::Arrange => {}
+        ContextAction::ArrangeCommand(arrangement) => match arrange_layout(arrangement) {
+            Some(layout) => match apply_selection_layout(state, symbol_context, layout) {
+                Ok(true) => {}
+                Ok(false) => {
+                    state.prompt(format!("{} produced no geometry change.", layout.label()));
+                }
+                Err(error) => {
+                    state.prompt(format!("{} was not applied: {error}.", layout.label()));
+                }
+            },
+            None => turn(state, symbol_context, arrangement),
+        },
+        ContextAction::ZoomBox => {
+            state.schematic.session.editor.zoom_box.arm();
+            state.prompt("Drag a box to zoom to it.");
         }
         ContextAction::AdoptStimulus
         | ContextAction::ReadoptStimulus
@@ -1328,40 +1482,50 @@ fn context_menu_binding(state: &AppState) -> Option<ContextMenuBinding> {
 
 fn context_menu_view(state: &AppState, ctx: &Context) -> Option<ContextMenuView> {
     let binding = context_menu_binding(state)?;
-    let entries = menu_entries(state, binding.target)
-        .into_iter()
-        .map(|entry| match entry {
-            ContextEntry::Separator => context_surface::ContextEntry::Separator,
-            ContextEntry::Command(command) => {
-                let (enabled, disabled_reason) = action_availability(command.action, state);
-                let shortcut =
-                    command
-                        .shortcut_command
-                        .map_or_else(String::new, |product_command| {
-                            state.ui.preferences.shortcuts().resolved_label(
-                                product_command,
-                                crate::workbench::app_state::runtime_command_platform(ctx),
-                                ctx.os(),
-                            )
-                        });
-                context_surface::ContextEntry::Command(context_surface::ContextCommand {
-                    action: command.action,
-                    icon: command.icon,
-                    label: command.label,
-                    shortcut,
-                    enabled,
-                    disabled_reason,
-                })
-            }
-        })
-        .collect();
+    let resolve = |entries: &[ContextEntry]| {
+        entries
+            .iter()
+            .map(|entry| resolve_entry(state, ctx, *entry))
+            .collect::<Vec<_>>()
+    };
     Some(ContextMenuView {
         summary: selection_summary(state, binding.target),
+        entries: resolve(&menu_entries(state, binding.target)),
+        arrange: resolve(ARRANGE_ENTRIES),
         binding,
-        entries,
         choices: ctx
             .data(|data| data.get_temp::<Vec<ChooserRow>>(choices_id()))
             .unwrap_or_default(),
+    })
+}
+
+/// One catalog entry as the menu draws it: available or not and why, with
+/// its key.
+fn resolve_entry(
+    state: &AppState,
+    ctx: &Context,
+    entry: ContextEntry,
+) -> context_surface::ContextEntry {
+    let ContextEntry::Command(command) = entry else {
+        return context_surface::ContextEntry::Separator;
+    };
+    let (enabled, disabled_reason) = action_availability(command.action, state);
+    let shortcut = command
+        .shortcut_command
+        .map_or_else(String::new, |product_command| {
+            state.ui.preferences.shortcuts().resolved_label(
+                product_command,
+                crate::workbench::app_state::runtime_command_platform(ctx),
+                ctx.os(),
+            )
+        });
+    context_surface::ContextEntry::Command(context_surface::ContextCommand {
+        action: command.action,
+        icon: command.icon,
+        label: command.label,
+        shortcut,
+        enabled,
+        disabled_reason,
     })
 }
 
@@ -1370,14 +1534,15 @@ fn apply_context_request(
     request: ContextMenuRequest,
     symbol_context: &SchematicSymbolContext,
 ) {
+    let offered = |entries: &[ContextEntry]| {
+        entries.iter().any(|entry| {
+            matches!(entry, ContextEntry::Command(command) if command.action == request.action)
+        })
+    };
     if context_menu_binding(state).as_ref() != Some(&request.binding)
         || state.application_modal_open()
         || !action_availability(request.action, state).0
-        || !menu_entries(state, request.binding.target)
-            .iter()
-            .any(|entry| {
-            matches!(entry, ContextEntry::Command(command) if command.action == request.action)
-        })
+        || !(offered(&menu_entries(state, request.binding.target)) || offered(ARRANGE_ENTRIES))
     {
         return;
     }

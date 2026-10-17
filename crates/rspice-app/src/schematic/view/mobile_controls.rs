@@ -14,6 +14,8 @@ use rspice_schematic_editor::view::mobile_controls::{
 };
 use rspice_schematic_editor::view::pointer_target::canvas_touch_mode;
 
+use super::shelf_drag::PlacementTransform;
+
 pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp, content_rect: Rect) {
     if !canvas_touch_mode(ctx) {
         return;
@@ -62,7 +64,21 @@ fn action_enabled(app: &RSpiceApp, action: MobileCanvasAction) -> bool {
     match action {
         MobileCanvasAction::SelectBox | MobileCanvasAction::SelectAdd => true,
         MobileCanvasAction::Cancel => operation_live(app),
+        MobileCanvasAction::Rotate | MobileCanvasAction::Mirror
+            if super::shelf_drag::something_floats(&app.state) =>
+        {
+            true
+        }
         _ => product_command(action).is_some_and(|command| command.is_enabled(app)),
+    }
+}
+
+/// What R or M would turn while something floats under the finger.
+const fn floating_transform(action: MobileCanvasAction) -> Option<PlacementTransform> {
+    match action {
+        MobileCanvasAction::Rotate => Some(PlacementTransform::RotateClockwise),
+        MobileCanvasAction::Mirror => Some(PlacementTransform::ToggleHorizontalMirror),
+        _ => None,
     }
 }
 
@@ -91,7 +107,12 @@ fn execute_action(ctx: &Context, app: &mut RSpiceApp, request: MobileCanvasReque
             "A tap selects one object."
         }),
         action => {
-            if let Some(command) = product_command(action) {
+            // The placement ghost, or the selection Move carries, turns as
+            // R and M turn it; the selection on the sheet turns otherwise.
+            let floated = floating_transform(action).is_some_and(|transform| {
+                super::shelf_drag::turn_what_floats(&mut app.state, transform)
+            });
+            if !floated && let Some(command) = product_command(action) {
                 command.execute(app);
             }
         }

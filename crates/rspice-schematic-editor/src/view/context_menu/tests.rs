@@ -11,13 +11,13 @@ fn catalog(commands: usize, separators: usize) -> Vec<ContextEntry<()>> {
 /// label for label in `rspice-app`'s `schematic/view/context_menu/tests.rs`.
 ///
 /// An instance, a Verilog-A instance (whose Descend row reads "Open Verilog-A
-/// view") and a wire have nineteen rows under four rules; a placed source
+/// view") and a wire have twenty rows under four rules; a placed source
 /// trades the three master rows for its stimulus group under a fifth; the
 /// empty canvas has one verb, "New Verilog-A device…", where the three
-/// master rows stand.
-const INSTANCE: (usize, usize) = (19, 4);
-const SOURCE: (usize, usize) = (19, 5);
-const CANVAS: (usize, usize) = (17, 4);
+/// master rows stand, and the zoom box.
+const INSTANCE: (usize, usize) = (20, 4);
+const SOURCE: (usize, usize) = (20, 5);
+const CANVAS: (usize, usize) = (19, 4);
 
 #[test]
 fn an_open_popup_cannot_retarget_its_action_when_the_source_or_selection_changes() {
@@ -56,6 +56,7 @@ fn an_open_popup_cannot_retarget_its_action_when_the_source_or_selection_changes
                 disabled_reason: "",
             })],
             choices: Vec::new(),
+            arrange: Vec::new(),
         };
         view.binding.selection.select_only_component(7);
         let original = view.binding.clone();
@@ -117,7 +118,7 @@ fn surface_geometry_matches_desktop_and_touch_contracts() {
     let desktop =
         SurfaceGeometry::for_viewport(vec2(1440.0, 900.0), ContextInvocation::Pointer, &entries);
     assert_eq!(desktop.width, 286.0);
-    assert_eq!(desktop.max_height, 608.0);
+    assert_eq!(desktop.max_height, 635.0);
     assert_eq!(desktop.row_height, 27.0);
     assert_eq!(desktop.radius, 3);
     // Every target's menu, measured on the mockup's 27 px row: 47 header +
@@ -127,13 +128,14 @@ fn surface_geometry_matches_desktop_and_touch_contracts() {
     // a menu into a scroller fails here rather than silently hiding the
     // entries it pushed past the edge.
     for (target, (commands, separators), height) in [
-        // An instance, a Verilog-A instance or a wire: 513 rows + 36 rules.
-        ("instance", INSTANCE, 598.0),
+        // An instance, a Verilog-A instance or a wire: 540 rows + 36 rules.
+        ("instance", INSTANCE, 625.0),
         // The tallest there is: a placed source whose standing calls for
         // three stimulus verbs, at a fifth separator.
-        ("placed source", SOURCE, 607.0),
-        // The empty canvas: one verb where an instance has three.
-        ("canvas", CANVAS, 544.0),
+        ("placed source", SOURCE, 634.0),
+        // The empty canvas: one verb where an instance has three, and the
+        // zoom box.
+        ("canvas", CANVAS, 598.0),
     ] {
         let menu = SurfaceGeometry::for_viewport(
             vec2(1440.0, 900.0),
@@ -175,11 +177,11 @@ fn desktop_origin_and_keyboard_anchor_match_the_mockup_contract() {
         clamp_desktop_surface_origin(screen, pos2(-20.0, -10.0), desktop),
         pos2(6.0, 6.0)
     );
-    // A click near the bottom edge lifts the whole 598 px surface so it
-    // hangs off neither the right edge nor the bottom: 700 - 598 - 6.
+    // A click near the bottom edge lifts the whole 625 px surface so it
+    // hangs off neither the right edge nor the bottom: 700 - 625 - 6.
     assert_eq!(
         clamp_desktop_surface_origin(screen, pos2(790.0, 690.0), desktop),
-        pos2(508.0, 96.0)
+        pos2(508.0, 69.0)
     );
     assert_eq!(
         keyboard_surface_anchor(Rect::from_min_size(pos2(100.0, 200.0), vec2(1000.0, 500.0),)),

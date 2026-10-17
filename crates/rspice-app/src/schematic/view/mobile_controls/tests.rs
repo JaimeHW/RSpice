@@ -204,6 +204,41 @@ impl Finger {
         self.frame(Vec::new());
     }
 
+    /// A touch that lands and lifts with no tap, as a palm brushing the
+    /// screen does: the canvas is in touch mode and nothing is clicked.
+    fn wake(&mut self) {
+        let corner = self.canvas.left_top() + egui::vec2(4.0, 4.0);
+        self.frame(vec![
+            Self::touch(TouchPhase::Start, corner),
+            Self::touch(TouchPhase::End, corner),
+        ]);
+        self.frame(Vec::new());
+    }
+
+    /// Scroll the open canvas menu with a finger until the row named
+    /// `name` is inside it.
+    fn reveal(&mut self, name: &str) {
+        for _ in 0..12 {
+            let menu = self
+                .find("Schematic selection")
+                .expect("the canvas menu is open");
+            let row = self
+                .find(name)
+                .unwrap_or_else(|| panic!("no {name:?} in the menu: {:?}", self.named));
+            if menu.contains_rect(row) {
+                return;
+            }
+            let from = menu.center();
+            let travel = if row.top() > menu.bottom() {
+                -120.0
+            } else {
+                120.0
+            };
+            self.drag(from, from + egui::vec2(0.0, travel));
+        }
+        panic!("{name:?} never scrolled into the menu");
+    }
+
     fn pan(&self) -> (f64, f64) {
         self.app.state.schematic.session.editor.pan
     }
@@ -499,4 +534,94 @@ fn a_long_press_on_overlapping_parts_offers_each_of_them() {
         turned.contains(&(under, true)) && turned.contains(&(taken, false)),
         "the menu turned the chosen part and only it: {turned:?}"
     );
+}
+
+/// G-12: R and M turn the placement ghost, and a tablet has neither key.
+/// The strip's Rotate and Mirror turn the ghost while a part is being
+/// placed, and the part lands as the ghost showed it.
+#[test]
+fn the_strip_turns_the_part_being_placed() {
+    let mut finger = Finger::new(Vec2::new(1024.0, 768.0));
+    finger.wake();
+    finger
+        .app
+        .state
+        .schematic
+        .arm_tool(crate::state::Tool::Place(ComponentType::Resistor));
+    finger.frame(Vec::new());
+    finger.press("Rotate clockwise");
+    finger.press("Mirror");
+    let quarter = rspice_design::schematic::rotation::Rotation::default().rotate_cw();
+    assert_eq!(
+        finger.app.state.schematic.session.editor.preview_rotation,
+        quarter
+    );
+    assert!(finger.app.state.schematic.session.editor.preview_mirror_h);
+
+    finger.tap(finger.screen(Point::new(300, 200)));
+    let part = finger
+        .app
+        .state
+        .schematic
+        .document()
+        .components
+        .last()
+        .expect("the tap placed the part");
+    assert_eq!((part.rotation, part.mirror_h), (quarter, true));
+}
+
+/// A finger has no Z: the empty canvas's long-press menu arms the zoom box,
+/// and the next one-finger drag frames the view.
+#[test]
+fn a_long_press_on_empty_canvas_arms_the_zoom_box() {
+    let mut finger = Finger::new(Vec2::new(1024.0, 768.0));
+    finger.long_press(finger.screen(Point::new(400, 300)));
+    finger.reveal("Zoom box");
+    finger.press("Zoom box");
+    assert!(finger.app.state.schematic.session.editor.zoom_box.armed);
+    let zoom = finger.app.state.schematic.session.editor.zoom;
+    let (from, to) = (
+        finger.screen(Point::new(100, 100)),
+        finger.screen(Point::new(300, 250)),
+    );
+    finger.drag(from, to);
+    assert!(!finger.app.state.schematic.session.editor.zoom_box.armed);
+    assert!(
+        finger.app.state.schematic.session.editor.zoom > zoom * 2.0,
+        "the box framed the view"
+    );
+}
+
+/// A phone shows no menu bar, so the Design menu's Arrange submenu is a
+/// page of the long-press menu: here, two parts lined up on the left.
+#[test]
+fn the_long_press_menu_reaches_the_arrange_commands() {
+    let mut finger = Finger::new(Vec2::new(1024.0, 768.0));
+    let first = finger.resistor(Point::new(200, 200));
+    let second = finger.resistor(Point::new(400, 300));
+    finger.tap(finger.screen(Point::new(200, 200)));
+    finger.press("Add to selection");
+    finger.tap(finger.screen(Point::new(400, 300)));
+    finger.press("Add to selection");
+    assert!(finger.selection().has_component(first) && finger.selection().has_component(second));
+
+    finger.long_press(finger.screen(Point::new(400, 300)));
+    finger.press("Arrange");
+    assert!(
+        finger.find("Back").is_some(),
+        "the Arrange page has a way back"
+    );
+    finger.reveal("Align left");
+    finger.press("Align left");
+    let left: Vec<i32> = finger
+        .app
+        .state
+        .schematic
+        .document()
+        .components
+        .iter()
+        .map(|part| part.pos.x)
+        .collect();
+    assert_eq!(left[0], left[1], "both parts line up on the left: {left:?}");
+    assert!(finger.app.state.schematic.can_undo(), "one undoable edit");
 }

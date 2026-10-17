@@ -146,9 +146,13 @@ pub(super) fn commit_shelf_drop(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PlacementTransform {
+pub(super) enum PlacementTransform {
     RotateClockwise,
+    RotateCounterClockwise,
     ToggleHorizontalMirror,
+    /// Top to bottom. A ghost has only a left-to-right mirror, and a
+    /// half turn with it is the same flip.
+    ToggleVerticalMirror,
 }
 
 fn consume_placement_transform(input: &mut InputState) -> Option<PlacementTransform> {
@@ -170,9 +174,39 @@ fn apply_placement_transform(
             schematic.session.editor.preview_rotation =
                 schematic.session.editor.preview_rotation.rotate_cw();
         }
+        PlacementTransform::RotateCounterClockwise => {
+            schematic.session.editor.preview_rotation =
+                schematic.session.editor.preview_rotation.rotate_ccw();
+        }
         PlacementTransform::ToggleHorizontalMirror => {
             schematic.session.editor.preview_mirror_h = !schematic.session.editor.preview_mirror_h;
         }
+        PlacementTransform::ToggleVerticalMirror => {
+            let editor = &mut schematic.session.editor;
+            editor.preview_rotation = editor.preview_rotation.rotate_cw().rotate_cw();
+            editor.preview_mirror_h = !editor.preview_mirror_h;
+        }
+    }
+}
+
+/// Whether something floats under the pointer for R and M to turn: the
+/// placement ghost, or a selection Move is carrying.
+pub(super) fn something_floats(state: &AppState) -> bool {
+    state.dialogs.move_selection.armed || state.schematic.session.editor.tool.is_place_tool()
+}
+
+/// Turn what floats under the pointer, as R and M do. Rotate and Mirror
+/// on the touch strip and the canvas menu take this path while something
+/// floats, since a tablet has no R or M key. Returns whether anything did.
+pub(super) fn turn_what_floats(state: &mut AppState, transform: PlacementTransform) -> bool {
+    if state.dialogs.move_selection.armed {
+        turn_the_move(state, transform);
+        true
+    } else if state.schematic.session.editor.tool.is_place_tool() {
+        apply_placement_transform(&mut state.schematic, transform);
+        true
+    } else {
+        false
     }
 }
 
@@ -225,9 +259,17 @@ fn turn_the_floating_move(ctx: &egui::Context, state: &mut AppState) -> bool {
     let Some(transform) = ctx.input_mut(consume_placement_transform) else {
         return false;
     };
+    turn_the_move(state, transform);
+    ctx.request_repaint();
+    true
+}
+
+fn turn_the_move(state: &mut AppState, transform: PlacementTransform) {
     let transform = match transform {
         PlacementTransform::RotateClockwise => SelectionTransform::RotateClockwise,
+        PlacementTransform::RotateCounterClockwise => SelectionTransform::RotateCounterClockwise,
         PlacementTransform::ToggleHorizontalMirror => SelectionTransform::MirrorHorizontal,
+        PlacementTransform::ToggleVerticalMirror => SelectionTransform::MirrorVertical,
     };
     let symbol_context = super::schematic_symbol_context(state);
     if transform_selection_on_active_sheet(state, &symbol_context, transform) {
@@ -237,8 +279,6 @@ fn turn_the_floating_move(ctx: &egui::Context, state: &mut AppState) -> bool {
             crate::workbench::app::SchematicEditAuthority::capture(state),
         );
     }
-    ctx.request_repaint();
-    true
 }
 
 /// Handle the mockup's direct R/M placement gestures.
