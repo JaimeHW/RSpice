@@ -1024,7 +1024,7 @@ fn results_tracking_button(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Layou
                 layout.toolbar_control_height,
             )
             .on_hover_text(
-                "This document remains readable from its immutable binding, but no completed run matches the current project revision and generated source.",
+                "This document still shows the results it was made from, but no completed run matches the current design and its netlist.",
             );
         }
         return true;
@@ -1053,9 +1053,9 @@ fn results_tracking_button(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Layou
     let pinned = tracking.mode == ResultDocumentTrackingMode::Pinned;
     let label = if pinned { "Pinned" } else { "Latest" };
     let tooltip = if pinned {
-        "Pinned to the current immutable dataset; reruns will not rebind this document."
+        "Pinned to this run's results; a rerun does not replace them."
     } else {
-        "Tracking latest: this document follows the newest run of its exact plan and authored analysis."
+        "Tracking latest: this document follows the newest run of its plan and analysis."
     };
     let response = labeled_icon_button_sized(
         ui,
