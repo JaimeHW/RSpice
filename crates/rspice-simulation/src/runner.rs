@@ -962,13 +962,13 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
         return Err(SimulationError::Aborted);
     }
 
-    if !input.project_veriloga_runtimes.is_empty() {
-        input.project_veriloga_runtimes.install().map_err(|error| {
-            SimulationError::CircuitError(format!(
-                "Could not install prepared project Verilog-A runtimes: {error}"
-            ))
-        })?;
-    }
+    // Held to the end of the run: an analysis rebuilds its circuit as often
+    // as it needs to, and each build reads the sources installed here.
+    let _veriloga = input.project_veriloga_runtimes.install().map_err(|error| {
+        SimulationError::CircuitError(format!(
+            "Could not install prepared project Verilog-A runtimes: {error}"
+        ))
+    })?;
 
     if let SimulationRequest::Spec { spec, .. } = &request
         && let Some(reason) =

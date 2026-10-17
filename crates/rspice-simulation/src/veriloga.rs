@@ -426,7 +426,14 @@ impl PreparedVerilogARuntimeSet {
             )
     }
 
-    pub fn install(&self) -> Result<(), String> {
+    /// Install every source for this process session, held until the
+    /// returned value is dropped.
+    ///
+    /// Hold it for as long as anything builds a deck naming these sources: a
+    /// sealed source the shared cache evicted is not compiled again, so a
+    /// build after the eviction fails. While held, another execution's
+    /// install that could only fit by evicting one is refused instead.
+    pub fn install(&self) -> Result<rspice_core::HeldVerilogASources, String> {
         self.validate()?;
         let registrations = self
             .runtimes
@@ -442,7 +449,10 @@ impl PreparedVerilogARuntimeSet {
                     .map(PreparedVerilogAConnectionLibrary::registration),
             )
             .collect::<Result<Vec<_>, _>>()?;
-        rspice_core::register_project_veriloga_sources_for_session(registrations)
+        rspice_core::hold_project_veriloga_sources_for_session(
+            registrations,
+            rspice_core::ResourceLimits::default(),
+        )
     }
 
     pub fn try_merge(self, additional: Self) -> Result<Self, String> {

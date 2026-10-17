@@ -1293,10 +1293,11 @@ fn configured_cell_view_compiles_the_exact_sealed_veriloga_bundle() {
         1,
         "configured netlist must reference the exact prepared runtime once"
     );
-    rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime.clone()])
-        .unwrap()
-        .install()
-        .expect("sealed configured runtime installs in the session cache");
+    let _installed =
+        rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime.clone()])
+            .unwrap()
+            .install()
+            .expect("sealed configured runtime installs in the session cache");
 }
 
 #[cfg(not(target_arch = "wasm32"))]

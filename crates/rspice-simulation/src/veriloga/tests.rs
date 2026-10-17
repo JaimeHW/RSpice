@@ -585,12 +585,12 @@ fn installing_an_edited_module_leaves_each_deck_the_runtime_it_names() {
     };
     let running = seal_runtime("installed-while-running.va", "load", &load("1.0e-3"));
     let edited = seal_runtime("installed-after-an-edit.va", "load", &load("2.0e-3"));
-    for runtime in [&running, &edited] {
+    let _installed = [&running, &edited].map(|runtime| {
         super::PreparedVerilogARuntimeSet::try_new(vec![runtime.clone()])
             .expect("one runtime is a set")
             .install()
-            .expect("an edited module installs beside the running one");
-    }
+            .expect("an edited module installs beside the running one")
+    });
 
     for (runtime, conductance) in [(&running, 1.0e-3), (&edited, 2.0e-3)] {
         let directive = crate::netlist_preparation::project_veriloga_directive(

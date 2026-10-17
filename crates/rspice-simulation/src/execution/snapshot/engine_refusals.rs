@@ -152,21 +152,24 @@ impl PreparedRunSnapshot {
         progress: &dyn Fn(DeckBuildProgress),
     ) -> Vec<EngineRefusal> {
         let mut refusals: Vec<EngineRefusal> = Vec::new();
-        if !self.project_veriloga_runtimes.is_empty()
-            && let Err(error) = self.project_veriloga_runtimes.install()
-        {
-            let tasks = self.tasks.iter().map(refused_task).collect();
-            refusals.push(EngineRefusal {
-                kind: EngineRefusalKind::Build {
-                    message: format!(
-                        "Could not install prepared project Verilog-A runtimes: {error}"
-                    ),
-                    instance: None,
-                },
-                tasks,
-            });
-            return refusals;
-        }
+        // Held until every deck is built: each build reads the sources
+        // installed here.
+        let _installed = match self.project_veriloga_runtimes.install() {
+            Ok(installed) => installed,
+            Err(error) => {
+                let tasks = self.tasks.iter().map(refused_task).collect();
+                refusals.push(EngineRefusal {
+                    kind: EngineRefusalKind::Build {
+                        message: format!(
+                            "Could not install prepared project Verilog-A runtimes: {error}"
+                        ),
+                        instance: None,
+                    },
+                    tasks,
+                });
+                return refusals;
+            }
+        };
 
         // Every deck every task dispatches, in dispatch order, so the pass can
         // say how many it builds before it builds the first. A recorded FFT

@@ -27,7 +27,7 @@ pub fn validate_prepared_periodic_sources<'a>(
             format!("Could not authenticate periodic sources in the executable netlist: {error}"),
         )
     })?;
-    runtimes.install().map_err(|error| {
+    let _installed = runtimes.install().map_err(|error| {
         PreparationError::new(
             PreparationStage::ModelBindings,
             format!("Could not install the run's sealed Verilog-A runtimes: {error}"),

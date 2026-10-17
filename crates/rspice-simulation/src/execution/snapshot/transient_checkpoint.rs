@@ -56,7 +56,9 @@ pub(super) fn route_resumes(
         return Ok(());
     }
     PreparationError::check_abort(abort)?;
-    parts
+    // Checking a checkpoint builds the task's deck, which reads the sources
+    // installed here; held until every check is done.
+    let _installed = parts
         .project_veriloga_runtimes
         .install()
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
