@@ -672,7 +672,10 @@ pub(crate) fn open_comparison(
     };
     let comparison = build_comparison_workspace(&candidate.display_name, baseline, recovered)?;
 
-    app.state.clear_project_execution_context();
+    app.state.replace_project_execution_context(format!(
+        "Opened recovery comparison for '{}'; the saved project and checkpoint are unchanged.",
+        candidate.display_name
+    ));
     app.state.library_manager = comparison.libraries;
     app.state.workspace = comparison.workspace;
     app.state.schematic = comparison.active;
@@ -680,14 +683,6 @@ pub(crate) fn open_comparison(
     app.state.sim_setup = crate::workbench::app_state::SimSetupState::new();
     app.state.model_library_manager = crate::workbench::app_state::default_model_library_manager();
     app.state.workbench.activate(Workspace::Design);
-    app.state.record(
-        LogSeverity::Info,
-        LogSource::Studio,
-        format!(
-            "Opened recovery comparison for '{}'; the saved project and checkpoint are unchanged.",
-            candidate.display_name
-        ),
-    );
     if let Some(notice) = baseline_notice {
         app.state
             .record(LogSeverity::Warning, LogSource::Studio, notice);
@@ -921,6 +916,30 @@ pub(crate) const fn diagnostics_folder_supported() -> bool {
     ))
 }
 
+/// The session log as the diagnostic folder keeps it: one line per entry,
+/// each message redacted as the support bundle redacts it.
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(target_os = "windows", target_os = "macos", target_os = "linux")
+))]
+fn session_log_text(state: &AppState, home: Option<&str>) -> String {
+    use std::fmt::Write as _;
+
+    let mut text = String::new();
+    for entry in state.log_buffer.entries() {
+        writeln!(
+            text,
+            "{} [{}] [{}] {}",
+            entry.format_timestamp(),
+            entry.severity.name(),
+            entry.source.name(),
+            crate::diagnostics::redact_log_message(&entry.message, home)
+        )
+        .expect("String writes cannot fail");
+    }
+    text
+}
+
 /// Write an explicit, privacy-reviewable diagnostic snapshot and reveal its
 /// directory using the host desktop's file-manager API.
 pub(crate) fn open_diagnostics_folder(state: &AppState) -> Result<PathBuf, String> {
@@ -968,17 +987,10 @@ pub(crate) fn open_diagnostics_folder(state: &AppState) -> Result<PathBuf, Strin
         .expect("String writes cannot fail");
         writeln!(snapshot).expect("String writes cannot fail");
         writeln!(snapshot, "Session log").expect("String writes cannot fail");
-        for entry in state.log_buffer.entries() {
-            writeln!(
-                snapshot,
-                "{} [{}] [{}] {}",
-                entry.format_timestamp(),
-                entry.severity.name(),
-                entry.source.name(),
-                entry.message
-            )
-            .expect("String writes cannot fail");
-        }
+        snapshot.push_str(&session_log_text(
+            state,
+            crate::diagnostics::home_directory().as_deref(),
+        ));
 
         let snapshot_path = directory.join("current-session.log");
         crate::io::durable_file::atomic_write_bytes(&snapshot_path, snapshot.as_bytes()).map_err(
@@ -1042,6 +1054,30 @@ mod tests {
         Component, ComponentType, DocumentationShape, DocumentationShapeGeometry, Junction,
         NetLabel, Point, Wire,
     };
+
+    /// The diagnostic folder is as private as the support bundle.
+    #[test]
+    #[cfg(all(
+        not(target_arch = "wasm32"),
+        any(target_os = "windows", target_os = "macos", target_os = "linux")
+    ))]
+    fn the_diagnostic_session_log_carries_no_home_directory() {
+        let mut state = AppState::default();
+        state.record(
+            LogSeverity::Info,
+            LogSource::Studio,
+            r"Opened project amp (C:\Users\James\designs\amp.rspiceproj).",
+        );
+
+        let text = session_log_text(&state, Some(r"C:\Users\James"));
+
+        assert!(
+            text.trim_end()
+                .ends_with(r"[APP] Opened project amp (<HOME>\designs\amp.rspiceproj)."),
+            "{text}"
+        );
+        assert!(!text.contains(r"C:\Users\James"), "{text}");
+    }
 
     #[test]
     #[cfg(not(target_arch = "wasm32"))]

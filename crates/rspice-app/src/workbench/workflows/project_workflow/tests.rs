@@ -1047,12 +1047,24 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
     );
     assert!(state.ui.code_workspace.automation.debug.watches.is_empty());
     assert_eq!(state.ui.netlist.diagnostics.summary().total(), 0);
-    assert!(
-        !state
-            .log_buffer
-            .entries()
-            .any(|entry| entry.message == "old project warning")
-    );
+    // The Console is the session's record: the old project's history stays,
+    // and the replacement states itself once after it.
+    let messages: Vec<_> = state
+        .log_buffer
+        .entries()
+        .map(|entry| entry.message.as_str())
+        .collect();
+    let old = messages
+        .iter()
+        .position(|message| *message == "old project warning")
+        .expect("the old project's history is kept");
+    let opened: Vec<_> = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, message)| message.starts_with("Imported project "))
+        .collect();
+    assert_eq!(opened.len(), 1, "{messages:?}");
+    assert!(opened[0].0 > old, "{messages:?}");
 }
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -13,6 +13,8 @@
 mod console;
 pub(crate) mod engine_log;
 mod log;
+mod redaction;
 
 pub use console::{ConsoleLevel, ConsoleMessage};
 pub use log::{LogAnchor, LogBuffer, LogEntry, LogSeverity, LogSource};
+pub(crate) use redaction::{home_directory, redact_log_message};

@@ -236,26 +236,13 @@ pub(super) fn apply_opened_netlist_project(
     // Construct and validate the replacement off to the side. The currently
     // open project, its dirty documents and all retained evidence remain
     // untouched unless the complete netlist-first project is ready to commit.
+    // The candidate states the opened netlist when it is created, so the line
+    // reaches the Console only if the candidate is committed.
     let mut candidate = state.clone();
-    crate::workbench::workflows::project_workflow::create_new_project(&mut candidate);
-    let proposed_name = std::path::Path::new(display_name)
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .filter(|stem| !stem.trim().is_empty())
-        .unwrap_or("Netlist Project");
-    if candidate
-        .workspace
-        .content
-        .project
-        .rename(proposed_name.to_owned())
-        .is_err()
-    {
-        let _ = candidate
-            .workspace
-            .content
-            .project
-            .rename("Netlist Project".to_owned());
-    }
+    crate::workbench::workflows::project_workflow::create_netlist_project(
+        &mut candidate,
+        display_name,
+    );
     if let Err(failure) = install_imported_netlist(
         &mut candidate,
         source,
@@ -278,11 +265,6 @@ pub(super) fn apply_opened_netlist_project(
         );
         return false;
     }
-    let opened = format!(
-        "Opened netlist project {} ({display_name}).",
-        candidate.workspace.content.project.display_name()
-    );
-    candidate.record(LogSeverity::Info, LogSource::Studio, opened);
     *state = candidate;
     true
 }

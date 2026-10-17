@@ -109,16 +109,10 @@ fn validate_identity_segment(field: &str, value: &str) -> Result<(), String> {
         .map_err(|error| format!("{field} {error}"))
 }
 
-/// Replace the session with a blank default project, without announcing it.
-///
-/// Opening a netlist as a project builds on this and records the one line
-/// that says what was opened; a "Created project" line before it would
-/// describe a project the reader never asked for.
+/// Replace the session with a blank default project.
+#[cfg(test)]
 pub(crate) fn create_new_project(state: &mut AppState) {
-    if let Ok(model_restore_errors) = replace_with_new_project(state, &NewProjectParams::default())
-    {
-        emit_session_model_restore_errors(state, "new project", model_restore_errors);
-    }
+    let _ = create_new_project_with(state, &NewProjectParams::default());
 }
 
 /// Replace the session with a new project under `params`.
@@ -129,24 +123,47 @@ pub(crate) fn create_new_project_with(
     state: &mut AppState,
     params: &NewProjectParams,
 ) -> Result<(), String> {
-    let model_restore_errors = replace_with_new_project(state, params)?;
-    state.record(
-        LogSeverity::Info,
-        LogSource::Studio,
-        format!(
-            "Created project {} (top cell {}/{}).",
-            params.name, params.root_library, params.top_cell
-        ),
+    let announcement = format!(
+        "Created project {} (top cell {}/{}).",
+        params.name, params.root_library, params.top_cell
     );
+    let model_restore_errors = replace_with_new_project(state, params, announcement)?;
     emit_session_model_restore_errors(state, "new project", model_restore_errors);
     Ok(())
 }
 
-/// The replacement both creators share; it returns the model catalog's
-/// restore errors for the caller to report after its own line.
+/// Replace the session with a new project for a netlist being opened as one.
+///
+/// The deck's file stem names the project when it is a valid project name.
+/// The replacement states itself as the netlist that was opened, which is
+/// what the reader asked for; a "Created project" line would describe a
+/// project they never asked for.
+pub(crate) fn create_netlist_project(state: &mut AppState, display_name: &str) {
+    const FALLBACK_NAME: &str = "Netlist Project";
+    let mut params = NewProjectParams {
+        name: std::path::Path::new(display_name)
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .filter(|stem| !stem.trim().is_empty())
+            .unwrap_or(FALLBACK_NAME)
+            .to_owned(),
+        ..NewProjectParams::default()
+    };
+    if params.validate().is_err() {
+        params.name = FALLBACK_NAME.to_owned();
+    }
+    let announcement = format!("Opened netlist project {} ({display_name}).", params.name);
+    if let Ok(model_restore_errors) = replace_with_new_project(state, &params, announcement) {
+        emit_session_model_restore_errors(state, "netlist project", model_restore_errors);
+    }
+}
+
+/// The replacement every creator shares; it returns the model catalog's
+/// restore errors for the caller to report after the announcement.
 fn replace_with_new_project(
     state: &mut AppState,
     params: &NewProjectParams,
+    announcement: String,
 ) -> Result<Vec<String>, String> {
     if state.simulation.execution.has_active_execution() {
         lifecycle_error(
@@ -186,7 +203,7 @@ fn replace_with_new_project(
     state.schematic = schematic;
     state.ui.schematic_snap = state.schematic.session.editor.snap_engine.clone();
     state.bump_active_schematic_epoch();
-    state.clear_project_execution_context();
+    state.replace_project_execution_context(announcement);
     state.sim_setup = crate::workbench::app_state::SimSetupState::new_with_user_preferences(
         &state.ui.preferences,
     );
@@ -1014,12 +1031,15 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
         );
         return false;
     }
-    let closed = state.workspace.content.project.display_name().to_owned();
+    let closed = format!(
+        "Closed project {}.",
+        state.workspace.content.project.display_name()
+    );
     let mut libraries = crate::state::LibraryManager::with_primitives();
     let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut libraries);
     let schematic = state.new_schematic_document();
     workspace.save_active_schematic(&schematic);
-    state.clear_project_execution_context();
+    state.replace_project_execution_context(closed);
     state.library_manager = libraries;
     state.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
     state.workspace = workspace;
@@ -1050,11 +1070,6 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
     if destination == ProjectCloseDestination::LiveMirror {
         state.workbench.request_live_mirror_entry();
     }
-    state.record(
-        LogSeverity::Info,
-        LogSource::Studio,
-        format!("Closed project {closed}."),
-    );
     true
 }
 
@@ -1218,7 +1233,13 @@ fn apply_loaded_project_authorized(
     let result_presentation = project.file.result_presentation;
     let mut simulation_results_warning = project.file.simulation_results_warning;
     let workspace_migration_warning = project.file.workspace_migration_warning;
-    state.clear_project_execution_context();
+    let opened = format!(
+        "{} {} ({}).",
+        origin.success_prefix(),
+        project.file.workspace.project.display_name(),
+        origin.display_label()
+    );
+    state.replace_project_execution_context(opened);
     state.library_manager = project.file.libraries;
     state.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
     state.workspace = crate::state::ProjectWorkspace::from_parts(
@@ -1249,15 +1270,6 @@ fn apply_loaded_project_authorized(
     if let Some(path) = origin.recent_path() {
         state.remember_recent_file(crate::workbench::app_state::RecentKind::Project, path);
     }
-    // The log carries on across a project switch, so this line is where one
-    // project's history ends and the next one's begins.
-    let opened = format!(
-        "{} {} ({}).",
-        origin.success_prefix(),
-        state.workspace.content.project.display_name(),
-        origin.display_label()
-    );
-    state.record(LogSeverity::Info, LogSource::Studio, opened);
     if let Some(error) = technology_block {
         state.record(
             LogSeverity::Warning,
