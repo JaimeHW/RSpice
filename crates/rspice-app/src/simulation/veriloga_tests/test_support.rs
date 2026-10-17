@@ -8,11 +8,12 @@ use super::{
 pub(crate) fn standalone_connection_authority()
 -> rspice_simulation::model_sources::SealedModelLibraryVerilogAAuthority {
     standalone_connection_authority_with_directive(".va \"rules.vams\" UI_CONNECTIONS\n")
+        .expect("one alias per source is a well-defined authority")
 }
 
 pub(super) fn standalone_connection_authority_with_directive(
     rules_directive: &str,
-) -> rspice_simulation::model_sources::SealedModelLibraryVerilogAAuthority {
+) -> Result<rspice_simulation::model_sources::SealedModelLibraryVerilogAAuthority, String> {
     let mut rules = rspice_veriloga::connect::library::BUILTIN_CONNECT_MODULES
         .iter()
         .map(|(_, source)| *source)
@@ -32,8 +33,7 @@ pub(super) fn standalone_connection_authority_with_directive(
         .seal_execution_sources()
         .unwrap()
         .reference_model_library_veriloga_authority(crate::product::ProcessCorner::TT)
-        .unwrap()
-        .unwrap()
+        .map(|authority| authority.expect("the library carries Verilog-A"))
 }
 
 pub(crate) fn standalone_connection_fixture() -> (PreparedVerilogARuntimeSet, String) {
