@@ -596,11 +596,30 @@ fn check_drawing(bench: &Bench, projected: &SchematicDocument) -> Result<(), Str
     check_dots(projected)
 }
 
-/// Conductor ends at `point`: wire ends with a vertex there, wires running
-/// through it, and pins on it.
-fn ends_at(document: &SchematicDocument, pins: &[Point], point: Point) -> (usize, usize, usize) {
+/// The conductor ends at one point: wire ends with a vertex there, wires
+/// running through it, and pins on it.
+struct Ends {
+    vertex_ends: usize,
+    interiors: usize,
+    on_pins: usize,
+    /// Wire interiors cross there: runs through it in two directions or
+    /// more, one wire's or several, with no vertex on it.
+    crossing: bool,
+}
+
+impl Ends {
+    fn count(&self) -> usize {
+        self.vertex_ends + 2 * self.interiors + self.on_pins
+    }
+}
+
+/// The conductor ends at `point`. A crossing is judged as the junction rule
+/// judges one, by the directions the runs through it take, so a wire that
+/// crosses itself crosses.
+fn ends_at(document: &SchematicDocument, pins: &[Point], point: Point) -> Ends {
     let mut vertex_ends = 0;
     let mut interiors = 0;
+    let mut directions = BTreeSet::new();
     for wire in &document.wires {
         let last = wire.points.len().saturating_sub(1);
         let at_vertex = wire
@@ -612,15 +631,33 @@ fn ends_at(document: &SchematicDocument, pins: &[Point], point: Point) -> (usize
             .sum::<usize>();
         if at_vertex > 0 {
             vertex_ends += at_vertex;
-        } else if wire.segments().any(|segment| segment.contains_point(point)) {
-            interiors += 1;
+            continue;
         }
+        let mut through = false;
+        for segment in wire
+            .segments()
+            .filter(|segment| segment.contains_point(point))
+        {
+            through = true;
+            let (dx, dy) = (
+                i64::from(segment.end.x) - i64::from(segment.start.x),
+                i64::from(segment.end.y) - i64::from(segment.start.y),
+            );
+            let mut divisor = (dx.abs(), dy.abs());
+            while divisor.1 != 0 {
+                divisor = (divisor.1, divisor.0 % divisor.1);
+            }
+            let sign = if dx < 0 || (dx == 0 && dy < 0) { -1 } else { 1 };
+            directions.insert((sign * dx / divisor.0, sign * dy / divisor.0));
+        }
+        interiors += usize::from(through);
     }
-    (
+    Ends {
         vertex_ends,
         interiors,
-        pins.iter().filter(|pin| **pin == point).count(),
-    )
+        on_pins: pins.iter().filter(|pin| **pin == point).count(),
+        crossing: vertex_ends == 0 && directions.len() >= 2,
+    }
 }
 
 /// The painted dots against the junction rule and the netlister, on the
@@ -654,8 +691,7 @@ fn check_dots(projected: &SchematicDocument) -> Result<(), String> {
     let extracted = rspice_design::connectivity::extract(projected, |_| None, |_| None);
     for &(x, y) in &painted {
         let dot = p(x, y);
-        let (vertex_ends, interiors, on_pins) = ends_at(projected, &pins, dot);
-        if vertex_ends + 2 * interiors + on_pins < 3 {
+        if ends_at(projected, &pins, dot).count() < 3 {
             return Err(format!(
                 "dots: the dot at {dot:?} marks fewer than three conductor ends"
             ));
@@ -685,12 +721,11 @@ fn check_dots(projected: &SchematicDocument) -> Result<(), String> {
         .collect::<BTreeSet<_>>();
     for (x, y) in candidates {
         let point = p(x, y);
-        let (vertex_ends, interiors, on_pins) = ends_at(projected, &pins, point);
-        let crossing = vertex_ends == 0 && interiors >= 2;
-        if !crossing && vertex_ends + 2 * interiors + on_pins >= 3 && !painted.contains(&(x, y)) {
+        let ends = ends_at(projected, &pins, point);
+        if !ends.crossing && ends.count() >= 3 && !painted.contains(&(x, y)) {
             return Err(format!(
                 "dots: the netlister joins {} conductor ends at {point:?} and no dot is painted",
-                vertex_ends + 2 * interiors + on_pins
+                ends.count()
             ));
         }
     }
