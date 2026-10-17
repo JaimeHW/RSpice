@@ -18,7 +18,6 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, hash_map};
 use std::sync::{Arc, Mutex};
 
-use crate::ContinuationAid;
 use crate::log_scope::{self, LogLine, LogScope, LogScopeGuard};
 
 /// The sweep points one notice lists by name. Past this many, it counts.
@@ -80,6 +79,35 @@ pub struct TimestepFloor {
     pub floor: f64,
     /// When the step was first reported held there, in seconds.
     pub time: f64,
+}
+
+/// An operating-point convergence aid: a homotopy that solves a deformed
+/// circuit and walks the deformation back to the circuit itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub enum ContinuationAid {
+    /// A conductance from every node to ground, stepped down to the GMIN
+    /// floor the direct solve uses.
+    GminStepping,
+    /// The independent sources, ramped up to full strength.
+    SourceStepping,
+    /// A pseudo-capacitance on every unknown, its timestep grown until the
+    /// circuit sits at DC.
+    PseudoTransient,
+    /// The gate generation-recombination branches of JFET-family devices,
+    /// ramped up to full strength.
+    GateGenerationStepping,
+}
+
+impl std::fmt::Display for ContinuationAid {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::GminStepping => "GMIN stepping",
+            Self::SourceStepping => "source stepping",
+            Self::PseudoTransient => "pseudo-transient continuation",
+            Self::GateGenerationStepping => "gate-generation continuation",
+        })
+    }
 }
 
 /// What makes two notices the same notice: the kind, the object it is about

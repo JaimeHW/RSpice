@@ -218,8 +218,14 @@ use rspice_core::analysis::harmonic_balance::{
 // `log_scope::logged` adds one: the simulation service's run log
 // (`rspice-simulation` engine_log.rs) says which line it kept for each engine
 // record it is offered, so the engine site that logged a warning raises the
-// notice it states with that line. The census is 5,733, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5733;
+// notice it states with that line. The census was 5,733, with no slack.
+// `ContinuationAid` moved down into `notice`, whose convergence notice carries
+// it, so the device models that record notices do not reach up into
+// `analysis` through it. The move adds one re-export and no name:
+// `analysis::error` re-exports the aid for the `ContinuationFailure` beside
+// it, and every public path to it is unchanged. The census is 5,734, with no
+// slack.
+const MAX_PUBLIC_ITEMS: usize = 5734;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

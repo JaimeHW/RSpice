@@ -24,6 +24,10 @@ use crate::netlist::NetlistSourceLocation;
 use crate::resource::ResourceLimitError;
 use crate::solver::SolverError;
 
+// Defined in `notice`, beside the notice a run raises when an aid succeeds, so
+// the device models that record notices need not reach up into `analysis`.
+pub use crate::notice::ContinuationAid;
+
 /// Stable machine-readable code for a simulation failure.
 ///
 /// Display messages are intended for people and may gain additional context.
@@ -969,24 +973,6 @@ impl std::fmt::Display for ResultSchemaMismatchError {
 
 impl std::error::Error for ResultSchemaMismatchError {}
 
-/// An operating-point convergence aid: a homotopy that solves a deformed
-/// circuit and walks the deformation back to the circuit itself.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[non_exhaustive]
-pub enum ContinuationAid {
-    /// A conductance from every node to ground, stepped down to the GMIN
-    /// floor the direct solve uses.
-    GminStepping,
-    /// The independent sources, ramped up to full strength.
-    SourceStepping,
-    /// A pseudo-capacitance on every unknown, its timestep grown until the
-    /// circuit sits at DC.
-    PseudoTransient,
-    /// The gate generation-recombination branches of JFET-family devices,
-    /// ramped up to full strength.
-    GateGenerationStepping,
-}
-
 impl ContinuationAid {
     /// The aid's continuation parameter at `value`, in the aid's own units.
     fn stage(self, value: crate::Value) -> String {
@@ -996,17 +982,6 @@ impl ContinuationAid {
             Self::PseudoTransient => format!("pseudo-timestep = {value:.3e} s"),
             Self::GateGenerationStepping => format!("gate-generation scale = {value:.4}"),
         }
-    }
-}
-
-impl std::fmt::Display for ContinuationAid {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(match self {
-            Self::GminStepping => "GMIN stepping",
-            Self::SourceStepping => "source stepping",
-            Self::PseudoTransient => "pseudo-transient continuation",
-            Self::GateGenerationStepping => "gate-generation continuation",
-        })
     }
 }
 
