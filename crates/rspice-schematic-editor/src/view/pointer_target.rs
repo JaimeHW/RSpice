@@ -614,11 +614,13 @@ mod tests {
     /// instances is drawn on top, and a click takes it.
     #[test]
     fn overlapping_instances_pick_the_topmost() {
-        let mut document = SchematicDocument::default();
-        document.components = vec![
-            Component::new(1, ComponentType::Resistor, Point::new(0, 0)),
-            Component::new(2, ComponentType::Resistor, Point::new(0, 0)),
-        ];
+        let document = SchematicDocument {
+            components: vec![
+                Component::new(1, ComponentType::Resistor, Point::new(0, 0)),
+                Component::new(2, ComponentType::Resistor, Point::new(0, 0)),
+            ],
+            ..Default::default()
+        };
         let zoom = viewport(1.0);
         assert_eq!(
             click(
