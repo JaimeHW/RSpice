@@ -473,3 +473,50 @@ fn rows_in(state: &AppState, cell_view: &CellViewRef) -> Vec<String> {
         .map(|(_, _, object)| object)
         .collect()
 }
+
+/// Leaving a view while its edit settles checks the edit on the way out,
+/// from the drawing left behind in the workspace, which is still part of the
+/// configured design: the check runs, and nothing says it failed.
+#[test]
+fn an_edit_settling_as_its_view_is_left_is_checked_without_a_warning() {
+    use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
+
+    let reference = hierarchy_reference::build();
+    let mut state = reference.state;
+    state.project_lifecycle.authority.open_session();
+    let amp = reference.amp_schematic;
+    state.open_workspace_view(amp.clone());
+    let start = crate::time_compat::Instant::now();
+    let _ = state.refresh_live_checks(start);
+    let live = DiagnosticInputs::LiveCheck {
+        subject: amp.clone(),
+    };
+    let stated = |state: &AppState| {
+        state
+            .diagnostics
+            .batch(&live)
+            .map_or(0, |batch| batch.records.len())
+    };
+    let before = stated(&state);
+    state
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(4000, 4000));
+    assert!(
+        state.refresh_live_checks(start).is_some(),
+        "the edit settles"
+    );
+
+    state.open_workspace_view(reference.top);
+    assert_eq!(state.refresh_live_checks(start), None);
+    assert!(
+        stated(&state) > before,
+        "the resistor's open legs are stated for amp on the way out"
+    );
+    assert!(
+        !state
+            .log_buffer
+            .entries()
+            .any(|entry| entry.message.starts_with("Live checks could not run")),
+        "nothing says the check failed"
+    );
+}

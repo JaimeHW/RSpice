@@ -159,6 +159,48 @@ fn close_project_discards_onto_the_no_project_landing_not_the_launcher() {
     );
 }
 
+/// Closing the project while an edit settles drops the edit with everything
+/// else the design held: nothing is checked afterwards, and nothing says a
+/// check failed.
+#[test]
+fn closing_a_project_as_an_edit_settles_checks_nothing() {
+    use crate::state::{ComponentType, Point};
+    use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
+    use crate::workbench::examples::hierarchy_reference;
+
+    let reference = hierarchy_reference::build();
+    let mut state = reference.state;
+    state.project_lifecycle.authority.open_session();
+    let amp = reference.amp_schematic;
+    state.open_workspace_view(amp.clone());
+    let start = crate::time_compat::Instant::now();
+    let _ = state.refresh_live_checks(start);
+    state
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(4000, 4000));
+    assert!(
+        state.refresh_live_checks(start).is_some(),
+        "the edit settles"
+    );
+
+    assert!(close_project_discard(&mut state));
+    assert_eq!(state.refresh_live_checks(start), None);
+    assert!(
+        state
+            .diagnostics
+            .batch(&DiagnosticInputs::LiveCheck { subject: amp })
+            .is_none(),
+        "nothing is checked once the project is closed"
+    );
+    assert!(
+        !state
+            .log_buffer
+            .entries()
+            .any(|entry| entry.message.starts_with("Live checks could not run")),
+        "nothing says a check failed"
+    );
+}
+
 #[test]
 fn close_to_live_mirror_raises_the_one_shot_engine_entry_request() {
     let mut state = AppState::default();
