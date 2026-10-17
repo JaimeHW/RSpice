@@ -107,11 +107,20 @@ impl AppState {
         true
     }
 
-    /// Duplicate what is selected, placed just off the current paste anchor.
+    /// Duplicate what is selected, placed one grid step off the current paste
+    /// anchor.
     pub(crate) fn duplicate_schematic_selection(&mut self) -> bool {
         let state = self;
-        let anchor = state.schematic_paste_anchor() + Point::new(2, 2);
+        let anchor = state.schematic_paste_anchor() + state.schematic_grid_step();
         state.duplicate_schematic_selection_at(anchor)
+    }
+
+    /// One grid step down and to the right: where a duplicate lands from the
+    /// point it was asked for, so it is seen beside its source and stays on
+    /// the grid.
+    pub(crate) fn schematic_grid_step(&self) -> Point {
+        let grid = self.schematic.document().grid_size.max(1);
+        Point::new(grid, grid)
     }
 
     /// Duplicate what is selected, placed at `anchor`.

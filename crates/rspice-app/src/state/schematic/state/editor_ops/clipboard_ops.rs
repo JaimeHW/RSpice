@@ -477,7 +477,9 @@ mod tests {
 
     #[test]
     fn label_duplicate_pattern_creates_fresh_identity_in_one_undo_step() {
-        let label = NetLabel::new(90, Point::new(3, 7), "duplicated_net");
+        // On the grid: a copy keeps its objects' places relative to the grid
+        // (audit E-6), so only an on-grid label lands exactly on the target.
+        let label = NetLabel::new(90, Point::new(30, 70), "duplicated_net");
         let mut schematic = SchematicState::default();
         schematic
             .design
@@ -493,7 +495,7 @@ mod tests {
         schematic.init_undo_history();
 
         schematic.copy_selection();
-        assert!(schematic.paste_at(Point::new(13, 17)));
+        assert!(schematic.paste_at(Point::new(130, 170)));
 
         assert_eq!(schematic.design.document().net_labels.len(), 2);
         let duplicate = schematic
@@ -503,7 +505,7 @@ mod tests {
             .iter()
             .find(|candidate| candidate.id != label.id)
             .unwrap();
-        assert_eq!(duplicate.pos, Point::new(13, 17));
+        assert_eq!(duplicate.pos, Point::new(130, 170));
         assert_eq!(duplicate.name, label.name);
         assert_ne!(duplicate.id, label.id);
         assert!(schematic.undo());

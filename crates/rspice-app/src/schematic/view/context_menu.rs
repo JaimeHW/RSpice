@@ -1023,7 +1023,8 @@ fn execute_context_action(
             state.copy_active_schematic_selection();
         }
         ContextAction::Duplicate => {
-            state.duplicate_schematic_selection_at(click_pos + Point::new(2, 2));
+            let step = state.schematic_grid_step();
+            state.duplicate_schematic_selection_at(click_pos + step);
         }
         ContextAction::Delete => {
             state.delete_schematic_selection();

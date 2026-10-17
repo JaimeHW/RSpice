@@ -141,7 +141,7 @@ pub fn capture_complete_selection(
         .cloned()
         .collect();
 
-    ClipboardData::from_complete_selection(ClipboardData {
+    let mut clipboard = ClipboardData::from_complete_selection(ClipboardData {
         components: selected_comps,
         wires: wires_to_copy,
         junctions: junctions_to_copy,
@@ -152,7 +152,36 @@ pub fn capture_complete_selection(
         documentation_shapes: documentation_shapes_to_copy,
         probes: probes_to_copy,
         origin: Point::origin(),
-    })
+    });
+    // A paste moves everything by the anchor less this origin. The anchor is
+    // on the grid, so an origin off it would carry every object off the grid
+    // too. A copy of junctions alone keeps its own points: it pastes onto
+    // crossings, which need not lie on the grid.
+    let junction_only = !clipboard.junctions.is_empty()
+        && clipboard.components.is_empty()
+        && clipboard.wires.is_empty()
+        && clipboard.buses.is_empty()
+        && clipboard.bus_taps.is_empty()
+        && clipboard.net_labels.is_empty()
+        && clipboard.design_notes.is_empty()
+        && clipboard.documentation_shapes.is_empty()
+        && clipboard.probes.is_empty();
+    if !junction_only {
+        clipboard.origin = snapped_to_grid(clipboard.origin, document.grid_size);
+    }
+    clipboard
+}
+
+/// `point` moved to the nearest point of a `grid` pitch.
+fn snapped_to_grid(point: Point, grid: i32) -> Point {
+    let grid = grid.max(1);
+    let snap = |value: i32| {
+        value
+            .saturating_add(grid / 2)
+            .div_euclid(grid)
+            .saturating_mul(grid)
+    };
+    Point::new(snap(point.x), snap(point.y))
 }
 
 /// A validated paste bound to its destination and allocation state. Commit
