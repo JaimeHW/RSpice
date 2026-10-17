@@ -50,6 +50,7 @@ use rspice_design::schematic::replacement;
 use rspice_design::schematic::rotation;
 use rspice_schematic_editor::session::selection;
 use rspice_schematic_editor::session::snap;
+pub(crate) mod operating_point_memo;
 mod state;
 pub(crate) mod symbol_context_cache;
 use rspice_schematic_editor::session::tool;

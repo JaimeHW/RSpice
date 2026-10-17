@@ -182,6 +182,10 @@ pub struct SchematicSession {
     /// The canvas's resolved symbols, kept while what they resolve from
     /// stands still.
     pub(crate) symbol_context: super::symbol_context_cache::SymbolContextCache,
+
+    /// The canvas's operating-point voltage badges, kept while what they are
+    /// read from stands still.
+    pub(crate) operating_point_badges: super::operating_point_memo::OperatingPointMemo,
 }
 
 impl Default for SchematicState {

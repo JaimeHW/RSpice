@@ -12,7 +12,7 @@
 //! first.
 
 use std::collections::BTreeMap;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use super::*;
 use crate::state::{CellViewRef, InstancePath, SheetId};
@@ -44,8 +44,9 @@ pub struct CrossProbeMapping {
     ///
     /// Read one sheet at a time through [`Self::on_sheet`]. Two sheets can
     /// draw different nets at the same coordinates, so a point means nothing
-    /// without the sheet it was read on.
-    sheets: SheetNetGeometries,
+    /// without the sheet it was read on. Shared, because every occurrence of
+    /// the captured master reads the same geometry under its own names.
+    sheets: Arc<SheetNetGeometries>,
 
     /// Engine spelling of every signal on this map, keyed by the folded local
     /// name.
@@ -114,7 +115,7 @@ impl CrossProbeMapping {
         self.source_reference = Some(source_reference);
         self.occurrence = None;
         self.engine_names = engine_names_at(&InstancePath::root(), &sheets);
-        self.sheets = sheets;
+        self.sheets = Arc::new(sheets);
         self.source_topology_version = Some(source_topology_version);
         self.version += 1;
     }
@@ -211,7 +212,7 @@ impl CrossProbeMapping {
     /// The same geometry read at `occurrence`.
     ///
     /// Two instances of one master share every point on the drawing and not
-    /// one signal name, so the points are cloned and the engine spellings are
+    /// one signal name, so the points are shared and the engine spellings are
     /// derived afresh from the occurrence.
     fn at_occurrence(&self, occurrence: &InstancePath) -> Self {
         Self {

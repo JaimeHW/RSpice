@@ -464,6 +464,9 @@ pub fn render_schematic_view(
     // Refresh the frame-coherent canvas cache (culling bounds + hover
     // hit-test index) after interactions may have edited topology.
     state.schematic.ensure_canvas_cache();
+    // Badges are placed against the wires the canvas cache indexes, so they
+    // are refreshed after it.
+    scene::refresh_voltage_badges(state);
 
     draw_scene(
         &painter,

@@ -6,7 +6,7 @@ use super::{
     drawing::ProbeVisualStatus,
     drawing_sheet::ActiveDrawingSheet,
     sheet_visibility::{
-        active_junction_at, active_sheet_has_objects, active_wire_at, object_is_on_active_sheet,
+        active_sheet_has_objects, active_wire_at, object_is_on_active_sheet,
         objects_on_active_sheet,
     },
     viewport::Viewport,
@@ -14,7 +14,7 @@ use super::{
 use crate::schematic::bus_notations;
 use crate::state::{
     CrossProbeIndex, Point, SchematicAnnotationVisibility, SchematicBackAnnotationContent,
-    SchematicNetHighlighting, Tool,
+    SchematicNetHighlighting, SheetCatalog, Tool,
 };
 use crate::workbench::app_state::AppState;
 use egui::{Painter, Rect};
@@ -29,6 +29,7 @@ use rspice_schematic_editor::view::{
     },
     tool_input::{ToolPointerAction, ToolPointerView},
 };
+use std::collections::HashMap;
 
 /// What a click at the hovered point would take, for the hover
 /// pre-highlight: in the Select tool the pointer target a click resolves (or
@@ -422,8 +423,8 @@ fn occurrence_cross_probe_index(state: &AppState) -> Option<CrossProbeIndex> {
         .map(|receipt| CrossProbeIndex::from_receipt(receipt, &state.simulation.source.cross_probe))
 }
 
-/// Where one solved node sits on the drawing, read at the active tab's
-/// occurrence and at no other.
+/// Every solved node's points on the active sheet, keyed by the engine's
+/// folded name for it, read at the active tab's occurrence and at no other.
 ///
 /// A net name is only half an address: `n1` inside `/X1` and `n1` inside `/X2`
 /// are two different nodes and the engine solved neither of them by that name.
@@ -439,11 +440,13 @@ fn occurrence_cross_probe_index(state: &AppState) -> Option<CrossProbeIndex> {
 /// as, which generation makes the design root's. A descended tab then has no
 /// evidence of what the engine called its nodes, and borrowing the root's names
 /// would annotate the wrong occurrence, so it reads nothing.
-fn occurrence_net_points<'a>(
+///
+/// Built once and looked up per node: asking every mapping's every net for its
+/// engine name once per solved node made the join quadratic.
+fn occurrence_engine_points<'a>(
     state: &'a AppState,
     index: Option<&'a CrossProbeIndex>,
-    engine_name: &str,
-) -> Option<&'a Vec<Point>> {
+) -> HashMap<String, &'a Vec<Point>> {
     let occurrence = state.workspace.content.occurrence_path();
     let selected = match index {
         Some(index) => index.for_occurrence(&occurrence),
@@ -453,21 +456,45 @@ fn occurrence_net_points<'a>(
     // Only the active sheet's share of the geometry, in its own coordinates:
     // another sheet's points mean nothing on this one.
     let sheet = super::sheet_visibility::active_sheet_id(state);
-    selected.iter().find_map(|mapping| {
-        mapping.on_sheet(sheet).net_to_points.iter().find_map(|(leaf, points)| {
-            mapping
-                .engine_name(leaf)
-                .is_some_and(|engine: &str| engine.eq_ignore_ascii_case(engine_name))
-                .then_some(points)
-        })
-    })
+    let mut points_by_engine = HashMap::new();
+    for mapping in selected {
+        for (leaf, points) in &mapping.on_sheet(sheet).net_to_points {
+            if let Some(engine) = mapping.engine_name(leaf) {
+                points_by_engine
+                    .entry(engine.to_ascii_lowercase())
+                    .or_insert(points);
+            }
+        }
+    }
+    points_by_engine
 }
 
-/// Produce annotations only from the explicitly selected analysis, and only for
+/// Where one solved node sits on the drawing; see [`occurrence_engine_points`].
+#[cfg(test)]
+fn occurrence_net_points<'a>(
+    state: &'a AppState,
+    index: Option<&'a CrossProbeIndex>,
+    engine_name: &str,
+) -> Option<&'a Vec<Point>> {
+    occurrence_engine_points(state, index)
+        .get(&engine_name.to_ascii_lowercase())
+        .copied()
+}
+
+/// The analysis whose operating point the canvas annotates, with what it
+/// retained about annotation, or `None` when the canvas shows no badges.
+///
+/// Annotations come only from the explicitly selected analysis, and only for
 /// the occurrence the active tab is editing. The retained cross-probe point map
 /// is replaced for each dispatch, so pairing it with any other result would
 /// falsely attach values to a different solve.
-pub(super) fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnnotation> {
+fn annotated_operating_point(
+    state: &AppState,
+) -> Option<(
+    &crate::state::DcOpResult,
+    Option<crate::state::OperatingPointAnnotationEvidence>,
+    Option<&rspice_core::circuit::DeviceOpReport>,
+)> {
     if state.ui.schematic_visibility.annotations != SchematicAnnotationVisibility::OperatingPoint
         || !state.simulation.source.cross_probe.is_populated()
         || !state.simulation.source.cross_probe.is_current_for(
@@ -475,35 +502,130 @@ pub(super) fn operating_point_annotations(state: &AppState) -> Vec<OperatingPoin
             state.schematic.topology_version(),
         )
     {
-        return Vec::new();
+        return None;
     }
-    let Some((dc_op, retained_annotation, device_op)) =
-        state.simulation.active_analysis().and_then(|analysis| {
-            analysis.dc_op.as_ref().map(|dc_op| {
-                let annotation = match analysis.result_payload.as_ref() {
-                    Some(crate::state::AnalysisResultPayload::OperatingPoint {
-                        annotation,
-                        ..
-                    }) => Some(*annotation),
-                    _ => None,
-                };
-                (dc_op, annotation, analysis.device_op.as_ref())
-            })
-        })
-    else {
-        return Vec::new();
+    let analysis = state.simulation.active_analysis()?;
+    let dc_op = analysis.dc_op.as_ref()?;
+    let retained = match analysis.result_payload.as_ref() {
+        Some(crate::state::AnalysisResultPayload::OperatingPoint { annotation, .. }) => {
+            Some(*annotation)
+        }
+        _ => None,
     };
-    if retained_annotation == Some(crate::state::OperatingPointAnnotationEvidence::None) {
-        return Vec::new();
-    }
+    (retained != Some(crate::state::OperatingPointAnnotationEvidence::None)).then_some((
+        dc_op,
+        retained,
+        analysis.device_op.as_ref(),
+    ))
+}
 
-    let mut annotations = Vec::new();
-    let back_annotation = state.ui.schematic_visibility.back_annotation;
+/// A fingerprint of everything the voltage badges are read from, hashed by
+/// content: the run's geometry and the receipt that partitions it by
+/// occurrence, the solved values, the occurrence, the active sheet and its
+/// assignments, the highlighted net whose badge belongs to the selection, and
+/// every schematic buffer the drawing, its net labels and its bus notations
+/// come from. Cheap enough to take every frame; the badges themselves are not.
+fn voltage_badge_fingerprint(state: &AppState, dc_op: &crate::state::DcOpResult) -> u64 {
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let map = &state.simulation.source.cross_probe;
+    map.version.hash(&mut hasher);
+    map.source_topology_version.hash(&mut hasher);
+    if let Some(receipt) = state
+        .simulation
+        .active_run()
+        .and_then(crate::state::SimulationRun::prepared_receipt)
+    {
+        for row in receipt.hierarchy_map() {
+            row.occurrence().hash(&mut hasher);
+            row.engine_prefix().hash(&mut hasher);
+            row.master_reference().key().hash(&mut hasher);
+        }
+    }
+    for voltage in &dc_op.node_voltages {
+        voltage.name.hash(&mut hasher);
+        voltage.value.to_bits().hash(&mut hasher);
+        voltage.unit.hash(&mut hasher);
+    }
+    state
+        .workspace
+        .content
+        .occurrence_path()
+        .fold_key()
+        .hash(&mut hasher);
+    let catalog = super::sheet_visibility::active_sheet_catalog(state);
+    catalog.map(SheetCatalog::revision).hash(&mut hasher);
+    catalog
+        .and_then(SheetCatalog::active_sheet_id)
+        .hash(&mut hasher);
+    let highlight = &state.schematic.session.editor.net_highlight;
+    highlight.active.hash(&mut hasher);
+    highlight
+        .selected_net_name
+        .as_deref()
+        .map(str::to_ascii_lowercase)
+        .hash(&mut hasher);
+    state.schematic.topology_version().hash(&mut hasher);
+    state.schematic.content_version().hash(&mut hasher);
+    let mut buffers = 0_u64;
+    for (key, buffer) in &state.workspace.content.schematic_buffers {
+        let mut entry = std::collections::hash_map::DefaultHasher::new();
+        key.hash(&mut entry);
+        buffer.topology_version().hash(&mut entry);
+        buffer.content_version().hash(&mut entry);
+        buffers ^= entry.finish();
+    }
+    buffers.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// The badge for every solved node the active sheet draws a point of.
+///
+/// A badge sits on the topmost-leftmost of its net's points that lies on a
+/// wire, a junction or a terminal the active sheet draws.
+fn voltage_badges(
+    state: &AppState,
+    dc_op: &crate::state::DcOpResult,
+) -> Vec<OperatingPointCanvasAnnotation> {
     let index = occurrence_cross_probe_index(state);
+    let points_by_engine = occurrence_engine_points(state, index.as_ref());
+    // Junctions and terminals are collected once, not searched per point.
+    let catalog = super::sheet_visibility::active_sheet_catalog(state);
+    let visible = |id: u64| {
+        rspice_schematic_editor::view::design_view::object_is_on_active_sheet(catalog, id)
+    };
+    let document = state.schematic.document();
+    let anchors = document
+        .junctions
+        .iter()
+        .filter(|junction| visible(junction.id))
+        .map(|junction| junction.pos)
+        .chain(
+            document
+                .components
+                .iter()
+                .filter(|component| visible(component.id))
+                .flat_map(|component| {
+                    component
+                        .terminal_positions()
+                        .into_iter()
+                        .map(|(_, terminal)| terminal)
+                }),
+        )
+        .collect::<std::collections::HashSet<_>>();
+    // The first net label on the active sheet that spells each name.
+    let mut labels = HashMap::new();
+    for label in document.net_labels.iter().filter(|label| visible(label.id)) {
+        labels
+            .entry(label.name.to_ascii_lowercase())
+            .or_insert(label.id);
+    }
     // The engine answers for a bus bit under the deck's `DATA#3`; the canvas
     // annotates the conductor the drawing shows, so it quotes the drawing's
     // own spelling of it.
     let notations = bus_notations(&state.workspace, &state.schematic);
+    let mut badges = Vec::new();
     for voltage in &dc_op.node_voltages {
         if !voltage.value.is_finite() {
             continue;
@@ -511,26 +633,14 @@ pub(super) fn operating_point_annotations(state: &AppState) -> Vec<OperatingPoin
         let Some(net_name) = wrapped_signal_name(&voltage.name, 'V') else {
             continue;
         };
-        let points = occurrence_net_points(state, index.as_ref(), net_name);
-        let Some(anchor) = points.and_then(|points| {
+        let key = net_name.to_ascii_lowercase();
+        let Some(anchor) = points_by_engine.get(&key).and_then(|points| {
             points
                 .iter()
                 .copied()
                 .filter(|point| {
-                    super::sheet_visibility::active_wire_at(state, *point).is_some()
-                        || active_junction_at(state, *point).is_some()
-                        || state
-                            .schematic
-                            .document()
-                            .components
-                            .iter()
-                            .any(|component| {
-                                object_is_on_active_sheet(state, component.id)
-                                    && component
-                                        .terminal_positions()
-                                        .iter()
-                                        .any(|(_, terminal)| terminal == point)
-                            })
+                    anchors.contains(point)
+                        || super::sheet_visibility::active_wire_at(state, *point).is_some()
                 })
                 .min_by_key(|point| (point.y, point.x))
         }) else {
@@ -538,16 +648,7 @@ pub(super) fn operating_point_annotations(state: &AppState) -> Vec<OperatingPoin
         };
         // A named net's value sits right after its own label, so it reads
         // `OUT 912.4 mV`; an unnamed net's badge carries its name.
-        let label = state
-            .schematic
-            .document()
-            .net_labels
-            .iter()
-            .find(|label| {
-                object_is_on_active_sheet(state, label.id)
-                    && label.name.eq_ignore_ascii_case(net_name)
-            })
-            .map(|label| label.id);
+        let label = labels.get(&key).copied();
         let display = notations.display(&voltage.name);
         let shown = wrapped_signal_name(&display, 'V').unwrap_or(net_name);
         let value = format!(
@@ -556,7 +657,7 @@ pub(super) fn operating_point_annotations(state: &AppState) -> Vec<OperatingPoin
             voltage.unit
         );
         let highlighted = editor_net_is_highlighted(state, net_name);
-        annotations.push(OperatingPointCanvasAnnotation {
+        badges.push(OperatingPointCanvasAnnotation {
             subject: BadgeSubject::Net { anchor, label },
             lines: vec![if label.is_some() {
                 value
@@ -570,10 +671,52 @@ pub(super) fn operating_point_annotations(state: &AppState) -> Vec<OperatingPoin
             } else {
                 3
             },
-            key: net_name.to_ascii_lowercase(),
+            key,
             selected_current: false,
         });
     }
+    badges
+}
+
+/// Read the voltage badges afresh only when something they are read from
+/// changed. Runs once a frame, before painting, where the session can hold
+/// them.
+pub(super) fn refresh_voltage_badges(state: &mut AppState) {
+    let Some((dc_op, _, _)) = annotated_operating_point(state) else {
+        return;
+    };
+    let fingerprint = voltage_badge_fingerprint(state, dc_op);
+    if state
+        .schematic
+        .session
+        .operating_point_badges
+        .current(fingerprint)
+        .is_some()
+    {
+        return;
+    }
+    let badges = std::sync::Arc::new(voltage_badges(state, dc_op));
+    state
+        .schematic
+        .session
+        .operating_point_badges
+        .store(fingerprint, badges);
+}
+
+/// The operating-point annotations the canvas paints: the voltage badges,
+/// reused while their inputs stand still, then the selected devices'
+/// currents, device operating points and power.
+pub(super) fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnnotation> {
+    let Some((dc_op, retained_annotation, device_op)) = annotated_operating_point(state) else {
+        return Vec::new();
+    };
+    let mut annotations = state
+        .schematic
+        .session
+        .operating_point_badges
+        .current(voltage_badge_fingerprint(state, dc_op))
+        .map_or_else(|| voltage_badges(state, dc_op), |badges| badges.to_vec());
+    let back_annotation = state.ui.schematic_visibility.back_annotation;
 
     let retained_currents = retained_annotation.is_none_or(|annotation| {
         annotation == crate::state::OperatingPointAnnotationEvidence::VoltagesAndCurrents
@@ -1167,34 +1310,175 @@ mod tests {
     fn each_sheet_annotates_only_the_nets_it_draws() {
         use crate::schematic::view::frame_cost::two_sheet_operating_point;
 
-        let labels = |state: &AppState| {
+        let badges = |state: &AppState| {
             operating_point_annotations(state)
                 .into_iter()
-                .map(|annotation| (annotation.position, annotation.label))
+                .filter_map(|annotation| match annotation.subject {
+                    BadgeSubject::Net { anchor, .. } => Some((anchor, annotation.key)),
+                    BadgeSubject::Device { .. } => None,
+                })
                 .collect::<Vec<_>>()
         };
-        let starts = |labels: &[(Point, String)], prefix: &str| {
-            labels
+        let anchors = |badges: &[(Point, String)], net: &str| {
+            badges
                 .iter()
-                .filter(|(_, label)| label.starts_with(prefix))
-                .map(|(position, _)| *position)
+                .filter(|(_, key)| key == net)
+                .map(|(anchor, _)| *anchor)
                 .collect::<Vec<_>>()
         };
 
-        let first = labels(&two_sheet_operating_point(false));
-        assert_eq!(starts(&first, "V(vout) ="), vec![Point::new(100, 0)]);
-        assert!(starts(&first, "V(bias) =").is_empty(), "{first:?}");
+        let first = badges(&two_sheet_operating_point(false));
+        assert_eq!(anchors(&first, "vout"), vec![Point::new(100, 0)]);
+        assert!(anchors(&first, "bias").is_empty(), "{first:?}");
 
-        let second = labels(&two_sheet_operating_point(true));
+        let second = badges(&two_sheet_operating_point(true));
         assert_eq!(
-            starts(&second, "V(bias) ="),
+            anchors(&second, "bias"),
             vec![Point::new(100, 0)],
             "Sheet 2's own net is annotated where Sheet 2 draws it: {second:?}"
         );
         assert!(
-            starts(&second, "V(vout) =").is_empty(),
+            anchors(&second, "vout").is_empty(),
             "Sheet 1's voltage is not painted on Sheet 2's wire: {second:?}"
         );
+    }
+
+    /// A steady frame reuses the held badges; a value changed in place is
+    /// never painted stale.
+    #[test]
+    fn voltage_badges_are_held_until_their_values_change() {
+        use crate::schematic::view::frame_cost::two_sheet_operating_point;
+
+        let mut state = two_sheet_operating_point(false);
+        let held = |state: &AppState| {
+            let (dc_op, _, _) = annotated_operating_point(state).expect("badges are shown");
+            state
+                .schematic
+                .session
+                .operating_point_badges
+                .current(voltage_badge_fingerprint(state, dc_op))
+        };
+        assert!(held(&state).is_none());
+        refresh_voltage_badges(&mut state);
+        let first = held(&state).expect("a refresh holds the badges");
+        refresh_voltage_badges(&mut state);
+        assert!(
+            std::sync::Arc::ptr_eq(&first, &held(&state).expect("still held")),
+            "a steady frame reads nothing again"
+        );
+
+        state.simulation.retained.runs[0].analyses[0]
+            .dc_op
+            .as_mut()
+            .expect("fixture dc op")
+            .node_voltages[0]
+            .value = 1.75;
+        assert!(held(&state).is_none(), "a value replaced in place misses");
+        let painted = operating_point_annotations(&state);
+        assert!(
+            painted
+                .iter()
+                .any(|badge| badge.key == "vout" && text(badge).contains("1.750 V")),
+            "{painted:?}"
+        );
+        refresh_voltage_badges(&mut state);
+        assert!(!std::sync::Arc::ptr_eq(
+            &first,
+            &held(&state).expect("held again")
+        ));
+    }
+
+    /// Every input the voltage badges are read from moves their fingerprint
+    /// when it changes on its own.
+    #[test]
+    fn every_badge_input_moves_the_fingerprint() {
+        use crate::schematic::view::frame_cost::{
+            install_projected_run_geometry, two_sheet_operating_point,
+        };
+
+        let fingerprint = |state: &AppState| {
+            let dc_op = state
+                .simulation
+                .active_analysis()
+                .and_then(|analysis| analysis.dc_op.as_ref())
+                .expect("fixture dc op");
+            voltage_badge_fingerprint(state, dc_op)
+        };
+        let changes: [(&str, fn(&mut AppState)); 9] = [
+            ("solved value", |state| {
+                state.simulation.retained.runs[0].analyses[0]
+                    .dc_op
+                    .as_mut()
+                    .expect("dc op")
+                    .node_voltages[1]
+                    .value = 0.9;
+            }),
+            ("run geometry", |state| {
+                install_projected_run_geometry(
+                    state,
+                    HashMap::from([("VOUT".to_owned(), vec![Point::new(100, 0)])]),
+                );
+            }),
+            ("topology", |state| state.schematic.bump_topology_version()),
+            ("committed content", |state| {
+                state.schematic.init_undo_history();
+                state.schematic.begin_operation("label");
+                state
+                    .schematic
+                    .document_mut_for_test()
+                    .net_labels
+                    .push(crate::state::NetLabel::new(9, Point::new(150, 0), "OUT"));
+                assert!(state.schematic.end_operation());
+            }),
+            ("another buffer", |state| {
+                state.workspace.insert_schematic_editor(
+                    "work/amp/schematic".to_owned(),
+                    crate::state::SchematicState::default(),
+                );
+            }),
+            ("active sheet", |state| {
+                let key = state.workspace.content.active_schematic_reference().key();
+                let catalog = state
+                    .workspace
+                    .content
+                    .design_management
+                    .sheet_catalog_mut(&key)
+                    .expect("two sheets");
+                let second = catalog.sheets()[1].id();
+                catalog.set_active(second).expect("sheet 2 opens");
+            }),
+            ("sheet assignment", |state| {
+                let key = state.workspace.content.active_schematic_reference().key();
+                let catalog = state
+                    .workspace
+                    .content
+                    .design_management
+                    .sheet_catalog_mut(&key)
+                    .expect("two sheets");
+                let second = catalog.sheets()[1].id();
+                catalog
+                    .assign_objects(catalog.revision(), second, [1])
+                    .expect("wire 1 moves to Sheet 2");
+            }),
+            ("occurrence", |state| {
+                state.workspace.descend_into(
+                    "X1".to_owned(),
+                    CellViewRef::new("user", "amp", "schematic"),
+                    ViewType::Schematic,
+                );
+            }),
+            ("highlighted net", |state| {
+                let highlight = &mut state.schematic.session.editor.net_highlight;
+                highlight.active = true;
+                highlight.selected_net_name = Some("VOUT".to_owned());
+            }),
+        ];
+        for (input, change) in changes {
+            let mut state = two_sheet_operating_point(false);
+            let before = fingerprint(&state);
+            change(&mut state);
+            assert_ne!(fingerprint(&state), before, "{input}");
+        }
     }
 
     #[test]
