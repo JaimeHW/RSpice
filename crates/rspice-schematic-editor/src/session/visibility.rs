@@ -86,8 +86,14 @@ pub enum SchematicWireRoutingStyle {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SchematicNetHighlighting {
+    /// The selected net's conductors in the open view. Each view keeps its
+    /// own highlight; nothing carries it through an instance terminal into a
+    /// child or back up to the parent.
     #[default]
-    SelectedAcrossHierarchy,
+    // The policy's earlier name promised a highlight across hierarchy levels;
+    // a preference saved under it still reads.
+    #[serde(alias = "selected-across-hierarchy")]
+    SelectedNet,
     NetClassColors,
     Off,
 }
