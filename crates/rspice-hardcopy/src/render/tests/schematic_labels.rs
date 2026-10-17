@@ -496,10 +496,7 @@ fn a_printed_port_shows_which_way_its_signal_goes() {
     assert_eq!(marks.len(), 6, "three strokes for each port");
 }
 
-/// The review sheet as a PNG, for a person to look at.
-#[test]
-#[ignore = "writes a review PNG to RSPICE_RASTER_DIR"]
-fn render_schematic_label_review() {
+fn resolved_review_sheet() -> ResolvedHardcopyDocument {
     let semantic = review_sheet();
     let identity = HardcopySourceIdentity::try_new(
         "test-schematic",
@@ -511,7 +508,7 @@ fn render_schematic_label_review() {
     let digest =
         rspice_hardcopy_contract::sources::canonical_digest(b"label-review", &semantic).unwrap();
     let bounds = schematic_bounds(&semantic).unwrap();
-    let source = resolve_semantic_source(
+    resolve_semantic_source(
         identity,
         digest,
         HardcopyDocumentKind::SchematicOrSymbol,
@@ -519,8 +516,90 @@ fn render_schematic_label_review() {
         HardcopySemanticDocument::Schematic(Box::new(semantic)),
         bounds,
     )
+    .unwrap()
+}
+
+#[test]
+fn a_printed_sheet_draws_in_the_export_inks_and_weights() {
+    let source = resolved_review_sheet();
+    let scene = scene_from_resolved(
+        &source,
+        source.default_print_mapping(),
+        SchematicHardcopySetup::default(),
+        resolved_metadata(),
+    )
     .unwrap();
-    let plan = plan_for_resolved(&source, OutputFormat::Png { dpi: 200 });
+    let wire = SemanticColor::Exact(Rgb8::new(0x4E, 0x34, 0x00));
+    let symbol = SemanticColor::Exact(Rgb8::new(0x2C, 0x31, 0x35));
+    let strokes = scene
+        .primitives()
+        .iter()
+        .filter_map(|primitive| match primitive {
+            ScenePrimitive::Polyline { stroke, .. } | ScenePrimitive::Line { stroke, .. } => {
+                Some((stroke.width.micrometres(), stroke.color))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    // D1: wires 1.1 wu, bus strands 1.2, taps 2.0, all in the wire ink;
+    // symbols 1.0 wu in the symbol ink.
+    for (width, ink, count) in [(275, wire, 2), (300, wire, 3), (500, wire, 2)] {
+        let drawn = strokes
+            .iter()
+            .filter(|stroke| stroke.0 == width)
+            .collect::<Vec<_>>();
+        assert_eq!(drawn.len(), count, "{width} um strokes: {strokes:?}");
+        assert!(drawn.iter().all(|stroke| stroke.1 == ink), "{drawn:?}");
+    }
+    let symbols = strokes
+        .iter()
+        .filter(|stroke| stroke.0 == 250)
+        .collect::<Vec<_>>();
+    assert!(!symbols.is_empty());
+    assert!(
+        symbols.iter().all(|stroke| stroke.1 == symbol),
+        "{symbols:?}"
+    );
+    // A junction is a 1.5-wu dot in the wire ink.
+    let dots = scene
+        .primitives()
+        .iter()
+        .filter_map(|primitive| match primitive {
+            ScenePrimitive::Circle {
+                radius,
+                fill: Some(fill),
+                ..
+            } => Some((radius.micrometres(), *fill)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(dots, [(375, SceneFill::solid(wire))]);
+}
+
+/// The review sheet as a PNG, for a person to look at, through the print
+/// mapping a new hardcopy starts from.
+#[test]
+#[ignore = "writes a review PNG to RSPICE_RASTER_DIR"]
+fn render_schematic_label_review() {
+    let source = resolved_review_sheet();
+    let base = setup(OutputFormat::Png { dpi: 200 }, false);
+    let setup = HardcopySetup::try_new_with_schematic(
+        base.physical_page().clone(),
+        base.scale(),
+        base.tiling(),
+        base.render().clone(),
+        base.decorations().clone(),
+        SchematicHardcopySetup::default(),
+        source.default_print_mapping().clone(),
+    )
+    .unwrap();
+    let plan = HardcopyPlan::compile_with_id(
+        HardcopyPlanId::try_from_uuid(Uuid::from_u128(79)).unwrap(),
+        source.authority().clone(),
+        setup,
+        source.content_extent(),
+    )
+    .unwrap();
     let publication =
         HardcopyRenderer::render_resolved(&plan, &source, resolved_metadata()).unwrap();
     let directory = std::env::var("RSPICE_RASTER_DIR")

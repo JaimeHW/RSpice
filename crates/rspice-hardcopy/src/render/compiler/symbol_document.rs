@@ -26,11 +26,17 @@ impl SemanticSceneCompiler<'_> {
         } else {
             "layer:symbol-pins"
         };
-        let body_stroke = self.mapped_stroke(
-            PrintObjectKind::Layer,
-            body_stable_id,
-            StrokeStyle::default(),
-        );
+        // An instance on a sheet takes the sheet's symbol ink, as the SVG
+        // export draws it; a printed symbol view keeps its own.
+        let body_fallback = if component.is_some() {
+            StrokeStyle {
+                color: SemanticColor::Exact(super::schematic_marks::SYMBOL_INK),
+                ..StrokeStyle::default()
+            }
+        } else {
+            StrokeStyle::default()
+        };
+        let body_stroke = self.mapped_stroke(PrintObjectKind::Layer, body_stable_id, body_fallback);
         let pin_stroke = self.mapped_stroke(
             PrintObjectKind::Layer,
             pin_stable_id,

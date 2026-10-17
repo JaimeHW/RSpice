@@ -7,7 +7,7 @@
 //! flat trace prints as a flat line rather than as nothing at all.
 
 use super::*;
-use rspice_design::schematic::bus_route;
+use rspice_design::schematic::{bus_route, drawing_metrics};
 
 pub(super) fn layer_mapping(
     stable_id: impl Into<String>,
@@ -156,7 +156,7 @@ pub fn schematic_bounds(
     // A bus's outer strands stand off its centreline, and its declaration
     // and every tap's slice stand beside it.
     let strand_reach = (bus_route::BUS_STRAND_OFFSET_WORLD
-        + bus_route::BUS_STRAND_WIDTH_WORLD * 0.5)
+        + drawing_metrics::BUS_STRAND_WIDTH_WORLD * 0.5)
         .ceil() as i64;
     for bus in &schematic.buses {
         for point in &bus.points {

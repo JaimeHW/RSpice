@@ -14,10 +14,6 @@ use rspice_design_model::Point;
 
 /// Centre-to-centre spacing of a bus's strands, in world units.
 pub const BUS_STRAND_OFFSET_WORLD: f32 = 4.0;
-/// A bus strand's nominal stroke width, in world units.
-pub const BUS_STRAND_WIDTH_WORLD: f32 = 1.2;
-/// A tap's nominal stroke width, in world units.
-pub const BUS_TAP_WIDTH_WORLD: f32 = 2.0;
 
 const TAP_LEAD: i32 = 10;
 const BREAKOUT_OFFSET: i32 = 4;

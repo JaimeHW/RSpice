@@ -19,11 +19,16 @@ use rspice_design::schematic::{
     port_overlay,
 };
 
-/// The print palette's conductor ink: the light screen wire token the SVG
-/// export draws wires, buses and taps in.
-pub(in crate::render) const WIRE_INK: Rgb8 = Rgb8::new(0x4E, 0x34, 0x00);
+/// The print palette's conductor and symbol inks, which the default print
+/// mapping also gives the electrical layers.
+pub(in crate::render) const WIRE_INK: Rgb8 = ink(crate::sources::WIRE_PRINT_INK);
+pub(in crate::render) const SYMBOL_INK: Rgb8 = ink(crate::sources::SYMBOL_PRINT_INK);
 
-/// A nominal world-unit width in exact micrometres.
+const fn ink(rgb: [u8; 3]) -> Rgb8 {
+    Rgb8::new(rgb[0], rgb[1], rgb[2])
+}
+
+/// A nominal world-unit size in exact micrometres.
 pub(super) fn width_um(world: f32) -> Length {
     Length::from_micrometres((f64::from(world) * SCHEMATIC_UNIT_UM as f64).round() as u64)
 }

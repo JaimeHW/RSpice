@@ -5,6 +5,11 @@ use rspice_design_model::design_management::{
     DrawingSheetBorderTemplate, DrawingSheetTitleBlockTemplate,
 };
 
+/// The light screen tokens the SVG export draws a sheet in: wires, buses
+/// and taps, and symbols.
+pub(crate) const WIRE_PRINT_INK: [u8; 3] = [0x4E, 0x34, 0x00];
+pub(crate) const SYMBOL_PRINT_INK: [u8; 3] = [0x2C, 0x31, 0x35];
+
 pub(super) fn default_print_mapping(
     document: &HardcopySemanticDocument,
 ) -> Result<PrintMappingTable, HardcopySourceError> {
@@ -40,28 +45,47 @@ pub(super) fn default_print_mapping(
                     "authored snap-grid pitch · output inclusion optional",
                 )?);
             }
+            // The electrical layers print in the SVG export's inks (D1
+            // section 11), so a printed sheet and an exported one agree.
+            let schematic_layer = |stable_id: &str,
+                                   display_name: &str,
+                                   screen_style: &str,
+                                   [red, green, blue]: [u8; 3]| {
+                mapping_entry(
+                    PrintObjectKind::Layer,
+                    stable_id,
+                    display_name,
+                    screen_style,
+                    PrintColor::Rgb { red, green, blue },
+                    PrintRedundancy::SourceStyle,
+                    true,
+                )
+            };
             if !schematic.components.is_empty() {
-                entries.push(layer_mapping(
+                entries.push(schematic_layer(
                     "layer:schematic-components",
                     "Components and symbols",
                     "schematic component color · solid",
+                    SYMBOL_PRINT_INK,
                 )?);
             }
             if !schematic.wires.is_empty()
                 || !schematic.junctions.is_empty()
                 || !schematic.net_labels.is_empty()
             {
-                entries.push(layer_mapping(
+                entries.push(schematic_layer(
                     "layer:schematic-wiring",
                     "Wires and junctions",
                     "schematic wire color · solid",
+                    WIRE_PRINT_INK,
                 )?);
             }
             if !schematic.buses.is_empty() || !schematic.bus_taps.is_empty() {
-                entries.push(layer_mapping(
+                entries.push(schematic_layer(
                     "layer:schematic-buses",
                     "Buses and taps",
                     "schematic bus color · heavy solid",
+                    WIRE_PRINT_INK,
                 )?);
             }
             if !schematic.design_notes.is_empty() {

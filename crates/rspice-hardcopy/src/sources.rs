@@ -36,6 +36,7 @@ pub use geometry::{
     schematic_bounds, semantic_is_empty, source_set_member_from_resolved, union_bounds,
 };
 use mapping::default_print_mapping;
+pub(crate) use mapping::{SYMBOL_PRINT_INK, WIRE_PRINT_INK};
 pub use plots::{resolve_plot_source, resolve_visualization_pane_source};
 pub use prepared::{PreparedRetainedHardcopyResolution, RetainedHardcopySourceInput};
 pub use quick_plot::{
