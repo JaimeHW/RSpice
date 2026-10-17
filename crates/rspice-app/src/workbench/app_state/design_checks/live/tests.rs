@@ -337,3 +337,47 @@ fn turning_live_checking_off_withdraws_its_findings() {
     assert_eq!(state.refresh_live_checks(start), None);
     assert!(rows(&state).is_empty());
 }
+
+/// A drawing under a configuration that does not resolve cannot be checked
+/// at any edit. That is said once, as the failed job it is, not at every
+/// edit after.
+#[test]
+fn a_drawing_that_cannot_be_checked_says_so_once() {
+    let mut state = open_state();
+    let root = state.workspace.content.active_view.clone();
+    state
+        .workspace
+        .content
+        .configuration_sets
+        .create(crate::state::ConfigurationSetDefinition {
+            name: "Unresolvable DUT".to_owned(),
+            root,
+            dut_path: "/XABSENT".to_owned(),
+            executable_view_policy: vec!["schematic".to_owned()],
+            stop_views: Vec::new(),
+            unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+            black_box_policy:
+                crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+            overrides: Vec::new(),
+            model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+            owner: "live check test".to_owned(),
+        })
+        .expect("the fixture configuration is well formed");
+    let start = Instant::now();
+    let _ = state.refresh_live_checks(start);
+    for x in [400, 600] {
+        state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(x, 400));
+        settle(&mut state, start);
+    }
+
+    let said = state
+        .log_buffer
+        .entries()
+        .filter(|entry| entry.message.starts_with("Live checks could not run: "))
+        .collect::<Vec<_>>();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert_eq!(said[0].severity, crate::diagnostics::LogSeverity::Error);
+    assert!(said[0].message.contains("XABSENT"), "{}", said[0].message);
+}

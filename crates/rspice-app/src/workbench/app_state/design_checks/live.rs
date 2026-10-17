@@ -34,6 +34,8 @@ pub(super) struct DrawingState {
     /// An edit not yet checked: the cellview it was made in, and when the
     /// drawing last moved.
     pending: Option<(CellViewRef, Instant)>,
+    /// Why the last live check could not run, until one runs.
+    failed: Option<String>,
 }
 
 impl AppState {
@@ -83,12 +85,21 @@ impl AppState {
             return Some(SETTLE - waited);
         }
         self.design_checks.drawing.pending = None;
-        if let Err(error) = self.run_live_check(subject) {
-            self.record(
-                LogSeverity::Warning,
-                LogSource::Studio,
-                format!("Live checks could not run: {error}"),
-            );
+        // A failed background job is an Error, and the Console lifts it into
+        // a notice. A drawing that cannot be checked — a configuration that
+        // does not resolve under it — fails the same way at every edit, so
+        // it is recorded when the reason changes, not each time.
+        match self.run_live_check(subject) {
+            Ok(_) => self.design_checks.drawing.failed = None,
+            Err(error) if self.design_checks.drawing.failed.as_ref() == Some(&error) => {}
+            Err(error) => {
+                self.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    format!("Live checks could not run: {error}"),
+                );
+                self.design_checks.drawing.failed = Some(error);
+            }
         }
         None
     }
