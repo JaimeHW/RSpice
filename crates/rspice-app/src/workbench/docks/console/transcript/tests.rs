@@ -5,6 +5,7 @@ use super::*;
 use crate::diagnostics::{LogBuffer, LogSource};
 use crate::state::SimulationRun;
 use crate::ui::widgets::NotificationAction;
+use crate::workbench::RSpiceApp;
 use crate::workbench::state::ConsolePage;
 use rspice_app_types::run_log::{RunLog, RunLogLine};
 

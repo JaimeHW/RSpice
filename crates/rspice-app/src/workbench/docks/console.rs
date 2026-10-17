@@ -221,8 +221,8 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 /// pages with nothing to clear disabled with the reason; a run's log is a
 /// record, so it has no Clear at all.
 fn clear_is_offered(layout: LayoutSpec, page: ConsolePage, channel: ConsoleChannel) -> bool {
-    !layout.compact_shell
-        && !(page == ConsolePage::Console && matches!(channel, ConsoleChannel::Run(_)))
+    let run_log = page == ConsolePage::Console && matches!(channel, ConsoleChannel::Run(_));
+    !(layout.compact_shell || run_log)
 }
 
 fn console_trailing_actions_width(
