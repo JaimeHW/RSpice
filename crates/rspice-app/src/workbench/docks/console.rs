@@ -642,7 +642,11 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
                     &run.label,
                     &format!(
                         "{analyses} {} · {:.3} s{progress} · {revision}",
-                        if analyses == 1 { "analysis" } else { "analyses" },
+                        if analyses == 1 {
+                            "analysis"
+                        } else {
+                            "analyses"
+                        },
                         run.elapsed_time
                     ),
                 );

@@ -693,7 +693,10 @@ fn the_task_status_column_fits_every_status() {
             let column = widest_status_width(ui);
             for status in ["INTERRUPTED", "CANCELLING", "CANCELLED", "RUNNING"] {
                 let width = task_text_width(ui, status, FontWeight::Regular);
-                assert!(width <= column, "{status} is {width} px in a {column} px column");
+                assert!(
+                    width <= column,
+                    "{status} is {width} px in a {column} px column"
+                );
             }
         });
     });
