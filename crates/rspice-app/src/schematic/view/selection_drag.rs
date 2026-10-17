@@ -73,7 +73,7 @@ fn capture(state: &AppState, action: SelectionDragAction) -> SelectionDragReques
     }
 }
 
-fn dispatch(
+pub(super) fn dispatch(
     state: &mut AppState,
     ctx: &egui::Context,
     symbols: &SchematicSymbolContext,

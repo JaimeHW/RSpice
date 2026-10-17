@@ -22,7 +22,9 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::state::Workspace;
 use rspice_design::projection::ProjectionSource;
 use rspice_design::schematic::document::SchematicDocument;
+use rspice_schematic_editor::view::pointer_target::PointerTarget;
 
+mod property;
 mod regressions;
 mod scenario;
 
@@ -211,6 +213,45 @@ impl Bench {
         let symbols = schematic_symbol_context(state);
         transform_selection_on_active_sheet(state, &symbols, transform);
         self.end_frame();
+    }
+
+    /// Drag the part `id` from where it stands through `steps`, offsets from
+    /// there, and release at the last.
+    pub(super) fn drag_part(&mut self, id: u64, steps: &[Point]) {
+        let Some(from) = self
+            .app
+            .state
+            .schematic
+            .document()
+            .components
+            .iter()
+            .find(|part| part.id == id)
+            .map(|part| part.pos)
+        else {
+            return;
+        };
+        let ctx = self.ctx.clone();
+        gesture_commits::drag_selection(
+            &mut self.app.state,
+            &ctx,
+            PointerTarget::Component(id),
+            from,
+            steps,
+        );
+        self.end_frame();
+    }
+
+    /// Delete the selection.
+    pub(super) fn delete_selection(&mut self) {
+        self.app.state.delete_schematic_selection();
+        self.end_frame();
+    }
+
+    /// Forget every step of both histories, as a freshly opened project has
+    /// none.
+    pub(super) fn forget_history(&mut self) {
+        self.app.state.schematic.clear_undo_history();
+        self.app.state.clear_project_design_history();
     }
 
     /// Copy the selection to the application's clipboard.
