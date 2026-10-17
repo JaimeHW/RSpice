@@ -11,7 +11,7 @@ use super::{
 };
 use rspice_design_model::Point;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 /// Connectivity policy applied while translating a schematic selection.
 ///
@@ -521,18 +521,37 @@ fn lay_dragged_wires_from(
         point_maps.insert(wire.id, point_map);
     }
     // The pin connections index the wires' vertices; re-read them from the
-    // baseline through each wire's new vertex numbering.
-    if document.connections.len() == baseline.connections.len() {
-        for (connection, before) in document.connections.iter_mut().zip(baseline.connections) {
-            if connection.wire_id != before.wire_id {
-                continue;
-            }
-            if let Some(point_map) = point_maps.get(&connection.wire_id) {
-                connection.point_index = point_map
-                    .as_ref()
-                    .and_then(|map| map.get(before.point_index).copied())
-                    .unwrap_or(before.point_index);
-            }
+    // baseline through each wire's new vertex numbering. Each is paired with
+    // the baseline's record of the same wire, part and pin, in order: the
+    // baseline holds every sheet, and a caller with another sheet's records
+    // out of reach still pairs the rest.
+    let mut baseline_indices = std::collections::HashMap::<_, VecDeque<usize>>::new();
+    for before in baseline.connections {
+        baseline_indices
+            .entry((
+                before.wire_id,
+                before.component_id,
+                before.terminal_name.as_str(),
+            ))
+            .or_default()
+            .push_back(before.point_index);
+    }
+    for connection in &mut document.connections {
+        let Some(before) = baseline_indices
+            .get_mut(&(
+                connection.wire_id,
+                connection.component_id,
+                connection.terminal_name.as_str(),
+            ))
+            .and_then(VecDeque::pop_front)
+        else {
+            continue;
+        };
+        if let Some(point_map) = point_maps.get(&connection.wire_id) {
+            connection.point_index = point_map
+                .as_ref()
+                .and_then(|map| map.get(before).copied())
+                .unwrap_or(before);
         }
     }
 }
