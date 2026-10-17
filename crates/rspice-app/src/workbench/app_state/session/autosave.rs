@@ -53,24 +53,16 @@ impl RSpiceApp {
             return;
         }
 
-        match crate::workbench::lifecycle::recovery_checkpoint::write_checkpoint(
+        // A checkpoint that was written is not an event: only its failure is.
+        if let Err(e) = crate::workbench::lifecycle::recovery_checkpoint::write_checkpoint(
             &path,
             &self.state.schematic,
         ) {
-            Ok(checkpoint) => {
-                self.state.log_buffer.log(
-                    crate::diagnostics::LogSeverity::Debug,
-                    crate::diagnostics::LogSource::Studio,
-                    format!("Autosaved checkpoint: {}", checkpoint.display()),
-                );
-            }
-            Err(e) => {
-                self.state.record(
-                    LogSeverity::Error,
-                    LogSource::Studio,
-                    format!("Autosave failed: {e}"),
-                );
-            }
+            self.state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Autosave failed: {e}"),
+            );
         }
         self.autosave_last = Some(now);
     }
