@@ -119,7 +119,7 @@ pub(super) fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
     if !valid {
         well_hint(
             ui,
-            "The retained network matrix is incomplete or has invalid coefficient or frequency evidence",
+            "The saved network matrix is incomplete or has invalid coefficient or frequency data",
         );
         return;
     }

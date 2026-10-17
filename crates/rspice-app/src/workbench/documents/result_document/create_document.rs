@@ -208,7 +208,7 @@ fn dataset_label(run: &SimulationRun) -> String {
         SimulationRunLifecycle::Preparing => "preparing",
         SimulationRunLifecycle::Running => "running",
         SimulationRunLifecycle::Cancelling => "cancelling",
-        SimulationRunLifecycle::Completed => "immutable",
+        SimulationRunLifecycle::Completed => "completed",
         SimulationRunLifecycle::Failed => "failed · partial",
         SimulationRunLifecycle::Aborted => "aborted · partial",
         SimulationRunLifecycle::Interrupted => "interrupted · partial",
@@ -385,7 +385,7 @@ fn resolve_draft<'a>(
         .any(|document| document.title().eq_ignore_ascii_case(name))
     {
         return Err(CreateResultDocumentError::InvalidDraft(format!(
-            "A result document named {name:?} already exists."
+            "A result document named '{name}' already exists."
         )));
     }
 
@@ -424,7 +424,7 @@ fn resolve_draft<'a>(
     }
 
     let viewer = viewer_document(&draft.viewer_id).ok_or_else(|| {
-        CreateResultDocumentError::InvalidDraft("Select a canonical viewer type.".to_owned())
+        CreateResultDocumentError::InvalidDraft("Select a viewer type.".to_owned())
     })?;
     if !family.includes(viewer) {
         return Err(CreateResultDocumentError::InvalidDraft(format!(
@@ -557,14 +557,14 @@ pub(super) fn source_dataset(
         )?,
         SourceColumn::new(
             "evidence-chunk",
-            "Evidence chunk",
+            "Data chunk",
             ValueType::Integer,
             ColumnRole::Coordinate,
             None,
         )?,
         SourceColumn::new(
             "evidence-json",
-            "Exact typed evidence",
+            "Analysis data (JSON)",
             ValueType::Text,
             ColumnRole::Signal,
             None,
@@ -607,7 +607,7 @@ pub(super) fn source_dataset(
         return Err(VisualizationError::InvalidValue {
             field: "source-dataset.rows",
             message: format!(
-                "the selected analysis projects {projected_rows} exact rows; this document format supports {maximum_rows}"
+                "the selected analysis has {projected_rows} rows; this document format supports {maximum_rows}"
             ),
         });
     }
@@ -703,7 +703,7 @@ fn analysis_evidence_artifacts(
         artifacts.push((
             "dc-operating-point",
             serialize_source_evidence(
-                "DC operating-point evidence",
+                "DC operating-point results",
                 &serde_json::json!({
                     "node_voltages": values("node", &dc_op.node_voltages),
                     "branch_currents": values("branch", &dc_op.branch_currents),
@@ -733,7 +733,7 @@ fn analysis_evidence_artifacts(
         artifacts.push((
             "device-operating-point",
             serialize_source_evidence(
-                "device operating-point evidence",
+                "device operating-point results",
                 &serde_json::json!({ "entries": entries }),
             )?,
         ));
@@ -794,7 +794,7 @@ fn append_json_artifact_rows(
         }
         let chunk_index = i64::try_from(chunk).map_err(|_| VisualizationError::InvalidValue {
             field: "source-dataset.evidence-chunk",
-            message: "typed evidence requires too many chunks".to_owned(),
+            message: "the analysis data needs too many chunks".to_owned(),
         })?;
         rows.push(SourceRow::new(vec![
             TypedValue::Integer(-1),

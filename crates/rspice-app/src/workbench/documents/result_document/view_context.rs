@@ -210,17 +210,19 @@ fn resolve_visualization_pane(
         .ok_or_else(|| "The selected visualization page has no pane.".to_owned())?;
     let binding = pane
         .binding
-        .ok_or_else(|| "The selected result pane has no immutable dataset binding.".to_owned())?;
+        .ok_or_else(|| "The selected result pane is not bound to a run.".to_owned())?;
     let run_index = state
         .simulation
         .retained
         .runs
         .iter()
         .position(|run| run.dataset_id == binding.dataset.dataset_id)
-        .ok_or_else(|| "The pane's immutable result dataset is no longer retained.".to_owned())?;
+        .ok_or_else(|| "The pane's run is no longer in the run history.".to_owned())?;
     let run = &state.simulation.retained.runs[run_index];
     if super::retained_dataset_digest(state, run) != binding.dataset.content_digest {
-        return Err("The retained dataset does not match the pane's immutable binding.".to_owned());
+        return Err(
+            "The run's results no longer match the ones this pane was bound to.".to_owned(),
+        );
     }
     let analysis_index = run
         .analyses

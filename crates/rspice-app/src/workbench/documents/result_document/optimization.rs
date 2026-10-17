@@ -92,7 +92,7 @@ pub(super) fn active_metadata_is_valid(state: &AppState) -> bool {
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let Some(run) = state.simulation.active_run() else {
-        well_hint(ui, "Select a dataset with retained optimization evidence");
+        well_hint(ui, "Select a dataset with optimization results");
         return;
     };
     let plan = optimization_plan(state);

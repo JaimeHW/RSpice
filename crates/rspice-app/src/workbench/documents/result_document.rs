@@ -327,9 +327,9 @@ pub(crate) fn result_artifact_stable_path(
     key: &ResultArtifactPresentationKey,
     runs: &[SimulationRun],
 ) -> Result<String, String> {
-    let (run_index, _, analysis) = key.resolve(runs).ok_or_else(|| {
-        "The selected typed result no longer resolves in its immutable dataset.".to_owned()
-    })?;
+    let (run_index, _, analysis) = key
+        .resolve(runs)
+        .ok_or_else(|| "The selected result no longer exists in its run.".to_owned())?;
     let analysis_id = analysis.provenance().map_or_else(
         || format!("legacy-{}", analysis.id),
         |provenance| provenance.source_instance_id().to_string(),
@@ -346,7 +346,7 @@ fn resolved_result_signal<'a>(
     runs: &'a [SimulationRun],
 ) -> Result<(&'a SimulationRun, &'a AnalysisResult, &'a WaveformData), String> {
     let (run_index, analysis_index, _, waveform) = key.resolve(runs).ok_or_else(|| {
-        "The selected quantity no longer resolves uniquely in its immutable dataset.".to_owned()
+        "The selected signal is missing from its run or is no longer unique.".to_owned()
     })?;
     Ok((
         &runs[run_index],
@@ -396,7 +396,7 @@ fn validate_exact_analysis_evidence(analysis: &AnalysisResult) -> Result<(), Str
     frame_work::note(frame_work::DatasetWalk::EvidenceValidation);
     analysis.validate_retained_evidence().map_err(|error| {
         format!(
-            "The selected analysis failed retained-evidence verification; exact numeric access is quarantined: {error}"
+            "The selected analysis's saved results failed validation, so its values cannot be copied or exported: {error}"
         )
     })
 }
@@ -408,9 +408,9 @@ pub(crate) fn validate_result_browser_selection_evidence(
     let analysis = match key {
         ResultBrowserSelectionKey::Waveform(key) => resolved_result_signal(key, runs)?.1,
         ResultBrowserSelectionKey::Artifact(key) => {
-            let (_, _, analysis) = key.resolve(runs).ok_or_else(|| {
-                "The selected typed result no longer resolves in its immutable dataset.".to_owned()
-            })?;
+            let (_, _, analysis) = key
+                .resolve(runs)
+                .ok_or_else(|| "The selected result no longer exists in its run.".to_owned())?;
             analysis
         }
     };
@@ -446,8 +446,7 @@ pub(crate) fn result_browser_selection_canonical_name(
             .resolve(runs)
             .map(|(.., waveform)| waveform.name.clone())
             .ok_or_else(|| {
-                "The selected quantity no longer resolves uniquely in its immutable dataset."
-                    .to_owned()
+                "The selected signal is missing from its run or is no longer unique.".to_owned()
             }),
         ResultBrowserSelectionKey::Artifact(key) => Ok(key.canonical_name().to_owned()),
     }
@@ -477,9 +476,9 @@ pub(crate) fn exact_result_artifact_text(
     key: &ResultArtifactPresentationKey,
     runs: &[SimulationRun],
 ) -> Result<String, String> {
-    let (run_index, _, analysis) = key.resolve(runs).ok_or_else(|| {
-        "The selected typed result no longer resolves in its immutable dataset.".to_owned()
-    })?;
+    let (run_index, _, analysis) = key
+        .resolve(runs)
+        .ok_or_else(|| "The selected result no longer exists in its run.".to_owned())?;
     validate_exact_analysis_evidence(analysis)?;
     rspice_formats::result_csv::encode_artifact_text(
         runs[run_index].dataset_id,
@@ -1376,7 +1375,7 @@ pub(crate) fn analysis_evidence_failure(
         analysis
             .validate_retained_evidence()
             .err()
-            .unwrap_or_else(|| "retained evidence failed validation".to_owned()),
+            .unwrap_or_else(|| "the saved results failed validation".to_owned()),
     )
 }
 
@@ -2199,7 +2198,7 @@ pub(crate) fn incomplete_evidence_reason(analysis: &AnalysisResult) -> Option<&'
     }
     frame_work::note(frame_work::DatasetWalk::EvidenceValidation);
     if analysis.validate_retained_evidence().is_err() {
-        return Some("the retained evidence failed validation");
+        return Some("the saved results failed validation");
     }
     None
 }
@@ -2218,7 +2217,7 @@ fn memoized_incomplete_evidence_reason(
         return Some("the run did not complete — these samples stop where it failed");
     }
     (!analysis_evidence_is_valid(state, dataset_id, analysis))
-        .then_some("the retained evidence failed validation")
+        .then_some("the saved results failed validation")
 }
 
 /// The same question for whichever analysis the active sheet is speaking for.
@@ -2345,7 +2344,7 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
                 )
             } else {
                 ViewerAvailability::unavailable(
-                    "Requires HB or Fourier to retain exact complex coefficients",
+                    "Requires HB or Fourier results that keep complex coefficients",
                 )
             }
         }
@@ -2395,7 +2394,7 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
                             Some(crate::state::AnalysisResultPayload::OperatingPoint { .. })
                         ))
             }) {
-                ViewerAvailability::available("Operating-point evidence is available")
+                ViewerAvailability::available("Operating-point results are available")
             } else {
                 // The gate reads the *active analysis*, and accepts any of
                 // three kinds of evidence. Naming only the device report, and
@@ -2441,7 +2440,7 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         ResultViewer::TransferFunction => {
             if transfer_function::active_payload_is_valid(state) {
                 ViewerAvailability::available(
-                    "Retained transfer-function evidence is available for the active analysis",
+                    "Transfer-function results are available for the active analysis",
                 )
             } else {
                 ViewerAvailability::unavailable(
@@ -2510,7 +2509,7 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
                 )
             } else {
                 ViewerAvailability::unavailable(
-                    "Requires a Monte Carlo with retained per-trial evidence",
+                    "Requires a Monte Carlo analysis with saved per-trial results",
                 )
             }
         }
@@ -2528,7 +2527,7 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         ResultViewer::Soa => {
             if soa::active_payload_is_valid(state) {
                 ViewerAvailability::available(
-                    "Retained safe-operating-area evidence is available for the active analysis",
+                    "Safe-operating-area results are available for the active analysis",
                 )
             } else {
                 ViewerAvailability::unavailable(
@@ -2549,7 +2548,7 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         }
         ResultViewer::Manifest => {
             if active_run.is_some() {
-                ViewerAvailability::available("The immutable active-dataset inventory is available")
+                ViewerAvailability::available("The active run's inventory is available")
             } else {
                 ViewerAvailability::unavailable("Requires a selected retained dataset")
             }
