@@ -20,7 +20,7 @@ pub(super) fn capture_external_hdl_sources(
         .preprocess_file_with_limits(root, provider_limits)
         .map_err(|error| {
             format!(
-                "Could not authenticate Verilog-A closure rooted at '{}': {error}",
+                "Could not read the Verilog-A source '{}' and its includes: {error}",
                 root.display()
             )
         })?;

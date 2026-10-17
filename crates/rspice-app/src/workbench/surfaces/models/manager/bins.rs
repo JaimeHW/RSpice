@@ -189,7 +189,7 @@ fn bins_blocked(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, error: &str) {
     section_title(
         ui,
         "Bins & geometry",
-        "exact inspection refused · no partial receipt is presented",
+        "inspection refused · no partial table is shown",
         // Outermost-right first: the band lays its actions out right to left.
         |ui| {
             if Button::new("Edit cards…").accent().show(ui).clicked() {
@@ -199,7 +199,7 @@ fn bins_blocked(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, error: &str) {
                 .enabled(!app.state.workbench.models_view.model_import_in_progress)
                 .show(ui)
                 .on_hover_text(
-                    "Import authenticated binned model cards; L, W, and NFIN bounds are evaluated by the simulator from the retained source.",
+                    "Import binned model cards; the simulator evaluates L, W, and NFIN bounds from the imported source.",
                 )
                 .clicked()
             {
@@ -210,7 +210,7 @@ fn bins_blocked(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, error: &str) {
     ui.add_space(6.0);
     ui.label(
         RichText::new(
-            "The simulator inspects the exact deck this design would run and reports either every \
+            "The simulator inspects the deck this design would run and reports either every \
              card and every instance decision or nothing at all. Repair the bounds it names in \
              Model Editor, or re-import the bin map, and this page fills in.",
         )
@@ -289,7 +289,7 @@ fn bins_body(
                 .enabled(!app.state.workbench.models_view.model_import_in_progress)
                 .show(ui)
                 .on_hover_text(
-                    "Import authenticated binned model cards; L, W, and NFIN bounds are evaluated by the simulator from the retained source.",
+                    "Import binned model cards; the simulator evaluates L, W, and NFIN bounds from the imported source.",
                 )
                 .clicked()
             {
@@ -1225,7 +1225,7 @@ fn geometry_instance_table(
             empty_state(
                 ui,
                 "No placed instance resolves to this family.",
-                "The exact prepared design contains no simulator-resolved instance for this family.",
+                "The prepared design has no instance the simulator resolves to this family.",
             );
             return;
         }

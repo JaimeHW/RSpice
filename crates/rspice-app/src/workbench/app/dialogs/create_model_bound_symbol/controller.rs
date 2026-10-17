@@ -260,7 +260,7 @@ pub(super) fn validate_create_symbol_draft(state: &AppState) -> Result<(), Strin
                 .ok_or_else(|| "The selected model contract is no longer available.".to_owned())?;
             if source.source_path.is_none() {
                 return Err(format!(
-                    "Model '{}' has no retained implementation source. The definition is unbound and non-placeable; import or attach its authenticated source before creating a model-bound symbol.",
+                    "Model '{}' has no retained implementation source, so it cannot be placed. Import or attach its source before creating a model-bound symbol.",
                     source.model
                 ));
             }
@@ -273,7 +273,7 @@ pub(super) fn validate_create_symbol_draft(state: &AppState) -> Result<(), Strin
                 || !source.reference.cell.eq_ignore_ascii_case(cell_name)
             {
                 return Err(format!(
-                    "Existing schematic pins belong to '{} / {}'. Use that exact target cell so the symbol remains placeable.",
+                    "Existing schematic pins belong to '{} / {}'. Use that cell as the target so the symbol remains placeable.",
                     source.reference.library, source.reference.cell
                 ));
             }

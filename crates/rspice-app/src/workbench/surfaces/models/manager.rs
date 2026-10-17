@@ -237,7 +237,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     .models_view
                     .model_import_label
                     .as_deref()
-                    .unwrap_or("Authenticating and parsing model sources…"),
+                    .unwrap_or("Reading and parsing model sources…"),
             );
         });
     }
@@ -1434,7 +1434,7 @@ fn author_technology_symbol_variant(
     let package = app
         .state
         .project_signed_technology_package()?
-        .ok_or_else(|| "This project has no exact signed technology package.".to_owned())?;
+        .ok_or_else(|| "This project has no signed technology package.".to_owned())?;
     if !package
         .manifest()
         .package_id
@@ -1581,7 +1581,7 @@ fn publish_definition_provider(
             )
             .map(|revision| {
                 format!(
-                    "Resolved {} '{}' to authenticated provider '{}' (source {}) at project revision {}.",
+                    "Resolved {} '{}' to provider '{}' (source {}) at project revision {}.",
                     scope.label(),
                     record.normalized_name,
                     record.provider_library,

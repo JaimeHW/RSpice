@@ -50,9 +50,7 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             if Button::new("Import section map")
                 .enabled(!app.state.workbench.models_view.model_import_in_progress)
                 .show(ui)
-                .on_hover_text(
-                    "Import an authenticated SPICE model source whose .lib sections define the map.",
-                )
+                .on_hover_text("Import a SPICE model source whose .lib sections define the map.")
                 .clicked()
             {
                 app.queue_model_source_import();
@@ -521,12 +519,7 @@ fn retained_section(
         .source_contents
         .iter()
         .find(|content| content.path == path)
-        .ok_or_else(|| {
-            format!(
-                "The authenticated closure retains no bytes for {}.",
-                path.display()
-            )
-        })?;
+        .ok_or_else(|| format!("The imported library keeps no copy of {}.", path.display()))?;
     let mut excerpt = slice_section(&content.bytes, section).ok_or_else(|| {
         format!(
             "No `.lib {section}` … `.endl` pair appears in the retained {}.",
@@ -776,7 +769,7 @@ fn statistical_and_aging_card(ui: &mut Ui, app: &ManagerRenderContext<'_>, row: 
                 "Aging",
                 aging.as_deref().unwrap_or("not bound"),
                 if aging.is_some() {
-                    "authenticated section"
+                    "source section"
                 } else {
                     "this corner binds none"
                 },
@@ -945,7 +938,7 @@ fn validate_current_model_execution_plan(
 ) -> Result<String, String> {
     if unresolved > 0 {
         return Err(format!(
-            "Corner validation found {unresolved} bindings without an exact source section."
+            "Corner validation found {unresolved} bindings without a matching source section."
         ));
     }
     if app.state.workbench.safe_mode.project_read_only() {
@@ -995,7 +988,7 @@ fn validate_current_model_execution_plan(
             code: "VERILOGA_RUNTIME_COMPILED".to_owned(),
             severity: crate::state::model_library::ModelValidationFindingSeverity::Information,
             message: format!(
-                "Compiled and validated {veriloga_count} authenticated signed-PDK Verilog-A runtime bindings."
+                "Compiled and validated {veriloga_count} Verilog-A runtime bindings from the signed PDK."
             ),
         });
     }
@@ -1006,7 +999,7 @@ fn validate_current_model_execution_plan(
         findings.push(crate::state::model_library::ModelValidationFinding {
             code: "SIGNED_PDK_TRUST_VERIFIED".to_owned(),
             severity: crate::state::model_library::ModelValidationFindingSeverity::Information,
-            message: "The exact project-pinned signed PDK archive, platform contract, and trust chain were verified.".to_owned(),
+            message: "The project's pinned signed PDK archive, platform contract, and trust chain were verified.".to_owned(),
         });
     }
     let receipt = app
@@ -1029,7 +1022,7 @@ fn validate_current_model_execution_plan(
         )?;
     app.state.workspace.content.project_metadata_dirty = true;
     Ok(format!(
-        "Published durable model-validation receipt {} for exact plan {} with {} authenticated bindings, {} source-qualified provider decisions, and {veriloga_count} Verilog-A runtimes.",
+        "Recorded model validation {} for plan {} with {} bindings, {} provider decisions, and {veriloga_count} Verilog-A runtimes.",
         receipt.receipt_digest,
         plan.digest(),
         plan.bindings().len(),
@@ -1316,8 +1309,8 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &CornerRo
                 if row.active { "yes" } else { "no" },
                 "executable model projection",
             );
-            property(ui, "NMOS", &row.corner.nmos_corner, "exact section axis");
-            property(ui, "PMOS", &row.corner.pmos_corner, "exact section axis");
+            property(ui, "NMOS", &row.corner.nmos_corner, "section axis");
+            property(ui, "PMOS", &row.corner.pmos_corner, "section axis");
             property(
                 ui,
                 "Source",
@@ -1332,7 +1325,7 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &CornerRo
                 ui,
                 "Source digest",
                 row.source_digest.as_deref().unwrap_or("not pinned"),
-                "authenticated content identity",
+                "digest of the source bytes",
             );
             property(
                 ui,
@@ -1418,7 +1411,7 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &CornerRo
                         short_digest(&receipt.receipt_digest.to_string())
                     ),
                     &format!(
-                        "project revision {} · plan {} · {} authenticated sources · {}",
+                        "project revision {} · plan {} · {} sources · {}",
                         receipt.project_revision.get(),
                         short_digest(&receipt.model_execution_plan_digest.to_string()),
                         receipt.source_count,
@@ -1449,7 +1442,7 @@ fn bound_section_row(ui: &mut Ui, domain: CornerSectionDomain, section: &str) ->
         let track = (ui.available_width() - ACTION_W).max(1.0);
         ui.allocate_ui(egui::vec2(track, PROPERTY_ROW_H), |ui| {
             ui.set_min_width(track);
-            property(ui, domain.label(), section, "authenticated section");
+            property(ui, domain.label(), section, "source section");
         });
         unbind = inline_unbind(ui, domain, section, ACTION_W);
     });
@@ -1646,9 +1639,7 @@ fn activate_corner(app: &mut ManagerRenderContext<'_>, library_name: &str, corne
                 .activate_corner(corner_name)
                 .then_some(())
                 .ok_or_else(|| {
-                    format!(
-                        "Corner '{corner_name}' no longer exists in library '{library_name}'."
-                    )
+                    format!("Corner '{corner_name}' no longer exists in library '{library_name}'.")
                 })
         })
         .and_then(|()| {
@@ -1661,7 +1652,7 @@ fn activate_corner(app: &mut ManagerRenderContext<'_>, library_name: &str, corne
         })
         .map(|revision| {
             format!(
-                "Activated exact corner '{corner_name}' for '{library_name}' at project revision {}.",
+                "Activated corner '{corner_name}' for '{library_name}' at project revision {}.",
                 revision.get()
             )
         });

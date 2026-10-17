@@ -333,7 +333,7 @@ fn pack_detail(
                 if built_in {
                     "embedded foundation"
                 } else if !attached.is_empty() {
-                    "authenticated project source"
+                    "project source"
                 } else {
                     "corpus only"
                 },

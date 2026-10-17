@@ -463,8 +463,9 @@ fn parse_symbol_view(site: &SymbolViewSite<'_>) -> ParsedSymbolView {
             .collect::<Vec<_>>();
         if expected != observed {
             diagnostics.push(format!(
-                "Blocking pin mismatch: provider {:?}, symbol {:?}",
-                expected, observed
+                "Blocking pin mismatch: provider pins '{}', symbol pins '{}'",
+                expected.join(", "),
+                observed.join(", ")
             ));
         }
         if let Err(error) = definition.validate() {

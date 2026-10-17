@@ -24,7 +24,7 @@ const MODELS_BASELINES: [ModelsBaseline; 8] = [
         name: "models-00-models-project",
         page: ModelsPage::Models,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "c0b1057e4e43ee35f848762b93b929ad1fbe8ce619eb5ee8b95f2deeef8b8954",
+        fingerprint: "1a9fc4d4a107933fca91e7e5a0d1b76d19d04110a9a273e6c1fed1664d7035bb",
     },
     ModelsBaseline {
         name: "models-01-symbols-cdf",
@@ -48,7 +48,7 @@ const MODELS_BASELINES: [ModelsBaseline; 8] = [
         name: "models-04-include-graph",
         page: ModelsPage::Include,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "08d0f73ebd98d99bd6b6b143bf1f4fce5bc5dd15078c3a54fb05b5924bb8c55e",
+        fingerprint: "3a82d32b6a8603c8277bd066beaa0b9d59fc67d8666f6b49ef62f9a8cd0126ab",
     },
     ModelsBaseline {
         name: "models-05-qualification",
@@ -60,7 +60,7 @@ const MODELS_BASELINES: [ModelsBaseline; 8] = [
         name: "models-00b-rspice-library",
         page: ModelsPage::Models,
         scope: ModelsCatalogScope::RSpiceLibrary,
-        fingerprint: "91aac206b8f6f84d737880ff5c956d5410c7bff69e25e4780d4a0c9035b988f2",
+        fingerprint: "55478b5e5918a31639590269b80308bee5e54bc602f9bc4c24ba6fed9880847e",
     },
     ModelsBaseline {
         name: "models-00c-installed-packs",
@@ -302,7 +302,7 @@ fn qualification_domain_projection_never_invents_oracle_provenance() {
     assert_eq!(domains.len(), 1);
     assert_eq!(domains[0].domain, QualificationDomain::Ac);
     assert_eq!(domains[0].reference_coverage, "2 refs · 1 quantity");
-    assert_eq!(domains[0].disposition, "1 without evidence");
+    assert_eq!(domains[0].disposition, "1 without results");
     assert!(
         !domains[0]
             .reference_coverage

@@ -66,7 +66,7 @@ pub(super) fn add_corner(
         receipt(
             app,
             Err(format!(
-                "Library '{library_name}' has no authenticated source root to bind a corner to."
+                "Library '{library_name}' has no root source file to bind a corner to."
             )),
         );
         return;
@@ -117,7 +117,7 @@ pub(super) fn add_corner(
     )
     .map(|revision| {
         format!(
-            "Added unbound corner draft '{name}' to '{library_name}' at project revision {}. Bind an authenticated section before execution.",
+            "Added unbound corner draft '{name}' to '{library_name}' at project revision {}. Bind a source section before simulating.",
             revision.get()
         )
     });
@@ -519,7 +519,7 @@ pub(super) fn unbind_corner_section(
         app.state,
         candidate,
         library_name,
-        format!("unbind {domain:?} section for corner {corner_name}"),
+        format!("unbind {} section for corner {corner_name}", domain.label()),
     )
     .map(|revision| {
         format!(
@@ -551,7 +551,7 @@ pub(super) fn bind_corner_section(
         receipt(
             app,
             Err(format!(
-                "Authenticated library '{library_name}' defines no non-empty section named '{section}'."
+                "Library '{library_name}' defines no non-empty section named '{section}'."
             )),
         );
         return;
@@ -599,7 +599,7 @@ pub(super) fn bind_corner_section(
         app.state,
         candidate,
         library_name,
-        format!("bind {domain:?} section {section} for corner {corner_name}"),
+        format!("bind {} section {section} for corner {corner_name}", domain.label()),
     )
     .map(|revision| {
         format!(

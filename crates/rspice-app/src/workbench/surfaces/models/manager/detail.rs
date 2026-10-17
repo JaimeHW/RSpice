@@ -107,13 +107,13 @@ fn project_selection<'a>(
 ) -> Result<SelectedModelDetail<'a>, (&'static str, &'static str)> {
     let Some(library_name) = app.state.model_library_manager.selected_library.as_deref() else {
         return Err((
-            "Select a model to inspect its exact source and resolved contract.",
+            "Select a model to inspect its source and resolved contract.",
             "The detail area never invents a model when the catalog selection is empty.",
         ));
     };
     let Some(model_name) = app.state.workbench.selected_model.as_deref() else {
         return Err((
-            "Select a model to inspect its exact source and resolved contract.",
+            "Select a model to inspect its source and resolved contract.",
             "Use the table above or choose a model source in the Navigator.",
         ));
     };
@@ -796,7 +796,7 @@ fn qualification_card(
     filled_detail_pane(
         ui,
         "Qualification",
-        Some("source-owned evidence"),
+        Some("saved with the model source"),
         height,
         "models-detail-qualification",
         |ui| {
@@ -808,7 +808,7 @@ fn qualification_card(
                 for (name, value, note) in [
                     ("Suites", counts.suites, "retained"),
                     ("Vectors", counts.vectors, "declared"),
-                    ("Evidence", counts.evidence, "immutable"),
+                    ("Runs", counts.evidence, "recorded"),
                     ("Releases", counts.releases, "promoted"),
                     (
                         "Open dispositions",
@@ -829,7 +829,7 @@ fn qualification_card(
                 empty_state(
                     ui,
                     "This model has no qualification suite.",
-                    "Qualification claims remain empty until a retained suite and exact-source evidence exist.",
+                    "Qualification stays empty until a suite is saved and run against this source.",
                 );
             }
         },

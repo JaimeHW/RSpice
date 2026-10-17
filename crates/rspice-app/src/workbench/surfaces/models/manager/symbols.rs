@@ -586,7 +586,7 @@ fn symbol_detail(
             {
                 card(ui, |ui| {
                     card_title(ui, "Signed technology authority", Some(technology_name));
-                    property(ui, "Revision", revision, "exact project pin");
+                    property(ui, "Revision", revision, "project pin");
                     property(
                         ui,
                         "Manifest",
@@ -969,9 +969,9 @@ fn parameter_form_card(ui: &mut Ui, row: &SymbolRow) {
                         ui,
                         &field.key,
                         &format!(
-                            "{:?} · {:?} · {}",
-                            field.property_type,
-                            field.visibility,
+                            "{} · {} · {}",
+                            property_type_label(field.property_type),
+                            visibility_label(field.visibility),
                             field.unit.as_deref().unwrap_or("unitless")
                         ),
                         if field.required {
@@ -990,6 +990,26 @@ fn parameter_form_card(ui: &mut Ui, row: &SymbolRow) {
             );
         }
     });
+}
+
+fn property_type_label(value: crate::state::PropertyType) -> &'static str {
+    use crate::state::PropertyType;
+    match value {
+        PropertyType::Number => "Number",
+        PropertyType::String => "Text",
+        PropertyType::Expression => "Expression",
+        PropertyType::Enum => "Enumeration",
+        PropertyType::Boolean => "Boolean",
+    }
+}
+
+fn visibility_label(value: crate::state::SymbolParameterVisibility) -> &'static str {
+    use crate::state::SymbolParameterVisibility;
+    match value {
+        SymbolParameterVisibility::Visible => "Visible",
+        SymbolParameterVisibility::Advanced => "Advanced",
+        SymbolParameterVisibility::Hidden => "Hidden",
+    }
 }
 
 /// Height of a row in one of the detail's tables. Tighter than the catalog's
