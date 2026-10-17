@@ -166,6 +166,19 @@ fn a_pin_dragged_onto_its_own_wire_never_doubles_it_back() {
     ]);
 }
 
+/// A junction-tool click on the dot where a wire tees into R3's moved
+/// stem took the dot away, though the wires still meet there and automatic
+/// junctions mark that point.
+#[test]
+fn a_junction_click_keeps_a_dot_the_wires_need() {
+    holds(&[
+        Draw(vec![p(200, 260), p(220, 120)]),
+        Drag(3, vec![p(60, -60), p(80, -40)]),
+        Move(vec![Pick::Wire(33), Pick::Wire(6)], p(20, 0), false),
+        Junction(p(220, 180)),
+    ]);
+}
+
 /// Undoing the switch to Sheet 2 and then moving a part on Sheet 1 is a
 /// new edit after the undo: the switch can no longer be redone. Redo
 /// replayed it anyway.

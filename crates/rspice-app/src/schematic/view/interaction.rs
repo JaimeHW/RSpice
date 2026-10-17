@@ -810,8 +810,26 @@ fn report_documentation_shape_error(
 enum JunctionPlacementOutcome {
     Placed(Point),
     Removed(Point),
+    /// The dot marks a point where three or more conductor ends meet, and
+    /// automatic junctions keep it while they do.
+    Required(Point),
     NoIntersection,
     MixedBus,
+}
+
+/// Whether the active sheet's wires and pins make a dot due at `point`
+/// whether or not one is placed there: a T, three wire ends or wires on a
+/// pin, as opposed to a crossing that only a placed dot joins.
+fn dot_required_on_active_sheet(state: &AppState, point: Point) -> bool {
+    let document = state.schematic.document();
+    let sheet = rspice_design::schematic::document::SchematicDocument {
+        wires: objects_on_active_sheet(state, &document.wires, |wire| wire.id).into_owned(),
+        components: objects_on_active_sheet(state, &document.components, |part| part.id)
+            .into_owned(),
+        ..Default::default()
+    };
+    rspice_design::schematic::junction_edit::JunctionRule::for_document(&sheet)
+        .dot_belongs(point, false)
 }
 
 fn commit_explicit_junction(state: &mut AppState, requested: Point) -> JunctionPlacementOutcome {
@@ -828,6 +846,15 @@ fn commit_explicit_junction(state: &mut AppState, requested: Point) -> JunctionP
     }
 
     if let Some(junction_id) = active_junction_at(state, target) {
+        let automatic = state
+            .schematic
+            .document()
+            .document_policy
+            .wire_junctions
+            .automatic_junctions();
+        if automatic && dot_required_on_active_sheet(state, target) {
+            return JunctionPlacementOutcome::Required(target);
+        }
         state.schematic.with_undo("remove junction", |schematic| {
             schematic.remove_junction(junction_id);
         });
@@ -850,6 +877,10 @@ pub(super) fn handle_junction_click(state: &mut AppState, requested: Point) {
         JunctionPlacementOutcome::Removed(point) => {
             format!("Removed the junction at ({}, {}).", point.x, point.y)
         }
+        JunctionPlacementOutcome::Required(point) => format!(
+            "The junction at ({}, {}) stays: three or more conductors meet there.",
+            point.x, point.y
+        ),
         JunctionPlacementOutcome::NoIntersection => {
             "No junction: two conductors do not meet there.".to_owned()
         }
