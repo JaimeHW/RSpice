@@ -217,7 +217,9 @@ fn infer_terminal_axis(component: &Component) -> TerminalAxis {
 /// the side its unturned body's right-hand side faces, so an instance
 /// mirrored or turned end for end letters its value on the left, ending at
 /// the body, instead of across the gate lead and the wire that leaves it.
-/// The text itself stays upright.
+/// Unless the device is turned a quarter, the value hangs just below the
+/// body's middle, clear of the bulk (or substrate) lead that runs out along
+/// it on that side. The text itself stays upright.
 ///
 /// Linear in `origin` and `scale`: `origin` is the instance's position and
 /// `scale` the size of one world unit in the caller's space, so the canvas
@@ -265,13 +267,23 @@ pub fn instance_label_layout(
 
     if is_tall_device {
         let faces_left = component.transform_point(Point::new(1, 0)).x < 0;
+        let (value_x, horizontal) = if faces_left {
+            (x - half_w - margin, End)
+        } else {
+            (x + half_w + margin, Start)
+        };
+        // Unturned, the gate (or base) and the bulk run their leads across
+        // the body's middle, so the value hangs just below that axis rather
+        // than across a wire leaving either one. Turned a quarter, those
+        // leads run up and down and the middle is clear.
+        let (value_y, vertical) = if component.rotation.is_vertical() {
+            (y, Center)
+        } else {
+            (y + margin, Start)
+        };
         return InstanceLabelLayout {
             name: above,
-            value: if faces_left {
-                PlacedText::new(LayoutPoint::new(x - half_w - margin, y), End, Center)
-            } else {
-                right
-            },
+            value: PlacedText::new(LayoutPoint::new(value_x, value_y), horizontal, vertical),
         };
     }
     // A mixed axis falls back to the turned body's aspect ratio.

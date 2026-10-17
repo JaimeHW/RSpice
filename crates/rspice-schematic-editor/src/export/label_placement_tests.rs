@@ -86,11 +86,19 @@ fn the_canvas_stands_names_and_values_outside_the_body_for_every_turn_and_mirror
             ((100.0, 236.0), A::CENTER_TOP),
         ),
         // A tall device: name above, value to the right, past the turned body.
+        // Unturned, the value hangs just below the middle, where the bulk
+        // lead runs out.
         case(
             K::Nmos,
             R::R0,
             ((100.0, 112.0), A::CENTER_BOTTOM),
-            ((148.0, 200.0), A::LEFT_CENTER),
+            ((148.0, 208.0), A::LEFT_TOP),
+        ),
+        case(
+            K::Nmos,
+            R::R180,
+            ((100.0, 112.0), A::CENTER_BOTTOM),
+            ((148.0, 208.0), A::LEFT_TOP),
         ),
         case(
             K::Nmos,
@@ -134,7 +142,10 @@ fn the_canvas_stands_names_and_values_outside_the_body_for_every_turn_and_mirror
             let faces_left = component.transform_point(Point::new(1, 0)).x < 0;
             let tall = matches!(case.kind, K::Nmos | K::NpnBjt);
             let value = if tall && faces_left {
-                ((200.0 - case.value.0.0, case.value.0.1), A::RIGHT_CENTER)
+                (
+                    (200.0 - case.value.0.0, case.value.0.1),
+                    A([egui::Align::Max, case.value.1.y()]),
+                )
             } else {
                 case.value
             };

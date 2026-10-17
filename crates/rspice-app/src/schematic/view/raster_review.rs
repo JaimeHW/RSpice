@@ -1206,3 +1206,54 @@ fn a_pin_name_stands_clear_of_an_artwork_lead() {
         }
     }
 }
+
+/// A transistor's value stands clear of every pin's line, mirrored or not:
+/// off the axis its gate and bulk leads run along, and outside the columns
+/// its drain and source leads run up and down. An unmirrored device's value
+/// stood on its bulk's axis, so the bulk wire ran under the text (M1's on the
+/// analog sheet), and a mirrored device's on the same axis on its other side
+/// (M3's).
+#[test]
+fn a_transistor_value_stands_clear_of_every_pin_line() {
+    let mut state = analog_sheet();
+    let framing = at_zoom(1.0, ANALOG_CENTRE);
+    let render = render(&mut state, themes()[0].1, framing, 1.0);
+    let values = painted_text(&render.shapes)
+        .into_iter()
+        .filter(|text| text.text.contains("W="))
+        .collect::<Vec<_>>();
+    let transistors = state
+        .schematic
+        .document()
+        .components
+        .iter()
+        .filter(|component| matches!(component.kind, ComponentType::Nmos | ComponentType::Pmos))
+        .collect::<Vec<_>>();
+    assert_eq!(transistors.len(), 5);
+    for transistor in transistors {
+        let body = on_screen(framing.centre, render.zoom, transistor.pos);
+        let value = values
+            .iter()
+            .min_by(|a, b| {
+                a.rect
+                    .center()
+                    .distance(body)
+                    .total_cmp(&b.rect.center().distance(body))
+            })
+            .expect("a value");
+        for (pin, at) in transistor.terminal_positions() {
+            let at = on_screen(framing.centre, render.zoom, at);
+            // The gate and bulk leads run across, the drain and source leads
+            // up and down.
+            let crosses = match pin {
+                "G" | "B" => value.rect.min.y < at.y && at.y < value.rect.max.y,
+                _ => value.rect.min.x < at.x && at.x < value.rect.max.x,
+            };
+            assert!(
+                !crosses,
+                "{}: the value {:?} at {:?} stands on the line of its {pin} pin at {at:?}",
+                transistor.name, value.text, value.rect
+            );
+        }
+    }
+}
