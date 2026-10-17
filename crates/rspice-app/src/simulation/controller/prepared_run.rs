@@ -597,6 +597,7 @@ impl SimulationController {
     /// Automation and tuning prepare their runs here. The identity of the
     /// state the run is prepared from is retained with it, and the frame that
     /// dispatches it checks that identity, as it checks a Run press's.
+    /// Automation prepares through [`Self::prepare_run_set_for_evidence`].
     pub(crate) fn prepare_run_set_for_preflight(
         &mut self,
         state: &AppState,
@@ -615,6 +616,26 @@ impl SimulationController {
         Ok(metadata)
     }
 
+    /// [`Self::prepare_run_set_for_preflight`], for a workflow that publishes
+    /// the results of the run it dispatches: beside the run's metadata, what
+    /// the run was prepared from, shared with the retained run. The dispatch
+    /// spends the retained run; the workflow keeps these inputs past it, and
+    /// publishes only while [`super::PreparedRunSetInputs::still_current`]
+    /// holds.
+    pub(crate) fn prepare_run_set_for_evidence(
+        &mut self,
+        state: &AppState,
+    ) -> Result<(PreparedRunMetadata, super::PreparedRunSetInputs), PreparationError> {
+        let metadata = self.prepare_run_set_for_preflight(state)?;
+        let inputs = self
+            .retained_run_inputs
+            .as_ref()
+            .zip(self.run_authorization.retained_snapshot())
+            .and_then(|(inputs, snapshot)| super::PreparedRunSetInputs::of(inputs, snapshot))
+            .ok_or_else(super::run_inputs::unaccounted_run)?;
+        Ok((metadata, inputs))
+    }
+
     /// Retain `snapshot` for dispatch, replacing whatever was retained, with
     /// what it was prepared from, which its dispatch checks.
     pub(super) fn retain_prepared_run(
@@ -625,7 +646,7 @@ impl SimulationController {
         self.retained_run_generation = self.retained_run_generation.wrapping_add(1);
         self.retained_run_inputs = None;
         self.run_authorization.retain(snapshot)?;
-        self.retained_run_inputs = Some(inputs);
+        self.retained_run_inputs = Some(std::sync::Arc::new(inputs));
         Ok(())
     }
 
@@ -867,31 +888,6 @@ impl SimulationController {
             self.active_campaign = None;
             state.simulation.execution.status = "Campaign stopped".to_owned();
         }
-    }
-
-    /// Rebuild the complete live run-set contract and require it to match the
-    /// exact snapshot authorized by a governed caller. Unlike the one-shot
-    /// execution permit, this check remains usable while a run is executing,
-    /// allowing evidence publication to reject any in-flight change to PVT,
-    /// solver options, sources, model bindings, outputs, target capability, or
-    /// analysis configuration.
-    pub(crate) fn ensure_run_set_snapshot_current(
-        &self,
-        state: &AppState,
-        expected_snapshot_digest: crate::product::ContentDigest,
-        expected_source_digest: crate::product::ContentDigest,
-    ) -> Result<(), PreparationError> {
-        let current = Self::build_prepared_snapshot(state, SimulationRunIntent::SimulateRunSet)?;
-        let metadata = current.metadata();
-        if metadata.snapshot_digest != expected_snapshot_digest
-            || metadata.source_digest != expected_source_digest
-        {
-            return Err(PreparationError::new(
-                PreparationStage::Authorization,
-                "The live simulation contract no longer matches the Automation dispatch snapshot",
-            ));
-        }
-        Ok(())
     }
 
     pub(crate) fn clear_prepared_run(&mut self) {

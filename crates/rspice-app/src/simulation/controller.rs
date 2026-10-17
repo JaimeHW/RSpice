@@ -81,6 +81,7 @@ mod results_convert;
 mod results_post;
 mod results_update;
 mod run_inputs;
+pub(crate) use run_inputs::PreparedRunSetInputs;
 mod run_lines;
 use run_lines::write_run_line;
 #[cfg(test)]
@@ -227,8 +228,9 @@ pub struct SimulationController {
     /// Retained preflight and generation-safe dispatch authority.
     run_authorization: crate::simulation::execution::PreparedRunAuthorization,
     /// What the retained run set was prepared from, which its dispatch
-    /// checks. Set and dropped with the retained run.
-    retained_run_inputs: Option<run_inputs::RetainedRunInputs>,
+    /// checks. Set and dropped with the retained run; Automation shares it,
+    /// and keeps it past the dispatch.
+    retained_run_inputs: Option<std::sync::Arc<run_inputs::RetainedRunInputs>>,
     /// Moves whenever the retained run is dropped or replaced, so a preflight
     /// pipeline can tell whether the run it prepared is still wanted.
     retained_run_generation: u64,

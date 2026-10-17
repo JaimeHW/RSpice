@@ -24,6 +24,15 @@
 //! about it. Automation and tuning prepare in their own frame from the live
 //! session, and retain the identity of the state they prepared from, so their
 //! runs are held to the same check.
+//!
+//! Automation also publishes evidence from the run it dispatched, and only
+//! while the session still holds what that run was prepared from. It used to
+//! decide so by preparing the whole run again and comparing digests, seconds
+//! of the frame on a large design, each frame it waited on the dispatch and
+//! again when it published, and a second judgement of currency that could
+//! disagree with the dispatch's. It now keeps [`PreparedRunSetInputs`], the
+//! very inputs its run was retained with, past the dispatch that spends them,
+//! and asks of them the question the dispatch asks.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -759,7 +768,8 @@ impl SourceFileAnswers {
 }
 
 /// What a retained run was prepared from, held beside it until it is
-/// dispatched or dropped.
+/// dispatched or dropped, and by a workflow that keeps it longer; see
+/// [`PreparedRunSetInputs`].
 pub(super) struct RetainedRunInputs {
     pub(super) identity: RunInputIdentity,
     pub(super) source_files: SourceFileAnswers,
@@ -782,11 +792,28 @@ impl RetainedRunInputs {
         if !self.identity.describes(snapshot) {
             return Err(unaccounted_run());
         }
+        self.refused_if_moved(
+            state,
+            self.identity.moved_in(state, snapshot),
+            snapshot.sealed_source_dependencies(),
+        )
+    }
+
+    /// Refuse when `moved` names a session input that moved, or when a host
+    /// file the run was prepared from has: the external model files its seal
+    /// read, `dependencies`, the files its includes spliced in, and the data
+    /// files its sources were routed to.
+    fn refused_if_moved(
+        &self,
+        state: &AppState,
+        moved: Option<&'static str>,
+        dependencies: &[rspice_core::netlist::ResolvedIncludeDependency],
+    ) -> Result<(), PreparationError> {
         let refused = self.identity.refusal();
         let refuse = |stage: PreparationStage, what: &str| {
             Err(PreparationError::new(stage, format!("{refused} · {what}")))
         };
-        if let Some(input) = self.identity.moved_in(state, snapshot) {
+        if let Some(input) = moved {
             return refuse(PreparationStage::Authorization, &format!("{input} changed"));
         }
         if let Err(error) = rspice_simulation::model_sources::verify_plan_external_model_sources(
@@ -797,7 +824,7 @@ impl RetainedRunInputs {
         }
         if let Err(error) =
             rspice_simulation::netlist_preparation::dependencies::verify_host_dependencies(
-                snapshot.sealed_source_dependencies(),
+                dependencies,
             )
         {
             return refuse(PreparationStage::Authorization, &error);
@@ -809,5 +836,77 @@ impl RetainedRunInputs {
             );
         }
         Ok(())
+    }
+}
+
+/// What a run set was prepared from, kept past its dispatch by the workflow
+/// that publishes the run's results.
+///
+/// Dispatch spends the retained run and what it was prepared from. Automation
+/// publishes the evidence of the run it dispatched only while the session
+/// still holds what that run was prepared from: it asks on each frame it
+/// waits for the dispatch, and again when it publishes. These are the inputs
+/// the run was retained with, shared, not a second capture, and the question
+/// asked of them is the one its dispatch asks, refused in the same words. The
+/// two cannot disagree, and neither prepares anything.
+#[derive(Clone)]
+pub(crate) struct PreparedRunSetInputs {
+    inputs: Arc<RetainedRunInputs>,
+    /// The host sources the run's includes were read from, as they were read.
+    sealed_source_dependencies: Arc<[rspice_core::netlist::ResolvedIncludeDependency]>,
+}
+
+impl PreparedRunSetInputs {
+    /// What the run set `snapshot` was retained with; `None` when `inputs`
+    /// are not a run set's, or not `snapshot`'s.
+    pub(super) fn of(
+        inputs: &Arc<RetainedRunInputs>,
+        snapshot: &PreparedRunSnapshot,
+    ) -> Option<Self> {
+        (snapshot.intent() == SimulationRunIntent::SimulateRunSet
+            && inputs.identity.describes(snapshot))
+        .then(|| Self {
+            inputs: Arc::clone(inputs),
+            sealed_source_dependencies: snapshot.sealed_source_dependencies().into(),
+        })
+    }
+
+    /// Refuse unless nothing the run set was prepared from has moved, as its
+    /// dispatch refuses it, whether or not it has been dispatched since.
+    /// Nothing is prepared.
+    pub(crate) fn still_current(&self, state: &AppState) -> Result<(), PreparationError> {
+        self.inputs.refused_if_moved(
+            state,
+            self.inputs.identity.run_set_moved_in(state),
+            &self.sealed_source_dependencies,
+        )
+    }
+}
+
+impl std::fmt::Debug for PreparedRunSetInputs {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PreparedRunSetInputs")
+            .field(
+                "sealed_source_dependencies",
+                &self.sealed_source_dependencies.len(),
+            )
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+impl PreparedRunSetInputs {
+    /// What a run set prepared from `state` would be retained with, for a
+    /// test that builds a workflow's dispatch record and prepares no run. It
+    /// holds no host file.
+    pub(crate) fn of_unprepared(state: &AppState) -> Self {
+        Self {
+            inputs: Arc::new(RetainedRunInputs {
+                identity: RunInputIdentity::of_run_set(state),
+                source_files: SourceFileAnswers::default(),
+            }),
+            sealed_source_dependencies: Arc::from([]),
+        }
     }
 }

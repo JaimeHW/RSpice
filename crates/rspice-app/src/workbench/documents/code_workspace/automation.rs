@@ -1331,11 +1331,12 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
     }
     // Automation owns a one-shot prepared permit for precisely this dispatch.
     // Clear any unrelated retained preflight first, then seal the complete
-    // current execution contract immediately before publishing the request.
+    // current execution contract immediately before publishing the request,
+    // keeping what it was prepared from for the evidence check.
     app.invalidate_simulation_preflight();
-    let prepared = match app
+    let (prepared, prepared_inputs) = match app
         .simulation_controller
-        .prepare_run_set_for_preflight(&app.state)
+        .prepare_run_set_for_evidence(&app.state)
     {
         Ok(prepared) => prepared,
         Err(error) => {
@@ -1353,6 +1354,7 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
         plan_revision,
         prepared_snapshot_digest: prepared.snapshot_digest,
         source_content_digest: prepared.source_digest,
+        prepared_inputs,
         plan_name: active_name,
         plan_payload,
         project_sources: app.state.workspace.content.project_sources.clone(),
@@ -2179,16 +2181,13 @@ fn dispatch_snapshot_is_current(
                 .to_owned(),
         );
     }
-    app.simulation_controller
-        .ensure_run_set_snapshot_current(
-            &app.state,
-            snapshot.prepared_snapshot_digest,
-            snapshot.source_content_digest,
-        )
+    // What the run was prepared from, asked as its dispatch asks it: nothing
+    // is prepared, and an edit is named as the dispatch names it.
+    snapshot
+        .prepared_inputs
+        .still_current(&app.state)
         .map_err(|error| {
-            format!(
-                "The prepared simulation changed after the Automation workflow started; its results were not published: {error}"
-            )
+            format!("The Automation workflow's results were not published: {error}")
         })?;
     let current_baseline = app
         .state

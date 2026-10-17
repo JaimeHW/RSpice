@@ -697,6 +697,11 @@ pub struct AutomationDispatchSnapshot {
     /// Explicit source identity retained alongside the whole-snapshot digest
     /// so run correlation fails closed if either receipt field diverges.
     pub source_content_digest: crate::product::ContentDigest,
+    /// What the dispatched run set was prepared from, shared with the run
+    /// retained for this dispatch and kept past it. Evidence is published
+    /// only while the session still holds it, judged as the dispatch judges
+    /// it.
+    pub(crate) prepared_inputs: crate::simulation::controller::PreparedRunSetInputs,
     pub plan_name: String,
     pub plan_payload: crate::state::SimulationPlanPayload,
     pub project_sources: crate::state::ProjectSourceRegistry,
