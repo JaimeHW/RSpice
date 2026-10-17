@@ -536,6 +536,52 @@ mod tests {
         );
     }
 
+    /// A corner section is read last, so its `.param` binds every reader,
+    /// even one above a nominal the deck writes itself (ngspice-46: the
+    /// last definition binds; v(out) = 7.5 V for ss, 3.333 V for ff, never
+    /// the nominal 6.667 V).
+    #[test]
+    fn a_corner_section_parameter_overrides_the_nominal_the_deck_writes() {
+        let binding = |process, section: &str, value: &str| CornerModelBinding {
+            process,
+            source_label: format!("corners.lib [{section}]"),
+            section: Some(section.to_owned()),
+            materialized_model_cards: format!(".param rload={value}"),
+        };
+        let config = CornerRunConfig {
+            process_corners: vec![ProcessCorner::SS, ProcessCorner::FF],
+            voltages: vec![1.0],
+            temperatures_c: vec![27.0],
+            nominal_voltage: Some(1.0),
+            base_mode: CornerBaseMode::Op,
+            model_bindings: vec![
+                binding(ProcessCorner::SS, "SS", "3k"),
+                binding(ProcessCorner::FF, "FF", "500"),
+            ],
+            ..CornerRunConfig::default()
+        };
+        let deck = format!(
+            "nominal divider\nV1 in 0 10\nR1 in out 1k\nR2 out 0 {{rload}}\n.param rload=2k\n\
+             {REFERENCE_MODEL_BINDING_BEGIN} 1\n.param rload=1k\n{REFERENCE_MODEL_BINDING_END}\n\
+             .op\n.end\n"
+        );
+
+        let output = |process| {
+            let bound = materialize_corner_process_source(&deck, &config, process, &NoAbort)
+                .expect("the corner section binds");
+            let netlist = rspice_core::Netlist::parse(&bound).expect("corner deck parses");
+            rspice_core::Engine::default()
+                .run_dc_op(&netlist)
+                .expect("corner deck solves")
+                .try_voltage_named("out")
+                .expect("out is solved")
+        };
+        let slow = output(ProcessCorner::SS);
+        let fast = output(ProcessCorner::FF);
+        assert!((slow - 7.5).abs() < 1e-9, "ss ran {slow} V");
+        assert!((fast - 10.0 / 3.0).abs() < 1e-9, "ff ran {fast} V");
+    }
+
     #[test]
     fn process_binding_honors_an_abort_raised_while_it_reads_the_deck() {
         let abort = AbortOnPoll::new(1);
