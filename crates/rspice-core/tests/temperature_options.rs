@@ -41,10 +41,12 @@ fn forward_temperature_options_reconcile_earlier_values_and_nominal_dependencies
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
-fn forward_options_capture_known_bindings_and_local_functions() {
+fn forward_options_read_the_last_bindings_and_functions() {
     let source = "Forward scope capture\n.param offset=5\n.func adjust(x) {x+offset}\n.options temp={adjust(ambient)} tnom=-nominal\n.param offset=90 ambient=80 nominal=10\n.func adjust(x) {x+100}\n.end\n";
     let netlist = Netlist::parse(source).unwrap();
-    assert_eq!(netlist.options.temp, Some(85.0));
+    // The option calls the last definition of adjust, as ngspice-46 does
+    // (TEMP = 180).
+    assert_eq!(netlist.options.temp, Some(180.0));
     assert_eq!(netlist.options.tnom, Some(-10.0));
 }
 
@@ -52,8 +54,9 @@ fn forward_options_capture_known_bindings_and_local_functions() {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn forward_options_preserve_complex_bindings_before_real_projection() {
     let netlist = Netlist::parse("Complex temperature dependency\n.param z={sqrt(-1)} expected={85+img(z)}\n.options temp={85+img(z)+ambient}\n.param z={sqrt(-4)} ambient=0\n.end\n").unwrap();
+    // The option and the eager reader both read the last z = sqrt(-4).
     assert_eq!(netlist.options.temp, netlist.params.get("expected"));
-    assert_eq!(netlist.options.temp, Some(84.0));
+    assert_eq!(netlist.options.temp, Some(83.0));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -252,9 +255,11 @@ fn inactive_invalid_and_post_end_options_do_not_set_temperature() {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn lexical_parameter_scope_and_redefinitions_survive_temperature_replay() {
     let netlist = Netlist::parse("Scoped temperature\n.param ambient=65\n.subckt local p n params: ambient=99\nRlocal p n {ambient}\n.ends\n.options temp={ambient}\n.param ambient=75\n.param observed={TEMP}\n.end\n").unwrap();
-    assert_eq!(netlist.options.temp, Some(65.0));
+    // The option reads the last top-level ambient, as ngspice-46 does
+    // (TEMP = 75); the subcircuit's local ambient does not leak out.
+    assert_eq!(netlist.options.temp, Some(75.0));
     assert_eq!(netlist.params.get("ambient"), Some(75.0));
-    assert_eq!(netlist.params.get("observed"), Some(65.0));
+    assert_eq!(netlist.params.get("observed"), Some(75.0));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

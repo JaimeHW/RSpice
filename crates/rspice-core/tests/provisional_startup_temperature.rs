@@ -55,7 +55,8 @@ fn voltage_hint_grammar_and_source_order_survive_recovery() {
                 "Source ordered hints\nR1 out 0 1k\nR2 other 0 1k\n.param gain=1\n{directive} {fields}\n.param gain=3\n.temp 85\n.end\n"
             );
             let netlist = Netlist::parse(&source).unwrap();
-            assert_eq!(hint_value(&netlist, directive, 0), 1.0);
+            // The hint reads the last gain, as an ngspice-46 `.ic` does.
+            assert_eq!(hint_value(&netlist, directive, 0), 3.0);
             assert_eq!(hint_value(&netlist, directive, 1), 2.0);
             assert_eq!(netlist.startup_directives().len(), 1);
             assert_eq!(netlist.startup_directives()[0].entries().len(), 2);

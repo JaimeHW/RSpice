@@ -179,8 +179,10 @@ fn resource_errors_are_not_replaced_by_retained_parameter_errors() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
-fn evaluated_function_domain_errors_reconcile_without_rebinding_functions() {
-    let netlist = Netlist::parse("Function domain\n.func factor(x) {mod(sqrt(x-50),2)}\n.param scale={factor(TEMP)}\n.func factor(x) {x+1000}\n.temp 85\n.end\n").unwrap();
+fn evaluated_function_domain_errors_reconcile_against_the_last_definition() {
+    // scale reads the last definition of factor, as an ngspice-46 reader
+    // does; at the provisional 27 C its square root leaves the domain.
+    let netlist = Netlist::parse("Function domain\n.func factor(x) {x+1000}\n.param scale={factor(TEMP)}\n.func factor(x) {mod(sqrt(x-50),2)}\n.temp 85\n.end\n").unwrap();
     assert_eq!(netlist.params.get("scale"), Some(35.0_f64.sqrt() % 2.0));
 }
 
