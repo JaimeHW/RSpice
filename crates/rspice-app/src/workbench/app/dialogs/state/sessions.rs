@@ -486,6 +486,9 @@ pub struct DialogState {
     /// named net, or declared bus selected in the active schematic.
     pub(crate) rename_selection: RenameSelectionDialogState,
 
+    /// Find and replace on names, net labels and values.
+    pub(crate) find_replace: crate::workbench::app::dialogs::find_replace::FindReplaceDialogState,
+
     /// Project-owned technology attachment transaction.
     pub(crate) technology_attachment: TechnologyAttachmentDialogState,
 
@@ -578,6 +581,7 @@ impl DialogState {
             || self.rule_setup.open
             || self.object_properties.open
             || self.rename_selection.open
+            || self.find_replace.open
             || self.technology_attachment.open
             || self.confirmation_dialog.visible
             || self.project_review_dialog.request.is_some()

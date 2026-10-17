@@ -119,6 +119,7 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::Duplicate
             | Command::Delete
             | Command::RenameSelection
+            | Command::FindReplace
             | Command::PlaceInstance
             | Command::PlaceWire
             | Command::PlaceBus
@@ -665,6 +666,7 @@ impl Command {
             Self::SelectionBulkEdit => {
                 active_schematic_editor(app) && state.project_lifecycle.is_open()
             }
+            Self::FindReplace => active_schematic_editor(app) && !state.schematic_edit_read_only(),
             Self::ConfigurationSets | Self::RuleSetup => state.project_lifecycle.is_open(),
             Self::ReviewComments => {
                 active_schematic_editor(app) && state.project_lifecycle.is_open()
@@ -1737,6 +1739,7 @@ impl Command {
             Self::SelectionBulkEdit => {
                 crate::workbench::app::open_selection_bulk_edit_dialog(&mut app.state);
             }
+            Self::FindReplace => crate::workbench::app::open_find_replace(&mut app.state),
             Self::ConfigurationSets => {
                 crate::workbench::app::open_configuration_sets_dialog(&mut app.state);
             }

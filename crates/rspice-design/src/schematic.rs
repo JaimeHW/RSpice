@@ -18,6 +18,7 @@ pub mod device_descriptor;
 pub mod document;
 pub mod document_policy;
 pub mod documentation_shape;
+pub mod find_replace;
 pub mod generated_veriloga_catalog;
 pub mod ground_names;
 pub mod hierarchy;

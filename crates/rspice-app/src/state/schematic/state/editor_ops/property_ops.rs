@@ -6,6 +6,20 @@ use crate::state::{
 };
 
 impl SchematicState {
+    /// Make the changes a find and replace listed, as one undo step.
+    /// Returns how many texts changed, or why none could.
+    pub(crate) fn replace_text(
+        &mut self,
+        matches: &[rspice_design::schematic::find_replace::FindMatch],
+    ) -> Result<usize, String> {
+        if self.session.read_only {
+            return Err("The schematic is read-only.".to_owned());
+        }
+        let edit = self.design.replace_text(matches)?;
+        self.finish_document_edit(edit.committed);
+        Ok(edit.value)
+    }
+
     pub(crate) fn edit_net_label_properties(
         &mut self,
         expected: NetLabel,

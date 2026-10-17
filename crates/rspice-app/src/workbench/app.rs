@@ -227,6 +227,7 @@ pub(crate) use actions::veriloga_parameters::{
     undeclared_instance_parameters,
 };
 
+pub(crate) use dialogs::find_replace::{find_replace_matches, open_find_replace};
 pub(crate) use dialogs::placement::net_label::{
     open_net_label_placement, place_sequenced_net_label,
 };
@@ -941,6 +942,7 @@ impl RSpiceApp {
         self.render_hardcopy_dialog(ctx);
         self.render_object_properties_dialog(ctx);
         self.render_rename_selection_dialog(ctx);
+        self.render_find_replace_dialog(ctx);
         self.render_window_session_dialog(ctx);
         self.render_help_center_dialog(ctx);
         self.render_about_dialog(ctx);

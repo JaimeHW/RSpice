@@ -38,6 +38,7 @@ use super::{
     empty_navigator_row, panel_search, schematic_nav_row_indented_response,
 };
 
+mod find_matches;
 mod hierarchy_tree;
 mod shelf;
 
@@ -478,6 +479,7 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
     ScrollArea::vertical()
         .id_salt("workbench.design.navigator")
         .show(ui, |ui| {
+            find_matches::find_matches_section(ui, &mut app.state);
             for section in DESIGN_NAVIGATOR_SECTION_ORDER {
                 match section {
                     DesignNavigatorSection::Masters => {

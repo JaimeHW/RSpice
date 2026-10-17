@@ -1278,9 +1278,10 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::SelectAll => WorkbenchIcon::Grid,
         Command::RenameSelection => WorkbenchIcon::Label,
         Command::ObjectProperties | Command::SimulationOptions => WorkbenchIcon::Sliders,
-        Command::FindInDesign | Command::FindCodeDocument | Command::CommandPalette => {
-            WorkbenchIcon::Search
-        }
+        Command::FindInDesign
+        | Command::FindReplace
+        | Command::FindCodeDocument
+        | Command::CommandPalette => WorkbenchIcon::Search,
         Command::Preferences => WorkbenchIcon::Settings,
         Command::ZoomIn => WorkbenchIcon::ZoomIn,
         Command::ZoomOut => WorkbenchIcon::ZoomOut,
@@ -1565,6 +1566,9 @@ fn edit_menu(ui: &mut Ui, app: &mut RSpiceApp) {
             Command::FindInDesign
         },
     );
+    if !source {
+        command_item(ui, app, Command::FindReplace);
+    }
     menu_separator(ui);
     command_item(ui, app, Command::Preferences);
 }

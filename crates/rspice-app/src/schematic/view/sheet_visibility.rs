@@ -411,7 +411,7 @@ pub(super) fn active_sheet_has_objects(state: &AppState) -> bool {
 /// A cell view with two sheets: `active_ids` stay on the active Sheet 1 and
 /// `hidden_ids` belong to Sheet 2. Shared by the canvas modules' tests.
 #[cfg(test)]
-pub(super) fn two_sheet_state(active_ids: &[u64], hidden_ids: &[u64]) -> AppState {
+pub(crate) fn two_sheet_state(active_ids: &[u64], hidden_ids: &[u64]) -> AppState {
     use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
 
     let mut state = AppState::default();

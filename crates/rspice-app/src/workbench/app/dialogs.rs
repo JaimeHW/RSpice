@@ -22,6 +22,7 @@ pub(in crate::workbench) mod drawing_sheet_preview;
 pub(in crate::workbench) mod drawing_sheet_setup;
 pub(in crate::workbench) mod drawing_sheet_support;
 pub(in crate::workbench) mod engineering_table;
+pub(in crate::workbench) mod find_replace;
 pub(in crate::workbench) mod grid_snap_routing;
 pub(in crate::workbench) mod hardcopy;
 pub(in crate::workbench) mod help;

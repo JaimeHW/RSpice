@@ -6,6 +6,7 @@ use super::super::{
     clipboard_edit::{ClipboardPaste, PastedObjects},
     component::{Component, LibraryCellInstance},
     deletion::{DeletionSelection, ObjectDeletion},
+    find_replace::{self, FindField, FindMatch},
     interface_repair::{InstanceInterfaceRepair, RepairedInterface},
     replacement::{
         SchematicReplacementAuthority, SchematicReplacementError, SchematicReplacementImpact,
@@ -41,6 +42,27 @@ impl Schematic {
             value: pasted,
             committed,
         }))
+    }
+
+    /// Make the text changes a find and replace listed, as one undo step,
+    /// after proving every new name legal and every instance name unique.
+    /// Returns how many texts changed.
+    pub fn replace_text(&mut self, matches: &[FindMatch]) -> Result<DocumentEdit<usize>, String> {
+        if let Some(refusal) = find_replace::refusal(&self.document, matches) {
+            return Err(refusal);
+        }
+        self.history.begin(&self.document, "replace");
+        let changed = find_replace::replace_in_document(&mut self.document, matches);
+        if matches
+            .iter()
+            .any(|found| found.field == FindField::NetLabel)
+        {
+            self.invalidate_topology();
+        }
+        Ok(DocumentEdit {
+            value: changed,
+            committed: self.end_operation(),
+        })
     }
 
     pub fn delete_objects(

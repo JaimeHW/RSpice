@@ -349,6 +349,11 @@ const RENAME_SYMBOL: &[ShortcutBinding] = &[primary(
 )];
 const FIND_DESIGN: &[ShortcutBinding] =
     &[primary(chord(Key::F, true, false, false, "Ctrl+F"), ALL)];
+// A browser keeps Ctrl+H for its history, so there the menu reaches it.
+const FIND_REPLACE: &[ShortcutBinding] = &[primary(
+    chord(Key::H, true, false, false, "Ctrl+H"),
+    DESKTOP,
+)];
 // Ctrl+F in a focused source editor finds in that source; on a drawing it
 // finds in the design. As with Ctrl+D the focused surface decides.
 const FIND_CODE_DOCUMENT: &[ShortcutBinding] =
@@ -593,6 +598,7 @@ impl Command {
                 | Self::ConnectivityManager
                 | Self::DesignManagement
                 | Self::SelectionBulkEdit
+                | Self::FindReplace
                 | Self::ConfigurationSets
                 | Self::RuleSetup
                 | Self::ReviewComments
@@ -689,6 +695,7 @@ impl Command {
                 | Self::ConnectivityManager
                 | Self::DesignManagement
                 | Self::SelectionBulkEdit
+                | Self::FindReplace
                 | Self::ConfigurationSets
                 | Self::RuleSetup
                 | Self::ReviewComments
@@ -752,6 +759,7 @@ impl Command {
             | Self::ZoomOneToOne
             | Self::SelectTool => ShortcutContext::EditContext,
             Self::FindInDesign
+            | Self::FindReplace
             | Self::CycleGrid
             | Self::PlaceInstance
             | Self::PlaceWire
@@ -925,6 +933,7 @@ impl Command {
             Self::RenameSelection => RENAME_SELECTION,
             Self::ObjectProperties => OBJECT_PROPERTIES,
             Self::FindInDesign => FIND_DESIGN,
+            Self::FindReplace => FIND_REPLACE,
             Self::Preferences => PREFERENCES,
             Self::ZoomIn => ZOOM_IN,
             Self::ZoomOut => ZOOM_OUT,
