@@ -30,8 +30,9 @@ use crate::workbench::app_state::AppState;
 use rspice_design::schematic::document::SchematicDocument;
 use rspice_design::schematic::junction_edit::JunctionRule;
 
-/// Sequences the default test run checks.
-const DEFAULT_SEQUENCES: u64 = 500;
+/// Sequences the default test run checks, about 15 s alone in the dev
+/// profile. The full ten thousand take about seven minutes.
+const DEFAULT_SEQUENCES: u64 = 400;
 /// Edits in one sequence.
 const STEPS: usize = 12;
 /// Every coordinate an edit names is a multiple of this.
@@ -957,7 +958,6 @@ fn check_sequences(seeds: std::ops::Range<u64>) {
 }
 
 #[test]
-#[ignore = "finds defects fixed in the commits that follow"]
 fn random_edit_sequences_keep_sheets_dots_undo_and_wires_sound() {
     check_sequences(0..DEFAULT_SEQUENCES);
 }
