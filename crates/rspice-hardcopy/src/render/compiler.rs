@@ -448,24 +448,7 @@ impl<'a> SemanticSceneCompiler<'a> {
                     component_fill,
                 )?;
             }
-            let anchor = self.schematic_point(semantic.component.pos)?;
-            self.add_text(
-                anchor,
-                &semantic.component.name,
-                SceneFont::SansSemibold,
-                2_700,
-                component_stroke.color,
-            )?;
-            if !semantic.component.value.is_empty() {
-                let value_anchor = self.offset_scene_point(anchor, 0, 3_500)?;
-                self.add_text(
-                    value_anchor,
-                    &semantic.component.value,
-                    SceneFont::Sans,
-                    2_500,
-                    component_stroke.color,
-                )?;
-            }
+            self.instance_labels(semantic)?;
         }
 
         let annotation_stroke = self.mapped_stroke(
@@ -2315,4 +2298,5 @@ impl<'a> SemanticSceneCompiler<'a> {
 mod plot_grid;
 mod title_block;
 pub(super) use title_block::*;
+mod schematic_text;
 mod symbol_document;

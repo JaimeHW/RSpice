@@ -14,10 +14,12 @@ mod result_summary;
 mod result_view;
 mod retained_results;
 mod schematic;
+mod schematic_text;
 mod semantic;
 mod visualization;
 
 pub(crate) use geometry::authored_sheet_bounds;
+pub(crate) use schematic_text::{SchematicText, SchematicTextClass, instance_texts};
 
 pub use aggregation::resolve_hardcopy_source_set_with;
 use artifacts::validate_frozen_report_png;

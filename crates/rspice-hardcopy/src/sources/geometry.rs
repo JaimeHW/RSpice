@@ -74,6 +74,14 @@ impl BoundsAccumulator {
         self.include_i64(i64::from(point.x), i64::from(point.y));
     }
 
+    /// A world-unit box from the shared label layout, widened to whole
+    /// units so it holds every fraction of the text.
+    fn include_layout_rect(&mut self, rect: rspice_design::schematic::label_layout::LayoutRect) {
+        let whole = |value: f32| value as i64;
+        self.include_i64(whole(rect.min.x.floor()), whole(rect.min.y.floor()));
+        self.include_i64(whole(rect.max.x.ceil()), whole(rect.max.y.ceil()));
+    }
+
     fn include_i64(&mut self, x: i64, y: i64) {
         if self.initialized {
             self.min_x = self.min_x.min(x);
@@ -132,21 +140,11 @@ pub fn schematic_bounds(
             bounds.include(Point::new(min_x, min_y));
             bounds.include(Point::new(max_x, max_y));
         }
-        // Component labels are semantic document content and can extend past
-        // the body. The edge allowance covers the font ascent and short names;
-        // long labels add deterministic horizontal width.
-        let label_chars = component
-            .component
-            .name
-            .len()
-            .max(component.component.value.len());
-        let label_width = i64::try_from(label_chars)
-            .unwrap_or(i64::MAX)
-            .saturating_mul(2);
-        bounds.include_i64(
-            i64::from(component.component.pos.x).saturating_add(label_width),
-            i64::from(component.component.pos.y),
-        );
+        // A name or value stands outside the body, where the canvas's layout
+        // puts it, and the page holds all of it.
+        for text in super::instance_texts(component) {
+            bounds.include_layout_rect(text.bounds());
+        }
     }
     for wire in &schematic.wires {
         wire.points

@@ -5,6 +5,7 @@
 
 mod plot_overlay;
 mod provenance;
+mod schematic_labels;
 mod title_lettering;
 
 use lopdf::Document as ParsedPdf;
