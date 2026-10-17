@@ -893,7 +893,6 @@ pub(crate) struct DrawingSheetSetupState {
     /// in-progress text never blanks the preview or makes its layout jump.
     pub(crate) last_valid_format: SchematicSheetFormat,
     pub(crate) authority_error: Option<String>,
-    pub(crate) commit_error: Option<String>,
     pub(crate) pending_support: Option<DrawingSheetSupportRequest>,
     pub(crate) support_suspended: bool,
 }
@@ -919,7 +918,6 @@ impl Default for DrawingSheetSetupState {
             staged_project_title_values: None,
             staged_document_control: None,
             authority_error: None,
-            commit_error: None,
             pending_support: None,
             support_suspended: false,
         }
@@ -940,7 +938,6 @@ impl DrawingSheetSetupState {
         self.staged_project_title_values = None;
         self.staged_document_control = None;
         self.capture_restore_margins_from_draft();
-        self.commit_error = None;
     }
 
     /// Restore only the four page margins from the selected format authority.

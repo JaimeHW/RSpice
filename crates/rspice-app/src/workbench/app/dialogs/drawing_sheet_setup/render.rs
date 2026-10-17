@@ -166,13 +166,11 @@ impl RSpiceApp {
                     let setup = &mut self.state.dialogs.drawing_sheet_setup;
                     setup.open = false;
                     setup.support_suspended = true;
-                    setup.commit_error = None;
                 }
                 Err(error) => {
                     // Answered on the status bar: the surface has no banner,
                     // and a refused request must not fail silently.
-                    self.state.prompt(error.clone());
-                    self.state.dialogs.drawing_sheet_setup.commit_error = Some(error);
+                    self.state.prompt(error);
                 }
             }
             return;
@@ -183,11 +181,7 @@ impl RSpiceApp {
                 self.state.dialogs.drawing_sheet_setup.close();
             }
             DialogChoice::Primary => match apply_drawing_sheet_setup(self) {
-                Ok(message) => self.state.prompt(message),
-                Err(error) => {
-                    self.state.prompt(error.clone());
-                    self.state.dialogs.drawing_sheet_setup.commit_error = Some(error);
-                }
+                Ok(message) | Err(message) => self.state.prompt(message),
             },
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.state.dialogs.drawing_sheet_setup.close();
@@ -461,7 +455,6 @@ fn section_navigation(
             };
             if section_response.clicked() {
                 state.section = section;
-                state.commit_error = None;
             }
             ui.painter().hline(
                 rect.x_range(),
@@ -906,7 +899,6 @@ fn format_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fie
                 state.restore_margins = standard.default_margins();
             }
         }
-        state.commit_error = None;
     }
     ui.add_space(12.0);
 
@@ -1057,9 +1049,9 @@ fn display_units_field(ui: &mut Ui, state: &mut DrawingSheetSetupState) {
     if previous != state.draft.display_unit {
         let selected = state.draft.display_unit;
         state.draft.display_unit = previous;
-        if let Err(error) = state.draft.set_display_unit(selected) {
-            state.commit_error = Some(error);
-        }
+        // Refused only while a length field does not parse; that field is
+        // already marked where it is, and the unit stays as it was.
+        let _ = state.draft.set_display_unit(selected);
     }
 }
 

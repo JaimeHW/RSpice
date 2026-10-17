@@ -1396,7 +1396,6 @@ fn apply_title_block_fields(app: &mut RSpiceApp) -> Result<String, String> {
         setup.staged_document_control = (transaction.draft_document_control
             != transaction.saved_document_control)
             .then_some(transaction.draft_document_control);
-        setup.commit_error = None;
         return Ok(format!(
             "Title-block fields staged for {}. Apply Page Setup to save the drawing sheet.",
             transaction.sheet_name

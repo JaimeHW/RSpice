@@ -326,7 +326,6 @@ pub(crate) fn resume_drawing_sheet_setup_after_support(state: &mut AppState) -> 
         .default_format
         .clone();
     setup.authority_error = None;
-    setup.commit_error = None;
     setup.support_suspended = false;
     setup.open = true;
     Ok(())
