@@ -20,6 +20,11 @@ pub struct WireDrawing {
 
     /// Routing mode for orthogonal wires
     pub routing_mode: WireRoutingMode,
+
+    /// How many of `points` stood after each vertex the user placed, so
+    /// taking one back also takes the corner routed to reach it.
+    #[serde(skip)]
+    placed: Vec<usize>,
 }
 
 impl WireDrawing {
@@ -27,7 +32,25 @@ impl WireDrawing {
     pub fn start(&mut self, pos: Point) {
         self.clear();
         self.points.push(pos);
+        self.placed.push(self.points.len());
         self.active = true;
+    }
+
+    /// Take back the last vertex the user placed, with any corner routed to
+    /// reach it. Taking back the first point ends the route.
+    pub fn remove_last_point(&mut self) {
+        if !self.active {
+            return;
+        }
+        self.placed.pop();
+        let keep = match self.placed.last() {
+            Some(&placed) if placed < self.points.len() => placed,
+            _ => self.points.len().saturating_sub(1),
+        };
+        self.points.truncate(keep);
+        if self.points.is_empty() {
+            self.clear();
+        }
     }
 
     /// Add a distinct point and any nondegenerate routing corner.
@@ -50,6 +73,7 @@ impl WireDrawing {
             }
 
             self.points.push(pos);
+            self.placed.push(self.points.len());
         }
     }
 
@@ -122,6 +146,7 @@ impl WireDrawing {
     /// Clear the wire drawing state
     pub fn clear(&mut self) {
         self.points.clear();
+        self.placed.clear();
         self.active = false;
         self.preview_pos = None;
     }

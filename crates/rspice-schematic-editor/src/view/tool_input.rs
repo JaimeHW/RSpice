@@ -18,11 +18,16 @@ use super::{
     symbol_context::SchematicSymbolContext,
     viewport::Viewport,
 };
-use crate::session::{snap::SnapEngine, tool::Tool};
+use crate::session::{
+    snap::{SnapEngine, SnapTargetType},
+    tool::Tool,
+};
 
 /// Events captured before any tool action changes the editor in this frame.
 pub struct ToolInput {
     pub finish_route: bool,
+    /// Backspace on a live wire route: take back its last vertex.
+    pub remove_route_point: bool,
     pub shape_double_click: Option<Pos2>,
     pub primary_click: Option<Pos2>,
     pub select_double_click: Option<Pos2>,
@@ -32,20 +37,28 @@ impl ToolInput {
     pub fn read(ui: &Ui, response: &Response, tool: Tool, route_active: bool) -> Self {
         let shape_double_click = tool == Tool::DocumentationShape
             && response.double_clicked_by(egui::PointerButton::Primary);
-        let route_double_click = matches!(tool, Tool::Wire | Tool::Bus)
-            && response.double_clicked_by(egui::PointerButton::Primary)
-            && route_active;
+        // The route tools own a double-click whole. With a route live it ends
+        // the route. With none, the first click already ended one on a
+        // conductor, and the second must not start a new route there.
+        let conductor_double_click = matches!(tool, Tool::Wire | Tool::Bus)
+            && response.double_clicked_by(egui::PointerButton::Primary);
+        let route_double_click = conductor_double_click && route_active;
         let route_enter = response.has_focus()
             && route_active
             && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+        let remove_route_point = tool == Tool::Wire
+            && response.has_focus()
+            && route_active
+            && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace));
         Self {
             finish_route: route_double_click || route_enter,
+            remove_route_point,
             shape_double_click: shape_double_click
                 .then(|| response.interact_pointer_pos())
                 .flatten(),
             primary_click: (response.clicked_by(egui::PointerButton::Primary)
                 && !shape_double_click
-                && !route_double_click)
+                && !conductor_double_click)
                 .then(|| response.interact_pointer_pos())
                 .flatten(),
             select_double_click: (tool == Tool::Select
@@ -68,7 +81,9 @@ pub enum ToolPointerAction {
     Place(ComponentType, Point),
     Wire {
         position: Option<Point>,
-        finish_on_conductor: bool,
+        /// The click joins a conductor or lands on a pin, which ends a live
+        /// route there.
+        ends_route: bool,
     },
     Bus(Point),
     BusTap {
@@ -142,12 +157,19 @@ impl ToolPointerView<'_> {
                     viewport,
                     position,
                 );
-                let fallback = target_position();
+                let target = resolve_target_pointer(
+                    &self.design,
+                    self.snap_engine,
+                    symbols,
+                    viewport,
+                    position,
+                );
+                let on_pin = matches!(target.target_type(), Some(SnapTargetType::Terminal { .. }));
                 // A visual conductor owns the click. An unrepresentable exact
                 // attachment must not fall back to a disconnected grid point.
                 ToolPointerAction::Wire {
-                    position: hit.map_or(Some(fallback), |hit| hit.attachment),
-                    finish_on_conductor: hit.is_some(),
+                    position: hit.map_or(Some(target.snapped_position), |hit| hit.attachment),
+                    ends_route: hit.is_some() || on_pin,
                 }
             }
             Tool::Bus => ToolPointerAction::Bus(grid_position()),

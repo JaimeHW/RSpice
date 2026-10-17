@@ -58,7 +58,9 @@ mod tests {
     const WHOLE_DOCUMENT_OPERATIONS: &[&str] = &[
         "split_wires_at_t_junction",
         "split_wires_under_pins",
+        "connect_moved_pins",
         "merge_overlapping_wires",
+        "join_collinear_wires",
         "update_wire_junctions",
         "auto_place_junctions",
         "remove_orphan_junctions",
@@ -76,6 +78,7 @@ mod tests {
         "stretch_target",
         "stretch_target_resolved",
         "transform_selection",
+        "connect_pasted_selection",
     ];
 
     /// Where a production caller may open a scope: this module; the one

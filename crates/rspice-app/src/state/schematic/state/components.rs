@@ -57,10 +57,12 @@ impl SchematicState {
     }
 
     /// Turn or flip the whole selection about `pivot`. Unselected wires that
-    /// end on what moved follow it with square corners, a pin that lands
-    /// inside a wire splits it, and the junction policy tidies the result.
-    /// The caller owns the undo step and opens it before the sheet scope, so
-    /// the step's snapshot holds every sheet. Returns whether anything moved.
+    /// end on what moved follow it with square corners, a pin turned off a
+    /// pin it touched gets a square wire back to it, a pin that lands inside
+    /// a wire splits it, and the junction policy tidies the result. The
+    /// caller owns the undo step and opens it before the sheet scope, so the
+    /// step's snapshot holds every sheet and says where the pins stood.
+    /// Returns whether anything moved.
     pub fn transform_selection(
         &mut self,
         transform: SelectionTransform,
@@ -85,7 +87,7 @@ impl SchematicState {
             .document_policy
             .wire_junctions
             .automatic_junctions();
-        self.split_wires_under_pins(&selection.components, &mut terminal_points_for, scope);
+        self.connect_moved_pins(&selection.components, &mut terminal_points_for, scope);
         self.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope);
         true
     }

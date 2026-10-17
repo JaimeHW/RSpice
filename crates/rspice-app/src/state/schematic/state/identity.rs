@@ -52,31 +52,7 @@ impl SchematicState {
     /// This MUST be called after deserialization to prevent ID collisions
     pub fn recalculate_runtime_state(&mut self) {
         let repaired = self.design.repair_document();
-        self.repair_clipboard_after_load();
         self.remove_stale_runtime_references(&repaired);
-    }
-
-    pub(in crate::state::schematic) fn repair_clipboard_after_load(&mut self) {
-        self.session
-            .editor
-            .clipboard
-            .wires
-            .retain(|wire| wire.points.len() >= 2);
-        self.session
-            .editor
-            .clipboard
-            .buses
-            .retain(|bus| bus.validate().is_ok());
-        self.session
-            .editor
-            .clipboard
-            .documentation_shapes
-            .retain(|shape| shape.validate().is_ok());
-        self.session
-            .editor
-            .clipboard
-            .probes
-            .retain(|probe| probe.validate().is_ok());
     }
 
     pub(in crate::state::schematic) fn remove_stale_runtime_references(

@@ -34,7 +34,7 @@ use self::{
     wire::WireDrawing,
 };
 use rspice_design::schematic::{
-    clipboard::ClipboardData, document::SchematicDocument, rotation::Rotation, selection::Selection,
+    document::SchematicDocument, rotation::Rotation, selection::Selection,
 };
 use rspice_design_model::Point;
 
@@ -62,13 +62,6 @@ pub struct EditorSession {
 
     /// Pan offset in pixels - not part of undo history or saved files
     pub pan: (f64, f64),
-
-    /// Clipboard for copy/paste operations.
-    ///
-    /// Clipboard ownership is session-local. Persisting it in a `.rsch` file
-    /// made an unrelated document reopen with stale copied design objects and
-    /// could retain data that the author had never committed to the drawing.
-    pub clipboard: ClipboardData,
 
     /// Preview rotation for component placement (runtime interaction state).
     pub preview_rotation: Rotation,
@@ -166,7 +159,6 @@ impl Default for EditorSession {
             conductor_source: None,
             zoom: 1.0,
             pan: Default::default(),
-            clipboard: Default::default(),
             preview_rotation: Default::default(),
             preview_mirror_h: Default::default(),
             pending_library_cell: Default::default(),

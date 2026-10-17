@@ -185,16 +185,11 @@ mod tests {
     }
 
     #[test]
-    fn commit_is_one_undo_step_and_preserves_clipboard_identity_and_placement() {
+    fn commit_is_one_undo_step_and_preserves_identity_and_placement() {
+        // The clipboard belongs to the app, out of this state's reach
+        // (audit E-8), so there is no clipboard here to preserve.
         let mut state = selected_opamp();
         let authority = state.replacement_authority().unwrap();
-        state
-            .session
-            .editor
-            .clipboard
-            .components
-            .push(state.design.document().components[0].clone());
-        let clipboard = serde_json::to_value(&state.session.editor.clipboard).unwrap();
         let before = state.design.document().components[0].clone();
         let topology = state.topology_version();
 
@@ -206,10 +201,6 @@ mod tests {
         assert_eq!(after.id, before.id);
         assert_eq!(after.name, before.name);
         assert_eq!(after.pos, before.pos);
-        assert_eq!(
-            serde_json::to_value(&state.session.editor.clipboard).unwrap(),
-            clipboard
-        );
         assert_eq!(impact.component_id, before.id);
         assert_eq!(state.topology_version(), topology.wrapping_add(1));
         assert_eq!(state.undo_description(), Some("replace instance"));

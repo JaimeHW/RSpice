@@ -252,6 +252,58 @@ fn a_wire_attached_to_a_turned_part_keeps_square_corners() {
     );
 }
 
+/// R1 and R2 touch pin to pin with no wire: one node. Turning R2 took its
+/// pin off R1's and parted the node silently (audit W-C2). The turn now
+/// runs a square wire from the pin that stayed to the one that turned, in
+/// the turn's one undo step.
+#[test]
+fn turning_a_part_off_a_pin_it_touched_wires_the_two_pins() {
+    use crate::state::{Component, ComponentType, Point};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    let probe = Component::new(0, ComponentType::Resistor, Point::origin());
+    let left = probe.terminal_positions()[0].1;
+    let shared = probe.terminal_positions()[1].1;
+    let document = app.state.schematic.document_mut_for_test();
+    document.wires.clear();
+    document.components = vec![
+        Component::new(1, ComponentType::Resistor, Point::origin()),
+        Component::new(2, ComponentType::Resistor, shared - left),
+    ];
+    app.state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(2);
+    app.state.schematic.init_undo_history();
+
+    Command::RotateSelection.execute(&mut app);
+
+    let symbols = crate::schematic::view::schematic_symbol_context(&app.state);
+    let document = app.state.schematic.document();
+    let turned = document
+        .components
+        .iter()
+        .find(|component| component.id == 2)
+        .expect("R2");
+    let turned_pins = symbols.terminal_points(turned);
+    assert!(!turned_pins.contains(&shared), "R2 turned off R1's pin");
+    assert!(
+        document.wires.iter().any(|wire| {
+            let ends = [wire.points[0], *wire.points.last().expect("end")];
+            wire.is_orthogonal()
+                && ends.contains(&shared)
+                && turned_pins.iter().any(|pin| ends.contains(pin))
+        }),
+        "no square wire joins the two pins: {:?}",
+        document.wires
+    );
+    assert!(app.state.schematic.undo());
+    assert!(app.state.schematic.document().wires.is_empty());
+}
+
 /// Ctrl+R turns the selection clockwise and Ctrl+Shift+R counter-clockwise;
 /// Ctrl+M mirrors it horizontally and Ctrl+Shift+M vertically. No key turned
 /// a placed selection before, and there was no counter-clockwise turn.
@@ -551,16 +603,7 @@ fn delete_cut_and_duplicate_act_on_the_schematic_without_a_dialog() {
     Command::Cut.execute(&mut app);
     assert!(!app.state.dialogs.application_modal_open());
     assert_eq!(app.state.schematic.document().components.len(), 1);
-    assert_eq!(
-        app.state
-            .schematic
-            .session
-            .editor
-            .clipboard
-            .components
-            .len(),
-        1
-    );
+    assert_eq!(app.state.ui.schematic_clipboard.components.len(), 1);
 
     app.state
         .schematic
@@ -1278,4 +1321,322 @@ fn repairing_a_stale_instance_restores_its_x_line() {
         "the repaired instance emits again:\n{}",
         repaired.netlist
     );
+}
+
+/// A design app with `wires` on the canvas, the wire with id `copied`
+/// selected and copied, and the pointer over grid point `hover`.
+fn app_with_copied_wire(
+    wires: Vec<crate::state::Wire>,
+    copied: u64,
+    hover: (f64, f64),
+) -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    app.state.schematic.document_mut_for_test().wires = wires;
+    app.state.schematic.init_undo_history();
+    app.state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_wire(copied);
+    Command::Copy.execute(&mut app);
+    app.state.schematic.session.editor.selection.clear();
+    app.state.ui.canvas_hover = Some(hover);
+    app
+}
+
+/// Paste dropped its wires in and stopped: a pasted wire ending inside
+/// another made a T the netlister joins with no split and no dot. The
+/// paste now splits the wire it lands on and dots the T in the same undo
+/// step (audit W-9).
+#[test]
+fn a_pasted_wire_ending_inside_another_splits_it_and_dots_the_t() {
+    use crate::state::{Point, Wire};
+
+    let through = Wire::segment(1, Point::new(0, 100), Point::new(200, 100));
+    let stub = Wire::segment(2, Point::new(300, 0), Point::new(300, 50));
+    let mut app = app_with_copied_wire(vec![through.clone(), stub.clone()], 2, (10.0, 5.0));
+
+    Command::Paste.execute(&mut app);
+
+    let document = app.state.schematic.document();
+    let tee = Point::new(100, 100);
+    let ends_at_tee = document
+        .wires
+        .iter()
+        .flat_map(|wire| [wire.points[0], *wire.points.last().expect("end")])
+        .filter(|point| *point == tee)
+        .count();
+    assert_eq!(
+        ends_at_tee, 3,
+        "the through wire was not split: {:?}",
+        document.wires
+    );
+    assert!(
+        document
+            .junctions
+            .iter()
+            .any(|junction| junction.pos == tee),
+        "the T has no dot"
+    );
+
+    assert!(app.state.schematic.undo(), "the paste is one undo step");
+    let document = app.state.schematic.document();
+    assert_eq!(document.wires, vec![through, stub]);
+    assert!(document.junctions.is_empty());
+}
+
+/// A pasted part whose pin lands inside a wire owns a vertex there, as a
+/// placed or moved part does (audit W-9, with the pin rule of W-5).
+#[test]
+fn a_pasted_pin_landing_inside_a_wire_splits_it() {
+    use crate::state::{Component, ComponentType, Point, Wire};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    let part = Component::new(1, ComponentType::Resistor, Point::new(500, 500));
+    let left = part.terminal_positions()[0].1 - part.pos;
+    let rail = Wire::segment(2, Point::new(100, 0), Point::new(100, 200));
+    let document = app.state.schematic.document_mut_for_test();
+    document.components.push(part);
+    document.wires.push(rail);
+    app.state.schematic.init_undo_history();
+    app.state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_component(1);
+    Command::Copy.execute(&mut app);
+    app.state.schematic.session.editor.selection.clear();
+    let grid = f64::from(app.state.schematic.document().grid_size);
+    let target = Point::new(100 - left.x, 100 - left.y);
+    app.state.ui.canvas_hover = Some((f64::from(target.x) / grid, f64::from(target.y) / grid));
+
+    Command::Paste.execute(&mut app);
+
+    let document = app.state.schematic.document();
+    assert_eq!(document.components.len(), 2, "the part was pasted");
+    let pin = Point::new(100, 100);
+    let ends_at_pin = document
+        .wires
+        .iter()
+        .flat_map(|wire| [wire.points[0], *wire.points.last().expect("end")])
+        .filter(|point| *point == pin)
+        .count();
+    assert_eq!(
+        ends_at_pin, 2,
+        "the rail was not split: {:?}",
+        document.wires
+    );
+}
+
+/// Library `work` with cells `a` and `b`, each with a schematic view; `a`
+/// is open on the design canvas.
+fn app_with_two_cells() -> RSpiceApp {
+    use crate::state::{Cell, Library, View, ViewType};
+
+    let mut app = RSpiceApp::test_instance();
+    let mut library = Library::new("work");
+    for name in ["a", "b"] {
+        let mut cell = Cell::new(name);
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        library.add_cell(cell);
+    }
+    app.state.library_manager.add_library(library);
+    app.state
+        .open_workspace_view(crate::state::CellViewRef::new("work", "a", "schematic"));
+    app.state.workbench.activate(Workspace::Design);
+    app
+}
+
+/// Two inductors named L1 and L2 and a K1 coupling them, ids from `first`.
+fn coupled_pair(first: u64) -> Vec<crate::state::Component> {
+    use crate::state::{Component, ComponentType, Point};
+
+    let x = i32::try_from(first).expect("small id") * 100;
+    let mut l1 = Component::new(first, ComponentType::Inductor, Point::new(x, 0));
+    l1.name = "L1".to_owned();
+    let mut l2 = Component::new(first + 1, ComponentType::Inductor, Point::new(x, 100));
+    l2.name = "L2".to_owned();
+    let mut k1 = Component::new(
+        first + 2,
+        ComponentType::CoupledInductor,
+        Point::new(x + 50, 50),
+    );
+    k1.name = "K1".to_owned();
+    k1.params = "inductors=\"L1 L2\"".to_owned();
+    vec![l1, l2, k1]
+}
+
+/// The clipboard belonged to each cell's editor, so a copy made in one cell
+/// was gone once another cell opened, and Paste was disabled there. It
+/// belongs to the app now. Copy a coupled pair in cell A, open cell B,
+/// which has its own L1, L2 and K1, and paste: the copies take B's next
+/// free names and the new K couples the new pair (audit E-8).
+#[test]
+fn a_copy_in_one_cell_pastes_into_another_with_its_coupling() {
+    let mut app = app_with_two_cells();
+    app.state.schematic.document_mut_for_test().components = coupled_pair(1);
+    for id in [1, 2, 3] {
+        app.state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(id);
+    }
+    Command::Copy.execute(&mut app);
+
+    app.state
+        .open_workspace_view(crate::state::CellViewRef::new("work", "b", "schematic"));
+    app.state.workbench.activate(Workspace::Design);
+    app.state.schematic.document_mut_for_test().components = coupled_pair(11);
+    app.state.schematic.init_undo_history();
+    assert!(
+        Command::Paste.is_enabled(&app),
+        "a copy from cell A pastes here"
+    );
+
+    Command::Paste.execute(&mut app);
+
+    let document = app.state.schematic.document();
+    assert_eq!(document.components.len(), 6);
+    let pasted: Vec<_> = document
+        .components
+        .iter()
+        .filter(|component| ![11, 12, 13].contains(&component.id))
+        .collect();
+    let mut names: Vec<&str> = pasted
+        .iter()
+        .map(|component| component.name.as_str())
+        .collect();
+    names.sort_unstable();
+    assert_eq!(names, ["K2", "L3", "L4"]);
+    let coupling = pasted
+        .iter()
+        .find(|component| component.name == "K2")
+        .expect("K2");
+    assert!(
+        coupling.params.contains("L3") && coupling.params.contains("L4"),
+        "the pasted K couples {}",
+        coupling.params
+    );
+}
+
+/// Ctrl+Z pressed while a drag was still held undid the step before it, and
+/// the release then committed the drag against the snapshot taken before
+/// that undo: the undone edit came back as part of "drag selection" and the
+/// redo stack was lost (audit E-7). Undo and Redo now wait for the edit in
+/// progress, by menu, palette or key.
+#[test]
+fn undo_and_redo_wait_for_the_edit_in_progress() {
+    use crate::state::{ComponentType, Point};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    app.state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
+    let first = app
+        .state
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(0, 0));
+    app.state.schematic.reset_undo_history();
+    app.state.schematic.with_undo("place R2", |schematic| {
+        schematic.add_component(ComponentType::Resistor, Point::new(200, 0));
+    });
+    let carry = |schematic: &mut crate::state::SchematicState, to: Point| {
+        schematic
+            .document_mut_for_test()
+            .components
+            .iter_mut()
+            .find(|component| component.id == first)
+            .expect("R1")
+            .pos = to;
+    };
+    let position = |app: &RSpiceApp| {
+        app.state
+            .schematic
+            .document()
+            .components
+            .iter()
+            .find(|component| component.id == first)
+            .map(|component| component.pos)
+            .expect("R1")
+    };
+    let mid_drag = "finish or cancel the edit in progress first";
+
+    // R1 is picked up and carried while the mouse is held.
+    app.state.schematic.begin_operation("drag selection");
+    carry(&mut app.state.schematic, Point::new(0, 100));
+    assert_eq!(
+        Command::Undo.availability(&app),
+        CommandAvailability::Disabled(mid_drag)
+    );
+    Command::Undo.execute(&mut app);
+    app.execute_shortcut_command(Command::Undo);
+    assert_eq!(app.state.schematic.document().components.len(), 2);
+    assert!(app.state.schematic.has_pending_operation());
+
+    // The release commits the drag as its own step, and Undo takes back
+    // exactly that, then the placement before it.
+    assert!(app.state.schematic.end_operation());
+    assert_eq!(
+        Command::Undo.availability(&app),
+        CommandAvailability::Available
+    );
+    Command::Undo.execute(&mut app);
+    assert_eq!(position(&app), Point::new(0, 0));
+    assert_eq!(app.state.schematic.document().components.len(), 2);
+    Command::Undo.execute(&mut app);
+    assert_eq!(app.state.schematic.document().components.len(), 1);
+
+    // Redo waits the same way, and the redo stack survives the wait.
+    app.state.schematic.begin_operation("drag selection");
+    carry(&mut app.state.schematic, Point::new(0, 50));
+    assert_eq!(
+        Command::Redo.availability(&app),
+        CommandAvailability::Disabled(mid_drag)
+    );
+    Command::Redo.execute(&mut app);
+    assert_eq!(app.state.schematic.document().components.len(), 1);
+    assert!(app.state.schematic.cancel_operation());
+    assert_eq!(app.state.schematic.redo_description(), Some("place R2"));
+    Command::Redo.execute(&mut app);
+    assert_eq!(app.state.schematic.document().components.len(), 2);
+}
+
+/// Two wires drawn end to end on one line stayed two wires, with a vertex
+/// in the middle of a straight run, and there was no command to lay them as
+/// one (audit W-C5). Join collinear wires does, as one undo step.
+#[test]
+fn join_collinear_wires_lays_a_straight_run_as_one_wire_in_one_undo_step() {
+    use crate::state::{Point, Wire};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    let first = Wire::segment(1, Point::new(0, 0), Point::new(50, 0));
+    let second = Wire::segment(2, Point::new(50, 0), Point::new(100, 0));
+    let document = app.state.schematic.document_mut_for_test();
+    document.components.clear();
+    document.junctions.clear();
+    document.wires = vec![first.clone(), second.clone()];
+    app.state.schematic.init_undo_history();
+    assert!(Command::JoinCollinearWires.is_enabled(&app));
+
+    Command::JoinCollinearWires.execute(&mut app);
+
+    let wires = &app.state.schematic.document().wires;
+    assert_eq!(wires.len(), 1, "{wires:?}");
+    assert_eq!(
+        (wires[0].points[0], *wires[0].points.last().expect("end")),
+        (Point::new(0, 0), Point::new(100, 0))
+    );
+    assert!(app.state.schematic.undo());
+    assert_eq!(app.state.schematic.document().wires, vec![first, second]);
+    assert!(!app.state.schematic.can_undo(), "one step, not two");
 }

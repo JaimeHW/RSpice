@@ -718,6 +718,33 @@ fn the_plain_find_command_leaves_the_navigator_filter_alone() {
     assert!(app.state.workbench.focus_navigator_search);
 }
 
+/// Find raised the search flag but left the left dock on the Component shelf
+/// that Place instance had opened, so nothing took the focus, and the stale
+/// flag stole it later when the reader switched tabs (audit E-10). Find, by
+/// menu or by Ctrl+F, now brings the Navigator tab forward.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn find_brings_the_navigator_tab_forward_over_the_component_shelf() {
+    for by_key in [false, true] {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.activate(Workspace::Design);
+        app.state.workbench.design_panel = DesignPanel::ComponentShelf;
+
+        if by_key {
+            app.execute_shortcut_command(Command::FindInDesign);
+        } else {
+            Command::FindInDesign.execute(&mut app);
+        }
+
+        assert_eq!(
+            app.state.workbench.design_panel,
+            DesignPanel::Navigator,
+            "by key: {by_key}"
+        );
+        assert!(app.state.workbench.focus_navigator_search);
+    }
+}
+
 #[test]
 fn design_tabs_keep_the_mockup_horizontal_inset() {
     let outer = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(260.0, 33.0));

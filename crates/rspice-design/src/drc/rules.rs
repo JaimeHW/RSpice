@@ -288,6 +288,16 @@ impl DrcViolationType {
                 floor: ENGINE_REFUSES,
                 waivable: false,
             },
+            Self::ShortedPart => &DrcRule {
+                code: "DRC-SHORTED-PART",
+                title: "Shorted part",
+                explanation: "One wire runs on through both pins of a two-terminal part, so both \
+                    ends of the part are one node. The deck is built and runs, but the part does \
+                    nothing in it. Break the wire between the pins, or move the part off it.",
+                default_severity: DrcSeverity::Warning,
+                floor: ANY,
+                waivable: true,
+            },
             Self::UndrivenNet => &DrcRule {
                 code: "DRC-UNDRIVEN-NET",
                 title: "Undriven net",
@@ -522,6 +532,7 @@ mod tests {
             DrcViolationType::ShortedOutputs => "DRC-SHORTED-OUTPUTS",
             DrcViolationType::MissingGround => "DRC-MISSING-GROUND",
             DrcViolationType::SourceToSource => "DRC-SOURCE-TO-SOURCE",
+            DrcViolationType::ShortedPart => "DRC-SHORTED-PART",
             DrcViolationType::UndrivenNet => "DRC-UNDRIVEN-NET",
             DrcViolationType::GroundNotNodeZero => "DRC-GROUND-NOT-NODE-ZERO",
             DrcViolationType::SupplyTiedToGround => "DRC-SUPPLY-TIED-TO-GROUND",

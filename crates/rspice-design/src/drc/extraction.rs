@@ -1098,6 +1098,7 @@ fn append_connectivity_diagnostics(
             ConnectivityDiagnosticKind::DanglingBusTap => DrcViolationType::DanglingBusTap,
             ConnectivityDiagnosticKind::MixedBusTap => DrcViolationType::MixedBusTap,
             ConnectivityDiagnosticKind::AmbiguousCrossing => DrcViolationType::AmbiguousCrossing,
+            ConnectivityDiagnosticKind::ShortedPart => DrcViolationType::ShortedPart,
             // The checker raises the orphan label itself, under the gate that
             // governs attachment findings. A width mismatch is raised by
             // `append_vector_width_violations`, which is where the project's

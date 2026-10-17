@@ -52,6 +52,29 @@ impl SchematicState {
         changed
     }
 
+    /// Connect the pins of `components` where a move or turn left them: a
+    /// pin taken off a pin it touched gets a square wire back to it, and a
+    /// pin that landed inside a wire splits it. Where the parts stood comes
+    /// from the pending operation, which the caller opens first.
+    pub fn connect_moved_pins(
+        &mut self,
+        components: &std::collections::HashSet<u64>,
+        mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+        scope: &ActiveSheetTopology,
+    ) -> bool {
+        if self.session.read_only {
+            return false;
+        }
+        let bridged = self
+            .design
+            .bridge_broken_abutments(components, &mut terminal_points_for);
+        if bridged {
+            self.session.is_dirty = true;
+        }
+        let split = self.split_wires_under_pins(components, terminal_points_for, scope);
+        bridged || split
+    }
+
     /// Optimize all wires by removing collinear intermediate points
     pub fn optimize_all_wires(&mut self, _scope: &ActiveSheetTopology) {
         if self.design.optimize_all_wires() {
@@ -100,6 +123,7 @@ impl SchematicState {
     ) {
         self.remove_degenerate_segments(scope);
         self.optimize_all_wires(scope);
+        self.join_collinear_wires(scope);
         if automatic_junctions {
             self.update_wire_junctions(scope);
         } else {

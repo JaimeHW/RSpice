@@ -57,7 +57,6 @@ impl SchematicState {
             .editor
             .selection
             .select_only_component(candidate.instance_id);
-        parent.repair_clipboard_after_load();
         let mut child = Self::default();
         child.design =
             rspice_design::schematic::owned::Schematic::from_hierarchy_document(candidate.child);

@@ -1354,10 +1354,11 @@ fn drc_identity_tags_are_never_renumbered() {
         DrcViolationType::RecursiveInstantiation => 28,
         DrcViolationType::UnresolvedReference => 29,
         DrcViolationType::AmbiguousCrossing => 30,
-        DrcViolationType::UndrivenNet => 31,
-        DrcViolationType::GroundNotNodeZero => 32,
-        DrcViolationType::SupplyTiedToGround => 33,
-        DrcViolationType::UnusedCellView => 34,
+        DrcViolationType::ShortedPart => 31,
+        DrcViolationType::UndrivenNet => 32,
+        DrcViolationType::GroundNotNodeZero => 33,
+        DrcViolationType::SupplyTiedToGround => 34,
+        DrcViolationType::UnusedCellView => 35,
     };
     let types = [
         DrcViolationType::FloatingNode,
@@ -1390,6 +1391,7 @@ fn drc_identity_tags_are_never_renumbered() {
         DrcViolationType::RecursiveInstantiation,
         DrcViolationType::UnresolvedReference,
         DrcViolationType::AmbiguousCrossing,
+        DrcViolationType::ShortedPart,
         DrcViolationType::UndrivenNet,
         DrcViolationType::GroundNotNodeZero,
         DrcViolationType::SupplyTiedToGround,

@@ -187,14 +187,17 @@ fn catalog_of(entries: &[ContextEntry]) -> Vec<(&'static str, Option<Command>)> 
 /// instance's "Open Verilog-A view" in place of Descend, and the empty
 /// canvas's one verb, "New Verilog-A device…", in place of all three. The row
 /// and rule counts are the ones `rspice-schematic-editor`'s geometry test
-/// measures against the 528 px ceiling: 16 + 4 (517 px), 14 + 4 (463 px).
+/// measures against the 608 px ceiling: 19 + 4 (598 px), 17 + 4 (544 px).
 #[test]
 fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
     let head = [
         ("Object properties…", Some(Command::ObjectProperties)),
         ("Rotate 90°", Some(Command::RotateSelection)),
         ("Mirror", Some(Command::MirrorSelectionHorizontal)),
+        ("Mirror vertically", Some(Command::MirrorSelectionVertical)),
+        ("Cut selection", Some(Command::Cut)),
         ("Copy selection", Some(Command::Copy)),
+        ("Paste here", Some(Command::Paste)),
         ("Duplicate", Some(Command::Duplicate)),
         ("Delete", Some(Command::Delete)),
     ];
@@ -240,7 +243,7 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
         catalog_of(&canvas),
         menu(&[("New Verilog-A device…", Some(Command::NewVerilogADevice))])
     );
-    assert_eq!((catalog_of(&canvas).len(), separators_in(&canvas)), (14, 4));
+    assert_eq!((catalog_of(&canvas).len(), separators_in(&canvas)), (17, 4));
 
     // A schematic instance, and a wire: the master rows, Descend first.
     let mut resistor = AppState::default();
@@ -261,7 +264,7 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
         );
         assert_eq!(
             (catalog_of(&entries).len(), separators_in(&entries)),
-            (16, 4)
+            (19, 4)
         );
     }
 
@@ -274,7 +277,7 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
     );
     assert_eq!(
         (catalog_of(&entries).len(), separators_in(&entries)),
-        (16, 4)
+        (19, 4)
     );
 }
 
@@ -411,7 +414,7 @@ fn a_placed_source_gets_the_stimulus_verbs_its_standing_calls_for() {
         // is what the canvas menu acts on.
         for target in [ContextTarget::Component(7), ContextTarget::Canvas] {
             let entries = menu_entries(state, target);
-            assert!(labels_of(&entries).len() <= 16, "{target:?}");
+            assert!(labels_of(&entries).len() <= 19, "{target:?}");
             assert_eq!(separators_in(&entries), 5, "{target:?}");
         }
         let entries = menu_entries(state, ContextTarget::Component(7));
@@ -426,7 +429,7 @@ fn a_placed_source_gets_the_stimulus_verbs_its_standing_calls_for() {
             assert!(!labels.contains(&master_row), "{labels:?}");
         }
         assert_eq!(separators_in(&entries), 5);
-        assert!(labels.len() <= 16);
+        assert!(labels.len() <= 19);
         assert!(
             !matches!(entries.first(), Some(ContextEntry::Separator))
                 && !matches!(entries.last(), Some(ContextEntry::Separator))
@@ -1258,7 +1261,7 @@ fn render_the_per_target_context_menus_for_review() {
     ] {
         state.dialogs.interaction.context_target = Some((target, (0, 0)));
         // The popup's own frame and 286 px width, at the desktop row height.
-        let size = vec2(300.0, 540.0);
+        let size = vec2(300.0, 620.0);
         let canvas = crate::ui::raster::render(size, |ui, _| {
             let view = context_menu_view(&state, ui.ctx()).expect("a context target");
             let t = crate::ui::tokens::Tokens::get(ui.ctx());
@@ -1319,7 +1322,7 @@ fn copy_takes_no_wire_or_junction_from_another_sheet() {
         &symbol_context,
     );
 
-    let clipboard = &state.schematic.session.editor.clipboard;
+    let clipboard = &state.ui.schematic_clipboard;
     assert_eq!(clipboard.components.len(), 2);
     let mut copied: Vec<u64> = clipboard.wires.iter().map(|wire| wire.id).collect();
     copied.sort_unstable();
@@ -1328,5 +1331,156 @@ fn copy_takes_no_wire_or_junction_from_another_sheet() {
         clipboard.junctions.is_empty(),
         "Sheet 2's junction was copied: {:?}",
         clipboard.junctions
+    );
+}
+
+/// A paste on Sheet 1 joins its wire to Sheet 1's wiring only. Sheet 2 has
+/// a wire through the very point where the pasted wire ends: it keeps its
+/// id and points and gets no dot, while Sheet 1's wire there is split and
+/// dotted, and one undo takes the paste and its wiring back.
+#[test]
+fn a_paste_joins_wiring_on_its_own_sheet_only() {
+    use rspice_design::schematic::clipboard::ClipboardData;
+
+    let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[1], &[2]);
+    let here = Wire::segment(1, Point::new(0, 100), Point::new(200, 100));
+    let there = Wire::segment(2, Point::new(100, 0), Point::new(100, 200));
+    state.schematic.document_mut_for_test().wires = vec![here.clone(), there.clone()];
+    state.schematic.init_undo_history();
+    let stub = Wire::segment(9, Point::new(0, 0), Point::new(0, 50));
+    state.ui.schematic_clipboard =
+        ClipboardData::from_selection(Vec::new(), vec![stub], Vec::new());
+
+    assert_eq!(
+        state.paste_schematic_clipboard_at(Point::new(100, 50)),
+        Ok(true)
+    );
+
+    let document = state.schematic.document();
+    assert_eq!(
+        document.wires.iter().find(|wire| wire.id == 2),
+        Some(&there),
+        "Sheet 2's wire was touched"
+    );
+    let tee = Point::new(100, 100);
+    let sheet_one_ends = document
+        .wires
+        .iter()
+        .filter(|wire| wire.id != 2)
+        .flat_map(|wire| [wire.points[0], *wire.points.last().expect("end")])
+        .filter(|point| *point == tee)
+        .count();
+    assert_eq!(
+        sheet_one_ends, 3,
+        "Sheet 1's T was not split: {:?}",
+        document.wires
+    );
+    assert_eq!(
+        document
+            .junctions
+            .iter()
+            .filter(|junction| junction.pos == tee)
+            .count(),
+        1
+    );
+
+    assert!(state.schematic.undo());
+    assert_eq!(state.schematic.document().wires, vec![here, there]);
+    assert!(state.schematic.document().junctions.is_empty());
+}
+
+/// The canvas menu had Copy, Duplicate and Delete but no Cut, no Paste and
+/// no vertical mirror, so a reader working from the menu had to reach for
+/// keys to finish the job (audit E-9). Each row is offered on every target
+/// and runs its command: Cut takes the part onto the clipboard, Paste puts
+/// it back where the menu was opened, and Mirror vertically flips the
+/// selection top to bottom.
+#[test]
+fn cut_paste_and_mirror_vertically_rows_run_their_commands() {
+    use crate::schematic::view::selection_transform::SelectionTransform;
+
+    let mut state = AppState::default();
+    state.schematic.document_mut_for_test().components.clear();
+    state.schematic.document_mut_for_test().wires.clear();
+    let mut part = Component::new(41, ComponentType::Resistor, Point::new(20, 30));
+    part.name = "R1".to_owned();
+    state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(part);
+    state.sync_active_schematic_to_workspace();
+    state.schematic.init_undo_history();
+    state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(41);
+    let symbol_context = schematic_symbol_context(&state);
+
+    for target in [ContextTarget::Component(41), ContextTarget::Canvas] {
+        let actions: Vec<ContextAction> = menu_entries(&state, target)
+            .iter()
+            .filter_map(|entry| match entry {
+                ContextEntry::Command(command) => Some(command.action),
+                ContextEntry::Separator => None,
+            })
+            .collect();
+        for action in [
+            ContextAction::Cut,
+            ContextAction::Paste,
+            ContextAction::MirrorVertical,
+        ] {
+            assert!(actions.contains(&action), "{target:?} lacks {action:?}");
+        }
+    }
+    assert!(action_availability(ContextAction::Cut, &state).0);
+    assert!(
+        !action_availability(ContextAction::Paste, &state).0,
+        "nothing has been copied yet"
+    );
+
+    execute_context_action(
+        ContextAction::Cut,
+        &mut state,
+        Point::origin(),
+        &symbol_context,
+    );
+    assert!(state.schematic.document().components.is_empty());
+    assert_eq!(state.ui.schematic_clipboard.components.len(), 1);
+    assert!(action_availability(ContextAction::Paste, &state).0);
+
+    let click = Point::new(200, 100);
+    let offset = click - state.ui.schematic_clipboard.origin;
+    execute_context_action(ContextAction::Paste, &mut state, click, &symbol_context);
+    let pasted = state.schematic.document().components.clone();
+    assert_eq!(pasted.len(), 1);
+    assert_eq!(pasted[0].pos, Point::new(20, 30) + offset);
+    assert!(
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .has_component(pasted[0].id)
+    );
+
+    assert!(action_availability(ContextAction::MirrorVertical, &state).0);
+    execute_context_action(
+        ContextAction::MirrorVertical,
+        &mut state,
+        click,
+        &symbol_context,
+    );
+    let mirrored = &state.schematic.document().components[0];
+    assert_ne!(
+        (mirrored.mirror_v, mirrored.mirror_h, mirrored.rotation),
+        (pasted[0].mirror_v, pasted[0].mirror_h, pasted[0].rotation),
+        "the part was not flipped"
+    );
+    assert_eq!(
+        state.schematic.undo_description(),
+        Some(SelectionTransform::MirrorVertical.description())
     );
 }

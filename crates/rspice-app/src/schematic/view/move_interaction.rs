@@ -4,7 +4,7 @@ use super::{
     SchematicSymbolContext, requests::editor_request_source,
     sheet_visibility::with_active_wire_topology, viewport::Viewport,
 };
-use crate::state::{Point, Tool};
+use crate::state::{Component, MoveSelectionMode, Point, Tool};
 use crate::workbench::{
     app::{armed_move_selection_authority, cancel_armed_move_selection},
     app_state::AppState,
@@ -112,12 +112,15 @@ fn commit_armed_move_selection(state: &mut AppState, symbol_context: &SchematicS
                 .wire_junctions
                 .automatic_junctions();
             // A pin moved inside a wire is connected there and owns a vertex.
+            // A pin moved off a pin it touched keeps the connection with a
+            // wire, unless the user asked for connections to break.
             let moved = schematic.session.editor.selection.components.clone();
-            schematic.split_wires_under_pins(
-                &moved,
-                |component| symbol_context.terminal_points(component),
-                scope,
-            );
+            let terminal_points = |component: &Component| symbol_context.terminal_points(component);
+            if mode == MoveSelectionMode::BreakConnections {
+                schematic.split_wires_under_pins(&moved, terminal_points, scope);
+            } else {
+                schematic.connect_moved_pins(&moved, terminal_points, scope);
+            }
             schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope);
         }
         movement
@@ -304,6 +307,80 @@ mod tests {
             Point::new(0, 10)
         );
         assert_eq!(state.schematic.document().wires, vec![hidden]);
+    }
+
+    /// R1 (id 1) at the origin and R2 (id 2) touching it pin to pin on its
+    /// right, with no wire. Returns the pin they share.
+    fn abutting_resistors(state: &mut AppState) -> Point {
+        let probe = Component::new(0, ComponentType::Resistor, Point::origin());
+        let left = probe.terminal_positions()[0].1;
+        let right = probe.terminal_positions()[1].1;
+        let pitch = Point::new(right.x - left.x, right.y - left.y);
+        state.schematic.document_mut_for_test().components.extend([
+            Component::new(1, ComponentType::Resistor, Point::origin()),
+            Component::new(2, ComponentType::Resistor, pitch),
+        ]);
+        right
+    }
+
+    /// Two parts touching pin to pin are one node with no wire. Moving one
+    /// off the other keeps them one node: a square wire runs from the pin
+    /// that stayed to the pin that moved, in the move's one undo step.
+    #[test]
+    fn moving_a_part_off_a_pin_it_touched_wires_the_two_pins() {
+        let mut state = AppState::default();
+        let pin = abutting_resistors(&mut state);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(2);
+        state.schematic.init_undo_history();
+        arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
+        state.dialogs.move_selection.canvas.preview_delta = Point::new(30, 20);
+        let symbols = schematic_symbol_context(&state);
+
+        commit_armed_move_selection(&mut state, &symbols);
+
+        let moved = Point::new(pin.x + 30, pin.y + 20);
+        let wires = &state.schematic.document().wires;
+        assert!(
+            wires.iter().any(|wire| wire.is_orthogonal()
+                && wire.points.first() == Some(&pin)
+                && wire.points.last() == Some(&moved)),
+            "{wires:?}"
+        );
+        assert!(state.schematic.undo());
+        assert!(state.schematic.document().wires.is_empty());
+    }
+
+    /// The part R2 touched is on Sheet 2. Moving R2 on Sheet 1 wires
+    /// nothing back to it: the two never touched on one page.
+    #[test]
+    fn moving_a_part_off_another_sheets_pin_draws_no_wire() {
+        let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[2], &[1]);
+        abutting_resistors(&mut state);
+        let start = state.schematic.document().components[1].pos;
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(2);
+        state.schematic.init_undo_history();
+        arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
+        state.dialogs.move_selection.canvas.preview_delta = Point::new(30, 20);
+        let symbols = schematic_symbol_context(&state);
+
+        commit_armed_move_selection(&mut state, &symbols);
+
+        assert_eq!(
+            state.schematic.document().components[1].pos,
+            Point::new(start.x + 30, start.y + 20),
+            "the move ran"
+        );
+        assert!(state.schematic.document().wires.is_empty());
     }
 
     /// The preview shows what the commit will do, so it runs with the other

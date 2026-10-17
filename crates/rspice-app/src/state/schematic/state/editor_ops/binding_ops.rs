@@ -44,7 +44,6 @@ impl SchematicState {
         view: Option<&str>,
     ) {
         let repaired = self.design.remove_master_placements(library, cell, view);
-        self.repair_clipboard_after_load();
         self.remove_stale_runtime_references(&repaired);
         self.session.is_dirty = true;
     }

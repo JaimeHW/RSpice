@@ -125,6 +125,9 @@ pub enum DrcViolationType {
     /// Independent voltage sources that close a loop among themselves, which
     /// leaves the loop's current undetermined.
     SourceToSource,
+    /// One wire runs through both pins of a two-terminal part, so the part
+    /// is shorted out of the circuit.
+    ShortedPart,
     /// A node that joins declared inputs and nothing that drives them.
     UndrivenNet,
     /// A ground label whose net took another name — an interface port's, an
@@ -194,7 +197,7 @@ impl DrcViolationType {
     /// The array's fixed length does not make it exhaustive — a variant added
     /// to the enum and not here still compiles — so a test in `rules` holds it
     /// to the variants serde's derive declares.
-    pub const ALL: [Self; 34] = [
+    pub const ALL: [Self; 35] = [
         Self::FloatingNode,
         Self::UnconnectedPin,
         Self::UndrivenInput,
@@ -213,6 +216,7 @@ impl DrcViolationType {
         Self::ShortedOutputs,
         Self::MissingGround,
         Self::SourceToSource,
+        Self::ShortedPart,
         Self::UndrivenNet,
         Self::GroundNotNodeZero,
         Self::SupplyTiedToGround,
@@ -252,6 +256,7 @@ impl DrcViolationType {
             Self::ShortedOutputs
             | Self::MissingGround
             | Self::SourceToSource
+            | Self::ShortedPart
             | Self::UndrivenNet
             | Self::GroundNotNodeZero
             | Self::SupplyTiedToGround => DrcRuleCategory::Electrical,
@@ -341,6 +346,7 @@ impl DrcViolationType {
             Self::UnusedCellView => "Cellview is not reached from the simulation root",
             Self::MissingGround => "Circuit has no ground reference (node 0)",
             Self::SourceToSource => "Voltage sources form a closed loop",
+            Self::ShortedPart => "One wire runs through both pins of a part",
             Self::DuplicateName => "Multiple components have the same name",
             Self::EmptyName => "Component has no reference designator",
             Self::InvalidName => "Component name contains invalid characters",
@@ -401,6 +407,7 @@ impl DrcViolationType {
             Self::SourceToSource => {
                 "Put a series element in the loop, or remove one of its sources"
             }
+            Self::ShortedPart => "Break the wire between the pins, or move the part off it",
             Self::DuplicateName => "Rename components to have unique identifiers",
             Self::EmptyName => "Assign a reference designator to the component",
             Self::InvalidName => "Use only alphanumeric characters and underscores",

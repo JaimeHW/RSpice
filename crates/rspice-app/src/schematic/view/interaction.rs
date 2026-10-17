@@ -101,6 +101,10 @@ pub(super) fn handle_tool_interactions(
         finish_active_route(ui, state);
         return;
     }
+    if input.remove_route_point {
+        state.schematic.retract_wire();
+        return;
+    }
 
     if current_tool == Tool::DocumentationShape
         && let Some(transition) = documentation_shape_input::pointer_motion(
@@ -142,11 +146,11 @@ pub(super) fn handle_tool_interactions(
             }
             ToolPointerAction::Wire {
                 position,
-                finish_on_conductor,
+                ends_route,
             } => match position {
                 Some(wire_pos) if state.schematic.session.editor.wire_drawing.active => {
                     state.schematic.extend_wire(wire_pos);
-                    if finish_on_conductor {
+                    if ends_route {
                         let _ = finish_wire_on_active_sheet(state);
                     }
                 }

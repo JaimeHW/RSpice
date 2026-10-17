@@ -1558,7 +1558,7 @@ fn row_icon(entry: &PaletteEntry) -> Icon {
         };
     };
     match command {
-        Command::PlaceWire => Icon::Wire,
+        Command::PlaceWire | Command::JoinCollinearWires => Icon::Wire,
         Command::PlaceBus => Icon::Bus,
         Command::PlaceBusTap => Icon::Bus,
         Command::PlaceJunction => Icon::Grid,

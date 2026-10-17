@@ -63,25 +63,16 @@ fn preview_is_exact_and_does_not_mutate_any_live_runtime_state() {
         state.session.editor.selection,
         before.session.editor.selection
     );
-    assert_eq!(
-        state.session.editor.clipboard.count(),
-        before.session.editor.clipboard.count()
-    );
     assert_eq!(state.session.is_dirty, before.session.is_dirty);
     assert_eq!(state.topology_version(), before.topology_version());
     assert!(!state.can_undo());
 }
 
 #[test]
-fn linear_commit_matches_preview_preserves_clipboard_and_undoes_once() {
+fn linear_commit_matches_preview_and_undoes_once() {
+    // The clipboard belongs to the app, out of this state's reach (audit
+    // E-8), so there is no clipboard here to preserve.
     let mut state = selected_resistor();
-    state
-        .session
-        .editor
-        .clipboard
-        .net_labels
-        .push(NetLabel::new(9_999, Point::new(5, 5), "clipboard_guard"));
-    let clipboard = state.session.editor.clipboard.clone();
     let topology = state.topology_version();
     let plan = plan(
         SchematicArrayKind::Linear,
@@ -97,14 +88,6 @@ fn linear_commit_matches_preview_preserves_clipboard_and_undoes_once() {
     assert_eq!(
         &state.design.document().components[1..],
         preview.components()
-    );
-    assert_eq!(
-        state.session.editor.clipboard.components,
-        clipboard.components
-    );
-    assert_eq!(
-        state.session.editor.clipboard.net_labels,
-        clipboard.net_labels
     );
     assert_eq!(state.topology_version(), topology.wrapping_add(1));
     assert_eq!(state.undo_description(), Some("create array"));

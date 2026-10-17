@@ -2024,3 +2024,72 @@ fn a_label_on_an_unmarked_crossing_is_an_error_marked_at_the_crossing() {
         DrcLocation::Point { x: 0.0, y: 500.0 }
     );
 }
+
+/// A capacitor beside the grounded resistor, and the line through its two
+/// pins, reaching one pin-pitch past each.
+fn capacitor_on_its_own_line() -> (SchematicDocument, Point, Point, Point, Point) {
+    let mut top = grounded_resistor();
+    let capacitor =
+        Component::new(3, ComponentType::Capacitor, Point::new(400, 0)).with_name_value("C1", "1n");
+    let first = terminal_positions_with_hierarchy(&capacitor, None)[0].1;
+    let second = terminal_positions_with_hierarchy(&capacitor, None)[1].1;
+    let before = Point::new(2 * first.x - second.x, 2 * first.y - second.y);
+    let after = Point::new(2 * second.x - first.x, 2 * second.y - first.y);
+    top.components.push(capacitor);
+    (top, before, first, second, after)
+}
+
+fn shorted_parts(top: &SchematicDocument) -> Vec<DrcViolation> {
+    let views = buffers([]);
+    let hierarchy = HierarchySource::from_buffers(&views);
+    let result = run_check_with_hierarchy(top, &hierarchy, connectivity_only());
+    of_type(&result, DrcViolationType::ShortedPart)
+        .into_iter()
+        .cloned()
+        .collect()
+}
+
+/// A part dropped onto a wire has one conductor through both pins, so the
+/// deck sees both its ends on one node. The check warns at the part.
+#[test]
+fn a_part_with_one_wire_running_through_both_pins_is_shorted() {
+    let (mut top, before, _, _, after) = capacitor_on_its_own_line();
+    assert_eq!(
+        shorted_parts(&top),
+        Vec::new(),
+        "a part on its own is not shorted"
+    );
+
+    top.wires.push(Wire::segment(20, before, after));
+    let shorted = shorted_parts(&top);
+
+    assert_eq!(shorted.len(), 1, "{shorted:?}");
+    assert_eq!(shorted[0].severity, DrcSeverity::Warning);
+    assert_eq!(
+        shorted[0].location,
+        DrcLocation::Component {
+            id: 3,
+            name: "C1".to_owned()
+        }
+    );
+}
+
+/// Placement splits a wire at the pins it lands on. The piece left between
+/// the pins still shorts the part; the pieces outside do not.
+#[test]
+fn the_piece_of_a_split_wire_between_the_pins_shorts_the_part() {
+    let (mut top, before, first, second, after) = capacitor_on_its_own_line();
+    top.wires.extend([
+        Wire::segment(20, before, first),
+        Wire::segment(21, second, after),
+    ]);
+    assert_eq!(
+        shorted_parts(&top),
+        Vec::new(),
+        "a wire on each pin is a wired part"
+    );
+
+    top.wires.push(Wire::segment(22, first, second));
+
+    assert_eq!(shorted_parts(&top).len(), 1);
+}

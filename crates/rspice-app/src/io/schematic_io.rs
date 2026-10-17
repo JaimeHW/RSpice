@@ -629,7 +629,7 @@ mod tests {
             .editor
             .selection
             .select_only_component(component_id);
-        schematic.copy_selection();
+        let copied = schematic.copy_selection();
         schematic
             .session
             .editor
@@ -645,7 +645,9 @@ mod tests {
 
         let selection = serde_json::to_value(&schematic.session.editor.selection).unwrap();
         let wire_drawing = serde_json::to_value(&schematic.session.editor.wire_drawing).unwrap();
-        let clipboard = serde_json::to_value(&schematic.session.editor.clipboard).unwrap();
+        // Older builds kept the clipboard in the editor session and could
+        // write it into the file.
+        let clipboard = serde_json::to_value(&copied).unwrap();
         let preview_rotation =
             serde_json::to_value(schematic.session.editor.preview_rotation).unwrap();
         let json = serialize_schematic_file(&SchematicFile::new(schematic)).unwrap();
@@ -680,7 +682,6 @@ mod tests {
 
         let loaded = load_schematic_text(&legacy.to_string(), None).unwrap();
         assert!(loaded.session.editor.selection.is_empty());
-        assert!(loaded.session.editor.clipboard.is_empty());
         assert!(!loaded.session.editor.wire_drawing.active);
         assert!(loaded.session.editor.wire_drawing.points.is_empty());
         assert_eq!(loaded.session.editor.wire_drawing.preview_pos, None);
@@ -754,12 +755,10 @@ mod tests {
             .editor
             .selection
             .select_only_design_note(93);
-        schematic.copy_selection();
-        assert_eq!(schematic.session.editor.clipboard.design_notes.len(), 1);
+        assert_eq!(schematic.copy_selection().design_notes.len(), 1);
         let json = serialize_schematic_file(&SchematicFile::new(schematic)).unwrap();
         let loaded = load_schematic_text(&json, None).unwrap();
         assert_eq!(loaded.document().design_notes, notes);
-        assert!(loaded.session.editor.clipboard.design_notes.is_empty());
 
         let mut legacy: serde_json::Value = serde_json::from_str(&json).unwrap();
         legacy["schematic"]
@@ -901,18 +900,6 @@ mod tests {
             .document_mut_for_test()
             .wires
             .push(Wire::new(100, vec![Point::new(0, 0), Point::new(20, 0)]));
-        original
-            .session
-            .editor
-            .clipboard
-            .wires
-            .push(Wire::new(101, vec![Point::new(7, 7)]));
-        original
-            .session
-            .editor
-            .clipboard
-            .wires
-            .push(Wire::new(102, vec![Point::new(10, 10), Point::new(20, 10)]));
 
         original
             .session
@@ -939,7 +926,6 @@ mod tests {
 
         assert_eq!(loaded.document().wires.len(), 1);
         assert_eq!(loaded.document().wires[0].id, 100);
-        assert!(loaded.session.editor.clipboard.is_empty());
         assert!(loaded.session.editor.selection.is_empty());
         assert!(
             loaded

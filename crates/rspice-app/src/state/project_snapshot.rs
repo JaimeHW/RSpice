@@ -185,7 +185,6 @@ impl rspice_project::SnapshotSessions for SnapshotSessionCapture<'_> {
             .or_default();
         session.editor.selection = Default::default();
         session.editor.wire_drawing = Default::default();
-        session.editor.clipboard = Default::default();
         session.editor.preview_rotation = Default::default();
         session.editor.preview_mirror_h = false;
         session.is_dirty = false;

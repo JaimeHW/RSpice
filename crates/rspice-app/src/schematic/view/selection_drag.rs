@@ -197,8 +197,10 @@ fn apply(
             let moved = state.schematic.session.editor.selection.components.clone();
             with_active_wire_topology(state, |schematic, scope| {
                 // A pin dropped inside a wire is connected there; the vertex
-                // it gets is what lets the next move carry the wire.
-                schematic.split_wires_under_pins(
+                // it gets is what lets the next move carry the wire. A pin
+                // dragged off a pin it touched keeps the connection with a
+                // wire.
+                schematic.connect_moved_pins(
                     &moved,
                     |component| symbols.terminal_points(component),
                     scope,
@@ -434,6 +436,70 @@ mod tests {
         assert_eq!(
             state.schematic.document().wires[0].points,
             vec![moved, pin, far]
+        );
+    }
+
+    /// A diagonal drag toward the wire's far end turns the wire once, under
+    /// the moved pin, and runs on along its old line. It does not reach back
+    /// to where the pin was and double over itself in a hook.
+    #[test]
+    fn a_diagonal_drag_toward_the_far_end_leaves_no_hook() {
+        let ctx = egui::Context::default();
+        let mut state = AppState::default();
+        let (target, pin, far) = resistor_wired_right(&mut state);
+        let symbols = super::super::schematic_symbol_context(&state);
+
+        drag_through(
+            &mut state,
+            &ctx,
+            &symbols,
+            target,
+            Point::origin(),
+            &[Point::new(10, 10), Point::new(30, 20)],
+        );
+
+        let moved = Point::new(pin.x + 30, pin.y + 20);
+        assert_eq!(
+            state.schematic.document().wires[0].points,
+            vec![moved, Point::new(moved.x, pin.y), far]
+        );
+    }
+
+    /// Two parts touching pin to pin are one node with no wire. Dragging one
+    /// off the other keeps them one node with a square wire from the pin
+    /// that stayed to the pin that moved.
+    #[test]
+    fn dragging_a_part_off_a_pin_it_touched_wires_the_two_pins() {
+        let ctx = egui::Context::default();
+        let mut state = AppState::default();
+        state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::origin());
+        let pin = state.schematic.document().components[0].terminal_positions()[1].1;
+        let left = state.schematic.document().components[0].terminal_positions()[0].1;
+        let pitch = Point::new(pin.x - left.x, pin.y - left.y);
+        let right = state
+            .schematic
+            .add_component(ComponentType::Resistor, pitch);
+        state.schematic.init_undo_history();
+        let symbols = super::super::schematic_symbol_context(&state);
+
+        drag_through(
+            &mut state,
+            &ctx,
+            &symbols,
+            PointerTarget::Component(right),
+            pitch,
+            &[Point::new(10, 10), Point::new(30, 20)],
+        );
+
+        let moved = Point::new(pin.x + 30, pin.y + 20);
+        let wires = &state.schematic.document().wires;
+        assert!(
+            wires.iter().any(|wire| wire.is_orthogonal()
+                && wire.points.first() == Some(&pin)
+                && wire.points.last() == Some(&moved)),
+            "{wires:?}"
         );
     }
 

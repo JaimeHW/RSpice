@@ -220,13 +220,33 @@ impl RSpiceApp {
         false
     }
 
+    /// Whether the schematic is in the middle of an edit (a drag still held,
+    /// a move still floating). A history step taken then would be folded
+    /// into that edit's undo record when it lands, so it is refused, with a
+    /// line saying why.
+    fn history_waits_for_the_edit_in_progress(&mut self, step: &str) -> bool {
+        if !self.state.schematic.has_pending_operation() {
+            return false;
+        }
+        self.state.prompt(format!(
+            "Finish or cancel the edit in progress before {step}."
+        ));
+        true
+    }
+
     pub(crate) fn action_edit_undo(&mut self) {
+        if self.history_waits_for_the_edit_in_progress("undoing") {
+            return;
+        }
         let waivers = self.state.stored_waivers();
         self.step_undo();
         self.after_history_step(&waivers);
     }
 
     pub(crate) fn action_edit_redo(&mut self) {
+        if self.history_waits_for_the_edit_in_progress("redoing") {
+            return;
+        }
         let waivers = self.state.stored_waivers();
         self.step_redo();
         self.after_history_step(&waivers);
@@ -317,7 +337,7 @@ impl RSpiceApp {
 
     pub(in crate::workbench) fn action_edit_paste(&mut self) {
         let anchor = self.state.schematic_paste_anchor();
-        let message = match self.state.schematic.paste_at_checked(anchor) {
+        let message = match self.state.paste_schematic_clipboard_at(anchor) {
             Ok(true) => return,
             Ok(false) => "Paste could not be completed at the current canvas target".to_owned(),
             Err(reason) => reason,

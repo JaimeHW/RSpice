@@ -88,6 +88,12 @@ impl SchematicState {
         }
     }
 
+    /// Take back the draft's last placed vertex. The route ends, with nothing
+    /// drawn, when its first point goes.
+    pub fn retract_wire(&mut self) {
+        self.session.editor.wire_drawing.remove_last_point();
+    }
+
     /// Finish drawing the current wire
     ///
     /// Implements professional EDA behavior:
@@ -221,6 +227,21 @@ impl SchematicState {
             return false;
         }
         let changed = self.design.merge_collinear_wires(Some(seeds), false);
+        if changed {
+            self.session.is_dirty = true;
+        }
+        changed
+    }
+
+    /// Join Collinear Wires: lay every pair of wires that overlap on one
+    /// line, or meet end to end on one with nothing else at the meeting
+    /// point, as one wire. A point where a pin, a dot, a label, a tap or a
+    /// third wire meets them stays a vertex.
+    pub fn join_collinear_wires(&mut self, _scope: &ActiveSheetTopology) -> bool {
+        if self.session.read_only {
+            return false;
+        }
+        let changed = self.design.merge_collinear_wires(None, true);
         if changed {
             self.session.is_dirty = true;
         }
@@ -404,5 +425,32 @@ mod tests {
         assert!(!schematic.can_undo());
         assert!(schematic.design.document().wires.is_empty());
         assert!(!schematic.session.is_dirty);
+    }
+
+    /// Cleanup lays two wires that meet end to end on one line, with nothing
+    /// else at the meeting point, as one wire. Where a third wire meets them
+    /// they stay apart, so the T keeps its vertex.
+    #[test]
+    fn cleanup_joins_wires_meeting_end_to_end_on_one_line() {
+        let mut schematic = SchematicState::default();
+        schematic.design.document_mut_for_test().wires = vec![
+            Wire::segment(1, Point::new(0, 0), Point::new(40, 0)),
+            Wire::segment(2, Point::new(40, 0), Point::new(100, 0)),
+            Wire::segment(3, Point::new(100, 0), Point::new(160, 0)),
+            Wire::segment(4, Point::new(100, 0), Point::new(100, 60)),
+        ];
+
+        schematic.with_single_sheet_topology(|schematic, scope| {
+            schematic.cleanup_wire_topology_with_junction_policy(true, scope);
+        });
+
+        assert_eq!(
+            spans(&schematic),
+            [
+                vec![Point::new(0, 0), Point::new(100, 0)],
+                vec![Point::new(100, 0), Point::new(160, 0)],
+                vec![Point::new(100, 0), Point::new(100, 60)],
+            ]
+        );
     }
 }

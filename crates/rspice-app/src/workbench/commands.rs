@@ -152,6 +152,7 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::AlignSelectionBottom
             | Command::DistributeSelectionHorizontal
             | Command::DistributeSelectionVertical
+            | Command::JoinCollinearWires
     )
 }
 
@@ -491,7 +492,9 @@ impl Command {
                     )
             }
             Self::Undo => {
-                if state.workbench.safe_mode.project_read_only() {
+                if state.workbench.safe_mode.project_read_only()
+                    || state.schematic.has_pending_operation()
+                {
                     false
                 } else if (netlist_page_is_visible(state)
                     && crate::workbench::documents::netlist_document::can_undo_netlist_edit(state))
@@ -507,7 +510,9 @@ impl Command {
                 }
             }
             Self::Redo => {
-                if state.workbench.safe_mode.project_read_only() {
+                if state.workbench.safe_mode.project_read_only()
+                    || state.schematic.has_pending_operation()
+                {
                     false
                 } else if (netlist_page_is_visible(state)
                     && crate::workbench::documents::netlist_document::can_redo_netlist_edit(state))
@@ -568,7 +573,7 @@ impl Command {
                 } else {
                     active_schematic_editor(app)
                         && !state.schematic_edit_read_only()
-                        && !state.schematic.session.editor.clipboard.is_empty()
+                        && !state.ui.schematic_clipboard.is_empty()
                 }
             }
             Self::SelectAll => active_symbol_editor(app) || active_schematic_editor(app),
@@ -607,6 +612,9 @@ impl Command {
                         )
                         .is_ok()
                     })
+            }
+            Self::JoinCollinearWires => {
+                active_schematic_editor(app) && !state.schematic_edit_read_only()
             }
             Self::MoveSelection => {
                 active_schematic_editor(app)
@@ -1371,6 +1379,9 @@ impl Command {
                     activate_workspace(app, Workspace::Design);
                     app.state.workbench.navigator_visible = true;
                     app.state.workbench.drawer = Some(super::state::Drawer::Navigator);
+                    // The search box is the Navigator tab's; the Component
+                    // shelf that Place instance brings forward has none.
+                    app.state.workbench.design_panel = super::state::DesignPanel::Navigator;
                     app.state.workbench.focus_navigator_search = true;
                 }
             }
@@ -1790,6 +1801,9 @@ impl Command {
                 };
                 let symbol_context = schematic_symbol_context(&app.state);
                 transform_selection_on_active_sheet(&mut app.state, &symbol_context, transform);
+            }
+            Self::JoinCollinearWires => {
+                app.state.join_collinear_wires_on_active_sheet();
             }
             Self::AlignSelectionLeft
             | Self::AlignSelectionCenter

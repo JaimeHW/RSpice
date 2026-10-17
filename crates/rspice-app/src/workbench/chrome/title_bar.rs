@@ -14,6 +14,13 @@ use super::super::layout::LayoutSpec;
 use super::super::state::{ModelsPage, VerificationPage, Workspace};
 use crate::workbench::commands::{CommandAvailability, vocabulary::Command};
 
+mod arrange;
+mod menu_row;
+#[cfg(test)]
+use arrange::ARRANGE_ROW_ID;
+use arrange::{ARRANGE_GROUPS, arrange_submenu, arrange_submenu_width};
+use menu_row::{MenuRowTrailing, paint_menu_row};
+
 #[cfg(test)]
 const COMMAND_REFERENCE_MENU_LABEL: &str = "Command reference";
 const MENU_OUTER_WIDTH: f32 = 244.0;
@@ -872,24 +879,7 @@ fn handle_popup_keyboard(ctx: &Context, popup_id: Id, trigger: &Response, rows: 
     let focused = ctx.memory(|memory| memory.focused());
     let focused_index = focused.and_then(|id| enabled_rows.iter().position(|row| row.id == id));
 
-    let destination = if ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::ArrowDown)) {
-        Some(focused_index.map_or(0, |index| (index + 1) % enabled_rows.len()))
-    } else if ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::ArrowUp)) {
-        Some(focused_index.map_or(enabled_rows.len() - 1, |index| {
-            (index + enabled_rows.len() - 1) % enabled_rows.len()
-        }))
-    } else if ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Home)) {
-        Some(0)
-    } else if ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::End)) {
-        Some(enabled_rows.len() - 1)
-    } else {
-        None
-    };
-    if let Some(index) = destination {
-        enabled_rows[index].response.request_focus();
-        enabled_rows[index]
-            .response
-            .scroll_to_me(Some(Align::Center));
+    if step_menu_row_focus(ctx, &enabled_rows, focused_index) {
         return;
     }
 
@@ -903,20 +893,55 @@ fn handle_popup_keyboard(ctx: &Context, popup_id: Id, trigger: &Response, rows: 
         return;
     }
 
-    if focused_index.is_some()
-        && let Some(query) = menu_typeahead_query(ctx)
+    if let Some(index) = focused_index {
+        typeahead_menu_row_focus(ctx, &enabled_rows, index);
+    }
+}
+
+/// Up, Down, Home and End among a menu's enabled rows. Returns whether one
+/// of them was pressed.
+fn step_menu_row_focus(
+    ctx: &Context,
+    enabled_rows: &[&MenuRowRecord],
+    focused_index: Option<usize>,
+) -> bool {
+    let destination = if ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::ArrowDown)) {
+        Some(focused_index.map_or(0, |index| (index + 1) % enabled_rows.len()))
+    } else if ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::ArrowUp)) {
+        Some(focused_index.map_or(enabled_rows.len() - 1, |index| {
+            (index + enabled_rows.len() - 1) % enabled_rows.len()
+        }))
+    } else if ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Home)) {
+        Some(0)
+    } else if ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::End)) {
+        Some(enabled_rows.len() - 1)
+    } else {
+        None
+    };
+    let Some(index) = destination else {
+        return false;
+    };
+    enabled_rows[index].response.request_focus();
+    enabled_rows[index]
+        .response
+        .scroll_to_me(Some(Align::Center));
+    true
+}
+
+/// Typing a row's first letters moves the focus to it.
+fn typeahead_menu_row_focus(ctx: &Context, enabled_rows: &[&MenuRowRecord], focused_index: usize) {
+    let Some(query) = menu_typeahead_query(ctx) else {
+        return;
+    };
+    if let Some(row) = enabled_rows
+        .iter()
+        .cycle()
+        .skip(focused_index + 1)
+        .take(enabled_rows.len())
+        .find(|row| row.label.to_lowercase().starts_with(&query))
     {
-        let start = focused_index.unwrap_or(0);
-        if let Some(row) = enabled_rows
-            .iter()
-            .cycle()
-            .skip(start + 1)
-            .take(enabled_rows.len())
-            .find(|row| row.label.to_lowercase().starts_with(&query))
-        {
-            row.response.request_focus();
-            row.response.scroll_to_me(Some(Align::Center));
-        }
+        row.response.request_focus();
+        row.response.scroll_to_me(Some(Align::Center));
     }
 }
 
@@ -1161,69 +1186,16 @@ fn command_item_as_impl(
     });
     record_menu_row(ui.ctx(), &response, label, enabled);
 
-    let t = Tokens::get(ui.ctx());
     let highlighted = enabled && (response.hovered() || response.has_focus());
-    if highlighted {
-        ui.painter().rect_filled(rect, t.radius, t.color.bg_hover);
-    }
-    let ink = if enabled {
-        if highlighted {
-            t.color.text
-        } else {
-            t.color.text_dim
-        }
-    } else {
-        t.color.text_dim.gamma_multiply(0.4)
-    };
-    let icon_rect = egui::Rect::from_min_size(
-        egui::Pos2::new(rect.left() + 7.0, rect.center().y - 8.5),
-        Vec2::splat(17.0),
+    paint_menu_row(
+        ui,
+        rect,
+        highlighted,
+        enabled,
+        command_icon(command),
+        label,
+        MenuRowTrailing::Shortcut(&shortcut),
     );
-    command_icon(command).paint(ui.painter(), icon_rect, ink);
-    let label_left = rect.left() + 31.0;
-    let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
-    let shortcut_font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let shortcut_width = if shortcut.is_empty() {
-        0.0
-    } else {
-        ui.painter()
-            .layout_no_wrap(shortcut.to_owned(), shortcut_font.clone(), ink)
-            .size()
-            .x
-            + 7.0
-    };
-    let label_right = rect.right() - 7.0 - shortcut_width;
-    let label_width = (label_right - label_left).max(8.0);
-    let painted_label = ellipsize_to_width(ui.painter(), label, &label_font, label_width);
-    // Keep the label in its mockup grid column even if a platform font has
-    // wider metrics than the bundled face. The measured ellipsis provides a
-    // readable ending; the clip is the final invariant that prevents a long
-    // localized label from ever painting through the shortcut column.
-    ui.painter()
-        .with_clip_rect(egui::Rect::from_min_max(
-            egui::pos2(label_left, rect.top()),
-            egui::pos2(label_right, rect.bottom()),
-        ))
-        .text(
-            egui::Pos2::new(label_left, rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            painted_label,
-            label_font,
-            ink,
-        );
-    if !shortcut.is_empty() {
-        ui.painter().text(
-            egui::Pos2::new(rect.right() - 7.0, rect.center().y),
-            egui::Align2::RIGHT_CENTER,
-            shortcut,
-            shortcut_font,
-            if enabled {
-                t.color.text_faint
-            } else {
-                t.color.text_faint.gamma_multiply(0.4)
-            },
-        );
-    }
     theme::paint_focus_ring_outset(ui, &response, rect);
 
     let response = match availability {
@@ -1325,7 +1297,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::ToggleFocusMode | Command::ToggleFullScreen => WorkbenchIcon::Focus,
         Command::PlaceInstance => WorkbenchIcon::Component,
         Command::Place(_) => WorkbenchIcon::Add,
-        Command::PlaceWire => WorkbenchIcon::Wire,
+        Command::PlaceWire | Command::JoinCollinearWires => WorkbenchIcon::Wire,
         Command::PlaceBus => WorkbenchIcon::Bus,
         Command::PlaceBusTap => WorkbenchIcon::Bus,
         Command::PlaceJunction => WorkbenchIcon::Grid,
@@ -1336,6 +1308,19 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::PlaceShape => WorkbenchIcon::Grid,
         Command::MoveSelection | Command::StretchSelection => WorkbenchIcon::Select,
         Command::ArraySelection => WorkbenchIcon::Grid,
+        Command::RotateSelection | Command::RotateSelectionCounterClockwise => {
+            WorkbenchIcon::Rotate
+        }
+        Command::MirrorSelectionHorizontal => WorkbenchIcon::Mirror,
+        Command::MirrorSelectionVertical => WorkbenchIcon::MirrorVertical,
+        Command::AlignSelectionLeft
+        | Command::AlignSelectionCenter
+        | Command::AlignSelectionRight
+        | Command::AlignSelectionTop
+        | Command::AlignSelectionMiddle
+        | Command::AlignSelectionBottom
+        | Command::DistributeSelectionHorizontal
+        | Command::DistributeSelectionVertical => WorkbenchIcon::Grid,
         Command::ReplaceInstance => WorkbenchIcon::Refresh,
         Command::CreateHierarchy | Command::DesignManagement => WorkbenchIcon::Folder,
         Command::ConnectivityManager => WorkbenchIcon::Bus,
@@ -1637,6 +1622,20 @@ fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     for command in DESIGN_EDIT_COMMANDS {
         command_item(ui, app, command);
     }
+    arrange_submenu(ui, |ui| {
+        let width = arrange_submenu_width(ui, app);
+        ui.set_max_width(width);
+        ui.set_min_width(width);
+        for (index, group) in ARRANGE_GROUPS.iter().enumerate() {
+            if index > 0 {
+                menu_separator(ui);
+            }
+            for &command in *group {
+                command_item(ui, app, command);
+            }
+        }
+    });
+    command_item(ui, app, Command::JoinCollinearWires);
     menu_separator(ui);
     for command in DESIGN_SHEET_COMMANDS {
         command_item(ui, app, command);

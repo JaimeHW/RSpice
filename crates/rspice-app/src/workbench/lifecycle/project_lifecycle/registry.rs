@@ -55,7 +55,7 @@ mod tests {
             .editor
             .selection
             .select_component(component);
-        state.schematic.copy_selection();
+        assert!(state.copy_active_schematic_selection());
         state.schematic.session.editor.pan = (125.0, -40.0);
         state.schematic.session.editor.zoom = 2.25;
         state.schematic.session.current_file = Some(std::path::PathBuf::from("presentation.rsch"));

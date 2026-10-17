@@ -195,6 +195,9 @@ pub enum Command {
     AlignSelectionBottom,
     DistributeSelectionHorizontal,
     DistributeSelectionVertical,
+    /// Lay the active sheet's wires that run on one line, end to end or
+    /// overlapping, as one wire each.
+    JoinCollinearWires,
     Cancel,
     AscendHierarchy,
     DescendHierarchy,
@@ -709,6 +712,9 @@ impl Command {
                 "Distribute vertically",
                 "Design",
             ),
+            Self::JoinCollinearWires => {
+                spec("join-collinear-wires", "Join collinear wires", "Design")
+            }
             Self::Cancel => spec("cancel-active-command", "Cancel active command", "Design"),
             Self::AscendHierarchy => spec("ascend-hierarchy", "Ascend hierarchy", "Design"),
             // Two gestures, two rows: this one opens the descend dialog, and
@@ -1314,6 +1320,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::AlignSelectionBottom,
     Command::DistributeSelectionHorizontal,
     Command::DistributeSelectionVertical,
+    Command::JoinCollinearWires,
     Command::AscendHierarchy,
     Command::DescendHierarchy,
     Command::DescendHierarchyDirect,

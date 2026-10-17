@@ -29,6 +29,10 @@ pub(super) fn diagnostic_location(anchor: &ConnectivityAnchor) -> DrcLocation {
         ConnectivityAnchor::Net(name) => DrcLocation::Node {
             net_name: name.clone(),
         },
+        ConnectivityAnchor::Component { id, name } => DrcLocation::Component {
+            id: *id,
+            name: name.clone(),
+        },
     }
 }
 

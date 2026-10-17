@@ -11,13 +11,13 @@ fn catalog(commands: usize, separators: usize) -> Vec<ContextEntry<()>> {
 /// label for label in `rspice-app`'s `schematic/view/context_menu/tests.rs`.
 ///
 /// An instance, a Verilog-A instance (whose Descend row reads "Open Verilog-A
-/// view") and a wire have sixteen rows under four rules; a placed source
+/// view") and a wire have nineteen rows under four rules; a placed source
 /// trades the three master rows for its stimulus group under a fifth; the
 /// empty canvas has one verb, "New Verilog-A device…", where the three
 /// master rows stand.
-const INSTANCE: (usize, usize) = (16, 4);
-const SOURCE: (usize, usize) = (16, 5);
-const CANVAS: (usize, usize) = (14, 4);
+const INSTANCE: (usize, usize) = (19, 4);
+const SOURCE: (usize, usize) = (19, 5);
+const CANVAS: (usize, usize) = (17, 4);
 
 #[test]
 fn an_open_popup_cannot_retarget_its_action_when_the_source_or_selection_changes() {
@@ -116,7 +116,7 @@ fn surface_geometry_matches_desktop_and_touch_contracts() {
     let desktop =
         SurfaceGeometry::for_viewport(vec2(1440.0, 900.0), ContextInvocation::Pointer, &entries);
     assert_eq!(desktop.width, 286.0);
-    assert_eq!(desktop.max_height, 528.0);
+    assert_eq!(desktop.max_height, 608.0);
     assert_eq!(desktop.row_height, 27.0);
     assert_eq!(desktop.radius, 3);
     // Every target's menu, measured on the mockup's 27 px row: 47 header +
@@ -126,13 +126,13 @@ fn surface_geometry_matches_desktop_and_touch_contracts() {
     // a menu into a scroller fails here rather than silently hiding the
     // entries it pushed past the edge.
     for (target, (commands, separators), height) in [
-        // An instance, a Verilog-A instance or a wire: 432 rows + 36 rules.
-        ("instance", INSTANCE, 517.0),
+        // An instance, a Verilog-A instance or a wire: 513 rows + 36 rules.
+        ("instance", INSTANCE, 598.0),
         // The tallest there is: a placed source whose standing calls for
         // three stimulus verbs, at a fifth separator.
-        ("placed source", SOURCE, 526.0),
+        ("placed source", SOURCE, 607.0),
         // The empty canvas: one verb where an instance has three.
-        ("canvas", CANVAS, 463.0),
+        ("canvas", CANVAS, 544.0),
     ] {
         let menu = SurfaceGeometry::for_viewport(
             vec2(1440.0, 900.0),
@@ -163,7 +163,7 @@ fn surface_geometry_matches_desktop_and_touch_contracts() {
 
 #[test]
 fn desktop_origin_and_keyboard_anchor_match_the_mockup_contract() {
-    let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0));
+    let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 700.0));
     let desktop = SurfaceGeometry::for_viewport(
         screen.size(),
         ContextInvocation::Pointer,
@@ -174,11 +174,11 @@ fn desktop_origin_and_keyboard_anchor_match_the_mockup_contract() {
         clamp_desktop_surface_origin(screen, pos2(-20.0, -10.0), desktop),
         pos2(6.0, 6.0)
     );
-    // A click near the bottom edge lifts the whole 517 px surface so it
-    // hangs off neither the right edge nor the bottom: 600 - 517 - 6.
+    // A click near the bottom edge lifts the whole 598 px surface so it
+    // hangs off neither the right edge nor the bottom: 700 - 598 - 6.
     assert_eq!(
-        clamp_desktop_surface_origin(screen, pos2(790.0, 590.0), desktop),
-        pos2(508.0, 77.0)
+        clamp_desktop_surface_origin(screen, pos2(790.0, 690.0), desktop),
+        pos2(508.0, 96.0)
     );
     assert_eq!(
         keyboard_surface_anchor(Rect::from_min_size(pos2(100.0, 200.0), vec2(1000.0, 500.0),)),

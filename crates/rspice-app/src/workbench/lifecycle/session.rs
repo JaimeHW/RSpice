@@ -241,6 +241,11 @@ pub struct UiSessionState {
     /// Schematic editor selection classes. This is restored with the UI
     /// session but never written into project-owned schematic data.
     pub schematic_selection_filter: crate::state::SchematicSelectionFilter,
+    /// What Copy and Cut last took from a schematic. It belongs to the app,
+    /// not to one cell view's editor, so a copy made in one cell view pastes
+    /// into another. Never persisted: a session restored later must not
+    /// reopen with design objects nobody committed to a drawing.
+    pub schematic_clipboard: rspice_design::schematic::clipboard::ClipboardData,
     /// Active and named filters for exact schematic bulk-edit queries.
     pub schematic_bulk_edit_filters: SelectionBulkFilterSession,
     /// Device-local schematic display policy. Presentation choices are
