@@ -948,7 +948,7 @@ fn show_library_audit_history(ctx: &Context, state: &AppState) {
     let receipts = state.workspace.content.project.library_mutation_audit();
     let publications = state.workspace.content.project.library_publications();
     let description = format!(
-        "{} immutable mutation receipt{} and {} content-addressed publication{}.",
+        "{} recorded library change{} and {} publication{}.",
         receipts.len(),
         if receipts.len() == 1 { "" } else { "s" },
         publications.len(),

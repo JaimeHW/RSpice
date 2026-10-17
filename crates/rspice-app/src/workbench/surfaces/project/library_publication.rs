@@ -129,7 +129,7 @@ impl RollbackDraft {
             }
         }
         if self.artifact_bytes.is_none() {
-            return Some("Choose the exact retained publication artifact before rollback.");
+            return Some("Choose the saved publication artifact before rollback.");
         }
         None
     }
@@ -234,7 +234,7 @@ fn show_publication_dialog(ctx: &Context, app: &mut RSpiceApp) {
         },
     )
     .description(
-        "Freeze the complete validated project and library catalog, durably write those exact bytes, then append one immutable content-addressed receipt.",
+        "Freeze the validated project and library catalog, write that copy to disk, then record the publication in the project's history.",
     )
     .size(DialogSize::Manager)
     .secondary("Cancel")
@@ -262,7 +262,7 @@ fn show_publication_dialog(ctx: &Context, app: &mut RSpiceApp) {
                 ui,
                 "Writer contract",
                 if cfg!(target_arch = "wasm32") {
-                    "File System Access write + exact read-back"
+                    "File System Access write + read-back check"
                 } else {
                     "atomic synchronized file publication"
                 },
@@ -275,12 +275,12 @@ fn show_publication_dialog(ctx: &Context, app: &mut RSpiceApp) {
             property_row(
                 ui,
                 "Identity scope",
-                "operator-provided evidence; no organization identity is inferred",
+                "entered by the operator; no organization identity is assumed",
             );
             property_row(
                 ui,
                 "Commit order",
-                "prepare bytes \u{2192} durable write \u{2192} exact receipt",
+                "prepare file \u{2192} write to disk \u{2192} record publication",
             );
             property_row(
                 ui,
@@ -378,9 +378,9 @@ fn show_rollback_dialog(ctx: &Context, app: &mut RSpiceApp) {
     let field_error = draft.field_error();
     let primary_enabled = !draft.busy && lifecycle_error.is_none() && field_error.is_none();
     let mut choose_artifact = false;
-    let choice = Dialog::new("Rollback library publication", "Restore exact publication")
+    let choice = Dialog::new("Rollback library publication", "Restore publication")
     .description(
-        "Restore one exact retained full-project artifact. Digest, size, project identity, revisions, publication lineage, technology binding, locks, and audit authority are revalidated before replacement.",
+        "Restore one saved full-project artifact. Its digest, size, project identity, revisions, publication history, technology binding, locks, and audit record are checked again before it replaces the project.",
     )
     .size(DialogSize::Manager)
     .secondary("Cancel")
@@ -391,7 +391,7 @@ fn show_rollback_dialog(ctx: &Context, app: &mut RSpiceApp) {
         ui.add_space(8.0);
         rollback_fields(ui, &mut draft);
         ui.add_space(8.0);
-        property_card(ui, "Exact artifact", |ui| {
+        property_card(ui, "Artifact", |ui| {
             let selected = selected_receipt(&receipts, draft.publication_id)
                 .expect("selected publication remains retained");
             property_row(
@@ -411,7 +411,7 @@ fn show_rollback_dialog(ctx: &Context, app: &mut RSpiceApp) {
             let choose = Button::new(if draft.artifact_bytes.is_some() {
                 "Replace artifact\u{2026}"
             } else {
-                "Choose exact artifact\u{2026}"
+                "Choose artifact\u{2026}"
             })
             .enabled(!draft.busy)
             .show(ui);
@@ -884,7 +884,7 @@ fn pick_native_rollback_artifact(
 ) -> Result<Option<(String, Vec<u8>)>, String> {
     let Some(path) = rfd::FileDialog::new()
         .add_filter("RSpice project publication", &[PROJECT_ARTIFACT_EXTENSION])
-        .set_title("Choose exact library publication artifact")
+        .set_title("Choose library publication artifact")
         .pick_file()
     else {
         return Ok(None);
@@ -1288,15 +1288,11 @@ mod tests {
             .into_iter()
             .filter_map(|(_, node)| node.label().map(str::to_owned))
             .collect::<Vec<_>>();
+        assert!(labels.iter().any(|label| label.contains("Choose artifact")));
         assert!(
             labels
                 .iter()
-                .any(|label| label.contains("Choose exact artifact"))
-        );
-        assert!(
-            labels
-                .iter()
-                .any(|label| label.contains("Restore exact publication"))
+                .any(|label| label.contains("Restore publication"))
         );
     }
 

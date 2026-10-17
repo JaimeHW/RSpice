@@ -218,7 +218,7 @@ fn resolve_display_contract(
             .eq_ignore_ascii_case(technology.package_id())
     {
         return Err(format!(
-            "{} is not bound to the project's exact validated signed PDK",
+            "{} is not bound to the project's validated signed PDK",
             document.owner().display_path()
         ));
     }

@@ -82,7 +82,7 @@ fn visible_workspace_height(ui: &Ui) -> f32 {
 const TECHNOLOGY_SURFACE_TITLE: &str = "Model-library technology contract";
 const TECHNOLOGY_SURFACE_ACTION: &str = "Attach model technology\u{2026}";
 const TECHNOLOGY_DIALOG_TITLE: &str = "Attach model-library technology";
-const TECHNOLOGY_DIALOG_PRIMARY: &str = "Attach authenticated binding";
+const TECHNOLOGY_DIALOG_PRIMARY: &str = "Attach binding";
 const TECHNOLOGY_DIALOG_CURRENT: &str = "Binding already attached";
 const TECHNOLOGY_DIALOG_PENDING: &str = "Writing checkpoint\u{2026}";
 
@@ -372,7 +372,7 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
                 || {
                     (
                         "source unavailable".to_owned(),
-                        "The project has no canonical SPICE source document".to_owned(),
+                        "The project has no SPICE source document".to_owned(),
                         Some(Problem::Failure),
                     )
                 },

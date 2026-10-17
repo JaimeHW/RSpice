@@ -694,9 +694,7 @@ fn collect(state: &AppState) -> PreflightReport {
                 blockers.push(PreflightIssue {
                     check: "Project model technology".to_owned(),
                     observed: error,
-                    required:
-                        "The exact attached model-source closure must resolve without catalog drift"
-                            .to_owned(),
+                    required: "The attached model sources must match the catalog".to_owned(),
                     remediation: PreflightRemediation::ProjectTechnology,
                 });
             }
@@ -709,7 +707,7 @@ fn collect(state: &AppState) -> PreflightReport {
                     check: "Project signed PDK".to_owned(),
                     observed: error.to_string(),
                     required:
-                        "The exact attached package revision must remain signature-trusted and compatible with this runtime"
+                        "The attached package revision must keep a trusted signature and stay compatible with this runtime"
                             .to_owned(),
                     remediation: PreflightRemediation::ProjectTechnology,
                 });
@@ -842,7 +840,7 @@ fn preparation_requirement(stage: crate::simulation::execution::PreparationStage
         PreparationStage::DesignChecks => "A current completed source-check receipt",
         PreparationStage::SourceChecks => "A closed, parseable source dependency set",
         PreparationStage::AnalysisPlan => "A complete executable analysis configuration",
-        PreparationStage::ModelBindings => "Authenticated materialized model sources",
+        PreparationStage::ModelBindings => "Model sources that are found and verified",
         PreparationStage::Netlist => "A deterministic self-contained executable netlist",
         PreparationStage::Authorization => "A one-use generation-safe dispatch authorization",
     }

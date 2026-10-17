@@ -440,9 +440,9 @@ impl OverviewSnapshot {
                     area: "Latest run",
                     state: "No retained run".to_owned(),
                     detail: if netlist_first {
-                        "Run the retained deck to create immutable result evidence".to_owned()
+                        "Run the saved deck to produce results".to_owned()
                     } else {
-                        "Run the active plan to create immutable result evidence".to_owned()
+                        "Run the active plan to produce results".to_owned()
                     },
                     action: if netlist_first {
                         "Open deck"
@@ -506,7 +506,7 @@ impl OverviewSnapshot {
                 || StatusSnapshot {
                     area: "Source deck",
                     state: "Unavailable".to_owned(),
-                    detail: "The project has no retained canonical source document".to_owned(),
+                    detail: "The project has no saved source document".to_owned(),
                     action: "Open deck",
                     tone: Tone::Error,
                     intent: OverviewIntent::Command(Command::OpenWorkspace(Workspace::Netlist)),
@@ -566,7 +566,7 @@ impl OverviewSnapshot {
                 || {
                     Some(ProblemSnapshot {
                         code: "SOURCE".to_owned(),
-                        message: "The canonical source document is unavailable".to_owned(),
+                        message: "The project's source document is unavailable".to_owned(),
                         path: "Project source".to_owned(),
                         tone: Tone::Error,
                     })
@@ -2155,13 +2155,13 @@ fn model_snapshot(app: &RSpiceApp) -> ModelSnapshot {
         }
         if library.root_path.is_none() {
             return Some(format!(
-                "Model library '{}' has no canonical root source",
+                "Model library '{}' has no root source file",
                 library.name
             ));
         }
         if library.source_closure.is_empty() {
             return Some(format!(
-                "Model library '{}' has no authenticated source closure",
+                "Model library '{}' has no imported source files",
                 library.name
             ));
         }
