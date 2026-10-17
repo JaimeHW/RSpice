@@ -1182,8 +1182,32 @@ fn insert_located_finding(
         });
 }
 
+/// The digest of `value` as canonical JSON, every object's keys in order.
+///
+/// A hash map serializes in its own iteration order, and two maps holding the
+/// same entries iterate differently when they were filled in another order:
+/// the library catalog rebuilt between the check and the save would digest
+/// differently with nothing changed. Sorting the keys makes the digest the
+/// value's own.
 fn digest_serializable(value: &impl Serialize) -> Result<ContentDigest, String> {
-    serde_json::to_vec(value)
+    fn sorted(value: serde_json::Value) -> serde_json::Value {
+        match value {
+            serde_json::Value::Object(entries) => serde_json::Value::Object(
+                entries
+                    .into_iter()
+                    .map(|(key, value)| (key, sorted(value)))
+                    .collect::<BTreeMap<_, _>>()
+                    .into_iter()
+                    .collect(),
+            ),
+            serde_json::Value::Array(items) => {
+                serde_json::Value::Array(items.into_iter().map(sorted).collect())
+            }
+            scalar => scalar,
+        }
+    }
+    serde_json::to_value(value)
+        .and_then(|value| serde_json::to_vec(&sorted(value)))
         .map(|bytes| digest_bytes(&bytes))
         .map_err(|error| format!("validation evidence could not be serialized: {error}"))
 }
@@ -1915,6 +1939,33 @@ mod tests {
         assert!(
             source_loop_errors(&state) > 0,
             "the page lists the loop the report blocks on"
+        );
+    }
+
+    /// What Check and Save validated is digested as canonical JSON: the same
+    /// library catalog, built in two insertion orders, digests alike though
+    /// its hash maps iterate differently.
+    #[test]
+    fn a_catalog_built_in_another_order_digests_alike() {
+        use crate::state::{Cell, Library, LibraryManager, View, ViewType};
+
+        let names = (0..24)
+            .map(|index| format!("cell{index:02}"))
+            .collect::<Vec<_>>();
+        let built = |order: Vec<&String>| {
+            let mut library = Library::new("work");
+            for name in order {
+                let mut cell = Cell::new(name);
+                cell.add_view(View::new("schematic", ViewType::Schematic));
+                library.add_cell(cell);
+            }
+            let mut manager = LibraryManager::default();
+            manager.add_library(library);
+            digest_serializable(&manager).expect("a catalog serializes")
+        };
+        assert_eq!(
+            built(names.iter().collect()),
+            built(names.iter().rev().collect())
         );
     }
 }
