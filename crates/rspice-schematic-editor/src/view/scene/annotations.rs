@@ -11,6 +11,7 @@ use super::super::{
 use egui::{Painter, Pos2, Rect, Vec2};
 use rspice_design::schematic::component::Component;
 use rspice_design::schematic::component_type::ComponentType;
+use rspice_design::schematic::label_layout;
 use rspice_design_model::Point;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -271,18 +272,26 @@ fn candidates(
     match subject {
         BadgeSubject::Net { anchor, label } => {
             let anchor = Pos2::new(anchor.x as f32, anchor.y as f32);
+            // The label's far edge (past a connector's tab) and the middle of
+            // its text box. The label's bounds also reach down to the wire
+            // it hangs from, so their middle sits below the text.
             let label = label.and_then(|id| {
                 view.document
                     .net_labels
                     .iter()
                     .find(|label| label.id == id)
-                    .map(|label| world_rect(net_labels::world_bounds(label)))
+                    .map(|label| {
+                        let text = label_layout::net_label_layout(label);
+                        (
+                            world_rect(net_labels::world_bounds(label)).max.x,
+                            text.corner.y - text.font_size * label_layout::LINE_BOX_EM * 0.5,
+                        )
+                    })
             });
             let first = match label {
-                Some(label) => at(Pos2::new(
-                    label.max.x + LABEL_GAP_WU,
-                    label.center().y - size.y * 0.5,
-                )),
+                Some((far_edge, middle)) => {
+                    at(Pos2::new(far_edge + LABEL_GAP_WU, middle - size.y * 0.5))
+                }
                 None => at(Pos2::new(
                     anchor.x + CORNER_OFFSET_WU,
                     anchor.y - CORNER_OFFSET_WU - size.y,

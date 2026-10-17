@@ -962,3 +962,41 @@ fn an_off_sheet_connector_tab_is_stroked_in_whole_device_pixels() {
         }
     }
 }
+
+/// A named net's badge stands on the middle of its label's name (D1 section
+/// 8: right of the label's text rect, vertically centred on it). It was
+/// centred on the label's whole bounds, which reach down to the wire the
+/// label hangs from, so it sat 3 wu low: 12 pt at 400 %, level with the
+/// name's baseline rather than its middle.
+#[test]
+fn a_named_net_badge_is_centred_on_its_label_name() {
+    for zoom in [1.0, 4.0] {
+        let mut state = hierarchy_sheet();
+        let render = render(
+            &mut state,
+            themes()[0].1,
+            at_zoom(zoom, HIERARCHY_DETAIL),
+            1.0,
+        );
+        let texts = painted_text(&render.shapes);
+        let find = |text: &str| {
+            texts
+                .iter()
+                .find(|painted| painted.text == text)
+                .unwrap_or_else(|| panic!("zoom {zoom}: {text:?} is not painted"))
+                .rect
+        };
+        for (name, badge) in [("MID", "1.213 V"), ("NBIAS", "651.2 mV")] {
+            let (name_rect, badge_rect) = (find(name), find(badge));
+            assert!(
+                badge_rect.min.x > name_rect.max.x,
+                "zoom {zoom}: the {name} badge stands right of its name"
+            );
+            let offset = badge_rect.center().y - name_rect.center().y;
+            assert!(
+                offset.abs() <= 0.5,
+                "zoom {zoom}: the {name} badge's middle is {offset} pt below its name's"
+            );
+        }
+    }
+}
