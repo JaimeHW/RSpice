@@ -1340,6 +1340,49 @@ fn opening_a_netlist_commits_an_independent_netlist_first_project() {
     );
 }
 
+/// The deck is installed into a candidate project that a failure discards,
+/// so the reason has to be carried out of it to reach the reader at all.
+#[test]
+fn a_netlist_project_that_cannot_open_states_why() {
+    let mut state = AppState::default();
+    let original_project_id = state.workspace.content.project.id();
+    let source = "deck\nR1 out 0 1k\n.op\n.end\n";
+
+    assert!(!apply_opened_netlist_project(
+        &mut state,
+        source.to_owned(),
+        // A path with no name gives the deck no identity to be filed under.
+        Some(std::path::PathBuf::new()),
+        "bias.cir",
+        NetlistImportMetadata {
+            encoding: crate::state::NetlistTextEncoding::Utf8,
+            line_ending: crate::state::NetlistLineEnding::Lf,
+            dialect: crate::state::NetlistSourceDialect::RSpice,
+            compatibility_reviewed: false,
+            raw_sha256: sha256(source.as_bytes()),
+        },
+        Vec::new(),
+    ));
+
+    assert_eq!(state.workspace.content.project.id(), original_project_id);
+    let line = state
+        .log_buffer
+        .entries()
+        .last()
+        .expect("the failure is recorded");
+    assert_eq!(line.severity, crate::diagnostics::LogSeverity::Error);
+    let reason = line
+        .message
+        .strip_prefix("Netlist project open failed: ")
+        .and_then(|rest| rest.strip_suffix(". The current project was left unchanged."))
+        .unwrap_or_else(|| panic!("the line states the failure: {}", line.message));
+    assert!(
+        reason.contains("logical identity"),
+        "the line states why: {}",
+        line.message
+    );
+}
+
 #[test]
 fn importing_a_deck_refuses_read_only_projects_without_mutation() {
     let mut state = AppState::default();
