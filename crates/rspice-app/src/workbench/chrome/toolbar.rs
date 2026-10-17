@@ -1,6 +1,7 @@
 //! Context toolbar.  Tool groups change with the canonical workspace while
 //! global run state remains visible at the trailing edge.
 
+mod overflow;
 mod run_config_chip;
 
 use egui::containers::menu::MenuButton;
@@ -457,11 +458,19 @@ fn trailing_controls_width(
     width + (controls.saturating_sub(1) as f32 * TOOLBAR_CONTEXT_GAP) + outer_gap
 }
 
+/// The workspace's tools, and behind More tools whatever a narrow row has no
+/// slot for (U-11).
 fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    let workspace = app.state.workbench.workspace;
     ui.data_mut(|data| {
         data.insert_temp(projected_tool_count_id(), 0_usize);
     });
+    overflow::reset(ui);
+    workspace_tool_row(ui, app, layout);
+    overflow::more_tools(ui, app, layout);
+}
+
+fn workspace_tool_row(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    let workspace = app.state.workbench.workspace;
     if !app.state.project_lifecycle.is_open() {
         no_project_tools(ui, app, layout);
         return;
@@ -668,10 +677,17 @@ fn design_toolbar_command_selected(tool: Tool, command: Command) -> bool {
 }
 
 fn design_grid_and_snap_menu(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    let grid_visible = app.state.ui.grid != crate::state::GridStyle::Off;
     if !take_projected_tool_slot(ui, layout) {
+        let presentation = ToolbarCommandPresentation::Icon {
+            icon: WorkbenchIcon::Grid,
+            selected: grid_visible,
+            label: Some("Cycle grid display"),
+        };
+        let tool = overflow::OverflowTool::command(Command::CycleGrid, presentation);
+        overflow::set_aside(ui, tool);
         return;
     }
-    let grid_visible = app.state.ui.grid != crate::state::GridStyle::Off;
     let height = layout.toolbar_control_height;
     let response = ui.add(egui::Button::selectable(grid_visible, "").min_size(Vec2::splat(height)));
     if response.clicked() {
@@ -773,8 +789,8 @@ fn symbol_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 ///
 /// Compile and the cross-link to the generated deck, then the build settings
 /// Compile reads, then the source tools, Format first. The toolbar is the only
-/// place the first two actions live, so they come first: where it keeps only
-/// its first tools, on a phone, they are what it keeps. Build settings, Format
+/// place the first two actions live, so they come first: on a phone, Compile
+/// is the one tool the row keeps, and the deck heads More tools. Build settings, Format
 /// and every source tool are in the command palette as well, and Format in the
 /// editor's own menu. A schematic's placement and transform tools have nothing
 /// to act on here.
@@ -823,14 +839,27 @@ fn veriloga_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 /// The generated deck, in the Netlist workspace: what the design this module
 /// is placed in netlists to.
 fn generated_netlist_tool(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    if !take_projected_tool_slot(ui, layout) {
-        return;
-    }
     let label = app
         .state
         .ui
         .messages()
         .text(crate::workbench::MessageId::CodeGeneratedNetlist);
+    if !take_projected_tool_slot(ui, layout) {
+        let action = overflow::OverflowAction::Run(|app| {
+            crate::workbench::documents::netlist_document::show_generated_deck(&mut app.state);
+        });
+        let (icon, selected) = (WorkbenchIcon::Netlist, false);
+        overflow::set_aside(
+            ui,
+            overflow::OverflowTool {
+                action,
+                icon,
+                label,
+                selected,
+            },
+        );
+        return;
+    }
     let response = if layout.toolbar_labels {
         labeled_icon_button_sized(
             ui,
@@ -1525,11 +1554,13 @@ fn toolbar_command(
     layout: LayoutSpec,
     presentation: ToolbarCommandPresentation,
 ) {
-    if !take_projected_tool_slot(ui, layout) {
-        return;
-    }
+    let has_slot = take_projected_tool_slot(ui, layout);
     let availability = command.availability(app);
     if availability == CommandAvailability::Hidden {
+        return;
+    }
+    if !has_slot {
+        overflow::set_aside(ui, overflow::OverflowTool::command(command, presentation));
         return;
     }
     let spec = command.spec();
@@ -1606,17 +1637,16 @@ fn label_fits_the_context_lane(ui: &egui::Ui, label_width: f32) -> bool {
     ui.min_rect().width() + ui.spacing().item_spacing.x + label_width <= lane
 }
 
+/// Take one of a narrow row's slots. The last is kept for More tools, so a
+/// tool that gets none sets itself aside there to stay reachable (U-11).
 fn take_projected_tool_slot(ui: &mut egui::Ui, layout: LayoutSpec) -> bool {
     let Some(limit) = layout.toolbar_tool_limit else {
         return true;
     };
     let id = projected_tool_count_id();
     let count = ui.data(|data| data.get_temp::<usize>(id).unwrap_or_default());
-    if count >= limit {
-        return false;
-    }
     ui.data_mut(|data| data.insert_temp(id, count + 1));
-    true
+    count + 1 < limit
 }
 
 fn context_separator(ui: &mut egui::Ui, layout: LayoutSpec) {

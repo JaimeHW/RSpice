@@ -1611,6 +1611,9 @@ mod veriloga_flow_tests;
 mod veriloga_panel_tests;
 
 #[cfg(test)]
+mod touch_flow_tests;
+
+#[cfg(test)]
 mod veriloga_build_settings_tests;
 
 #[cfg(test)]
