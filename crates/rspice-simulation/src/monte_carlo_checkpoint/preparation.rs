@@ -41,14 +41,30 @@ pub fn digest_with_resumes(
     writer.finish()
 }
 
-/// Resolve selected history into checked populations before freezing a task.
-/// Different populations stay separate; matching trial journals pool exactly.
-pub fn resume_inputs_from_config<'a, W: 'a>(
+/// A checkpoint a Monte Carlo resumes from, beside the retained result its
+/// selection takes it from; `None` when it is taken from the imported
+/// library.
+pub type SelectedCheckpoint<'a, W> = (
+    Option<&'a rspice_results::analysis_result::AnalysisResult<W>>,
+    &'a rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointEvidence,
+);
+
+/// The checkpoints `config` resumes from, in its order, each with the result
+/// it is taken from: the first of `retained` that holds it, or else the
+/// imported library. The reason instead when one is selected twice, is held
+/// nowhere, or when together they exceed the byte limit.
+///
+/// Nothing is decoded and no result is checked here; preparing the resume
+/// checks each image against the result it is taken from, decodes it and
+/// pools it ([`resume_inputs_from_config`]). Two selections of the same
+/// images, each taken from results that check it alike, therefore prepare
+/// the same resume, which is how a run prepared to resume from them is asked
+/// whether it still does.
+pub fn selected_checkpoints<'a, W: 'a>(
     retained: impl Iterator<Item = &'a rspice_results::analysis_result::AnalysisResult<W>> + Clone,
     imported: &'a rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointLibrary,
     config: Option<&rspice_simulation_contract::mc_checkpoint::McCheckpointConfig>,
-) -> Result<Vec<PreparedMonteCarloResume>, String> {
-    use rspice_results::monte_carlo_checkpoint::StudyMonteCarloCheckpoint;
+) -> Result<Vec<SelectedCheckpoint<'a, W>>, String> {
     let Some(config) = config else {
         return Ok(Vec::new());
     };
@@ -79,6 +95,19 @@ pub fn resume_inputs_from_config<'a, W: 'a>(
         }
         selected.push((analysis, evidence));
     }
+    Ok(selected)
+}
+
+/// Resolve selected history into checked populations before freezing a task.
+/// Different populations stay separate; matching trial journals pool exactly.
+pub fn resume_inputs_from_config<'a, W: 'a>(
+    retained: impl Iterator<Item = &'a rspice_results::analysis_result::AnalysisResult<W>> + Clone,
+    imported: &'a rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointLibrary,
+    config: Option<&rspice_simulation_contract::mc_checkpoint::McCheckpointConfig>,
+) -> Result<Vec<PreparedMonteCarloResume>, String> {
+    use rspice_results::monte_carlo_checkpoint::StudyMonteCarloCheckpoint;
+    let limits = rspice_core::ResourceLimits::default();
+    let selected = selected_checkpoints(retained, imported, config)?;
     let mut populations: std::collections::BTreeMap<[u8; 32], StudyMonteCarloCheckpoint> =
         Default::default();
     for (analysis, evidence) in selected {
