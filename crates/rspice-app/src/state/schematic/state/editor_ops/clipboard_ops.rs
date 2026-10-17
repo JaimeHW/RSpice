@@ -10,6 +10,7 @@ use super::super::super::clipboard_edit;
 #[cfg(test)]
 use super::super::super::{BusDeclaration, BusSlice, BusTapOrientation, DesignNoteKind};
 use super::super::*;
+use rspice_design::schematic::wire::Wire;
 
 impl SchematicState {
     // =========================================================================
