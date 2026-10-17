@@ -113,6 +113,7 @@ fn canvas_shapes(document: &SchematicDocument) -> Vec<Shape> {
         SceneOverlays {
             net_class_colors: std::collections::HashMap::new(),
             operating_point: Vec::new(),
+            operating_point_layout: None,
             probe_status: &|_| ProbeVisualStatus::Materialized,
             selected_trace_expression: &|| None,
             open_pins: &std::collections::HashMap::new(),
