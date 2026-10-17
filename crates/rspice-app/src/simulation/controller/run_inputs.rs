@@ -567,6 +567,11 @@ fn operating_point_reads(state: &AppState) -> Vec<Result<AnalysisSpec, String>> 
 /// The revision of the retained runs, when an analysis in the plan resumes
 /// from a checkpoint they may hold; `None` when none does, because then
 /// nothing but an operating point reads them.
+///
+/// Capturing checkpoints reads no retained run: only the checkpoints a draft
+/// resumes from are looked up there. A plan that only captures them is
+/// therefore not expired by a run added to the history, the run its own
+/// dispatch starts among them.
 fn checkpoint_run_reads(
     state: &AppState,
 ) -> Option<rspice_results::run_history::RunHistoryRevision> {
@@ -575,10 +580,17 @@ fn checkpoint_run_reads(
         .iter()
         .any(|instance| match instance.draft() {
             // A draft that does not lower prepares no run at all.
-            AnalysisDraft::MonteCarlo(draft) => {
-                !matches!(draft.to_config(), Ok(config) if config.checkpoint.is_none())
-            }
-            AnalysisDraft::Transient(draft) => draft.checkpoint.is_some(),
+            AnalysisDraft::MonteCarlo(draft) => !matches!(
+                draft.to_config(),
+                Ok(config) if config
+                    .checkpoint
+                    .as_ref()
+                    .is_none_or(|checkpoint| checkpoint.resume.is_empty())
+            ),
+            AnalysisDraft::Transient(draft) => draft
+                .checkpoint
+                .as_ref()
+                .is_some_and(|checkpoint| !checkpoint.resume.is_empty()),
             _ => false,
         })
         .then(|| state.simulation.retained.runs.revision())

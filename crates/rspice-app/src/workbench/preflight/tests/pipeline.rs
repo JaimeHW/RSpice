@@ -607,6 +607,16 @@ fn the_run_automation_prepares_is_checked_at_dispatch_as_a_run_press_is() {
     assert_refused_for(&edited, "the design");
 }
 
+/// The RC lowpass example, its transient alone at the reference point: a run
+/// that finishes in moments.
+fn rc_lowpass() -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.authority.open_session();
+    enable_only(&mut app.state, &[]);
+    crate::workbench::examples::load_example("RC Lowpass Filter", &mut app.state.schematic);
+    app
+}
+
 /// Automation checks its evidence is still the design's on each frame it
 /// waits for the dispatch and again when it publishes. On an unedited design
 /// the check passes at each of those frames, before the dispatch, while the
@@ -614,10 +624,7 @@ fn the_run_automation_prepares_is_checked_at_dispatch_as_a_run_press_is() {
 /// Automation dispatched does not expire the evidence it produces.
 #[test]
 fn an_automation_evidence_check_on_an_unedited_design_prepares_nothing() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
-    enable_only(&mut app.state, &[]);
-    crate::workbench::examples::load_example("RC Lowpass Filter", &mut app.state.schematic);
+    let mut app = rc_lowpass();
     let (authorized, inputs) = app.queued_as_automation_queues();
 
     let (before_dispatch, prepared) = app.evidence_check(&inputs);
@@ -647,6 +654,112 @@ fn an_automation_evidence_check_on_an_unedited_design_prepares_nothing() {
     let (at_publication, prepared) = app.evidence_check(&inputs);
     assert_eq!(at_publication, Ok(()));
     assert!(prepared.is_empty(), "{prepared:?}");
+}
+
+/// Edit the plan's transient as `edit` does.
+fn edit_the_transient(
+    app: &mut RSpiceApp,
+    edit: impl FnOnce(&mut rspice_simulation_contract::drafts::TranSetup),
+) {
+    use crate::simulation::plan::AnalysisDraft;
+
+    let plan = app
+        .state
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .expect("a default state owns a stable plan");
+    let transient = plan
+        .instances()
+        .iter()
+        .find(|instance| matches!(instance.draft(), AnalysisDraft::Transient(_)))
+        .expect("the example runs a transient")
+        .id();
+    plan.edit(transient, |draft| {
+        if let AnalysisDraft::Transient(draft) = draft {
+            edit(draft);
+        }
+    })
+    .expect("the transient takes the edit");
+}
+
+/// Run the RC lowpass's transient to 20 µs, capturing a checkpoint every
+/// 10 µs, as Automation runs it. Returns the inputs Automation kept and the
+/// digest of the last checkpoint the run captured.
+fn a_run_capturing_checkpoints(
+    app: &mut RSpiceApp,
+) -> (
+    crate::simulation::controller::PreparedRunSetInputs,
+    crate::product::ContentDigest,
+) {
+    edit_the_transient(app, |draft| {
+        draft.stop = "20u".to_owned();
+        draft.step = "100n".to_owned();
+        draft.max_step = "100n".to_owned();
+        draft.checkpoint = Some(
+            rspice_simulation_contract::tran_checkpoint::TranCheckpointDraft {
+                interval: Some("10u".to_owned()),
+                resume: Vec::new(),
+            },
+        );
+    });
+    let (_, inputs) = app.queued_as_automation_queues();
+    assert!(app.dispatch_frame().is_empty());
+    app.finish_the_run();
+    let run = app
+        .state
+        .simulation
+        .retained
+        .runs
+        .first()
+        .expect("the run is retained");
+    assert!(run.success, "{:?}", run.analyses);
+    let image = run
+        .analyses
+        .iter()
+        .find_map(|analysis| analysis.transient_checkpoint.as_ref())
+        .expect("the run captured a checkpoint")
+        .digest();
+    (inputs, image)
+}
+
+/// A transient that captures checkpoints and resumes from none reads no
+/// retained run. The run Automation dispatched, which the history holds from
+/// the dispatch on, therefore does not expire its evidence, though the
+/// history has moved under it.
+#[test]
+fn a_transient_capturing_checkpoints_does_not_expire_its_own_evidence() {
+    let mut app = rc_lowpass();
+    let (inputs, _) = a_run_capturing_checkpoints(&mut app);
+
+    let (at_publication, prepared) = app.evidence_check(&inputs);
+    assert_eq!(at_publication, Ok(()));
+    assert!(prepared.is_empty(), "{prepared:?}");
+}
+
+/// A transient that resumes from a checkpoint reads the retained run that
+/// holds it. Removing that run expires the evidence of a run prepared to
+/// resume from it, named as the input it is.
+#[test]
+fn removing_the_run_a_checkpoint_resumes_from_expires_the_evidence() {
+    let mut app = rc_lowpass();
+    let (_, image) = a_run_capturing_checkpoints(&mut app);
+    edit_the_transient(&mut app, |draft| {
+        draft.stop = "40u".to_owned();
+        if let Some(checkpoint) = draft.checkpoint.as_mut() {
+            checkpoint.resume = vec![image];
+        }
+    });
+    let (_, inputs) = app.queued_as_automation_queues();
+    assert_eq!(app.evidence_check(&inputs).0, Ok(()));
+
+    app.state.simulation.retained.runs.remove(0);
+    let (verdict, prepared) = app.evidence_check(&inputs);
+
+    assert!(prepared.is_empty(), "{prepared:?}");
+    assert_eq!(
+        verdict.expect_err("the checkpoint's run is gone").message(),
+        format!("{DESIGN_CHANGED} · the retained runs a checkpoint resumes from changed")
+    );
 }
 
 /// An edit made while Automation's run is in flight expires its evidence, and
