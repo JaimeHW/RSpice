@@ -11,7 +11,9 @@ use std::collections::{BTreeMap, HashMap};
 use super::input::ComponentInfo;
 use super::net::{NetInfo, fold_nets};
 use super::source_loops;
-use super::types::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
+use super::types::{
+    DrcLocation, DrcRelated, DrcRelation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
+};
 use crate::connectivity::{ConnectivityAnchor, ConnectivityDiagnosticKind, ExtractedConnectivity};
 use crate::schematic::component::{CardRole, WrittenCard};
 use crate::schematic::port::PortDirection;
@@ -323,8 +325,7 @@ impl DrcChecker {
                             id: component.id,
                             name: component.name.clone(),
                         },
-                    )
-                    .with_related(vec![component_name.clone(), (*parameter).clone()]),
+                    ),
                 );
             }
             let mut range_issues = component.out_of_range_parameters.iter().collect::<Vec<_>>();
@@ -350,8 +351,7 @@ impl DrcChecker {
                             id: component.id,
                             name: component.name.clone(),
                         },
-                    )
-                    .with_related(vec![component_name.clone(), issue.name.clone()]),
+                    ),
                 );
             }
         }
@@ -390,8 +390,7 @@ impl DrcChecker {
                         id: component.id,
                         name: component.name.clone(),
                     },
-                )
-                .with_related(vec![component_name]),
+                ),
                 false,
             );
         }
@@ -431,7 +430,21 @@ impl DrcChecker {
                             name: component.name.clone(),
                         },
                     )
-                    .with_related(vec![identity.clone(), broken.reference.clone()]),
+                    .with_related(
+                        broken
+                            .candidates
+                            .iter()
+                            .map(|(id, name)| {
+                                DrcRelated::new(
+                                    DrcLocation::Component {
+                                        id: *id,
+                                        name: name.clone(),
+                                    },
+                                    DrcRelation::Candidate,
+                                )
+                            })
+                            .collect(),
+                    ),
                 );
             }
         }
@@ -523,8 +536,7 @@ impl DrcChecker {
                             pin_name: pin.name.clone(),
                             point: pin.point,
                         },
-                    )
-                    .with_related(vec![component_name, pin.name.clone()]),
+                    ),
                 );
             }
         }
@@ -557,19 +569,14 @@ impl DrcChecker {
     }
 
     fn check_dangling_wires(&mut self, net_map: &HashMap<String, NetInfo>, result: &mut DrcResult) {
-        let mut dangling = std::collections::BTreeMap::<u64, String>::new();
-        let mut net_names = net_map.keys().collect::<Vec<_>>();
-        net_names.sort();
-        for net_name in net_names {
-            let net = &net_map[net_name];
+        let mut dangling = std::collections::BTreeSet::<u64>::new();
+        for net in net_map.values() {
             if net.connection_count != 0 || net.tapped {
                 continue;
             }
-            for wire_id in &net.wire_ids {
-                dangling.entry(*wire_id).or_insert_with(|| net_name.clone());
-            }
+            dangling.extend(net.wire_ids.iter().copied());
         }
-        for (wire_id, net_name) in dangling {
+        for wire_id in dangling {
             let id = self.next_id();
             self.add_violation(
                 result,
@@ -578,8 +585,7 @@ impl DrcChecker {
                     DrcViolationType::DanglingWire,
                     format!("Wire #{wire_id} has no component or typed-bus endpoint"),
                     DrcLocation::Wire { id: wire_id },
-                )
-                .with_related(vec![net_name]),
+                ),
             );
         }
     }
@@ -675,7 +681,26 @@ impl DrcChecker {
                     listed(&spellings)
                 ),
             };
-            let (first, _) = sharing[0];
+            let (first, first_card) = sharing[0];
+            // Every other instance the deck writes under the name, once each.
+            let mut others = sharing
+                .iter()
+                .map(|(component, _)| *component)
+                .filter(|component| component.id != first.id)
+                .collect::<Vec<_>>();
+            others.dedup_by_key(|component| component.id);
+            let others = others
+                .into_iter()
+                .map(|component| {
+                    DrcRelated::new(
+                        DrcLocation::Component {
+                            id: component.id,
+                            name: component.name.clone(),
+                        },
+                        DrcRelation::SameName(first_card.name.clone()),
+                    )
+                })
+                .collect();
             let id = self.next_id();
             self.add_violation(
                 result,
@@ -688,7 +713,7 @@ impl DrcChecker {
                         name: first.name.clone(),
                     },
                 )
-                .with_related(drawn),
+                .with_related(others),
             );
         }
     }
@@ -779,7 +804,7 @@ impl DrcChecker {
                         format!("Node '{}' has only {} connection(s)", name, connections),
                         net.location(name),
                     )
-                    .with_related(net.connected_components.clone()),
+                    .with_related(related(&net.on_node, DrcRelation::OnNode)),
                 );
             }
         }
@@ -837,6 +862,19 @@ impl DrcChecker {
                 .iter()
                 .map(|&member| component_identity(sources[member].0))
                 .collect::<Vec<_>>();
+            let in_loop = members
+                .iter()
+                .map(|&member| {
+                    let source = sources[member].0;
+                    DrcRelated::new(
+                        DrcLocation::Component {
+                            id: source.id,
+                            name: source.name.clone(),
+                        },
+                        DrcRelation::LoopSource,
+                    )
+                })
+                .collect();
             let message = if names.len() == 1 {
                 format!(
                     "Voltage source {} has both terminals on node '{node}'",
@@ -859,7 +897,7 @@ impl DrcChecker {
             self.add_violation(
                 result,
                 DrcViolation::new(id, DrcViolationType::SourceToSource, message, location)
-                    .with_related(names),
+                    .with_related(in_loop),
             );
         }
     }
@@ -897,7 +935,7 @@ impl DrcChecker {
                     ),
                     net.location(net_name),
                 )
-                .with_related(drivers),
+                .with_related(related(&net.declared_output_pins, DrcRelation::Output)),
             );
         }
     }
@@ -931,6 +969,10 @@ impl DrcChecker {
                 continue;
             }
             let id = self.next_id();
+            let names = receivers
+                .iter()
+                .map(|receiver| receiver.object_name(None))
+                .collect::<Vec<_>>();
             self.add_violation(
                 result,
                 DrcViolation::new(
@@ -940,11 +982,11 @@ impl DrcChecker {
                         "Net '{}' joins {} declared inputs and nothing drives it: {}",
                         net.display_name,
                         receivers.len(),
-                        receivers.join(", ")
+                        names.join(", ")
                     ),
                     net.location(name),
                 )
-                .with_related(receivers.clone()),
+                .with_related(related(receivers, DrcRelation::Input)),
             );
         }
     }
@@ -977,10 +1019,18 @@ impl DrcChecker {
                     ),
                     net.location(&net.display_name),
                 )
-                .with_related(drivers),
+                .with_related(related(&net.output_pins, DrcRelation::Output)),
             );
         }
     }
+}
+
+/// Every one of `objects`, as an object a finding involves in `relation`.
+fn related(objects: &[DrcLocation], relation: DrcRelation) -> Vec<DrcRelated> {
+    objects
+        .iter()
+        .map(|object| DrcRelated::new(object.clone(), relation.clone()))
+        .collect()
 }
 
 /// Report every off-sheet connector whose declared name no second connector
@@ -1119,7 +1169,8 @@ pub(super) fn append_case_collision_violations(
             ))
         }));
 
-    let mut first_spelling: HashMap<String, String> = HashMap::new();
+    // The first spelling of each folded name, and where it is written.
+    let mut first_spelling: HashMap<String, (String, DrcLocation)> = HashMap::new();
     let mut next_id = result.total_count();
     for (name, location) in authored {
         if name.is_empty() {
@@ -1127,20 +1178,23 @@ pub(super) fn append_case_collision_violations(
         }
         match first_spelling.entry(name.to_ascii_lowercase()) {
             std::collections::hash_map::Entry::Vacant(slot) => {
-                slot.insert(name);
+                slot.insert((name, location));
             }
-            std::collections::hash_map::Entry::Occupied(slot) if *slot.get() != name => {
+            std::collections::hash_map::Entry::Occupied(slot) if slot.get().0 != name => {
+                let (first, written) = slot.get();
                 let mut violation = DrcViolation::new(
                     next_id,
                     DrcViolationType::CaseCollidingNetNames,
                     format!(
-                        "Nets `{}` and `{name}` differ only by case; the netlist joins them \
-                         into one node.",
-                        slot.get()
+                        "Nets `{first}` and `{name}` differ only by case; the netlist joins them \
+                         into one node."
                     ),
                     location,
                 )
-                .with_related(vec![slot.get().clone(), name]);
+                .with_related(vec![DrcRelated::new(
+                    written.clone(),
+                    DrcRelation::OtherSpelling,
+                )]);
                 if let Some(severity) =
                     severity_overrides.get(&DrcViolationType::CaseCollidingNetNames)
                 {

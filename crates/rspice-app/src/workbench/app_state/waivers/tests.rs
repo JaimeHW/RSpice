@@ -158,7 +158,14 @@ fn stub_finding<'a>(
         .iter()
         .find(|finding| {
             finding.violation_type == DrcViolationType::FloatingNode
-                && finding.related_items == [name]
+                && matches!(
+                    finding.related.as_slice(),
+                    [related] if matches!(
+                        &related.location,
+                        rspice_design::drc::DrcLocation::Terminal { component_name, .. }
+                            if component_name == name
+                    )
+                )
         })
         .unwrap_or_else(|| panic!("{name}'s stub floats: {:?}", result.violations()));
     let floating = DrcViolationType::FloatingNode.rule_code();

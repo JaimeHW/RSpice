@@ -8,7 +8,7 @@
 //! lives.
 
 use super::*;
-use crate::drc::input::{ParameterRangeIssue, PinInfo};
+use crate::drc::input::{BrokenReference, ParameterRangeIssue, PinInfo};
 use crate::schematic::document::SchematicDocument;
 use crate::schematic::port::PortDirection;
 use rspice_design_model::Point;
@@ -349,8 +349,10 @@ fn single_connection_net_is_floating() {
             terminals: Vec::new(),
         }
     );
-    // Related items identify the component so the UI can highlight it.
-    assert_eq!(floating[0].related_items, vec!["R2".to_string()]);
+    // The terminal on the node is where a reader is sent, and what the canvas
+    // marks.
+    assert_eq!(floating[0].related_items(), vec!["R2.2".to_string()]);
+    assert_eq!(floating[0].related[0].relation, DrcRelation::OnNode);
 }
 
 #[test]
@@ -409,7 +411,7 @@ fn two_voltage_sources_across_one_pair_are_source_to_source() {
         }
     );
     assert_eq!(
-        shorted[0].related_items,
+        shorted[0].related_items(),
         vec!["V1".to_string(), "V2".to_string()]
     );
 }
@@ -451,7 +453,7 @@ fn a_ring_of_three_sources_is_one_loop() {
     assert_eq!(loops.len(), 1, "{:?}", result.violations());
     assert_eq!(loops[0].severity, DrcSeverity::Error);
     assert_eq!(
-        loops[0].related_items,
+        loops[0].related_items(),
         vec!["V2".to_string(), "V1".to_string(), "V3".to_string()]
     );
     assert_eq!(
@@ -472,7 +474,7 @@ fn a_ring_of_three_sources_is_one_loop() {
     );
     let loops = of_type(&result, DrcViolationType::SourceToSource);
     assert_eq!(loops.len(), 1, "{:?}", result.violations());
-    assert_eq!(loops[0].related_items, vec!["V1".to_string()]);
+    assert_eq!(loops[0].related_items(), vec!["V1".to_string()]);
 }
 
 #[test]
@@ -504,9 +506,16 @@ fn declared_outputs_on_one_node_are_shorted_outputs() {
     );
     let shorted = of_type(&result, DrcViolationType::ShortedOutputs);
     assert_eq!(shorted.len(), 1);
+    // Every output on the net, by the terminal it drives through.
     assert_eq!(
-        shorted[0].related_items,
-        vec!["X1".to_owned(), "X2".to_owned()]
+        shorted[0].related_items(),
+        vec!["X1.OUT".to_owned(), "X2.OUT".to_owned()]
+    );
+    assert!(
+        shorted[0]
+            .related
+            .iter()
+            .all(|output| output.relation == DrcRelation::Output)
     );
 }
 
@@ -1444,4 +1453,166 @@ fn the_advisory_continues_the_result_id_sequence_it_is_appended_to() {
         .map(|violation| violation.id)
         .collect();
     assert_eq!(ids, vec![0, 1]);
+}
+
+/// One instance, by where it is.
+fn at(id: u64, name: &str) -> DrcLocation {
+    DrcLocation::Component {
+        id,
+        name: name.to_owned(),
+    }
+}
+
+/// A loop is every source it runs through, not only the node it is stated
+/// at, and each is named by where it is so a reader can be taken to it.
+#[test]
+fn a_loop_relates_every_source_it_runs_through() {
+    let components = vec![
+        vsource(0, "V1", "a", "b"),
+        vsource(1, "V2", "b", "0"),
+        vsource(2, "V3", "0", "a"),
+        resistor(3, "R1", vec![pin("1", "a"), pin("2", "0")]),
+        resistor(4, "R2", vec![pin("1", "b"), pin("2", "0")]),
+    ];
+    let result = check(&components, DrcConfig::default());
+    let loops = of_type(&result, DrcViolationType::SourceToSource);
+    assert_eq!(loops.len(), 1, "{:?}", result.violations());
+    assert_eq!(
+        loops[0].related,
+        [(1, "V2"), (0, "V1"), (2, "V3")]
+            .map(|(id, name)| DrcRelated::new(at(id, name), DrcRelation::LoopSource))
+    );
+}
+
+/// A duplicated name is stated once, at the first instance carrying it, and
+/// names every other instance the deck writes under it — however the author
+/// spelled it.
+#[test]
+fn a_duplicate_name_relates_every_other_instance_carrying_it() {
+    let components = vec![
+        vsource(0, "V1", "vin", "0"),
+        resistor(3, "R1", vec![pin("1", "vin"), pin("2", "0")]),
+        resistor(1, "R1", vec![pin("1", "vin"), pin("2", "0")]),
+        resistor(2, "r1", vec![pin("1", "vin"), pin("2", "0")]),
+    ];
+    let result = check(&components, DrcConfig::default());
+    let duplicates = of_type(&result, DrcViolationType::DuplicateName);
+    assert_eq!(duplicates.len(), 1, "{:?}", result.violations());
+    assert_eq!(duplicates[0].location, at(1, "R1"));
+    assert_eq!(
+        duplicates[0].related,
+        [(2, "r1"), (3, "R1")].map(|(id, name)| DrcRelated::new(
+            at(id, name),
+            DrcRelation::SameName("R1".to_owned())
+        ))
+    );
+    assert_eq!(
+        DrcRelation::SameName("R1".to_owned()).describe(),
+        "also named R1"
+    );
+}
+
+/// The second spelling of a name is the finding, and the first is where the
+/// reader is sent to compare them.
+#[test]
+fn a_case_collision_relates_the_name_it_collides_with() {
+    use crate::schematic::net_label::NetLabel;
+
+    let mut schematic = SchematicDocument::default();
+    schematic
+        .net_labels
+        .push(NetLabel::new(1, Point::origin(), "Out"));
+    schematic
+        .net_labels
+        .push(NetLabel::new(2, Point::new(40, 0), "out"));
+    let mut result = DrcResult::new();
+    append_case_collision_violations(&schematic, &mut result, &BTreeMap::new());
+    assert_eq!(
+        result.violations()[0].related,
+        [DrcRelated::new(
+            DrcLocation::NetLabel {
+                name: "Out".to_owned()
+            },
+            DrcRelation::OtherSpelling
+        )]
+    );
+}
+
+/// A reference several instances answer to names them; one nothing answers
+/// to names nothing, and relates nothing.
+#[test]
+fn an_ambiguous_reference_relates_the_instances_it_could_mean() {
+    let mut sensing = vsource(4, "F1", "a", "0");
+    sensing.is_voltage_source = false;
+    sensing.broken_references = vec![
+        BrokenReference {
+            parameter: "vref".to_owned(),
+            reference: "Vs".to_owned(),
+            ambiguous: true,
+            candidates: vec![(5, "Vs".to_owned()), (6, "vs".to_owned())],
+        },
+        BrokenReference {
+            parameter: "vref".to_owned(),
+            reference: "Vnone".to_owned(),
+            ambiguous: false,
+            candidates: Vec::new(),
+        },
+    ];
+    let result = check(&[sensing], DrcConfig::default());
+    let unresolved = of_type(&result, DrcViolationType::UnresolvedReference);
+    assert_eq!(unresolved.len(), 2, "{:?}", result.violations());
+    assert_eq!(
+        unresolved[0].related,
+        [(5, "Vs"), (6, "vs")]
+            .map(|(id, name)| DrcRelated::new(at(id, name), DrcRelation::Candidate))
+    );
+    assert!(unresolved[1].related.is_empty());
+}
+
+/// What an object a finding involves is called is read off where it is: an
+/// object inside the occurrence the finding is stated at by its own name, and
+/// one in another occurrence by its path.
+#[test]
+fn related_objects_are_named_from_where_they_are() {
+    use rspice_app_types::hierarchy_path::InstancePath;
+    use rspice_design_model::cell_view::CellViewRef;
+
+    let inside = |path: &str, location: DrcLocation| DrcLocation::InsideInstance {
+        path: InstancePath::parse(path).expect("path"),
+        view: CellViewRef::new("work", "pair", "schematic"),
+        inner: Box::new(location),
+    };
+    let node = DrcLocation::Node {
+        net_name: "vdd!".to_owned(),
+        terminals: Vec::new(),
+    };
+    let finding = |location: DrcLocation, related: Vec<DrcLocation>| {
+        DrcViolation::new(0, DrcViolationType::SourceToSource, "loop", location).with_related(
+            related
+                .into_iter()
+                .map(|location| DrcRelated::new(location, DrcRelation::LoopSource))
+                .collect(),
+        )
+    };
+
+    let within = finding(
+        inside("/X1", node.clone()),
+        vec![inside("/X1", at(1, "V1")), inside("/X1", at(2, ""))],
+    );
+    assert_eq!(within.related_items(), ["V1", "component #2"]);
+
+    let across = finding(
+        inside("/X1", node.clone()),
+        vec![inside("/X1", at(1, "V1")), inside("/X2", at(1, "V1"))],
+    );
+    assert_eq!(across.related_items(), ["/X1/V1", "/X2/V1"]);
+
+    let terminal = DrcLocation::Terminal {
+        component_id: 7,
+        component_name: "X3".to_owned(),
+        pin_name: "OUT".to_owned(),
+        point: Point::origin(),
+    };
+    let here = finding(node, vec![terminal, DrcLocation::Wire { id: 9 }]);
+    assert_eq!(here.related_items(), ["X3.OUT", "wire #9"]);
 }

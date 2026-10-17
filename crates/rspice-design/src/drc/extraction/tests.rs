@@ -1690,6 +1690,19 @@ fn a_global_touched_once_in_the_design_is_floating() {
     );
 }
 
+/// The instance whose one leg a floating stub's finding stands on.
+fn stands_on_stub(finding: &DrcViolation) -> &str {
+    match finding.related.as_slice() {
+        [
+            DrcRelated {
+                location: DrcLocation::Terminal { component_name, .. },
+                relation: DrcRelation::OnNode,
+            },
+        ] => component_name,
+        related => panic!("a stub's node holds one leg: {related:?}"),
+    }
+}
+
 /// A resistor at `x` with one leg wired out to nothing: a node of one
 /// connection that no label names, so the extractor numbers it by where it
 /// is drawn.
@@ -1729,7 +1742,7 @@ fn a_waiver_on_an_unnamed_node_stays_on_its_node_when_the_nodes_are_renumbered()
     let on = |result: &DrcResult, name: &str| {
         of_type(result, DrcViolationType::FloatingNode)
             .into_iter()
-            .find(|finding| finding.related_items == [name])
+            .find(|finding| stands_on_stub(finding) == name)
             .cloned()
             .unwrap_or_else(|| panic!("{name}'s stub floats: {:?}", result.violations()))
     };
@@ -1756,9 +1769,9 @@ fn a_waiver_on_an_unnamed_node_stays_on_its_node_when_the_nodes_are_renumbered()
     let waived = of_type(&after, DrcViolationType::FloatingNode)
         .into_iter()
         .filter(|finding| finding.waiver.is_some())
-        .map(|finding| finding.related_items.clone())
+        .map(stands_on_stub)
         .collect::<Vec<_>>();
-    assert_eq!(waived, [vec!["R2".to_owned()]], "{:?}", after.violations());
+    assert_eq!(waived, ["R2"], "{:?}", after.violations());
 
     // A waiver an earlier build keyed by the number covers no node at all,
     // so it is reported rather than following the number.
@@ -1849,6 +1862,29 @@ fn only_a_conflict_on_one_global_across_occurrences_is_a_hierarchy_finding() {
         vec![("/X1".to_owned(), Some("work/pair/schematic".to_owned()))],
         "the cell's own rule states it, and the hierarchy rule does not repeat it"
     );
+    // Its sources are drawn where the loop is, at the same occurrence, and
+    // named as that cellview draws them, as its message names them.
+    let loops = of_type(&result, DrcViolationType::SourceToSource);
+    let pair = CellViewRef::new("work", "pair", "schematic");
+    assert_eq!(
+        loops[0]
+            .related
+            .iter()
+            .map(|source| &source.location)
+            .collect::<Vec<_>>(),
+        [(1, "V1"), (2, "V2")]
+            .map(|(id, name)| DrcLocation::InsideInstance {
+                path: InstancePath::parse("/X1").expect("path"),
+                view: pair.clone(),
+                inner: Box::new(DrcLocation::Component {
+                    id,
+                    name: name.to_owned(),
+                }),
+            })
+            .iter()
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(loops[0].related_items(), ["V1", "V2"]);
 }
 
 /// Across the hierarchy, as within one cellview, sources conflict only where
@@ -1937,7 +1973,7 @@ fn cross_cellview_sources_conflict_only_where_they_close_a_loop() {
     let loops = of_type(&twice, DrcViolationType::SourceToSource);
     assert_eq!(loops.len(), 1, "{:?}", twice.violations());
     assert_eq!(
-        loops[0].related_items,
+        loops[0].related_items(),
         ["/X1/V1", "/X2/V1", "/X1/V2", "/X2/V2"].map(str::to_owned)
     );
 }

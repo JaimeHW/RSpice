@@ -353,7 +353,7 @@ impl<'a> NetlistGenerator<'a> {
                         let reference = params.get("vref").map_or("", |reference| reference.trim());
                         match resolve_instance_reference(&self.schematic.components, reference) {
                             InstanceReference::Names { card, .. } => card,
-                            InstanceReference::Ambiguous | InstanceReference::Unresolved => {
+                            InstanceReference::Ambiguous(_) | InstanceReference::Unresolved => {
                                 reference.to_owned()
                             }
                         }

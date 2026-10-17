@@ -39,13 +39,21 @@ pub(super) struct NetInfo {
     pub(super) has_voltage_source: bool,
     pub(super) has_current_source: bool,
     pub(super) is_ground: bool,
-    pub(super) connected_components: Vec<String>,
+    /// Every placed terminal on this node, where a finding about the node
+    /// sends a reader: by component id and pin.
+    pub(super) on_node: Vec<DrcLocation>,
+    /// The components a declared output on this node belongs to, once each.
     pub(super) output_drivers: HashSet<String>,
+    /// The declared outputs on this node, terminal by terminal.
+    pub(super) output_pins: Vec<DrcLocation>,
+    /// The components a declared output other than a source's belongs to.
     pub(super) declared_output_drivers: HashSet<String>,
-    /// The terminals on this node an interface declares inputs, as
-    /// `component.pin`. A node every terminal of which is one has receivers
-    /// and nothing to drive them.
-    pub(super) declared_inputs: Vec<String>,
+    /// Those outputs, terminal by terminal.
+    pub(super) declared_output_pins: Vec<DrcLocation>,
+    /// The terminals on this node an interface declares inputs, in the order
+    /// their names sort in. A node every terminal of which is one has
+    /// receivers and nothing to drive them.
+    pub(super) declared_inputs: Vec<DrcLocation>,
     pub(super) wire_ids: Vec<u64>,
     /// A typed bus tap binds this node: a real electrical endpoint that no
     /// placed terminal represents.
@@ -104,6 +112,12 @@ pub(super) fn fold_nets(
     for component in components {
         let identity = component_identity(component);
         for pin in &component.pins {
+            let terminal = DrcLocation::Terminal {
+                component_id: component.id,
+                component_name: component.name.clone(),
+                pin_name: pin.name.clone(),
+                point: pin.point,
+            };
             let entry = nets.entry(pin.net_name.clone()).or_default();
             entry.is_ground |= crate::schematic::ground_names::is_ground_reference(&pin.net_name);
             entry.connection_count += 1;
@@ -120,23 +134,21 @@ pub(super) fn fold_nets(
             }
             entry.has_voltage_source |= component.is_voltage_source;
             entry.has_current_source |= component.is_current_source;
-            if !entry.connected_components.contains(&identity) {
-                entry.connected_components.push(identity.clone());
-            }
             if pin.direction == Some(PortDirection::In) {
-                entry
-                    .declared_inputs
-                    .push(format!("{identity}.{}", pin.name));
+                entry.declared_inputs.push(terminal.clone());
             }
             if pin.drives() {
                 entry.output_drivers.insert(identity.clone());
+                entry.output_pins.push(terminal.clone());
                 // A source's drive terminal is not a declared output: what
                 // makes sources conflict is a loop among them, which the
                 // source rule finds over their branches rather than per node.
                 if !component.is_voltage_source {
                     entry.declared_output_drivers.insert(identity.clone());
+                    entry.declared_output_pins.push(terminal.clone());
                 }
             }
+            entry.on_node.push(terminal);
         }
     }
 
@@ -150,9 +162,14 @@ pub(super) fn fold_nets(
         // the drawing's; a member name written by hand parses as a slice.
         net.bus_member = connectivity.display_names.contains_key(name)
             || crate::schematic::bus::BusSlice::parse(name).is_ok_and(|slice| slice.is_scalar());
-        net.connected_components.sort();
-        net.connected_components.dedup();
-        net.declared_inputs.sort();
+        for terminals in [
+            &mut net.on_node,
+            &mut net.output_pins,
+            &mut net.declared_output_pins,
+            &mut net.declared_inputs,
+        ] {
+            terminals.sort_by_cached_key(|terminal| terminal.object_name(None));
+        }
         net.wire_ids.sort_unstable();
         net.wire_ids.dedup();
         net.terminals.sort();

@@ -38,15 +38,16 @@ fn named_port(schematic: &mut SchematicState, at: Point, name: &str) {
         .value = name.to_owned();
 }
 
-fn reference_of(schematic: &SchematicState, id: u64) -> String {
-    schematic
-        .document()
-        .components
+/// The instances whose terminals a node finding says stand on the node.
+fn on_node(finding: &DrcViolation) -> Vec<u64> {
+    finding
+        .related
         .iter()
-        .find(|component| component.id == id)
-        .expect("placed component")
-        .name
-        .clone()
+        .map(|related| match &related.location {
+            DrcLocation::Terminal { component_id, .. } => *component_id,
+            other => panic!("a node holds terminals: {other:?}"),
+        })
+        .collect()
 }
 
 fn run(schematic: &SchematicState, config: DrcConfig) -> DrcResult {
@@ -454,10 +455,7 @@ fn an_autonamed_single_connection_node_is_reported_floating() {
     );
     let floating = of_type(&result, DrcViolationType::FloatingNode);
     assert_eq!(floating.len(), 1, "{:?}", result.violations());
-    assert_eq!(
-        floating[0].related_items,
-        vec![reference_of(&schematic, resistor)]
-    );
+    assert_eq!(on_node(floating[0]), vec![resistor]);
     let DrcLocation::Node {
         net_name,
         terminals,
@@ -562,10 +560,7 @@ fn a_labelled_terminal_with_no_conductor_is_floating_under_the_label_name() {
                 }
         })
         .expect("the label names the node the finding quotes");
-    assert_eq!(
-        finding.related_items,
-        vec![reference_of(&schematic, resistor)]
-    );
+    assert_eq!(on_node(finding), vec![resistor]);
 }
 
 #[test]

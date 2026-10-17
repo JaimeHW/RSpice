@@ -650,11 +650,14 @@ fn sheet_check_rows_report_real_unconnected_and_floating_counts() {
     assert!(sheet_open_pin_findings(&state).is_empty());
 }
 
-/// A component's own findings are the ones located on it, or naming it on
-/// this drawing. A finding inside a placed cell names that cell's components:
-/// `amp`'s `R1` is not this sheet's `R1`.
+/// A component's own findings are the ones located on it, or involving it on
+/// this drawing. A finding inside a placed cell involves that cell's
+/// components: `amp`'s `R1` is not this sheet's `R1`, and neither is another
+/// instance on this sheet that happens to share its name.
 #[test]
 fn a_component_does_not_claim_a_placed_cells_finding_of_the_same_name() {
+    use rspice_design::drc::{DrcLocation, DrcRelated, DrcRelation};
+
     let state = state_with_two_components();
     let resistor = state
         .schematic
@@ -664,33 +667,42 @@ fn a_component_does_not_claim_a_placed_cells_finding_of_the_same_name() {
         .find(|component| component.kind == ComponentType::Resistor)
         .expect("the fixture resistor")
         .clone();
-    let named = |location| {
+    let leg = |id: u64| DrcLocation::Terminal {
+        component_id: id,
+        component_name: resistor.name.clone(),
+        pin_name: "1".to_owned(),
+        point: crate::state::Point::new(0, 0),
+    };
+    let node = DrcLocation::Node {
+        net_name: "n1".to_owned(),
+        terminals: Vec::new(),
+    };
+    let inside = |location: DrcLocation| DrcLocation::InsideInstance {
+        path: rspice_app_types::hierarchy_path::InstancePath::parse("/X1")
+            .expect("an occurrence path"),
+        view: crate::state::CellViewRef::new("work", "amp", "schematic"),
+        inner: Box::new(location),
+    };
+    let floating = |location, on_node| {
         rspice_design::drc::DrcViolation::new(
             1,
             rspice_design::drc::DrcViolationType::FloatingNode,
             "floating",
             location,
         )
-        .with_related(vec![resistor.name.clone()])
+        .with_related(vec![DrcRelated::new(on_node, DrcRelation::OnNode)])
     };
 
     assert!(violation_targets_component(
-        &named(rspice_design::drc::DrcLocation::Node {
-            net_name: "n1".to_owned(),
-            terminals: Vec::new(),
-        }),
+        &floating(node.clone(), leg(resistor.id)),
         &resistor
     ));
     assert!(!violation_targets_component(
-        &named(rspice_design::drc::DrcLocation::InsideInstance {
-            path: rspice_app_types::hierarchy_path::InstancePath::parse("/X1")
-                .expect("an occurrence path"),
-            view: crate::state::CellViewRef::new("work", "amp", "schematic"),
-            inner: Box::new(rspice_design::drc::DrcLocation::Node {
-                net_name: "n1".to_owned(),
-                terminals: Vec::new(),
-            }),
-        }),
+        &floating(node.clone(), leg(resistor.id + 1000)),
+        &resistor
+    ));
+    assert!(!violation_targets_component(
+        &floating(inside(node), inside(leg(resistor.id))),
         &resistor
     ));
 }

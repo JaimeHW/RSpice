@@ -238,8 +238,9 @@ pub enum InstanceReference<'a> {
         instance: &'a Component,
         card: String,
     },
-    /// More than one card answers to it.
-    Ambiguous,
+    /// More than one card answers to it: the instances that write them, once
+    /// each, in the order they are drawn.
+    Ambiguous(Vec<&'a Component>),
     /// No card the cellview writes answers to it.
     Unresolved,
 }
@@ -286,7 +287,12 @@ pub fn resolve_instance_reference<'a>(
         });
     }
     if candidates.len() > 1 {
-        return InstanceReference::Ambiguous;
+        let mut instances = candidates
+            .into_iter()
+            .map(|(instance, _)| instance)
+            .collect::<Vec<_>>();
+        instances.dedup_by_key(|instance| instance.id);
+        return InstanceReference::Ambiguous(instances);
     }
     match candidates.pop() {
         Some((instance, card)) => InstanceReference::Names { instance, card },

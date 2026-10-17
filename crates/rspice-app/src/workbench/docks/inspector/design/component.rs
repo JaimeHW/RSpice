@@ -1234,18 +1234,24 @@ pub(super) fn violation_targets_component(violation: &DrcViolation, component: &
     if matches!(violation.location, DrcLocation::InsideInstance { .. }) {
         return false;
     }
-    // A terminal finding belongs to the component that owns the terminal. The
-    // identity has to be read off the location rather than left to the related
-    // items, because an instance with no authored reference is named by its id
-    // in those and matches nothing.
-    matches!(
-        &violation.location,
-        DrcLocation::Component { id, .. } | DrcLocation::Terminal { component_id: id, .. }
-            if *id == component.id
-    ) || violation
-        .related_items
-        .iter()
-        .any(|item| item.eq_ignore_ascii_case(&component.name))
+    // A terminal finding belongs to the component that owns the terminal, and
+    // so does a finding that involves the component or one of its terminals:
+    // a loop through it, a name it shares, an output of it on a shorted net.
+    // Each is matched by identity, never by name, so an instance with no
+    // authored reference is found and two instances that share a name are
+    // told apart.
+    let this = |location: &DrcLocation| {
+        matches!(
+            location,
+            DrcLocation::Component { id, .. } | DrcLocation::Terminal { component_id: id, .. }
+                if *id == component.id
+        )
+    };
+    this(&violation.location)
+        || violation
+            .related
+            .iter()
+            .any(|related| this(&related.location))
 }
 
 /// A safe-operating-area verdict as a row states it: the worst margin, or the

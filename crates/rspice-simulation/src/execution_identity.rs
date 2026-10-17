@@ -626,7 +626,10 @@ fn drc_violation_digest(violation: &DrcViolation) -> ContentDigest {
     writer.string(&violation.message);
     encode_drc_location(&mut writer, &violation.location);
 
-    let mut related = violation.related_items.clone();
+    // What the other objects the finding involves are called, as it always
+    // was: where each one is, and what it is to the finding, is how a reader
+    // is shown them, and is not evidence the receipt holds.
+    let mut related = violation.related_items();
     related.sort();
     writer.sequence(related.len());
     for item in related {
