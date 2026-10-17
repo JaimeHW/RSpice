@@ -46,7 +46,7 @@ pub fn add_component(
     model_override: Option<ComponentModelOverride<'_>>,
 ) -> u64 {
     let id = identity.allocate(document);
-    let name = identity.generate_name(kind);
+    let name = identity.generate_name(document, kind);
     let mut component = Component::new(id, kind, placement.position);
     component.name = name;
     component.rotation = placement.rotation;
@@ -95,7 +95,7 @@ pub fn add_library_cell_component(
     let name = if let Some(prefix) = preferred_prefix {
         next_library_reference_name(&document.components, prefix)
     } else {
-        identity.generate_name(ComponentType::CellInstance)
+        identity.generate_name(document, ComponentType::CellInstance)
     };
     let mut component = Component::new(id, ComponentType::CellInstance, placement.position);
     component.name = name;

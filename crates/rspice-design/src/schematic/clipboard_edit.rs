@@ -329,7 +329,7 @@ impl<'document, 'clipboard> ClipboardPaste<'document, 'clipboard> {
             new_comp.id = new_id;
             new_comp.pos.x = new_comp.pos.x.saturating_add(offset_x);
             new_comp.pos.y = new_comp.pos.y.saturating_add(offset_y);
-            new_comp.name = identity.generate_name(new_comp.kind);
+            new_comp.name = identity.generate_name(document, new_comp.kind);
             copied_components.push(new_comp);
         }
         references.apply(&mut copied_components);
@@ -527,7 +527,7 @@ mod tests {
         assert_eq!(identity.cursor(), 9);
         let mut expected_identity = identity.clone();
         assert_eq!(
-            expected_identity.generate_name(ComponentType::Resistor),
+            expected_identity.generate_name(&document, ComponentType::Resistor),
             "R8"
         );
 

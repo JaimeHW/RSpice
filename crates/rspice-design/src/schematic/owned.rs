@@ -110,7 +110,7 @@ impl Schematic {
         self.identity.allocate(&self.document)
     }
     pub fn generate_name(&mut self, kind: ComponentType) -> String {
-        self.identity.generate_name(kind)
+        self.identity.generate_name(&self.document, kind)
     }
 
     /// External symbol/catalog changes also invalidate document geometry caches.
