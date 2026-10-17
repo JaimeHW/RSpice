@@ -696,7 +696,7 @@ fn sensitivity_spec_projects_frequency_only_in_ac_mode() {
 }
 
 #[test]
-fn sensitivity_completion_preserves_unavailable_results_and_finite_console_values() {
+fn sensitivity_completion_preserves_unavailable_results_and_logs_no_values() {
     use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
     let mut controller = SimulationController::new();
     let result = crate::simulation::SimulationResult::SensitivityStudy {
@@ -726,22 +726,9 @@ fn sensitivity_completion_preserves_unavailable_results_and_finite_console_value
     };
     let mut state = AppState::default();
     controller.apply_result_side_effects(&mut state, &result);
-    let messages: Vec<_> = state
-        .log_buffer
-        .entries()
-        .map(|entry| entry.message.as_str())
-        .collect();
     assert!(
-        messages
-            .iter()
-            .any(|text| text.contains("normalized = unavailable (out-of-range)")),
-        "{messages:?}"
-    );
-    assert!(
-        messages
-            .iter()
-            .any(|text| text.contains("normalized = 1.000e308")),
-        "{messages:?}"
+        state.log_buffer.is_empty(),
+        "result values are the Results workspace's to show, not the log's"
     );
     let retained = controller.convert_to_analysis_result_with_metadata_owned(
         result,
