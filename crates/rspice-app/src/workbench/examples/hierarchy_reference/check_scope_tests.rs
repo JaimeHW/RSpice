@@ -222,7 +222,10 @@ pub(in crate::workbench) fn draw_supply_source(state: &mut AppState) {
         .terminal_positions();
     for (pin, at) in terminals {
         let (end, net) = match pin {
-            "+" => (Point::new(at.x, at.y - 40), hierarchy_reference::GLOBAL_SUPPLY_NET),
+            "+" => (
+                Point::new(at.x, at.y - 40),
+                hierarchy_reference::GLOBAL_SUPPLY_NET,
+            ),
             _ => (Point::new(at.x, at.y + 40), "gnd"),
         };
         schematic
@@ -253,7 +256,10 @@ fn a_cellview_check_leaves_standing_what_only_the_design_check_computes() {
 
     fixture.state.check_design().expect("the design checks");
     let loops = source_loop_errors(&fixture.state);
-    assert!(loops > 0, "the copies of amp close a loop through the global");
+    assert!(
+        loops > 0,
+        "the copies of amp close a loop through the global"
+    );
 
     let own = fixture
         .state
@@ -388,7 +394,11 @@ fn a_deck_cannot_make_an_unused_cellview_block_a_run() {
         r#"{"schema_version":1,"severities":{"DRC-UNUSED-CELLVIEW":"Error"}}"#,
     )
     .expect("a stored deck always reads");
-    assert_eq!(errors(&mut promoted), shipped, "preflight blocks on no more");
+    assert_eq!(
+        errors(&mut promoted),
+        shipped,
+        "preflight blocks on no more"
+    );
 
     let listed = listing::listing(&promoted.state);
     let unused = (0..listed.len())
@@ -402,6 +412,57 @@ fn a_deck_cannot_make_an_unused_cellview_block_a_run() {
         "{:?}",
         rows(&promoted.state)
     );
+}
+
+/// A waiver is an edit of the document that stores it, so it is changed only
+/// where the workbench edits that document: the open view, or a schematic
+/// the project holds open. Elsewhere the page and the edit give one reason —
+/// open the cellview first, or its library is borrowed read-only.
+#[test]
+fn a_waiver_is_changed_only_where_its_document_is_edited() {
+    use crate::workbench::app_state::waivers::WaiverTarget;
+
+    let mut fixture = fixture();
+    let symbol = CellViewRef::new(USER_LIBRARY, "amp", "symbol");
+    let state = &fixture.state;
+    assert_eq!(
+        state.waiver_edit_refusal(&fixture.amp),
+        None,
+        "the open view"
+    );
+    assert_eq!(
+        state.waiver_edit_refusal(&fixture.top),
+        None,
+        "a schematic the project holds"
+    );
+    assert_eq!(
+        state.waiver_edit_refusal(&symbol),
+        Some(format!(
+            "Open {} to change its waivers",
+            symbol.display_path()
+        ))
+    );
+    assert_eq!(
+        state.waiver_edit_refusal(&fixture.borrowed),
+        Some(format!("{} is read-only", fixture.borrowed.library))
+    );
+
+    for cell_view in [symbol, fixture.borrowed.clone()] {
+        let reason = fixture
+            .state
+            .waiver_edit_refusal(&cell_view)
+            .expect("refused above");
+        let target = WaiverTarget {
+            cell_view,
+            rule: std::sync::Arc::from("DRC-FLOATING-NODE"),
+            object: "component:1".to_owned(),
+        };
+        assert_eq!(
+            fixture.state.waive_finding(&target, "a probe point"),
+            Err(format!("{reason}.")),
+            "the edit refuses for the reason the page gives"
+        );
+    }
 }
 
 /// The objects of the rows naming `cell_view`.
