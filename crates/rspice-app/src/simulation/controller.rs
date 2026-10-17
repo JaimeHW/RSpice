@@ -187,6 +187,9 @@ pub struct SimulationController {
     current_run_id: Option<u64>,
     /// When the runner took the active task, for its line in the run's log.
     current_task_started: Option<crate::time_compat::Instant>,
+    /// What the run advised when it started, which its tasks' engine logs
+    /// repeat and its log states once.
+    current_advisories: Vec<String>,
     /// Exact accepted samples observed for the current transient task. These
     /// back both adaptive live presentation and a truthful partial result if
     /// the task terminates before returning a full engine result.
@@ -255,6 +258,7 @@ impl SimulationController {
             current_source_domain: AnalysisResultSourceDomain::SimulationPlan,
             current_run_id: None,
             current_task_started: None,
+            current_advisories: Vec::new(),
             live_transient: LiveTransientAccumulator::default(),
             pending_analyses: VecDeque::new(),
             successful_analysis_instances: HashSet::new(),
@@ -560,6 +564,7 @@ impl SimulationController {
         for advisory in dispatch.advisories() {
             write_run_line(state, Some(run_id), LogSeverity::Warning, advisory.clone());
         }
+        self.current_advisories = dispatch.advisories().to_vec();
 
         self.point_families.clear();
         for task in dispatch.tasks() {
@@ -1382,6 +1387,7 @@ impl SimulationController {
                 lines,
                 &mut run.log,
                 crate::time_compat::checked_unix_time_ms().unwrap_or_default(),
+                &self.current_advisories,
             );
         }
     }

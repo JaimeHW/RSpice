@@ -12,9 +12,19 @@ use rspice_simulation::engine_log::{admits, note_stderr_level, offer};
 /// The text is carried unchanged: the source tag says whose words a line is —
 /// the engine's, the testbench's or the Verilog-A compiler's — so nothing is
 /// prefixed to say it again.
-pub(crate) fn publish(lines: Vec<EngineLogLine>, log: &mut RunLog, unix_ms: u64) {
+///
+/// An engine line that says what the run already advised when it started is
+/// left out: each task parses the deck again, and logs the parse warnings the
+/// run has already stated once.
+pub(crate) fn publish(
+    lines: Vec<EngineLogLine>,
+    log: &mut RunLog,
+    unix_ms: u64,
+    advised: &[String],
+) {
     for line in lines {
         let source = match line.origin {
+            EngineLogOrigin::Engine if advised.contains(&line.message) => continue,
             EngineLogOrigin::Engine => LogSource::Engine,
             EngineLogOrigin::Hdl => LogSource::Hdl,
             EngineLogOrigin::VerilogA => LogSource::VerilogA,
@@ -180,7 +190,7 @@ mod tests {
         );
 
         let mut log = RunLog::default();
-        publish(lines, &mut log, 1_760_613_845_250);
+        publish(lines, &mut log, 1_760_613_845_250, &[]);
         assert_eq!(
             log.lines(),
             [RunLogLine {
@@ -213,9 +223,45 @@ mod tests {
             ],
             &mut log,
             0,
+            &[],
         );
         let sources: Vec<_> = log.lines().iter().map(|line| line.source).collect();
         assert_eq!(sources, vec![LogSource::Hdl, LogSource::VerilogA]);
+    }
+
+    /// The engine's repeat of a parse warning the run advised when it started
+    /// is left out; its other lines are not.
+    #[test]
+    fn an_engine_line_the_run_already_advised_is_left_out() {
+        let advised = "line 5: unsupported dot-command '.FOO' ignored".to_owned();
+        let line = |origin, message: &str| EngineLogLine {
+            severity: LogSeverity::Warning,
+            message: message.to_owned(),
+            origin,
+        };
+        let mut log = RunLog::default();
+        publish(
+            vec![
+                line(EngineLogOrigin::Engine, &advised),
+                line(EngineLogOrigin::Engine, "Circuit: 1 node"),
+                line(EngineLogOrigin::Hdl, &advised),
+            ],
+            &mut log,
+            0,
+            std::slice::from_ref(&advised),
+        );
+        let kept: Vec<_> = log
+            .lines()
+            .iter()
+            .map(|line| (line.source, line.message.as_str()))
+            .collect();
+        assert_eq!(
+            kept,
+            [
+                (LogSource::Engine, "Circuit: 1 node"),
+                (LogSource::Hdl, advised.as_str())
+            ]
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -234,7 +280,7 @@ mod tests {
         }
 
         let mut log = RunLog::default();
-        crate::diagnostics::engine_log::publish(lock_queue(&queue).drain(), &mut log, 0);
+        crate::diagnostics::engine_log::publish(lock_queue(&queue).drain(), &mut log, 0, &[]);
         let rows = log.lines();
         assert_eq!(rows.len(), 1, "one engine line: {rows:?}");
         assert_eq!(rows[0].source, LogSource::Engine);

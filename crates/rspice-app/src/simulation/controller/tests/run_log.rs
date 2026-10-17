@@ -138,6 +138,54 @@ fn a_run_writes_its_start_and_end_in_the_session_and_its_account_in_its_own_log(
     assert_eq!(session[1].severity, summary.severity);
 }
 
+/// A typed deck's own parse warnings are advised in its run's log, as a
+/// headless run of the same deck advises them.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_typed_decks_parse_warnings_are_warnings_in_its_runs_log() {
+    crate::diagnostics::engine_log::studio_logger_for_tests();
+    let export_io = MockExportWorkflowIo::default();
+    let (mut state, mut controller) = start_manual_batch(
+        "* dropped control command\n\
+         V1 in 0 DC 1\n\
+         R1 in 0 1k\n\
+         .op\n\
+         .frobnicate\n\
+         .control\n\
+         print v(in)\n\
+         .endc\n\
+         .end\n",
+    );
+    let run_sequence = controller.current_run_id.expect("the deck has a run");
+    while controller.has_active_batch() {
+        test_execution::wait_until_finished_unpolled(&controller.runner);
+        controller.update(&mut state, &export_io);
+    }
+    let run = state
+        .simulation
+        .retained
+        .run_by_sequence(run_sequence)
+        .expect("the run is retained");
+    // The parser logs no line for a dropped control command, and logs one
+    // for an unknown dot-command on every parse; each is stated once.
+    for (warning, line) in [("control command 'print' ignored", 7), ("'.FROBNICATE'", 5)] {
+        let stated: Vec<_> = run
+            .log
+            .lines()
+            .iter()
+            .filter(|row| row.message.contains(warning))
+            .collect();
+        assert_eq!(stated.len(), 1, "{warning}: {:?}", run.log.lines());
+        assert_eq!(stated[0].severity, crate::diagnostics::LogSeverity::Warning);
+        assert_eq!(stated[0].source, LogSource::Run);
+        assert!(
+            stated[0].message.starts_with(&format!("line {line}: ")),
+            "{}",
+            stated[0].message
+        );
+    }
+}
+
 /// A live preview that cannot be shown says why in the run's log, once,
 /// though the preview is tried every frame.
 #[test]
