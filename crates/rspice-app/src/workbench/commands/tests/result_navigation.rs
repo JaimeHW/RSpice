@@ -313,7 +313,7 @@ fn a_retained_notice_keeps_the_offer_its_toast_carried() {
         NotificationCategory::Job,
         ToastKind::Success,
         "Run 3 complete",
-        "2 retained analyses in this immutable dataset.",
+        "2 analyses saved with this run.",
         NotificationAction::OpenRunInResults { run_sequence: 3 },
     );
     toasts.info(&ctx, "unrelated");

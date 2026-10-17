@@ -283,7 +283,7 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
         category,
         kind,
         title,
-        format!("{retained} retained analys{plural} in this immutable dataset."),
+        format!("{retained} analys{plural} saved with this run."),
         crate::ui::widgets::NotificationAction::OpenRunInResults {
             run_sequence: run_id,
         },
@@ -724,7 +724,7 @@ mod tests {
         assert_eq!(activity[0].title(), "Run 1 complete");
         assert_eq!(
             activity[0].message(),
-            "1 retained analysis in this immutable dataset.",
+            "1 analysis saved with this run.",
             "one analysis is an analysis, not an \"analys\""
         );
         assert_eq!(

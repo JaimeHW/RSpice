@@ -1493,12 +1493,12 @@ fn schematic_cross_probe_unavailability(
     };
     if run.dataset_id != selected.dataset_id() || selected.resolve(run).is_none() {
         return Some(
-            "The selected trace does not belong to the active immutable result dataset.".to_owned(),
+            "The selected trace does not belong to the open run.".to_owned(),
         );
     }
     let Some(receipt) = run.prepared_receipt() else {
         return Some(
-            "This legacy result has no authenticated project revision and cannot be cross-probed."
+            "This result does not record which project revision produced it, so it cannot be cross-probed."
                 .to_owned(),
         );
     };
@@ -1542,7 +1542,7 @@ fn cross_probe_trace_to_design(app: &mut RSpiceApp, signal: &str) -> Result<Stri
         .ui
         .results
         .valid_selected_trace(&app.state.simulation)
-        .ok_or_else(|| "No exact retained result trace is selected.".to_owned())?;
+        .ok_or_else(|| "No result trace is selected.".to_owned())?;
     if let Some(reason) = schematic_cross_probe_unavailability(&app.state, selected, signal) {
         return Err(reason);
     }

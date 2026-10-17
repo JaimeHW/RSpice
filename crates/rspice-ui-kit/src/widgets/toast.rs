@@ -932,7 +932,7 @@ mod tests {
             NotificationCategory::Job,
             ToastKind::Success,
             "Run 12 complete",
-            "3 retained analyses in this immutable dataset.",
+            "3 analyses saved with this run.",
             action,
         );
 

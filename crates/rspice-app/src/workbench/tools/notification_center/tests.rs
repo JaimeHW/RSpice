@@ -101,7 +101,7 @@ pub(super) fn seed_session(ctx: &egui::Context, toasts: &mut Toasts) {
         NotificationCategory::Job,
         ToastKind::Success,
         "Run 41 complete",
-        "3 retained analyses in this immutable dataset.",
+        "3 analyses saved with this run.",
         NotificationAction::OpenRunInResults { run_sequence: 41 },
     );
 }

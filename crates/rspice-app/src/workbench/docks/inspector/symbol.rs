@@ -11,14 +11,14 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
     let Ok(document) = state.load_active_symbol_document() else {
         muted_inspector_copy(
             ui,
-            "This symbol cellview could not be read. The editor surface reports the exact reason.",
+            "This symbol could not be read. The symbol editor shows why.",
         );
         return;
     };
     let Ok(metadata) = state.load_active_symbol_editor_metadata(&document) else {
         muted_inspector_copy(
             ui,
-            "This symbol's authoring metadata could not be read. The editor surface reports the exact reason.",
+            "This symbol's editor data could not be read. The symbol editor shows why.",
         );
         return;
     };
