@@ -64,6 +64,7 @@ pub(super) fn expand_global_run_set_tasks(
     pvt_points: &[PreparedPvtPoint],
     participation: &RunSetParticipation,
     executable_netlist: &str,
+    corner_veriloga: &CornerVerilogARuntimes,
     reference_process: ProcessCorner,
     reference_temperature_celsius: f64,
 ) -> Result<Vec<PreparedTask>, PreparationError> {
@@ -129,7 +130,11 @@ pub(super) fn expand_global_run_set_tasks(
 
     let mut prepared_sources = Vec::with_capacity(pvt_points.len());
     for point in pvt_points {
-        prepared_sources.push(prepare_pvt_point_source(executable_netlist, point)?);
+        prepared_sources.push(prepare_pvt_point_source(
+            executable_netlist,
+            point,
+            corner_veriloga,
+        )?);
     }
 
     let mut identities = HashMap::with_capacity(requested);

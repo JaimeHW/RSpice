@@ -27,9 +27,9 @@ use crate::output_contract::selection::{effective_plan_capture, projection_occur
 use crate::preparation::{QueuedAnalysis, validate_prepared_periodic_sources};
 use crate::project_technology::ProjectTechnologyInputs;
 use crate::project_veriloga::preparation::{
-    prepared_configuration_veriloga_runtimes, prepared_model_library_veriloga_runtimes,
-    prepared_signed_pdk_veriloga_runtimes, project_veriloga_runtimes_referenced_by,
-    rebind_project_veriloga_source_keys,
+    prepared_configuration_veriloga_runtimes, prepared_corner_veriloga_runtimes,
+    prepared_model_library_veriloga_runtimes, prepared_signed_pdk_veriloga_runtimes,
+    project_veriloga_runtimes_referenced_by, rebind_project_veriloga_source_keys,
 };
 use crate::sealed_source::{generated_executable_source_digest, manual_executable_source_digest};
 use rspice_app_types::canonical::content_digest;
@@ -320,6 +320,20 @@ where
             format!("Run Set model binding failed: {error}"),
         )
     })?;
+    // Every process a deck of this run may be materialized for: the Run Set's
+    // and each corner run's own.
+    let corner_processes = run_set_contract
+        .process_corners
+        .iter()
+        .chain(tasks.iter().flat_map(|task| {
+            task.queued_analysis()
+                .spec_options
+                .corner
+                .iter()
+                .flat_map(|corner| corner.process_corners.iter())
+        }))
+        .copied()
+        .collect::<Vec<_>>();
     let prepared_run_set =
         super::PreparedRunSet::new(inputs.analysis.sim_setup.run_set.clone(), run_set_contract);
     PreparationError::check_abort(abort)?;
@@ -345,8 +359,17 @@ where
         inputs.project_sources,
         &execution_projection,
     )?;
+    let reference_process = inputs.analysis.sim_setup.reference_pvt.process;
+    let model_library_veriloga_runtimes =
+        prepared_model_library_veriloga_runtimes(&sealed_models, reference_process)?;
+    let corner_veriloga_runtimes = prepared_corner_veriloga_runtimes(
+        &sealed_models,
+        reference_process,
+        &model_library_veriloga_runtimes,
+        corner_processes,
+    )?;
     let external_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?
-        .try_merge(prepared_model_library_veriloga_runtimes(&sealed_models)?)
+        .try_merge(model_library_veriloga_runtimes)
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
     let project_veriloga_runtimes = project_veriloga_runtimes
         .try_merge(external_veriloga_runtimes.clone())
@@ -529,6 +552,7 @@ where
             specifications,
             specification_policy,
             project_veriloga_runtimes,
+            corner_veriloga_runtimes,
             target: ExecutionTargetCapabilities::current(),
             receipt,
             advisories,
@@ -607,7 +631,10 @@ pub fn build_prepared_manual_deck<R, A>(
         &model_cards,
     );
     let external_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?
-        .try_merge(prepared_model_library_veriloga_runtimes(&sealed_models)?)
+        .try_merge(prepared_model_library_veriloga_runtimes(
+            &sealed_models,
+            inputs.analysis.sim_setup.reference_pvt.process,
+        )?)
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
     for runtime in external_veriloga_runtimes.sources() {
         crate::netlist_preparation::append_project_veriloga_directive(
@@ -771,6 +798,9 @@ pub fn build_prepared_manual_deck<R, A>(
         specifications: Vec::new(),
         specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
         project_veriloga_runtimes,
+        // A manual deck selects its own sections and carries its own corner
+        // directives; no deck of its run is materialized for a process.
+        corner_veriloga_runtimes: Default::default(),
         target: ExecutionTargetCapabilities::current(),
         receipt: RunSourceReceipt::ManualSourceCheck(receipt_digest),
         advisories,

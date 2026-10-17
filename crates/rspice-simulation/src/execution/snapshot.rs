@@ -45,6 +45,8 @@ use crate::prepared_dependency::validate_prepared_dependency_contract_with_optio
 use rspice_app_types::canonical::CanonicalWriter;
 
 pub(crate) mod bound_cards;
+mod corner_veriloga;
+pub(crate) use corner_veriloga::CornerVerilogARuntimes;
 mod declared_points;
 mod derived_identity;
 mod engine_refusals;
@@ -316,6 +318,10 @@ pub struct PreparedTask {
     /// Exact per-point source after process-model binding. `None` selects the
     /// run-level executable source verbatim.
     executable_netlist_override: Option<String>,
+    /// The Verilog-A this task's deck names, where its deck names other
+    /// sources than the run's. `None` installs the run's set. Derived from the
+    /// final deck, so a task handed another task's deck installs that deck's.
+    veriloga_runtimes: Option<crate::veriloga::PreparedVerilogARuntimeSet>,
     /// Circuit source before analysis-local numerical/observation cards.
     source_basis_digest: Option<ContentDigest>,
     /// The PVT point this task was expanded to. Only per-point expansion sets
@@ -375,6 +381,7 @@ impl PreparedTask {
             saved_output_contracts: Vec::new(),
             touchstone_export: None,
             executable_netlist_override: None,
+            veriloga_runtimes: None,
             source_basis_digest: None,
             pvt_point: None,
             declared_point: None,
@@ -834,6 +841,9 @@ pub(crate) struct SnapshotParts {
     pub(crate) specifications: Vec<PreparedSpecification>,
     pub(crate) specification_policy: PreparedSpecificationPolicy,
     pub(crate) project_veriloga_runtimes: crate::veriloga::PreparedVerilogARuntimeSet,
+    /// What a deck materialized for a process corner installs in place of the
+    /// reference sections' model-library Verilog-A.
+    pub(crate) corner_veriloga_runtimes: CornerVerilogARuntimes,
     pub(crate) measurement_references: crate::measurement_references::PreparedMeasurementReferences,
     pub(crate) target: ExecutionTargetCapabilities,
     pub(crate) receipt: RunSourceReceipt,
@@ -1083,6 +1093,7 @@ impl PreparedRunSnapshot {
                 &pvt_points,
                 &participation,
                 &parts.executable_netlist,
+                &parts.corner_veriloga_runtimes,
                 parts.reference_process,
                 parts.reference_temperature_celsius,
             )?
@@ -1095,6 +1106,7 @@ impl PreparedRunSnapshot {
                 parts.tasks,
                 &pvt_points,
                 &parts.executable_netlist,
+                &parts.corner_veriloga_runtimes,
                 parts.reference_process,
                 parts.reference_temperature_celsius,
             )?
@@ -1166,6 +1178,33 @@ impl PreparedRunSnapshot {
             bound_cards::validate_bound_observation_cards(&parts.tasks)?;
         }
 
+        // Each task installs the Verilog-A its own deck names. A deck
+        // materialized for a process corner names that corner's model-library
+        // runtimes in place of the reference sections'; a deck that names what
+        // the run's deck names installs the run's set.
+        let run_directives = corner_veriloga::directive_lines(&parts.executable_netlist);
+        for task in &mut parts.tasks {
+            PreparationError::check_abort(abort)?;
+            let Some(deck) = task.executable_netlist_override.as_deref() else {
+                continue;
+            };
+            if corner_veriloga::directive_lines(deck) == run_directives {
+                continue;
+            }
+            let runtimes = crate::veriloga::PreparedVerilogARuntimeSet::named_by(
+                std::iter::once(&parts.project_veriloga_runtimes)
+                    .chain(parts.corner_veriloga_runtimes.sets()),
+                deck,
+            )
+            .map_err(|error| {
+                PreparationError::new(
+                    PreparationStage::ModelBindings,
+                    format!("{}: {error}", task.label),
+                )
+            })?;
+            task.veriloga_runtimes = Some(runtimes);
+        }
+
         if parts.task_source_policy == TaskSourcePolicy::PreparedAnalyses {
             for task in &parts.tasks {
                 PreparationError::check_abort(abort)?;
@@ -1180,7 +1219,9 @@ impl PreparedRunSnapshot {
                 )?;
                 crate::netlist_preparation::reject_deferred_external_sources_with_project_runtimes(
                     deck,
-                    &parts.project_veriloga_runtimes,
+                    task.veriloga_runtimes
+                        .as_ref()
+                        .unwrap_or(&parts.project_veriloga_runtimes),
                     &parts.measurement_references,
                 )?;
                 crate::netlist_preparation::validated_executable_hierarchy_with_limits_and_abort(
@@ -1481,6 +1522,17 @@ impl PreparedRunSnapshot {
                 runtime.artifact_digest(),
             ));
         }
+        for runtime in parts
+            .tasks
+            .iter()
+            .filter_map(|task| task.veriloga_runtimes.as_ref())
+            .flat_map(crate::veriloga::PreparedVerilogARuntimeSet::sources)
+        {
+            parts.model_identities.push(ModelSourceIdentity::new(
+                runtime.provenance_label(),
+                runtime.artifact_digest(),
+            ));
+        }
         parts.project_model_sources.sort_by(|left, right| {
             left.source_id()
                 .as_uuid()
@@ -1669,7 +1721,9 @@ impl PreparedRunSnapshot {
                         .executable_netlist_override
                         .map(Arc::<str>::from)
                         .unwrap_or_else(|| Arc::clone(&executable_netlist)),
-                    project_veriloga_runtimes: project_veriloga_runtimes.clone(),
+                    project_veriloga_runtimes: prepared
+                        .veriloga_runtimes
+                        .unwrap_or_else(|| project_veriloga_runtimes.clone()),
                     measurement_references: measurement_references.clone(),
                     touchstone_export,
                     pvt_point: prepared.pvt_point,

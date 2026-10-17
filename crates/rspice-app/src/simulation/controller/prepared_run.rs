@@ -503,7 +503,10 @@ impl SimulationController {
                 &model_cards,
             );
         let external_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?
-            .try_merge(prepared_model_library_veriloga_runtimes(&sealed_models)?)
+            .try_merge(prepared_model_library_veriloga_runtimes(
+                &sealed_models,
+                state.sim_setup.reference_pvt.process,
+            )?)
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         for runtime in external_veriloga_runtimes.sources() {
             rspice_simulation::netlist_preparation::append_project_veriloga_directive(

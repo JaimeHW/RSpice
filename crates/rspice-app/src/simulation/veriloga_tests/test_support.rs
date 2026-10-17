@@ -31,7 +31,7 @@ pub(super) fn standalone_connection_authority_with_directive(
     manager
         .seal_execution_sources()
         .unwrap()
-        .model_library_veriloga_authority()
+        .reference_model_library_veriloga_authority(crate::product::ProcessCorner::TT)
         .unwrap()
         .unwrap()
 }

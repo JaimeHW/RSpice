@@ -193,12 +193,74 @@ pub fn prepared_signed_pdk_veriloga_runtimes(
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
 }
 
+/// The model-library Verilog-A runtimes the reference model selection's
+/// sections name, which the run's own deck installs.
 pub fn prepared_model_library_veriloga_runtimes(
     sealed_models: &crate::model_sources::SealedModelExecutionSources,
+    reference_process: rspice_app_types::product::ProcessCorner,
 ) -> Result<crate::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
-    let Some(authority) = sealed_models
-        .model_library_veriloga_authority()
-        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?
+    compile_model_library_authority(
+        sealed_models.reference_model_library_veriloga_authority(reference_process),
+    )
+}
+
+/// The model-library Verilog-A runtimes each of `processes` names in its
+/// corner sections, beside `reference`, the runtimes of the reference
+/// sections the run's deck names.
+///
+/// Sections that read the same sources share one compilation: a corner whose
+/// sections read what the reference sections read installs the reference
+/// runtimes themselves.
+pub(crate) fn prepared_corner_veriloga_runtimes(
+    sealed_models: &crate::model_sources::SealedModelExecutionSources,
+    reference_process: rspice_app_types::product::ProcessCorner,
+    reference: &crate::veriloga::PreparedVerilogARuntimeSet,
+    processes: impl IntoIterator<Item = rspice_app_types::product::ProcessCorner>,
+) -> Result<crate::execution::CornerVerilogARuntimes, PreparationError> {
+    let identity = |authority: Result<
+        Option<crate::model_sources::SealedModelLibraryVerilogAAuthority>,
+        String,
+    >| {
+        authority
+            .map(|authority| {
+                let digest = authority
+                    .as_ref()
+                    .map(crate::model_sources::SealedModelLibraryVerilogAAuthority::closure_digest);
+                (digest, authority)
+            })
+            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
+    };
+    let (reference_digest, _) =
+        identity(sealed_models.reference_model_library_veriloga_authority(reference_process))?;
+    let mut compiled = vec![(reference_digest, reference.clone())];
+    let mut by_process = Vec::<(_, crate::veriloga::PreparedVerilogARuntimeSet)>::new();
+    for process in processes {
+        if by_process.iter().any(|(seen, _)| *seen == process) {
+            continue;
+        }
+        let (digest, authority) =
+            identity(sealed_models.corner_model_library_veriloga_authority(process))?;
+        let runtimes = match compiled.iter().find(|(seen, _)| *seen == digest) {
+            Some((_, runtimes)) => runtimes.clone(),
+            None => {
+                let runtimes = compile_model_library_authority(Ok(authority))?;
+                compiled.push((digest, runtimes.clone()));
+                runtimes
+            }
+        };
+        by_process.push((process, runtimes));
+    }
+    Ok(crate::execution::CornerVerilogARuntimes::new(
+        reference.clone(),
+        by_process,
+    ))
+}
+
+fn compile_model_library_authority(
+    authority: Result<Option<crate::model_sources::SealedModelLibraryVerilogAAuthority>, String>,
+) -> Result<crate::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
+    let Some(authority) =
+        authority.map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?
     else {
         return Ok(Default::default());
     };

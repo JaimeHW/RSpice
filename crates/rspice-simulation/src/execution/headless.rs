@@ -307,6 +307,7 @@ pub fn prepare_headless_run(
             specifications: Vec::new(),
             specification_policy: Default::default(),
             project_veriloga_runtimes: input.veriloga_runtimes,
+            corner_veriloga_runtimes: Default::default(),
             measurement_references: input.measurement_references,
             target: ExecutionTargetCapabilities::current(),
             receipt: RunSourceReceipt::ManualSourceCheck(receipt_digest),

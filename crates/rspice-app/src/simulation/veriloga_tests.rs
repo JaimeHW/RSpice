@@ -106,7 +106,10 @@ mod tests {
                 None,
             ).unwrap();
             let sealed = manager.seal_execution_sources().unwrap();
-            sealed.model_library_veriloga_authority().unwrap().unwrap()
+            sealed
+                .reference_model_library_veriloga_authority(crate::product::ProcessCorner::TT)
+                .unwrap()
+                .unwrap()
         }
         let authority = selected_authority("first_load");
         assert_eq!(authority.roots().len(), 2);

@@ -98,8 +98,9 @@ fn spectre_model_library_ahdl_is_compiled_and_emitted_as_a_sealed_runtime_direct
         .seal_execution_sources_for_plan(&[binding])
         .expect("model-library sources seal");
 
-    let runtimes = prepared_model_library_veriloga_runtimes(&sealed)
-        .expect("prepared-run compilation succeeds");
+    let runtimes =
+        prepared_model_library_veriloga_runtimes(&sealed, crate::product::ProcessCorner::TT)
+            .expect("prepared-run compilation succeeds");
     assert_eq!(runtimes.len(), 1);
     let runtime = runtimes.device_runtimes().next().expect("one AHDL runtime");
     let mut executable = "prepared Spectre AHDL\n.end\n".to_owned();

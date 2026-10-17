@@ -43,7 +43,10 @@ pub(crate) fn standalone_connection_fixture() -> (super::PreparedVerilogARuntime
         &rspice_model_library::ModelResolutionRecords::default(),
     )
     .unwrap();
-    let authority = sealed.model_library_veriloga_authority().unwrap().unwrap();
+    let authority = sealed
+        .reference_model_library_veriloga_authority(rspice_app_types::product::ProcessCorner::TT)
+        .unwrap()
+        .unwrap();
     let sources =
         crate::project_veriloga::compile_model_library_source_runtimes(&authority).unwrap();
     let mut deck = "standalone UI connections\nV1 p 0 1\nX1 p q UI_DRIVER\n.options connectrules=Low connectrules_source=ui_connections\n.tran 0.2n 2n\n.end\n".to_owned();

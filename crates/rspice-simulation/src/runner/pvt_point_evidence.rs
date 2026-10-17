@@ -208,6 +208,7 @@ pub(crate) fn run_declaration(
         specifications: Vec::new(),
         specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
         project_veriloga_runtimes: Default::default(),
+        corner_veriloga_runtimes: Default::default(),
         target: ExecutionTargetCapabilities::current(),
         receipt: RunSourceReceipt::SchematicDrc(ContentDigest::from_bytes([7; 32])),
         advisories: Vec::new(),
