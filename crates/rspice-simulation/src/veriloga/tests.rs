@@ -568,3 +568,48 @@ fn the_seal_refuses_a_payload_carrying_a_float_json_cannot_encode() {
         "the `String` conversion every existing caller relies on is the same sentence"
     );
 }
+
+/// Installing a project's runtimes never moves a deck off the runtime it
+/// names. An edited module is sealed under a key of its own, as a project
+/// source's key carries its content digest, and installing it beside the one
+/// a running deck names, as a check of the edited design does while a run
+/// executes, leaves that deck elaborating the artifact it names: the
+/// registration adds to the session's runtimes and replaces none.
+#[test]
+fn installing_an_edited_module_leaves_each_deck_the_runtime_it_names() {
+    let load = |siemens: &str| {
+        format!(
+            "`include \"disciplines.vams\"\nmodule load(p, n);\n  inout p, n;\n  \
+             electrical p, n;\n  analog I(p, n) <+ {siemens} * V(p, n);\nendmodule\n"
+        )
+    };
+    let running = seal_runtime("installed-while-running.va", "load", &load("1.0e-3"));
+    let edited = seal_runtime("installed-after-an-edit.va", "load", &load("2.0e-3"));
+    for runtime in [&running, &edited] {
+        super::PreparedVerilogARuntimeSet::try_new(vec![runtime.clone()])
+            .expect("one runtime is a set")
+            .install()
+            .expect("an edited module installs beside the running one");
+    }
+
+    for (runtime, conductance) in [(&running, 1.0e-3), (&edited, 2.0e-3)] {
+        let directive = crate::netlist_preparation::project_veriloga_directive(
+            runtime.source_key(),
+            runtime.netlist_alias(),
+        );
+        let netlist = rspice_core::Netlist::parse(&format!(
+            "deck\n{directive}\nV1 n 0 1\nX1 n 0 load\n.op\n.end\n"
+        ))
+        .expect("the deck parses");
+        let current = -rspice_core::Engine::default()
+            .run_dc_op(&netlist)
+            .expect("the deck solves")
+            .branch_current_named("V1")
+            .expect("V1 is solved");
+        assert!(
+            (current - conductance).abs() < 1e-12,
+            "{}: {current} A",
+            runtime.source_key()
+        );
+    }
+}

@@ -248,6 +248,52 @@ fn chained_root_redefinitions_settle_and_circular_ones_are_refused() {
     }
 }
 
+/// A chain whose last definitions are written against the order they read
+/// one another settles one more link per pass, so it settles at any length
+/// rather than at a fixed number of passes. ngspice-46 binds every name of
+/// `.param d={c}`, `.param c={b}`, `.param b={a}`, `.param a=2` to 2, and of
+/// the same chain over eight names ending `.param a=3` to 3.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_chain_of_redefinitions_written_against_its_order_settles_at_any_length() {
+    const NAMES: [&str; 8] = ["a", "b", "c", "d", "e", "f", "g", "h"];
+    for (length, head) in [(4, 2.0), (8, 3.0)] {
+        let names = &NAMES[..length];
+        let mut source = format!(
+            "Chain of {length}\n.param {}\n",
+            names
+                .iter()
+                .map(|name| format!("{name}=1"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        for link in names.windows(2).rev() {
+            source.push_str(&format!(".param {}={{{}}}\n", link[1], link[0]));
+        }
+        source.push_str(&format!(
+            ".param a={head}\nV1 n 0 1\nR1 n 0 {{{}}}\n.end\n",
+            names[length - 1]
+        ));
+        for dialect in DIALECTS {
+            let netlist = Netlist::parse_with_options(&source, options(dialect))
+                .unwrap_or_else(|error| panic!("{dialect:?}: {error}\n{source}"));
+            for name in names {
+                assert_eq!(
+                    netlist.params.get(name),
+                    Some(head),
+                    "{dialect:?}: {name}\n{source}"
+                );
+            }
+            let current = -Engine::default()
+                .run_dc_op(&netlist)
+                .unwrap()
+                .branch_current_named("V1")
+                .unwrap();
+            assert!((current - 1.0 / head).abs() < 1e-12, "{current}");
+        }
+    }
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn failed_forward_probes_preserve_the_seeded_random_stream() {

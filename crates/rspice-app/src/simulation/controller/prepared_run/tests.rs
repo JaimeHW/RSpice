@@ -913,6 +913,108 @@ fn prepared_waveforms_distinguish_inline_names_from_file_inputs() {
     }
 }
 
+/// A validated manual deck is dispatched without reading again any file its
+/// sources would open, because no such file survives validation: a Touchstone
+/// table a code model would open at run time is refused as the deck is
+/// prepared, as a file-backed PWL source is.
+#[test]
+fn a_manual_deck_that_would_open_a_touchstone_table_is_refused_when_prepared() {
+    let source = "deck\nV1 in 0 DC 0 AC 1\nA1 in out dut\n\
+                  .model dut xfer(file=\"dut.s2p\")\nR1 out 0 1k\n.ac dec 10 1k 1meg\n.end\n";
+    let state = manual_deck_state(source);
+    let error =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .expect_err("an unsealed Touchstone table cannot reach dispatch");
+    assert_eq!(error.stage(), PreparationStage::SourceChecks, "{error}");
+    assert!(
+        error.message().contains("unsealed external dependency"),
+        "{error}"
+    );
+}
+
+/// The setup a run was checked against keeps its identity through what the
+/// session does to an unchanged setup before the dispatch: a replacement is
+/// a clone, which keeps each of its sets laid out as it was, and a
+/// projection refresh rebuilds them in plan order, as the refresh that built
+/// them did. The identity digests the setup's `Debug` text, which follows
+/// that layout, so a rebuild in another order would refuse the run as "the
+/// simulation setup changed".
+#[test]
+fn an_unchanged_setup_cloned_and_refreshed_after_its_check_still_dispatches() {
+    use crate::simulation::plan::AnalysisKind;
+
+    let mut state = runnable_state();
+    {
+        let plan = state
+            .sim_setup
+            .stable_analysis_plan_mut()
+            .expect("the setup holds a plan");
+        for kind in [
+            AnalysisKind::Transient,
+            AnalysisKind::Ac,
+            AnalysisKind::DcSweep,
+            AnalysisKind::Noise,
+            AnalysisKind::PoleZero,
+        ] {
+            let (id, _) = plan.insert(kind).expect("the plan takes the analysis");
+            plan.set_enabled(id, false)
+                .expect("a listed analysis can be disabled");
+        }
+    }
+    state.sim_setup.refresh_legacy_analysis_projections();
+    let mut controller = SimulationController::new();
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("the run set prepares");
+    controller
+        .retain_prepared_from(&state, snapshot)
+        .expect("the run is authorized");
+
+    state.sim_setup = state.sim_setup.clone();
+    state.sim_setup.refresh_legacy_analysis_projections();
+
+    controller
+        .consume_snapshot_for_dispatch(&state)
+        .expect("the unchanged setup dispatches");
+}
+
+/// A hand-written deck's analyses are read from its own cards, never lowered
+/// from a form: its `gnd!` is a node like any other, and a noise analysis
+/// the deck measures against it is dispatched measured against it, not
+/// against ground.
+#[test]
+fn a_manual_deck_measures_against_the_gnd_node_it_writes() {
+    let source = "gnd bang\nV1 in 0 DC 0 AC 1\nR1 in gnd! 1k\nR2 gnd! 0 1k\n\
+                  .noise v(in,gnd!) V1 dec 10 1k 1meg\n.end\n";
+    let state = manual_deck_state(source);
+    let mut controller = SimulationController::new();
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .expect("the deck prepares");
+    controller
+        .retain_prepared_from(&state, snapshot)
+        .expect("the deck is authorized");
+    let dispatch = controller
+        .consume_snapshot_for_dispatch(&state)
+        .expect("the deck dispatches");
+    let tasks = dispatch.tasks().collect::<Vec<_>>();
+
+    assert_eq!(tasks.len(), 1);
+    let AnalysisSpec::Noise {
+        output_node,
+        reference_node,
+        ..
+    } = tasks[0].spec()
+    else {
+        panic!("the deck's noise card: {:?}", tasks[0].spec());
+    };
+    assert!(output_node.eq_ignore_ascii_case("in"), "{output_node}");
+    assert!(
+        reference_node.eq_ignore_ascii_case("gnd!"),
+        "the reference the deck writes: {reference_node}"
+    );
+}
+
 #[test]
 fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
     let mut state = AppState::default();

@@ -16,7 +16,10 @@
 //! with that final binding pinned at every definition except the one
 //! [`binding_definition`] selects (the last), which still evaluates its own
 //! expression. A last definition that reads another redefined name can move
-//! under the pins, so passes repeat until no superseded binding differs.
+//! under the pins, so passes repeat until no superseded binding differs. Each
+//! pass settles at least one more link of a chain that does not read itself,
+//! so a deck still unsettled after one pass per redefined name, beyond the
+//! first, has a redefinition that feeds back into itself, and is refused.
 //!
 //! [`UseLast`]: crate::netlist::ParameterRedefinitionPolicy::UseLast
 //! [`binding_definition`]: crate::netlist::ParameterRedefinitionPolicy::binding_definition
@@ -28,10 +31,6 @@ use crate::netlist::expr::{
 use crate::netlist::{Netlist, ParseError};
 use std::collections::HashMap;
 use std::sync::Arc;
-
-/// One discovery pass plus the pinned passes a chain of redefinitions that
-/// read one another can need before it settles.
-const MAX_PASSES: usize = 4;
 
 /// The namespace a root definition binds in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -194,27 +193,40 @@ impl RootRedefinitions {
             first,
         ))
     }
+
+    /// The names this pass saw defined more than once.
+    fn redefined_names(&self) -> usize {
+        self.definitions
+            .values()
+            .filter(|&&count| count > 1)
+            .count()
+    }
 }
 
 /// Parse until every reader of a redefined root parameter or function sees
 /// its last definition.
+///
+/// The first pass discovers the redefinitions, and each pinned pass after it
+/// settles at least one more redefined name of a chain that does not read
+/// itself, so a deck is refused only when one pass per redefined name has not
+/// settled it.
 pub(super) fn parse_with_settled_root_redefinitions<T>(
     mut parse: impl FnMut(&mut RootRedefinitions) -> Result<(Netlist, T), TemperaturePassError>,
 ) -> Result<(Netlist, T), TemperaturePassError> {
     let mut redefinitions = RootRedefinitions::default();
-    let mut unsettled = String::new();
-    for _ in 0..MAX_PASSES {
+    let mut pinned_passes = 0;
+    loop {
         let (netlist, carried) = parse(&mut redefinitions)?;
-        match redefinitions.next_pass(&netlist.params) {
-            Some((next, name)) => {
-                redefinitions = next;
-                unsettled = name;
-            }
-            None => return Ok((netlist, carried)),
+        let Some((next, unsettled)) = redefinitions.next_pass(&netlist.params) else {
+            return Ok((netlist, carried));
+        };
+        if pinned_passes == redefinitions.redefined_names() {
+            return Err(ParseError::InvalidValue(format!(
+                "Parameter {unsettled} does not settle: its last .PARAM definition reads a value that its own redefinition changes; remove the circular redefinition"
+            ))
+            .into());
         }
+        pinned_passes += 1;
+        redefinitions = next;
     }
-    Err(ParseError::InvalidValue(format!(
-        "Parameter {unsettled} does not settle: its last .PARAM definition reads a value that its own redefinition changes; remove the circular redefinition"
-    ))
-    .into())
 }

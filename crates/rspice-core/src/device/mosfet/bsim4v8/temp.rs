@@ -2120,7 +2120,10 @@ impl Bsim4v8InstTemp {
             let mut mobility_scale = 1.0 + size.ku0we * sceff;
             if mobility_scale <= 0.0 {
                 log::warn!("BSIM4: KU0WE makes WPE mobility non-positive; clamped to zero");
-                replaced(Instance, "ku0we", mobility_scale, 0.0, Some(0.0));
+                // The factor held at zero is the one KU0WE = -1/SCEFF gives
+                // (sceff is nonzero here, or the factor would be 1).
+                let zeroing = -1.0 / sceff;
+                replaced(Instance, "ku0we", size.ku0we, zeroing, Some(zeroing));
                 mobility_scale = 0.0;
             }
             u0temp_pre *= mobility_scale;

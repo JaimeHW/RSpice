@@ -537,16 +537,25 @@ mod tests {
     }
 
     /// A corner section is read last, so its `.param` binds every reader,
-    /// even one above a nominal the deck writes itself (ngspice-46: the
-    /// last definition binds; v(out) = 7.5 V for ss, 3.333 V for ff, never
-    /// the nominal 6.667 V).
+    /// even one above a nominal the deck writes itself. ngspice-46 binds the
+    /// last definition: v(out) = 7.5 V and 62.5 µA in each transistor for ss,
+    /// 3.333 V and 250 µA for ff, never the nominal 6.667 V and 125 µA.
+    ///
+    /// The resistor alone could not tell: its value is an expression the
+    /// engine keeps and binds after the whole deck is read, so it took the
+    /// corner's value even when the parser bound the nominal everywhere else.
+    /// A transistor's length is bound when its card is read. M1, read before
+    /// any definition, resolves forward to the last one either way; M2, read
+    /// between the nominal and the section, binds the nominal unless the
+    /// section's redefinition reaches every reader, and is the reader that
+    /// fails without it.
     #[test]
     fn a_corner_section_parameter_overrides_the_nominal_the_deck_writes() {
-        let binding = |process, section: &str, value: &str| CornerModelBinding {
+        let binding = |process, section: &str, rload: &str, lval: &str| CornerModelBinding {
             process,
             source_label: format!("corners.lib [{section}]"),
             section: Some(section.to_owned()),
-            materialized_model_cards: format!(".param rload={value}"),
+            materialized_model_cards: format!(".param rload={rload} lval={lval}"),
         };
         let config = CornerRunConfig {
             process_corners: vec![ProcessCorner::SS, ProcessCorner::FF],
@@ -555,31 +564,46 @@ mod tests {
             nominal_voltage: Some(1.0),
             base_mode: CornerBaseMode::Op,
             model_bindings: vec![
-                binding(ProcessCorner::SS, "SS", "3k"),
-                binding(ProcessCorner::FF, "FF", "500"),
+                binding(ProcessCorner::SS, "SS", "3k", "2u"),
+                binding(ProcessCorner::FF, "FF", "500", "0.5u"),
             ],
             ..CornerRunConfig::default()
         };
         let deck = format!(
-            "nominal divider\nV1 in 0 10\nR1 in out 1k\nR2 out 0 {{rload}}\n.param rload=2k\n\
-             {REFERENCE_MODEL_BINDING_BEGIN} 1\n.param rload=1k\n{REFERENCE_MODEL_BINDING_END}\n\
-             .op\n.end\n"
+            "nominal divider and devices\nV1 in 0 10\nR1 in out 1k\nR2 out 0 {{rload}}\n\
+             VD1 d1 0 1\nVD2 d2 0 1\nVG g 0 1\nM1 d1 g 0 0 nch L={{lval}} W=10u\n\
+             .param rload=2k lval=1u\nM2 d2 g 0 0 nch L={{lval}} W=10u\n\
+             .model nch nmos level=1 vto=0.5 kp=100u\n\
+             {REFERENCE_MODEL_BINDING_BEGIN} 1\n.param rload=1k lval=1u\n\
+             {REFERENCE_MODEL_BINDING_END}\n.op\n.end\n"
         );
 
-        let output = |process| {
+        // Saturation at VGS = VDS = 1: Id = KP/2 * W/L * (VGS - VTO)^2.
+        for (process, divided, length) in [
+            (ProcessCorner::SS, 7.5, 2e-6),
+            (ProcessCorner::FF, 10.0 / 3.0, 0.5e-6),
+        ] {
             let bound = materialize_corner_process_source(&deck, &config, process, &NoAbort)
                 .expect("the corner section binds");
             let netlist = rspice_core::Netlist::parse(&bound).expect("corner deck parses");
-            rspice_core::Engine::default()
+            let solution = rspice_core::Engine::default()
                 .run_dc_op(&netlist)
-                .expect("corner deck solves")
-                .try_voltage_named("out")
-                .expect("out is solved")
-        };
-        let slow = output(ProcessCorner::SS);
-        let fast = output(ProcessCorner::FF);
-        assert!((slow - 7.5).abs() < 1e-9, "ss ran {slow} V");
-        assert!((fast - 10.0 / 3.0).abs() < 1e-9, "ff ran {fast} V");
+                .expect("corner deck solves");
+            let out = solution.try_voltage_named("out").expect("out is solved");
+            assert!((out - divided).abs() < 1e-9, "{process:?} ran {out} V");
+            let drain = 50e-6 * (10e-6 / length) * 0.25;
+            for (reader, supply) in [("M1, above the nominal", "VD1"), ("M2, below it", "VD2")] {
+                let current = -solution
+                    .branch_current_named(supply)
+                    .expect("the drain supply is solved");
+                // The drain-bulk junction leaks about a picoampere beside the
+                // channel.
+                assert!(
+                    (current - drain).abs() <= 1e-6 * drain,
+                    "{process:?} {reader}: {current} A, expected {drain} A"
+                );
+            }
+        }
     }
 
     #[test]

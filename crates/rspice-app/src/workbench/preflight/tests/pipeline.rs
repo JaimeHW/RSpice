@@ -210,6 +210,102 @@ fn an_edit_during_preparation_queues_nothing_and_stales_what_the_pass_found() {
     assert!(stated(&app, "Preflight stale"), "the staleness is stated");
 }
 
+/// A second Run press while the design is as the pass in flight froze it
+/// joins that pass: one worker prepares one run, and it is queued once.
+#[test]
+fn a_second_run_press_on_the_unedited_design_joins_the_pass_in_flight() {
+    let mut app = inverter_over_a_run_set();
+    let release = app.simulation_controller.hold_next_preflight_worker();
+    run(&mut app);
+    run_and_queue(&mut app);
+    assert!(
+        app.state.workbench.preflight.run_awaits_check(),
+        "the press asks the pass in flight for its run"
+    );
+    release.send(()).expect("the worker waits to prepare");
+    app.settle_preflight();
+
+    assert!(app.state.simulation.execution.trigger_simulation);
+    await_workers(&app, 1);
+    assert_eq!(
+        app.simulation_controller
+            .preflight_worker_stages()
+            .iter()
+            .filter(|(stage, _)| *stage == "preparing")
+            .count(),
+        1,
+        "one pass prepares the run"
+    );
+    assert!(!stated(&app, "Preflight restarted"));
+}
+
+/// A Run press made after an edit, while the pass the edit outdated is still
+/// preparing, is not absorbed into that pass, whose verdict would authorize
+/// nothing: the stale pass stops, and the press checks, prepares and queues
+/// the design as edited. The edit is the supply's value, so the deck the run
+/// is retained with shows which design was prepared.
+#[test]
+fn a_run_press_after_an_edit_restarts_the_pass_on_the_edited_design() {
+    let mut app = inverter_over_a_run_set();
+    let release = app.simulation_controller.hold_next_preflight_worker();
+    run_and_queue(&mut app);
+
+    app.state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .iter_mut()
+        .find(|component| component.name == "VDD")
+        .expect("the inverter draws VDD")
+        .value = "3.25".to_owned();
+    app.state.schematic.bump_topology_version();
+    app.invalidate_simulation_preflight();
+    run_and_queue(&mut app);
+    release.send(()).expect("the stale worker waits to prepare");
+    app.settle_preflight();
+
+    assert!(stated(&app, "Preflight restarted"), "the restart is stated");
+    assert!(
+        !stated(&app, "Preflight stale"),
+        "the press was not absorbed into the stale pass"
+    );
+    assert!(
+        app.state.simulation.execution.trigger_simulation,
+        "the edited design's run is queued"
+    );
+    let report = app
+        .state
+        .workbench
+        .preflight
+        .report
+        .clone()
+        .expect("the pass retains its report");
+    let (topology_root, topology_revision, topology_closure) =
+        app.state.configured_topology_revision();
+    assert!(report.is_runnable_for(
+        app.state.workspace.content.project.revision().get(),
+        &topology_root,
+        topology_revision,
+        &topology_closure,
+        app.state.active_plan_revision(),
+    ));
+    let (deck, digest) = app
+        .simulation_controller
+        .retained_run_deck()
+        .expect("the edited design's run is retained");
+    assert_eq!(
+        Some(digest),
+        report
+            .prepared
+            .as_ref()
+            .map(|prepared| prepared.snapshot_digest)
+    );
+    assert!(
+        deck.contains("3.25"),
+        "the edited supply is prepared: {deck}"
+    );
+}
+
 /// The frames that queue a run and dispatch it, driven on the application
 /// they run in.
 impl RSpiceApp {

@@ -9,7 +9,6 @@
 //! circuit — or the build's own error — says what the engine will refuse.
 //! Nothing is solved.
 
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use rspice_core::circuit::DcBranchVoltageLoop;
@@ -80,16 +79,19 @@ pub struct DeckBuildProgress {
     pub total: usize,
 }
 
-/// The temperature the runner applies to a task's deck before parsing it.
+/// The temperature the runner applies to a task's deck.
 #[derive(Clone, Copy, PartialEq)]
 enum RunTemperature {
     /// The deck's own `.TEMP`.
     Deck,
-    /// A Run Set point's temperature, set on the parsed deck.
+    /// A Run Set point's temperature, set on the parsed deck, of an analysis
+    /// whose deck already states it or that takes it from its operating
+    /// point.
     Point(f64),
-    /// An operating point's own temperature, which the runner also splices
-    /// into the source so parameter evaluation sees it.
-    OperatingPoint(f64),
+    /// A temperature the runner writes into the source before parsing it
+    /// (`runner::spliced_run_temperature`), so parameter evaluation and
+    /// `.if` selection see it, and sets on the parsed deck.
+    Spliced(f64),
 }
 
 impl RunTemperature {
@@ -97,14 +99,14 @@ impl RunTemperature {
         match self {
             Self::Deck => (0, 0),
             Self::Point(celsius) => (1, celsius.to_bits()),
-            Self::OperatingPoint(celsius) => (2, celsius.to_bits()),
+            Self::Spliced(celsius) => (2, celsius.to_bits()),
         }
     }
 
     fn celsius(self) -> Option<f64> {
         match self {
             Self::Deck => None,
-            Self::Point(celsius) | Self::OperatingPoint(celsius) => Some(celsius),
+            Self::Point(celsius) | Self::Spliced(celsius) => Some(celsius),
         }
     }
 }
@@ -120,14 +122,12 @@ enum DeckVerdict {
 
 /// What makes two dispatched decks one build: the source, and the
 /// temperature it is built at ([`RunTemperature::key`]).
-type DeckKey<'a> = (Cow<'a, str>, (u8, u64));
+type DeckKey<'a> = (&'a str, (u8, u64));
 
-/// One deck a task dispatches, and the label it is dispatched under. Borrowed
-/// from the snapshot unless the task composes it.
+/// The deck a task dispatches, and the temperature the runner applies to it.
 struct DispatchedDeck<'a> {
-    source: Cow<'a, str>,
+    source: &'a str,
     temperature: RunTemperature,
-    label: String,
 }
 
 impl PreparedRunSnapshot {
@@ -169,26 +169,29 @@ impl PreparedRunSnapshot {
         }
 
         // Every deck every task dispatches, in dispatch order, so the pass can
-        // say how many it builds before it builds the first.
-        let mut dispatched = Vec::new();
-        for task in &self.tasks {
-            if matches!(task.task.spec, AnalysisSpec::Fft { .. }) {
-                // A recorded FFT transforms its producer's waveform and builds
-                // no circuit of its own.
-                continue;
-            }
-            if abort.is_aborted() {
-                return Vec::new();
-            }
-            dispatched.extend(
-                self.dispatched_decks(task, abort)
-                    .into_iter()
-                    .map(|deck| (task, deck)),
-            );
-        }
+        // say how many it builds before it builds the first. A recorded FFT
+        // transforms its producer's waveform and builds no circuit of its own.
+        // A corner run or temperature step whose points were expanded is not
+        // dispatched either: its turn assembles the results of its points,
+        // which are the solves (`PointFamilyRegistry::declares`).
+        let declarations: HashSet<AnalysisInstanceId> = self
+            .tasks
+            .iter()
+            .filter(|task| task.declared_point.is_some())
+            .map(|task| task.authored_instance_id)
+            .collect();
+        let dispatched: Vec<(&PreparedTask, DispatchedDeck<'_>)> = self
+            .tasks
+            .iter()
+            .filter(|task| {
+                !matches!(task.task.spec, AnalysisSpec::Fft { .. })
+                    && !declarations.contains(&task.instance_id)
+            })
+            .map(|task| (task, self.dispatched_deck(task)))
+            .collect();
         let total = dispatched
             .iter()
-            .map(|(_, deck)| (deck.source.as_ref(), deck.temperature.key()))
+            .map(|(_, deck)| (deck.source, deck.temperature.key()))
             .collect::<HashSet<_>>()
             .len();
         let mut built = 0;
@@ -211,10 +214,7 @@ impl PreparedRunSnapshot {
             let Some(verdict) = verdict else {
                 continue;
             };
-            let refused = RefusedTask {
-                analysis: task.authored_instance_id,
-                label: deck.label,
-            };
+            let refused = refused_task(task);
             for kind in task_refusals(task, verdict) {
                 record(&mut refusals, kind, &refused);
             }
@@ -222,57 +222,26 @@ impl PreparedRunSnapshot {
         refusals
     }
 
-    /// The decks one task's engine calls build, as the runner composes them.
-    fn dispatched_decks<'a>(
-        &'a self,
-        task: &'a PreparedTask,
-        abort: &dyn rspice_core::abort_signal::AbortSignal,
-    ) -> Vec<DispatchedDeck<'a>> {
+    /// The deck one task's engine call builds, as the runner composes it: the
+    /// deck the task's preparation composed for it, where it composed one,
+    /// else the run's. A declared corner point's deck already carries its
+    /// process's cards, and the runner adds none.
+    fn dispatched_deck<'a>(&'a self, task: &'a PreparedTask) -> DispatchedDeck<'a> {
         let source = task
             .executable_netlist_override
             .as_deref()
             .unwrap_or(&self.executable_netlist);
-        let temperature = match (&task.task.spec, &task.execution_environment) {
-            (
-                AnalysisSpec::DcOp {
-                    temperature_celsius,
-                    ..
-                },
-                _,
-            ) => RunTemperature::OperatingPoint(*temperature_celsius),
-            (_, Some(environment)) => RunTemperature::Point(environment.temperature_celsius),
-            (_, None) => RunTemperature::Deck,
+        let environment = task.execution_environment.as_ref();
+        let temperature = match crate::runner::spliced_run_temperature(&task.task, environment) {
+            Some(celsius) => RunTemperature::Spliced(celsius),
+            None => environment.map_or(RunTemperature::Deck, |point| {
+                RunTemperature::Point(point.temperature_celsius)
+            }),
         };
-        // A corner study composes each corner's deck itself, from the cards
-        // its contract carries, and builds each one.
-        if let Some(corner) = task
-            .task
-            .spec_options
-            .corner
-            .as_ref()
-            .filter(|corner| !corner.model_bindings.is_empty())
-        {
-            return corner
-                .process_corners
-                .iter()
-                .filter_map(|&process| {
-                    crate::netlist_preparation::materialize_corner_process_source(
-                        source, corner, process, abort,
-                    )
-                    .ok()
-                    .map(|source| DispatchedDeck {
-                        source: Cow::Owned(source),
-                        temperature,
-                        label: format!("{} \u{00b7} {}", task.label, process.short_name()),
-                    })
-                })
-                .collect();
-        }
-        vec![DispatchedDeck {
-            source: Cow::Borrowed(source),
+        DispatchedDeck {
+            source,
             temperature,
-            label: task.label.clone(),
-        }]
+        }
     }
 
     /// Parse and build one deck exactly as the runner does, without solving.
@@ -287,11 +256,22 @@ impl PreparedRunSnapshot {
         limits.max_netlist_bytes = limits.max_expanded_source_bytes;
         let spliced;
         let source = match temperature {
-            RunTemperature::OperatingPoint(celsius) => {
-                spliced = crate::netlist_preparation::source_with_run_temperature_with_abort(
+            RunTemperature::Spliced(celsius) => {
+                // A temperature the splice refuses fails the runner's
+                // materialization as a configuration error, and is that refusal
+                // here.
+                spliced = match crate::netlist_preparation::source_with_run_temperature_with_abort(
                     source, celsius, abort,
-                )
-                .ok()?;
+                ) {
+                    Ok(spliced) => spliced,
+                    Err(error) if error.is_aborted() => return None,
+                    Err(error) => {
+                        return Some(DeckVerdict::Refused(vec![EngineRefusalKind::Build {
+                            message: error.to_string(),
+                            instance: None,
+                        }]));
+                    }
+                };
                 spliced.as_str()
             }
             RunTemperature::Deck | RunTemperature::Point(_) => source,
@@ -330,7 +310,17 @@ impl PreparedRunSnapshot {
                 | rspice_core::SimulationError::TimeLimitExceeded,
             ) => None,
             Err(error) => {
-                let gaps = engine.model_bin_coverage_gaps(&netlist).unwrap_or_default();
+                // The scan walks the whole design again, so a Stop ends it as
+                // it ends the build. A card it cannot read failed the build
+                // too, whose own refusal states it.
+                let gaps = match engine.model_bin_coverage_gaps(&netlist, abort) {
+                    Ok(gaps) => gaps,
+                    Err(
+                        rspice_core::SimulationError::Aborted
+                        | rspice_core::SimulationError::TimeLimitExceeded,
+                    ) => return None,
+                    Err(_) => Vec::new(),
+                };
                 let message = error.to_string();
                 // The build stops at the first instance no bin covers. When
                 // that is what it stopped on, the gaps say it with the

@@ -88,12 +88,12 @@ fn issues_for(refusal: &EngineRefusal, drawing: &DrawnDesign) -> Vec<PreflightIs
                 }
             })
             .collect(),
-        // A loop of voltage sources alone is the design rule's: it finds the
-        // same loop across the hierarchy without a deck, and its error already
-        // blocks the run, so stating it here would list one loop twice.
-        EngineRefusalKind::BranchVoltageLoop(branch_loop) if !branch_loop.through_inductor => {
-            Vec::new()
-        }
+        // A loop of voltage sources alone is also the design rule's, and a
+        // loop it finds is an error that cannot be lowered or waived: the
+        // pass stops on it before any deck is built. So a loop the engine
+        // refuses here is one the rule did not report — sources a text or
+        // model-library cell writes, or a card the netlister adds, such as a
+        // loop probe's — and this row is the only one that states it.
         EngineRefusalKind::BranchVoltageLoop(branch_loop) => {
             let members: Vec<String> = branch_loop
                 .members
@@ -105,15 +105,29 @@ fn issues_for(refusal: &EngineRefusal, drawing: &DrawnDesign) -> Vec<PreflightIs
                 PreflightRemediation::NetlistSource { line: None },
                 |member| drawing.element(member).1,
             );
+            let (observed, required) = if branch_loop.through_inductor {
+                (
+                    format!(
+                        "Voltage sources and inductors {} form a closed loop: the DC solve \
+                         shorts each inductor, so the current around the loop is undetermined.",
+                        members.join(", ")
+                    ),
+                    "A resistive element inside the loop",
+                )
+            } else {
+                (
+                    format!(
+                        "Voltage sources {} form a closed loop: the current around the loop is \
+                         undetermined.",
+                        members.join(", ")
+                    ),
+                    "A series element inside the loop, or one source fewer",
+                )
+            };
             vec![PreflightIssue {
                 check: LOOP_CHECK.to_owned(),
-                observed: format!(
-                    "Voltage sources and inductors {} form a closed loop: the DC solve shorts \
-                     each inductor, so the current around the loop is undetermined. Refused by \
-                     {refused_by}.",
-                    members.join(", ")
-                ),
-                required: "A resistive element inside the loop".to_owned(),
+                observed: format!("{observed} Refused by {refused_by}."),
+                required: required.to_owned(),
                 remediation: closing,
             }]
         }

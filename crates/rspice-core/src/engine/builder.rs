@@ -5449,11 +5449,15 @@ impl Engine {
     /// [`Self::build_circuit`] refuses the first such instance with a message;
     /// this names all of them, with the geometry they were evaluated at, over
     /// the same flattening, scoped cards, expression context and inclusive
-    /// bounds. A malformed card fails here as it fails construction.
+    /// bounds. A malformed card fails here as it fails construction, and a
+    /// raised `abort` stops it as it stops construction, with
+    /// [`SimulationError::Aborted`].
     pub fn model_bin_coverage_gaps(
         &self,
         netlist: &Netlist,
+        abort: &dyn AbortSignal,
     ) -> Result<Vec<ModelBinCoverageGap>, SimulationError> {
+        check_build_abort(abort)?;
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_valid_configuration()?;
         netlist.params.restart_statistical_stream();
@@ -5464,7 +5468,7 @@ impl Engine {
                 max_elements: engine.config.resource_limits.max_flattened_elements,
                 ..FlattenerConfig::default()
             },
-            &NoAbort,
+            abort,
         )
         .map_err(|error| map_build_parse_error("model-bin hierarchy flattening", error))?;
         let mut effective_model_netlist;
@@ -5477,7 +5481,7 @@ impl Engine {
                 .extend(flattened.scoped_models);
             &effective_model_netlist
         };
-        let resolution = ModelResolution::new(netlist, &NoAbort);
+        let resolution = ModelResolution::new(netlist, abort);
         let mut gaps = Vec::new();
         for element in &flattened.elements {
             let ElementKind::Mosfet {
@@ -5488,6 +5492,7 @@ impl Engine {
             else {
                 continue;
             };
+            check_build_abort(abort)?;
             gaps.extend(model_bin_coverage_gap(
                 &resolution,
                 &element.name,
@@ -11219,7 +11224,7 @@ mod tests {
         );
 
         let gaps = engine
-            .model_bin_coverage_gaps(&netlist)
+            .model_bin_coverage_gaps(&netlist, &NoAbort)
             .expect("well-formed cards inspect");
         let named: Vec<&str> = gaps.iter().map(|gap| gap.element.as_str()).collect();
         assert_eq!(named, ["M1", "M3"]);
@@ -11232,6 +11237,44 @@ mod tests {
         assert_eq!(gaps[0].nearest.model, "NCH.0");
         assert!(near(gaps[0].nearest.geometry.length.min, 0.28e-6));
         assert!(near(gaps[1].nearest.geometry.width.max, 2.0e-6));
+    }
+
+    /// A Stop raised at any point of the coverage scan ends it there, with no
+    /// gap list: the scan flattens and resolves under the caller's abort, and
+    /// asks it again before each instance.
+    #[test]
+    fn a_stopped_coverage_scan_names_no_gaps() {
+        use crate::abort_signal::CountingAbort;
+
+        let mut deck = String::from("uncovered binned mosfets\nV1 d 0 1\n");
+        for index in 0..40 {
+            deck.push_str(&format!("M{index} d d 0 0 NCH W=1u L=0.1u\n"));
+        }
+        deck.push_str(
+            ".model NCH.0 NMOS LEVEL=1 LMIN=0.28u LMAX=0.5u WMIN=0.5u WMAX=2u VTO=0.4\n.end\n",
+        );
+        let netlist = Netlist::parse(&deck).expect("uncovered bin deck parses");
+        let engine = Engine::new(SimulationConfig::default());
+        let unstopped = CountingAbort::new(usize::MAX);
+        let gaps = engine
+            .model_bin_coverage_gaps(&netlist, &unstopped)
+            .expect("well-formed cards inspect");
+        assert_eq!(gaps.len(), 40);
+        assert!(
+            unstopped.count() > 40,
+            "the scan asks before each instance: {} polls",
+            unstopped.count()
+        );
+
+        for threshold in 0..unstopped.count() {
+            let stop = CountingAbort::new(threshold);
+            let stopped = engine.model_bin_coverage_gaps(&netlist, &stop);
+            assert!(
+                matches!(stopped, Err(SimulationError::Aborted)),
+                "a Stop at poll {} ends the scan: {stopped:?}",
+                threshold + 1
+            );
+        }
     }
 
     #[test]

@@ -13,6 +13,9 @@
 //! failures: the next run of the design supersedes them, and an edit to the
 //! design the run was dispatched against makes them stale rather than gone.
 
+use std::collections::HashSet;
+use std::hash::Hash;
+
 use rspice_core::ContinuationAid;
 use rspice_core::notice::{EngineNotice, ParameterReplacement, ParameterScope, RecordedNotice};
 use rspice_results::convergence_quality::TransientConvergenceEvidence;
@@ -108,35 +111,65 @@ struct Gathered<'a> {
     key: FindingKey,
     first: &'a RunNotice,
     occurrences: usize,
-    analyses: Named,
-    points: Named,
+    /// By name.
+    analyses: Named<String>,
+    /// By the identity each analysis's record gives a point.
+    points: Named<u64>,
 }
 
 /// A short list of names and how many more there were.
-#[derive(Default)]
-struct Named {
+///
+/// Every distinct one is held by what identifies it, so one that two
+/// analyses raised is counted once, whether both name it, one names it and
+/// the other only counts it, or both only count it.
+struct Named<K> {
     names: Vec<String>,
-    more: usize,
+    /// Every one, the named among them.
+    every: HashSet<K>,
 }
 
-impl Named {
-    fn add(&mut self, name: &str) {
-        if self.names.iter().any(|named| named == name) {
-            return;
+impl<K> Default for Named<K> {
+    fn default() -> Self {
+        Self {
+            names: Vec::new(),
+            every: HashSet::new(),
         }
-        if self.names.len() < MAX_NAMED {
+    }
+}
+
+impl<K: Eq + Hash> Named<K> {
+    /// Name `name` if it is among the first few.
+    fn name(&mut self, name: &str) {
+        if self.names.len() < MAX_NAMED && !self.names.iter().any(|named| named == name) {
             self.names.push(name.to_owned());
-        } else {
-            self.more = self.more.saturating_add(1);
         }
     }
 
     fn sentence(&self) -> String {
         let mut text = self.names.join(", ");
-        if self.more > 0 {
-            text.push_str(&format!(" and {} more", self.more));
+        let more = self.every.len().saturating_sub(self.names.len());
+        if more > 0 {
+            text.push_str(&format!(" and {more} more"));
         }
         text
+    }
+}
+
+impl Named<String> {
+    fn add(&mut self, name: &str) {
+        self.name(name);
+        self.every.insert(name.to_owned());
+    }
+}
+
+impl Named<u64> {
+    /// The points one analysis's record names, and every point it was
+    /// raised at, the named among them.
+    fn add(&mut self, named: &[String], identities: &[u64]) {
+        for name in named {
+            self.name(name);
+        }
+        self.every.extend(identities);
     }
 }
 
@@ -439,16 +472,18 @@ fn gather<'a>(facts: &'a [(String, RunNotice)], scope: &str) -> Vec<Gathered<'a>
     let mut gathered: Vec<Gathered<'a>> = Vec::new();
     for (analysis, notice) in facts {
         let key = notice_key(notice, scope);
-        let (occurrences, points, unnamed) = match notice {
+        let (occurrences, points, identities) = match notice {
             RunNotice::Engine(recorded) => (
                 recorded.occurrences,
                 recorded.points.as_slice(),
-                recorded.unnamed_points,
+                recorded.point_identities.as_slice(),
             ),
-            RunNotice::TruncationExceeded { points, .. } => {
-                (usize::try_from(*points).unwrap_or(usize::MAX), &[][..], 0)
-            }
-            RunNotice::MeasureFailed { .. } => (1, &[][..], 0),
+            RunNotice::TruncationExceeded { points, .. } => (
+                usize::try_from(*points).unwrap_or(usize::MAX),
+                &[][..],
+                &[][..],
+            ),
+            RunNotice::MeasureFailed { .. } => (1, &[][..], &[][..]),
         };
         let index = match gathered.iter().position(|condition| condition.key == key) {
             Some(index) => index,
@@ -466,10 +501,7 @@ fn gather<'a>(facts: &'a [(String, RunNotice)], scope: &str) -> Vec<Gathered<'a>
         let condition = &mut gathered[index];
         condition.occurrences = condition.occurrences.saturating_add(occurrences);
         condition.analyses.add(analysis);
-        for point in points {
-            condition.points.add(point);
-        }
-        condition.points.more = condition.points.more.saturating_add(unnamed);
+        condition.points.add(points, identities);
     }
     gathered
 }
@@ -627,6 +659,15 @@ mod tests {
         state
     }
 
+    /// What identifies `point` in a record. Any digest the records of one run
+    /// share will do, as the collector's do.
+    fn identity(point: &str) -> u64 {
+        use std::hash::Hasher;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        point.hash(&mut hasher);
+        hasher.finish()
+    }
+
     /// `parameter` of `element` replaced at each of `points`.
     fn clamp(element: &str, parameter: &str, points: &[&str]) -> RecordedNotice {
         RecordedNotice {
@@ -642,7 +683,7 @@ mod tests {
             }),
             occurrences: points.len().max(1),
             points: points.iter().map(|point| (*point).to_owned()).collect(),
-            unnamed_points: 0,
+            point_identities: points.iter().map(|point| identity(point)).collect(),
         }
     }
 
@@ -726,7 +767,7 @@ mod tests {
                     notice: EngineNotice::ConvergenceAid(ContinuationAid::GminStepping),
                     occurrences: 3,
                     points: Vec::new(),
-                    unnamed_points: 0,
+                    point_identities: Vec::new(),
                 },
             ],
             None,
@@ -756,6 +797,61 @@ mod tests {
         let listed = listing::listing(&state);
         assert_eq!(listed.len(), 3);
         assert_eq!(listed.counts().warnings, 2, "{:?}", listed.counts());
+    }
+
+    /// `parameter` of `element` replaced at each of `points`, in order, as
+    /// one analysis's collector delivers it: the first eight named, and every
+    /// one identified.
+    fn delivered(element: &str, parameter: &str, points: &[String]) -> RecordedNotice {
+        let named: Vec<&str> = points.iter().take(8).map(String::as_str).collect();
+        let mut notice = clamp(element, parameter, &named);
+        notice.occurrences = points.len();
+        notice.point_identities = points.iter().map(|point| identity(point)).collect();
+        notice
+    }
+
+    /// The samples `first..=last`.
+    fn samples(first: usize, last: usize) -> Vec<String> {
+        (first..=last)
+            .map(|sample| format!("sample {sample}"))
+            .collect()
+    }
+
+    /// Points are counted once however many analyses raised the condition at
+    /// them, whether the record names them or counts them. Two Monte Carlo
+    /// analyses that clamp at samples 1 to 12 clamp at twelve samples, not
+    /// sixteen; one at 1 to 12 and one at 9 to 16, at sixteen, not twenty.
+    #[test]
+    fn a_point_two_analyses_raise_a_condition_at_is_counted_once() {
+        let named = samples(1, 8).join(", ");
+        for (second, raised, more) in [(samples(1, 12), 24, 4), (samples(9, 16), 20, 8)] {
+            let mut state = open_state(&[1]);
+            state.open_run_outcome(1);
+            state.publish_run_notices(
+                "Monte Carlo A",
+                vec![delivered("M1", "rdsw", &samples(1, 12))],
+                None,
+                &[],
+                1,
+            );
+            state.publish_run_notices(
+                "Monte Carlo B",
+                vec![delivered("M1", "rdsw", &second)],
+                None,
+                &[],
+                1,
+            );
+
+            let standing = notices(&state);
+            assert_eq!(standing.len(), 1, "{standing:#?}");
+            assert_eq!(
+                standing[0].2,
+                format!(
+                    "Raised {raised} times in Monte Carlo A, Monte Carlo B · at {named} and \
+                     {more} more · engine element M1"
+                )
+            );
+        }
     }
 
     /// A `.MEASURE` that produced no value is a warning about the run, in

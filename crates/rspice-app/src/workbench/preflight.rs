@@ -60,11 +60,28 @@ pub(crate) fn run(app: &mut RSpiceApp) {
 /// Start a pass. `queue` asks for the run to be queued once the pass
 /// authorizes it.
 fn start(state: &mut AppState, controller: &mut SimulationController, queue: bool) {
-    if let Some(check) = state.workbench.preflight.checking.as_mut() {
-        // The decks being built are the ones this press would build. A Run
-        // press during a check alone asks for the run it authorizes.
-        check.queue |= queue;
-        return;
+    if let Some(check) = &state.workbench.preflight.checking {
+        let revision = check.report.project_revision;
+        if checks_the_design_as_it_stands(state, controller, &check.report) {
+            // The decks being built are the ones this press would build. A
+            // Run press during a check alone asks for the run it authorizes.
+            if let Some(check) = state.workbench.preflight.checking.as_mut() {
+                check.queue |= queue;
+            }
+            return;
+        }
+        // The design has moved since that pass's press, so its verdict will
+        // authorize nothing, and a press that joined it would be lost with
+        // it. It stops, and this press checks the design as it stands.
+        state.workbench.preflight.checking = None;
+        controller.cancel_preflight();
+        state.record(
+            LogSeverity::Info,
+            LogSource::Studio,
+            format!(
+                "Preflight restarted · the design changed while revision {revision} was checked"
+            ),
+        );
     }
     state.sync_active_schematic_to_workspace();
     // In the frame that takes the press, before the report is collected from
@@ -97,6 +114,26 @@ fn start(state: &mut AppState, controller: &mut SimulationController, queue: boo
         }
     }
     conclude(state, controller, report, None, queue);
+}
+
+/// Whether the pass in flight, whose report is `report`, still checks the
+/// design as it stands: nothing has dropped the run it prepares, and nothing
+/// it inspected at its press has moved. What [`poll`] asks of its verdict
+/// before letting it authorize anything.
+fn checks_the_design_as_it_stands(
+    state: &AppState,
+    controller: &SimulationController,
+    report: &PreflightReport,
+) -> bool {
+    let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
+    controller.preflight_is_current()
+        && report.is_current_for(
+            state.workspace.content.project.revision().get(),
+            &topology_root,
+            topology_revision,
+            &topology_closure,
+            state.active_plan_revision(),
+        )
 }
 
 /// The blocker a preparation failure stands as.
