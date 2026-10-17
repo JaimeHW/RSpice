@@ -5,24 +5,95 @@ use super::{
     SchematicSymbolContext,
     drawing::ProbeVisualStatus,
     drawing_sheet::ActiveDrawingSheet,
-    sheet_visibility::{active_junction_at, active_sheet_has_objects, object_is_on_active_sheet},
+    sheet_visibility::{
+        active_junction_at, active_sheet_has_objects, active_wire_at, object_is_on_active_sheet,
+        objects_on_active_sheet,
+    },
     viewport::Viewport,
 };
 use crate::schematic::bus_notations;
 use crate::state::{
     CellViewRef, CrossProbeIndex, Point, SchematicAnnotationVisibility,
-    SchematicBackAnnotationContent, SchematicHierarchyVisibility, SchematicNetHighlighting,
+    SchematicBackAnnotationContent, SchematicHierarchyVisibility, SchematicNetHighlighting, Tool,
 };
 use crate::workbench::app_state::AppState;
 use egui::{Painter, Rect};
-use rspice_design::connectivity::summary::projection_nets;
+use rspice_design::connectivity::{extract_with_hierarchy, summary::projection_nets};
+use rspice_design::hierarchy::HierarchySource;
 use rspice_schematic_editor::view::{
     cross_probe::wrapped_signal_name,
     design_view::DesignView,
+    pointer_target::{self, PointerTarget},
     scene::{
-        self, OperatingPointCanvasAnnotation, named_net_class_color, normalized_probe_expression,
+        self, BadgeSubject, OperatingPointCanvasAnnotation, named_net_class_color,
+        normalized_probe_expression,
     },
+    tool_input::{ToolPointerAction, ToolPointerView},
 };
+
+/// What a click at the hovered point would take, for the hover
+/// pre-highlight: in the Select tool the pointer target a click resolves (or
+/// the next one a repeat click cycles to), in the Probe tool the wire or
+/// instance a probe click lands on, and the chooser's focused row while the
+/// overlap chooser is open. Nothing while
+/// a button is down (a drag or a band), a popup is open, or the canvas is
+/// driven by touch, which has no hover.
+fn canvas_hover(
+    ctx: &egui::Context,
+    available: Rect,
+    viewport: &Viewport,
+    state: &AppState,
+    symbol_context: &SchematicSymbolContext,
+) -> Option<PointerTarget> {
+    // The chooser's focused row, while it is open; then the object a repeat
+    // click would cycle to.
+    if let Some(chooser) = super::pick_chooser::open_chooser(ctx) {
+        return chooser.focused_target();
+    }
+    let cycled = super::pick_chooser::cycle_hover(ctx);
+    let editor = &state.schematic.session.editor;
+    if !matches!(editor.tool, Tool::Select | Tool::Probe)
+        || editor.selection_rect.is_active()
+        || egui::Popup::is_any_open(ctx)
+        || ctx.input(|input| input.pointer.any_down())
+        || pointer_target::canvas_touch_mode(ctx)
+    {
+        return None;
+    }
+    let position = ctx
+        .pointer_hover_pos()
+        .filter(|position| available.contains(*position))?;
+    let view = ToolPointerView {
+        design: super::schematic_design_view(state),
+        snap_engine: &editor.snap_engine,
+        can_edit: !state.schematic_edit_read_only(),
+    };
+    match view.action(editor.tool, viewport, symbol_context, position)? {
+        ToolPointerAction::Select(_) if cycled.is_some() => cycled,
+        ToolPointerAction::Select(query) => pointer_target::pointer_target(
+            &view.design,
+            query,
+            state.ui.schematic_selection_filter,
+            symbol_context,
+            ctx,
+            viewport,
+            || state.workspace.content.active_view.display_path(),
+        ),
+        ToolPointerAction::Probe(grid) => active_wire_at(state, grid)
+            .map(PointerTarget::Wire)
+            .or_else(|| {
+                let components = objects_on_active_sheet(
+                    state,
+                    &state.schematic.document().components,
+                    |item| item.id,
+                );
+                symbol_context
+                    .component_at_resolved_symbol(components.as_ref(), grid)
+                    .map(PointerTarget::Component)
+            }),
+        _ => None,
+    }
+}
 
 pub(super) fn draw_scene(
     painter: &Painter,
@@ -77,6 +148,8 @@ pub(super) fn draw_scene(
             net_highlighting: state.ui.schematic_visibility.net_highlighting,
             parameter_labels: state.ui.schematic_visibility.parameter_labels,
             hover_wire_vertex: state.dialogs.interaction.hover_wire_vertex,
+            selection_filter: state.ui.schematic_selection_filter,
+            hover: canvas_hover(painter.ctx(), available, viewport, state, symbol_context),
         },
         scene::SceneSymbols {
             library: symbol_library,
@@ -93,6 +166,7 @@ pub(super) fn draw_scene(
             operating_point: operating_point_annotations(state),
             probe_status: &probe_status,
             selected_trace_expression: &selected_trace_expression,
+            open_pins: &open_pins(painter.ctx(), state),
         },
         || state.workspace.content.active_view.display_path(),
     );
@@ -269,6 +343,59 @@ fn probe_visual_statuses(state: &AppState) -> ProbeMaterializationStatuses {
 /// A version-keyed cache of our own would be wrong as well as redundant: net
 /// identity moves with instance values and port parameters, which deliberately
 /// do not advance the schematic topology version.
+/// The open-pin set: every terminal nothing meets, by instance. One per
+/// topology and symbol revision.
+type OpenPins = std::sync::Arc<std::collections::HashMap<u64, Vec<Point>>>;
+
+/// Each instance's open terminals: `ExtractedTerminal::attached == false`,
+/// the same judgement the design check reports as an unconnected pin, so
+/// the mark and the finding cannot disagree. Extracted once per topology
+/// and symbol revision, not per frame.
+fn open_pins(ctx: &egui::Context, state: &AppState) -> OpenPins {
+    let key = (
+        state.schematic.topology_version(),
+        super::symbol_context_revision(state),
+    );
+    let id = egui::Id::new("rspice.schematic.open_pins");
+    if let Some((cached, pins)) = ctx.data(|data| data.get_temp::<((u64, u64), OpenPins)>(id))
+        && cached == key
+    {
+        return pins;
+    }
+    let pins = OpenPins::new(extract_open_pins(state));
+    ctx.data_mut(|data| data.insert_temp(id, (key, OpenPins::clone(&pins))));
+    pins
+}
+
+fn extract_open_pins(state: &AppState) -> std::collections::HashMap<u64, Vec<Point>> {
+    let mut open = std::collections::HashMap::<u64, Vec<Point>>::new();
+    let Ok(projection) = state.workspace.design_projection(
+        &state.library_manager,
+        &state.workspace.content.active_view,
+        &state.schematic,
+    ) else {
+        return open;
+    };
+    let key = state.workspace.content.active_view.key();
+    let Some((_, schematic)) = projection
+        .schematic_buffers()
+        .iter()
+        .find(|(buffer, _)| buffer.eq_ignore_ascii_case(&key))
+    else {
+        return open;
+    };
+    let hierarchy =
+        HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
+    for terminal in extract_with_hierarchy(schematic, Some(&hierarchy)).terminals {
+        if !terminal.attached {
+            open.entry(terminal.component_id)
+                .or_default()
+                .push(terminal.point);
+        }
+    }
+    open
+}
+
 fn net_class_colors(state: &AppState) -> std::collections::HashMap<u64, egui::Color32> {
     let mut colors = std::collections::HashMap::new();
     let Ok(projection) = state.workspace.design_projection(
@@ -284,7 +411,10 @@ fn net_class_colors(state: &AppState) -> std::collections::HashMap<u64, egui::Co
         &state.workspace.content.active_view.key(),
     );
     for net in nets.iter().filter(|net| net.authored_name) {
-        let color = named_net_class_color(&net.name);
+        // A name that declares no class is painted as a wire.
+        let Some(color) = named_net_class_color(&net.name) else {
+            continue;
+        };
         for wire_id in &net.wire_ids {
             colors.entry(*wire_id).or_insert(color);
         }
@@ -418,7 +548,6 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
 
     let mut annotations = Vec::new();
     let back_annotation = state.ui.schematic_visibility.back_annotation;
-    let mut annotated_devices = std::collections::HashSet::new();
     let index = occurrence_cross_probe_index(state);
     // The engine answers for a bus bit under the deck's `DATA#3`; the canvas
     // annotates the conductor the drawing shows, so it quotes the drawing's
@@ -432,7 +561,7 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
             continue;
         };
         let points = occurrence_net_points(state, index.as_ref(), net_name);
-        let Some(position) = points.and_then(|points| {
+        let Some(anchor) = points.and_then(|points| {
             points
                 .iter()
                 .copied()
@@ -456,14 +585,41 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
         }) else {
             continue;
         };
+        // A named net's value sits right after its own label, so it reads
+        // `OUT 912.4 mV`; an unnamed net's badge carries its name.
+        let label = state
+            .schematic
+            .document()
+            .net_labels
+            .iter()
+            .find(|label| {
+                object_is_on_active_sheet(state, label.id)
+                    && label.name.eq_ignore_ascii_case(net_name)
+            })
+            .map(|label| label.id);
+        let display = notations.display(&voltage.name);
+        let shown = wrapped_signal_name(&display, 'V').unwrap_or(net_name);
+        let value = format!(
+            "{} {}",
+            crate::state::format_engineering(voltage.value),
+            voltage.unit
+        );
+        let highlighted = editor_net_is_highlighted(state, net_name);
         annotations.push(OperatingPointCanvasAnnotation {
-            position,
-            label: format!(
-                "{} = {} {}",
-                notations.display(&voltage.name),
-                crate::state::format_engineering(voltage.value),
-                voltage.unit
-            ),
+            subject: BadgeSubject::Net { anchor, label },
+            lines: vec![if label.is_some() {
+                value
+            } else {
+                format!("{shown} {value}")
+            }],
+            class: if highlighted {
+                0
+            } else if label.is_some() {
+                1
+            } else {
+                3
+            },
+            key: net_name.to_ascii_lowercase(),
             selected_current: false,
         });
     }
@@ -471,132 +627,92 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
     let retained_currents = retained_annotation.is_none_or(|annotation| {
         annotation == crate::state::OperatingPointAnnotationEvidence::VoltagesAndCurrents
     });
-    if retained_currents && back_annotation != SchematicBackAnnotationContent::VoltagesOnly {
-        for component in state
-            .schematic
-            .document()
-            .components
-            .iter()
-            .filter(|component| {
-                state
-                    .schematic
-                    .session
-                    .editor
-                    .selection
-                    .has_component(component.id)
-                    && object_is_on_active_sheet(state, component.id)
-            })
-        {
-            let Some(current) = dc_op.branch_currents.iter().find(|current| {
+    let retained_device_op = retained_annotation
+        == Some(crate::state::OperatingPointAnnotationEvidence::VoltagesAndDeviceOp);
+    if back_annotation == SchematicBackAnnotationContent::VoltagesOnly {
+        return annotations;
+    }
+    // One block per selected device: its current, its operating point and
+    // its power, one quantity a line, placed and kept as one.
+    for component in state
+        .schematic
+        .document()
+        .components
+        .iter()
+        .filter(|component| {
+            state
+                .schematic
+                .session
+                .editor
+                .selection
+                .has_component(component.id)
+                && object_is_on_active_sheet(state, component.id)
+        })
+    {
+        let mut lines = Vec::new();
+        if retained_currents
+            && let Some(current) = dc_op.branch_currents.iter().find(|current| {
                 current.value.is_finite()
                     && wrapped_signal_name(&current.name, 'I')
                         .is_some_and(|name| name.eq_ignore_ascii_case(&component.name))
-            }) else {
-                continue;
-            };
-            let mut label = format!(
+            })
+        {
+            lines.push(format!(
                 "{} = {} {}",
                 current.name,
                 crate::state::format_engineering(current.value),
                 current.unit
+            ));
+        }
+        if retained_device_op
+            && let Some(entry) = device_op.and_then(|report| {
+                report
+                    .entries
+                    .iter()
+                    .find(|entry| entry.name.eq_ignore_ascii_case(&component.name))
+            })
+        {
+            lines.extend(
+                device_op_annotation_label(entry)
+                    .split(" \u{00b7} ")
+                    .map(str::to_owned),
             );
-            if back_annotation == SchematicBackAnnotationContent::VoltagesCurrentsAndPower
-                && let Some(power) = device_power(dc_op, &component.name)
-            {
-                label.push_str(&format!(
-                    " \u{00b7} {} = {} {}",
-                    power.name,
-                    crate::state::format_engineering(power.value),
-                    power.unit
-                ));
-            }
-            annotations.push(OperatingPointCanvasAnnotation {
-                position: component.pos,
-                label,
-                selected_current: true,
-            });
-            annotated_devices.insert(component.id);
         }
-    }
-    if retained_annotation
-        == Some(crate::state::OperatingPointAnnotationEvidence::VoltagesAndDeviceOp)
-        && back_annotation != SchematicBackAnnotationContent::VoltagesOnly
-        && let Some(report) = device_op
-    {
-        for component in state
-            .schematic
-            .document()
-            .components
-            .iter()
-            .filter(|component| {
-                state
-                    .schematic
-                    .session
-                    .editor
-                    .selection
-                    .has_component(component.id)
-                    && object_is_on_active_sheet(state, component.id)
-            })
+        if back_annotation == SchematicBackAnnotationContent::VoltagesCurrentsAndPower
+            && let Some(power) = device_power(dc_op, &component.name)
         {
-            let Some(entry) = report
-                .entries
-                .iter()
-                .find(|entry| entry.name.eq_ignore_ascii_case(&component.name))
-            else {
-                continue;
-            };
-            let mut label = device_op_annotation_label(entry);
-            if back_annotation == SchematicBackAnnotationContent::VoltagesCurrentsAndPower
-                && let Some(power) = device_power(dc_op, &component.name)
-            {
-                label.push_str(&format!(
-                    " \u{00b7} {} = {} {}",
-                    power.name,
-                    crate::state::format_engineering(power.value),
-                    power.unit
-                ));
-            }
-            annotations.push(OperatingPointCanvasAnnotation {
-                position: component.pos,
-                label,
-                selected_current: true,
-            });
-            annotated_devices.insert(component.id);
+            lines.push(format!(
+                "{} = {} {}",
+                power.name,
+                crate::state::format_engineering(power.value),
+                power.unit
+            ));
         }
-    }
-    if back_annotation == SchematicBackAnnotationContent::VoltagesCurrentsAndPower {
-        for component in state
-            .schematic
-            .document()
-            .components
-            .iter()
-            .filter(|component| {
-                state
-                    .schematic
-                    .session
-                    .editor
-                    .selection
-                    .has_component(component.id)
-                    && object_is_on_active_sheet(state, component.id)
-                    && !annotated_devices.contains(&component.id)
-            })
-        {
-            let Some(power) = device_power(dc_op, &component.name) else {
-                continue;
-            };
-            annotations.push(OperatingPointCanvasAnnotation {
-                position: component.pos,
-                label: format!(
-                    "{} = {} {}",
-                    power.name,
-                    crate::state::format_engineering(power.value),
-                    power.unit
-                ),
-                selected_current: true,
-            });
+        if lines.is_empty() {
+            continue;
         }
+        annotations.push(OperatingPointCanvasAnnotation {
+            subject: BadgeSubject::Device {
+                component: component.id,
+            },
+            lines,
+            class: 0,
+            key: component.name.to_ascii_lowercase(),
+            selected_current: true,
+        });
     }
     annotations
+}
+
+/// Whether the canvas's net highlight is on the net the engine calls
+/// `net_name`: its badge then belongs to the selection.
+fn editor_net_is_highlighted(state: &AppState, net_name: &str) -> bool {
+    let highlight = &state.schematic.session.editor.net_highlight;
+    highlight.active
+        && highlight
+            .selected_net_name
+            .as_deref()
+            .is_some_and(|name| name.eq_ignore_ascii_case(net_name))
 }
 
 fn device_power<'a>(
@@ -734,6 +850,18 @@ mod tests {
                 net.spice_name()
             );
         }
+    }
+
+    /// A named net whose name declares no class (not ground, supply or
+    /// clock) is painted as a wire, not in a colour hashed from its name.
+    #[test]
+    fn an_unclassified_named_net_takes_no_class_colour() {
+        let mut state = separated_same_name_groups();
+        for label in &mut state.schematic.document_mut_for_test().net_labels {
+            label.name = "VOUT".to_owned();
+        }
+        state.sync_active_schematic_to_workspace();
+        assert!(net_class_colors(&state).is_empty());
     }
 
     /// An unnamed conductor declares no class, so it keeps the default stroke
@@ -919,16 +1047,60 @@ mod tests {
         state
     }
 
+    /// A badge's text, its lines joined.
+    fn text(annotation: &OperatingPointCanvasAnnotation) -> String {
+        annotation.lines.join(" · ")
+    }
+
+    /// An unnamed net's badge carries its name and value at the net's
+    /// representative point, in the lowest class; the selected device's
+    /// current is a block of its own on that instance, in class 0.
     #[test]
     fn operating_point_policy_maps_latest_values_to_exact_schematic_points() {
         let state = state_with_operating_point();
         let annotations = operating_point_annotations(&state);
 
         assert_eq!(annotations.len(), 2);
-        assert_eq!(annotations[0].position, Point::new(20, 10));
-        assert!(annotations[0].label.starts_with("V(out) = 1.25"));
-        assert_eq!(annotations[1].position, Point::new(40, 30));
+        assert_eq!(
+            annotations[0].subject,
+            BadgeSubject::Net {
+                anchor: Point::new(20, 10),
+                label: None
+            }
+        );
+        assert!(
+            text(&annotations[0]).starts_with("out 1.25"),
+            "{annotations:?}"
+        );
+        assert_eq!(annotations[0].class, 3);
+        assert_eq!(
+            annotations[1].subject,
+            BadgeSubject::Device { component: 1 }
+        );
         assert!(annotations[1].selected_current);
+        assert_eq!(annotations[1].class, 0);
+    }
+
+    /// A net named by a label on the sheet shows its value only, set right
+    /// after the label, in the named-net class.
+    #[test]
+    fn a_named_net_badge_shows_the_value_after_its_label() {
+        let mut state = state_with_operating_point();
+        state
+            .schematic
+            .document_mut_for_test()
+            .net_labels
+            .push(crate::state::NetLabel::new(9, Point::new(20, 10), "OUT"));
+        let annotations = operating_point_annotations(&state);
+        assert_eq!(
+            annotations[0].subject,
+            BadgeSubject::Net {
+                anchor: Point::new(20, 10),
+                label: Some(9)
+            }
+        );
+        assert_eq!(annotations[0].lines, vec!["1.250 V".to_owned()]);
+        assert_eq!(annotations[0].class, 1);
     }
 
     /// The canvas renders a solved name through the same boundary every other
@@ -992,8 +1164,13 @@ mod tests {
 
         let annotations = operating_point_annotations(&state);
 
-        assert!(annotations[1].label.contains("P(vbias)"));
-        assert!(annotations[1].label.ends_with('W'));
+        assert!(text(&annotations[1]).contains("P(vbias)"));
+        assert!(text(&annotations[1]).ends_with('W'));
+        assert_eq!(
+            annotations[1].lines.len(),
+            2,
+            "current and power, one a line"
+        );
     }
 
     #[test]
@@ -1038,8 +1215,8 @@ mod tests {
 
         let annotations = operating_point_annotations(&state);
         assert_eq!(annotations.len(), 2, "voltage plus selected device OP");
-        assert!(annotations[1].label.contains("VBIAS [SOURCE]"));
-        assert!(annotations[1].label.contains("id=2mA"));
+        assert!(text(&annotations[1]).contains("VBIAS [SOURCE]"));
+        assert!(text(&annotations[1]).contains("id=2mA"));
     }
 
     /// One prepared run that emitted `amp` at `/X1` and `/X2`.
@@ -1198,12 +1375,12 @@ mod tests {
 
         state.simulation.view.active_analysis_idx = Some(1);
         let hot = operating_point_annotations(&state);
-        assert!(hot[0].label.contains("2.5"), "{hot:?}");
-        assert!(hot[1].label.contains("4m"), "{hot:?}");
+        assert!(text(&hot[0]).contains("2.5"), "{hot:?}");
+        assert!(text(&hot[1]).contains("4m"), "{hot:?}");
 
         state.simulation.view.active_analysis_idx = Some(0);
         let nominal = operating_point_annotations(&state);
-        assert!(nominal[0].label.contains("1.25"));
-        assert!(nominal[1].label.contains("2m"));
+        assert!(text(&nominal[0]).contains("1.25"));
+        assert!(text(&nominal[1]).contains("2m"));
     }
 }

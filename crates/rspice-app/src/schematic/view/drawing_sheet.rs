@@ -145,8 +145,6 @@ pub(super) fn draw_base(
             layers: state.ui.drawing_sheet_layers,
             grid: state.ui.grid,
             grid_size: state.schematic.document().grid_size,
-            pan: state.schematic.session.editor.pan,
-            zoom: state.schematic.session.editor.zoom,
         },
         sheet,
         || resolved_title_block_fields(state, sheet),

@@ -30,7 +30,8 @@ use self::geometry::{
     write_design_note, write_documentation_shape, write_junction, write_wire,
 };
 use super::view::resolved_symbol_render::{
-    resolved_symbol_world_bounds, write_resolved_symbol_svg,
+    InstanceLabel, resolved_symbol_world_bounds, write_instance_label_svg,
+    write_resolved_symbol_svg,
 };
 
 #[derive(Clone)]
@@ -525,35 +526,41 @@ fn write_component(
         write_symbol_resolution_error(svg, component, config, "missing canonical SVG");
     }
 
-    if !symbol_wrote_labels {
-        // Component label
+    // A primitive's name and value sit where the canvas puts them, through
+    // the canvas's own layout evaluated in SVG units, and turn with it.
+    if !symbol_wrote_labels && component.kind != ComponentType::Ground {
+        let layout = crate::view::drawing::compute_label_layout(
+            egui::Pos2::new(cx as f32, cy as f32),
+            config.grid_size as f32,
+            component,
+        );
+        let at = |position: egui::Pos2| (f64::from(position.x), f64::from(position.y));
         if component
             .display_mode
             .show_name(SchematicParameterLabelVisibility::NamesAndValues)
+            && !component.name.is_empty()
         {
-            writeln!(
+            write_instance_label_svg(
                 svg,
-                "<text class=\"text\" x=\"{}\" y=\"{}\">{}</text>",
-                cx,
-                cy - 25.0,
-                escape_xml(&component.name)
-            )
-            .unwrap();
+                at(layout.name_pos),
+                &component.name,
+                layout.name_align,
+                InstanceLabel::Name.size(config),
+            );
         }
-
+        let value = crate::source_labels::component_value_label_cached(component);
         if component
             .display_mode
             .show_value(SchematicParameterLabelVisibility::NamesAndValues)
-            && !component.value.is_empty()
+            && !value.is_empty()
         {
-            writeln!(
+            write_instance_label_svg(
                 svg,
-                "<text class=\"text\" x=\"{}\" y=\"{}\">{}</text>",
-                cx,
-                cy + 35.0,
-                escape_xml(&component.value)
-            )
-            .unwrap();
+                at(layout.value_pos),
+                value.as_ref(),
+                layout.value_align,
+                InstanceLabel::Value.size(config),
+            );
         }
     }
 
@@ -1084,13 +1091,17 @@ mod tests {
             svg.contains(r#"<path class="component" d="M 900 900 L 1100 900 L 1100 1100"/>"#),
             "authored body polyline should be exported"
         );
+        // The anchors are (800, 700) and (800, 1300); an unturned run starts
+        // there, centred on it: the baseline sits 0.375 em below.
         assert!(
-            svg.contains(r#"<text class="text" x="800" y="700">XAMP</text>"#),
-            "instance name should use the authored name anchor"
+            svg.contains(r#"<text class="text" x="800" y="737.5" text-anchor="start""#)
+                && svg.contains(">XAMP</text>"),
+            "instance name should use the authored name anchor: {svg}"
         );
         assert!(
-            svg.contains(r#"<text class="text" x="800" y="1300">gain_stage</text>"#),
-            "instance value should use the authored value anchor"
+            svg.contains(r#"<text class="text" x="800" y="1333.75" text-anchor="start""#)
+                && svg.contains(">gain_stage</text>"),
+            "instance value should use the authored value anchor: {svg}"
         );
         assert!(
             !svg.contains(">X<"),
@@ -1193,6 +1204,50 @@ mod tests {
         assert!(svg.contains("1k &amp; 2k"));
         assert!(!svg.contains("R<&>"));
         assert!(!svg.contains("1k & 2k"));
+    }
+
+    /// A primitive's name and value export where the canvas puts them,
+    /// through the canvas's own layout: centred above an unturned resistor,
+    /// and ending left of a turned one, in the instance type. Before, both
+    /// sat at fixed offsets above and below the origin whatever the turn.
+    #[test]
+    fn primitive_labels_export_through_the_canvas_layout() {
+        let config = SvgExportConfig::default();
+        let name_line = |rotation: Rotation| {
+            let mut resistor = Component::new(1, ComponentType::Resistor, Point::new(100, 100));
+            resistor.name = "R1".to_owned();
+            resistor.value = "10k".to_owned();
+            resistor.rotation = rotation;
+            let mut svg = String::new();
+            write_component(&mut svg, &resistor, &config, None, None);
+            let layout = crate::view::drawing::compute_label_layout(
+                egui::Pos2::new(1000.0, 1000.0),
+                config.grid_size as f32,
+                &resistor,
+            );
+            let line = svg
+                .lines()
+                .find(|line| line.ends_with(">R1</text>"))
+                .unwrap_or_else(|| panic!("no name in {svg}"))
+                .to_owned();
+            (line, layout)
+        };
+        let (flat, layout) = name_line(Rotation::R0);
+        assert!(flat.contains(r#"text-anchor="middle""#), "{flat}");
+        assert!(
+            flat.contains(&format!(
+                r#"x="{}" y="{}""#,
+                f64::from(layout.name_pos.x),
+                f64::from(layout.name_pos.y) - 0.275 * 100.0
+            )),
+            "the name stands on the canvas's anchor above the body: {flat}"
+        );
+        assert!(
+            flat.contains("font-size: 100px; font-weight: 500"),
+            "{flat}"
+        );
+        let (turned, _) = name_line(Rotation::R90);
+        assert!(turned.contains(r#"text-anchor="end""#), "{turned}");
     }
 
     #[test]

@@ -3,7 +3,10 @@
 use super::super::{
     design_notes::draw_design_note,
     documentation_shapes::draw_documentation_shape,
-    drawing::{draw_bus, draw_bus_tap, draw_component, draw_junction, draw_wire},
+    drawing::{
+        ConductorInk, JunctionPaint, draw_bus, draw_bus_tap, draw_component, draw_junction,
+        draw_wire,
+    },
     net_labels::draw_net_label,
     symbol_context::SchematicSymbolContext,
     viewport::Viewport,
@@ -62,8 +65,12 @@ pub fn draw_move_candidate(
             painter,
             viewport,
             junction.pos,
-            view.editor.selection.has_junction(junction.pos),
-            style.hover_wire_vertex == Some((junction.pos.x, junction.pos.y)),
+            JunctionPaint {
+                selected: view.editor.selection.has_junction(junction.pos),
+                hovered: style.hover_wire_vertex == Some((junction.pos.x, junction.pos.y)),
+                // A preview draws its conductors selected.
+                incident: ConductorInk::Selected,
+            },
         );
     }
     for label in candidate.net_labels.iter().filter(|candidate_label| {
@@ -115,7 +122,7 @@ pub fn draw_array_candidate(
     view_path: impl Fn() -> String,
 ) {
     for wire in preview.wires() {
-        draw_wire(painter, viewport, wire, true, None);
+        draw_wire(painter, viewport, wire, ConductorInk::Selected);
     }
     for bus in preview.buses() {
         draw_bus(painter, viewport, bus, true);
@@ -139,8 +146,11 @@ pub fn draw_array_candidate(
             painter,
             viewport,
             junction.pos,
-            view.editor.selection.has_junction(junction.pos),
-            style.hover_wire_vertex == Some((junction.pos.x, junction.pos.y)),
+            JunctionPaint {
+                selected: view.editor.selection.has_junction(junction.pos),
+                hovered: style.hover_wire_vertex == Some((junction.pos.x, junction.pos.y)),
+                incident: ConductorInk::Selected,
+            },
         );
     }
     for label in preview.net_labels() {
@@ -174,7 +184,7 @@ fn draw_changed_conductors(
             .find(|wire| wire.id == candidate_wire.id)
             != Some(*candidate_wire)
     }) {
-        draw_wire(painter, viewport, wire, true, None);
+        draw_wire(painter, viewport, wire, ConductorInk::Selected);
     }
     for bus in candidate.buses.iter().filter(|candidate_bus| {
         source.buses.iter().find(|bus| bus.id == candidate_bus.id) != Some(*candidate_bus)
@@ -223,15 +233,7 @@ pub fn draw_transform_feedback(
     let color = if valid { palette.ok } else { palette.err };
     let clip = painter.clip_rect();
     let tooltip_width = (clip.width() * 0.7).clamp(80.0, 300.0);
-    let galley = painter.layout(
-        detail,
-        rspice_ui_kit::theme::mono(
-            rspice_ui_kit::tokens::FS_0,
-            rspice_ui_kit::theme::FontWeight::Medium,
-        ),
-        color,
-        tooltip_width,
-    );
+    let galley = painter.layout(detail, feedback_font(), color, tooltip_width);
     let requested = response
         .hover_pos()
         .or_else(|| response.interact_pointer_pos())
@@ -259,4 +261,60 @@ pub fn draw_transform_feedback(
         egui::StrokeKind::Inside,
     );
     painter.galley(position, galley, color);
+}
+
+/// The face [`draw_transform_feedback`] letters its readout in.
+fn feedback_font() -> egui::FontId {
+    rspice_ui_kit::theme::mono(
+        rspice_ui_kit::tokens::FS_0,
+        rspice_ui_kit::theme::FontWeight::Medium,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::feedback_font;
+
+    /// Every pixel a run of `text` paints in the readout face.
+    fn ink(text: &str) -> Vec<egui::Color32> {
+        let size = egui::vec2(260.0, 30.0);
+        let canvas = rspice_ui_kit::raster::render(size, |ui, background| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(background))
+                .show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new(text)
+                            .font(feedback_font())
+                            .color(egui::Color32::WHITE),
+                    );
+                });
+        });
+        canvas
+            .pixels_in(egui::Rect::from_min_size(egui::Pos2::ZERO, size))
+            .collect()
+    }
+
+    /// The move, stretch and array readouts are lettered in the mono face,
+    /// which has no Greek. Every character outside ASCII in them has to come
+    /// out as itself rather than as the replacement box: a missing glyph does
+    /// leave ink, so each one is compared with the last private-use code
+    /// point, which no face carries.
+    #[test]
+    fn the_transform_readouts_letter_every_glyph() {
+        let replacement = ink("\u{10fffd}");
+        for readout in [
+            "\u{0394} 20, 0 \u{b7} Orthogonal",
+            "\u{0394} -10, 30 \u{b7} Rubber band",
+            "4 replicas \u{00b7} pitch \u{0394} 20, 0",
+            "6 radial replicas \u{00b7} center 40, 40",
+        ] {
+            for glyph in readout.chars().filter(|glyph| !glyph.is_ascii()) {
+                let painted = ink(&glyph.to_string());
+                assert!(
+                    painted != replacement && painted != ink(" "),
+                    "{glyph:?} in {readout:?} letters as a replacement"
+                );
+            }
+        }
+    }
 }

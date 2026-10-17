@@ -2,7 +2,7 @@
 
 use super::super::{
     coordinates::screen_to_schematic,
-    drawing::paint_conductor,
+    drawing::{conductor_width_pt, paint_conductor},
     snap_resolution::{nearest_active_wire_screen_hit, resolve_target_pointer},
     symbol_context::SchematicSymbolContext,
     viewport::Viewport,
@@ -12,7 +12,9 @@ use crate::session::snap::{SnapResult, SnapTarget, SnapTargetType};
 use egui::{Painter, Pos2, Rect, Stroke};
 use rspice_design_model::Point;
 
-const WIRE_PREVIEW_STROKE_WIDTH: f32 = 1.5;
+/// A route being drawn is the selection colour, slightly held back so a
+/// committed selection still reads above it.
+const ROUTE_PREVIEW_ALPHA: f32 = 0.85;
 
 pub fn draw_wire_preview(
     painter: &Painter,
@@ -37,8 +39,12 @@ pub fn draw_wire_preview(
         let route: Vec<Pos2> = drawing.get_full_path().iter().map(to_screen).collect();
 
         if let Some(start) = committed.first().copied() {
-            let wire_color = rspice_ui_kit::tokens::active_palette().accent;
-            let width = WIRE_PREVIEW_STROKE_WIDTH * viewport.zoom;
+            let wire_color = rspice_ui_kit::tokens::active_palette()
+                .canvas_select
+                .gamma_multiply(ROUTE_PREVIEW_ALPHA);
+            // The route being drawn is a raised wire: the width it would
+            // carry selected once committed.
+            let width = conductor_width_pt(viewport.zoom, painter.pixels_per_point(), true);
             paint_conductor(
                 painter,
                 route,
@@ -141,14 +147,15 @@ fn draw_wire_snap_feedback(
 
     let palette = rspice_ui_kit::tokens::active_palette();
     let center = viewport.schematic_to_screen(result.snapped_position);
-    painter.circle_stroke(center, 5.0, Stroke::new(1.25, palette.accent));
+    let mark = palette.canvas_select.gamma_multiply(ROUTE_PREVIEW_ALPHA);
+    painter.circle_stroke(center, 5.0, Stroke::new(1.25, mark));
     painter.line_segment(
         [center - egui::vec2(2.5, 0.0), center + egui::vec2(2.5, 0.0)],
-        Stroke::new(1.0, palette.accent),
+        Stroke::new(1.0, mark),
     );
     painter.line_segment(
         [center - egui::vec2(0.0, 2.5), center + egui::vec2(0.0, 2.5)],
-        Stroke::new(1.0, palette.accent),
+        Stroke::new(1.0, mark),
     );
 
     let galley = painter.layout_no_wrap(

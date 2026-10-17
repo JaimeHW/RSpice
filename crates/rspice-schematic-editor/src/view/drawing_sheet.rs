@@ -383,13 +383,12 @@ impl DrawingSheetPalette {
 }
 
 /// Local display inputs; authored sheet geometry remains in the design model.
+/// The camera is the viewport's, so the grid and the content share it.
 #[derive(Debug, Clone, Copy)]
 pub struct DrawingSheetCanvas {
     pub layers: DrawingSheetLayerVisibility,
     pub grid: GridStyle,
     pub grid_size: i32,
-    pub pan: (f64, f64),
-    pub zoom: f64,
 }
 
 /// Paint the permanent pointer-transparent paper and its optional supporting
@@ -431,14 +430,17 @@ pub fn draw_base(
     painter.rect_filled(paper, 0.0, palette.paper);
 
     if lod.show_grid {
+        // The lattice is phased on the viewport's own offset, which content
+        // is placed with (rounded to device pixels), never on the raw pan:
+        // a grid point and the pin end on it share one screen position.
         draw_grid(
             painter,
-            available,
+            viewport.bounds,
             drawing_area.intersect(available),
             input.grid,
             input.grid_size,
-            input.pan,
-            input.zoom,
+            (f64::from(viewport.offset.x), f64::from(viewport.offset.y)),
+            f64::from(viewport.zoom),
         );
     }
     if lod.show_margins && layers.margins && sheet.format.border != DrawingSheetBorderTemplate::None

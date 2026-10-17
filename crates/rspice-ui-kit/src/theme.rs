@@ -323,6 +323,11 @@ fn apply_engineering_canvas_palette(tokens: &mut Tokens, canvas: Palette) {
     tokens.color.wire = canvas.wire;
     tokens.color.symbol = canvas.symbol;
     tokens.color.net_label = canvas.net_label;
+    tokens.color.canvas_select = canvas.canvas_select;
+    tokens.color.canvas_net_highlight = canvas.canvas_net_highlight;
+    tokens.color.net_class_ground = canvas.net_class_ground;
+    tokens.color.net_class_supply = canvas.net_class_supply;
+    tokens.color.net_class_clock = canvas.net_class_clock;
     tokens.color.traces = canvas.traces;
 }
 

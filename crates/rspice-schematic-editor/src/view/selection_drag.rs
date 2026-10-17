@@ -143,8 +143,10 @@ pub fn start(
         viewport,
         view_path,
     );
+    // The rubber band follows the pointer, not the grid.
+    let band = screen_to_schematic(viewport, position);
     if read_only {
-        return Some(SelectionDragAction::BeginMarquee(grid));
+        return Some(SelectionDragAction::BeginMarquee(band));
     }
     Some(match target {
         Some(
@@ -164,7 +166,7 @@ pub fn start(
         {
             SelectionDragAction::BeginWireVertex(wire)
         }
-        _ => SelectionDragAction::BeginMarquee(grid),
+        _ => SelectionDragAction::BeginMarquee(band),
     })
 }
 
@@ -176,11 +178,12 @@ pub fn update(
     if !response.dragged_by(PointerButton::Primary) {
         return None;
     }
+    let pointer = response.hover_pos()?;
     let position = resolve_grid_pointer(
         &view.editor.snap_engine,
         view.design.document.grid_size,
         viewport,
-        response.hover_pos()?,
+        pointer,
     )
     .snapped_position;
     match view.drag {
@@ -209,9 +212,9 @@ pub fn update(
                 position,
             })
         }
-        _ if view.editor.selection_rect.is_active() => {
-            Some(SelectionDragAction::UpdateMarquee(position))
-        }
+        _ if view.editor.selection_rect.is_active() => Some(SelectionDragAction::UpdateMarquee(
+            screen_to_schematic(viewport, pointer),
+        )),
         _ => None,
     }
 }

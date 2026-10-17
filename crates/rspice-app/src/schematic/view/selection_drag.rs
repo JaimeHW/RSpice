@@ -215,22 +215,22 @@ fn apply(
         }
         SelectionDragAction::FinishMarquee { additive } => {
             let rectangle = &mut state.schematic.session.editor.selection_rect;
-            let left_to_right = rectangle.current.x >= rectangle.start.x;
-            let Some((min_x, min_y, max_x, max_y)) = rectangle.finish() else {
+            let (start, current) = (rectangle.start, rectangle.current);
+            if rectangle.finish().is_none() {
                 return;
-            };
-            let enclosed_only = state
-                .schematic
-                .document()
-                .document_policy
-                .selection_crossing
-                .enclosed_only(left_to_right);
-            select_in_rect_on_active_sheet(
-                state,
-                symbols,
-                SelectionWindow::new(min_x, min_y, max_x, max_y, enclosed_only),
-                additive,
+            }
+            // The window the live preview drew from, so release selects what
+            // the drag showed selected.
+            let window = SelectionWindow::from_band(
+                start,
+                current,
+                state
+                    .schematic
+                    .document()
+                    .document_policy
+                    .selection_crossing,
             );
+            select_in_rect_on_active_sheet(state, symbols, window, additive);
         }
     }
 }

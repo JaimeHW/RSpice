@@ -108,12 +108,19 @@ pub fn font_definitions() -> FontDefinitions {
     let proportional = fonts.families.entry(FontFamily::Proportional).or_default();
     proportional.insert(0, "plex-sans".to_owned());
 
+    // Plex Mono carries no Greek: Δ, Ω and μ would letter as a replacement
+    // box. Plex Sans carries them, so the mono families fall back to it
+    // before egui's defaults.
     let monospace = fonts.families.entry(FontFamily::Monospace).or_default();
     monospace.insert(0, "plex-mono".to_owned());
+    monospace.insert(1, "plex-sans".to_owned());
 
     // Weighted families fall back to the regular cut, then egui defaults.
     let base_proportional = fonts.families[&FontFamily::Proportional].clone();
-    let base_monospace = fonts.families[&FontFamily::Monospace].clone();
+    let mut base_monospace = fonts.families[&FontFamily::Monospace].clone();
+    // A medium mono run borrows from the medium sans, so a borrowed glyph
+    // keeps its weight.
+    base_monospace.insert(1, SANS_MEDIUM.to_owned());
 
     let mut sans_medium_stack = vec![SANS_MEDIUM.to_owned()];
     sans_medium_stack.extend(base_proportional.iter().cloned());
@@ -192,6 +199,60 @@ mod tests {
         // Plex must be the first face on the default families.
         assert_eq!(fonts.families[&sans()][0], "plex-sans");
         assert_eq!(fonts.families[&mono()][0], "plex-mono");
+    }
+
+    /// Every pixel a run of `text` paints in `font`.
+    pub(crate) fn ink(text: &str, font: egui::FontId) -> Vec<egui::Color32> {
+        let canvas = crate::raster::render(egui::vec2(60.0, 30.0), |ui, background| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(background))
+                .show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new(text)
+                            .font(font.clone())
+                            .color(egui::Color32::WHITE),
+                    );
+                });
+        });
+        canvas
+            .pixels_in(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(60.0, 30.0),
+            ))
+            .collect()
+    }
+
+    /// Whether `font` letters `glyph` from a face that carries it. A missing
+    /// glyph does not leave a blank: it letters the family's replacement,
+    /// which has ink. So the glyph is compared with the last private-use code
+    /// point, which no face carries (egui's icon font fills part of the
+    /// first private-use block) and so letters exactly that replacement.
+    pub(crate) fn letters(glyph: &str, font: egui::FontId) -> bool {
+        let painted = ink(glyph, font.clone());
+        let blank = ink(" ", font.clone());
+        painted != blank && painted != ink("\u{10fffd}", font)
+    }
+
+    /// Plex Mono has no Greek. The mono families borrow Δ, Ω and μ from Plex
+    /// Sans, at the matching weight, instead of lettering a replacement box.
+    #[test]
+    fn the_mono_families_letter_greek_from_plex_sans() {
+        use crate::theme::{FontWeight, mono as mono_font};
+        for weight in [FontWeight::Regular, FontWeight::Medium] {
+            for glyph in ["\u{394}", "\u{3a9}", "\u{3bc}"] {
+                assert!(
+                    letters(glyph, mono_font(11.0, weight)),
+                    "mono {weight:?} letters {glyph} as a replacement"
+                );
+            }
+            assert!(letters("A", mono_font(11.0, weight)), "control glyph");
+        }
+        let fonts = font_definitions();
+        assert_eq!(fonts.families[&mono()][..2], ["plex-mono", "plex-sans"]);
+        assert_eq!(
+            fonts.families[&mono_medium()][..3],
+            [MONO_MEDIUM, "plex-mono", SANS_MEDIUM]
+        );
     }
 
     /// The `usWeightClass` an sfnt face's `OS/2` table records.

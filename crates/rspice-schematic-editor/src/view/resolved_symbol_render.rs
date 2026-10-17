@@ -13,6 +13,7 @@ use std::fmt::Write;
 
 use egui::{Align, Align2, Color32, Painter, Pos2, Shape, Stroke, vec2};
 
+use super::lod;
 use crate::export::SvgExportConfig;
 use rspice_design::{
     resolved_symbol::ResolvedCellSymbol,
@@ -51,24 +52,8 @@ pub fn draw_resolved_symbol_with_visibility(
     parameter_labels: SchematicParameterLabelVisibility,
 ) {
     draw_symbol_body(painter, origin, scale, component, symbol, stroke);
-    draw_symbol_pins(
-        painter,
-        origin,
-        scale,
-        component,
-        symbol,
-        stroke.color,
-        true,
-    );
-    draw_symbol_labels(
-        painter,
-        origin,
-        scale,
-        component,
-        symbol,
-        stroke.color,
-        parameter_labels,
-    );
+    draw_symbol_pins(painter, origin, scale, component, symbol, stroke, true);
+    draw_symbol_labels(painter, origin, scale, component, symbol, parameter_labels);
 }
 
 /// The symbol's artwork without its type: body and pin leads, and no pin,
@@ -83,15 +68,7 @@ pub fn draw_resolved_symbol_artwork(
     stroke: Stroke,
 ) {
     draw_symbol_body(painter, origin, scale, component, symbol, stroke);
-    draw_symbol_pins(
-        painter,
-        origin,
-        scale,
-        component,
-        symbol,
-        stroke.color,
-        false,
-    );
+    draw_symbol_pins(painter, origin, scale, component, symbol, stroke, false);
 }
 
 pub(crate) fn write_resolved_symbol_svg(
@@ -192,10 +169,11 @@ fn draw_symbol_body(
                 size,
                 align,
             } => {
-                let font_size = size.height() as f32 * scale;
-                if font_size < LEGIBLE_TYPE_PX {
+                let Some(font_size) =
+                    lod::annotation_size(size.height() as f32, scale, painter.pixels_per_point())
+                else {
                     continue;
-                }
+                };
                 painter.text(
                     to_screen_symbol(origin, scale, component, symbol, *anchor),
                     symbol_text_align(component, *align),
@@ -210,10 +188,6 @@ fn draw_symbol_body(
         }
     }
 }
-
-/// Below this the glyphs are noise rather than type, and the pass costs more
-/// than it shows. Pin names are held to the same floor.
-const LEGIBLE_TYPE_PX: f32 = 4.0;
 
 /// egui's spelling of where the instance's orientation put a text run.
 fn symbol_text_align(component: &Component, align: SymbolTextAlign) -> Align2 {
@@ -232,20 +206,24 @@ fn draw_symbol_pins(
     scale: f32,
     component: &Component,
     symbol: &ResolvedCellSymbol,
-    color: Color32,
+    stroke: Stroke,
     named: bool,
 ) {
-    let stroke = Stroke::new(1.1 * scale, color);
-    let font_size = GENERATED_PIN_LABEL_SIZE * scale;
+    // Leads are drawn in the body's stroke: one symbol weight.
+    let color = stroke.color;
+    let font_size =
+        lod::annotation_size(GENERATED_PIN_LABEL_SIZE, scale, painter.pixels_per_point())
+            .filter(|_| named);
     for pin in symbol.connectable_pins() {
         let offset = symbol.effective_pin_offset(pin);
         let terminal = to_screen(origin, scale, component, offset);
         let inner = to_screen(origin, scale, component, symbol.pin_lead_inner(pin));
+        // No dot on the terminal: a filled dot means a junction of three or
+        // more, and an open pin takes the scene's open-pin mark instead.
         painter.line_segment([terminal, inner], stroke);
-        painter.circle_filled(terminal, 1.6 * scale, color);
         draw_direction_mark(painter, terminal, inner, pin.direction, scale, color);
 
-        if named && font_size >= LEGIBLE_TYPE_PX {
+        if let Some(font_size) = font_size {
             let anchor = to_screen(origin, scale, component, symbol.pin_label_anchor(pin));
             painter.text(
                 anchor,
@@ -275,36 +253,67 @@ fn pin_label_align(component: &Component, side: SymbolPinSide) -> Align2 {
     }
 }
 
+/// An instance's name and value in the type a primitive's use (Plex Sans
+/// 10 wu Medium in `text`, 9 wu Regular in `text_dim`), upright and
+/// justified to grow away from the body however the instance is turned.
 fn draw_symbol_labels(
     painter: &Painter,
     origin: Pos2,
     scale: f32,
     component: &Component,
     symbol: &ResolvedCellSymbol,
-    color: Color32,
     visibility: SchematicParameterLabelVisibility,
 ) {
-    let font_size = (9.0 * scale).max(1.0);
-    if font_size < LEGIBLE_TYPE_PX {
-        return;
-    }
-    let font = rspice_ui_kit::theme::mono(font_size, rspice_ui_kit::theme::FontWeight::Medium);
-    if component.display_mode.show_name(visibility) && !component.name.is_empty() {
+    use super::drawing::{INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD};
+    use rspice_ui_kit::theme::{FontWeight, sans};
+    let ppp = painter.pixels_per_point();
+    let palette = rspice_ui_kit::tokens::active_palette();
+    let name_anchor = symbol.document().name_anchor;
+    if let Some(size) = lod::annotation_size(INSTANCE_NAME_WORLD, scale, ppp)
+        && component.display_mode.show_name(visibility)
+        && !component.name.is_empty()
+    {
         painter.text(
-            to_screen_symbol(
-                origin,
-                scale,
-                component,
-                symbol,
-                symbol.document().name_anchor,
-            ),
-            Align2::LEFT_CENTER,
+            to_screen_symbol(origin, scale, component, symbol, name_anchor),
+            instance_label_align(component, symbol, name_anchor),
             &component.name,
-            font.clone(),
-            color,
+            sans(size, FontWeight::Medium),
+            palette.text,
         );
     }
-    let value = if component.value.is_empty() {
+    let value = instance_value(component);
+    let value_anchor = symbol.document().value_anchor;
+    if let Some(size) = lod::annotation_size(INSTANCE_VALUE_WORLD, scale, ppp)
+        && component.display_mode.show_value(visibility)
+        && !value.is_empty()
+    {
+        painter.text(
+            to_screen_symbol(origin, scale, component, symbol, value_anchor),
+            instance_label_align(component, symbol, value_anchor),
+            value,
+            sans(size, FontWeight::Regular),
+            palette.text_dim,
+        );
+    }
+}
+
+/// Where a cell instance's name stands, in world units, and how it hangs off
+/// that point: for whatever must keep clear of it.
+pub(crate) fn instance_name_anchor(
+    component: &Component,
+    symbol: &ResolvedCellSymbol,
+) -> (Pos2, Align2) {
+    let anchor = symbol.document().name_anchor;
+    let world = component.pos + component.transform_point(symbol.effective_point(anchor));
+    (
+        Pos2::new(world.x as f32, world.y as f32),
+        instance_label_align(component, symbol, anchor),
+    )
+}
+
+/// The value a cell instance shows: its own, else the cell it places.
+fn instance_value(component: &Component) -> &str {
+    if component.value.is_empty() {
         component
             .library_cell
             .as_ref()
@@ -312,22 +321,46 @@ fn draw_symbol_labels(
             .unwrap_or("")
     } else {
         component.value.as_str()
-    };
-    if component.display_mode.show_value(visibility) && !value.is_empty() {
-        painter.text(
-            to_screen_symbol(
-                origin,
-                scale,
-                component,
-                symbol,
-                symbol.document().value_anchor,
-            ),
-            Align2::LEFT_CENTER,
-            value,
-            font,
-            color.gamma_multiply(0.8),
-        );
     }
+}
+
+/// How an instance's name or value hangs off its anchor once the instance
+/// is rotated or mirrored (D1 section 7). The text stays upright; the
+/// authored run grows rightward from its anchor, and its justification
+/// turns with the instance, so the run still grows away from the body. A
+/// run turned to grow vertically, which upright text cannot, hangs below or
+/// stands above its anchor, and starts or ends on the side of the body the
+/// anchor is on.
+fn instance_label_align(
+    component: &Component,
+    symbol: &ResolvedCellSymbol,
+    anchor: Point,
+) -> Align2 {
+    let growth = component.transform_point(Point::new(1, 0));
+    if growth.x != 0 {
+        return if growth.x > 0 {
+            Align2::LEFT_CENTER
+        } else {
+            Align2::RIGHT_CENTER
+        };
+    }
+    let place = |point: Point| component.transform_point(symbol.effective_point(point));
+    let anchor = place(anchor);
+    let horizontal = symbol
+        .document()
+        .drawn_body_bounds()
+        .map_or(Align::Center, |(min, max)| {
+            let (min, max) = (place(min), place(max));
+            if anchor.x > min.x.max(max.x) {
+                Align::Min
+            } else if anchor.x < min.x.min(max.x) {
+                Align::Max
+            } else {
+                Align::Center
+            }
+        });
+    let vertical = if growth.y > 0 { Align::Min } else { Align::Max };
+    Align2([horizontal, vertical])
 }
 
 fn write_symbol_body_svg(
@@ -444,13 +477,6 @@ fn write_symbol_pins_svg(
             r#"<line class="component" x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}"/>"#
         )
         .unwrap();
-        let radius = 1.6 * config.grid_size;
-        writeln!(
-            svg,
-            r#"<circle cx="{x1}" cy="{y1}" r="{radius}" fill="{fill}" stroke="none"/>"#,
-            fill = config.component_color
-        )
-        .unwrap();
         write_direction_mark_svg(svg, (x1, y1), (x2, y2), pin.direction, config);
         let (tx, ty) = to_svg(component, symbol.pin_label_anchor(pin), config);
         write_anchored_text_svg(
@@ -517,31 +543,82 @@ fn write_symbol_labels_svg(
     symbol: &ResolvedCellSymbol,
     config: &SvgExportConfig,
 ) {
+    let name_anchor = symbol.document().name_anchor;
     if component
         .display_mode
         .show_name(SchematicParameterLabelVisibility::NamesAndValues)
         && !component.name.is_empty()
     {
-        let (x, y) = to_svg_symbol(component, symbol, symbol.document().name_anchor, config);
-        write_text_svg(svg, x, y, &component.name);
+        let (x, y) = to_svg_symbol(component, symbol, name_anchor, config);
+        write_instance_label_svg(
+            svg,
+            (x, y),
+            &component.name,
+            instance_label_align(component, symbol, name_anchor),
+            InstanceLabel::Name.size(config),
+        );
     }
-    let value = if component.value.is_empty() {
-        component
-            .library_cell
-            .as_ref()
-            .map(|binding| binding.cell.as_str())
-            .unwrap_or("")
-    } else {
-        component.value.as_str()
-    };
+    let value = instance_value(component);
+    let value_anchor = symbol.document().value_anchor;
     if component
         .display_mode
         .show_value(SchematicParameterLabelVisibility::NamesAndValues)
         && !value.is_empty()
     {
-        let (x, y) = to_svg_symbol(component, symbol, symbol.document().value_anchor, config);
-        write_text_svg(svg, x, y, value);
+        let (x, y) = to_svg_symbol(component, symbol, value_anchor, config);
+        write_instance_label_svg(
+            svg,
+            (x, y),
+            value,
+            instance_label_align(component, symbol, value_anchor),
+            InstanceLabel::Value.size(config),
+        );
     }
+}
+
+/// Which instance label an SVG run is: the name or the value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InstanceLabel {
+    Name,
+    Value,
+}
+
+impl InstanceLabel {
+    /// The label's size and weight in SVG units: the canvas's world size
+    /// times the export's units per world unit.
+    pub(crate) fn size(self, config: &SvgExportConfig) -> (f64, u16) {
+        use super::drawing::{INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD};
+        match self {
+            Self::Name => (f64::from(INSTANCE_NAME_WORLD) * config.grid_size, 500),
+            Self::Value => (f64::from(INSTANCE_VALUE_WORLD) * config.grid_size, 400),
+        }
+    }
+}
+
+/// An instance name or value in the SVG, hung off its anchor as the canvas
+/// hangs it: `text-anchor` from the horizontal justification, and the
+/// baseline set from Plex's metrics (ascent 1.025 em, descent 0.275 em, a
+/// 1.3 em line) rather than `dominant-baseline`, which renderers disagree
+/// on. The type is inline, so it is not the sheet's monospace text class.
+pub(crate) fn write_instance_label_svg(
+    svg: &mut String,
+    (x, y): (f64, f64),
+    text: &str,
+    align: Align2,
+    (size, weight): (f64, u16),
+) {
+    let (anchor, _) = svg_text_anchor(align);
+    let baseline = match align.y() {
+        Align::Min => y + 1.025 * size,
+        Align::Center => y + 0.375 * size,
+        Align::Max => y - 0.275 * size,
+    };
+    writeln!(
+        svg,
+        r#"<text class="text" x="{x}" y="{baseline}" text-anchor="{anchor}" style="font-family: 'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif; font-size: {size}px; font-weight: {weight}">{}</text>"#,
+        escape_xml(text)
+    )
+    .unwrap();
 }
 
 fn write_polygon_svg(
@@ -563,15 +640,6 @@ fn write_polygon_svg(
         svg,
         r#"" fill="{fill}" stroke="none"/>"#,
         fill = config.component_color
-    )
-    .unwrap();
-}
-
-fn write_text_svg(svg: &mut String, x: f64, y: f64, text: &str) {
-    writeln!(
-        svg,
-        r#"<text class="text" x="{x}" y="{y}">{}</text>"#,
-        escape_xml(text)
     )
     .unwrap();
 }
@@ -979,6 +1047,166 @@ mod tests {
             svg.contains(r#"text-anchor="end""#),
             "a right-edge pin name must read inward from the body edge: {svg}"
         );
+    }
+
+    /// A turned or mirrored cell's name and value stay upright and are
+    /// justified to grow away from the body, as the design's table for the
+    /// generated symbol gives them (name above its left corner, value below
+    /// it, both authored to grow rightward).
+    #[test]
+    fn instance_labels_rejustify_with_the_instance() {
+        let symbol = ResolvedCellSymbol::from_generated(&[
+            port("in", PortDirection::In),
+            port("out", PortDirection::Out),
+        ]);
+        let name = symbol.document().name_anchor;
+        let value = symbol.document().value_anchor;
+        let (start, end, middle) = (Align::Min, Align::Max, Align::Center);
+        let (top, bottom) = (Align::Min, Align::Max);
+        let cases = [
+            (
+                "R0",
+                Rotation::R0,
+                false,
+                false,
+                [start, middle],
+                [start, middle],
+            ),
+            ("R90", Rotation::R90, false, false, [start, top], [end, top]),
+            (
+                "R180",
+                Rotation::R180,
+                false,
+                false,
+                [end, middle],
+                [end, middle],
+            ),
+            (
+                "R270",
+                Rotation::R270,
+                false,
+                false,
+                [end, bottom],
+                [start, bottom],
+            ),
+            (
+                "mirror X",
+                Rotation::R0,
+                true,
+                false,
+                [end, middle],
+                [end, middle],
+            ),
+            (
+                "mirror Y",
+                Rotation::R0,
+                false,
+                true,
+                [start, middle],
+                [start, middle],
+            ),
+        ];
+        for (orientation, rotation, mirror_h, mirror_v, name_align, value_align) in cases {
+            let mut component = Component::new(1, ComponentType::CellInstance, Point::origin());
+            component.rotation = rotation;
+            component.mirror_h = mirror_h;
+            component.mirror_v = mirror_v;
+            assert_eq!(
+                instance_label_align(&component, &symbol, name).0,
+                name_align,
+                "{orientation} name"
+            );
+            assert_eq!(
+                instance_label_align(&component, &symbol, value).0,
+                value_align,
+                "{orientation} value"
+            );
+        }
+    }
+
+    /// The SVG hangs an instance label as the canvas does: the justification
+    /// becomes `text-anchor`, and the baseline is set from the Plex metrics
+    /// in place of `dominant-baseline`.
+    #[test]
+    fn a_turned_cell_exports_its_labels_justified_like_the_canvas() {
+        let symbol = ResolvedCellSymbol::from_generated(&[
+            port("in", PortDirection::In),
+            port("out", PortDirection::Out),
+        ]);
+        let mut component = Component::new(1, ComponentType::CellInstance, Point::origin());
+        component.name = "X1".to_owned();
+        component.value = "ota".to_owned();
+        component.rotation = Rotation::R90;
+        let mut svg = String::new();
+        let config = SvgExportConfig {
+            grid_size: 1.0,
+            ..SvgExportConfig::default()
+        };
+        write_resolved_symbol_svg(&mut svg, &component, &symbol, &config);
+        let line = |text: &str| {
+            svg.lines()
+                .find(|line| line.ends_with(&format!(">{text}</text>")))
+                .unwrap_or_else(|| panic!("no {text} in {svg}"))
+                .to_owned()
+        };
+        let (name_x, name_y) =
+            to_svg_symbol(&component, &symbol, symbol.document().name_anchor, &config);
+        let name = line("X1");
+        assert!(name.contains(r#"text-anchor="start""#), "{name}");
+        assert!(
+            name.contains(&format!(r#"x="{name_x}" y="{}""#, name_y + 1.025 * 10.0)),
+            "the name hangs below its anchor by the Plex ascent: {name}"
+        );
+        assert!(name.contains("font-size: 10px; font-weight: 500"), "{name}");
+        let value = line("ota");
+        assert!(value.contains(r#"text-anchor="end""#), "{value}");
+        assert!(
+            value.contains("font-size: 9px; font-weight: 400"),
+            "{value}"
+        );
+        assert!(!name.contains("dominant-baseline"), "{name}");
+    }
+
+    /// A cell pin carries no solder dot, on the canvas or in the SVG: a
+    /// filled dot means a junction of three or more conductors, and an open
+    /// pin takes the scene's hollow open-pin mark instead.
+    #[test]
+    fn a_cell_pin_has_no_solder_dot() {
+        let symbol = symbol_with_shifted_origin();
+        let component = Component::new(1, ComponentType::CellInstance, Point::new(100, 50));
+        let mut svg = String::new();
+        write_resolved_symbol_svg(
+            &mut svg,
+            &component,
+            &symbol,
+            &SvgExportConfig {
+                grid_size: 1.0,
+                ..SvgExportConfig::default()
+            },
+        );
+        assert!(!svg.contains("<circle"), "the SVG pin has a dot: {svg}");
+
+        let painter = Painter::new(
+            egui::Context::default(),
+            egui::LayerId::background(),
+            egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 400.0)),
+        );
+        draw_symbol_pins(
+            &painter,
+            Pos2::new(100.0, 100.0),
+            2.0,
+            &component,
+            &symbol,
+            Stroke::new(1.0, egui::Color32::WHITE),
+            false,
+        );
+        let mut circles = 0;
+        painter.for_each_shape(|shape| {
+            if matches!(shape.shape, Shape::Circle(_)) {
+                circles += 1;
+            }
+        });
+        assert_eq!(circles, 0, "the canvas pin has a dot");
     }
 
     /// The reported defect: a generated block taller than it is wide sent

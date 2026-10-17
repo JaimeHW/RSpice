@@ -8,6 +8,7 @@ pub mod documentation_shape_input;
 pub mod documentation_shapes;
 pub mod geometry;
 pub mod grid;
+pub mod lod;
 pub mod mobile_controls;
 pub mod navigation;
 pub mod net_labels;
@@ -23,6 +24,7 @@ pub mod symbol_context;
 pub mod keyboard_navigation;
 
 pub mod design_view;
+pub mod pick_chooser;
 pub mod pointer_target;
 pub mod selection_drag;
 pub mod snap_resolution;

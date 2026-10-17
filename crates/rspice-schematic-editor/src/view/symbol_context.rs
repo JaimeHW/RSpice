@@ -132,8 +132,11 @@ impl SchematicSymbolContext {
         components: &[Component],
         pos: Point,
     ) -> Option<u64> {
+        // Topmost first: instances paint in document order, so the last one
+        // is the one on top.
         components
             .iter()
+            .rev()
             .find(|component| self.terminal_points(component).contains(&pos))
             .map(|component| component.id)
     }
@@ -147,6 +150,7 @@ impl SchematicSymbolContext {
             .or_else(|| {
                 components
                     .iter()
+                    .rev()
                     .map(|component| (component.id, self.component_bounds(component)))
                     .find(|(_, (min, max))| {
                         pos.x >= min.x && pos.x <= max.x && pos.y >= min.y && pos.y <= max.y
@@ -298,13 +302,6 @@ impl SchematicSymbolContext {
         window: SelectionWindow,
         add_to_selection: bool,
     ) -> usize {
-        let SelectionWindow {
-            min_x,
-            min_y,
-            max_x,
-            max_y,
-            enclosed_only,
-        } = window;
         if !add_to_selection {
             selection.clear();
         }
@@ -312,71 +309,37 @@ impl SchematicSymbolContext {
         let mut count = 0;
 
         for component in &document.components {
-            let (min, max) = self.component_bounds(component);
-            let matches = if enclosed_only {
-                rect_contains_rect(min, max, min_x, min_y, max_x, max_y)
-            } else {
-                rects_intersect(min, max, min_x, min_y, max_x, max_y)
-            };
-            if matches && !selection.has_component(component.id) {
+            if window.takes_component(self, component) && !selection.has_component(component.id) {
                 selection.select_component(component.id);
                 count += 1;
             }
         }
 
         for wire in &document.wires {
-            let wire_in_rect = if enclosed_only {
-                wire.points
-                    .iter()
-                    .all(|point| point_in_rect(*point, min_x, min_y, max_x, max_y))
-            } else {
-                wire.points.windows(2).any(|points| {
-                    segment_intersects_rect(points[0], points[1], min_x, min_y, max_x, max_y)
-                })
-            };
-            if wire_in_rect && !selection.has_wire(wire.id) {
+            if window.takes_polyline(&wire.points) && !selection.has_wire(wire.id) {
                 selection.select_wire(wire.id);
                 count += 1;
             }
         }
 
         for bus in &document.buses {
-            let bus_in_rect = if enclosed_only {
-                bus.points
-                    .iter()
-                    .all(|point| point_in_rect(*point, min_x, min_y, max_x, max_y))
-            } else {
-                bus.points.windows(2).any(|points| {
-                    segment_intersects_rect(points[0], points[1], min_x, min_y, max_x, max_y)
-                })
-            };
-            if bus_in_rect && !selection.has_bus(bus.id) {
+            if window.takes_polyline(&bus.points) && !selection.has_bus(bus.id) {
                 selection.select_bus(bus.id);
                 count += 1;
             }
         }
 
         for tap in &document.bus_taps {
-            let route = crate::bus_geometry::bus_tap_route_points(tap);
-            let tap_in_rect = if enclosed_only {
-                route
-                    .iter()
-                    .all(|point| point_in_rect(*point, min_x, min_y, max_x, max_y))
-            } else {
-                route.windows(2).any(|segment| {
-                    segment_intersects_rect(segment[0], segment[1], min_x, min_y, max_x, max_y)
-                })
-            };
-            if tap_in_rect && !selection.has_bus_tap(tap.id) {
+            if window.takes_polyline(&crate::bus_geometry::bus_tap_route_points(tap))
+                && !selection.has_bus_tap(tap.id)
+            {
                 selection.select_bus_tap(tap.id);
                 count += 1;
             }
         }
 
         for junction in &document.junctions {
-            if point_in_rect(junction.pos, min_x, min_y, max_x, max_y)
-                && !selection.has_junction(junction.pos)
-            {
+            if window.takes_point(junction.pos) && !selection.has_junction(junction.pos) {
                 selection.select_junction(junction.pos);
                 count += 1;
             }
@@ -384,12 +347,7 @@ impl SchematicSymbolContext {
 
         for label in &document.net_labels {
             let (min, max) = net_labels::world_bounds(label);
-            let matches = if enclosed_only {
-                rect_contains_rect(min, max, min_x, min_y, max_x, max_y)
-            } else {
-                rects_intersect(min, max, min_x, min_y, max_x, max_y)
-            };
-            if matches && !selection.has_net_label(label.id) {
+            if window.takes_bounds(min, max) && !selection.has_net_label(label.id) {
                 selection.net_labels.insert(label.id);
                 count += 1;
             }
@@ -397,27 +355,16 @@ impl SchematicSymbolContext {
 
         for note in &document.design_notes {
             let (min, max) = design_notes::conservative_world_bounds(note);
-            let matches = if enclosed_only {
-                rect_contains_rect(min, max, min_x, min_y, max_x, max_y)
-            } else {
-                rects_intersect(min, max, min_x, min_y, max_x, max_y)
-            };
-            if matches && !selection.has_design_note(note.id) {
+            if window.takes_bounds(min, max) && !selection.has_design_note(note.id) {
                 selection.select_design_note(note.id);
                 count += 1;
             }
         }
 
         for shape in &document.documentation_shapes {
-            let matches = documentation_shapes::shape_intersects_rect(
-                shape,
-                min_x,
-                min_y,
-                max_x,
-                max_y,
-                enclosed_only,
-            );
-            if matches && !selection.has_documentation_shape(shape.id) {
+            if window.takes_documentation_shape(shape)
+                && !selection.has_documentation_shape(shape.id)
+            {
                 selection.select_documentation_shape(shape.id);
                 count += 1;
             }
@@ -425,12 +372,7 @@ impl SchematicSymbolContext {
 
         for probe in &document.probes {
             let (min, max) = probe.world_bounds();
-            let matches = if enclosed_only {
-                rect_contains_rect(min, max, min_x, min_y, max_x, max_y)
-            } else {
-                rects_intersect(min, max, min_x, min_y, max_x, max_y)
-            };
-            if matches && !selection.has_probe(probe.id) {
+            if window.takes_bounds(min, max) && !selection.has_probe(probe.id) {
                 selection.select_probe(probe.id);
                 count += 1;
             }
@@ -458,6 +400,75 @@ impl SelectionWindow {
             max_y,
             enclosed_only,
         }
+    }
+
+    /// The window a rubber band selects through: its rectangle, in window
+    /// (enclosed only) or crossing mode as the document's policy reads the
+    /// drag direction. The live preview and the release both take this one,
+    /// so what is drawn selected during the drag is what the release
+    /// selects.
+    pub fn from_band(
+        start: Point,
+        current: Point,
+        policy: rspice_design::schematic::document_policy::SelectionCrossingPolicy,
+    ) -> Self {
+        Self::new(
+            start.x.min(current.x),
+            start.y.min(current.y),
+            start.x.max(current.x),
+            start.y.max(current.y),
+            policy.enclosed_only(current.x >= start.x),
+        )
+    }
+
+    /// Window mode takes only what lies wholly inside; crossing mode takes
+    /// anything it touches.
+    pub const fn enclosed_only(&self) -> bool {
+        self.enclosed_only
+    }
+
+    pub fn takes_point(&self, point: Point) -> bool {
+        point_in_rect(point, self.min_x, self.min_y, self.max_x, self.max_y)
+    }
+
+    pub fn takes_bounds(&self, min: Point, max: Point) -> bool {
+        if self.enclosed_only {
+            rect_contains_rect(min, max, self.min_x, self.min_y, self.max_x, self.max_y)
+        } else {
+            rects_intersect(min, max, self.min_x, self.min_y, self.max_x, self.max_y)
+        }
+    }
+
+    /// A wire, bus or tap route.
+    pub fn takes_polyline(&self, points: &[Point]) -> bool {
+        if self.enclosed_only {
+            points.iter().all(|point| self.takes_point(*point))
+        } else {
+            points.windows(2).any(|segment| {
+                segment_intersects_rect(
+                    segment[0], segment[1], self.min_x, self.min_y, self.max_x, self.max_y,
+                )
+            })
+        }
+    }
+
+    pub fn takes_component(&self, symbols: &SchematicSymbolContext, component: &Component) -> bool {
+        let (min, max) = symbols.component_bounds(component);
+        self.takes_bounds(min, max)
+    }
+
+    pub fn takes_documentation_shape(
+        &self,
+        shape: &rspice_design::schematic::documentation_shape::DocumentationShape,
+    ) -> bool {
+        documentation_shapes::shape_intersects_rect(
+            shape,
+            self.min_x,
+            self.min_y,
+            self.max_x,
+            self.max_y,
+            self.enclosed_only,
+        )
     }
 }
 

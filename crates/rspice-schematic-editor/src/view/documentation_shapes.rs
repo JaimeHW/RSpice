@@ -7,6 +7,8 @@ use rspice_design::schematic::documentation_shape::{
 };
 use rspice_design_model::Point;
 
+use super::drawing::draw_hover_outline;
+use super::lod::{self, Emphasis, StrokeRole};
 use super::viewport::Viewport;
 
 const HIT_TOLERANCE_POINTS: f32 = 6.0;
@@ -25,19 +27,35 @@ pub fn draw_documentation_shape(
 ) {
     let palette = rspice_ui_kit::tokens::active_palette();
     let color = if selected {
-        palette.accent
-    } else if hovered {
-        palette.text
+        palette.canvas_select
     } else {
         palette.text_faint
     };
-    let stroke = Stroke::new(if selected { 1.7 } else { 1.2 }, color);
+    if hovered && !selected {
+        let (min, max) = shape.bounds();
+        draw_hover_outline(
+            painter,
+            Rect::from_two_pos(
+                viewport.schematic_to_screen(min),
+                viewport.schematic_to_screen(max),
+            ),
+        );
+    }
+    let stroke = Stroke::new(
+        lod::stroke_pt(
+            StrokeRole::Documentation,
+            viewport.zoom,
+            painter.pixels_per_point(),
+            Emphasis::raised_if(selected),
+        ),
+        color,
+    );
     draw_geometry(painter, viewport, &shape.geometry, stroke);
     if selected {
         for point in shape.geometry.points() {
             let screen = viewport.schematic_to_screen(point);
             painter.circle_filled(screen, 3.0, palette.canvas_bg);
-            painter.circle_stroke(screen, 3.0, Stroke::new(1.0, palette.accent));
+            painter.circle_stroke(screen, 3.0, Stroke::new(1.0, palette.canvas_select));
         }
     }
 }
@@ -311,13 +329,28 @@ fn shape_segments(geometry: &DocumentationShapeGeometry) -> Vec<(Point, Point)> 
 
 pub fn preview_stroke(valid: bool) -> Stroke {
     let palette = rspice_ui_kit::tokens::active_palette();
-    Stroke::new(1.4, if valid { palette.accent } else { palette.err })
+    Stroke::new(
+        1.4,
+        if valid {
+            palette.canvas_select.gamma_multiply(PREVIEW_ALPHA)
+        } else {
+            palette.err
+        },
+    )
 }
 
 pub fn preview_anchor_color(valid: bool) -> Color32 {
     let palette = rspice_ui_kit::tokens::active_palette();
-    if valid { palette.accent } else { palette.err }
+    if valid {
+        palette.canvas_select.gamma_multiply(PREVIEW_ALPHA)
+    } else {
+        palette.err
+    }
 }
+
+/// Route, placement and shape previews are the selection colour, slightly
+/// held back so a committed selection still reads above them.
+const PREVIEW_ALPHA: f32 = 0.85;
 
 #[cfg(test)]
 mod tests {

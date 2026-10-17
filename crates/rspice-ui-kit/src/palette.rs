@@ -58,6 +58,17 @@ pub struct Palette {
     pub symbol: Color32,
     /// Schematic net-name labels.
     pub net_label: Color32,
+    /// Selection on the schematic canvas: a selected conductor, symbol,
+    /// junction or mark, and the selection rect behind selected text. Its
+    /// own hue, apart from the wire and the net highlight, rather than the
+    /// interface `accent`.
+    pub canvas_select: Color32,
+    /// A highlighted net on the schematic canvas.
+    pub canvas_net_highlight: Color32,
+    /// Net-class colours: ground, supply and clock nets.
+    pub net_class_ground: Color32,
+    pub net_class_supply: Color32,
+    pub net_class_clock: Color32,
     /// Waveform trace cycle (assignment order for new traces).
     pub traces: [Color32; 6],
     /// Popover/menu shadow color (translucent).
@@ -96,9 +107,16 @@ pub const INSTRUMENT_DARK: Palette = Palette {
     info: Color32::from_rgb(0x7c, 0xb8, 0xe8),
     canvas_bg: Color32::from_rgb(7, 12, 16),
     canvas_grid: Color32::from_rgb(28, 35, 39),
-    wire: Color32::from_rgb(127, 191, 149),
+    // Dark enough that the yellow selection stands 3:1 above it.
+    wire: Color32::from_rgb(68, 140, 96),
     symbol: Color32::from_rgb(203, 210, 215),
     net_label: Color32::from_rgb(220, 177, 85),
+    canvas_select: Color32::from_rgb(255, 226, 92),
+    // Magenta: orange beside the yellow selection collapses for deuteranopes.
+    canvas_net_highlight: Color32::from_rgb(232, 110, 210),
+    net_class_ground: Color32::from_rgb(0x7c, 0xb8, 0xe8),
+    net_class_supply: Color32::from_rgb(234, 147, 68),
+    net_class_clock: Color32::from_rgb(217, 132, 176),
     traces: [
         Color32::from_rgb(242, 184, 36),
         Color32::from_rgb(124, 184, 232),
@@ -134,9 +152,17 @@ pub const INSTRUMENT_LIGHT: Palette = Palette {
     info: Color32::from_rgb(0x3d, 0x72, 0xa8),
     canvas_bg: Color32::from_rgb(251, 253, 254),
     canvas_grid: Color32::from_rgb(224, 227, 229),
-    wire: Color32::from_rgb(114, 78, 0),
+    // Dark enough that the azure selection, which has to sit in the 0.21 to
+    // 0.29 luminance band on paper, still stands 3:1 off it.
+    wire: Color32::from_rgb(78, 52, 0),
     symbol: Color32::from_rgb(44, 49, 53),
     net_label: Color32::from_rgb(125, 82, 0),
+    canvas_select: Color32::from_rgb(30, 136, 255),
+    // Orange, the complement of the azure selection.
+    canvas_net_highlight: Color32::from_rgb(194, 110, 18),
+    net_class_ground: Color32::from_rgb(0, 124, 58),
+    net_class_supply: Color32::from_rgb(194, 110, 18),
+    net_class_clock: Color32::from_rgb(168, 83, 126),
     traces: [
         Color32::from_rgb(161, 97, 0),
         Color32::from_rgb(61, 114, 168),
@@ -149,8 +175,8 @@ pub const INSTRUMENT_LIGHT: Palette = Palette {
     shadow_geom: (14, 42),
 };
 
-const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_DARK.wire, 0x7f, 0xbf, 0x95) as usize];
-const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.wire, 0x72, 0x4e, 0x00) as usize];
+const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_DARK.wire, 0x44, 0x8c, 0x60) as usize];
+const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.wire, 0x4e, 0x34, 0x00) as usize];
 
 #[cfg(test)]
 mod tests {
@@ -158,8 +184,37 @@ mod tests {
 
     #[test]
     fn instrument_wire_tokens_match_rspice_schematic_design_refs() {
-        assert_eq!(INSTRUMENT_DARK.wire, Color32::from_rgb(0x7f, 0xbf, 0x95));
-        assert_eq!(INSTRUMENT_LIGHT.wire, Color32::from_rgb(0x72, 0x4e, 0x00));
+        assert_eq!(INSTRUMENT_DARK.wire, Color32::from_rgb(0x44, 0x8c, 0x60));
+        assert_eq!(INSTRUMENT_LIGHT.wire, Color32::from_rgb(0x4e, 0x34, 0x00));
+    }
+
+    /// Selection, the wire and the canvas stand apart in both palettes: a
+    /// selected wire 3:1 off an unselected one, both 3:1 off the canvas, and
+    /// a highlighted net 3:1 off the canvas. Selection, highlight and the
+    /// wire are different hues, so the state also reads for a deuteranope.
+    #[test]
+    fn canvas_state_colours_stand_apart() {
+        for (mode, palette) in [("dark", INSTRUMENT_DARK), ("light", INSTRUMENT_LIGHT)] {
+            for (pair, ink, ground) in [
+                ("selection on the wire", palette.canvas_select, palette.wire),
+                ("wire on the canvas", palette.wire, palette.canvas_bg),
+                (
+                    "selection on the canvas",
+                    palette.canvas_select,
+                    palette.canvas_bg,
+                ),
+                (
+                    "net highlight on the canvas",
+                    palette.canvas_net_highlight,
+                    palette.canvas_bg,
+                ),
+            ] {
+                let ratio = contrast(ink, ground);
+                assert!(ratio >= 3.0, "{mode} {pair} is only {ratio:.2}:1");
+            }
+            assert_ne!(palette.canvas_select, palette.canvas_net_highlight);
+            assert_ne!(palette.canvas_select, palette.accent, "{mode}");
+        }
     }
 
     #[test]
