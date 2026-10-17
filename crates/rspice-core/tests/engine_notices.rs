@@ -79,6 +79,41 @@ fn a_clamp_is_recorded_against_the_card_and_the_element_that_bound_it() {
     assert_eq!(eu, ["M1", "M2"], "{replaced:#?}");
 }
 
+/// What a WPE clamp clamps is the mobility factor `1 + KU0WE * SCEFF`, which
+/// `KU0WE = -0.5` at `SCA = 4` drives to -1 and the model holds at zero. The
+/// notice states the parameter the card wrote, -0.5, and the value of it that
+/// zeroes the factor at this instance's SCEFF, -1/4: never the factor, which
+/// no card spells.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_wpe_mobility_clamp_states_the_ku0we_the_card_wrote() {
+    let collector = NoticeCollector::new();
+    let _installed = collector.install();
+    let netlist = Netlist::parse(
+        "WPE clamp\nVD d 0 1\nVG g 0 1\nM1 d g 0 0 nch L=1u W=10u sca=4\n\
+         .model nch nmos level=54 version=4.8 wpemod=1 ku0we=-0.5\n.op\n.end\n",
+    )
+    .expect("the deck parses");
+    // A channel with no mobility conducts nothing, so the deck is built, which
+    // binds the instance, and not solved.
+    Engine::default()
+        .build_circuit_with_abort(&netlist, &NoAbort)
+        .expect("a clamped instance still binds");
+
+    let replaced = replacements(&collector);
+    let ku0we: Vec<_> = replaced
+        .iter()
+        .filter(|(replacement, _)| replacement.parameter == "ku0we")
+        .collect();
+    assert_eq!(ku0we.len(), 1, "{replaced:#?}");
+    let (ku0we, _) = ku0we[0];
+    assert_eq!(ku0we.scope, ParameterScope::Instance);
+    assert_eq!(
+        (ku0we.requested, ku0we.applied, ku0we.limit),
+        (-0.5, -0.25, Some(-0.25))
+    );
+}
+
 /// Recording is an account of the solve, not a part of it: the clamped deck
 /// solves to the same bits with a collector installed as without one.
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
