@@ -125,6 +125,9 @@ pub enum ConnectivityDiagnosticKind {
     /// A net label, pin or bus-tap end on a crossing of two wire interiors
     /// with no junction: the drawing does not say which wire it means.
     AmbiguousCrossing,
+    /// One wire runs through both pins of a two-terminal part, so the part
+    /// is shorted out of the circuit.
+    ShortedPart,
 }
 
 /// Where a connectivity diagnostic points.
@@ -140,6 +143,8 @@ pub enum ConnectivityAnchor {
     NetLabel(String),
     /// An electrical node, by name.
     Net(String),
+    /// A placed component, with its authored reference.
+    Component { id: u64, name: String },
 }
 
 /// One thing the extraction found wrong with the drawing's connectivity.
@@ -371,6 +376,56 @@ where
         }
     }
 
+    /// Find every two-terminal part with one wire running through both of
+    /// its pins. The deck sees both ends on one node, so the part does
+    /// nothing; a part dropped onto a wire is the usual way in. A pin left
+    /// joining neither wire of an unmarked crossing is not on the wire.
+    fn find_shorted_parts(&mut self) {
+        let schematic = self.schematic;
+        let mut found = Vec::new();
+        for component in &schematic.components {
+            let terminals = terminal_positions(component, self.resolve_symbol);
+            let [(first_pin, first), (second_pin, second)] = terminals.as_slice() else {
+                continue;
+            };
+            if first == second
+                || self.ambiguous_points.contains(first)
+                || self.ambiguous_points.contains(second)
+            {
+                continue;
+            }
+            if schematic
+                .wires
+                .iter()
+                .any(|wire| wire.contains_point(*first) && wire.contains_point(*second))
+            {
+                // A message never names an empty reference.
+                let identity = if component.name.trim().is_empty() {
+                    format!("component #{}", component.id)
+                } else {
+                    component.name.clone()
+                };
+                found.push((
+                    component.id,
+                    component.name.clone(),
+                    format!(
+                        "{identity} is shorted: one wire runs through both its pins, \
+                         {first_pin} and {second_pin}, so it does nothing in the circuit. \
+                         Break the wire between the pins, or move the part off it"
+                    ),
+                ));
+            }
+        }
+        for (id, name, message) in found {
+            self.report(
+                ConnectivityDiagnosticKind::ShortedPart,
+                false,
+                message,
+                ConnectivityAnchor::Component { id, name },
+            );
+        }
+    }
+
     fn report(
         &mut self,
         kind: ConnectivityDiagnosticKind,
@@ -426,6 +481,7 @@ where
         }
 
         self.find_ambiguous_crossings();
+        self.find_shorted_parts();
         let ambiguous = &self.ambiguous_points;
 
         // Seeded nodes: always nets, even when isolated (a floating terminal

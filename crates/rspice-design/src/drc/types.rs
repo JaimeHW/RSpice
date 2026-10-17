@@ -89,6 +89,9 @@ pub enum DrcViolationType {
     /// Independent voltage sources that close a loop among themselves, which
     /// leaves the loop's current undetermined.
     SourceToSource,
+    /// One wire runs through both pins of a two-terminal part, so the part
+    /// is shorted out of the circuit.
+    ShortedPart,
 
     //-------------------------------------------------------------------------
     // Hierarchy Issues
@@ -195,6 +198,8 @@ impl DrcViolationType {
             Self::OrphanNetLabel => DrcSeverity::Warning,
             Self::ValueOutOfRange => DrcSeverity::Warning,
             Self::UnnamedBus => DrcSeverity::Warning,
+            // The deck still runs; the shorted part just does nothing in it.
+            Self::ShortedPart => DrcSeverity::Warning,
 
             // Info
             Self::OffSheetConnectorWithoutPartner => DrcSeverity::Info,
@@ -249,6 +254,7 @@ impl DrcViolationType {
             Self::RecursiveInstantiation => "Cellview reaches itself through its instances",
             Self::MissingGround => "Circuit has no ground reference (node 0)",
             Self::SourceToSource => "Voltage sources form a closed loop",
+            Self::ShortedPart => "One wire runs through both pins of a part",
             Self::DuplicateName => "Multiple components have the same name",
             Self::EmptyName => "Component has no reference designator",
             Self::InvalidName => "Component name contains invalid characters",
@@ -297,6 +303,7 @@ impl DrcViolationType {
             Self::SourceToSource => {
                 "Put a series element in the loop, or remove one of its sources"
             }
+            Self::ShortedPart => "Break the wire between the pins, or move the part off it",
             Self::DuplicateName => "Rename components to have unique identifiers",
             Self::EmptyName => "Assign a reference designator to the component",
             Self::InvalidName => "Use only alphanumeric characters and underscores",
