@@ -156,10 +156,12 @@ impl<'a> Lexer<'a> {
 
     /// V/I arguments name signals. Read their spelling before the arithmetic
     /// lexer can interpret `-`, `+`, a SPICE suffix, or an overflowing exponent.
-    fn read_probe_argument(&mut self) -> Result<String, ParseError> {
+    /// Returns where the argument's spelling starts, quotes included.
+    fn read_probe_argument(&mut self) -> Result<(usize, String), ParseError> {
         self.skip_whitespace();
+        let start = self.position();
         if self.chars.peek().is_some_and(|(_, c)| *c == '"') {
-            return self.read_string_literal();
+            return Ok((start, self.read_string_literal()?));
         }
         let mut name = String::new();
         while let Some(&(_, c)) = self.chars.peek() {
@@ -169,7 +171,7 @@ impl<'a> Lexer<'a> {
             self.chars.next();
             name.push(c);
         }
-        Ok(name)
+        Ok((start, name))
     }
 
     fn next_token(&mut self) -> Result<SpannedToken, ParseError> {
@@ -245,10 +247,22 @@ struct SpannedToken {
 // Parser
 // =============================================================================
 
+/// One `V(...)` or `I(...)` argument as the parser read it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProbeArgument {
+    /// A voltage names a node; a current names a device or branch.
+    pub voltage: bool,
+    /// The name the argument reads, quotes removed.
+    pub name: String,
+    /// The bytes of the input that spell it, quotes included.
+    pub span: std::ops::Range<usize>,
+}
+
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
     current: SpannedToken,
     initial_error: Option<ParseError>,
+    probe_arguments: Vec<ProbeArgument>,
 }
 
 impl<'a> Parser<'a> {
@@ -269,7 +283,20 @@ impl<'a> Parser<'a> {
             lexer,
             current,
             initial_error,
+            probe_arguments: Vec::new(),
         }
+    }
+
+    /// Parse the input, and say where each probe argument it names is spelled,
+    /// in source order.
+    ///
+    /// The argument a probe reads is a name, and only the parser knows where
+    /// one starts and ends: `V(out-)` names `out-`, `V(a)-V(b)` subtracts, and
+    /// `/` divides or opens a hierarchical name by position. A caller that has
+    /// to spell a name differently replaces exactly these bytes.
+    pub fn try_parse_probe_arguments(&mut self) -> Result<Vec<ProbeArgument>, ParseError> {
+        self.try_parse()?;
+        Ok(std::mem::take(&mut self.probe_arguments))
     }
 
     fn advance(&mut self) -> Result<(), ParseError> {
@@ -414,13 +441,18 @@ impl<'a> Parser<'a> {
         if (upper_name == "V" || upper_name == "I") && matches!(self.current.token, Token::LParen) {
             let start = self.current.position;
             let argument_start = self.lexer.position();
-            let arg = self.lexer.read_probe_argument()?;
+            let (spelling_start, arg) = self.lexer.read_probe_argument()?;
             if arg.trim().is_empty() {
                 return Err(ParseError::new(
                     argument_start,
                     format!("expected signal name inside {}(...)", upper_name),
                 ));
             }
+            self.probe_arguments.push(ProbeArgument {
+                voltage: upper_name == "V",
+                name: arg.clone(),
+                span: spelling_start..self.lexer.position(),
+            });
             self.advance()?; // consume arg
             self.expect_rparen(start)?;
 
