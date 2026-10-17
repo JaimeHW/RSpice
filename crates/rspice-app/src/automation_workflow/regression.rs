@@ -112,7 +112,7 @@ pub(crate) fn compare_governed_waveforms(
     }
 
     let expected = u64::try_from(targets.len())
-        .map_err(|_| "waveform target count exceeds the supported evidence range".to_owned())?;
+        .map_err(|_| "waveform target count exceeds the supported range".to_owned())?;
     let issue_count = differing.saturating_add(missing);
     let omitted = usize::try_from(issue_count)
         .unwrap_or(usize::MAX)
@@ -143,12 +143,10 @@ pub(crate) fn compare_governed_waveforms(
 fn waveform_observations(run: &SimulationRun) -> Result<Vec<OwnedWaveformObservation<'_>>, String> {
     let mut observations = Vec::new();
     for analysis in &run.analyses {
-        let provenance = analysis.provenance.as_ref().ok_or_else(|| {
-            format!(
-                "analysis {:?} has no authenticated source identity",
-                analysis.label
-            )
-        })?;
+        let provenance = analysis
+            .provenance
+            .as_ref()
+            .ok_or_else(|| format!("analysis '{}' has no recorded source", analysis.label))?;
         for (index, waveform) in analysis.waveforms.iter().enumerate() {
             let occurrence = analysis.waveforms[..index]
                 .iter()
@@ -156,7 +154,7 @@ fn waveform_observations(run: &SimulationRun) -> Result<Vec<OwnedWaveformObserva
                 .count();
             let occurrence = u32::try_from(occurrence).map_err(|_| {
                 format!(
-                    "analysis {:?} contains too many waveform occurrences named {:?}",
+                    "analysis '{}' contains too many waveform occurrences named '{}'",
                     analysis.label, waveform.name
                 )
             })?;
@@ -209,9 +207,14 @@ fn compare_targets(
 }
 
 fn target_label(target: &RegressionTargetSelector) -> String {
+    let domain = match target.source_domain {
+        AnalysisResultSourceDomain::SimulationPlan => "simulation_plan",
+        AnalysisResultSourceDomain::ManualDeck => "manual_deck",
+        AnalysisResultSourceDomain::LegacyUnclassified => "legacy_unclassified",
+    };
     format!(
-        "waveform::{:?}::{}::{}[{}]",
-        target.source_domain, target.source_instance_id, target.name, target.occurrence
+        "waveform::{domain}::{}::{}[{}]",
+        target.source_instance_id, target.name, target.occurrence
     )
 }
 
@@ -274,9 +277,9 @@ fn evaluate_waveform(
         return Err("persisted tolerance does not govern a waveform".to_owned());
     }
     validate_waveform(baseline)
-        .map_err(|error| format!("baseline evidence is invalid: {error}"))?;
+        .map_err(|error| format!("baseline results are invalid: {error}"))?;
     validate_waveform(candidate)
-        .map_err(|error| format!("candidate evidence is invalid: {error}"))?;
+        .map_err(|error| format!("candidate results are invalid: {error}"))?;
     evaluate_series(
         &baseline.x,
         &baseline.y,
@@ -293,7 +296,7 @@ fn evaluate_waveform(
         (Some(reference), Some(current)) => {
             if reference.source_name != current.source_name {
                 return Err(format!(
-                    "complex source identity changed from {:?} to {:?}",
+                    "complex source changed from '{}' to '{}'",
                     reference.source_name, current.source_name
                 ));
             }

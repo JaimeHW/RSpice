@@ -767,7 +767,7 @@ pub(crate) fn request_veriloga_compile(app: &mut RSpiceApp) -> Result<(), String
         >= crate::state::MAX_PROJECT_SOURCE_QUALIFICATION_RECORDS
     {
         return Err(
-            "This source bundle has reached the immutable qualification-history limit. Archive the project as a new governed revision before compiling again."
+            "This source bundle has reached its limit of saved qualification records. Archive the project as a new revision before compiling again."
                 .to_owned(),
         );
     }
@@ -1200,7 +1200,7 @@ fn record_veriloga_qualification(
         Some(report) => serde_json::to_vec(report),
         None => serde_json::to_vec(diagnostics),
     }
-    .map_err(|error| format!("could not encode qualification evidence: {error}"))?;
+    .map_err(|error| format!("could not encode the qualification report: {error}"))?;
     let report_digest =
         crate::product::ContentDigest::from_bytes(sha2::Sha256::digest(&report_bytes).into());
     let targets = report

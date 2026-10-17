@@ -365,8 +365,7 @@ fn validate_launch_snapshot(snapshot: &SourceSnapshot) -> Result<(), String> {
     )?;
     if snapshot.environment_digest != Digest(BASE_ENVIRONMENT_DIGEST) {
         return Err(
-            "the selected Python environment is not installed in this immutable browser release"
-                .to_owned(),
+            "the selected Python environment is not installed in this browser release".to_owned(),
         );
     }
     Ok(())
@@ -411,5 +410,5 @@ fn js_error(error: JsValue) -> String {
     Reflect::get(&error, &JsValue::from_str("message"))
         .ok()
         .and_then(|value| value.as_string())
-        .unwrap_or_else(|| format!("{error:?}"))
+        .unwrap_or_else(|| "the browser reported an error without a message".to_owned())
 }

@@ -39,7 +39,7 @@ pub(crate) fn source_file_mutation_block_reason(
         ProjectSourceLanguage::VerilogA
             if app.state.ui.code_workspace.veriloga.pending.is_some() =>
         {
-            Some("Wait for the exact Verilog-A compile to finish or cancel it first.")
+            Some("Wait for the Verilog-A compile to finish or cancel it first.")
         }
         ProjectSourceLanguage::RSpiceAutomation => {
             let runtime = &app.state.ui.code_workspace.automation;
@@ -553,8 +553,7 @@ pub(crate) fn commit_source_file_dialog(app: &mut RSpiceApp) -> Result<String, S
     };
     if !source_bundle_contains_document(app, draft.language, draft.bundle_id, authority_path) {
         return Err(
-            "The source-file transaction no longer targets an authenticated project source bundle."
-                .to_owned(),
+            "The file change no longer applies to a source bundle in the project.".to_owned(),
         );
     }
     if bundle.language() != draft.language
@@ -1011,7 +1010,7 @@ pub(crate) fn commit_source_history_restore(app: &mut RSpiceApp) -> Result<Strin
         .ok_or_else(|| "The source bundle no longer exists.".to_owned())?;
     if !source_bundle_contains_document(app, draft.language, draft.bundle_id, &draft.source_path) {
         return Err(
-            "Source history no longer targets an authenticated project source bundle.".to_owned(),
+            "Source history no longer applies to a source bundle in the project.".to_owned(),
         );
     }
     if bundle.revision().get() != draft.bundle_revision

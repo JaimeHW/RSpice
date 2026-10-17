@@ -322,7 +322,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
             Err(error) => {
                 runtime_protocol_failure(
                     app,
-                    &format!("Managed Python worker authentication or transport failed: {error}"),
+                    &format!("Could not connect to the managed Python worker: {error}"),
                 );
                 continue;
             }
@@ -421,7 +421,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                     if pending.pending_execute_call_id.is_some() {
                         runtime_protocol_failure(
                             app,
-                            "Managed Python completed while a simulator host call was still awaiting its authenticated result.",
+                            "Managed Python finished while a simulator call was still waiting for its result.",
                         );
                         continue;
                     }
@@ -585,7 +585,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                 else {
                     runtime_protocol_failure(
                         app,
-                        "Managed Python emitted a host call without an active authenticated execution session.",
+                        "Managed Python made a simulator call outside an active run.",
                     );
                     continue;
                 };
@@ -599,7 +599,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                 let Some(pending) = execution.filter(|pending| pending.mode.is_debug()) else {
                     runtime_protocol_failure(
                         app,
-                        "Managed Python emitted a debugger stop outside an authenticated debug session.",
+                        "Managed Python stopped for the debugger outside a debug session.",
                     );
                     continue;
                 };
@@ -611,16 +611,23 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                 debug.call_stack.clear();
                 debug.locals.clear();
                 debug.globals.clear();
+                let reason = match reason {
+                    rspice_automation_protocol::StopReason::Breakpoint => "Breakpoint",
+                    rspice_automation_protocol::StopReason::Step => "Step",
+                    rspice_automation_protocol::StopReason::Exception => "Exception",
+                    rspice_automation_protocol::StopReason::Pause => "Pause",
+                    rspice_automation_protocol::StopReason::Entry => "Entry",
+                };
                 let _ = push_debug_output(
                     debug,
                     "info",
                     "stopped",
-                    &format!("{reason:?}: {description}"),
+                    &format!("{reason}: {description}"),
                 );
                 let Some(debug_session_id) = pending.session_id else {
                     runtime_protocol_failure(
                         app,
-                        "Managed Python paused without an authenticated debugger session identity.",
+                        "Managed Python paused without a debugger session.",
                     );
                     continue;
                 };
@@ -725,7 +732,7 @@ fn begin_managed_python_execution(
     else {
         fail(
             app,
-            "Managed Python execution has no exact validated source snapshot.",
+            "Managed Python execution has no validated snapshot of the current source.",
         );
         return;
     };
@@ -868,7 +875,7 @@ fn begin_managed_python_execution(
     else {
         fail(
             app,
-            "Managed Python execution has no exact validated source snapshot.",
+            "Managed Python execution has no validated snapshot of the current source.",
         );
         return;
     };
@@ -1679,7 +1686,7 @@ pub fn poll_automation_workflow(app: &mut RSpiceApp) {
             if matching_run_ids.len() > 1 {
                 fail(
                     app,
-                    "Prepared execution produced multiple runs matching the same Automation dispatch contract; exact run correlation is ambiguous.",
+                    "The simulation produced more than one run matching this Automation request, so RSpice cannot tell which run belongs to it.",
                 );
                 return;
             }
@@ -1700,7 +1707,7 @@ pub fn poll_automation_workflow(app: &mut RSpiceApp) {
             {
                 fail(
                     app,
-                    "Prepared-run preflight ended without creating a unique authenticated run matching the immutable Automation dispatch contract.",
+                    "The simulation preflight finished without starting a run for this Automation request.",
                 );
             }
         }
@@ -1774,10 +1781,7 @@ pub fn settle_pending_python_execute(app: &mut RSpiceApp) {
                 current.pending_execute_call_id = None;
                 current.simulation_run_id = Some(run_id);
             }
-            host_success(
-                Some(run_handle),
-                "authenticated simulation and evidence completed",
-            )
+            host_success(Some(run_handle), "simulation and checks completed")
         }
         AutomationExecutionState::Cancelled => {
             if let Some(current) = app
@@ -1790,10 +1794,7 @@ pub fn settle_pending_python_execute(app: &mut RSpiceApp) {
             {
                 current.pending_execute_call_id = None;
             }
-            host_failure(
-                "RUN-CANCELLED",
-                "The authenticated simulation was cancelled.",
-            )
+            host_failure("RUN-CANCELLED", "The simulation was cancelled.")
         }
         AutomationExecutionState::Failed => {
             if let Some(current) = app
@@ -1814,7 +1815,7 @@ pub fn settle_pending_python_execute(app: &mut RSpiceApp) {
                     .automation
                     .last_error
                     .clone()
-                    .unwrap_or_else(|| "The authenticated simulation failed.".to_owned()),
+                    .unwrap_or_else(|| "The simulation failed.".to_owned()),
             )
         }
         _ => return,
@@ -1886,7 +1887,7 @@ fn finish_run(
     if !source_token_is_current(app, token) {
         fail(
             app,
-            "The Automation source changed while the workflow was running; completed evidence was not published.",
+            "The Automation source changed while the workflow was running; its results were not published.",
         );
         return;
     }
@@ -1910,19 +1911,19 @@ fn finish_run(
     if !run_matches_dispatch(&candidate, snapshot) {
         fail(
             app,
-            "The selected run no longer matches the immutable Automation dispatch contract.",
+            "The selected run no longer matches the Automation request that started it.",
         );
         return;
     }
     if let Err(error) = validate_candidate_run(&candidate, snapshot) {
         fail(
             app,
-            &format!("Workflow run evidence is incomplete: {error}"),
+            &format!("Workflow run results are incomplete: {error}"),
         );
         return;
     }
     if let Err(error) = validate_baseline_run(&snapshot.baseline_run, snapshot.plan_id) {
-        fail(app, &format!("Baseline evidence is not eligible: {error}"));
+        fail(app, &format!("The baseline run cannot be used: {error}"));
         return;
     }
 
@@ -1931,7 +1932,7 @@ fn finish_run(
         Err(error) => {
             fail(
                 app,
-                &format!("Could not seal specification evidence: {error}"),
+                &format!("Could not evaluate the specifications: {error}"),
             );
             return;
         }
@@ -1957,7 +1958,7 @@ fn finish_run(
     ) {
         Ok(evidence) => evidence,
         Err(error) => {
-            fail(app, &format!("Could not seal workflow evidence: {error}"));
+            fail(app, &format!("Could not build workflow results: {error}"));
             return;
         }
     };
@@ -2023,7 +2024,7 @@ fn validate_requested_analyses(app: &RSpiceApp, requested: &[String]) -> Result<
         Ok(())
     } else {
         Err(format!(
-            "The Automation run plan requests analyses that are not enabled in the active immutable simulation plan: {}.",
+            "The Automation run plan requests analyses that are not enabled in the active simulation plan: {}.",
             missing.join(", ")
         ))
     }
@@ -2081,7 +2082,7 @@ fn validate_run_shape(run: &SimulationRun) -> Result<(), String> {
     run.validate_provenance()?;
     if run.analyses.len() != receipt.tasks().len() {
         return Err(format!(
-            "{} of {} authenticated tasks produced results",
+            "{} of {} tasks produced results",
             run.analyses.len(),
             receipt.tasks().len()
         ));
@@ -2144,7 +2145,7 @@ fn dispatch_snapshot_is_current(
         || app.state.workspace.content.project.revision() != snapshot.project_revision
     {
         return Err(
-            "The project identity or revision changed while Automation execution was in flight; evidence publication was refused."
+            "The project changed while the Automation workflow was running; its results were not published."
                 .to_owned(),
         );
     }
@@ -2156,25 +2157,25 @@ fn dispatch_snapshot_is_current(
         .ok_or_else(|| "The dispatched simulation plan is no longer active.".to_owned())?;
     if current_plan.id() != snapshot.plan_id || current_plan.revision() != snapshot.plan_revision {
         return Err(
-            "The simulation plan identity or revision changed after Automation dispatch; evidence publication was refused."
+            "The simulation plan changed after the Automation workflow started; its results were not published."
                 .to_owned(),
         );
     }
     if app.state.sim_setup.active_plan_name().as_str() != snapshot.plan_name {
         return Err(
-            "The active simulation plan name changed after Automation dispatch; evidence publication was refused."
+            "The active simulation plan was renamed after the Automation workflow started; its results were not published."
                 .to_owned(),
         );
     }
     if app.state.workspace.content.plan_data(snapshot.plan_id) != Some(&snapshot.plan_payload) {
         return Err(
-            "The governed plan payload, specifications, baseline selection, or tolerance policy changed after Automation dispatch; evidence publication was refused."
+            "The plan's settings, specifications, baseline, or tolerances changed after the Automation workflow started; its results were not published."
                 .to_owned(),
         );
     }
     if app.state.workspace.content.project_sources != snapshot.project_sources {
         return Err(
-            "A project-owned source document or validation identity changed after Automation dispatch; evidence publication was refused."
+            "A project source or its validation changed after the Automation workflow started; its results were not published."
                 .to_owned(),
         );
     }
@@ -2186,7 +2187,7 @@ fn dispatch_snapshot_is_current(
         )
         .map_err(|error| {
             format!(
-                "The prepared simulation contract changed after Automation dispatch; evidence publication was refused: {error}"
+                "The prepared simulation changed after the Automation workflow started; its results were not published: {error}"
             )
         })?;
     let current_baseline = app
@@ -2198,7 +2199,7 @@ fn dispatch_snapshot_is_current(
     let current_digest = simulation_run_digest(current_baseline)?;
     if current_digest != snapshot.baseline_digest {
         return Err(
-            "The retained baseline dataset changed after Automation dispatch; evidence publication was refused."
+            "The baseline run changed after the Automation workflow started; the workflow's results were not published."
                 .to_owned(),
         );
     }
@@ -2230,7 +2231,7 @@ fn validate_regression_policy(
                 && prior.target.occurrence == rule.target.occurrence
         }) {
             return Err(format!(
-                "duplicate persisted waveform tolerance target {:?}[{}] for analysis {}",
+                "duplicate persisted waveform tolerance target '{}'[{}] for analysis {}",
                 rule.target.name, rule.target.occurrence, rule.target.source_instance_id
             ));
         }

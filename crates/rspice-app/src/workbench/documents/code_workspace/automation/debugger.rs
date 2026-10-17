@@ -154,10 +154,7 @@ pub fn refresh_automation_debugger(app: &mut RSpiceApp) {
         return;
     }
     let Some((session_id, _)) = active_debug_session(app) else {
-        debug_fail(
-            app,
-            "Cannot evaluate watches without an authenticated debug session.",
-        );
+        debug_fail(app, "Cannot evaluate watches without a debug session.");
         return;
     };
     let Some(frame_id) = app
@@ -234,11 +231,19 @@ pub(super) fn send_debug_control(
     let Some((session_id, _)) = active_debug_session(app) else {
         debug_fail(
             app,
-            "No authenticated RSpice-managed Python debugger session is connected.",
+            "No RSpice-managed Python debugger session is connected.",
         );
         return false;
     };
-    let label = format!("{control:?}");
+    let label = match control {
+        rspice_automation_protocol::DebugControl::Continue => "Continue",
+        rspice_automation_protocol::DebugControl::Pause => "Pause",
+        rspice_automation_protocol::DebugControl::StepIn => "Step into",
+        rspice_automation_protocol::DebugControl::StepOver => "Step over",
+        rspice_automation_protocol::DebugControl::StepOut => "Step out",
+        rspice_automation_protocol::DebugControl::Restart => "Restart",
+        rspice_automation_protocol::DebugControl::Stop => "Stop",
+    };
     match app.automation_runtime.send_request(
         rspice_automation_protocol::RuntimeRequest::DebugControl {
             session_id,
@@ -258,7 +263,7 @@ pub(super) fn send_debug_control(
                 debug.pending_variable_requests.clear();
                 debug.pending_evaluation_requests.clear();
             }
-            let _ = push_debug_output(debug, "info", "debug-control", &label);
+            let _ = push_debug_output(debug, "info", "debug-control", label);
             true
         }
         Err(error) => {

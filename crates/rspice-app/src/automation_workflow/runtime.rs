@@ -176,7 +176,9 @@ pub(crate) enum AutomationRuntimeSnapshotError {
     #[error("Automation document '{path}' is missing")]
     MissingDocument { path: String },
     #[error(
-        "Automation document '{path}' must be bound as {expected:?}; current role is {actual:?}"
+        "Automation document '{path}' must have the role {}; its current role is {}",
+        .expected.label(),
+        .actual.map_or("none", ProjectSourceRole::label)
     )]
     RoleMismatch {
         path: String,

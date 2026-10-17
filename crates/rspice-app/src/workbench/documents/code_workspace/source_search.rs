@@ -335,7 +335,7 @@ pub(crate) fn commit_source_search_replace(app: &mut RSpiceApp) -> Result<String
         return Err(if results.read_only_matches > 0 {
             "Every match is in a read-only project source; no files were changed.".to_owned()
         } else {
-            "The exact current source bundle contains no matches to replace.".to_owned()
+            "The current source bundle contains no matches to replace.".to_owned()
         });
     }
     let changed_files = app
