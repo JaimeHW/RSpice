@@ -44,7 +44,7 @@ use crate::ui::widgets::{
 const CONSOLE_FONT_SIZE: f32 = tokens::FS_1;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    transcript::collect_save(ui.ctx(), app);
+    transcript::collect_save(ui.ctx(), &mut app.state);
     ui.spacing_mut().item_spacing.y = 0.0;
     header(ui, app, layout);
     if !layout.show_console_body {
@@ -659,7 +659,7 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
             }
         });
     if let Some(run) = open_log {
-        crate::workbench::commands::result_navigation::open_run_log(app, run);
+        crate::workbench::commands::result_navigation::open_run_log(&mut app.state, run);
     }
 }
 

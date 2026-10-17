@@ -1522,6 +1522,14 @@ impl Default for WorkbenchState {
 }
 
 impl WorkbenchState {
+    /// Show the bottom dock, at its own height and out of focus mode, on
+    /// whichever page it last showed.
+    pub(crate) fn open_console(&mut self) {
+        self.focus_mode = false;
+        self.console_visible = true;
+        self.console_maximized = false;
+    }
+
     pub(crate) fn capture_authoring_recovery(&mut self) {
         self.model_editor_recovery = self
             .model_editor

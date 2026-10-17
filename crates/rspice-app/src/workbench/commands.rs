@@ -1524,11 +1524,7 @@ impl Command {
                 app.state.workbench.console_maximized = false;
                 app.state.workbench.console_page = super::state::ConsolePage::Problems;
             }
-            Self::OpenConsole => {
-                app.state.workbench.focus_mode = false;
-                app.state.workbench.console_visible = true;
-                app.state.workbench.console_maximized = false;
-            }
+            Self::OpenConsole => app.state.workbench.open_console(),
             Self::OpenNotifications => app.state.workbench.notification_center_open = true,
             Self::ToggleConsoleMaximized => {
                 app.state.workbench.focus_mode = false;
@@ -2241,7 +2237,7 @@ impl Command {
                     .prompt(format!("Could not open the task deck: {reason}.")),
             },
             Self::RevealProducerLog => match result_navigation::producer_log_hop(app) {
-                Ok(run_sequence) => result_navigation::open_run_log(app, run_sequence),
+                Ok(run_sequence) => result_navigation::open_run_log(&mut app.state, run_sequence),
                 Err(reason) => app
                     .state
                     .prompt(format!("Could not open the run log: {reason}.")),

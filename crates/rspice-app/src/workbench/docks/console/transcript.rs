@@ -26,9 +26,9 @@ use crate::diagnostics::{LogAnchor, LogSeverity};
 use crate::io::file_exchange::{self, FileKind};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
+use crate::workbench::AppState;
 use crate::workbench::app_state::session::shortcuts::report_escape_owner;
 use crate::workbench::state::{ConsoleChannel, ConsoleReveal, ConsoleSelection, ConsoleView};
-use crate::workbench::{AppState, RSpiceApp};
 use lines::{Line, Metrics, Rows, Source};
 
 /// The widest time the clock column prints, measured in the row's face to
@@ -104,15 +104,14 @@ pub(super) fn console(ui: &mut Ui, state: &mut AppState) {
 }
 
 /// Say how a save the page started went, once the picker has answered.
-pub(super) fn collect_save(ctx: &egui::Context, app: &mut RSpiceApp) {
+pub(super) fn collect_save(ctx: &egui::Context, state: &mut AppState) {
     let Some(outcome) = file_exchange::take_saved(ctx, save_id()) else {
         return;
     };
     match outcome {
-        Ok(Some(file)) => app.state.prompt(format!("Saved {}.", file.name)),
+        Ok(Some(file)) => state.prompt(format!("Saved {}.", file.name)),
         Ok(None) => {}
-        Err(error) => app
-            .state
+        Err(error) => state
             .ui
             .toasts
             .error_with_title(ctx, "Log not saved", error),

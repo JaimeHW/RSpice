@@ -71,25 +71,24 @@ pub(crate) fn perform_notification_action(app: &mut RSpiceApp, action: Notificat
                     ));
             }
         }
-        NotificationAction::ShowInConsole { log_id } => show_session_line(app, log_id),
+        NotificationAction::ShowInConsole { log_id } => show_session_line(&mut app.state, log_id),
     }
 }
 
 /// Open the Console on the session's log with line `log_id` selected and in
 /// view, or at the end of the log when the line has since been dropped.
-pub(crate) fn show_session_line(app: &mut RSpiceApp, log_id: u64) {
-    let severity = app
-        .state
+pub(crate) fn show_session_line(state: &mut crate::workbench::AppState, log_id: u64) {
+    let severity = state
         .log_buffer
         .entries()
         .find(|entry| entry.id == log_id)
         .map(|entry| entry.severity);
-    let view = &mut app.state.workbench.console_view;
+    let view = &mut state.workbench.console_view;
     match severity {
         Some(severity) => view.show_session_line(log_id, severity),
         None => view.open(ConsoleChannel::Session),
     }
-    open_console_page(app);
+    open_console_page(&mut state.workbench);
 }
 
 /// Open the Console on one run's own log, from its latest line.
@@ -97,25 +96,23 @@ pub(crate) fn show_session_line(app: &mut RSpiceApp, log_id: u64) {
 /// Callers offer this only for a run the session still holds; a run dropped
 /// between the offer and the click is reported rather than opened as an empty
 /// channel.
-pub(crate) fn open_run_log(app: &mut RSpiceApp, run_sequence: u64) {
-    if app
-        .state
+pub(crate) fn open_run_log(state: &mut crate::workbench::AppState, run_sequence: u64) {
+    if state
         .simulation
         .retained
         .run_by_sequence(run_sequence)
         .is_none()
     {
-        app.state
-            .prompt(crate::workbench::AppState::retired_run_message(
-                run_sequence,
-            ));
+        state.prompt(crate::workbench::AppState::retired_run_message(
+            run_sequence,
+        ));
         return;
     }
-    app.state
+    state
         .workbench
         .console_view
         .open(ConsoleChannel::Run(run_sequence));
-    open_console_page(app);
+    open_console_page(&mut state.workbench);
 }
 
 /// The run that produced dataset `dataset`, while the session still holds it.
@@ -128,10 +125,10 @@ pub(crate) fn producing_run(
         .map(|run| run.id)
 }
 
-fn open_console_page(app: &mut RSpiceApp) {
-    // The command opens the dock on whichever page was last shown.
-    Command::OpenConsole.execute(app);
-    app.state.workbench.console_page = crate::workbench::state::ConsolePage::Console;
+fn open_console_page(workbench: &mut crate::workbench::state::WorkbenchState) {
+    // Opening the dock alone shows whichever page was last shown.
+    workbench.open_console();
+    workbench.console_page = crate::workbench::state::ConsolePage::Console;
 }
 
 /// Resolve the producing-plan hop for the running application.

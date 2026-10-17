@@ -1900,7 +1900,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             super::inspector::run_details::open(&mut app.state, run_id);
                         }
                         if log {
-                            open_run_log(app, run_id);
+                            open_run_log(&mut app.state, run_id);
                         }
                     }
                     if responses.overlay.is_some_and(|response| response.clicked()) {
@@ -5441,7 +5441,7 @@ fn result_artifact_context_menu(
             artifact.identity.analysis().dataset_id(),
         ) && ui.button("Open run log").clicked()
         {
-            open_run_log(app, run);
+            open_run_log(&mut app.state, run);
             ui.close();
         }
     });
@@ -5631,7 +5631,7 @@ fn result_signal_context_menu(
             key.analysis().dataset_id(),
         ) && ui.button("Open run log").clicked()
         {
-            open_run_log(app, run);
+            open_run_log(&mut app.state, run);
             ui.close();
         }
     });
