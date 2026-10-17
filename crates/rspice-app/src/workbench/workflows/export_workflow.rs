@@ -41,8 +41,29 @@ impl ObservedExportDestination {
         }
     }
 
+    /// A destination a file already stood at, for a test backend that
+    /// models one.
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn occupied(path: PathBuf) -> Self {
+        Self {
+            path,
+            expectation: ExportDestinationExpectation::Digest([0; 32]),
+        }
+    }
+
     pub(crate) fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Whether a file stood at the destination when it was observed, which
+    /// writing there replaces. A browser download or a test sink replaces
+    /// nothing.
+    pub(crate) fn is_occupied(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        let occupied = matches!(self.expectation, ExportDestinationExpectation::Digest(_));
+        #[cfg(target_arch = "wasm32")]
+        let occupied = false;
+        occupied
     }
 }
 
@@ -61,6 +82,15 @@ enum ExportDestinationExpectation {
 pub(crate) trait ExportWorkflowIo {
     fn show_save_dialog(&self, config: SaveDialogConfig<'_>) -> Result<Option<PathBuf>, String>;
     fn write_text_file(&self, path: &Path, contents: &str) -> Result<(), String>;
+
+    /// Ask, once, whether the export may replace the files at `paths`: files
+    /// it writes beside the one the save dialog returned, which the dialog
+    /// did not ask about. A backend that cannot ask answers no, so nothing
+    /// the reader did not choose is replaced.
+    fn confirm_replace(&self, title: &str, paths: &[&Path]) -> bool {
+        let _ = (title, paths);
+        false
+    }
 
     /// Accept the destination state returned by the save picker. Native
     /// backends override this with an exact missing/digest observation.
@@ -146,6 +176,26 @@ impl ExportWorkflowIo for NativeExportWorkflowIo {
             .set_file_name(config.default_name)
             .set_title(config.title)
             .save_file())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn confirm_replace(&self, title: &str, paths: &[&Path]) -> bool {
+        let listed = paths
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let description = match paths {
+            [_] => format!("{listed} already exists.\nDo you want to replace it?"),
+            _ => format!("These files already exist:\n{listed}\nDo you want to replace them?"),
+        };
+        rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Warning)
+            .set_title(title)
+            .set_description(description)
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .show()
+            == rfd::MessageDialogResult::Yes
     }
 
     /// The browser derives the name instead of asking for it. A picker exists
