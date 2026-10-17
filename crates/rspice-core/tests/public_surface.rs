@@ -191,8 +191,14 @@ use rspice_core::analysis::harmonic_balance::{
 // `HeldVerilogASources` it returns, which the simulation service's prepared
 // runtime sets install through (`rspice-simulation` veriloga.rs, behind the
 // runner, preflight's deck builds and checkpoint routing).
-// The census is 5,735, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5735;
+// The census was 5,735, with no slack.
+// `IncludeProcessor::process_sealed_root_reading_veriloga` adds one: the
+// simulation service's model sources (`rspice-simulation` model_sources.rs)
+// read the Verilog-A directives the library sections a process selects carry,
+// each with the file that wrote it, so a corner's deck installs its own
+// sections' runtimes and never another section's.
+// The census is 5,736, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5736;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
