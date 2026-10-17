@@ -210,7 +210,7 @@ impl RSpiceApp {
                 }
             };
         }
-        if !self.state.schematic.can_redo() {
+        if !self.state.can_redo_active_schematic() {
             return false;
         }
         if self.state.schematic.redo() {
@@ -324,6 +324,10 @@ impl RSpiceApp {
                 Ok(None) => {}
             }
         }
+        // A step committed in either history since an undo replaces what
+        // the other can redo, so only the steps no newer edit replaced are
+        // left to arbitrate.
+        self.state.retire_replaced_redo_steps();
         let project_first = project_step_is_newer(
             self.state.project_redo_sequence(),
             self.active_document_redo_sequence(),

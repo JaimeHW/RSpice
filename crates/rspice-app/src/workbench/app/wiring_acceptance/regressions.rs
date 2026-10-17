@@ -2,7 +2,7 @@
 //! reproduction.
 
 use super::Bench;
-use super::property::{Pick, Step::*, replay};
+use super::property::{Pick, Step::*, p, replay};
 use crate::state::{ComponentType, Point, Rotation};
 
 /// Replay a shrunk sequence the property test reported, from its fixture.
@@ -19,6 +19,31 @@ fn holds(steps: &[super::property::Step]) {
 #[test]
 fn deleting_a_t_branch_drops_its_dot_though_another_sheet_has_a_t_there() {
     holds(&[Delete(Pick::Wire(8))]);
+}
+
+/// Undoing the switch to Sheet 2 and then moving a part on Sheet 1 is a
+/// new edit after the undo: the switch can no longer be redone. Redo
+/// replayed it anyway.
+#[test]
+fn an_edit_after_undo_leaves_nothing_to_redo_in_either_history() {
+    holds(&[
+        Sheet,
+        Undo,
+        Move(vec![Pick::Part(1)], p(40, 0), false),
+        Redo,
+    ]);
+}
+
+/// The other way round: opening Sheet 2 after undoing a move is a new step,
+/// and the move can no longer be redone.
+#[test]
+fn a_sheet_switch_after_undo_leaves_the_undone_edit_unredoable() {
+    holds(&[
+        Move(vec![Pick::Part(1)], p(40, 0), false),
+        Undo,
+        Sheet,
+        Redo,
+    ]);
 }
 
 /// Opening Sheet 2 is a step in the one undo order. A part placed there

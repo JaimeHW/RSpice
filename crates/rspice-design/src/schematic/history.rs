@@ -215,6 +215,10 @@ pub struct SchematicHistory {
     max_size: usize,
     /// Whether the history has been initialized
     initialized: bool,
+    /// Where the newest step committed here sits in the global order, or
+    /// [`UNSTAMPED_UNDO_SEQUENCE`] before the first. Undo and redo only move
+    /// records between the stacks, so they leave it as it is.
+    committed: UndoSequence,
     /// Sheet membership currently in force for this document, as the boundary
     /// that owns the sheet catalog last stated it. Every snapshot this history
     /// stamps carries a copy, so the membership travels with the design the
@@ -246,6 +250,7 @@ impl SchematicHistory {
             redo_stack: Vec::new(),
             max_size,
             initialized: false,
+            committed: UNSTAMPED_UNDO_SEQUENCE,
             live_sheet_assignments: BTreeMap::new(),
             restored_sheet_assignments: BTreeMap::new(),
         }
@@ -256,6 +261,7 @@ impl SchematicHistory {
         self.undo_stack.clear();
         self.redo_stack.clear();
         self.initialized = true;
+        self.committed = UNSTAMPED_UNDO_SEQUENCE;
         self.restored_sheet_assignments.clear();
     }
 
@@ -278,6 +284,7 @@ impl SchematicHistory {
 
         // Create undo entry with the "before" snapshot
         let entry = Self::stamped(before_snapshot, description);
+        self.committed = entry.sequence;
 
         self.undo_stack.push_back(entry);
 
@@ -398,6 +405,13 @@ impl SchematicHistory {
         self.redo_stack.last().map(|entry| entry.sequence)
     }
 
+    /// Where the newest step committed here sits in the global order. A
+    /// redo step another history took back before then is no longer the
+    /// way forward: this newer step replaced it.
+    pub fn commit_sequence(&self) -> Option<UndoSequence> {
+        (self.committed != UNSTAMPED_UNDO_SEQUENCE).then_some(self.committed)
+    }
+
     /// Get description of the next undo operation
     pub fn undo_description(&self) -> Option<&str> {
         self.undo_stack.back().map(|e| e.description.as_str())
@@ -438,6 +452,7 @@ impl SchematicHistory {
         self.undo_stack.clear();
         self.redo_stack.clear();
         self.initialized = false;
+        self.committed = UNSTAMPED_UNDO_SEQUENCE;
         self.restored_sheet_assignments.clear();
     }
 

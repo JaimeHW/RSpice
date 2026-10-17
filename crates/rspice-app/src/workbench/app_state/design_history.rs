@@ -54,6 +54,9 @@ const MAX_PROJECT_DESIGN_STEPS: usize = 32;
 pub(crate) struct ProjectDesignHistory {
     undo: Vec<ProjectDesignRecord>,
     redo: Vec<ProjectDesignRecord>,
+    /// Where the newest transaction committed here sits in the global order.
+    /// Undo and redo only move records between the stacks, so they leave it.
+    committed: Option<UndoSequence>,
 }
 
 /// One project transaction: where it sits in the global undo order and which
@@ -660,6 +663,7 @@ impl AppState {
     /// Push one freshly committed transaction, stamped into the global order
     /// by its header, and retire the redo stack the way any new step does.
     fn push_project_record(&mut self, header: RecordHeader, body: ProjectDesignBody) {
+        self.project_design_history.committed = Some(header.sequence());
         self.project_design_history.undo.push(ProjectDesignRecord {
             header,
             body,
@@ -851,13 +855,55 @@ impl AppState {
     }
 
     pub(crate) fn can_redo_project_design(&self) -> bool {
-        self.project_design_history
-            .redo
-            .last()
-            .is_some_and(|record| {
-                record.before_design_matches(self)
-                    && record.validate_mutation(self, "redone").is_ok()
-            })
+        !self.project_redo_is_replaced()
+            && self
+                .project_design_history
+                .redo
+                .last()
+                .is_some_and(|record| {
+                    record.before_design_matches(self)
+                        && record.validate_mutation(self, "redone").is_ok()
+                })
+    }
+
+    /// Whether the active schematic has a step to redo that no newer step
+    /// replaced.
+    pub(crate) fn can_redo_active_schematic(&self) -> bool {
+        self.schematic.can_redo() && !self.schematic_redo_is_replaced()
+    }
+
+    /// Drop the redo steps a newer step replaced.
+    ///
+    /// The project history and the active document's history are one
+    /// timeline, and a redo step is the way forward only while nothing new
+    /// has been done since it was undone. Each history drops its own redo
+    /// steps when it commits; a step committed in the other one replaces
+    /// them as well, or Redo would replay an undone step over the newer edit.
+    pub(crate) fn retire_replaced_redo_steps(&mut self) {
+        if self.project_redo_is_replaced() {
+            self.project_design_history.redo.clear();
+        }
+        if self.schematic_redo_is_replaced() {
+            self.schematic.clear_schematic_redo();
+        }
+    }
+
+    /// Whether the active schematic committed a step after the next project
+    /// redo step was undone.
+    fn project_redo_is_replaced(&self) -> bool {
+        self.project_redo_sequence()
+            .zip(self.schematic.history().commit_sequence())
+            .is_some_and(|(undone, committed)| committed > undone)
+    }
+
+    /// Whether the project committed a transaction after the active
+    /// schematic's next redo step was undone.
+    fn schematic_redo_is_replaced(&self) -> bool {
+        self.schematic
+            .history()
+            .redo_sequence()
+            .zip(self.project_design_history.committed)
+            .is_some_and(|(undone, committed)| committed > undone)
     }
 
     /// Where the next project undo step sits in the global order, for

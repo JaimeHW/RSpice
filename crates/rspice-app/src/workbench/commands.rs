@@ -526,7 +526,7 @@ impl Command {
                 } else {
                     active_schematic_editor(app)
                         && !state.schematic_edit_read_only()
-                        && state.schematic.can_redo()
+                        && state.can_redo_active_schematic()
                 }
             }
             Self::Cut => {
