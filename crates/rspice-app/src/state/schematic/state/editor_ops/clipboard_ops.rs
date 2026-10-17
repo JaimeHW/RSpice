@@ -140,6 +140,46 @@ impl SchematicState {
         }
         Ok(has_content || committed)
     }
+
+    /// Join what a paste just dropped in, which is still the selection, to
+    /// the wiring around it, as drawing or moving it there would: a pasted
+    /// wire ending inside another wire splits it, a pasted wire running over
+    /// another wire's end is split there, a pasted pin landing inside a wire
+    /// owns a vertex there, and the junction policy dots the joints. Run it
+    /// inside the paste's own undo step.
+    pub fn connect_pasted_selection(
+        &mut self,
+        mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+        scope: &ActiveSheetTopology,
+    ) {
+        let selection = self.session.editor.selection.clone();
+        let wires = &self.design.document().wires;
+        let ends = |wire: &Wire| [wire.points[0], wire.points[wire.points.len() - 1]];
+        let (pasted, others): (Vec<&Wire>, Vec<&Wire>) = wires
+            .iter()
+            .filter(|wire| wire.points.len() >= 2)
+            .partition(|wire| selection.has_wire(wire.id));
+        let mut joints: Vec<Point> = pasted.iter().flat_map(|wire| ends(wire)).collect();
+        joints.extend(
+            others
+                .iter()
+                .flat_map(|wire| ends(wire))
+                .filter(|end| pasted.iter().any(|wire| wire.contains_point(*end))),
+        );
+        joints.sort_by_key(|point| (point.x, point.y));
+        joints.dedup();
+        for joint in joints {
+            self.split_wires_at_t_junction(joint, scope);
+        }
+        self.split_wires_under_pins(&selection.components, &mut terminal_points_for, scope);
+        let automatic_junctions = self
+            .design
+            .document()
+            .document_policy
+            .wire_junctions
+            .automatic_junctions();
+        self.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope);
+    }
 }
 
 #[cfg(test)]

@@ -1330,3 +1330,58 @@ fn copy_takes_no_wire_or_junction_from_another_sheet() {
         clipboard.junctions
     );
 }
+
+/// A paste on Sheet 1 joins its wire to Sheet 1's wiring only. Sheet 2 has
+/// a wire through the very point where the pasted wire ends: it keeps its
+/// id and points and gets no dot, while Sheet 1's wire there is split and
+/// dotted, and one undo takes the paste and its wiring back.
+#[test]
+fn a_paste_joins_wiring_on_its_own_sheet_only() {
+    use rspice_design::schematic::clipboard::ClipboardData;
+
+    let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[1], &[2]);
+    let here = Wire::segment(1, Point::new(0, 100), Point::new(200, 100));
+    let there = Wire::segment(2, Point::new(100, 0), Point::new(100, 200));
+    state.schematic.document_mut_for_test().wires = vec![here.clone(), there.clone()];
+    state.schematic.init_undo_history();
+    let stub = Wire::segment(9, Point::new(0, 0), Point::new(0, 50));
+    state.ui.schematic_clipboard =
+        ClipboardData::from_selection(Vec::new(), vec![stub], Vec::new());
+
+    assert_eq!(
+        state.paste_schematic_clipboard_at(Point::new(100, 50)),
+        Ok(true)
+    );
+
+    let document = state.schematic.document();
+    assert_eq!(
+        document.wires.iter().find(|wire| wire.id == 2),
+        Some(&there),
+        "Sheet 2's wire was touched"
+    );
+    let tee = Point::new(100, 100);
+    let sheet_one_ends = document
+        .wires
+        .iter()
+        .filter(|wire| wire.id != 2)
+        .flat_map(|wire| [wire.points[0], *wire.points.last().expect("end")])
+        .filter(|point| *point == tee)
+        .count();
+    assert_eq!(
+        sheet_one_ends, 3,
+        "Sheet 1's T was not split: {:?}",
+        document.wires
+    );
+    assert_eq!(
+        document
+            .junctions
+            .iter()
+            .filter(|junction| junction.pos == tee)
+            .count(),
+        1
+    );
+
+    assert!(state.schematic.undo());
+    assert_eq!(state.schematic.document().wires, vec![here, there]);
+    assert!(state.schematic.document().junctions.is_empty());
+}

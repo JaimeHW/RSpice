@@ -13,7 +13,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use crate::schematic::view::schematic_symbol_context;
 use crate::schematic::view::sheet_visibility::{
     selectable_objects_on_active_sheet, selection_filtered_to_active_sheet,
-    with_hidden_wire_topology_preserved,
+    with_active_wire_topology, with_hidden_wire_topology_preserved,
 };
 use crate::state::{CellViewRef, DuplicateExternalNets, Point, SchematicState, Selection};
 use rspice_design::connectivity::summary::{
@@ -200,8 +200,9 @@ impl AppState {
         self.paste_schematic_objects_at(&clipboard, anchor)
     }
 
-    /// Paste `objects` at `anchor` into the active cell view as one undo step.
-    /// The pasted objects become the selection.
+    /// Paste `objects` at `anchor` into the active cell view as one undo step,
+    /// joined to the wiring they land on. The pasted objects become the
+    /// selection.
     fn paste_schematic_objects_at(
         &mut self,
         objects: &ClipboardData,
@@ -211,11 +212,25 @@ impl AppState {
             return Ok(false);
         }
         let objects = bound_to_active_cell(self, objects)?;
-        let pasted = self.schematic.paste_at_checked(&objects, anchor)?;
-        if pasted {
+        let symbols = schematic_symbol_context(self);
+        // The undo step opens with every sheet present; the cell view's other
+        // sheets, which share these coordinates, step out of reach only while
+        // the pasted wires and pins are joined to this one.
+        self.schematic.begin_operation("paste");
+        let pasted = self.schematic.paste_at_checked(&objects, anchor);
+        if matches!(pasted, Ok(true)) {
+            with_active_wire_topology(self, |schematic, scope| {
+                schematic.connect_pasted_selection(
+                    |component| symbols.terminal_points(component),
+                    scope,
+                );
+            });
+        }
+        self.schematic.end_operation();
+        if matches!(pasted, Ok(true)) {
             self.sync_active_schematic_to_workspace();
         }
-        Ok(pasted)
+        pasted
     }
 
     /// Select every object on the active sheet the selection filter admits.

@@ -1271,6 +1271,115 @@ fn repairing_a_stale_instance_restores_its_x_line() {
     );
 }
 
+/// A design app with `wires` on the canvas, the wire with id `copied`
+/// selected and copied, and the pointer over grid point `hover`.
+fn app_with_copied_wire(
+    wires: Vec<crate::state::Wire>,
+    copied: u64,
+    hover: (f64, f64),
+) -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    app.state.schematic.document_mut_for_test().wires = wires;
+    app.state.schematic.init_undo_history();
+    app.state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_wire(copied);
+    Command::Copy.execute(&mut app);
+    app.state.schematic.session.editor.selection.clear();
+    app.state.ui.canvas_hover = Some(hover);
+    app
+}
+
+/// Paste dropped its wires in and stopped: a pasted wire ending inside
+/// another made a T the netlister joins with no split and no dot. The
+/// paste now splits the wire it lands on and dots the T in the same undo
+/// step (audit W-9).
+#[test]
+fn a_pasted_wire_ending_inside_another_splits_it_and_dots_the_t() {
+    use crate::state::{Point, Wire};
+
+    let through = Wire::segment(1, Point::new(0, 100), Point::new(200, 100));
+    let stub = Wire::segment(2, Point::new(300, 0), Point::new(300, 50));
+    let mut app = app_with_copied_wire(vec![through.clone(), stub.clone()], 2, (10.0, 5.0));
+
+    Command::Paste.execute(&mut app);
+
+    let document = app.state.schematic.document();
+    let tee = Point::new(100, 100);
+    let ends_at_tee = document
+        .wires
+        .iter()
+        .flat_map(|wire| [wire.points[0], *wire.points.last().expect("end")])
+        .filter(|point| *point == tee)
+        .count();
+    assert_eq!(
+        ends_at_tee, 3,
+        "the through wire was not split: {:?}",
+        document.wires
+    );
+    assert!(
+        document
+            .junctions
+            .iter()
+            .any(|junction| junction.pos == tee),
+        "the T has no dot"
+    );
+
+    assert!(app.state.schematic.undo(), "the paste is one undo step");
+    let document = app.state.schematic.document();
+    assert_eq!(document.wires, vec![through, stub]);
+    assert!(document.junctions.is_empty());
+}
+
+/// A pasted part whose pin lands inside a wire owns a vertex there, as a
+/// placed or moved part does (audit W-9, with the pin rule of W-5).
+#[test]
+fn a_pasted_pin_landing_inside_a_wire_splits_it() {
+    use crate::state::{Component, ComponentType, Point, Wire};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    let part = Component::new(1, ComponentType::Resistor, Point::new(500, 500));
+    let left = part.terminal_positions()[0].1 - part.pos;
+    let rail = Wire::segment(2, Point::new(100, 0), Point::new(100, 200));
+    let document = app.state.schematic.document_mut_for_test();
+    document.components.push(part);
+    document.wires.push(rail);
+    app.state.schematic.init_undo_history();
+    app.state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_component(1);
+    Command::Copy.execute(&mut app);
+    app.state.schematic.session.editor.selection.clear();
+    let grid = f64::from(app.state.schematic.document().grid_size);
+    let target = Point::new(100 - left.x, 100 - left.y);
+    app.state.ui.canvas_hover = Some((f64::from(target.x) / grid, f64::from(target.y) / grid));
+
+    Command::Paste.execute(&mut app);
+
+    let document = app.state.schematic.document();
+    assert_eq!(document.components.len(), 2, "the part was pasted");
+    let pin = Point::new(100, 100);
+    let ends_at_pin = document
+        .wires
+        .iter()
+        .flat_map(|wire| [wire.points[0], *wire.points.last().expect("end")])
+        .filter(|point| *point == pin)
+        .count();
+    assert_eq!(
+        ends_at_pin, 2,
+        "the rail was not split: {:?}",
+        document.wires
+    );
+}
+
 /// Library `work` with cells `a` and `b`, each with a schematic view; `a`
 /// is open on the design canvas.
 fn app_with_two_cells() -> RSpiceApp {

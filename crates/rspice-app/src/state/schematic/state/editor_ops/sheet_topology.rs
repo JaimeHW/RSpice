@@ -76,6 +76,7 @@ mod tests {
         "stretch_target",
         "stretch_target_resolved",
         "transform_selection",
+        "connect_pasted_selection",
     ];
 
     /// Where a production caller may open a scope: this module; the one
