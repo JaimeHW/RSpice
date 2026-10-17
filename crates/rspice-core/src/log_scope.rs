@@ -9,9 +9,11 @@
 //! on the worker. A record logged on a thread that never entered a scope
 //! belongs to no run.
 //!
-//! The run's [`NoticeCollector`] travels in the same scope, so a notice raised
-//! on a worker reaches the run that spawned it, labelled with the same point
-//! as the worker's lines.
+//! The run's [`NoticeCollector`](crate::notice::NoticeCollector) travels in the
+//! same scope, so a notice raised on a worker reaches the run that spawned it,
+//! labelled with the same point as the worker's lines. The scope carries it
+//! opaquely, as it carries the host's state: what a notice is belongs to the
+//! notice module, which reads down into this one.
 //!
 //! A site that logs the warning stating a notice learns which line of the
 //! run's log the host kept for it ([`warn_line!`]), and raises the notice with
@@ -22,8 +24,6 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-use crate::notice::NoticeCollector;
-
 /// What a host keeps on the thread executing one run, and the point of the
 /// run that thread is solving, when that is one of several.
 #[derive(Clone)]
@@ -33,8 +33,10 @@ pub struct LogScope {
     /// Lines the run states once however often it reaches them, shared by
     /// every thread the run hands work to.
     said_once: Arc<Mutex<HashSet<String>>>,
-    /// Where the run records what it raised, shared the same way.
-    notices: Option<NoticeCollector>,
+    /// Where the run records what it raised, shared the same way. Set and
+    /// read only by the notice module's `LogScope::collecting` and
+    /// `LogScope::notices`.
+    pub(crate) notices: Option<Arc<dyn Any + Send + Sync>>,
 }
 
 impl LogScope {
@@ -45,21 +47,6 @@ impl LogScope {
             said_once: Arc::default(),
             notices: None,
         }
-    }
-
-    /// The same run, recording the notices it raises in `notices`, on this
-    /// thread and on every thread it hands work to.
-    #[must_use]
-    pub fn collecting(self, notices: NoticeCollector) -> Self {
-        Self {
-            notices: Some(notices),
-            ..self
-        }
-    }
-
-    /// Where the run records its notices, if it does.
-    pub(crate) fn notices(&self) -> Option<&NoticeCollector> {
-        self.notices.as_ref()
     }
 
     /// The host's own state for the run, to downcast to what it stored.

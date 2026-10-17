@@ -283,6 +283,21 @@ impl NoticeCollector {
     }
 }
 
+impl LogScope {
+    /// The same run, recording the notices it raises in `notices`, on this
+    /// thread and on every thread it hands work to.
+    #[must_use]
+    pub fn collecting(mut self, notices: NoticeCollector) -> Self {
+        self.notices = Some(Arc::new(notices));
+        self
+    }
+
+    /// Where the run records its notices, if it does.
+    pub(crate) fn notices(&self) -> Option<&NoticeCollector> {
+        self.notices.as_deref()?.downcast_ref()
+    }
+}
+
 /// The element being bound on this thread and the card it is bound to.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Binding {
