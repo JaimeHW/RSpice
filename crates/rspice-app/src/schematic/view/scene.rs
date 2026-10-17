@@ -652,11 +652,7 @@ fn voltage_badges(
         let label = labels.get(&key).copied();
         let display = notations.display(&voltage.name);
         let shown = wrapped_signal_name(&display, 'V').unwrap_or(net_name);
-        let value = format!(
-            "{} {}",
-            crate::state::format_engineering(voltage.value),
-            voltage.unit
-        );
+        let value = badge_quantity(voltage.value, &voltage.unit);
         let highlighted = editor_net_is_highlighted(state, net_name);
         badges.push(OperatingPointCanvasAnnotation {
             subject: BadgeSubject::Net { anchor, label },
@@ -707,6 +703,37 @@ pub(super) fn refresh_voltage_badges(state: &mut AppState) {
 /// The operating-point annotations the canvas paints: the voltage badges,
 /// reused while their inputs stand still, then the selected devices'
 /// currents, device operating points and power.
+/// A solved quantity as an operating-point badge reads it: four significant
+/// digits, then the SI prefix joined to its unit, with micro spelled `µ`, so
+/// a badge reads `912.4 mV` or `21.4 µA`, never `912.430m V`.
+pub(super) fn badge_quantity(value: f64, unit: &str) -> String {
+    use crate::quantity::engineering::{EngineeringPrecision, format_engineering_display_with};
+
+    // The mantissa decides how many decimals make four digits.
+    let fixed = format_engineering_display_with(value, EngineeringPrecision::Fixed(3));
+    let mantissa = fixed
+        .trim_end_matches(char::is_alphabetic)
+        .parse::<f64>()
+        .unwrap_or(0.0)
+        .abs();
+    let decimals = if mantissa > 0.0 {
+        (3.0 - mantissa.log10().floor()).clamp(0.0, 3.0) as u8
+    } else {
+        0
+    };
+    let text = format_engineering_display_with(value, EngineeringPrecision::UpTo(decimals));
+    if unit.is_empty() {
+        return text;
+    }
+    let digits = text.trim_end_matches(char::is_alphabetic);
+    let prefix = &text[digits.len()..];
+    if prefix.is_empty() {
+        format!("{digits} {unit}")
+    } else {
+        format!("{digits} {prefix}{unit}")
+    }
+}
+
 pub(super) fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnnotation> {
     let Some((dc_op, retained_annotation, device_op)) = annotated_operating_point(state) else {
         return Vec::new();
@@ -753,10 +780,9 @@ pub(super) fn operating_point_annotations(state: &AppState) -> Vec<OperatingPoin
             })
         {
             lines.push(format!(
-                "{} = {} {}",
+                "{} = {}",
                 current.name,
-                crate::state::format_engineering(current.value),
-                current.unit
+                badge_quantity(current.value, &current.unit)
             ));
         }
         if retained_device_op
@@ -777,10 +803,9 @@ pub(super) fn operating_point_annotations(state: &AppState) -> Vec<OperatingPoin
             && let Some(power) = device_power(dc_op, &component.name)
         {
             lines.push(format!(
-                "{} = {} {}",
+                "{} = {}",
                 power.name,
-                crate::state::format_engineering(power.value),
-                power.unit
+                badge_quantity(power.value, &power.unit)
             ));
         }
         if lines.is_empty() {
@@ -1060,7 +1085,7 @@ mod tests {
                 label: Some(9)
             }
         );
-        assert_eq!(annotations[0].lines, vec!["1.250 V".to_owned()]);
+        assert_eq!(annotations[0].lines, vec!["1.25 V".to_owned()]);
         assert_eq!(annotations[0].class, 1);
     }
 
@@ -1379,7 +1404,7 @@ mod tests {
         assert!(
             painted
                 .iter()
-                .any(|badge| badge.key == "vout" && text(badge).contains("1.750 V")),
+                .any(|badge| badge.key == "vout" && text(badge).contains("1.75 V")),
             "{painted:?}"
         );
         refresh_voltage_badges(&mut state);
@@ -1515,11 +1540,11 @@ mod tests {
         state.simulation.view.active_analysis_idx = Some(1);
         let hot = operating_point_annotations(&state);
         assert!(text(&hot[0]).contains("2.5"), "{hot:?}");
-        assert!(text(&hot[1]).contains("4m"), "{hot:?}");
+        assert!(text(&hot[1]).contains("4 mA"), "{hot:?}");
 
         state.simulation.view.active_analysis_idx = Some(0);
         let nominal = operating_point_annotations(&state);
         assert!(text(&nominal[0]).contains("1.25"));
-        assert!(text(&nominal[1]).contains("2m"));
+        assert!(text(&nominal[1]).contains("2 mA"));
     }
 }
