@@ -1624,8 +1624,12 @@ impl Netlist {
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
         Self::enforce_root_source_limits_with_abort(input, options.resource_limits, abort)?;
+        // A root selects no inline library section, from a path or from
+        // memory alike; the processor that leaves them out of a path-backed
+        // root does not run here.
+        let (read, unread_sections) = include::read_inline_library_sections(input)?;
         let (declarative, control_script) =
-            control_source::prepare_text(input, options.retain_control_script, abort)?;
+            control_source::prepare_text(&read, options.retain_control_script, abort)?;
         let (sanitized, mut diagnostics, dispositions) =
             Self::sanitize_control_regions_with_abort(&declarative, abort)?;
         let mut netlist = parser::parse_netlist_with_parameter_overrides_and_abort(
@@ -1635,6 +1639,7 @@ impl Netlist {
         netlist.diagnostics = diagnostics;
         netlist.control_dispositions = dispositions;
         netlist.control_script = control_script;
+        netlist.unread_source.extend(unread_sections);
         if !netlist.spef_includes.is_empty() {
             return Err(ParseError::Syntax {
                 line: 0,

@@ -2556,6 +2556,39 @@ M1 d g s b nonly\n\
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// A deck's own inline sections are definitions no card selects, from a
+    /// path and from memory alike, so a value written outside them binds.
+    #[test]
+    fn a_deck_reads_none_of_its_own_inline_library_sections() {
+        let src = "deck\n\
+.param vth=0.9\n\
+.lib tt\n\
+.param vth=0.5\n\
+.endl tt\n\
+.lib ss\n\
+.param vth=0.4\n\
+.endl ss\n\
+V1 a 0 {vth}\n\
+.end\n";
+        let (map, netlist) = map_as_parsed(src);
+
+        assert_eq!(netlist.params.get("vth"), Some(0.9));
+        assert_eq!(map.param_context_in(None).get("vth"), Some(0.9));
+        assert_eq!(
+            map.param_definition_for("vth", None)
+                .map(|definition| definition.line),
+            Some(2)
+        );
+        for (line, section) in [(4, "tt"), (7, "ss")] {
+            assert_eq!(
+                unread_on(&map, "vth", line),
+                Some(UnreadSourceReason::LibrarySection {
+                    name: section.to_owned()
+                })
+            );
+        }
+    }
+
     #[test]
     fn source_map_records_xspice_model_span() {
         let src = "deck\nA1 in out gain gain=2\n.model gain xspice\n.end\n";

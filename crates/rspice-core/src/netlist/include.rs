@@ -547,7 +547,8 @@ struct InlineLibFrame {
 ///
 /// A source reads a section only when the `.lib` card that brought the source
 /// in selects it by name and every section around it is read as well; a root
-/// selects none. Each outermost section left out is recorded as unread.
+/// selects none. Each outermost section left out is recorded as unread. The
+/// include processor and the in-memory parse both decide sections here.
 #[derive(Debug, Default)]
 struct InlineLibrarySections {
     frames: Vec<InlineLibFrame>,
@@ -625,6 +626,54 @@ impl InlineLibrarySections {
             None => Ok(()),
         }
     }
+}
+
+/// The text of an in-memory root as a parse reads it, and the lines it
+/// leaves out.
+///
+/// A root selects no inline `.lib name` ... `.endl` section, so the include
+/// processor leaves every one out of a deck parsed from a path. A deck parsed
+/// from memory has no processor; this leaves the same sections out of it,
+/// decided by the same [`InlineLibrarySections`]. Each line left out, the two
+/// cards around a section included, becomes an empty line, so every line
+/// after it keeps its number. `.include` and external `.lib` cards outside a
+/// section are left to the parser, which cannot resolve them from memory.
+pub(crate) fn read_inline_library_sections(
+    content: &str,
+) -> Result<(std::borrow::Cow<'_, str>, Vec<UnreadSourceRegion>), ParseError> {
+    let defines_sections = content.lines().any(|line| {
+        split_directive(line.trim()).is_some_and(|(directive, _)| {
+            directive.eq_ignore_ascii_case(".lib") || directive.eq_ignore_ascii_case(".endl")
+        })
+    });
+    if !defines_sections {
+        return Ok((std::borrow::Cow::Borrowed(content), Vec::new()));
+    }
+    let mut sections = InlineLibrarySections::default();
+    let mut unread = Vec::new();
+    let mut read = String::with_capacity(content.len());
+    for (line_index, line) in content.lines().enumerate() {
+        let line_number = line_index + 1;
+        let trimmed = line.trim();
+        let kept = if let Some((name, None)) = split_directive(trimmed)
+            .filter(|(directive, _)| directive.eq_ignore_ascii_case(".lib"))
+            .and_then(|_| parse_lib_directive(trimmed))
+        {
+            sections.open(name, line_number, None);
+            false
+        } else if let Some(end_name) = parse_endl_directive(trimmed, line_number)? {
+            sections.close(end_name.as_deref(), line_number, None, &mut unread)?;
+            false
+        } else {
+            sections.reading()
+        };
+        if kept {
+            read.push_str(line);
+        }
+        read.push('\n');
+    }
+    sections.finish()?;
+    Ok((std::borrow::Cow::Owned(read), unread))
 }
 
 impl IncludeKey {
@@ -2212,6 +2261,45 @@ Rkept 1 0 2
             .expect("inline library definitions preprocess");
 
         assert_eq!(expanded, "Rkept 1 0 2\n");
+    }
+
+    /// A deck parsed from memory leaves out the inline sections the same deck
+    /// parsed from its path leaves out, nested ones included, records them as
+    /// unread, and keeps the number of every line after them.
+    #[test]
+    fn an_in_memory_root_leaves_out_the_inline_sections_a_path_backed_root_does() {
+        let deck = "title\n.lib Unused\nRhidden 1 0 1\n.lib nested\nRdeeper 1 0 1\n.endl NESTED\n.endl unused\nRkept 1 0 2\n.end\n";
+
+        let (read, unread) = read_inline_library_sections(deck).expect("sections balance");
+
+        assert_eq!(read, "title\n\n\n\n\n\n\nRkept 1 0 2\n.end\n");
+        assert_eq!(
+            unread,
+            vec![UnreadSourceRegion {
+                source: None,
+                lines: 3..=6,
+                reason: UnreadSourceReason::LibrarySection {
+                    name: "Unused".to_owned()
+                },
+            }]
+        );
+        let element_names = |netlist: crate::netlist::Netlist| {
+            netlist
+                .elements
+                .into_iter()
+                .map(|element| element.name)
+                .collect::<Vec<_>>()
+        };
+        let from_memory = crate::netlist::Netlist::parse(deck).expect("in-memory deck parses");
+        assert_eq!(from_memory.unread_root_source().count(), 1);
+        let from_path =
+            crate::netlist::Netlist::parse_with_path(deck, Path::new("memory-parity.cir"))
+                .expect("path-backed deck parses");
+        assert_eq!(element_names(from_memory), element_names(from_path));
+        assert!(
+            read_inline_library_sections("title\n.lib open\nR1 1 0 1\n").is_err(),
+            "an unclosed section fails from memory as it does from a path"
+        );
     }
 
     #[test]
