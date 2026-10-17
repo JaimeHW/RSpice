@@ -529,8 +529,20 @@ pub enum DrcLocation {
     BusTap { id: u64 },
     /// On a net label
     NetLabel { name: String },
-    /// On a node (by net name)
-    Node { net_name: String },
+    /// On a node: by the name the deck writes for it, and, where the drawing
+    /// gives the node no name of its own, by the terminals on it.
+    ///
+    /// A label, a port or a global names a node, and that name is what the
+    /// node is. An unnamed node's name is only the number the extractor gave
+    /// it by where it is drawn, which placing anything to its left renumbers;
+    /// what that node is, is the terminals on it, by component id and pin,
+    /// sorted. Those are what a waiver and a finding's identity name it by.
+    Node {
+        net_name: String,
+        /// Empty for a node the drawing names.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        terminals: Vec<(u64, String)>,
+    },
     /// Global (no specific location)
     Global,
     /// A whole cellview, for a finding about the cellview itself rather than
@@ -569,7 +581,7 @@ impl DrcLocation {
             Self::Bus { id } => format!("Bus #{}", id),
             Self::BusTap { id } => format!("Bus tap #{}", id),
             Self::NetLabel { name } => format!("Net '{}'", name),
-            Self::Node { net_name } => format!("Node '{}'", net_name),
+            Self::Node { net_name, .. } => format!("Node '{}'", net_name),
             Self::Global => "Global".to_string(),
             Self::CellView { reference } => reference.display_path(),
             Self::SymbolPin {

@@ -271,11 +271,17 @@ impl<'de> Deserialize<'de> for DrcWaivers {
 ///
 /// What survives an unrelated edit is the object's own identity, so that is
 /// what the key is: a component or wire by its id, a terminal by its
-/// component and pin, a net or a label by its name. Where the object is drawn
+/// component and pin, a named net or a label by its name, and a net the
+/// drawing does not name by the terminals on it. Where the object is drawn
 /// and what the message says about it are not part of it. A finding inside an
 /// instantiated cellview is keyed by the occurrence path down to that view and
 /// its own key inside it, which is what tells `X1/M3` from `X2/M3`. A point is
 /// the last resort, for a finding that names no object at all.
+///
+/// An unnamed net's name is the extractor's number for it, which placing
+/// anything to its left gives another net, so it is never the key: a waiver
+/// keyed by it would move to whichever net took the number. One stored that
+/// way by an earlier build covers nothing, and is reported for it.
 pub fn location_key(location: &DrcLocation) -> String {
     match location {
         DrcLocation::Terminal {
@@ -284,7 +290,19 @@ pub fn location_key(location: &DrcLocation) -> String {
             ..
         } => format!("terminal:{component_id}:{pin_name}"),
         DrcLocation::Component { id, .. } => format!("component:{id}"),
-        DrcLocation::Node { net_name } => format!("net:{net_name}"),
+        DrcLocation::Node {
+            net_name,
+            terminals,
+        } if terminals.is_empty() => format!("net:{net_name}"),
+        DrcLocation::Node { terminals, .. } => {
+            // Length-prefixed, because a pin name may contain any separator
+            // chosen here.
+            let terminals = terminals
+                .iter()
+                .map(|(component, pin)| format!("{component}:{}:{pin}", pin.len()))
+                .collect::<String>();
+            format!("net-of:{terminals}")
+        }
         DrcLocation::Wire { id } => format!("wire:{id}"),
         DrcLocation::NetLabel { name } => format!("label:{name}"),
         DrcLocation::Bus { id } => format!("bus:{id}"),
@@ -572,6 +590,7 @@ mod tests {
             DrcViolationType::ShortedOutputs,
             DrcLocation::Node {
                 net_name: "out".to_owned(),
+                terminals: Vec::new(),
             },
         ));
         assert!(result.has_errors());

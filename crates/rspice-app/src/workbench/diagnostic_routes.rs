@@ -254,8 +254,10 @@ pub(in crate::workbench) fn apply_remediation(
                     id: *id,
                     name: name.clone(),
                 },
+                // Located by the name the drawing is searched for.
                 DrawnObject::Net { name, .. } => DrcLocation::Node {
                     net_name: name.clone(),
+                    terminals: Vec::new(),
                 },
             };
             app.state.open_workspace_view(cell_view.clone());

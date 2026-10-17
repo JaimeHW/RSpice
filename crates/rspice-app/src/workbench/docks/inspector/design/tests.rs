@@ -623,6 +623,7 @@ fn sheet_check_rows_report_real_unconnected_and_floating_counts() {
                 rspice_design::drc::DrcViolationType::FloatingNode,
                 rspice_design::drc::DrcLocation::Node {
                     net_name: "n1".to_owned(),
+                    terminals: Vec::new(),
                 },
             ),
         ] {
@@ -675,7 +676,8 @@ fn a_component_does_not_claim_a_placed_cells_finding_of_the_same_name() {
 
     assert!(violation_targets_component(
         &named(rspice_design::drc::DrcLocation::Node {
-            net_name: "n1".to_owned()
+            net_name: "n1".to_owned(),
+            terminals: Vec::new(),
         }),
         &resistor
     ));
@@ -685,7 +687,8 @@ fn a_component_does_not_claim_a_placed_cells_finding_of_the_same_name() {
                 .expect("an occurrence path"),
             view: crate::state::CellViewRef::new("work", "amp", "schematic"),
             inner: Box::new(rspice_design::drc::DrcLocation::Node {
-                net_name: "n1".to_owned()
+                net_name: "n1".to_owned(),
+                terminals: Vec::new(),
             }),
         }),
         &resistor

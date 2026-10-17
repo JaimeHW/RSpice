@@ -683,7 +683,13 @@ fn encode_drc_location(writer: &mut CanonicalWriter, location: &DrcLocation) {
         DrcLocation::NetLabel { name } => {
             writer.string(name);
         }
-        DrcLocation::Node { net_name } => {
+        // The terminals that name an unnamed node to a waiver are the
+        // drawing's, which the design's own digests already hold; the deck
+        // knows the node by its name.
+        DrcLocation::Node {
+            net_name,
+            terminals: _,
+        } => {
             writer.string(net_name);
         }
         DrcLocation::Global => {}

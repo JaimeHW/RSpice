@@ -1317,8 +1317,10 @@ impl GlobalTouches {
                     0,
                     DrcViolationType::FloatingNode,
                     format!("Global node '{node}' has only {total} connection(s) in the design"),
+                    // A global's name is what the node is.
                     DrcLocation::Node {
                         net_name: node.clone(),
+                        terminals: Vec::new(),
                     },
                 ),
             ));
@@ -1633,8 +1635,11 @@ impl GlobalDriven {
     /// rewire: the conflict is stated inside the first driver's occurrence,
     /// which is where a reader goes to resolve it.
     fn location(&self, occurrences: &[Occurrences], views: &[ReachedView<'_>]) -> DrcLocation {
+        // Stated by name: a global's name is what the node is, and a loop no
+        // global carries is a source loop, which is repaired, never waived.
         let node = DrcLocation::Node {
             net_name: self.nodes[0].clone(),
+            terminals: Vec::new(),
         };
         let first = &self.drivers[0];
         if self.drivers.iter().any(|driver| driver.view == SUBJECT) {

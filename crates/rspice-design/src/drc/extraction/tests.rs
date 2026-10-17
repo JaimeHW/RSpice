@@ -1565,7 +1565,8 @@ fn sources_across_one_pair_of_globals_in_two_occurrences_are_a_loop() {
     assert_eq!(
         **inner,
         DrcLocation::Node {
-            net_name: "vdd!".to_owned()
+            net_name: "vdd!".to_owned(),
+            terminals: Vec::new(),
         }
     );
     // Within the cell the global is touched once, and that is not floating.
@@ -1639,6 +1640,7 @@ fn a_global_touched_once_in_the_design_is_floating() {
     let contract = crate::connectivity_contract::ConnectivityContract::default();
     let vref = DrcLocation::Node {
         net_name: "vref!".to_owned(),
+        terminals: Vec::new(),
     };
 
     // R1 from `in` to `vref!`, and nothing else names `vref!`.
@@ -1686,6 +1688,92 @@ fn a_global_touched_once_in_the_design_is_floating() {
         "{:?}",
         result.violations()
     );
+}
+
+/// A resistor at `x` with one leg wired out to nothing: a node of one
+/// connection that no label names, so the extractor numbers it by where it
+/// is drawn.
+fn stubbed(id: u64, name: &str, x: i32) -> (Component, Wire) {
+    let resistor =
+        Component::new(id, ComponentType::Resistor, Point::new(x, 0)).with_name_value(name, "1k");
+    let leg = terminal_positions_with_hierarchy(&resistor, None)[0].1;
+    let wire = Wire::segment(100 + id, leg, Point::new(leg.x, leg.y - 100));
+    (resistor, wire)
+}
+
+/// A finding on a node the drawing does not name is keyed by what stands on
+/// the node, not by the number the extractor gave it. Placing a part to the
+/// left renumbers every node to its right; a waiver of one node's finding
+/// stays on that node, and covers no other node's.
+#[test]
+fn a_waiver_on_an_unnamed_node_stays_on_its_node_when_the_nodes_are_renumbered() {
+    let check = |parts: Vec<(Component, Wire)>| {
+        let (components, wires) = parts.into_iter().unzip();
+        let drawing = SchematicDocument {
+            components,
+            wires,
+            ..SchematicDocument::default()
+        };
+        let libraries = LibraryCatalog::default();
+        let views = HashMap::<String, SchematicDocument>::new();
+        let hierarchy = HierarchySource::from_workspace(&libraries, &views);
+        run_check_with_hierarchy(
+            &drawing,
+            &hierarchy,
+            DrcConfig {
+                check_missing_ground: false,
+                ..DrcConfig::default()
+            },
+        )
+    };
+    let on = |result: &DrcResult, name: &str| {
+        of_type(result, DrcViolationType::FloatingNode)
+            .into_iter()
+            .find(|finding| finding.related_items == [name])
+            .cloned()
+            .unwrap_or_else(|| panic!("{name}'s stub floats: {:?}", result.violations()))
+    };
+
+    let before = check(vec![stubbed(1, "R1", 400), stubbed(2, "R2", 800)]);
+    let r2 = on(&before, "R2");
+    let mut stored = super::super::DrcWaivers::default();
+    stored
+        .waive(super::super::DrcWaiver {
+            rule: r2.violation_type.rule_code().to_owned(),
+            object: super::super::location_key(&r2.location),
+            reason: "a test point".to_owned(),
+            author: "ana".to_owned(),
+            waived_at_ms: 1,
+        })
+        .expect("a floating node may be waived");
+
+    let mut after = check(vec![
+        stubbed(3, "R0", -400),
+        stubbed(1, "R1", 400),
+        stubbed(2, "R2", 800),
+    ]);
+    super::super::CheckWaivers::for_subject(&stored).apply(&mut after);
+    let waived = of_type(&after, DrcViolationType::FloatingNode)
+        .into_iter()
+        .filter(|finding| finding.waiver.is_some())
+        .map(|finding| finding.related_items.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(waived, [vec!["R2".to_owned()]], "{:?}", after.violations());
+
+    // A waiver an earlier build keyed by the number covers no node at all,
+    // so it is reported rather than following the number.
+    let DrcLocation::Node { net_name, .. } = &r2.location else {
+        panic!("a floating node is located on its node: {:?}", r2.location);
+    };
+    let mut numbered = super::super::DrcWaivers::default();
+    numbered
+        .waive(super::super::DrcWaiver {
+            object: format!("net:{net_name}"),
+            ..stored.entries()[0].clone()
+        })
+        .expect("a floating node may be waived");
+    let numbered = super::super::CheckWaivers::for_subject(&numbered);
+    assert_eq!(numbered.unmatched_in(&after).len(), 1);
 }
 
 /// What the cross-cellview driver rules leave alone: sources on different

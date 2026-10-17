@@ -26,8 +26,10 @@ pub(super) fn diagnostic_location(anchor: &ConnectivityAnchor) -> DrcLocation {
         ConnectivityAnchor::Bus(id) => DrcLocation::Bus { id: *id },
         ConnectivityAnchor::BusTap(id) => DrcLocation::BusTap { id: *id },
         ConnectivityAnchor::NetLabel(name) => DrcLocation::NetLabel { name: name.clone() },
+        // A connectivity finding about a net is about a name it was given.
         ConnectivityAnchor::Net(name) => DrcLocation::Node {
             net_name: name.clone(),
+            terminals: Vec::new(),
         },
     }
 }
@@ -222,7 +224,7 @@ impl DrcChecker {
 
         // Check mutually exclusive driver contracts on the resolved net map.
         if self.config.check_shorted_outputs {
-            self.check_source_to_source(components, &mut result);
+            self.check_source_to_source(components, &net_map, &mut result);
             self.check_shorted_outputs(&net_map, &mut result);
             self.check_duplicate_bus_member_drivers(&net_map, &mut result);
             self.check_undriven_nets(&net_map, &mut result);
@@ -771,9 +773,7 @@ impl DrcChecker {
                         id,
                         DrcViolationType::FloatingNode,
                         format!("Node '{}' has only {} connection(s)", name, connections),
-                        DrcLocation::Node {
-                            net_name: name.clone(),
-                        },
+                        net.location(name),
                     )
                     .with_related(net.connected_components.clone()),
                 );
@@ -789,7 +789,12 @@ impl DrcChecker {
     /// closes a loop is one finding, as it is one refusal there: it names the
     /// sources the loop runs through and stands at the node the closing source
     /// holds against the rest.
-    fn check_source_to_source(&mut self, components: &[ComponentInfo], result: &mut DrcResult) {
+    fn check_source_to_source(
+        &mut self,
+        components: &[ComponentInfo],
+        net_map: &HashMap<String, NetInfo>,
+        result: &mut DrcResult,
+    ) {
         let mut sources = components
             .iter()
             .filter(|component| component.is_voltage_source)
@@ -835,18 +840,18 @@ impl DrcChecker {
                     names.join(", ")
                 )
             };
+            let location = net_map.get(node).map_or_else(
+                || DrcLocation::Node {
+                    net_name: node.to_owned(),
+                    terminals: Vec::new(),
+                },
+                |net| net.location(node),
+            );
             let id = self.next_id();
             self.add_violation(
                 result,
-                DrcViolation::new(
-                    id,
-                    DrcViolationType::SourceToSource,
-                    message,
-                    DrcLocation::Node {
-                        net_name: node.to_owned(),
-                    },
-                )
-                .with_related(names),
+                DrcViolation::new(id, DrcViolationType::SourceToSource, message, location)
+                    .with_related(names),
             );
         }
     }
@@ -882,9 +887,7 @@ impl DrcChecker {
                         drivers.len(),
                         drivers.join(", ")
                     ),
-                    DrcLocation::Node {
-                        net_name: net_name.clone(),
-                    },
+                    net.location(net_name),
                 )
                 .with_related(drivers),
             );
@@ -931,9 +934,7 @@ impl DrcChecker {
                         receivers.len(),
                         receivers.join(", ")
                     ),
-                    DrcLocation::Node {
-                        net_name: name.clone(),
-                    },
+                    net.location(name),
                 )
                 .with_related(receivers.clone()),
             );
@@ -966,9 +967,7 @@ impl DrcChecker {
                         drivers.len(),
                         drivers.join(", ")
                     ),
-                    DrcLocation::Node {
-                        net_name: net.display_name.clone(),
-                    },
+                    net.location(&net.display_name),
                 )
                 .with_related(drivers),
             );

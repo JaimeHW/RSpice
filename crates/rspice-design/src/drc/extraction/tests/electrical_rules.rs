@@ -311,7 +311,8 @@ fn inputs_tied_together_with_nothing_to_drive_them_are_an_undriven_net() {
     assert_eq!(
         undriven[0].location,
         DrcLocation::Node {
-            net_name: "sense".to_owned()
+            net_name: "sense".to_owned(),
+            terminals: Vec::new(),
         }
     );
     assert_eq!(undriven[0].related_items, ["X1.A", "X2.A"]);
@@ -395,7 +396,8 @@ fn an_undriven_net_below_the_subject_is_stated_inside_its_occurrence() {
             "/XP".to_owned(),
             "work/pair/schematic".to_owned(),
             DrcLocation::Node {
-                net_name: "sense".to_owned()
+                net_name: "sense".to_owned(),
+                terminals: Vec::new(),
             }
         )
     );

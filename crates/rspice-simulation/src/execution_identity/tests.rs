@@ -1393,6 +1393,7 @@ fn drc_identity_tags_are_never_renumbered() {
         (
             DrcLocation::Node {
                 net_name: "a".to_owned(),
+                terminals: Vec::new(),
             },
             4,
         ),
@@ -1548,6 +1549,7 @@ fn drc_identity_bytes_are_pinned_for_every_location_kind() {
         (
             DrcLocation::Node {
                 net_name: "vdd!".to_owned(),
+                terminals: Vec::new(),
             },
             Box::new(|bytes: &mut Vec<u8>| {
                 location(bytes, 4);

@@ -341,7 +341,8 @@ fn single_connection_net_is_floating() {
     assert_eq!(
         floating[0].location,
         DrcLocation::Node {
-            net_name: "out".to_string()
+            net_name: "out".to_string(),
+            terminals: Vec::new(),
         }
     );
     // Related items identify the component so the UI can highlight it.
@@ -357,7 +358,8 @@ fn ground_net_is_never_floating() {
     assert_eq!(
         floating[0].location,
         DrcLocation::Node {
-            net_name: "a".to_string()
+            net_name: "a".to_string(),
+            terminals: Vec::new(),
         }
     );
 }
@@ -377,7 +379,8 @@ fn min_connections_config_is_honored() {
     assert_eq!(
         floating[0].location,
         DrcLocation::Node {
-            net_name: "vin".to_string()
+            net_name: "vin".to_string(),
+            terminals: Vec::new(),
         }
     );
 }
@@ -397,7 +400,8 @@ fn two_voltage_sources_across_one_pair_are_source_to_source() {
     assert_eq!(
         shorted[0].location,
         DrcLocation::Node {
-            net_name: "vin".to_string()
+            net_name: "vin".to_string(),
+            terminals: Vec::new(),
         }
     );
     assert_eq!(
@@ -449,7 +453,8 @@ fn a_ring_of_three_sources_is_one_loop() {
     assert_eq!(
         loops[0].location,
         DrcLocation::Node {
-            net_name: "a".to_string()
+            net_name: "a".to_string(),
+            terminals: Vec::new(),
         }
     );
 
