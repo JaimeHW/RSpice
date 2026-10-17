@@ -484,7 +484,7 @@ fn symbol_pin_checks_keep_every_finding_and_log_one_line() {
     );
     let lines: Vec<_> = entries
         .iter()
-        .filter(|entry| entry.message.contains("Symbol pin checks"))
+        .filter(|entry| entry.message.contains("Symbol pin check:"))
         .collect();
     assert_eq!(
         lines.len(),

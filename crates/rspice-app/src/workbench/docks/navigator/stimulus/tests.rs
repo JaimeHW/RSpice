@@ -70,11 +70,10 @@ fn inspector(state: &mut AppState) -> Vec<String> {
 }
 
 /// Whether the console holds a user line containing `fragment`.
-fn console_says(state: &AppState, fragment: &str) -> bool {
+fn prompt_says(state: &AppState, fragment: &str) -> bool {
     state
-        .log_buffer
-        .entries()
-        .any(|entry| entry.message.contains(fragment))
+        .prompt_text()
+        .is_some_and(|prompt| prompt.contains(fragment))
 }
 
 /// The mockup's fourteen definitions, with nothing adopted, in the workspace
@@ -627,7 +626,7 @@ fn place_arms_the_saved_revision_and_warns_about_an_unapplied_draft() {
     assert_eq!(armed.definition(), "sensor_diff_1k");
     assert_eq!(armed.revision(), 1);
     assert!(
-        !console_says(&app.state, "apply the draft first"),
+        !prompt_says(&app.state, "apply the draft first"),
         "a clean definition was warned about"
     );
 
@@ -646,7 +645,7 @@ fn place_arms_the_saved_revision_and_warns_about_an_unapplied_draft() {
         .edit(|working| working.params = "va=9m freq=1k".to_owned());
     stimulus_verbs::place_selected_definition(&mut app.state);
     assert!(
-        console_says(
+        prompt_says(
             &app.state,
             "Placement copies the saved r1 of 'sensor_diff_1k'; apply the draft first"
         ),

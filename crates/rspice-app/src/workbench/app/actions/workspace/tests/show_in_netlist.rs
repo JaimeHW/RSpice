@@ -85,14 +85,8 @@ fn located_instance_state() -> (AppState, u64, u64, u64) {
     (state, source_id, load_id, unmapped_id)
 }
 
-fn last_user_message(state: &AppState) -> String {
-    state
-        .log_buffer
-        .entries()
-        .filter(|entry| entry.source == LogSource::Studio)
-        .last()
-        .map(|entry| entry.message.clone())
-        .unwrap_or_default()
+fn prompt(state: &AppState) -> &str {
+    state.prompt_text().unwrap_or_default()
 }
 
 /// A block has to say which of the three things is missing. One generic
@@ -188,10 +182,7 @@ fn showing_an_instance_opens_the_generated_primary_at_its_card() {
     // the caret request and the cursor have to agree about which card it is.
     assert_eq!(state.ui.netlist.requested_line, Some(3));
     assert_eq!(state.ui.netlist.cursor_line, 2);
-    assert_eq!(
-        last_user_message(&state),
-        "Located instance R1 at generated line 3."
-    );
+    assert_eq!(prompt(&state), "Located instance R1 at generated line 3.");
 }
 
 /// A stale deck still resolves — it is what the project last generated — but
@@ -214,7 +205,7 @@ fn showing_an_instance_from_a_stale_deck_says_so_without_blocking_the_jump() {
 
     assert_eq!(state.ui.netlist.requested_line, Some(2));
     assert_eq!(
-        last_user_message(&state),
+        prompt(&state),
         "Located instance V1 at generated line 2 in a stale deck; regenerating it may move the card."
     );
 }

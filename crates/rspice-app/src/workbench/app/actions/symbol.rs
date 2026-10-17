@@ -1,6 +1,5 @@
 //! App authority, history and publication for symbol editor commands.
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::Point;
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_schematic_editor::symbol_editor::commands::{
@@ -23,7 +22,7 @@ impl RSpiceApp {
         let document = match self.state.load_active_symbol_document() {
             Ok(document) => document,
             Err(error) => {
-                self.state.push_user_message(ConsoleMessage::warning(error));
+                self.state.prompt(error);
                 return;
             }
         };
@@ -38,7 +37,7 @@ impl RSpiceApp {
         let document = match self.state.load_active_symbol_document() {
             Ok(document) => document,
             Err(error) => {
-                self.state.push_user_message(ConsoleMessage::warning(error));
+                self.state.prompt(error);
                 return;
             }
         };
@@ -148,7 +147,7 @@ fn apply_edit_request(state: &mut AppState, request: SymbolEditRequest) {
     let mut document = match state.load_active_symbol_document() {
         Ok(document) => document,
         Err(error) => {
-            state.push_user_message(ConsoleMessage::warning(error));
+            state.prompt(error);
             return;
         }
     };
@@ -159,7 +158,7 @@ fn apply_edit_request(state: &mut AppState, request: SymbolEditRequest) {
         match state.load_active_symbol_editor_metadata(&document) {
             Ok(metadata) => Some(metadata),
             Err(error) => {
-                state.push_user_message(ConsoleMessage::warning(error));
+                state.prompt(error);
                 return;
             }
         }
@@ -183,7 +182,7 @@ fn apply_edit_request(state: &mut AppState, request: SymbolEditRequest) {
             None => state.store_active_symbol_document(&document),
         };
         if let Err(error) = stored {
-            state.push_user_message(ConsoleMessage::warning(error));
+            state.prompt(error);
         }
     }
 }

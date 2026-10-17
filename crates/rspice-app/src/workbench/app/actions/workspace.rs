@@ -7,11 +7,12 @@
 
 mod symbol_document;
 
-use crate::diagnostics::{ConsoleMessage, LogAnchor};
+use crate::diagnostics::{LogAnchor, LogSeverity, LogSource};
 use crate::schematic::view::schematic_symbol_context;
 use crate::state::{
     CellViewRef, ComponentType, OpenCellView, Point, SchematicState, SymbolDocument, View, ViewType,
 };
+use crate::ui::accessibility::counted;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry};
 use crate::workbench::state::WorkspaceDocumentId;
@@ -307,10 +308,10 @@ impl AppState {
                     if !cell_view.key().eq_ignore_ascii_case(
                         &self.workspace.content.active_schematic_reference().key(),
                     ) {
-                        self.push_user_message(ConsoleMessage::warning(format!(
+                        self.prompt(format!(
                             "{} could not be opened, so the finding was not followed.",
                             cell_view.display_path()
-                        )));
+                        ));
                         return;
                     }
                 }
@@ -353,9 +354,7 @@ impl AppState {
                     self.workbench
                         .activate(crate::workbench::state::Workspace::Results);
                 } else {
-                    self.push_user_message(ConsoleMessage::warning(Self::retired_run_message(
-                        run_sequence,
-                    )));
+                    self.prompt(Self::retired_run_message(run_sequence));
                 }
             }
         }
@@ -424,8 +423,7 @@ impl AppState {
     /// for the same condition, and for the same reason: the map that would
     /// find these conductors describes a drawing that has since changed, so
     /// pointing anywhere would be pointing at where a wire used to be. The
-    /// answer goes to the console because that is where the row the author
-    /// clicked lives.
+    /// answer is a prompt, because it answers the gesture that asked.
     pub(crate) fn highlight_failed_run_sites(
         &mut self,
         nets: &[String],
@@ -433,22 +431,22 @@ impl AppState {
     ) -> bool {
         match crate::schematic::view::select_failure_sites(self, nets, devices) {
             Ok(selection) if selection.is_empty() => {
-                self.push_sim_message(ConsoleMessage::warning(format!(
+                self.prompt(format!(
                     "This sheet draws none of the objects that run named ({}).",
                     selection.unlocated.join(", ")
-                )));
+                ));
                 false
             }
             Ok(selection) => {
                 self.workbench
                     .activate(crate::workbench::state::Workspace::Design);
                 if !selection.unlocated.is_empty() {
-                    self.push_sim_message(ConsoleMessage::warning(format!(
+                    self.prompt(format!(
                         "Marked {} of {} objects; this sheet does not draw {}.",
                         selection.nets.len() + selection.devices.len(),
                         nets.len() + devices.len(),
                         selection.unlocated.join(", ")
-                    )));
+                    ));
                 }
                 true
             }
@@ -459,7 +457,7 @@ impl AppState {
                     .map(String::as_str)
                     .collect::<Vec<_>>()
                     .join(", ");
-                self.push_sim_message(ConsoleMessage::warning(error.message(&named)));
+                self.prompt(error.message(&named));
                 false
             }
         }
@@ -587,18 +585,33 @@ impl AppState {
         {
             return;
         }
-        match self.workspace.restore_pending_annotation(&self.library_manager) {
+        match self
+            .workspace
+            .restore_pending_annotation(&self.library_manager)
+        {
             Ok(count) => {
                 if let Some(schematic) = self.workspace.active_context_schematic() {
                     self.schematic = schematic.clone_editor();
                 }
-                self.push_user_message(ConsoleMessage::info(format!(
-                    "Reference annotation recovery completed ({count} component(s) updated)."
-                )));
+                self.record(
+                    LogSeverity::Info,
+                    LogSource::Studio,
+                    format!(
+                        "Reference annotation recovery completed: {}.",
+                        counted(count, "component updated", "components updated")
+                    ),
+                );
             }
-            Err(error) if error != previous_error => self.push_user_message(ConsoleMessage::error(format!(
-                "Reference annotation recovery still needs correction: {error}. Recovered documents were preserved."
-            ))),
+            Err(error) if error != previous_error => {
+                self.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    format!(
+                        "Reference annotation recovery still needs correction: {error}. \
+                         Recovered documents were preserved."
+                    ),
+                );
+            }
             Err(_) => {}
         }
     }
@@ -638,9 +651,11 @@ impl AppState {
         {
             Ok(receipt) => receipt,
             Err(error) => {
-                self.push_user_message(ConsoleMessage::warning(format!(
-                    "Sheet membership could not be updated: {error}"
-                )));
+                self.record(
+                    LogSeverity::Warning,
+                    LogSource::Studio,
+                    format!("Sheet membership could not be updated: {error}"),
+                );
                 return;
             }
         };
@@ -673,10 +688,10 @@ impl AppState {
         } else {
             "connections"
         };
-        self.push_user_message(ConsoleMessage::warning(format!(
+        self.prompt(format!(
             "Undo restores {removed_ports} cross-sheet {subject} dropped with the objects they \
              anchor to."
-        )));
+        ));
     }
 
     /// Keep the active cell's generated "symbol" view in step with its
@@ -748,7 +763,7 @@ impl AppState {
             }
         };
         if let Some(error) = symbol_error {
-            self.push_user_message(ConsoleMessage::warning(error));
+            self.record(LogSeverity::Warning, LogSource::Studio, error);
         }
     }
 
@@ -796,10 +811,7 @@ impl AppState {
         self.schematic = schematic_for_workspace(self, &schematic_reference);
         self.bump_active_schematic_epoch();
         self.refresh_active_design_check_projection();
-        self.push_user_message(ConsoleMessage::info(format!(
-            "Opened {}",
-            reference.display_path()
-        )));
+        self.prompt(format!("Opened {}.", reference.display_path()));
     }
 
     /// Descend into a hierarchical instance: open its master and record the
@@ -830,10 +842,7 @@ impl AppState {
         self.schematic = schematic_for_workspace(self, &schematic_reference);
         self.bump_active_schematic_epoch();
         self.refresh_active_design_check_projection();
-        self.push_user_message(ConsoleMessage::info(format!(
-            "Entered {}",
-            reference.display_path()
-        )));
+        self.prompt(format!("Entered {}.", reference.display_path()));
     }
 
     /// Take a deleted cell out of every workspace collection that named it.
@@ -1882,8 +1891,8 @@ impl AppState {
         );
     }
 
-    /// Refuse an edit on a read-only view, with the console line that names
-    /// the library. Returns true when the edit must be blocked.
+    /// Refuse an edit on a read-only view, with a prompt that names the
+    /// library. Returns true when the edit must be blocked.
     pub(crate) fn deny_read_only_edit(&mut self) -> bool {
         if !self.schematic_edit_read_only() {
             return false;
@@ -1907,7 +1916,7 @@ impl AppState {
         } else {
             "The active schematic is read-only; no design data was changed.".to_owned()
         };
-        self.push_user_message(ConsoleMessage::warning(message));
+        self.prompt(message);
         true
     }
 
@@ -2081,9 +2090,7 @@ impl AppState {
             return;
         }
         let Some((instance_name, reference)) = self.selected_hierarchy_master() else {
-            self.push_user_message(ConsoleMessage::warning(
-                "Select one instance with a resolved schematic master first",
-            ));
+            self.prompt("Select one instance with a resolved schematic master first.");
             return;
         };
         if self.hierarchical_edit_in_place_enabled() {
@@ -2105,8 +2112,8 @@ impl AppState {
     /// [`Self::open_selected_instance_master`] opens its schematic master.
     ///
     /// The Netlist workspace, the generated primary document and the caret
-    /// move as one transaction, and the console states where the instance was
-    /// found. The schematic selection is deliberately left alone: the netlist
+    /// move as one transaction, and the status bar states where the instance
+    /// was found. The schematic selection is deliberately left alone: the netlist
     /// navigator's reveal reads it to bring the round trip back.
     pub(crate) fn show_selected_instance_in_netlist(&mut self) {
         let Ok(location) = selected_instance_generated_line(self) else {
@@ -2130,7 +2137,7 @@ impl AppState {
                 ("line", &location.line.to_string()),
             ],
         );
-        self.push_user_message(ConsoleMessage::info(announced));
+        self.prompt(announced);
     }
 }
 

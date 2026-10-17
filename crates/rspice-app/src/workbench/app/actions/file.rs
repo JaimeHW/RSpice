@@ -3,7 +3,7 @@
 //! New, open, save, and the recent-files list, including the confirmation
 //! flow that runs first when the current document has unsaved changes.
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app::{ConfirmationAction, ConfirmationResponse, RSpiceApp};
 
 impl RSpiceApp {
@@ -95,10 +95,12 @@ impl RSpiceApp {
                     && let Err(error) =
                         crate::workbench::documents::model_editor::save_open_candidate(self)
                 {
-                    self.state.push_user_message(
-                        crate::diagnostics::ConsoleMessage::error(format!(
+                    self.state.record(
+                        LogSeverity::Error,
+                        LogSource::Studio,
+                        format!(
                             "The pending action remains blocked because the model candidate could not be saved: {error}"
-                        )),
+                        ),
                     );
                     self.state.dialogs.confirmation_dialog.visible = pending.is_some();
                     self.state.dialogs.confirmation_dialog.pending_action = pending;
@@ -151,10 +153,10 @@ impl RSpiceApp {
                         }
                     }
                     crate::workbench::workflows::project_workflow::SaveRequestOutcome::CopyOnly => {
-                        self.state.push_user_message(
-                            crate::diagnostics::ConsoleMessage::warning(
-                                "Downloaded a copy, but no canonical save completed. The pending action was not authorized and unsaved work remains open."
-                            ),
+                        self.state.record(
+                            LogSeverity::Warning,
+                            LogSource::Studio,
+                            "Downloaded a copy, but the project itself was not saved. The pending action did not continue and unsaved work remains open.",
                         );
                         self.state.dialogs.confirmation_dialog.visible = pending.is_some();
                         self.state.dialogs.confirmation_dialog.pending_action = pending;
@@ -202,21 +204,22 @@ impl RSpiceApp {
                 .dialogs
                 .confirmation_dialog
                 .restore_continuation_for_review(pending);
-            self.state.push_user_message(
-                crate::diagnostics::ConsoleMessage::warning(
-                    "The requested snapshot was saved, but newer edits were made while the browser file surface was pending. Review and save those edits before continuing.",
-                ),
+            self.state.record(
+                LogSeverity::Warning,
+                LogSource::Studio,
+                "The project was saved, but edits made while the browser save was pending are not in it. Review and save them before continuing.",
             );
         } else {
             self.state
                 .dialogs
                 .confirmation_dialog
                 .restore_continuation_for_review(pending);
-            if let Some(message) = event.failure_message() {
-                self.state
-                    .push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                        message.to_owned(),
-                    ));
+            // The save path has already recorded why the save did not
+            // complete; this answers only for the action that waited on it.
+            if event.failure_message().is_some() {
+                self.state.prompt(
+                    "The pending action did not continue because the project was not saved.",
+                );
             }
         }
     }
@@ -225,10 +228,12 @@ impl RSpiceApp {
         if self.state.workbench.model_editor_has_unsaved_changes()
             && let Err(error) = crate::workbench::documents::model_editor::save_open_candidate(self)
         {
-            self.state.push_user_message(
-                crate::diagnostics::ConsoleMessage::error(format!(
+            self.state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!(
                     "The project remains open because the model candidate could not be saved: {error}"
-                )),
+                ),
             );
             return;
         }
@@ -250,10 +255,10 @@ impl RSpiceApp {
                 );
             }
             crate::workbench::workflows::project_workflow::SaveRequestOutcome::CopyOnly => {
-                self.state.push_user_message(
-                    crate::diagnostics::ConsoleMessage::warning(
-                        "A project copy was downloaded, but canonical Save all did not complete. The project remains open with its working changes.",
-                    ),
+                self.state.record(
+                    LogSeverity::Warning,
+                    LogSource::Studio,
+                    "A project copy was downloaded, but Save all did not complete. The project remains open with its working changes.",
                 );
             }
             crate::workbench::workflows::project_workflow::SaveRequestOutcome::CopyPending
@@ -345,8 +350,8 @@ impl RSpiceApp {
     }
 
     /// Internal: actually open a recent file (after any confirmation).
-    /// Entries whose file vanished are dropped from the list with a console
-    /// note instead of failing silently.
+    /// Entries whose file vanished are dropped from the list with a Console
+    /// line instead of failing silently.
     fn do_open_recent(
         &mut self,
         path: std::path::PathBuf,
@@ -356,11 +361,14 @@ impl RSpiceApp {
 
         if !path.exists() {
             self.state.recent_files.retain(|r| r.path != path);
-            self.state
-                .push_user_message(ConsoleMessage::warning(format!(
-                    "File no longer exists: {}",
+            self.state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!(
+                    "Could not open {}: the file no longer exists.",
                     path.display()
-                )));
+                ),
+            );
             return;
         }
 
@@ -380,9 +388,9 @@ impl RSpiceApp {
                 }
                 #[cfg(target_arch = "wasm32")]
                 {
-                    self.state.push_user_message(ConsoleMessage::warning(
-                        "Browser projects must be reopened through Open project so file permission can be verified",
-                    ));
+                    self.state.prompt(
+                        "Browser projects must be reopened through Open project so file permission can be verified.",
+                    );
                     false
                 }
             }

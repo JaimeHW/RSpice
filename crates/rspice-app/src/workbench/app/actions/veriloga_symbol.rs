@@ -6,7 +6,6 @@
 //! definition makes. Pins the module no longer declares stay for the author
 //! to remove, because removing one would disconnect whatever is wired to it.
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::CellViewRef;
 use crate::workbench::app_state::{AppState, publish_symbol_definition_candidate};
 use crate::workbench::documents::code_workspace::{
@@ -17,16 +16,14 @@ impl AppState {
     /// Update the open Verilog-A view's symbol, and say what happened.
     pub(crate) fn update_active_veriloga_symbol(&mut self) {
         let reference = self.workspace.content.active_view.clone();
-        let message = match self.update_veriloga_symbol(&reference) {
-            Ok(summary) => ConsoleMessage::info(summary),
-            Err(error) => ConsoleMessage::warning(error),
-        };
-        self.push_user_message(message);
+        match self.update_veriloga_symbol(&reference) {
+            Ok(message) | Err(message) => self.prompt(message),
+        }
     }
 
     /// Reconcile the hand-edited symbol of the cell owning the Verilog-A view
     /// at `reference` with the module's ports, as one undo step. Returns the
-    /// console line describing what changed.
+    /// sentence describing what changed.
     pub(crate) fn update_veriloga_symbol(
         &mut self,
         reference: &CellViewRef,
