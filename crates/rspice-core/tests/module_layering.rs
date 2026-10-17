@@ -114,7 +114,9 @@ const LAYERS: &[(&str, u32)] = &[
     // error taxonomy from reaching up into the orchestration layer.
     ("identity", 0),
     // Which run a log record belongs to. It names nothing in the crate: the
-    // analyses that hand work to another thread read down into it.
+    // analyses that hand work to another thread read down into it, and so
+    // does `notice`, whose collector rides in the scope as an opaque value
+    // that `notice` alone sets and downcasts.
     ("log_scope", 0),
     // SPICE RAW waveform files, read and written. A leaf by construction:
     // `raw_export` names nothing in the crate at all and the reader needs only
@@ -142,6 +144,15 @@ const LAYERS: &[(&str, u32)] = &[
     // values, unaligned tails and convergence policy. Numerics stays independent
     // of the accelerator so native and browser fallbacks have the same meaning.
     ("simd", 2),
+    // What a run raised and went on to complete with: the parameters the
+    // device models clamp, the convergence aids that solved, the timestep
+    // floor the transient stepper was held at. The device models record into
+    // it, so it sits below them, and it owns the `ContinuationAid` vocabulary
+    // its convergence notice carries rather than reaching up into `analysis`
+    // for it; `analysis::error` re-exports the aid for the failure that names
+    // it. It reads `log_scope` and `numerics`, and shares rank 2 with `simd`
+    // because neither references the other.
+    ("notice", 2),
     // Simulation configuration. Below the solver, the device models and the
     // circuit store, all of which read a tolerance or a dialect flag and used
     // to reach up into `engine` to do it.
