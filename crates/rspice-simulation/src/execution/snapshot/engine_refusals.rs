@@ -9,7 +9,6 @@
 //! circuit — or the build's own error — says what the engine will refuse.
 //! Nothing is solved.
 
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use rspice_core::circuit::DcBranchVoltageLoop;
@@ -120,14 +119,12 @@ enum DeckVerdict {
 
 /// What makes two dispatched decks one build: the source, and the
 /// temperature it is built at ([`RunTemperature::key`]).
-type DeckKey<'a> = (Cow<'a, str>, (u8, u64));
+type DeckKey<'a> = (&'a str, (u8, u64));
 
-/// One deck a task dispatches, and the label it is dispatched under. Borrowed
-/// from the snapshot unless the task composes it.
+/// The deck a task dispatches, and the temperature the runner applies to it.
 struct DispatchedDeck<'a> {
-    source: Cow<'a, str>,
+    source: &'a str,
     temperature: RunTemperature,
-    label: String,
 }
 
 impl PreparedRunSnapshot {
@@ -169,26 +166,29 @@ impl PreparedRunSnapshot {
         }
 
         // Every deck every task dispatches, in dispatch order, so the pass can
-        // say how many it builds before it builds the first.
-        let mut dispatched = Vec::new();
-        for task in &self.tasks {
-            if matches!(task.task.spec, AnalysisSpec::Fft { .. }) {
-                // A recorded FFT transforms its producer's waveform and builds
-                // no circuit of its own.
-                continue;
-            }
-            if abort.is_aborted() {
-                return Vec::new();
-            }
-            dispatched.extend(
-                self.dispatched_decks(task, abort)
-                    .into_iter()
-                    .map(|deck| (task, deck)),
-            );
-        }
+        // say how many it builds before it builds the first. A recorded FFT
+        // transforms its producer's waveform and builds no circuit of its own.
+        // A corner run or temperature step whose points were expanded is not
+        // dispatched either: its turn assembles the results of its points,
+        // which are the solves (`PointFamilyRegistry::declares`).
+        let declarations: HashSet<AnalysisInstanceId> = self
+            .tasks
+            .iter()
+            .filter(|task| task.declared_point.is_some())
+            .map(|task| task.authored_instance_id)
+            .collect();
+        let dispatched: Vec<(&PreparedTask, DispatchedDeck<'_>)> = self
+            .tasks
+            .iter()
+            .filter(|task| {
+                !matches!(task.task.spec, AnalysisSpec::Fft { .. })
+                    && !declarations.contains(&task.instance_id)
+            })
+            .map(|task| (task, self.dispatched_deck(task)))
+            .collect();
         let total = dispatched
             .iter()
-            .map(|(_, deck)| (deck.source.as_ref(), deck.temperature.key()))
+            .map(|(_, deck)| (deck.source, deck.temperature.key()))
             .collect::<HashSet<_>>()
             .len();
         let mut built = 0;
@@ -211,10 +211,7 @@ impl PreparedRunSnapshot {
             let Some(verdict) = verdict else {
                 continue;
             };
-            let refused = RefusedTask {
-                analysis: task.authored_instance_id,
-                label: deck.label,
-            };
+            let refused = refused_task(task);
             for kind in task_refusals(task, verdict) {
                 record(&mut refusals, kind, &refused);
             }
@@ -222,12 +219,11 @@ impl PreparedRunSnapshot {
         refusals
     }
 
-    /// The decks one task's engine calls build, as the runner composes them.
-    fn dispatched_decks<'a>(
-        &'a self,
-        task: &'a PreparedTask,
-        abort: &dyn rspice_core::abort_signal::AbortSignal,
-    ) -> Vec<DispatchedDeck<'a>> {
+    /// The deck one task's engine call builds, as the runner composes it: the
+    /// deck the task's preparation composed for it, where it composed one,
+    /// else the run's. A declared corner point's deck already carries its
+    /// process's cards, and the runner adds none.
+    fn dispatched_deck<'a>(&'a self, task: &'a PreparedTask) -> DispatchedDeck<'a> {
         let source = task
             .executable_netlist_override
             .as_deref()
@@ -243,36 +239,10 @@ impl PreparedRunSnapshot {
             (_, Some(environment)) => RunTemperature::Point(environment.temperature_celsius),
             (_, None) => RunTemperature::Deck,
         };
-        // A corner study composes each corner's deck itself, from the cards
-        // its contract carries, and builds each one.
-        if let Some(corner) = task
-            .task
-            .spec_options
-            .corner
-            .as_ref()
-            .filter(|corner| !corner.model_bindings.is_empty())
-        {
-            return corner
-                .process_corners
-                .iter()
-                .filter_map(|&process| {
-                    crate::netlist_preparation::materialize_corner_process_source(
-                        source, corner, process, abort,
-                    )
-                    .ok()
-                    .map(|source| DispatchedDeck {
-                        source: Cow::Owned(source),
-                        temperature,
-                        label: format!("{} \u{00b7} {}", task.label, process.short_name()),
-                    })
-                })
-                .collect();
-        }
-        vec![DispatchedDeck {
-            source: Cow::Borrowed(source),
+        DispatchedDeck {
+            source,
             temperature,
-            label: task.label.clone(),
-        }]
+        }
     }
 
     /// Parse and build one deck exactly as the runner does, without solving.

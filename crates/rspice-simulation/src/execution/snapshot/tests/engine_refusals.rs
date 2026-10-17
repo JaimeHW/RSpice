@@ -202,6 +202,72 @@ X1 d cell\n\
     );
 }
 
+/// A corner run's points dispatch the decks their preparation composed, each
+/// with its own process's binned cards, and the engine builds exactly those;
+/// the declaration assembles the points' results and never reaches it, so it
+/// is not built. A device every process's bins cover is refused nowhere, as a
+/// second copy of a point's cards, which overlaps its bins, would refuse it.
+#[test]
+fn a_corner_run_is_built_as_its_points_dispatch_it() {
+    use crate::netlist_preparation::{REFERENCE_MODEL_BINDING_BEGIN, REFERENCE_MODEL_BINDING_END};
+
+    let cards = |vto: &str| {
+        format!(
+            ".model nch.1 nmos level=1 lmin=0.1u lmax=1u wmin=0.1u wmax=100u vto={vto}\n\
+             .model nch.2 nmos level=1 lmin=1u lmax=10u wmin=0.1u wmax=100u vto={vto}"
+        )
+    };
+    let binding = |process: ProcessCorner, vto: &str| rspice_model_library::CornerModelBinding {
+        process,
+        source_label: format!("corners.lib [{}]", process.short_name()),
+        section: Some(process.short_name().to_owned()),
+        materialized_model_cards: cards(vto),
+    };
+    let mut corners = corner_task(
+        vec![ProcessCorner::SS, ProcessCorner::FF],
+        vec![1.0],
+        vec![27.0],
+        true,
+    );
+    corners
+        .spec_options
+        .corner
+        .as_mut()
+        .expect("a corner task carries its contract")
+        .model_bindings = vec![
+        binding(ProcessCorner::SS, "0.55"),
+        binding(ProcessCorner::FF, "0.45"),
+    ];
+    let mut run = parts();
+    run.executable_netlist = format!(
+        "corner devices\nVDD d 0 1\nVG g 0 1\nM1 d g 0 0 nch L=0.5u W=10u\n\
+         {REFERENCE_MODEL_BINDING_BEGIN} 2\n{}\n{REFERENCE_MODEL_BINDING_END}\n.op\n.end\n",
+        cards("0.5")
+    );
+    run.tasks = vec![prepared("corners", "Corner run", corners)];
+    let snapshot = PreparedRunSnapshot::new(run).expect("every corner's deck is covered");
+    assert_eq!(
+        snapshot
+            .tasks
+            .iter()
+            .filter(|task| task.declared_point.is_some())
+            .count(),
+        2,
+        "one point per process"
+    );
+
+    let progress = std::cell::Cell::new(DeckBuildProgress::default());
+    let refusals =
+        snapshot.engine_refusals_reporting(&rspice_core::NoAbort, &|now| progress.set(now));
+
+    assert!(refusals.is_empty(), "{refusals:#?}");
+    assert_eq!(
+        progress.get(),
+        DeckBuildProgress { built: 2, total: 2 },
+        "one deck per point, and none for the declaration"
+    );
+}
+
 /// A mixed-discipline connection is bridged by the connect module the builder
 /// inserts, so drawing none is normal. Connect rules that cannot settle the
 /// boundary are the builder's refusal, and that is what is stated.
