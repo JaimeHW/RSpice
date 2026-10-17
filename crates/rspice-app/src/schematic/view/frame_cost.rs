@@ -8,6 +8,15 @@
 //!
 //! `cargo test -p rspice-app --lib --release -- --ignored --exact
 //! schematic::view::frame_cost::canvas_frame_cost_at_scale --nocapture`
+//!
+//! The browser build is held to the same budgets. Its shipping profile is
+//! `web-release`, and the probe runs there under Node through
+//! `wasm-bindgen-test-runner`:
+//!
+//! `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner
+//! cargo test -p rspice-app --lib --profile web-release
+//! --target wasm32-unknown-unknown -- schematic::view::frame_cost
+//! --include-ignored --nocapture`
 
 use std::collections::HashMap;
 
@@ -826,6 +835,21 @@ fn site_cost_table() -> String {
         )
         .collect();
     let (circles, tessellate_ms) = idle_frame_circles_and_tessellation();
+    // What an idle Select frame does with the pointer over the sheet: pick
+    // the object under it, and outline every object off the sheet.
+    let pick_ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&pick_ctx);
+    let pointer_view = rspice_schematic_editor::view::tool_input::ToolPointerView {
+        design: super::schematic_design_view(state),
+        snap_engine: &state.schematic.session.editor.snap_engine,
+        can_edit: true,
+    };
+    let overflow = super::drawing_sheet::drawing_sheet_overflow_summary(state, &symbols, &sheet);
+    let overflow_painter = egui::Painter::new(
+        pick_ctx.clone(),
+        egui::LayerId::background(),
+        viewport.bounds,
+    );
     // Every wire the active sheet draws, in plain ink, as the canvas groups
     // them at fit.
     let chain_groups = vec![(
@@ -878,6 +902,36 @@ fn site_cost_table() -> String {
                 super::drawing_sheet::drawing_sheet_overflow_summary(state, &symbols, &sheet)
                     .items
                     .len()
+            }),
+        ),
+        (
+            "overflow advisories drawn, held",
+            site_ms(|| {
+                rspice_schematic_editor::view::drawing_sheet::draw_overflow_advisories(
+                    &overflow_painter,
+                    viewport.bounds,
+                    &viewport,
+                    &overflow,
+                );
+                overflow.items.len()
+            }),
+        ),
+        (
+            "object under the pointer, Select hover",
+            site_ms(|| {
+                let query = pointer_view.selection_query(&viewport, pointer);
+                usize::from(
+                    rspice_schematic_editor::view::pointer_target::pointer_target(
+                        &pointer_view.design,
+                        query,
+                        state.ui.schematic_selection_filter,
+                        &symbols,
+                        &pick_ctx,
+                        &viewport,
+                        || state.workspace.content.active_view.display_path(),
+                    )
+                    .is_some(),
+                )
             }),
         ),
         (
@@ -958,7 +1012,10 @@ fn site_cost_table() -> String {
 /// one function, so the probe holds one suppression.
 #[allow(clippy::print_stdout)]
 fn report(table: &str) {
+    #[cfg(not(target_arch = "wasm32"))]
     println!("{table}");
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen_test::console_log!("{table}");
 }
 
 /// One idle Select frame over the fitted sheet: how many circles it paints
@@ -994,10 +1051,12 @@ fn idle_frame_circles_and_tessellation() -> (usize, f64) {
     (circles, tessellate_ms)
 }
 
-/// Desktop release budgets: idle hover under 4 ms; the move preview, Stretch
-/// and the operating-point overlay under 8 ms. Every scenario is printed
+/// Release budgets, on desktop and in the browser alike: idle hover under
+/// 4 ms; the move preview, Stretch and the operating-point overlay under
+/// 8 ms. Every scenario is printed
 /// before any budget is asserted, so a failing run still reports them all.
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[ignore = "frame-cost probe"]
 fn canvas_frame_cost_at_scale() {
     use std::fmt::Write as _;
