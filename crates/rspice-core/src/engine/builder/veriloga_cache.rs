@@ -2883,7 +2883,7 @@ fn register_project_veriloga_runtimes_for_session_with_limit(
     registrations: impl IntoIterator<Item = ProjectVerilogARuntimeRegistration>,
     max_shared_cache_bytes: usize,
 ) -> Result<(), String> {
-    register_project_veriloga_sources_for_session_with_limits(
+    install_project_veriloga_sources(
         registrations
             .into_iter()
             .map(ProjectVerilogASourceRegistration::Runtime),
@@ -2891,29 +2891,9 @@ fn register_project_veriloga_runtimes_for_session_with_limit(
             max_shared_cache_bytes,
             ..Default::default()
         },
+        false,
     )
-}
-
-/// Atomically register sealed device and connection-library sources. Both kinds
-/// share key/alias collision checks and the existing bounded in-memory cache.
-#[cfg(feature = "veriloga")]
-pub fn register_project_veriloga_sources_for_session(
-    registrations: impl IntoIterator<Item = ProjectVerilogASourceRegistration>,
-) -> Result<(), String> {
-    register_project_veriloga_sources_for_session_with_limits(
-        registrations,
-        ResourceLimits::default(),
-    )
-}
-
-/// Register the complete source set with caller-selected source/cache limits.
-/// Validation, collision and budget failures leave the installed set unchanged.
-#[cfg(feature = "veriloga")]
-pub fn register_project_veriloga_sources_for_session_with_limits(
-    registrations: impl IntoIterator<Item = ProjectVerilogASourceRegistration>,
-    limits: ResourceLimits,
-) -> Result<(), String> {
-    install_project_veriloga_sources(registrations, limits, false).map(drop)
+    .map(drop)
 }
 
 /// Sealed Verilog-A sources an execution installed, held in the shared cache
@@ -2947,8 +2927,13 @@ impl Drop for HeldVerilogASources {
     }
 }
 
-/// [`register_project_veriloga_sources_for_session_with_limits`], holding
-/// every installed source until the returned value is dropped.
+/// Atomically install sealed device and connection-library sources under
+/// caller-selected source and cache limits, holding every installed source
+/// until the returned value is dropped.
+///
+/// Both kinds share key and alias collision checks and the bounded in-memory
+/// cache. Validation, collision and budget failures leave the installed set
+/// unchanged.
 #[cfg(feature = "veriloga")]
 pub fn hold_project_veriloga_sources_for_session(
     registrations: impl IntoIterator<Item = ProjectVerilogASourceRegistration>,

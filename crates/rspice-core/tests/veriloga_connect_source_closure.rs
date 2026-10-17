@@ -463,8 +463,7 @@ fn source_qualified_configuration_resolves_duplicate_names_after_virtual_remappi
 fn standalone_virtual_connections_register_atomically_with_devices() {
     use rspice_core::{
         ProjectVerilogAConnectionLibraryRegistration, ProjectVerilogASourceRegistration as Source,
-        ResourceLimits, register_project_veriloga_sources_for_session,
-        register_project_veriloga_sources_for_session_with_limits,
+        ResourceLimits, hold_project_veriloga_sources_for_session,
     };
     let compiler = VerilogACompiler::new(CompilerOptions {
         enable_ams: true,
@@ -509,7 +508,9 @@ fn standalone_virtual_connections_register_atomically_with_devices() {
         Source::Runtime(device.clone()),
         Source::Connections(library.clone()),
     ];
-    register_project_veriloga_sources_for_session(sources.clone()).unwrap();
+    let installed =
+        hold_project_veriloga_sources_for_session(sources.clone(), ResourceLimits::default())
+            .unwrap();
     let deck = |name: &str| {
         Netlist::parse(&format!("* standalone virtual library\nV1 p 0 1\nX1 p q DRIVER\n.va \"{}\" DRIVER\n.va \"{}\" CONNECTIONS\n.options connectrules={name} connectrules_source=connections\n.end\n", device_key.display(), library_key.display())).unwrap()
     };
@@ -531,19 +532,20 @@ fn standalone_virtual_connections_register_atomically_with_devices() {
         );
     };
     assert_output("Low", 1.0);
+    // Released, both entries stay installed until an install evicts them, so
+    // the refused installs below are what must leave them in place.
+    drop(installed);
 
     let mut limits = ResourceLimits::default();
     limits.max_shared_cache_bytes = 1;
-    let error = register_project_veriloga_sources_for_session_with_limits(sources.clone(), limits)
-        .unwrap_err();
+    let error = hold_project_veriloga_sources_for_session(sources.clone(), limits).unwrap_err();
     assert!(
         error.contains("shared_cache_bytes limit exceeded"),
         "{error}"
     );
     let mut limits = ResourceLimits::default();
     limits.max_expanded_source_bytes = 1;
-    let error =
-        register_project_veriloga_sources_for_session_with_limits(sources, limits).unwrap_err();
+    let error = hold_project_veriloga_sources_for_session(sources, limits).unwrap_err();
     assert!(
         error.contains("expanded_source_bytes limit exceeded"),
         "{error}"
@@ -552,10 +554,10 @@ fn standalone_virtual_connections_register_atomically_with_devices() {
     collision.source_key = library_key.clone();
     let mut pending = device;
     pending.source_key = PathBuf::from(format!("{source_prefix}/pending.vams"));
-    let error = register_project_veriloga_sources_for_session(vec![
-        Source::Runtime(pending.clone()),
-        Source::Runtime(collision),
-    ])
+    let error = hold_project_veriloga_sources_for_session(
+        vec![Source::Runtime(pending.clone()), Source::Runtime(collision)],
+        ResourceLimits::default(),
+    )
     .unwrap_err();
     assert!(error.contains("differing installed artifact"), "{error}");
     let pending_deck = Netlist::parse(&format!(

@@ -201,8 +201,14 @@ use rspice_core::analysis::harmonic_balance::{
 // read the Verilog-A directives the library sections a process selects carry,
 // each with the file that wrote it, so a corner's deck installs its own
 // sections' runtimes and never another section's.
-// The census is 5,737, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5737;
+// The census was 5,737, with no slack.
+// Two statements are removed: `register_project_veriloga_sources_for_session`
+// and its `_with_limits` form, which installed sealed sources without holding
+// them. Nothing outside the core called them, and a caller that did would
+// leave what it installed for the next install to evict before it built;
+// the core's integration tests install through the hold instead.
+// The census is 5,735, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5735;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

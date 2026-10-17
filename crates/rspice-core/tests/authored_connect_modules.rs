@@ -867,7 +867,8 @@ fn deck_reconfigures_registered_specializations_without_resetting_root_assignmen
 fn sealed_hierarchy_rebinds_selected_libraries_without_filesystem_sources() {
     use rspice_core::{
         ProjectVerilogAConnectionLibraryRegistration, ProjectVerilogARuntimeRegistration,
-        ProjectVerilogASourceRegistration, register_project_veriloga_sources_for_session,
+        ProjectVerilogASourceRegistration, ResourceLimits,
+        hold_project_veriloga_sources_for_session,
     };
     use rspice_veriloga::{
         CompilerOptions, NoPipelineControl, VerilogACompiler, VirtualCompileLimits,
@@ -914,21 +915,24 @@ fn sealed_hierarchy_rebinds_selected_libraries_without_filesystem_sources() {
     let device_key = std::path::PathBuf::from(format!("{prefix}/top.vams"));
     let library_key = std::path::PathBuf::from(format!("{prefix}/rules.vams"));
     assert!(!device_key.exists() && !library_key.exists());
-    register_project_veriloga_sources_for_session(vec![
-        ProjectVerilogASourceRegistration::Runtime(ProjectVerilogARuntimeRegistration {
-            source_key: device_key.clone(),
-            aliases: vec!["top".into()],
-            model: runtime.model,
-            canonical_ir: runtime.canonical_ir,
-        }),
-        ProjectVerilogASourceRegistration::Connections(
-            ProjectVerilogAConnectionLibraryRegistration {
-                source_key: library_key.clone(),
-                aliases: vec!["rules".into()],
-                artifact: library,
-            },
-        ),
-    ])
+    let _installed = hold_project_veriloga_sources_for_session(
+        vec![
+            ProjectVerilogASourceRegistration::Runtime(ProjectVerilogARuntimeRegistration {
+                source_key: device_key.clone(),
+                aliases: vec!["top".into()],
+                model: runtime.model,
+                canonical_ir: runtime.canonical_ir,
+            }),
+            ProjectVerilogASourceRegistration::Connections(
+                ProjectVerilogAConnectionLibraryRegistration {
+                    source_key: library_key.clone(),
+                    aliases: vec!["rules".into()],
+                    artifact: library,
+                },
+            ),
+        ],
+        ResourceLimits::default(),
+    )
     .unwrap();
     for (block, expected) in [("high", 2.0), ("low", 2.0 / 3.0), ("high", 2.0)] {
         let deck=Netlist::parse(&format!("* sealed hierarchy\n.options connectrules={block} connectrules_source=rules\n.va \"{}\" top\n.va \"{}\" rules\nX1 p top\nRp p 0 1k\n.end\n",device_key.display(),library_key.display())).unwrap();

@@ -19,7 +19,6 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use rspice_core::{
     Engine, Netlist, ProjectVerilogARuntimeRegistration, ProjectVerilogASourceRegistration,
     ResourceLimits, SimulationConfig, hold_project_veriloga_sources_for_session,
-    register_project_veriloga_sources_for_session_with_limits,
 };
 
 /// One test at a time owns the process's cache budget.
@@ -62,11 +61,8 @@ fn limits(max_shared_cache_bytes: usize) -> ResourceLimits {
 
 /// What one registration retains, read from the refusal of a one-byte budget.
 fn retained_bytes(registration: &ProjectVerilogASourceRegistration) -> usize {
-    let refusal = register_project_veriloga_sources_for_session_with_limits(
-        [registration.clone()],
-        limits(1),
-    )
-    .expect_err("no runtime fits in one byte");
+    let refusal = hold_project_veriloga_sources_for_session([registration.clone()], limits(1))
+        .expect_err("no runtime fits in one byte");
     refusal
         .split("requested ")
         .nth(1)
@@ -103,9 +99,8 @@ fn a_task_builds_the_runtime_it_installed_after_another_task_installs_its_own() 
 
     let hold = hold_project_veriloga_sources_for_session([held], budget)
         .expect("the first task installs its runtime");
-    let refusal =
-        register_project_veriloga_sources_for_session_with_limits([pushing.clone()], budget)
-            .expect_err("the second install cannot evict a held runtime");
+    let refusal = hold_project_veriloga_sources_for_session([pushing.clone()], budget)
+        .expect_err("the second install cannot evict a held runtime");
     assert!(
         refusal.contains("shared_cache_bytes limit exceeded")
             && refusal.contains("held by executions in progress"),
@@ -116,7 +111,7 @@ fn a_task_builds_the_runtime_it_installed_after_another_task_installs_its_own() 
         .expect("the first task builds the runtime it installed");
 
     drop(hold);
-    register_project_veriloga_sources_for_session_with_limits([pushing], budget)
+    let _pushed = hold_project_veriloga_sources_for_session([pushing], budget)
         .expect("a released runtime makes room");
     engine
         .build_circuit(&deck(&pushing_key, "pushing_task"))
@@ -150,13 +145,13 @@ fn a_runtime_stays_held_until_every_holder_releases_it() {
     let second = hold_project_veriloga_sources_for_session([runtime], budget)
         .expect("a second execution reinstalls and holds the same runtime");
     drop(first);
-    register_project_veriloga_sources_for_session_with_limits([other.clone()], budget)
+    hold_project_veriloga_sources_for_session([other.clone()], budget)
         .expect_err("the second execution still holds the runtime");
     engine
         .build_circuit(&deck(&key, "shared_hold"))
         .expect("the runtime is still installed");
 
     drop(second);
-    register_project_veriloga_sources_for_session_with_limits([other], budget)
+    let _other = hold_project_veriloga_sources_for_session([other], budget)
         .expect("released by both, the runtime makes room");
 }
