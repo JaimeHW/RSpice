@@ -141,7 +141,7 @@ impl AppState {
         };
         let input_digest = self.diagnostic_live_digest(&inputs)?;
         let records = design_rule_records(self, &subject, &result, StoredWaivers::Left);
-        let coverage: RuleCoverage = check_coverage(self, &subject, CheckScope::Live)?;
+        let coverage: RuleCoverage = check_coverage(self, &subject, CheckScope::Live, &result)?;
         self.publish_superseding(inputs, records, &coverage)?;
         let is_active_subject =
             owner_key(&subject) == owner_key(&self.workspace.content.active_schematic_reference());

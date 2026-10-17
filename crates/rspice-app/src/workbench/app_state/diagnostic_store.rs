@@ -301,6 +301,11 @@ pub(in crate::workbench) struct DiagnosticRecord {
     /// this one over: see [`super::design_checks::RuleCoverage`]. `None` for
     /// every other producer's records.
     pub(in crate::workbench) drawn_in: Option<CanonicalCellViewOwnerKey>,
+    /// The object a design-rule finding is about, as a waiver stored in
+    /// [`Self::drawn_in`] names it: what tells a later pass's statement of
+    /// the same finding from another finding of the rule there. `None` for
+    /// every other record.
+    pub(in crate::workbench) drawn_object: Option<String>,
 }
 
 impl DiagnosticRecord {
@@ -329,6 +334,7 @@ impl DiagnosticRecord {
             route: None,
             waiver_action: None,
             drawn_in: None,
+            drawn_object: None,
         }
     }
 
@@ -339,6 +345,12 @@ impl DiagnosticRecord {
             &cell_view.cell,
             &cell_view.view,
         ));
+        self
+    }
+
+    /// State the object the finding is about, as a waiver names it.
+    pub(in crate::workbench) fn drawn_object(mut self, object: String) -> Self {
+        self.drawn_object = Some(object);
         self
     }
 

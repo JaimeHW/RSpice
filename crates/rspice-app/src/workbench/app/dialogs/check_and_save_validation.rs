@@ -1884,4 +1884,37 @@ mod tests {
             report.blockers()
         );
     }
+
+    /// Check and Save checks the design, then the open cellview as the
+    /// design places it. The second pass computes no loop the copies of the
+    /// cellview close through a global, so the loop Check Design found is
+    /// still listed when the report blocks on it.
+    #[test]
+    fn the_loop_check_and_save_blocks_on_is_the_one_the_page_lists() {
+        use crate::workbench::examples::hierarchy_reference;
+        use crate::workbench::examples::hierarchy_reference::check_scope_tests::{
+            draw_supply_source, source_loop_errors,
+        };
+
+        let reference = hierarchy_reference::build();
+        let mut state = reference.state;
+        state.project_lifecycle.authority.open_session();
+        state.open_workspace_view(reference.amp_schematic);
+        draw_supply_source(&mut state);
+
+        run_design_checks(&mut state);
+        let report = CheckAndSaveValidationReport::collect(&state).expect("report");
+        assert!(
+            report
+                .blockers()
+                .iter()
+                .any(|finding| finding.message.contains("form a closed loop")),
+            "{:?}",
+            report.blockers()
+        );
+        assert!(
+            source_loop_errors(&state) > 0,
+            "the page lists the loop the report blocks on"
+        );
+    }
 }

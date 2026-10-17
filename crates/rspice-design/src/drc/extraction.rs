@@ -316,6 +316,28 @@ pub const LIVE_RULES: [DrcViolationType; 13] = [
     DrcViolationType::DuplicateName,
 ];
 
+/// The rules some of whose findings only the walk from a subject computes.
+///
+/// A global is one node across the design, so whether ideal sources close a
+/// loop through one, whether two declared outputs drive one, whether anything
+/// else in the design touches one, and whether a cellview ties one to ground
+/// that another reaches as a node of its own, are answered over every
+/// cellview the walk reaches and every occurrence of each — and the answer
+/// depends on where the walk starts. Such a finding is stated inside the
+/// cellview it is drawn in, beside that cellview's own findings of the same
+/// rules.
+///
+/// A check of one cellview's contents computes none of them, and a check that
+/// starts from another subject computes them for another design. Neither can
+/// say that a finding of these rules stated by the walk from the configured
+/// root is gone; only that walk can.
+pub const HIERARCHY_RULES: [DrcViolationType; 4] = [
+    DrcViolationType::SourceToSource,
+    DrcViolationType::ShortedOutputs,
+    DrcViolationType::FloatingNode,
+    DrcViolationType::SupplyTiedToGround,
+];
+
 /// Check one cellview's drawing against the [`LIVE_RULES`] alone.
 ///
 /// One extraction of the drawing and nothing below it. Each finding is the

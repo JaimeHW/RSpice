@@ -178,6 +178,84 @@ fn the_newest_check_of_a_cellview_states_its_findings_once() {
     );
 }
 
+const SOURCE_LOOP: &str = "DRC-SOURCE-TO-SOURCE";
+
+/// A source drawn in the open `amp` from the global supply to ground. Each
+/// occurrence of `amp` places it again, so the copies close a loop through
+/// the global that only a walk of the whole design can see: `amp` alone
+/// holds one source, and one source closes nothing.
+pub(in crate::workbench) fn draw_supply_source(state: &mut AppState) {
+    let schematic = &mut state.schematic;
+    let id = schematic.add_component(ComponentType::VoltageSource, Point::new(3000, 3000));
+    let terminals = schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == id)
+        .expect("the source is placed")
+        .terminal_positions();
+    for (pin, at) in terminals {
+        let (end, net) = match pin {
+            "+" => (Point::new(at.x, at.y - 40), hierarchy_reference::GLOBAL_SUPPLY_NET),
+            _ => (Point::new(at.x, at.y + 40), "gnd"),
+        };
+        schematic
+            .add_wire(vec![at, end])
+            .expect("a two-point wire commits");
+        schematic.add_net_label(end, net.to_owned());
+    }
+}
+
+/// The source-loop rows the page lists, unwaived and current.
+pub(in crate::workbench) fn source_loop_errors(state: &AppState) -> usize {
+    let listed = listing::listing(state);
+    (0..listed.len())
+        .filter_map(|index| listed.row(index))
+        .filter(|row| row.code == SOURCE_LOOP && row.current() && !row.waived())
+        .count()
+}
+
+/// A narrower check takes over only what it computes again. Check Cellview
+/// of `amp` walks nothing above it, so it never sees the loop the copies of
+/// `amp` close through the global: Check Design's statement of that loop
+/// stands, and the page lists the error the run gate and Check and Save
+/// block on.
+#[test]
+fn a_cellview_check_leaves_standing_what_only_the_design_check_computes() {
+    let mut fixture = fixture();
+    draw_supply_source(&mut fixture.state);
+
+    fixture.state.check_design().expect("the design checks");
+    let loops = source_loop_errors(&fixture.state);
+    assert!(loops > 0, "the copies of amp close a loop through the global");
+
+    let own = fixture
+        .state
+        .check_active_cellview()
+        .expect("the open cellview checks");
+    assert!(
+        own.violations()
+            .iter()
+            .all(|finding| finding.violation_type.rule_code() != SOURCE_LOOP),
+        "amp alone closes no loop"
+    );
+    assert_eq!(
+        source_loop_errors(&fixture.state),
+        loops,
+        "the loop is still listed: {:?}",
+        rows(&fixture.state)
+    );
+
+    let gate = fixture
+        .state
+        .current_design_check(
+            &fixture.top,
+            crate::workbench::app_state::design_checks::CheckScope::Design,
+        )
+        .expect("Check Design still describes the design");
+    assert!(gate.has_errors(), "the run gate refuses on the loop");
+}
+
 /// The objects of the rows naming `cell_view`.
 fn rows_in(state: &AppState, cell_view: &CellViewRef) -> Vec<String> {
     rows(state)

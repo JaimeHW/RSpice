@@ -703,4 +703,4 @@ mod tests;
 mod check_currency_tests;
 
 #[cfg(test)]
-mod check_scope_tests;
+pub(in crate::workbench) mod check_scope_tests;

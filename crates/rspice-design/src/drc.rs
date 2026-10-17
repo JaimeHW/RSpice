@@ -12,7 +12,7 @@ mod waivers;
 
 pub use checker::{DrcChecker, DrcConfig};
 pub use extraction::{
-    CheckReach, CheckReads, LIVE_RULES, append_unused_cellviews, check_reads,
+    CheckReach, CheckReads, HIERARCHY_RULES, LIVE_RULES, append_unused_cellviews, check_reads,
     extract_checked_design, live_check_reads, run_check_of_cellview, run_check_with_hierarchy,
     run_live_check,
 };
