@@ -71,7 +71,14 @@ impl ParsedNetlistSourceMap {
             source,
             netlist.params.expression_dialect() != crate::config::ExpressionDialect::Xyce,
         );
-        builder.into_map()
+        let mut map = builder.into_map();
+        // A card on a line the parser skipped references nothing.
+        map.references.retain(|reference| {
+            !netlist
+                .unread_root_source()
+                .any(|region| region.lines.contains(&reference.range.line))
+        });
+        map
     }
 
     pub fn lint_unknown_references(&self, netlist: &Netlist) -> Vec<UnknownReferenceDiagnostic> {
@@ -795,6 +802,33 @@ mod tests {
                 .map(|diagnostic| diagnostic.name.as_str())
                 .collect::<Vec<_>>(),
             vec!["D", "NPN"]
+        );
+    }
+
+    /// A card in a branch the parser skips references nothing, so the lint
+    /// says nothing about it, while the same card in the taken branch is
+    /// still checked against the models the parser read.
+    #[test]
+    fn a_card_in_a_skipped_branch_is_not_linted() {
+        let deck = "source map\n\
+            .param mode=1\n\
+            .if (mode==1)\n\
+            D1 a 0 missing_taken\n\
+            .else\n\
+            D2 a 0 missing_skipped\n\
+            .model only_skipped d\n\
+            .endif\n\
+            .end\n";
+
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let diagnostics = netlist.lint_unknown_references();
+
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|diagnostic| (diagnostic.name.as_str(), diagnostic.range.line))
+                .collect::<Vec<_>>(),
+            vec![("MISSING_TAKEN", 4)]
         );
     }
 
