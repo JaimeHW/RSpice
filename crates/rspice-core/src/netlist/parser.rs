@@ -54,10 +54,12 @@ mod card_binding;
 mod chebyshev_synthesis;
 mod command_parsers;
 mod commands;
+mod root_redefinitions;
 mod scopes;
 mod startup_cards;
 mod stream;
 mod temperature;
+use root_redefinitions::{RootRedefinitions, parse_with_settled_root_redefinitions};
 pub(super) use stream::NumericParseAbort;
 use stream::TokenStream;
 
@@ -585,15 +587,21 @@ pub(crate) fn parse_netlist_with_parameter_overrides_and_abort(
 ) -> Result<Netlist, ParseWithAbortError> {
     parse_with_consistent_random_seed(|seed| {
         parse_with_consistent_temperatures(|temperatures| {
-            parse_netlist_impl(
-                input,
-                options,
-                None,
-                None,
-                ParserReplay { seed, temperatures },
-                overrides,
-                abort,
-            )
+            parse_with_settled_root_redefinitions(|redefinitions| {
+                parse_netlist_impl(
+                    input,
+                    options,
+                    None,
+                    None,
+                    ParserReplay {
+                        seed,
+                        temperatures,
+                        redefinitions: Some(redefinitions),
+                    },
+                    overrides,
+                    abort,
+                )
+            })
         })
     })
 }
@@ -607,15 +615,21 @@ pub(crate) fn parse_expanded_netlist_with_parameter_overrides_and_abort(
     let rendered = expanded.render();
     parse_with_consistent_random_seed(|seed| {
         parse_with_consistent_temperatures(|temperatures| {
-            parse_netlist_impl(
-                &rendered,
-                options,
-                Some(SourceEventSchedule::from_expanded(expanded)),
-                expanded.implicit_title(),
-                ParserReplay { seed, temperatures },
-                overrides,
-                abort,
-            )
+            parse_with_settled_root_redefinitions(|redefinitions| {
+                parse_netlist_impl(
+                    &rendered,
+                    options,
+                    Some(SourceEventSchedule::from_expanded(expanded)),
+                    expanded.implicit_title(),
+                    ParserReplay {
+                        seed,
+                        temperatures,
+                        redefinitions: Some(redefinitions),
+                    },
+                    overrides,
+                    abort,
+                )
+            })
         })
     })
 }
@@ -675,9 +689,11 @@ pub(crate) fn strip_device_initial_condition_record_comment(
 }
 
 #[derive(Default)]
-struct ParserReplay {
+struct ParserReplay<'a> {
     seed: Option<u64>,
     temperatures: Option<ParserTemperatures>,
+    /// Pins in from the previous pass, and this pass's record out.
+    redefinitions: Option<&'a mut RootRedefinitions>,
 }
 
 fn parse_netlist_impl(
@@ -685,7 +701,7 @@ fn parse_netlist_impl(
     options: NetlistParseOptions,
     source_schedule: Option<SourceEventSchedule>,
     implicit_title: Option<&str>,
-    replay: ParserReplay,
+    replay: ParserReplay<'_>,
     overrides: &[ParameterOverride],
     abort: &dyn AbortSignal,
 ) -> Result<(Netlist, ParserTemperatures), TemperaturePassError> {
@@ -750,6 +766,9 @@ fn parse_netlist_impl(
     // an out-of-band title and parsing begins at physical line one.
     let title = implicit_title.map_or_else(|| lines[0].to_string(), str::to_owned);
     let mut state = ParseState::new();
+    if let Some(redefinitions) = replay.redefinitions.as_deref() {
+        state.root_redefinitions = redefinitions.begin_pass();
+    }
     for (index, parameter) in overrides.iter().enumerate() {
         poll_parse_abort(abort, index)?;
         if !parameter.value.is_finite() {
@@ -968,12 +987,16 @@ fn parse_netlist_impl(
     validate_coupling_model_references_with_abort(&state, abort)?;
 
     ensure_parse_not_aborted(abort)?;
+    let root_redefinitions = std::mem::take(&mut state.root_redefinitions);
     let mut netlist = state.into_netlist(
         title,
         input,
         root_eof.unwrap_or_else(|| NetlistSourceLocation::in_memory(lines.len() + 1)),
         abort,
     )?;
+    if let Some(redefinitions) = replay.redefinitions {
+        *redefinitions = root_redefinitions;
+    }
     if let Some(temperature) = replayed_temperature(overrides)? {
         netlist.options.temp = Some(temperature);
     }

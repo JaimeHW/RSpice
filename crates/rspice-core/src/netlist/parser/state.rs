@@ -83,6 +83,7 @@ pub(super) struct SubcktFrame {
 #[derive(Debug)]
 pub(super) struct ParseState {
     pub(super) parameter_overrides: Vec<ParameterOverride>,
+    pub(super) root_redefinitions: RootRedefinitions,
     pub(super) parameter_direction: Option<Box<ParameterDirectionCapture>>,
     pub(super) elements: Vec<Element>,
     pub(super) element_names: ElementNameRegistry,
@@ -144,6 +145,7 @@ impl ParseState {
     pub(super) fn new() -> Self {
         Self {
             parameter_overrides: Vec::new(),
+            root_redefinitions: RootRedefinitions::default(),
             parameter_direction: None,
             elements: Vec::new(),
             element_names: ElementNameRegistry::default(),
@@ -356,6 +358,8 @@ pub(super) struct ParseLineContext<'a> {
     pub(super) scopes: &'a mut scopes::LexicalScopes,
     pub(super) parameter_direction: Option<&'a mut ParameterDirectionCapture>,
     pub(super) parameter_overrides: &'a [ParameterOverride],
+    /// Root-scope redefinition record; `None` inside a subcircuit body.
+    pub(super) root_redefinitions: Option<&'a mut RootRedefinitions>,
     pub(super) analyses: &'a mut Vec<AnalysisCommand>,
     pub(super) monte_carlo_source_cards: &'a mut Vec<monte_carlo_identity::SourceCard>,
     pub(super) lin_analysis: &'a mut Option<LinAnalysis>,
@@ -390,6 +394,8 @@ pub(super) struct ParseCommandContext<'a> {
     pub(super) scopes: &'a mut scopes::LexicalScopes,
     pub(super) parameter_direction: Option<&'a mut ParameterDirectionCapture>,
     pub(super) parameter_overrides: &'a [ParameterOverride],
+    /// Root-scope redefinition record; `None` inside a subcircuit body.
+    pub(super) root_redefinitions: Option<&'a mut RootRedefinitions>,
     /// Complete logical card text used for byte-exact output operand slices.
     pub(super) logical_line: &'a str,
     pub(super) analyses: &'a mut Vec<AnalysisCommand>,

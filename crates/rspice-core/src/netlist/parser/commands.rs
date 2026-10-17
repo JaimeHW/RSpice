@@ -25,6 +25,7 @@ pub(super) fn parse_command(
     let ParseCommandContext {
         parameter_direction,
         parameter_overrides,
+        mut root_redefinitions,
         logical_line,
         analysis_cards,
         startup_cards,
@@ -157,6 +158,7 @@ pub(super) fn parse_command(
                 diagnostics,
                 origin,
                 parameter_overrides,
+                root_redefinitions.as_deref_mut(),
                 temperature_options.plan,
                 abort,
             )?;
@@ -171,6 +173,7 @@ pub(super) fn parse_command(
                 diagnostics,
                 origin,
                 parameter_overrides,
+                root_redefinitions.as_deref_mut(),
                 temperature_options.plan,
                 abort,
             )?;
@@ -4581,6 +4584,7 @@ pub(super) fn parse_param_statement(
     diagnostics: &mut Vec<ParseDiagnostic>,
     origin: &NetlistSourceLocation,
     overrides: &[ParameterOverride],
+    mut root_redefinitions: Option<&mut RootRedefinitions>,
     temperature_options: &mut temperature::TemperatureOptionPlan,
     abort: &dyn AbortSignal,
 ) -> Result<(), ParseWithAbortError> {
@@ -4654,6 +4658,10 @@ pub(super) fn parse_param_statement(
                 parameter.global == retain_global_expression
                     && parameter.name.eq_ignore_ascii_case(&name)
             });
+            // Every root reader sees a redefined parameter's last definition.
+            let pinned = root_redefinitions.as_deref_mut().and_then(|redefinitions| {
+                redefinitions.define(&name, retain_global_expression, params)
+            });
             if let Some(error) = parse_param_assignment_value(
                 stream,
                 line_num,
@@ -4661,7 +4669,9 @@ pub(super) fn parse_param_statement(
                 deferred_params.as_deref_mut(),
                 retain_global_expression,
                 name.clone(),
-                parameter_override.map(|parameter| parameter.value),
+                parameter_override
+                    .map(|parameter| parameter.value)
+                    .or(pinned),
                 abort,
             )? {
                 temperature_options.retain_parameter_error(error, origin);

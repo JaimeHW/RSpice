@@ -174,6 +174,80 @@ fn forward_referenced_instance_parameters_match_their_literal_twin() {
     assert!((forward - defaults).abs() > 0.4 * defaults, "{forward}");
 }
 
+/// A root `.PARAM` redefined after its readers reaches every one of them:
+/// the transistor and resistor at the top level, the derived parameter, and
+/// the copies inside a subcircuit. ngspice-46 solves 11.25 mA in both
+/// supplies (the last definition, L=0.1u); Xyce 7.10, which keeps the first
+/// definition by default, solves 2.25 mA in both.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_redefined_root_parameter_reaches_every_reader_in_the_deck() {
+    let source = "Redefinition after the readers\n.param LVAL=0.5u\n.param RVAL={LVAL*1e9}\n\
+                  .subckt cell d g\nM1 d g 0 0 nch L={LVAL} W=10u\nR1 d 0 {LVAL*1e9}\n.ends\n\
+                  VG g 0 1\nV1 d 0 1\nM1 d g 0 0 nch L={LVAL} W=10u\nR1 d 0 {RVAL}\n\
+                  V2 d2 0 1\nX1 d2 g cell\n.model nch nmos level=1 vto=0.5 kp=100u\n\
+                  .param LVAL=0.1u\n.end\n";
+    for (policy, length, expected) in [
+        (ParameterRedefinitionPolicy::UseLast, 0.1e-6, 11.25e-3),
+        (ParameterRedefinitionPolicy::UseFirst, 0.5e-6, 2.25e-3),
+    ] {
+        for dialect in DIALECTS {
+            let mut opts = options(dialect);
+            opts.parameter_redefinition_policy = policy;
+            let netlist = Netlist::parse_with_options(source, opts).unwrap();
+            let derived = netlist.params.get("RVAL").unwrap();
+            assert!(
+                (derived - length * 1e9).abs() <= 1e-9 * derived,
+                "{policy:?} {dialect:?}: RVAL={derived}"
+            );
+            let solution = Engine::default().run_dc_op(&netlist).unwrap();
+            for supply in ["V1", "V2"] {
+                let current = -solution.branch_current_named(supply).unwrap();
+                assert!(
+                    (current - expected).abs() <= 1e-6 * expected,
+                    "{policy:?} {dialect:?} {supply}: {current} A, expected {expected} A"
+                );
+            }
+        }
+    }
+}
+
+/// A last definition that reads another redefined parameter sees that
+/// parameter's last definition too (ngspice-46: a=15, b=5), and a
+/// redefinition that feeds back into itself is refused, as ngspice refuses
+/// it, instead of settling on whichever pass ran last.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn chained_root_redefinitions_settle_and_circular_ones_are_refused() {
+    for dialect in DIALECTS {
+        let chained = Netlist::parse_with_options(
+            "Chained redefinitions\n.param a=1 b=1\nV1 n 0 1\nR1 n 0 {a}\nR2 n 0 {b}\n\
+             .param a={b*3}\n.param b=5\n.end\n",
+            options(dialect),
+        )
+        .unwrap();
+        assert_eq!(chained.params.get("a"), Some(15.0));
+        let current = -Engine::default()
+            .run_dc_op(&chained)
+            .unwrap()
+            .branch_current_named("V1")
+            .unwrap();
+        assert!(
+            (current - (1.0 / 15.0 + 1.0 / 5.0)).abs() < 1e-9,
+            "{current}"
+        );
+
+        let error = Netlist::parse_with_options(
+            "Circular redefinition\n.param a=1\n.param b={a*2}\nV1 n 0 1\nR1 n 0 {a}\n\
+             .param a={b+1}\n.end\n",
+            options(dialect),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("Parameter A does not settle"), "{error}");
+    }
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn failed_forward_probes_preserve_the_seeded_random_stream() {
