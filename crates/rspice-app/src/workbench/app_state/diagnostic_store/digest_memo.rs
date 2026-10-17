@@ -78,11 +78,13 @@ impl DigestKey {
             )
         };
         match inputs {
-            DiagnosticInputs::DesignCheck { .. } => Some(Self::DesignCheck {
-                design: design()?,
-                deck: state.workspace.content.design_rules.stamp(),
-                project,
-            }),
+            DiagnosticInputs::DesignCheck { .. } | DiagnosticInputs::LiveCheck { .. } => {
+                Some(Self::DesignCheck {
+                    design: design()?,
+                    deck: state.workspace.content.design_rules.stamp(),
+                    project,
+                })
+            }
             DiagnosticInputs::SymbolPins { subject } => Some(Self::SymbolPins {
                 library: state.library_manager.revision(),
                 contract: state.symbol_contract_stamp(subject),

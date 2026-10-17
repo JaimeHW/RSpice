@@ -470,6 +470,9 @@ pub(in crate::workbench) enum DiagnosticInputs {
     /// Everything one cell view's checks read, exactly as the check receipt
     /// digests it.
     DesignCheck { subject: CellViewRef },
+    /// One cellview's drawing as the live rules read it while it is drawn:
+    /// the drawing itself and the interfaces of the masters it places.
+    LiveCheck { subject: CellViewRef },
     /// One symbol view's published artwork and the interface contract its
     /// pins are compared against — exactly what the pin checks read.
     SymbolPins { subject: CellViewRef },
@@ -495,7 +498,7 @@ pub(in crate::workbench) enum DiagnosticInputs {
 impl DiagnosticInputs {
     pub(in crate::workbench) const fn owner(&self) -> DiagnosticOwner {
         match self {
-            Self::DesignCheck { .. } => DiagnosticOwner::DesignRules,
+            Self::DesignCheck { .. } | Self::LiveCheck { .. } => DiagnosticOwner::DesignRules,
             Self::SymbolPins { .. } => DiagnosticOwner::SymbolPins,
             Self::Dispatch => DiagnosticOwner::Dispatch,
             Self::Run { .. } | Self::CampaignMember { .. } => DiagnosticOwner::Run,
@@ -513,6 +516,11 @@ impl DiagnosticInputs {
         match self {
             Self::DesignCheck { subject } => format!(
                 "a cellview or binding the check of {} read has changed since this was reported",
+                subject.display_path()
+            ),
+            Self::LiveCheck { subject } => format!(
+                "the drawing of {}, or the interface of a cellview it places, has changed since \
+                 this was reported",
                 subject.display_path()
             ),
             Self::SymbolPins { subject } => format!(
@@ -554,6 +562,16 @@ impl DiagnosticInputs {
                 );
                 format!("{owner}\u{1f}{subject}")
             }
+            // Beside the explicit checks it shares an owner with, and never
+            // under the same key as the one of the same cellview.
+            Self::LiveCheck { subject } => {
+                let subject = crate::state::canonical_cell_view_owner_key(
+                    &subject.library,
+                    &subject.cell,
+                    &subject.view,
+                );
+                format!("{owner}\u{1f}live\u{1f}{subject}")
+            }
             Self::Dispatch | Self::RuleDeck => owner.to_owned(),
             Self::Run { run_sequence } => format!("{owner}\u{1f}{run_sequence:020}"),
             // After every run, and in the order the campaign dispatched them.
@@ -577,6 +595,7 @@ impl DiagnosticInputs {
             Self::DesignCheck { subject } => {
                 super::design_checks::live_input_digest(state, subject)
             }
+            Self::LiveCheck { subject } => super::design_checks::live_check_digest(state, subject),
             // The artwork and the contract, through the one accessor the
             // checks themselves read them through: a digest taken over
             // anything else would be a second notion of staleness.
@@ -1216,6 +1235,7 @@ impl AppState {
                     ..
                 } => campaign != Some(member_campaign),
                 DiagnosticInputs::DesignCheck { .. }
+                | DiagnosticInputs::LiveCheck { .. }
                 | DiagnosticInputs::SymbolPins { .. }
                 | DiagnosticInputs::Dispatch
                 | DiagnosticInputs::RuleDeck => false,
@@ -1248,6 +1268,7 @@ impl AppState {
                     .iter()
                     .all(|run| run.id != run_sequence),
                 DiagnosticInputs::DesignCheck { .. }
+                | DiagnosticInputs::LiveCheck { .. }
                 | DiagnosticInputs::SymbolPins { .. }
                 | DiagnosticInputs::Dispatch
                 | DiagnosticInputs::CampaignMember { .. }

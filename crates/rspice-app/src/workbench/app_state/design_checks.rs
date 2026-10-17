@@ -24,6 +24,9 @@ use super::diagnostic_store::{
 };
 use super::waivers;
 
+mod live;
+pub(in crate::workbench) use live::live_check_digest;
+
 /// Producer identity every schematic and electrical rule finding carries.
 const DESIGN_RULE_PRODUCER: &str = "rspice.design.rules";
 
@@ -55,12 +58,14 @@ pub(crate) enum CheckScope {
     /// schematic of the project's own libraries the walk never reaches:
     /// Check Design.
     Design,
+    /// The live rules, on the drawing an author is editing.
+    Live,
 }
 
 impl CheckScope {
     const fn reach(self) -> CheckReach {
         match self {
-            Self::Cellview => CheckReach::Cellview,
+            Self::Cellview | Self::Live => CheckReach::Cellview,
             Self::Hierarchy | Self::Design => CheckReach::Hierarchy,
         }
     }
@@ -92,6 +97,8 @@ enum RuleScope {
     Every,
     /// Only whether the cellview is used.
     Use,
+    /// The rules checked while the cellview is drawn.
+    Live,
 }
 
 impl RuleScope {
@@ -101,6 +108,9 @@ impl RuleScope {
             Self::Every => true,
             Self::Contents => code != unused,
             Self::Use => code == unused,
+            Self::Live => rspice_design::drc::LIVE_RULES
+                .iter()
+                .any(|rule| rule.rule_code() == code),
         }
     }
 }
@@ -151,6 +161,11 @@ impl DesignCheckStatus<'_> {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct DesignCheckRuntime {
     receipts: BTreeMap<CanonicalCellViewOwnerKey, CellViewCheckReceipt>,
+    /// The live checks' passes, by the cellview each was of.
+    live: BTreeMap<CanonicalCellViewOwnerKey, CellViewCheckReceipt>,
+    /// Where the drawing in front of the reader stands against its live
+    /// check.
+    drawing: live::DrawingState,
     /// The sequence the next receipt is stored under.
     published: u64,
 }
@@ -166,12 +181,21 @@ impl DesignCheckRuntime {
         self.receipts.insert(owner_key(&receipt.subject), receipt);
     }
 
+    fn insert_live(&mut self, mut receipt: CellViewCheckReceipt) {
+        receipt.sequence = self.published;
+        self.published = self.published.wrapping_add(1);
+        self.live.insert(owner_key(&receipt.subject), receipt);
+    }
+
     pub(crate) fn clear(&mut self) {
         self.receipts.clear();
+        self.live.clear();
+        self.drawing = live::DrawingState::default();
     }
 
     fn clear_subject(&mut self, subject: &CellViewRef) {
         self.receipts.remove(&owner_key(subject));
+        self.live.remove(&owner_key(subject));
     }
 }
 
@@ -321,7 +345,7 @@ impl AppState {
         // Canonical records are derived before anything is stored, because
         // one of them needs to ask the live drawing where its object is and
         // both insertions take the state mutably.
-        let records = design_rule_records(self, &subject, &result);
+        let records = design_rule_records(self, &subject, &result, StoredWaivers::Stated);
         let coverage = check_coverage(self, &subject, scope)?;
         // Published before the receipt is stored, because the store can
         // refuse a batch and the receipt cannot: a receipt stored first would
@@ -444,6 +468,9 @@ impl AppState {
         }
         let subject = self.workspace.content.active_schematic_reference();
         self.design_checks.clear_subject(&subject);
+        self.withdraw_diagnostics(&DiagnosticInputs::LiveCheck {
+            subject: subject.clone(),
+        });
         self.withdraw_diagnostics(&DiagnosticInputs::DesignCheck { subject });
     }
 
@@ -463,10 +490,20 @@ impl AppState {
             .design_checks
             .receipts
             .values()
-            .map(|receipt| (receipt.sequence, receipt.subject.clone()))
+            .map(|receipt| (receipt.sequence, false, receipt.subject.clone()))
+            .chain(
+                self.design_checks
+                    .live
+                    .values()
+                    .map(|receipt| (receipt.sequence, true, receipt.subject.clone())),
+            )
             .collect::<Vec<_>>();
-        subjects.sort_by_key(|(sequence, _)| *sequence);
-        for (_, subject) in subjects {
+        subjects.sort_by_key(|(sequence, _, _)| *sequence);
+        for (_, live, subject) in subjects {
+            if live {
+                self.restate_live_check(subject);
+                continue;
+            }
             let DesignCheckStatus::Current(receipt) = self.design_check_status(&subject) else {
                 continue;
             };
@@ -482,15 +519,25 @@ impl AppState {
     }
 
     pub(crate) fn clear_all_design_checks(&mut self) {
-        let subjects: Vec<CellViewRef> = self
+        let published: Vec<DiagnosticInputs> = self
             .design_checks
             .receipts
             .values()
-            .map(|receipt| receipt.subject.clone())
+            .map(|receipt| DiagnosticInputs::DesignCheck {
+                subject: receipt.subject.clone(),
+            })
+            .chain(
+                self.design_checks
+                    .live
+                    .values()
+                    .map(|receipt| DiagnosticInputs::LiveCheck {
+                        subject: receipt.subject.clone(),
+                    }),
+            )
             .collect();
         self.design_checks.clear();
-        for subject in subjects {
-            self.withdraw_diagnostics(&DiagnosticInputs::DesignCheck { subject });
+        for inputs in &published {
+            self.withdraw_diagnostics(inputs);
         }
     }
 
@@ -531,6 +578,7 @@ fn design_rule_records(
     state: &AppState,
     subject: &CellViewRef,
     result: &DrcResult,
+    stored_waivers: StoredWaivers,
 ) -> Vec<DiagnosticRecord> {
     let project = state.workspace.content.project.id();
     let revision = state.workspace.content.project.revision().get();
@@ -576,7 +624,9 @@ fn design_rule_records(
         .collect::<Vec<_>>();
     // The subject's own waivers that do not do what they say are stated with
     // the pass that found that out.
-    if let Some(stored) = state.schematic_waivers(subject) {
+    if stored_waivers == StoredWaivers::Stated
+        && let Some(stored) = state.schematic_waivers(subject)
+    {
         records.extend(
             waivers::stored_waiver_records(state, subject, stored, result)
                 .into_iter()
@@ -584,6 +634,17 @@ fn design_rule_records(
         );
     }
     records
+}
+
+/// Whether a pass states the subject's own waivers that cover nothing.
+///
+/// A live pass checks a few rules, so a waiver of any other rule covers none
+/// of its findings without being unmatched: it is left to the checks that
+/// state every rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StoredWaivers {
+    Stated,
+    Left,
 }
 
 /// What each finding in `result` is about, in its order: the key its
@@ -655,9 +716,16 @@ fn check_coverage(
     scope: CheckScope,
 ) -> Result<RuleCoverage, String> {
     let mut coverage = RuleCoverage::default();
-    if scope == CheckScope::Cellview {
-        coverage.state(subject, RuleScope::Contents);
-        return Ok(coverage);
+    match scope {
+        CheckScope::Cellview => {
+            coverage.state(subject, RuleScope::Contents);
+            return Ok(coverage);
+        }
+        CheckScope::Live => {
+            coverage.state(subject, RuleScope::Live);
+            return Ok(coverage);
+        }
+        CheckScope::Hierarchy | CheckScope::Design => {}
     }
     let projection = state
         .workspace

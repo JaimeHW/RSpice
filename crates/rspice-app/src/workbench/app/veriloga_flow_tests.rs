@@ -66,7 +66,7 @@ impl User {
                 app.prepare_frame(&ctx);
                 app.render_frame_chrome(ui);
                 app.render_secondary_application_windows(&ctx);
-                app.refresh_incremental_connectivity_checks();
+                app.refresh_live_checks(&ctx);
                 app.render_frame_dialogs(&ctx);
                 app.end_frame(&before);
             },
