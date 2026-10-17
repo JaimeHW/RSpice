@@ -207,15 +207,15 @@ impl SchematicIdentity {
             topology_changes += 1;
         }
 
-        // A junction position has one electrical meaning and one stable
-        // identity. Preserve the first record at each position, then repair
-        // duplicate IDs among the remaining records so ID-based removal can
-        // never remove multiple markers or reveal a hidden duplicate.
+        // Every sheet of a cell view lives in this one document and shares its
+        // coordinates, so two junction records at one position can be dots on
+        // two sheets. Neither may be dropped here: this repair runs on every
+        // undo and redo and cannot see which sheet holds which record, and a
+        // dropped dot disconnects the crossing it marked. Two records at one
+        // point on the same sheet still mean one junction, and the sheet's
+        // next junction maintenance rebuilds its dots. Repair duplicate IDs
+        // only, so ID-based removal can never remove two markers at once.
         let junction_count_before_repair = document.junctions.len();
-        let mut seen_positions = HashSet::with_capacity(document.junctions.len());
-        document
-            .junctions
-            .retain(|junction| seen_positions.insert(junction.pos));
         let mut seen_ids = HashSet::with_capacity(document.junctions.len());
         let duplicate_junction_ids: Vec<usize> = document
             .junctions

@@ -237,8 +237,47 @@ mod tests {
         assert_eq!(matches, 1, "duplicate ids must be reassigned");
     }
 
+    /// Sheet 1 and sheet 2 of one cell view each mark a crossing at the same
+    /// coordinates with a dot. Undo repairs the document it restores, and that
+    /// repair used to keep only the first record at a position, so any undo
+    /// deleted sheet 2's dot and disconnected its crossing.
     #[test]
-    fn recalculate_deduplicates_junction_positions_and_repairs_ids() {
+    fn undo_keeps_a_dot_another_sheet_has_at_the_same_point() {
+        let mut schematic = SchematicState::default();
+        schematic.design.document_mut_for_test().junctions = vec![
+            Junction::new(50, Point::new(100, 0)),
+            Junction::new(51, Point::new(100, 0)),
+        ];
+        schematic.init_undo_history();
+        assert!(schematic.with_undo("add a part", |schematic| {
+            schematic
+                .design
+                .document_mut_for_test()
+                .components
+                .push(Component::new(
+                    60,
+                    ComponentType::Resistor,
+                    Point::new(300, 300),
+                ));
+        }));
+
+        assert!(schematic.undo());
+
+        let ids: Vec<u64> = schematic
+            .design
+            .document()
+            .junctions
+            .iter()
+            .map(|junction| junction.id)
+            .collect();
+        assert_eq!(ids, vec![50, 51]);
+    }
+
+    /// Two junction records at one point can be dots on two sheets of the
+    /// cell view, which share coordinates, so repair keeps both and only
+    /// gives the duplicated ID a fresh one.
+    #[test]
+    fn recalculate_repairs_junction_ids_and_keeps_every_position_record() {
         let mut schematic = SchematicState::default();
         schematic.design.document_mut_for_test().junctions = vec![
             Junction::new(7, Point::new(10, 10)),
@@ -258,15 +297,13 @@ mod tests {
 
         schematic.recalculate_runtime_state();
 
-        assert_eq!(schematic.design.document().junctions.len(), 2);
-        assert_eq!(
-            schematic.design.document().junctions[0],
-            Junction::new(7, Point::new(10, 10))
-        );
-        assert_ne!(
-            schematic.design.document().junctions[0].id,
-            schematic.design.document().junctions[1].id
-        );
+        let junctions = &schematic.design.document().junctions;
+        assert_eq!(junctions.len(), 3);
+        assert_eq!(junctions[0], Junction::new(7, Point::new(10, 10)));
+        assert_eq!(junctions[2], Junction::new(9, Point::new(10, 10)));
+        assert_eq!(junctions[1].pos, Point::new(20, 20));
+        let ids: HashSet<u64> = junctions.iter().map(|junction| junction.id).collect();
+        assert_eq!(ids.len(), 3, "duplicate ids must be reassigned");
         assert!(
             schematic
                 .session
