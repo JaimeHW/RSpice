@@ -811,6 +811,9 @@ fn extract_components(
             component_type: comp.kind.spice_prefix().to_string(),
             pins,
             is_voltage_source,
+            series_resistance: comp
+                .source_parasitics()
+                .is_some_and(|parasitics| parasitics.series_resistance.is_some()),
             is_current_source,
             is_ground_symbol: comp.kind == ComponentType::Ground,
             reference_required,
@@ -1483,6 +1486,11 @@ impl GlobalDrives {
                 let (Some(plus), Some(minus)) = (terminal("+"), terminal("-")) else {
                     continue;
                 };
+                // Behind its `rs` the deck writes the source onto a node of
+                // its own, so it is no branch between the drawn nets.
+                if component.series_resistance {
+                    continue;
+                }
                 self.sources.push(SourceBranch {
                     view,
                     identity,

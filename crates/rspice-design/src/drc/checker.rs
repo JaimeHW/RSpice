@@ -789,6 +789,10 @@ impl DrcChecker {
     /// closes a loop is one finding, as it is one refusal there: it names the
     /// sources the loop runs through and stands at the node the closing source
     /// holds against the rest.
+    ///
+    /// The branches are the ones the deck writes. A source behind its `rs` is
+    /// written onto a node of its own that only the series resistor joins to
+    /// the drawn net, so it is no branch between the drawn nets.
     fn check_source_to_source(
         &mut self,
         components: &[ComponentInfo],
@@ -797,7 +801,7 @@ impl DrcChecker {
     ) {
         let mut sources = components
             .iter()
-            .filter(|component| component.is_voltage_source)
+            .filter(|component| component.is_voltage_source && !component.series_resistance)
             .filter_map(|component| {
                 let terminal = |name: &str| {
                     component

@@ -404,6 +404,63 @@ fn a_source_written_as_a_sense_source_is_refused_before_the_run() {
     );
 }
 
+/// A voltage source with a series `rs` is written behind that resistor, on a
+/// node of its own. Two sources drawn across `in` and ground are a loop of
+/// sources alone only where neither has one: the design check builds its
+/// branches as the deck writes them, so it passes the deck the engine solves
+/// and refuses the one the engine refuses.
+#[test]
+fn a_source_behind_its_series_resistance_closes_no_source_loop() {
+    let across = |series: &str| {
+        let mut bench = Bench::new();
+        let v1 = bench.place(ComponentType::VoltageSource, 0, 0, "V1", "1", "");
+        let v2 = bench.place(ComponentType::VoltageSource, 200, 0, "V2", "1.2", series);
+        bench.connect((v1, 0), (v2, 0));
+        bench.label((v1, 0), "in");
+        bench.ground((v1, 1));
+        bench.ground((v2, 1));
+        bench
+    };
+    let views = std::collections::HashMap::<
+        String,
+        rspice_design::schematic::document::SchematicDocument,
+    >::new();
+    let hierarchy = rspice_design::hierarchy::HierarchySource::from_buffers(&views);
+    let root = rspice_design_model::cell_view::CellViewRef::new("work", "top", "schematic");
+    let loops = |bench: &Bench| {
+        rspice_design::drc::run_check_with_hierarchy(
+            &bench.state,
+            &hierarchy,
+            rspice_design::drc::DrcConfig::default(),
+        )
+        .violations()
+        .iter()
+        .filter(|finding| {
+            finding.violation_type == rspice_design::drc::DrcViolationType::SourceToSource
+        })
+        .map(|finding| finding.message.clone())
+        .collect::<Vec<_>>()
+    };
+    let gate = |bench: &Bench| {
+        crate::preparation::check_generated_design(
+            &bench.state,
+            &root,
+            &hierarchy,
+            rspice_design::drc::DrcConfig::default(),
+        )
+    };
+
+    let behind = across("rs=50");
+    let netlist = behind.netlist();
+    assert!(loops(&behind).is_empty(), "{:?}\n{netlist}", loops(&behind));
+    assert!(gate(&behind).is_ok(), "{:?}\n{netlist}", gate(&behind).err());
+    solve_op(&netlist);
+
+    let ideal = across("");
+    assert_eq!(loops(&ideal).len(), 1, "{:?}", loops(&ideal));
+    assert!(gate(&ideal).is_err(), "{}", ideal.netlist());
+}
+
 /// A current-controlled source may name its controlling element by the name
 /// drawn on it. The deck writes a source drawn `sense` as `Vsense`, so the
 /// reference has to follow: in the plain card, and in the behavioural form a

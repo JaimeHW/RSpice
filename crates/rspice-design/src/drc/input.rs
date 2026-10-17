@@ -18,6 +18,12 @@ pub struct ComponentInfo {
     pub component_type: String,
     pub pins: Vec<PinInfo>,
     pub is_voltage_source: bool,
+    /// A voltage source the deck writes behind a series resistance, its `rs`,
+    /// read through [`crate::schematic::component::Component::source_parasitics`]
+    /// as the netlister reads it. The source then drives a node of its own,
+    /// which only that resistor joins to the drawn `+` net, so it is not an
+    /// ideal branch between the drawn nets and closes no loop of sources.
+    pub series_resistance: bool,
     pub is_current_source: bool,
     /// A drawn ground symbol. Its own terminal is what binds node 0, so it is
     /// not evidence that the circuit reaches ground.
