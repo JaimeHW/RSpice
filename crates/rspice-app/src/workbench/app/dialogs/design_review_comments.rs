@@ -196,7 +196,7 @@ impl RSpiceApp {
         let mut body_scroll_offset = self.state.dialogs.design_review_comments.body_scroll_offset;
         let mut dialog = Dialog::new(TITLE, PRIMARY)
             .description(
-                "Review durable comments anchored to the active schematic, its validated revisions, and retained result evidence.",
+                "Review comments attached to the active schematic, its validated revisions, and saved results.",
             )
             .size(DialogSize::SimulationWorkflow)
             .initial_height(610.0)
@@ -288,7 +288,7 @@ impl RSpiceApp {
                 let candidates = evidence_candidates(&self.state);
                 let Some(candidate) = candidates.get(index) else {
                     self.state.dialogs.design_review_comments.error =
-                        Some("The selected result evidence no longer exists.".to_owned());
+                        Some("The selected result no longer exists.".to_owned());
                     return;
                 };
                 self.apply_review_mutation(DesignReviewMutation::AttachEvidence {
@@ -765,7 +765,7 @@ fn review_thread_detail(
             if !review.evidence.is_empty() {
                 section_header(
                     ui,
-                    "Attached evidence",
+                    "Attached results",
                     Some(&review.evidence.len().to_string()),
                 );
                 for item in &review.evidence {
@@ -790,7 +790,7 @@ fn review_thread_detail(
             .id(reply_id())
             .desired_rows(3)
             .desired_width(f32::INFINITY)
-            .hint_text("Add review evidence, mention a teammate, or record a decision\u{2026}"),
+            .hint_text("Add a finding, mention a teammate, or record a decision\u{2026}"),
     );
 
     if dialog.assignment_editor_open {
@@ -808,7 +808,7 @@ fn review_thread_detail(
                     write_allowed,
                     TextEdit::singleline(&mut dialog.assignment)
                         .desired_width(f32::INFINITY)
-                        .hint_text("Exact project member identity"),
+                        .hint_text("Project member"),
                 );
                 ui.horizontal(|ui| {
                     let valid = !dialog.assignment.trim().is_empty();
@@ -837,11 +837,7 @@ fn review_thread_detail(
             .stroke(Stroke::new(1.0, t.color.border))
             .inner_margin(egui::Margin::same(8))
             .show(ui, |ui| {
-                section_header(
-                    ui,
-                    "Retained result evidence",
-                    Some(&evidence.len().to_string()),
-                );
+                section_header(ui, "Saved results", Some(&evidence.len().to_string()));
                 if evidence.is_empty() {
                     ui.label(
                         RichText::new(
@@ -862,7 +858,7 @@ fn review_thread_detail(
                     if let Some(index) = select(
                         ui,
                         "design-review-evidence",
-                        "Retained result evidence",
+                        "Saved results",
                         &options[selected],
                         &options,
                         ui.available_width().min(430.0),

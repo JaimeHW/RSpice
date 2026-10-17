@@ -131,7 +131,7 @@ impl ProjectAuditComparison {
         comparison_field(&mut fields, "Change", &first.change, &second.change);
         comparison_field(
             &mut fields,
-            "Affected evidence",
+            "Affected records",
             &first.affected_evidence,
             &second.affected_evidence,
         );
@@ -250,7 +250,7 @@ impl RSpiceApp {
             .body_scroll_offset;
         let mut dialog = Dialog::new(TITLE, "Close")
             .description(
-                "Inspect retained project revisions, semantic changes, and immutable audit evidence across schematic, simulation, model, and governed records.",
+                "Inspect saved project revisions, what changed, and the audit history of schematics, simulations, models, and other records.",
             )
             .size(DialogSize::SimulationWorkflow)
             .initial_height(610.0)
@@ -556,7 +556,7 @@ fn revision_history_body(
                                 table_heading(ui, "Time");
                                 table_heading(ui, "Actor");
                                 table_heading(ui, "Change");
-                                table_heading(ui, "Affected evidence");
+                                table_heading(ui, "Affected records");
                                 table_heading(ui, "Status");
                                 ui.end_row();
                                 for row in &visible {
@@ -633,7 +633,7 @@ fn revision_history_body(
         );
         revision_note_card(
             &mut columns[1],
-            "Immutable results",
+            "Results never change",
             "Result manifests retain their original input revision and are never rewritten when the project moves forward.",
         );
     });
@@ -819,7 +819,7 @@ fn append_model_and_pdk_rows(rows: &mut Vec<ProjectAuditRow>, state: &AppState) 
                 digest,
             } => (
                 revision.get().to_string(),
-                "authenticated",
+                "pinned",
                 format!(
                     "project source {source_id} \u{00b7} {}",
                     short_text(&digest.to_string())
@@ -839,7 +839,7 @@ fn append_model_and_pdk_rows(rows: &mut Vec<ProjectAuditRow>, state: &AppState) 
                 match root_digest {
                     Some(digest) => (
                         digest.clone(),
-                        "authenticated",
+                        "pinned",
                         format!("external source \u{00b7} root digest {digest}"),
                     ),
                     None => (
@@ -851,7 +851,7 @@ fn append_model_and_pdk_rows(rows: &mut Vec<ProjectAuditRow>, state: &AppState) 
             }
             ModelSourceAuthority::RetainedImport { source_id, digest } => (
                 short_text(&digest.to_string()),
-                "authenticated",
+                "pinned",
                 format!(
                     "retained import {source_id} \u{00b7} root digest {}",
                     short_text(&digest.to_string())
@@ -907,7 +907,7 @@ fn append_governed_rows(rows: &mut Vec<ProjectAuditRow>, state: &AppState) {
                 short_text(&entry.policy_digest().to_string()),
                 short_text(&entry.semantic_digest().to_string())
             ),
-            status: "immutable".to_owned(),
+            status: "committed".to_owned(),
             schematic_revision: None,
             restorable_schematic_revision: None,
         });

@@ -113,7 +113,7 @@ impl RSpiceApp {
                     self.state.ui.toasts.warn_with_title(
                         ctx,
                         "Disclosure review required",
-                        "Review and acknowledge the exact support-bundle contents before export.",
+                        "Review and acknowledge the support-bundle contents before export.",
                     );
                 }
             }
@@ -532,7 +532,7 @@ fn render_support_bundle(
     ui.add_space(10.0);
     ui.checkbox(
         disclosure_reviewed,
-        "I reviewed the exact data classes above and approve this local export",
+        "I reviewed the data listed above and approve this local export",
     );
 }
 

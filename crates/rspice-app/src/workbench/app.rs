@@ -377,7 +377,7 @@ impl RSpiceApp {
             .has_retained_manual_authorization(receipt.prepared_snapshot_digest)
         {
             return Some(
-                "Validate the exact current netlist before running; its one-shot authorization is no longer retained"
+                "Validate the current netlist again before running; the earlier validation can no longer be used"
                     .to_owned(),
             );
         }
