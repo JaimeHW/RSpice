@@ -32,9 +32,12 @@ impl ToolInput {
     pub fn read(ui: &Ui, response: &Response, tool: Tool, route_active: bool) -> Self {
         let shape_double_click = tool == Tool::DocumentationShape
             && response.double_clicked_by(egui::PointerButton::Primary);
-        let route_double_click = matches!(tool, Tool::Wire | Tool::Bus)
-            && response.double_clicked_by(egui::PointerButton::Primary)
-            && route_active;
+        // The route tools own a double-click whole. With a route live it ends
+        // the route. With none, the first click already ended one on a
+        // conductor, and the second must not start a new route there.
+        let conductor_double_click = matches!(tool, Tool::Wire | Tool::Bus)
+            && response.double_clicked_by(egui::PointerButton::Primary);
+        let route_double_click = conductor_double_click && route_active;
         let route_enter = response.has_focus()
             && route_active
             && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
@@ -45,7 +48,7 @@ impl ToolInput {
                 .flatten(),
             primary_click: (response.clicked_by(egui::PointerButton::Primary)
                 && !shape_double_click
-                && !route_double_click)
+                && !conductor_double_click)
                 .then(|| response.interact_pointer_pos())
                 .flatten(),
             select_double_click: (tool == Tool::Select
