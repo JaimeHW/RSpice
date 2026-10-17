@@ -273,6 +273,41 @@ impl DrcViolationType {
                 floor: ENGINE_REFUSES,
                 waivable: false,
             },
+            Self::UndrivenNet => &DrcRule {
+                code: "DRC-UNDRIVEN-NET",
+                title: "Undriven net",
+                explanation: "Two or more pins their interfaces declare inputs share a net, and \
+                    nothing on it drives them: no declared output, no source, no passive or \
+                    bidirectional terminal, no port and no global. The inputs read a node no \
+                    element sets. Connect a driver to the net, or declare one of its pins an \
+                    output.",
+                default_severity: DrcSeverity::Error,
+                floor: ANY,
+                waivable: true,
+            },
+            Self::GroundNotNodeZero => &DrcRule {
+                code: "DRC-GROUND-NOT-NODE-ZERO",
+                title: "Ground not node 0",
+                explanation: "A net the drawing names as ground, a GND! global or a ground label \
+                    whose net took another name, is written to the deck as a node of its own \
+                    rather than as node 0. Everything returned to it is returned to that node, not \
+                    to the reference. Use a ground symbol, or a net label named 0 or GND.",
+                default_severity: DrcSeverity::Error,
+                floor: ANY,
+                waivable: true,
+            },
+            Self::SupplyTiedToGround => &DrcRule {
+                code: "DRC-SUPPLY-TIED-TO-GROUND",
+                title: "Global tied to ground",
+                explanation: "A global net is tied to a ground symbol in one cellview, while the \
+                    rest of the design writes the global as a node of its own. The deck makes \
+                    that cellview's net node 0 and keeps the global apart, so the tie the drawing \
+                    shows is not in the circuit that runs. Remove the tie, or give the net a name \
+                    of its own.",
+                default_severity: DrcSeverity::Error,
+                floor: ANY,
+                waivable: true,
+            },
             Self::RecursiveInstantiation => &DrcRule {
                 code: "DRC-RECURSIVE-INSTANTIATION",
                 title: "Recursive instantiation",
@@ -454,6 +489,9 @@ mod tests {
             DrcViolationType::ShortedOutputs => "DRC-SHORTED-OUTPUTS",
             DrcViolationType::MissingGround => "DRC-MISSING-GROUND",
             DrcViolationType::SourceToSource => "DRC-SOURCE-TO-SOURCE",
+            DrcViolationType::UndrivenNet => "DRC-UNDRIVEN-NET",
+            DrcViolationType::GroundNotNodeZero => "DRC-GROUND-NOT-NODE-ZERO",
+            DrcViolationType::SupplyTiedToGround => "DRC-SUPPLY-TIED-TO-GROUND",
             DrcViolationType::RecursiveInstantiation => "DRC-RECURSIVE-INSTANTIATION",
             DrcViolationType::DuplicateName => "DRC-DUPLICATE-NAME",
             DrcViolationType::EmptyName => "DRC-EMPTY-NAME",
