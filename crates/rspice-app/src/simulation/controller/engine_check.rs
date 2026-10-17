@@ -162,6 +162,15 @@ impl SimulationController {
         })
     }
 
+    /// Whether a pipeline is in flight and nothing has dropped or replaced
+    /// the retained run since its press, so the run it prepares would be
+    /// retained when its verdict lands.
+    pub(crate) fn preflight_is_current(&self) -> bool {
+        self.preflight
+            .as_ref()
+            .is_some_and(|pending| pending.generation == self.retained_run_generation)
+    }
+
     /// Stop the pipeline in flight. Its worker stops at the next stage
     /// boundary, deck or abort point, and its verdict is dropped. Returns
     /// whether a pipeline was in flight.
