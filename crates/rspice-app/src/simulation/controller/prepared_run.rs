@@ -900,6 +900,19 @@ impl SimulationController {
         self.run_authorization.clear();
     }
 
+    /// Whether the run retained as checked would be dispatched as it stands:
+    /// nothing it was prepared from has moved, judged as its dispatch judges
+    /// it. `false` where no run is retained.
+    pub(crate) fn retained_run_is_current(&self, state: &AppState) -> bool {
+        let (Some(inputs), Some(snapshot)) = (
+            self.retained_run_inputs.as_ref(),
+            self.run_authorization.retained_snapshot(),
+        ) else {
+            return false;
+        };
+        inputs.still_current(state, snapshot).is_ok()
+    }
+
     pub(crate) fn has_retained_manual_authorization(
         &self,
         expected_snapshot_digest: crate::product::ContentDigest,
