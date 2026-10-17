@@ -1253,7 +1253,7 @@ pub(super) fn violation_targets_net(violation: &DrcViolation, net: &DesignNet) -
             net.terminals
                 .iter()
                 .any(|terminal| terminal.component_id == *id)
-                && violation.related_items.iter().any(|item| {
+                && violation.related_items().iter().any(|item| {
                     item.eq_ignore_ascii_case(&net.name)
                         || net
                             .terminals
@@ -1275,7 +1275,7 @@ pub(super) fn violation_targets_net(violation: &DrcViolation, net: &DesignNet) -
         | DrcLocation::BusTap { .. }
         | DrcLocation::Global
         | DrcLocation::SymbolPin { .. } => violation
-            .related_items
+            .related_items()
             .iter()
             .any(|item| item.eq_ignore_ascii_case(&net.name)),
     }

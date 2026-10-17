@@ -442,8 +442,11 @@ pub struct DrcViolation {
     pub message: String,
     /// Location in schematic (component ID, wire ID, or coordinates)
     pub location: DrcLocation,
-    /// Related component names (for cross-referencing)
-    pub related_items: Vec<String>,
+    /// Every other object the finding involves: each source in a loop, each
+    /// instance carrying a duplicated name, each output on a shorted net.
+    /// What they are called is read off these, by [`Self::related_items`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub related: Vec<DrcRelated>,
     /// The waiver that covers this finding, where one does. A waived finding
     /// is still reported, at its own severity; it does not count against the
     /// design. Stated by the check from the waivers its configuration
@@ -466,7 +469,7 @@ impl DrcViolation {
             violation_type,
             message: message.into(),
             location,
-            related_items: Vec::new(),
+            related: Vec::new(),
             waiver: None,
         }
     }
@@ -476,10 +479,49 @@ impl DrcViolation {
         self.waiver.is_none()
     }
 
-    /// Add related items
-    pub fn with_related(mut self, items: Vec<String>) -> Self {
-        self.related_items = items;
+    /// State the other objects this finding involves.
+    pub fn with_related(mut self, related: Vec<DrcRelated>) -> Self {
+        self.related = related;
         self
+    }
+
+    /// What each object the finding involves is called, in order.
+    ///
+    /// Read off where each one is rather than kept beside it, so a name can
+    /// never disagree with the place a reader is taken to.
+    pub fn related_items(&self) -> Vec<String> {
+        let within = self.naming_scope();
+        self.related
+            .iter()
+            .map(|related| related.location.object_name(within))
+            .collect()
+    }
+
+    /// What one object this finding involves is called, as
+    /// [`Self::related_items`] calls it.
+    pub fn related_name(&self, related: &DrcRelated) -> String {
+        related.location.object_name(self.naming_scope())
+    }
+
+    /// The occurrence the objects this finding involves are named within.
+    ///
+    /// A finding about one cellview, stated at an occurrence of it, involves
+    /// objects of that cellview only, and names them as the cellview draws
+    /// them, as its message does. A finding that spans occurrences names
+    /// each object by its instance path, as its message does.
+    fn naming_scope(&self) -> Option<&InstancePath> {
+        let DrcLocation::InsideInstance { path, .. } = &self.location else {
+            return None;
+        };
+        self.related
+            .iter()
+            .all(|related| {
+                matches!(
+                    &related.location,
+                    DrcLocation::InsideInstance { path: within, .. } if within == path
+                )
+            })
+            .then_some(path)
     }
 
     /// Re-base this finding's severity on the instance that raised it.
@@ -493,6 +535,85 @@ impl DrcViolation {
     pub fn with_instance_severity(mut self, written: bool) -> Self {
         self.severity = self.violation_type.severity_for_instance(written);
         self
+    }
+}
+
+/// One object a finding involves besides the one it is located at.
+///
+/// A loop is every source in it and a duplicated name every instance that
+/// carries it, while the finding is stated at one place. Each other object is
+/// named by where it is, in the same vocabulary a finding is located in, so a
+/// reader can be taken to it and the canvas can mark it.
+///
+/// What a finding involves is how it is shown, not what it is: neither its
+/// identity nor a waiver of it is keyed by these.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DrcRelated {
+    /// Where the object is. A finding stated inside an instance states the
+    /// objects it involves there too.
+    pub location: DrcLocation,
+    /// What the object is to the finding.
+    pub relation: DrcRelation,
+}
+
+impl DrcRelated {
+    pub fn new(location: DrcLocation, relation: DrcRelation) -> Self {
+        Self { location, relation }
+    }
+}
+
+/// What an object a finding involves is to that finding.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DrcRelation {
+    /// A voltage source the loop runs through.
+    LoopSource,
+    /// Another instance the deck writes under the finding's name, which is
+    /// carried as the deck spells it.
+    SameName(String),
+    /// A declared output on the net.
+    Output,
+    /// A declared input on the net.
+    Input,
+    /// A terminal on the node.
+    OnNode,
+    /// The authored name the finding's name differs from only by case.
+    OtherSpelling,
+    /// An instance the reference answers to, one of several.
+    Candidate,
+    /// A wire that runs through both pins of the part.
+    ShortingWire,
+    /// A wire that crosses another there, with no junction to join them.
+    CrossingWire,
+    /// The label or port whose name the net took.
+    NetName,
+    /// A ground symbol or ground label that makes the net node 0.
+    GroundTie,
+    /// A bus whose declaration the finding's bus or tap disagrees with.
+    ConflictingBus,
+    /// Geometry a tap ends on that is the wrong kind for it: a bus under a
+    /// scalar tap, a wire under a multi-bit one.
+    TapLanding,
+}
+
+impl DrcRelation {
+    /// What the object is to its finding, as a reader is told it beside the
+    /// object's name: `V1 · source in the loop`.
+    pub fn describe(&self) -> String {
+        match self {
+            Self::LoopSource => "source in the loop".to_owned(),
+            Self::SameName(written) => format!("also named {written}"),
+            Self::Output => "output on the net".to_owned(),
+            Self::Input => "input on the net".to_owned(),
+            Self::OnNode => "on the node".to_owned(),
+            Self::OtherSpelling => "same name, other case".to_owned(),
+            Self::Candidate => "answers to the reference".to_owned(),
+            Self::ShortingWire => "runs through both pins".to_owned(),
+            Self::CrossingWire => "crosses without a junction".to_owned(),
+            Self::NetName => "names the net".to_owned(),
+            Self::GroundTie => "ties it to ground".to_owned(),
+            Self::ConflictingBus => "declares it differently".to_owned(),
+            Self::TapLanding => "where the tap ends".to_owned(),
+        }
     }
 }
 
@@ -597,6 +718,52 @@ impl DrcLocation {
                 ..
             } => format!("{} pin {}", reference.display_path(), pin_name),
         }
+    }
+
+    /// What the object here is called where a finding names it among others:
+    /// an instance by its reference, a terminal as `R1.A`, a node or a label
+    /// by its name.
+    ///
+    /// `within` is the occurrence the naming finding is stated at. An object
+    /// inside it is named as its cellview draws it; one inside any other
+    /// occurrence by the path to it, as `/X2/V1`.
+    pub fn object_name(&self, within: Option<&InstancePath>) -> String {
+        match self {
+            Self::Component { id, name } => instance_name(*id, name),
+            Self::Terminal {
+                component_id,
+                component_name,
+                pin_name,
+                ..
+            } => format!(
+                "{}.{pin_name}",
+                instance_name(*component_id, component_name)
+            ),
+            Self::InsideInstance { path, inner, .. } if Some(path) == within => {
+                inner.object_name(None)
+            }
+            Self::InsideInstance { path, inner, .. } => {
+                format!("{path}/{}", inner.object_name(None))
+            }
+            Self::Wire { id } => format!("wire #{id}"),
+            Self::Bus { id } => format!("bus #{id}"),
+            Self::BusTap { id } => format!("bus tap #{id}"),
+            Self::NetLabel { name } => name.trim().to_owned(),
+            Self::Node { net_name, .. } => net_name.clone(),
+            Self::Point { .. } | Self::Global | Self::CellView { .. } | Self::SymbolPin { .. } => {
+                self.display()
+            }
+        }
+    }
+}
+
+/// An instance's authored reference, or its identity where it has none, so a
+/// name is never an empty string.
+fn instance_name(id: u64, name: &str) -> String {
+    if name.trim().is_empty() {
+        format!("component #{id}")
+    } else {
+        name.to_owned()
     }
 }
 

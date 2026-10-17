@@ -20,7 +20,7 @@ use rspice_design::drc::{CheckReach, DrcConfig, DrcLocation, DrcResult, DrcViola
 use super::AppState;
 use super::diagnostic_store::{
     DiagnosticInputs, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject, FindingKey,
-    mint_canonical,
+    RelatedPlace, mint_canonical,
 };
 use super::waivers;
 
@@ -478,6 +478,45 @@ impl AppState {
         finding_identities(&self.workspace.content.active_schematic_reference(), result)
     }
 
+    /// The other objects the current finding involves that `cell_view` draws,
+    /// and how bad the finding is: what the canvas marks beside the finding's
+    /// own badge.
+    ///
+    /// Read through the store's memo of the current finding's places, so a
+    /// frame costs that finding's objects and no walk over the others. A
+    /// finding whose batch no longer describes the design marks nothing, as
+    /// its row offers no jump.
+    pub(crate) fn current_finding_related_marks(
+        &self,
+        cell_view: &CellViewRef,
+    ) -> Option<(rspice_design::drc::DrcSeverity, Vec<DrcLocation>)> {
+        use super::diagnostic_store::DiagnosticLevel;
+        use rspice_design::drc::DrcSeverity;
+
+        let current = self.diagnostics.current_places()?;
+        let key = cell_view.key();
+        let drawn: Vec<DrcLocation> = current
+            .places
+            .iter()
+            .filter(|place| place.cell_view.key().eq_ignore_ascii_case(&key))
+            .map(|place| place.location.clone())
+            .collect();
+        if drawn.is_empty() {
+            return None;
+        }
+        let batch = self.diagnostics.batch_of(&current)?;
+        if !self.diagnostic_batch_standing(batch).is_current() {
+            return None;
+        }
+        let severity = match current.level {
+            DiagnosticLevel::Critical => DrcSeverity::Critical,
+            DiagnosticLevel::Error => DrcSeverity::Error,
+            DiagnosticLevel::Warning => DrcSeverity::Warning,
+            DiagnosticLevel::Info | DiagnosticLevel::Hint => DrcSeverity::Info,
+        };
+        Some((severity, drawn))
+    }
+
     /// The worst rule finding published for `subject`, first among equals in
     /// the order the checks reported them — where a worst-first tour starts.
     pub(in crate::workbench) fn worst_design_rule_finding(
@@ -704,12 +743,14 @@ impl AppState {
 
 /// One canonical record per rule finding.
 ///
-/// Each route is resolved in the subject's own drawing — the live editor when
-/// the subject is the view in front of the reader, the workspace's copy of it
-/// otherwise — and names that view, so following it opens the view before it
-/// selects anything. A finding about a view that is not open used to be
-/// published with no route at all, and one resolved against whichever view
-/// was open would have pointed into the wrong coordinate space.
+/// Each route is resolved in the drawing the object is drawn in — the live
+/// editor when that is the view in front of the reader, the workspace's copy
+/// of it otherwise — and names that view and the sheet the object is on, so
+/// following it opens the view and brings the sheet forward before it selects
+/// anything. A finding about a view that is not open used to be published with
+/// no route at all, and one resolved against whichever view was open would
+/// have pointed into the wrong coordinate space. Every other object a finding
+/// involves is published beside it, routed the same way.
 fn design_rule_records(
     state: &AppState,
     subject: &CellViewRef,
@@ -721,18 +762,35 @@ fn design_rule_records(
     let document_id = subject.key();
     let keys = finding_keys(subject, result);
     let canonicals = mint_canonical(&keys, revision, &format!("design-check:{document_id}"));
+    let route_to = |location: &DrcLocation| {
+        let (cell_view, location) = drawn_place(subject, location);
+        crate::schematic::view::violations::location_anchor_in(state, cell_view, location)
+            .map(DiagnosticRoute::Anchor)
+    };
     let mut records = result
         .violations()
         .iter()
         .zip(keys)
         .zip(canonicals)
         .map(|((violation, key), mut canonical)| {
-            let route = crate::schematic::view::violations::location_anchor_in(
-                state,
-                subject,
-                &violation.location,
-            )
-            .map(DiagnosticRoute::Anchor);
+            let route = route_to(&violation.location);
+            let related_places = violation
+                .related
+                .iter()
+                .map(|related| {
+                    let (cell_view, location) = drawn_place(subject, &related.location);
+                    RelatedPlace {
+                        label: format!(
+                            "{} \u{00b7} {}",
+                            violation.related_name(related),
+                            related.relation.describe()
+                        ),
+                        cell_view: cell_view.clone(),
+                        location: location.clone(),
+                        route: route_to(&related.location),
+                    }
+                })
+                .collect::<Vec<_>>();
             canonical.suppression = violation.waiver.as_ref().map(waivers::suppression_of);
             let (drawn_in, object) = rspice_design::drc::waiver_site(&violation.location);
             let drawn_in = drawn_in.unwrap_or(subject);
@@ -755,6 +813,7 @@ fn design_rule_records(
             .with_details(violation.violation_type.suggested_fix())
             .with_rule(violation.violation_type.rule().explanation)
             .with_route(route)
+            .with_related_places(related_places)
             .with_waiver_action(waivers::finding_waiver_action(subject, violation))
         })
         .collect::<Vec<_>>();
@@ -770,6 +829,18 @@ fn design_rule_records(
         );
     }
     records
+}
+
+/// The cellview a location in a check of `subject` is drawn in, and where it
+/// is there: one stated inside an instance is drawn in that instance's master.
+fn drawn_place<'a>(
+    subject: &'a CellViewRef,
+    location: &'a DrcLocation,
+) -> (&'a CellViewRef, &'a DrcLocation) {
+    match location {
+        DrcLocation::InsideInstance { view, inner, .. } => drawn_place(view, inner),
+        _ => (subject, location),
+    }
 }
 
 /// Whether a pass states the subject's own waivers that cover nothing.
@@ -1681,5 +1752,53 @@ mod tests {
             ),
             "a refused check publishes no evidence"
         );
+    }
+
+    /// What else a finding involves is how it is shown, not what it is: a
+    /// loop that gains, loses or reorders a source is the same finding, so a
+    /// selection, a waiver's match and the page's current row all stay on it.
+    #[test]
+    fn a_findings_identity_is_unmoved_by_the_objects_it_involves() {
+        use rspice_design::drc::{DrcRelated, DrcRelation, DrcViolation};
+
+        let subject = CellViewRef::new("work", "top", "schematic");
+        let source = |id: u64| {
+            DrcRelated::new(
+                DrcLocation::Component {
+                    id,
+                    name: format!("V{id}"),
+                },
+                DrcRelation::LoopSource,
+            )
+        };
+        let pass = |related: Vec<DrcRelated>| {
+            let mut result = completed_result();
+            result.add_violation(
+                DrcViolation::new(
+                    1,
+                    DrcViolationType::SourceToSource,
+                    "a loop of voltage sources",
+                    DrcLocation::Node {
+                        net_name: "a".to_owned(),
+                        terminals: Vec::new(),
+                    },
+                )
+                .with_related(related),
+            );
+            result
+        };
+
+        let alone = pass(Vec::new());
+        let identity = finding_identities(&subject, &alone);
+        let key = finding_keys(&subject, &alone);
+        for related in [
+            vec![source(1)],
+            vec![source(1), source(2), source(3)],
+            vec![source(3), source(1), source(2)],
+        ] {
+            let involved = pass(related);
+            assert_eq!(finding_identities(&subject, &involved), identity);
+            assert_eq!(finding_keys(&subject, &involved), key);
+        }
     }
 }

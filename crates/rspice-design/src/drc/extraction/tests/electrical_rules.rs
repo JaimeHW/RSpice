@@ -315,7 +315,15 @@ fn inputs_tied_together_with_nothing_to_drive_them_are_an_undriven_net() {
             terminals: Vec::new(),
         }
     );
-    assert_eq!(undriven[0].related_items, ["X1.A", "X2.A"]);
+    assert_eq!(undriven[0].related_items(), ["X1.A", "X2.A"]);
+    assert!(
+        undriven[0]
+            .related
+            .iter()
+            .all(|input| input.relation == DrcRelation::Input),
+        "{:?}",
+        undriven[0].related
+    );
     for already in [
         DrcViolationType::UndrivenInput,
         DrcViolationType::FloatingNode,

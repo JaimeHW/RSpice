@@ -3,6 +3,7 @@
 use super::*;
 use rspice_app_types::canonical::content_digest;
 use rspice_design::drc::DrcLocation;
+use rspice_design::drc::DrcRelation;
 use rspice_design::drc::DrcViolation;
 use rspice_simulation_contract::analysis_spec::EnvelopeAdaptiveMode;
 use rspice_simulation_contract::analysis_spec::EnvelopeExtractionPath;
@@ -1632,7 +1633,10 @@ fn drc_identity_bytes_are_pinned_for_every_location_kind() {
 
     for (at, spelled) in cases {
         let mut violation = DrcViolation::new(3, DrcViolationType::FloatingNode, "Node 'a'", at)
-            .with_related(vec!["R2".to_owned(), "R1".to_owned()]);
+            .with_related(vec![
+                related_instance(12, "R2", DrcRelation::OnNode),
+                related_instance(11, "R1", DrcRelation::OnNode),
+            ]);
         violation.severity = DrcSeverity::Warning;
 
         let mut bytes = b"RSPICE-CANONICAL".to_vec();
@@ -1643,7 +1647,7 @@ fn drc_identity_bytes_are_pinned_for_every_location_kind() {
         tag(&mut bytes, 1);
         text(&mut bytes, STRING, "Node 'a'");
         spelled(&mut bytes);
-        // The related items, sorted.
+        // What the objects it involves are called, sorted.
         sequence(&mut bytes, 2);
         text(&mut bytes, STRING, "R1");
         text(&mut bytes, STRING, "R2");
@@ -1655,6 +1659,53 @@ fn drc_identity_bytes_are_pinned_for_every_location_kind() {
             violation.location
         );
     }
+}
+
+/// An instance a finding involves, at `id`.
+fn related_instance(id: u64, name: &str, relation: DrcRelation) -> rspice_design::drc::DrcRelated {
+    rspice_design::drc::DrcRelated::new(
+        DrcLocation::Component {
+            id,
+            name: name.to_owned(),
+        },
+        relation,
+    )
+}
+
+/// The objects a finding involves are how it is shown: where each is drawn,
+/// what it is to the finding and the order they are listed in are not what
+/// the check found, so none of them moves the receipt. The receipt holds what
+/// they are called, exactly as it held the names it was handed before the
+/// objects themselves were stated.
+#[test]
+fn where_a_findings_related_objects_are_drawn_is_not_in_its_receipt() {
+    let digest = |related: Vec<rspice_design::drc::DrcRelated>| {
+        drc_violation_digest(
+            &DrcViolation::new(
+                3,
+                DrcViolationType::SourceToSource,
+                "Voltage sources V1, V2 form a closed loop through node 'a'",
+                DrcLocation::Node {
+                    net_name: "a".to_owned(),
+                    terminals: Vec::new(),
+                },
+            )
+            .with_related(related),
+        )
+    };
+    let stated = digest(vec![
+        related_instance(1, "V1", DrcRelation::LoopSource),
+        related_instance(2, "V2", DrcRelation::LoopSource),
+    ]);
+
+    // Moved to other ids, listed the other way round, given another part.
+    assert_eq!(
+        digest(vec![
+            related_instance(20, "V2", DrcRelation::Output),
+            related_instance(10, "V1", DrcRelation::OnNode),
+        ]),
+        stated
+    );
 }
 
 #[test]

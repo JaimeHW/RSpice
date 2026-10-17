@@ -123,6 +123,55 @@ fn hidden_identity_anchor_is_suppressed_but_unowned_point_remains_visible() {
     assert_eq!(anchor(&view, &inside.location), None);
 }
 
+/// What follows a finding is told the sheet its object is drawn on, so it can
+/// bring that sheet forward first; the canvas, which draws only the sheet in
+/// view, is given no place for an object it does not draw.
+#[test]
+fn an_object_on_another_sheet_is_placed_on_its_own_sheet() {
+    let catalog = catalog_with_hidden_object(20);
+    let second = catalog
+        .sheet_for_object(20)
+        .expect("assigned to the second sheet");
+    let mut document = SchematicDocument::default();
+    for (id, at) in [(20, Point::new(10, 10)), (21, Point::new(40, 40))] {
+        document
+            .components
+            .push(Component::new(id, ComponentType::Resistor, at));
+    }
+    let view = DesignView {
+        document: &document,
+        canvas_cache: None,
+        sheet_catalog: Some(&catalog),
+        review_markers: Default::default(),
+    };
+    let hidden = DrcLocation::Component {
+        id: 20,
+        name: "R1".to_owned(),
+    };
+    let unassigned = DrcLocation::Component {
+        id: 21,
+        name: "R2".to_owned(),
+    };
+
+    assert_eq!(
+        placement(&view, &hidden),
+        Some(Placement {
+            point: Point::new(10, 10),
+            sheet: Some(second),
+        })
+    );
+    assert_eq!(anchor(&view, &hidden), None);
+    assert_eq!(
+        placement(&view, &unassigned),
+        Some(Placement {
+            point: Point::new(40, 40),
+            sheet: None,
+        }),
+        "an object no sheet claims is drawn on the sheet in view"
+    );
+    assert_eq!(anchor(&view, &unassigned), Some(Point::new(40, 40)));
+}
+
 /// The checks read the projected document, which lays the second sheet a
 /// stride along. A terminal found there is badged where the second sheet
 /// draws it, not a million grid units off the canvas.

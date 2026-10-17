@@ -20,8 +20,8 @@ pub use input::{BrokenReference, ComponentInfo, ParameterRangeIssue, PinInfo};
 pub use rule_deck::{DESIGN_RULE_DECK_SCHEMA_VERSION, DeckEditRefusal, DeckIssue, DesignRuleDeck};
 pub use rules::{DrcFloor, DrcRule};
 pub use types::{
-    DrcLocation, DrcResult, DrcRuleCategory, DrcSeverity, DrcSummary, DrcViolation,
-    DrcViolationType,
+    DrcLocation, DrcRelated, DrcRelation, DrcResult, DrcRuleCategory, DrcSeverity, DrcSummary,
+    DrcViolation, DrcViolationType,
 };
 pub use waivers::{
     CheckWaivers, DRC_WAIVER_SCHEMA_VERSION, DrcWaiver, DrcWaivers, WaiverEditRefusal,

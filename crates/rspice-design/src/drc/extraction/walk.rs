@@ -376,7 +376,6 @@ impl<'a> InstanceGraph<'a> {
             } else {
                 continue;
             };
-            let instance = instance_label(component_id, &component_name);
             let mut violation = DrcViolation::new(
                 result.total_count(),
                 DrcViolationType::RecursiveInstantiation,
@@ -385,8 +384,7 @@ impl<'a> InstanceGraph<'a> {
                     id: component_id,
                     name: component_name,
                 },
-            )
-            .with_related(vec![instance, recursive.repeated.display_path()]);
+            );
             if let Some(severity) =
                 severity_overrides.get(&DrcViolationType::RecursiveInstantiation)
             {

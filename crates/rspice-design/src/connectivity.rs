@@ -145,6 +145,8 @@ pub enum ConnectivityAnchor {
     Net(String),
     /// A placed component, with its authored reference.
     Component { id: u64, name: String },
+    /// A drawn wire.
+    Wire(u64),
 }
 
 /// One thing the extraction found wrong with the drawing's connectivity.
@@ -159,6 +161,10 @@ pub struct ConnectivityDiagnostic {
     pub message: String,
     /// Where it points.
     pub anchor: ConnectivityAnchor,
+    /// The other objects it is about: the wire through a shorted part's
+    /// pins, the wires of an unmarked crossing, the bus a declaration
+    /// conflicts with, the geometry a tap wrongly lands on.
+    pub related: Vec<ConnectivityAnchor>,
 }
 
 /// Everything one cell view's drawing says about what is connected to what.
@@ -361,7 +367,15 @@ where
         found.sort_by_key(|(point, _)| (point.x, point.y));
         for (point, what) in found {
             if self.ambiguous_points.insert(point) {
-                self.report(
+                // No wire has a vertex on an unmarked crossing, so every wire
+                // through the point crosses there.
+                let crossing = schematic
+                    .wires
+                    .iter()
+                    .filter(|wire| wire.contains_point(point))
+                    .map(|wire| ConnectivityAnchor::Wire(wire.id))
+                    .collect();
+                self.report_about(
                     ConnectivityDiagnosticKind::AmbiguousCrossing,
                     true,
                     format!(
@@ -371,6 +385,7 @@ where
                         point.x, point.y
                     ),
                     ConnectivityAnchor::Point(point),
+                    crossing,
                 );
             }
         }
@@ -394,11 +409,13 @@ where
             {
                 continue;
             }
-            if schematic
+            let shorting = schematic
                 .wires
                 .iter()
-                .any(|wire| wire.contains_point(*first) && wire.contains_point(*second))
-            {
+                .filter(|wire| wire.contains_point(*first) && wire.contains_point(*second))
+                .map(|wire| ConnectivityAnchor::Wire(wire.id))
+                .collect::<Vec<_>>();
+            if !shorting.is_empty() {
                 // A message never names an empty reference.
                 let identity = if component.name.trim().is_empty() {
                     format!("component #{}", component.id)
@@ -413,15 +430,17 @@ where
                          {first_pin} and {second_pin}, so it does nothing in the circuit. \
                          Break the wire between the pins, or move the part off it"
                     ),
+                    shorting,
                 ));
             }
         }
-        for (id, name, message) in found {
-            self.report(
+        for (id, name, message, shorting) in found {
+            self.report_about(
                 ConnectivityDiagnosticKind::ShortedPart,
                 false,
                 message,
                 ConnectivityAnchor::Component { id, name },
+                shorting,
             );
         }
     }
@@ -433,11 +452,25 @@ where
         message: String,
         anchor: ConnectivityAnchor,
     ) {
+        self.report_about(kind, blocking, message, anchor, Vec::new());
+    }
+
+    /// Report a finding that is about `related` as well as about where it
+    /// points.
+    fn report_about(
+        &mut self,
+        kind: ConnectivityDiagnosticKind,
+        blocking: bool,
+        message: String,
+        anchor: ConnectivityAnchor,
+        related: Vec<ConnectivityAnchor>,
+    ) {
         self.diagnostics.push(ConnectivityDiagnostic {
             kind,
             blocking,
             message,
             anchor,
+            related,
         });
     }
 
@@ -477,7 +510,13 @@ where
                 ConnectivityAnchor::Point(diagnostic.point)
             };
             let blocking = kind != ConnectivityDiagnosticKind::UnnamedBus;
-            self.report(kind, blocking, diagnostic.message, anchor);
+            self.report_about(
+                kind,
+                blocking,
+                diagnostic.message,
+                anchor,
+                diagnostic.related,
+            );
         }
 
         self.find_ambiguous_crossings();
@@ -656,12 +695,12 @@ where
             });
 
         for mismatch in &connectivity.mismatches {
-            self.diagnostics.push(ConnectivityDiagnostic {
-                kind: ConnectivityDiagnosticKind::VectorWidthMismatch,
-                blocking: true,
-                message: mismatch.message(),
-                anchor: ConnectivityAnchor::Point(mismatch.point),
-            });
+            self.report(
+                ConnectivityDiagnosticKind::VectorWidthMismatch,
+                true,
+                mismatch.message(),
+                ConnectivityAnchor::Point(mismatch.point),
+            );
         }
 
         let mut taken: HashSet<String> = self

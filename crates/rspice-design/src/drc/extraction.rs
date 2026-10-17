@@ -11,7 +11,9 @@ use super::checker::{
 };
 use super::input::{BrokenReference, ComponentInfo, ParameterRangeIssue, PinInfo};
 use super::source_loops::{self, GROUND_KEY};
-use super::types::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
+use super::types::{
+    DrcLocation, DrcRelated, DrcRelation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
+};
 use crate::connectivity::{ConnectivityDiagnosticKind, ExtractedConnectivity};
 use crate::hierarchy::{ConfigurationExecutionBinding, HierarchySource};
 use crate::properties::PropertyCatalog;
@@ -686,7 +688,7 @@ fn restated(
         severity,
         mut message,
         location,
-        related_items,
+        related,
         waiver,
         ..
     } = finding.clone();
@@ -697,24 +699,30 @@ fn restated(
             severity,
             message,
             location,
-            related_items,
+            related,
             waiver,
         };
     };
     if let Some(note) = note {
         message = format!("{message} ({note})");
     }
+    // Everything the finding involves is drawn where it is, in the same
+    // occurrence.
+    let inside = |location: DrcLocation| DrcLocation::InsideInstance {
+        path: path.clone(),
+        view: reference.clone(),
+        inner: Box::new(location),
+    };
     DrcViolation {
         id,
         violation_type,
         severity,
         message,
-        location: DrcLocation::InsideInstance {
-            path: path.clone(),
-            view: reference.clone(),
-            inner: Box::new(location),
-        },
-        related_items,
+        location: inside(location),
+        related: related
+            .into_iter()
+            .map(|related| DrcRelated::new(inside(related.location), related.relation))
+            .collect(),
         waiver,
     }
 }
@@ -852,15 +860,23 @@ fn broken_references(component: &Component, cellview: &[Component]) -> Vec<Broke
     else {
         return Vec::new();
     };
-    let ambiguous = match resolve_instance_reference(cellview, reference) {
+    let (ambiguous, candidates) = match resolve_instance_reference(cellview, reference) {
         InstanceReference::Names { .. } => return Vec::new(),
-        InstanceReference::Ambiguous => true,
-        InstanceReference::Unresolved => false,
+        InstanceReference::Ambiguous(instances) => (
+            true,
+            instances
+                .into_iter()
+                .filter(|instance| instance.id != component.id)
+                .map(|instance| (instance.id, instance.name.clone()))
+                .collect(),
+        ),
+        InstanceReference::Unresolved => (false, Vec::new()),
     };
     vec![BrokenReference {
         parameter: "vref".to_owned(),
         reference: reference.to_owned(),
         ambiguous,
+        candidates,
     }]
 }
 
@@ -1121,14 +1137,27 @@ fn append_connectivity_diagnostics(
 ) {
     let mut next_id = result.total_count();
     for diagnostic in &connectivity.diagnostics {
-        let violation_type = match diagnostic.kind {
-            ConnectivityDiagnosticKind::MalformedBus => DrcViolationType::MalformedBus,
-            ConnectivityDiagnosticKind::UnnamedBus => DrcViolationType::UnnamedBus,
-            ConnectivityDiagnosticKind::BusRangeConflict => DrcViolationType::BusRangeConflict,
-            ConnectivityDiagnosticKind::DanglingBusTap => DrcViolationType::DanglingBusTap,
-            ConnectivityDiagnosticKind::MixedBusTap => DrcViolationType::MixedBusTap,
-            ConnectivityDiagnosticKind::AmbiguousCrossing => DrcViolationType::AmbiguousCrossing,
-            ConnectivityDiagnosticKind::ShortedPart => DrcViolationType::ShortedPart,
+        // The rule, and what each other object the diagnostic names is to
+        // its finding.
+        let (violation_type, relation) = match diagnostic.kind {
+            ConnectivityDiagnosticKind::MalformedBus => (DrcViolationType::MalformedBus, None),
+            ConnectivityDiagnosticKind::UnnamedBus => (DrcViolationType::UnnamedBus, None),
+            ConnectivityDiagnosticKind::BusRangeConflict => (
+                DrcViolationType::BusRangeConflict,
+                Some(DrcRelation::ConflictingBus),
+            ),
+            ConnectivityDiagnosticKind::DanglingBusTap => (DrcViolationType::DanglingBusTap, None),
+            ConnectivityDiagnosticKind::MixedBusTap => {
+                (DrcViolationType::MixedBusTap, Some(DrcRelation::TapLanding))
+            }
+            ConnectivityDiagnosticKind::AmbiguousCrossing => (
+                DrcViolationType::AmbiguousCrossing,
+                Some(DrcRelation::CrossingWire),
+            ),
+            ConnectivityDiagnosticKind::ShortedPart => (
+                DrcViolationType::ShortedPart,
+                Some(DrcRelation::ShortingWire),
+            ),
             // The checker raises the orphan label itself, under the gate that
             // governs attachment findings. A width mismatch is raised by
             // `append_vector_width_violations`, which is where the project's
@@ -1138,12 +1167,20 @@ fn append_connectivity_diagnostics(
             | ConnectivityDiagnosticKind::VectorWidthMismatch
             | ConnectivityDiagnosticKind::NetNaming => continue,
         };
+        let related = relation.map_or_else(Vec::new, |relation| {
+            diagnostic
+                .related
+                .iter()
+                .map(|anchor| DrcRelated::new(diagnostic_location(anchor), relation.clone()))
+                .collect()
+        });
         let mut violation = DrcViolation::new(
             next_id,
             violation_type,
             diagnostic.message.clone(),
             diagnostic_location(&diagnostic.anchor),
-        );
+        )
+        .with_related(related);
         if let Some(severity) = severity_overrides.get(&violation_type) {
             violation.severity = *severity;
         }
@@ -1255,6 +1292,8 @@ struct GlobalDrives {
 struct SourceBranch {
     view: usize,
     identity: String,
+    /// The source, in the cellview it is drawn in.
+    object: DrcLocation,
     /// Its `+` and `-` nodes as the cellview spells them.
     nodes: [String; 2],
     /// For each of the two, the folded name of the node every cellview shares
@@ -1287,17 +1326,25 @@ struct GlobalTouches {
 
 #[derive(Default)]
 struct GlobalTouched {
-    /// The terminals on the node in each cellview that touches it, with the
-    /// node as that cellview spells it.
-    touches: Vec<(usize, u64, String)>,
+    /// How each cellview that touches the node touches it.
+    touches: Vec<GlobalTouch>,
     /// An interface port stands on the node somewhere, so it continues into a
     /// parent the walk does not see.
     continues: bool,
 }
 
+/// One cellview's terminals on a global node.
+struct GlobalTouch {
+    view: usize,
+    /// The node as that cellview spells it.
+    node: String,
+    /// Each terminal on it, in that cellview.
+    terminals: Vec<DrcLocation>,
+}
+
 impl GlobalTouches {
     fn collect(&mut self, view: usize, components: &[ComponentInfo]) {
-        let mut in_view = BTreeMap::<String, (u64, String)>::new();
+        let mut in_view = BTreeMap::<String, GlobalTouch>::new();
         for component in components {
             for pin in component.pins.iter().filter(|pin| pin.on_global) {
                 let key = pin.net_name.to_ascii_lowercase();
@@ -1306,16 +1353,22 @@ impl GlobalTouches {
                 }
                 in_view
                     .entry(key)
-                    .or_insert_with(|| (0, pin.net_name.clone()))
-                    .0 += 1;
+                    .or_insert_with(|| GlobalTouch {
+                        view,
+                        node: pin.net_name.clone(),
+                        terminals: Vec::new(),
+                    })
+                    .terminals
+                    .push(DrcLocation::Terminal {
+                        component_id: component.id,
+                        component_name: component.name.clone(),
+                        pin_name: pin.name.clone(),
+                        point: pin.point,
+                    });
             }
         }
-        for (key, (terminals, node)) in in_view {
-            self.nodes
-                .entry(key)
-                .or_default()
-                .touches
-                .push((view, terminals, node));
+        for (key, touch) in in_view {
+            self.nodes.entry(key).or_default().touches.push(touch);
         }
     }
 
@@ -1328,22 +1381,32 @@ impl GlobalTouches {
     ) -> Vec<(usize, DrcViolation)> {
         let mut findings = Vec::new();
         for touched in self.nodes.values() {
-            let Some((view, _, node)) = touched.touches.first() else {
+            let Some(first) = touched.touches.first() else {
                 continue;
             };
+            let node = &first.node;
             if touched.continues || crate::schematic::ground_names::is_ground_reference(node) {
                 continue;
             }
             let total = touched
                 .touches
                 .iter()
-                .map(|(view, terminals, _)| terminals.saturating_mul(occurrences[*view].count))
+                .map(|touch| {
+                    (touch.terminals.len() as u64).saturating_mul(occurrences[touch.view].count)
+                })
                 .fold(0u64, u64::saturating_add);
             if total >= min_connections as u64 {
                 continue;
             }
+            // Stated in the first cellview that touches it, so the terminals
+            // it involves are that cellview's.
+            let on_node = first
+                .terminals
+                .iter()
+                .map(|terminal| DrcRelated::new(terminal.clone(), DrcRelation::OnNode))
+                .collect();
             findings.push((
-                *view,
+                first.view,
                 DrcViolation::new(
                     0,
                     DrcViolationType::FloatingNode,
@@ -1353,7 +1416,8 @@ impl GlobalTouches {
                         net_name: node.clone(),
                         terminals: Vec::new(),
                     },
-                ),
+                )
+                .with_related(on_node),
             ));
         }
         findings
@@ -1375,8 +1439,9 @@ impl GlobalTouches {
 #[derive(Default)]
 struct GroundTies {
     /// By folded node name: the first cellview that ties the global to node
-    /// 0, the label there that ties it, and the global as the deck names it.
-    tied: BTreeMap<String, (usize, String, String)>,
+    /// 0, the label there that ties it, the global as the deck names it, and
+    /// the ground marks on the label's net there that make it node 0.
+    tied: BTreeMap<String, (usize, String, String, Vec<DrcLocation>)>,
     /// Folded names of the globals a terminal stands on as a node of its own.
     reached: HashSet<String>,
 }
@@ -1414,14 +1479,19 @@ impl GroundTies {
             {
                 continue;
             }
-            let grounded = connectivity.net_at(label.pos).is_some_and(|net| {
+            let Some(net) = connectivity.net_at(label.pos).filter(|net| {
                 crate::schematic::ground_names::is_ground_reference(&net.spice_name())
+            }) else {
+                continue;
+            };
+            self.tied.entry(key).or_insert_with(|| {
+                (
+                    view,
+                    label.name.clone(),
+                    global,
+                    ground_marks(schematic, connectivity, components, net.id),
+                )
             });
-            if grounded {
-                self.tied
-                    .entry(key)
-                    .or_insert_with(|| (view, label.name.clone(), global));
-            }
         }
     }
 
@@ -1431,7 +1501,7 @@ impl GroundTies {
         self.tied
             .iter()
             .filter(|(key, _)| self.reached.contains(*key))
-            .map(|(_, (view, label, global))| {
+            .map(|(_, (view, label, global, ties))| {
                 (
                     *view,
                     DrcViolation::new(
@@ -1444,11 +1514,50 @@ impl GroundTies {
                         DrcLocation::NetLabel {
                             name: label.clone(),
                         },
+                    )
+                    .with_related(
+                        ties.iter()
+                            .map(|tie| DrcRelated::new(tie.clone(), DrcRelation::GroundTie))
+                            .collect(),
                     ),
                 )
             })
             .collect()
     }
+}
+
+/// The ground marks on the net `net` of one cellview: each ground symbol whose
+/// terminal is on it, and each label naming it ground. A label is placed by
+/// its name, so a name the net carries twice is one mark.
+fn ground_marks(
+    schematic: &SchematicDocument,
+    connectivity: &ExtractedConnectivity,
+    components: &[ComponentInfo],
+    net: usize,
+) -> Vec<DrcLocation> {
+    let on_net = |point| connectivity.net_at(point).is_some_and(|on| on.id == net);
+    let symbols = components
+        .iter()
+        .filter(|component| {
+            component.is_ground_symbol && component.pins.iter().any(|pin| on_net(pin.point))
+        })
+        .map(|component| DrcLocation::Component {
+            id: component.id,
+            name: component.name.clone(),
+        });
+    let mut labels = schematic
+        .net_labels
+        .iter()
+        .filter(|label| label.is_ground() && on_net(label.pos))
+        .collect::<Vec<_>>();
+    labels.sort_by_key(|label| label.id);
+    let mut named = HashSet::new();
+    labels.retain(|label| named.insert(label.name.as_str()));
+    symbols
+        .chain(labels.into_iter().map(|label| DrcLocation::NetLabel {
+            name: label.name.clone(),
+        }))
+        .collect()
 }
 
 /// What drives one global node, or one pair of them, across the walk.
@@ -1459,11 +1568,13 @@ struct GlobalDriven {
     drivers: Vec<GlobalDriver>,
 }
 
-/// One driver on a global node: the cellview it is drawn in, and what it is
-/// called there.
+/// One driver on a global node: the cellview it is drawn in, what it is
+/// called there, and the terminals by which it drives — or, for a source,
+/// the source itself — where they are there.
 struct GlobalDriver {
     view: usize,
     identity: String,
+    objects: Vec<DrcLocation>,
 }
 
 impl GlobalDrives {
@@ -1497,6 +1608,10 @@ impl GlobalDrives {
                 self.sources.push(SourceBranch {
                     view,
                     identity,
+                    object: DrcLocation::Component {
+                        id: component.id,
+                        name: component.name.clone(),
+                    },
                     nodes: [plus.to_owned(), minus.to_owned()],
                     shared: [global(plus), global(minus)],
                 });
@@ -1504,14 +1619,24 @@ impl GlobalDrives {
             }
             // One driver per component and node, as the cellview's own rule
             // counts: two output pins of one instance on one global are that
-            // instance's business, not two drivers fighting.
-            let mut driven = BTreeMap::new();
+            // instance's business, not two drivers fighting. Each of them is
+            // still an output on the node.
+            let mut driven = BTreeMap::<String, (String, Vec<DrcLocation>)>::new();
             for pin in component.pins.iter().filter(|pin| pin.drives()) {
                 if let Some(key) = global(&pin.net_name).filter(|key| key != GROUND_KEY) {
-                    driven.entry(key).or_insert_with(|| pin.net_name.clone());
+                    driven
+                        .entry(key)
+                        .or_insert_with(|| (pin.net_name.clone(), Vec::new()))
+                        .1
+                        .push(DrcLocation::Terminal {
+                            component_id: component.id,
+                            component_name: component.name.clone(),
+                            pin_name: pin.name.clone(),
+                            point: pin.point,
+                        });
                 }
             }
-            for (key, node) in driven {
+            for (key, (node, objects)) in driven {
                 self.outputs
                     .entry(key)
                     .or_insert_with(|| GlobalDriven {
@@ -1522,6 +1647,7 @@ impl GlobalDrives {
                     .push(GlobalDriver {
                         view,
                         identity: identity.clone(),
+                        objects,
                     });
             }
         }
@@ -1553,7 +1679,12 @@ impl GlobalDrives {
                     ),
                     driven.location(occurrences, views),
                 )
-                .with_related(listed),
+                .with_related(drivers_related(
+                    &driven.drivers,
+                    occurrences,
+                    views,
+                    DrcRelation::Output,
+                )),
             );
         }
         findings
@@ -1616,6 +1747,7 @@ impl GlobalDrives {
                 .map(|&source| GlobalDriver {
                     view: self.sources[source].view,
                     identity: self.sources[source].identity.clone(),
+                    objects: vec![self.sources[source].object.clone()],
                 })
                 .collect::<Vec<_>>();
             let Some((total, listed)) = conflict(&drivers, occurrences) else {
@@ -1655,7 +1787,12 @@ impl GlobalDrives {
                     ),
                     driven.location(occurrences, views),
                 )
-                .with_related(listed),
+                .with_related(drivers_related(
+                    &driven.drivers,
+                    occurrences,
+                    views,
+                    DrcRelation::LoopSource,
+                )),
             );
         }
         findings
@@ -1743,6 +1880,46 @@ fn conflict(
         total.to_string()
     };
     Some((total, listed))
+}
+
+/// Where each driver of a conflict is, at each occurrence [`conflict`] lists
+/// it at, in the order the finding names them: the source, or every output
+/// by which an instance drives the node.
+fn drivers_related(
+    drivers: &[GlobalDriver],
+    occurrences: &[Occurrences],
+    views: &[ReachedView<'_>],
+    relation: DrcRelation,
+) -> Vec<DrcRelated> {
+    let mut listed = 0;
+    let mut related = Vec::new();
+    for driver in drivers {
+        for path in &occurrences[driver.view].paths {
+            if listed == MAX_REPORTED_OCCURRENCE_PATHS {
+                return related;
+            }
+            listed += 1;
+            let place = |object: &DrcLocation| {
+                if path.segments().is_empty() {
+                    return Some(object.clone());
+                }
+                let view = views[driver.view].reference.clone()?;
+                Some(DrcLocation::InsideInstance {
+                    path: path.clone(),
+                    view,
+                    inner: Box::new(object.clone()),
+                })
+            };
+            related.extend(
+                driver
+                    .objects
+                    .iter()
+                    .filter_map(place)
+                    .map(|location| DrcRelated::new(location, relation.clone())),
+            );
+        }
+    }
+    related
 }
 
 #[cfg(test)]

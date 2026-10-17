@@ -85,6 +85,9 @@ pub struct BrokenReference {
     pub reference: String,
     /// More than one instance answers to it, rather than none.
     pub ambiguous: bool,
+    /// The other instances that answer to it, by id and authored reference,
+    /// where more than one does.
+    pub candidates: Vec<(u64, String)>,
 }
 
 /// One exact parameter-range failure extracted from the canonical property
