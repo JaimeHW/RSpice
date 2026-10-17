@@ -7234,8 +7234,8 @@ impl Engine {
                             )
                         }));
                     }
-                    if $schedule_within_floor {
-                        log::warn!(
+                    let stated = if $schedule_within_floor {
+                        crate::log_scope::warn_line!(
                             "{} has held the transient stepper at its minimum timestep {:.3e}s \
                              for {} consecutive accepted points near t={:.6e}s (next \
                              activation {:.6e}s): the schedule is at or finer than the analog \
@@ -7245,9 +7245,9 @@ impl Engine {
                             sub_minimum_activation_streak,
                             t,
                             next_activation
-                        );
+                        )
                     } else {
-                        log::warn!(
+                        crate::log_scope::warn_line!(
                             "the transient stepper has been held at its minimum timestep \
                              {:.3e}s for {} consecutive accepted points near t={:.6e}s while \
                              {} kept an activation within 64x that minimum (next activation \
@@ -7258,15 +7258,18 @@ impl Engine {
                             t,
                             subject,
                             next_activation
-                        );
-                    }
-                    crate::notice::record(crate::notice::EngineNotice::TimestepFloor(
-                        crate::notice::TimestepFloor {
-                            element,
-                            floor,
-                            time: t,
-                        },
-                    ));
+                        )
+                    };
+                    crate::notice::record(
+                        crate::notice::EngineNotice::TimestepFloor(
+                            crate::notice::TimestepFloor {
+                                element,
+                                floor,
+                                time: t,
+                            },
+                        ),
+                        stated,
+                    );
                 }
             };
         }

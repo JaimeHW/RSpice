@@ -10,8 +10,20 @@ impl SimulationController {
         result: Result<crate::simulation::SimulationResult, SimulationError>,
     ) {
         // What the task raised and went on past. Taken on every outcome, so
-        // an aborted task's notices cannot be read as the next task's.
-        let notices = self.runner.drain_engine_notices();
+        // an aborted task's notices cannot be read as the next task's. Each
+        // goes with the place in the run's log of the line that stated it,
+        // which the task's last lines have reached by now.
+        let notices: Vec<_> = self
+            .runner
+            .drain_engine_notices()
+            .into_iter()
+            .map(|notice| {
+                let line = notice
+                    .line
+                    .and_then(|ordinal| self.current_engine_lines.get(&ordinal).copied());
+                (notice, line)
+            })
+            .collect();
         match result {
             Ok(sim_result) => {
                 log::info!(
@@ -126,17 +138,16 @@ impl SimulationController {
                     solved => solved.transient_convergence().cloned(),
                 };
                 let testbench_verdict = testbench_errors(&sim_result);
-                if let Some(quality) = sim_result.transient_convergence()
-                    && quality.has_lte_exceptions()
-                {
-                    self.run_line(
+                let truncation_line = match sim_result.transient_convergence() {
+                    Some(quality) if quality.has_lte_exceptions() => self.placed_run_line(
                         state,
                         LogSeverity::Warning,
                         format!(
                             "{current_label}: accepted points exceeded the local truncation-error criterion. Review convergence details in the result inspector."
                         ),
-                    );
-                }
+                    ),
+                    _ => None,
+                };
 
                 let mut analysis_result = if let Some(config) = &self.current_config {
                     self.convert_to_analysis_result_owned(sim_result, config)
@@ -172,7 +183,9 @@ impl SimulationController {
                     state.publish_run_notices(
                         &current_label,
                         notices,
-                        solved_transient.as_deref(),
+                        solved_transient
+                            .as_deref()
+                            .map(|transient| (transient, truncation_line)),
                         &analysis_result.measurements,
                         run_sequence,
                     );

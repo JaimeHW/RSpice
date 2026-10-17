@@ -12,9 +12,13 @@
 //! The run's [`NoticeCollector`] travels in the same scope, so a notice raised
 //! on a worker reaches the run that spawned it, labelled with the same point
 //! as the worker's lines.
+//!
+//! A site that logs the warning stating a notice learns which line of the
+//! run's log the host kept for it ([`warn_line!`]), and raises the notice with
+//! that line, so the two are linked by the site and never by text.
 
 use std::any::Any;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
@@ -98,6 +102,68 @@ pub(crate) fn with_current<R>(read: impl FnOnce(&LogScope) -> R) -> Option<R> {
         .ok()
         .flatten()
 }
+
+thread_local! {
+    /// What the host said it kept for the record this thread is logging,
+    /// until [`stating`] takes it.
+    static LOGGED: Cell<Option<u64>> = const { Cell::new(None) };
+}
+
+/// The line of the run's log that states a notice: the one the host kept for
+/// the warning the notice's site logged just before raising it, numbered as
+/// the host numbers its lines.
+///
+/// Only [`stating`] makes one that names a line, around the one warning
+/// [`warn_line!`] logs, so a notice is never handed a line some other site
+/// logged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+pub(crate) struct LogLine(Option<u64>);
+
+impl LogLine {
+    /// What a notice raised without a warning of its own carries.
+    pub(crate) const NONE: Self = Self(None);
+
+    /// The line, if the host kept one.
+    pub(crate) fn line(self) -> Option<u64> {
+        self.0
+    }
+}
+
+/// Say which line of the run's log the host kept for the record this thread
+/// is logging: `Some(line)`, numbered as the host numbers its lines, or
+/// `None` for a record it withheld or will not let state a notice.
+///
+/// A host that keeps the run's log answers this from its logger, on the
+/// logging thread, for the engine records it is offered. Only a warning the
+/// engine logs through [`warn_line!`] reads the answer.
+pub fn logged(line: Option<u64>) {
+    let _ = LOGGED.try_with(|logged| logged.set(line));
+}
+
+/// Run `log`, which logs one warning, and return the line the host kept for
+/// it.
+///
+/// Whatever the thread was told before is cleared first and taken after, so
+/// the line is this warning's or none: none when the host withheld it, keeps
+/// no log, or was never offered it.
+pub(crate) fn stating(log: impl FnOnce()) -> LogLine {
+    let _ = LOGGED.try_with(|logged| logged.set(None));
+    log();
+    LogLine(LOGGED.try_with(Cell::take).ok().flatten())
+}
+
+/// `log::warn!`, returning the [`LogLine`] the host kept for that warning,
+/// for the site to raise the notice the warning states with.
+///
+/// A macro and not a function, so the record keeps its own call site: the
+/// host limits how many warnings each site shows in a run.
+macro_rules! warn_line {
+    ($($arg:tt)+) => {
+        $crate::log_scope::stating(|| ::log::warn!($($arg)+))
+    };
+}
+pub(crate) use warn_line;
 
 /// Execute in `scope` on this thread until the guard drops.
 ///

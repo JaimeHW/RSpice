@@ -849,7 +849,7 @@ impl AppState {
                     message: record.message.clone(),
                 }),
                 Some(DiagnosticRoute::NetlistDiagnostic(_) | DiagnosticRoute::Repair(_))
-                | Some(DiagnosticRoute::CodeDocument { .. })
+                | Some(DiagnosticRoute::CodeDocument { .. } | DiagnosticRoute::RunLogLine { .. })
                 | None => None,
             })
             .collect();

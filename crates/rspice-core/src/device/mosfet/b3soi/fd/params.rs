@@ -543,7 +543,7 @@ impl B3SoiFdModel {
         let tmp1 = 2.0 * EPSSI * self.vbsa.v / CHARGE_Q / (1e6 * self.npeak.v);
         let tmp2 = self.tsi * self.tsi;
         if tmp2 < tmp1 {
-            log::warn!(
+            let stated = crate::log_scope::warn_line!(
                 "B3SOIFD: vbsa = {:.3} is too large for tsi = {:.3e}; treated as zero",
                 self.vbsa.v,
                 self.tsi
@@ -555,6 +555,7 @@ impl B3SoiFdModel {
                 self.vbsa.v,
                 0.0,
                 Some(tmp2 * CHARGE_Q * 1e6 * self.npeak.v / (2.0 * EPSSI)),
+                stated,
             );
             self.csieff = self.csi;
             self.qsieff = self.qsi;

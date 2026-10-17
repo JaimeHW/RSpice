@@ -16,12 +16,18 @@ use rspice_simulation::engine_log::{admits, note_stderr_level, offer};
 /// An engine line that says what the run already advised when it started is
 /// left out: each task parses the deck again, and logs the parse warnings the
 /// run has already stated once.
+///
+/// Returns where each line the task's sink numbered was kept in the log, as
+/// (its ordinal, its position), so a notice that names the line by its
+/// ordinal can be followed to it. A line the log withheld or left out is not
+/// there.
 pub(crate) fn publish(
     lines: Vec<EngineLogLine>,
     log: &mut RunLog,
     unix_ms: u64,
     advised: &[String],
-) {
+) -> Vec<(u64, usize)> {
+    let mut kept = Vec::new();
     for line in lines {
         let source = match line.origin {
             EngineLogOrigin::Engine if advised.contains(&line.message) => continue,
@@ -29,13 +35,20 @@ pub(crate) fn publish(
             EngineLogOrigin::Hdl => LogSource::Hdl,
             EngineLogOrigin::VerilogA => LogSource::VerilogA,
         };
+        let position = log.lines().len();
         log.push(RunLogLine {
             unix_ms,
             severity: line.severity,
             source,
             message: line.message,
         });
+        if let Some(ordinal) = line.ordinal
+            && log.lines().len() > position
+        {
+            kept.push((ordinal, position));
+        }
     }
+    kept
 }
 
 /// The desktop application's logger: stderr as before, plus the run's Console.
@@ -186,6 +199,7 @@ mod tests {
                 severity: LogSeverity::Info,
                 message: "Transient noise: 2 device noise source(s)".to_owned(),
                 origin: EngineLogOrigin::Engine,
+                ordinal: Some(0),
             }]
         );
 
@@ -211,6 +225,7 @@ mod tests {
             severity: LogSeverity::Warning,
             message: message.to_owned(),
             origin,
+            ordinal: None,
         };
         let mut log = RunLog::default();
         publish(
@@ -238,6 +253,7 @@ mod tests {
             severity: LogSeverity::Warning,
             message: message.to_owned(),
             origin,
+            ordinal: None,
         };
         let mut log = RunLog::default();
         publish(

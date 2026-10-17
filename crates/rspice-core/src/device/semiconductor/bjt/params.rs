@@ -1082,7 +1082,7 @@ impl Bjt {
                 // for the builder's named operating-domain diagnostic.
                 if value.is_finite() && value > 0.999 {
                     if [self.mje, self.mjc, self.ms][index] != 0.999 {
-                        log::warn!(
+                        let stated = crate::log_scope::warn_line!(
                             "BJT '{}': {} including temperature coefficients is limited to 0.999 at {temp} K",
                             self.name,
                             ["MJE", "MJC", "MJS"][index]
@@ -1094,6 +1094,7 @@ impl Bjt {
                             value,
                             0.999,
                             Some(0.999),
+                            stated,
                         );
                     }
                     0.999

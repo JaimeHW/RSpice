@@ -14,28 +14,34 @@ fn now_ms() -> u64 {
     crate::time_compat::checked_unix_time_ms().unwrap_or_default()
 }
 
-/// Write one of the run's own lines into its log.
+/// Write one of the run's own lines into its log, and say where it is there.
 ///
 /// A line whose run is gone goes to the session's log instead, so what it
-/// says is not lost with the run.
+/// says is not lost with the run; it then has no place in the run's log.
 pub(super) fn write_run_line(
     state: &mut AppState,
     run_sequence: Option<u64>,
     severity: LogSeverity,
     message: impl Into<String>,
-) {
+) -> Option<usize> {
     let message = message.into();
     match run_sequence
         .and_then(|run_sequence| state.simulation.retained.run_by_sequence_mut(run_sequence))
     {
-        Some(run) => run.log.push(RunLogLine {
-            unix_ms: now_ms(),
-            severity,
-            source: LogSource::Run,
-            message,
-        }),
+        Some(run) => {
+            // The run's own lines are never withheld.
+            let position = run.log.lines().len();
+            run.log.push(RunLogLine {
+                unix_ms: now_ms(),
+                severity,
+                source: LogSource::Run,
+                message,
+            });
+            Some(position)
+        }
         None => {
             state.record(severity, LogSource::Run, message);
+            None
         }
     }
 }
@@ -49,6 +55,17 @@ impl SimulationController {
         message: impl Into<String>,
     ) {
         write_run_line(state, self.current_run_id, severity, message);
+    }
+
+    /// Write one of the active run's own lines into its log, and say where
+    /// it is there, for a finding the line states.
+    pub(super) fn placed_run_line(
+        &self,
+        state: &mut AppState,
+        severity: LogSeverity,
+        message: impl Into<String>,
+    ) -> Option<usize> {
+        write_run_line(state, self.current_run_id, severity, message)
     }
 }
 

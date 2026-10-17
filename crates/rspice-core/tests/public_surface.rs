@@ -185,8 +185,12 @@ use rspice_core::analysis::harmonic_balance::{
 // and why; `Netlist::unread_root_source`, the ones in the deck's own text;
 // `source_map_for_editor_as_read`, the editor map with them applied; and
 // `NetlistSourceMap::unread_definition_for`, where a name nothing read binds
-// is written. The census is 5,733, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5733;
+// is written. The census was 5,733, with no slack.
+// `log_scope::logged` adds one: the simulation service's run log
+// (`rspice-simulation` engine_log.rs) says which line it kept for each engine
+// record it is offered, so the engine site that logged a warning raises the
+// notice it states with that line. The census is 5,734, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5734;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

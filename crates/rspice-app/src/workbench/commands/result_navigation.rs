@@ -115,6 +115,36 @@ pub(crate) fn open_run_log(state: &mut crate::workbench::AppState, run_sequence:
     open_console_page(&mut state.workbench);
 }
 
+/// Open the Console on one run's own log with line `line` selected and in
+/// view: a line a finding names as the one that states it.
+///
+/// A run dropped since the finding was made is reported rather than opened
+/// as an empty channel.
+pub(crate) fn show_run_line(
+    state: &mut crate::workbench::AppState,
+    run_sequence: u64,
+    line: usize,
+) {
+    let Some(severity) = state
+        .simulation
+        .retained
+        .run_by_sequence(run_sequence)
+        .map(|run| run.log.lines().get(line).map(|line| line.severity))
+    else {
+        state.prompt(format!(
+            "Run {run_sequence} is no longer retained in this session, so its log could not be \
+             opened."
+        ));
+        return;
+    };
+    let view = &mut state.workbench.console_view;
+    match severity {
+        Some(severity) => view.show_line(ConsoleChannel::Run(run_sequence), line as u64, severity),
+        None => view.open(ConsoleChannel::Run(run_sequence)),
+    }
+    open_console_page(&mut state.workbench);
+}
+
 /// The run that produced dataset `dataset`, while the session still holds it.
 pub(crate) fn producing_run(
     runs: &[crate::state::SimulationRun],

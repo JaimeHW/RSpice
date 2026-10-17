@@ -250,6 +250,13 @@ pub(super) fn detail(
                     actions.related = route;
                 }
             }
+            // The line of the run's log that states it. What a run logged
+            // does not move under an edit, so a stale finding offers it too.
+            if let Some(place) = row.log_place
+                && place_line(ui, &place.label(), true)
+            {
+                actions.related = Some(place.route());
+            }
         });
     actions
 }
@@ -387,7 +394,8 @@ fn related_route(
         Some(
             DiagnosticRoute::Anchor(_)
             | DiagnosticRoute::NetlistDiagnostic(_)
-            | DiagnosticRoute::Repair(_),
+            | DiagnosticRoute::Repair(_)
+            | DiagnosticRoute::RunLogLine { .. },
         )
         | None => None,
     }
@@ -481,6 +489,7 @@ mod tests {
             rule: "",
             related: &[],
             related_places: &[],
+            log_place: None,
             quick_fixes: &[],
             suppression: None,
             route,

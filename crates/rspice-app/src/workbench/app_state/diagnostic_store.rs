@@ -199,6 +199,9 @@ pub(in crate::workbench) enum DiagnosticRoute {
     },
     /// The destination a blocking dispatch finding named for itself.
     Repair(PreflightRemediation),
+    /// A line of one run's own log, opened in the Console with the line
+    /// selected.
+    RunLogLine { run_sequence: u64, line: usize },
 }
 
 /// What a finding is about, independent of when it was found or how it is
@@ -310,6 +313,40 @@ pub(in crate::workbench) struct DiagnosticRecord {
     /// stated them: each source in a loop, each instance carrying a
     /// duplicated name. Empty where it involves only what it is about.
     pub(in crate::workbench) related_places: Vec<RelatedPlace>,
+    /// The line of a run's own log that states the finding, for a condition
+    /// a run raised and logged. `None` where no line of a log states it.
+    pub(in crate::workbench) log_place: Option<RunLogPlace>,
+}
+
+/// One line of a run's own log.
+///
+/// A place a finding names rather than a route it is repaired by: the log is
+/// what the run said, so an edit to the design moves nothing in it, and the
+/// line stays where it is for as long as the run is held.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workbench) struct RunLogPlace {
+    pub(in crate::workbench) run_sequence: u64,
+    /// Its position in the run's log, from zero, which is how the Console
+    /// addresses a run's lines.
+    pub(in crate::workbench) line: usize,
+}
+
+impl RunLogPlace {
+    /// `Run 3 log · line 14`, counted from one as a reader counts.
+    pub(in crate::workbench) fn label(self) -> String {
+        format!(
+            "Run {} log \u{00b7} line {}",
+            self.run_sequence,
+            self.line.saturating_add(1)
+        )
+    }
+
+    pub(in crate::workbench) const fn route(self) -> DiagnosticRoute {
+        DiagnosticRoute::RunLogLine {
+            run_sequence: self.run_sequence,
+            line: self.line,
+        }
+    }
 }
 
 /// One other object a finding involves, where it is drawn and how to get
@@ -360,6 +397,7 @@ impl DiagnosticRecord {
             drawn_in: None,
             drawn_object: None,
             related_places: Vec::new(),
+            log_place: None,
         }
     }
 
@@ -412,6 +450,12 @@ impl DiagnosticRecord {
     /// State the other objects the finding involves.
     pub(in crate::workbench) fn with_related_places(mut self, places: Vec<RelatedPlace>) -> Self {
         self.related_places = places;
+        self
+    }
+
+    /// State the line of a run's log that states the finding, where one does.
+    pub(in crate::workbench) fn with_log_place(mut self, place: Option<RunLogPlace>) -> Self {
+        self.log_place = place;
         self
     }
 

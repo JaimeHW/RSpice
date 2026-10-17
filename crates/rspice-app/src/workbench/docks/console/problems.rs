@@ -884,7 +884,8 @@ fn route_refusal(state: &AppState, route: &DiagnosticRoute) -> Option<String> {
         DiagnosticRoute::Anchor(anchor) => state.log_anchor_refusal(anchor),
         DiagnosticRoute::NetlistDiagnostic(_)
         | DiagnosticRoute::CodeDocument { .. }
-        | DiagnosticRoute::Repair(_) => None,
+        | DiagnosticRoute::Repair(_)
+        | DiagnosticRoute::RunLogLine { .. } => None,
     }
 }
 

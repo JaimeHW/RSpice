@@ -255,6 +255,69 @@ fn a_completed_runs_engine_warnings_reach_the_page_as_canonical_records() {
     );
 }
 
+/// Each clamp the engine raised in a real run names the line of that run's
+/// log where the engine said so, two clamps in a row each their own, and
+/// following one opens the run's log with that line selected and in view.
+///
+/// The engine site logs the clamp's warning, learns which line the run's sink
+/// numbered it, and raises its notice with that number; the controller turns
+/// it into the line's place in the run's log. No text is matched anywhere on
+/// the way.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_clamp_opens_its_runs_log_on_the_line_the_engine_reported_it_on() {
+    use crate::workbench::state::{ConsoleChannel, ConsoleReveal, ConsoleSelection};
+
+    crate::diagnostics::engine_log::studio_logger_for_tests();
+    let mut app = RSpiceApp::test_instance();
+    app.state = crate::simulation::controller::test_execution::run_manual_batch_session(
+        "BSIM4 clamp\nVD d 0 1\nVG g 0 1\nM1 d g 0 0 nch L=1u W=10u\n\
+         .model nch nmos level=54 version=4.8 pbs=0.05 pbsws=0.05\n.op\n.end\n",
+    );
+    app.state.project_lifecycle.authority.open_session();
+    let run_sequence = app.state.simulation.retained.runs[0].id;
+
+    for parameter in ["pbs", "pbsws"] {
+        let place = app
+            .state
+            .diagnostics
+            .batches()
+            .flat_map(|batch| batch.records.iter())
+            .find(|record| {
+                record.canonical.code.as_ref() == "MODEL-PARAMETER-CLAMPED"
+                    && record.message.starts_with(&format!("BSIM4 {parameter} = "))
+            })
+            .map(|clamp| {
+                clamp
+                    .log_place
+                    .unwrap_or_else(|| panic!("the clamp names its line: {clamp:#?}"))
+            })
+            .unwrap_or_else(|| panic!("the {parameter} clamp is a record"));
+        assert_eq!(place.run_sequence, run_sequence);
+        let line = &app
+            .state
+            .simulation
+            .retained
+            .run_by_sequence(run_sequence)
+            .expect("the run is retained")
+            .log
+            .lines()[place.line];
+        assert_eq!(line.source, LogSource::Engine);
+        assert_eq!(
+            line.message,
+            format!("BSIM4: given {parameter} is less than 0.1; set to 0.1")
+        );
+
+        app.state.diagnostics.request_route(place.route());
+        crate::workbench::diagnostic_routes::apply_pending(&egui::Context::default(), &mut app);
+        let view = &app.state.workbench.console_view;
+        let key = place.line as u64;
+        assert_eq!(view.channel, ConsoleChannel::Run(run_sequence));
+        assert_eq!(view.selection, Some(ConsoleSelection::single(key)));
+        assert_eq!(view.reveal, Some(ConsoleReveal::Line(key)));
+    }
+}
+
 /// The page reads records. It must not read the session log back in, which is
 /// what made it a severity filter over everything that had ever happened.
 ///

@@ -19,7 +19,7 @@ use std::collections::{HashMap, HashSet, hash_map};
 use std::sync::{Arc, Mutex};
 
 use crate::ContinuationAid;
-use crate::log_scope::{self, LogScope, LogScopeGuard};
+use crate::log_scope::{self, LogLine, LogScope, LogScopeGuard};
 
 /// The sweep points one notice lists by name. Past this many, it counts.
 const MAX_NAMED_POINTS: usize = 8;
@@ -136,6 +136,13 @@ pub struct RecordedNotice {
     /// records counts their points by these, so a point that two of them
     /// raise it at is counted once whether either names it or not.
     pub point_identities: Vec<u64>,
+    /// The line of the run's log that states it, as the host that keeps the
+    /// log numbered that line ([`log_scope::logged`]): the warning its site
+    /// logged just before raising it, the first time a raise had one kept.
+    /// `None` for a notice the engine raises without a warning of its own,
+    /// an operating-point aid, and for one whose every warning was withheld.
+    #[serde(default)]
+    pub line: Option<u64>,
 }
 
 /// One notice as the collector keeps it while the run raises it.
@@ -220,11 +227,15 @@ impl NoticeCollector {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    fn record(&self, notice: EngineNotice, point: Option<&str>) {
+    fn record(&self, notice: EngineNotice, point: Option<&str>, line: Option<u64>) {
         let mut ledger = self.lock();
         let Ledger { entries, index } = &mut *ledger;
         match index.entry(notice.key()) {
-            hash_map::Entry::Occupied(at) => entries[*at.get()].count_at(point),
+            hash_map::Entry::Occupied(at) => {
+                let entry = &mut entries[*at.get()];
+                entry.count_at(point);
+                entry.recorded.line = entry.recorded.line.or(line);
+            }
             hash_map::Entry::Vacant(slot) => {
                 slot.insert(entries.len());
                 let mut entry = Entry {
@@ -233,6 +244,7 @@ impl NoticeCollector {
                         occurrences: 0,
                         points: Vec::new(),
                         point_identities: Vec::new(),
+                        line,
                     },
                     identities: HashSet::new(),
                 };
@@ -301,17 +313,20 @@ fn collecting() -> bool {
 }
 
 /// Record `notice` with the collector of the run on this thread, if it has
-/// one, at the point of the run this thread is solving.
-pub(crate) fn record(notice: EngineNotice) {
+/// one, at the point of the run this thread is solving, stated by `stated`:
+/// the line of the warning its site logged just before raising it
+/// ([`log_scope::warn_line!`]), or [`LogLine::NONE`] for a notice raised
+/// without one.
+pub(crate) fn record(notice: EngineNotice, stated: LogLine) {
     let _ = log_scope::with_current(|scope| {
         if let Some(collector) = scope.notices() {
-            collector.record(notice, scope.point());
+            collector.record(notice, scope.point(), stated.line());
         }
     });
 }
 
 /// Record that `family` replaced `parameter` of the element or card being
-/// bound on this thread.
+/// bound on this thread, as the warning `stated` says in prose.
 pub(crate) fn parameter_replaced(
     family: &str,
     scope: ParameterScope,
@@ -319,6 +334,7 @@ pub(crate) fn parameter_replaced(
     requested: f64,
     applied: f64,
     limit: Option<f64>,
+    stated: LogLine,
 ) {
     if !collecting() {
         return;
@@ -326,16 +342,19 @@ pub(crate) fn parameter_replaced(
     let binding = BINDING
         .try_with(|binding| binding.borrow().clone())
         .unwrap_or_default();
-    record(EngineNotice::ParameterReplaced(ParameterReplacement {
-        family: family.to_owned(),
-        model: binding.model,
-        element: binding.element,
-        scope,
-        parameter: parameter.to_ascii_lowercase(),
-        requested,
-        applied,
-        limit,
-    }));
+    record(
+        EngineNotice::ParameterReplaced(ParameterReplacement {
+            family: family.to_owned(),
+            model: binding.model,
+            element: binding.element,
+            scope,
+            parameter: parameter.to_ascii_lowercase(),
+            requested,
+            applied,
+            limit,
+        }),
+        stated,
+    );
 }
 
 #[cfg(test)]
@@ -343,6 +362,10 @@ mod tests {
     use super::*;
 
     fn clamp(parameter: &str) {
+        stated_clamp(parameter, LogLine::NONE);
+    }
+
+    fn stated_clamp(parameter: &str, stated: LogLine) {
         parameter_replaced(
             "BSIM4",
             ParameterScope::Model,
@@ -350,6 +373,7 @@ mod tests {
             0.05,
             0.1,
             Some(0.1),
+            stated,
         );
     }
 
@@ -434,6 +458,7 @@ mod tests {
                     -1.0,
                     0.0,
                     Some(0.0),
+                    LogLine::NONE,
                 );
             }
         }
@@ -466,12 +491,16 @@ mod tests {
         assert!(!collecting(), "the guard restores");
         std::thread::scope(|threads| {
             threads.spawn(|| {
-                record(EngineNotice::ConvergenceAid(
-                    ContinuationAid::SourceStepping,
-                ));
+                record(
+                    EngineNotice::ConvergenceAid(ContinuationAid::SourceStepping),
+                    LogLine::NONE,
+                );
                 let _run = log_scope::enter(captured.clone());
                 let _sample = log_scope::enter_point(|| "sample 3".to_owned());
-                record(EngineNotice::ConvergenceAid(ContinuationAid::GminStepping));
+                record(
+                    EngineNotice::ConvergenceAid(ContinuationAid::GminStepping),
+                    LogLine::NONE,
+                );
             });
         });
         let recorded = collector.take();
@@ -481,6 +510,91 @@ mod tests {
             "only the line inside the run: {recorded:#?}"
         );
         assert_eq!(recorded[0].points, ["sample 3"]);
+    }
+
+    /// Each notice recorded, by the parameter it replaced, with its line.
+    fn named_lines(recorded: Vec<RecordedNotice>) -> Vec<(String, Option<u64>)> {
+        recorded
+            .into_iter()
+            .map(|recorded| {
+                let name = match &recorded.notice {
+                    EngineNotice::ParameterReplaced(replacement) => replacement.parameter.clone(),
+                    other => format!("{other:?}"),
+                };
+                (name, recorded.line)
+            })
+            .collect()
+    }
+
+    /// A notice names the line the host kept for the warning its own site
+    /// logged just before raising it. Two clamps in a row each name their
+    /// own, a clamp on a worker names the worker's, and a clamp raised again
+    /// keeps the first line it named.
+    ///
+    /// The host answers from its logger, inside the log call: each closure
+    /// handed to `stating` stands for one warning and that answer.
+    #[test]
+    fn a_notice_names_the_line_its_own_site_logged() {
+        let collector = NoticeCollector::new();
+        let _installed = collector.install();
+        let _binding = binding("M1", Some("nch"));
+        stated_clamp("pbs", log_scope::stating(|| log_scope::logged(Some(7))));
+        stated_clamp("pbsws", log_scope::stating(|| log_scope::logged(Some(8))));
+        let captured = log_scope::capture();
+        std::thread::scope(|threads| {
+            threads.spawn(|| {
+                let _run = log_scope::enter(captured.clone());
+                let _sample = log_scope::enter_point(|| "sample 2".to_owned());
+                stated_clamp("pbd", log_scope::stating(|| log_scope::logged(Some(9))));
+            });
+        });
+        stated_clamp("pbs", log_scope::stating(|| log_scope::logged(Some(12))));
+
+        assert_eq!(
+            named_lines(collector.take()),
+            [
+                ("pbs".to_owned(), Some(7)),
+                ("pbsws".to_owned(), Some(8)),
+                ("pbd".to_owned(), Some(9)),
+            ]
+        );
+    }
+
+    /// A notice raised without a warning of its own names no line, however
+    /// recently another site's warning was kept: only the site that logged
+    /// a warning states its line. Nor does a notice whose own warning the
+    /// host withheld, or never saw, take the line kept before it.
+    #[test]
+    fn a_notice_raised_after_an_unrelated_warning_names_no_line() {
+        let collector = NoticeCollector::new();
+        let _installed = collector.install();
+        let _binding = binding("M1", Some("nch"));
+        // Another site's warning, kept as line 3, then notices with no
+        // warning of their own.
+        log_scope::logged(Some(3));
+        record(
+            EngineNotice::ConvergenceAid(ContinuationAid::GminStepping),
+            LogLine::NONE,
+        );
+        clamp("pbs");
+        // Line 4 kept, then a warning the host withheld.
+        log_scope::logged(Some(4));
+        stated_clamp("pbd", log_scope::stating(|| log_scope::logged(None)));
+        // Line 5 kept, then a warning no host keeping a log was offered:
+        // this test binary installs no such logger.
+        log_scope::logged(Some(5));
+        let unseen = log_scope::warn_line!("BSIM4: given pbsws is less than 0.1; set to 0.1");
+        stated_clamp("pbsws", unseen);
+
+        assert_eq!(
+            named_lines(collector.take()),
+            [
+                ("ConvergenceAid(GminStepping)".to_owned(), None),
+                ("pbs".to_owned(), None),
+                ("pbd".to_owned(), None),
+                ("pbsws".to_owned(), None),
+            ]
+        );
     }
 
     /// Installed on a thread already executing a run, the collector joins
@@ -493,7 +607,10 @@ mod tests {
         let owner =
             log_scope::capture().and_then(|scope| scope.owner().downcast_ref::<&str>().copied());
         assert_eq!(owner, Some("run"));
-        record(EngineNotice::ConvergenceAid(ContinuationAid::GminStepping));
+        record(
+            EngineNotice::ConvergenceAid(ContinuationAid::GminStepping),
+            LogLine::NONE,
+        );
         assert_eq!(collector.take().len(), 1);
     }
 }

@@ -1129,10 +1129,10 @@ mod tests {
         crate::engine_log::lock_queue(&sink_of_run(spec, netlist)).drain()
     }
 
-    /// Run one specification through the real runner and return the queue
-    /// its sink delivered to, lines and notices both.
+    /// Install, once for this test binary, the logger a studio installs: one
+    /// that offers every record to the run of the thread logging it.
     #[cfg(not(target_arch = "wasm32"))]
-    fn sink_of_run(spec: AnalysisSpec, netlist: &str) -> Arc<Mutex<EngineLogQueue>> {
+    fn offer_records_to_runs() {
         struct CaptureLogger;
         impl log::Log for CaptureLogger {
             fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
@@ -1148,6 +1148,13 @@ mod tests {
             log::set_logger(&CaptureLogger).expect("install runtime test logger");
             crate::engine_log::note_stderr_level(log::LevelFilter::Off);
         });
+    }
+
+    /// Run one specification through the real runner and return the queue
+    /// its sink delivered to, lines and notices both.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn sink_of_run(spec: AnalysisSpec, netlist: &str) -> Arc<Mutex<EngineLogQueue>> {
+        offer_records_to_runs();
         let queue = Arc::new(Mutex::new(EngineLogQueue::default()));
         let verbose = request_asked_for_verbose(&SimulationRequest::Spec {
             spec: Box::new(spec.clone()),
@@ -1189,41 +1196,116 @@ mod tests {
         queue
     }
 
-    /// The runner hands over what a run raised as well as what it logged:
-    /// the clamp of the card's `pbs` arrives as a notice naming the card and
-    /// the element that bound it, delivered once the run has ended.
+    /// A BSIM4 card whose head clamps `pbs` and then `pbsws`, two warnings in
+    /// a row from one site.
     #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn a_run_delivers_the_notices_it_raised_with_its_lines() {
-        use rspice_core::notice::{EngineNotice, ParameterScope};
+    const TWO_CLAMPS: &str = "BSIM4 clamp\n.param vg=1\nVD d 0 1\nVG g 0 {vg}\n\
+                              M1 d g 0 0 nch L=1u W=10u\n\
+                              .model nch nmos level=54 version=4.8 pbs=0.05 pbsws=0.05\n\
+                              .op\n.end\n";
 
-        let queue = sink_of_run(
-            AnalysisSpec::dc_op(),
-            "BSIM4 clamp\nVD d 0 1\nVG g 0 1\nM1 d g 0 0 nch L=1u W=10u\n\
-             .model nch nmos level=54 version=4.8 pbs=0.05\n.op\n.end\n",
-        );
-        let notices = crate::engine_log::lock_queue(&queue).drain_notices();
-        let pbs = notices
+    /// The replacement of `parameter` among `notices`, and the delivered line
+    /// it names.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn clamp_and_its_line<'a>(
+        notices: &'a [rspice_core::notice::RecordedNotice],
+        lines: &'a [EngineLogLine],
+        parameter: &str,
+    ) -> (
+        &'a rspice_core::notice::ParameterReplacement,
+        &'a EngineLogLine,
+    ) {
+        use rspice_core::notice::EngineNotice;
+
+        let (replacement, line) = notices
             .iter()
             .find_map(|recorded| match &recorded.notice {
-                EngineNotice::ParameterReplaced(replacement) if replacement.parameter == "pbs" => {
-                    Some(replacement)
+                EngineNotice::ParameterReplaced(replacement)
+                    if replacement.parameter == parameter =>
+                {
+                    Some((replacement, recorded.line))
                 }
                 _ => None,
             })
-            .unwrap_or_else(|| panic!("the pbs clamp is delivered: {notices:#?}"));
+            .unwrap_or_else(|| panic!("the {parameter} clamp is delivered: {notices:#?}"));
+        let stated = lines
+            .iter()
+            .find(|delivered| delivered.ordinal.is_some() && delivered.ordinal == line)
+            .unwrap_or_else(|| {
+                panic!("the {parameter} clamp names a delivered line {line:?}: {lines:#?}")
+            });
+        (replacement, stated)
+    }
+
+    /// The runner hands over what a run raised as well as what it logged:
+    /// the clamp of the card's `pbs` arrives as a notice naming the card and
+    /// the element that bound it, delivered once the run has ended. Each of
+    /// two clamps raised in a row names the line the run delivered for its
+    /// own warning.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_run_delivers_the_notices_it_raised_with_its_lines() {
+        use rspice_core::notice::ParameterScope;
+
+        let queue = sink_of_run(AnalysisSpec::dc_op(), TWO_CLAMPS);
+        let notices = crate::engine_log::lock_queue(&queue).drain_notices();
+        let lines = crate::engine_log::lock_queue(&queue).drain();
+        let (pbs, _) = clamp_and_its_line(&notices, &lines, "pbs");
         assert_eq!(pbs.scope, ParameterScope::Model);
         assert!(
             pbs.element
                 .as_deref()
                 .is_some_and(|element| element.eq_ignore_ascii_case("M1"))
         );
+        for parameter in ["pbs", "pbsws"] {
+            let (_, stated) = clamp_and_its_line(&notices, &lines, parameter);
+            assert_eq!(
+                stated.message,
+                format!("BSIM4: given {parameter} is less than 0.1; set to 0.1")
+            );
+        }
         assert!(
             crate::engine_log::lock_queue(&queue)
                 .drain_notices()
                 .is_empty(),
             "a notice is delivered once"
         );
+    }
+
+    /// A Monte Carlo run solves its samples on worker threads, each entered
+    /// in the run's scope. A clamp raised there names the line delivered for
+    /// its own warning, which says which sample raised it; two clamps raised
+    /// in a row on the same worker each name their own.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_clamp_raised_on_a_monte_carlo_worker_names_its_own_line() {
+        use rspice_core::engine::{Engine, SimulationConfig};
+
+        offer_records_to_runs();
+        let netlist =
+            rspice_core::netlist::parse_netlist(TWO_CLAMPS).expect("the BSIM4 deck parses");
+        let mut config = SimulationConfig::default();
+        config.resource_limits.max_parallel_workers = 4;
+        let queue = Arc::new(Mutex::new(EngineLogQueue::default()));
+        {
+            let _run = crate::engine_log::install(RunLogSink::queued(Arc::clone(&queue), false));
+            Engine::new(config)
+                .run_monte_carlo(&netlist, 4, 7)
+                .expect("every sample solves");
+        }
+        let notices = crate::engine_log::lock_queue(&queue).drain_notices();
+        let lines = crate::engine_log::lock_queue(&queue).drain();
+        for parameter in ["pbs", "pbsws"] {
+            let (_, stated) = clamp_and_its_line(&notices, &lines, parameter);
+            // The site's last shown warning carries the suppression notice
+            // after the same words.
+            let said = format!(": BSIM4: given {parameter} is less than 0.1; set to 0.1");
+            assert!(
+                stated.message.starts_with("sample ") && stated.message.contains(&said),
+                "{parameter} names {:?}",
+                stated.message
+            );
+        }
     }
 
     /// The receipt names numbers that exist nowhere else.
