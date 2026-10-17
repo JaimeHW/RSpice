@@ -116,7 +116,10 @@ fn forward_referenced_geometry_selects_its_bin_and_sizes_the_device() {
             let netlist = Netlist::parse(&source).unwrap();
             let inspection = Engine::default().inspect_model_bins(&netlist).unwrap();
             let instance = &inspection.instances[0];
-            assert!(instance.selected_model.eq_ignore_ascii_case(bin), "{source}");
+            assert!(
+                instance.selected_model.eq_ignore_ascii_case(bin),
+                "{source}"
+            );
             let close = |value: Option<f64>, expected: f64| {
                 value.is_some_and(|value| (value - expected).abs() <= 1e-12 * expected)
             };
