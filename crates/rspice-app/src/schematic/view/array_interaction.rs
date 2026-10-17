@@ -334,6 +334,55 @@ mod tests {
         assert!(state.dialogs.array_selection.canvas.preview_error.is_some());
         assert!(!state.schematic.can_undo());
     }
+
+    /// A replica whose wire end or pin would land inside a wire already on
+    /// the sheet is refused, so Create array can never leave the undotted,
+    /// unsplit T a paste used to (audit W-9). R1 is arrayed downwards, once
+    /// with a stub wire off its right pin and once bare; a rail runs through
+    /// the first copy's stub end, then through its pin.
+    #[test]
+    fn an_array_copy_touching_a_wire_is_refused_rather_than_left_as_a_bare_t() {
+        use crate::state::Wire;
+        let part = Component::new(1, ComponentType::Resistor, Point::origin());
+        let pin = part.terminal_positions()[1].1;
+        let stub_end = Point::new(pin.x + 20, pin.y);
+        for (case, stub, touch) in [("stub end", true, stub_end), ("pin", false, pin)] {
+            let mut state = AppState::default();
+            let drawing = state.schematic.document_mut_for_test();
+            drawing.components.push(part.clone());
+            if stub {
+                drawing.wires.push(Wire::segment(2, pin, stub_end));
+            }
+            drawing.wires.push(Wire::segment(
+                3,
+                Point::new(touch.x, touch.y + 50),
+                Point::new(touch.x, touch.y + 150),
+            ));
+            let wire_points = |state: &AppState| -> Vec<Vec<Point>> {
+                let document = state.schematic.document();
+                document.wires.iter().map(|wire| wire.points.clone()).collect()
+            };
+            let before = wire_points(&state);
+
+            let wires: &[u64] = if stub { &[2] } else { &[] };
+            commit_array_of(&mut state, &[1], wires, Point::new(0, 100));
+
+            let refusal = state
+                .dialogs
+                .array_selection
+                .canvas
+                .preview_error
+                .clone()
+                .unwrap_or_default();
+            assert!(refusal.contains("object 3 at"), "{case}: {refusal:?}");
+            let document = state.schematic.document();
+            assert_eq!(document.components.len(), 1, "{case}");
+            assert!(document.junctions.is_empty(), "{case}");
+            assert_eq!(wire_points(&state), before, "{case}");
+            assert!(!state.schematic.can_undo(), "{case}");
+        }
+    }
+
     #[test]
     fn array_requests_recheck_the_source_draft_and_operation_without_cancelling_a_replacement() {
         for change in [
