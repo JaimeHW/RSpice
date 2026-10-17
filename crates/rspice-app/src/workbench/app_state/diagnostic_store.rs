@@ -929,7 +929,8 @@ impl DiagnosticStore {
         self.batches.get(&inputs.key())
     }
 
-    const fn generation(&self) -> u64 {
+    /// Moves on every publication and withdrawal.
+    pub(in crate::workbench) const fn generation(&self) -> u64 {
         self.generation
     }
 
