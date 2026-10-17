@@ -177,8 +177,13 @@ fn infer_terminal_axis(component: &Component) -> TerminalAxis {
 
 /// Where an instance's name and value stand, clear of its turned body: above
 /// and below when its pins run across, left and right when they run up and
-/// down, and name above with value to the right for a tall device. Mirroring
-/// leaves them where they are.
+/// down, and name above with value beside the body for a tall device.
+///
+/// A tall device's value reads away from its gate (or base): it stands on
+/// the side its unturned body's right-hand side faces, so an instance
+/// mirrored or turned end for end letters its value on the left, ending at
+/// the body, instead of across the gate lead and the wire that leaves it.
+/// The text itself stays upright.
 ///
 /// Linear in `origin` and `scale`: `origin` is the instance's position and
 /// `scale` the size of one world unit in the caller's space, so the canvas
@@ -225,9 +230,14 @@ pub fn instance_label_layout(
     let right = PlacedText::new(LayoutPoint::new(x + half_w + margin, y), Start, Center);
 
     if is_tall_device {
+        let faces_left = component.transform_point(Point::new(1, 0)).x < 0;
         return InstanceLabelLayout {
             name: above,
-            value: right,
+            value: if faces_left {
+                PlacedText::new(LayoutPoint::new(x - half_w - margin, y), End, Center)
+            } else {
+                right
+            },
         };
     }
     // A mixed axis falls back to the turned body's aspect ratio.

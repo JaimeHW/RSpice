@@ -128,6 +128,16 @@ fn the_canvas_stands_names_and_values_outside_the_body_for_every_turn_and_mirror
                 "{:?} {:?} mirror ({mirror_h}, {mirror_v})",
                 case.kind, case.rotation
             );
+            // A tall device whose body is turned to face left letters its
+            // value on the left, ending at the body: the mirror image of
+            // where it stands unturned, away from the gate.
+            let faces_left = component.transform_point(Point::new(1, 0)).x < 0;
+            let tall = matches!(case.kind, K::Nmos | K::NpnBjt);
+            let value = if tall && faces_left {
+                ((200.0 - case.value.0.0, case.value.0.1), A::RIGHT_CENTER)
+            } else {
+                case.value
+            };
             assert!(
                 close(layout.name_pos, case.name.0),
                 "{context}: name at {:?}",
@@ -135,11 +145,11 @@ fn the_canvas_stands_names_and_values_outside_the_body_for_every_turn_and_mirror
             );
             assert_eq!(layout.name_align, case.name.1, "{context}: name hang");
             assert!(
-                close(layout.value_pos, case.value.0),
+                close(layout.value_pos, value.0),
                 "{context}: value at {:?}",
                 layout.value_pos
             );
-            assert_eq!(layout.value_align, case.value.1, "{context}: value hang");
+            assert_eq!(layout.value_align, value.1, "{context}: value hang");
         }
     }
 }

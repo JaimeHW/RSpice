@@ -39,6 +39,8 @@ use super::AppState;
 pub(super) const SCREEN: egui::Vec2 = egui::vec2(960.0, 640.0);
 /// An ISO A1 sheet in world units (841 mm by 594 mm at 4 wu/mm).
 const A1_WORLD: (f64, f64) = (3364.0, 2376.0);
+/// The canvas of a desktop window, as the frame-cost probe sizes it.
+const DESKTOP_CANVAS: egui::Vec2 = egui::vec2(1600.0, 1000.0);
 
 /// Hands out object ids in order.
 struct Ids(u64);
@@ -80,23 +82,24 @@ fn settle(state: &mut AppState) {
     state.sync_active_schematic_to_workspace();
 }
 
-/// Ids of the objects the analog sheet's review assertions address.
-pub(super) struct AnalogSheet {
-    pub(super) state: AppState,
-    /// The selected PMOS load.
-    pub(super) selected_part: u64,
-    /// The selected bias conductor.
-    pub(super) selected_wire: u64,
-}
+/// Where the analog sheet is reviewed from: its middle, and the diode tie of
+/// its mirror.
+pub(super) const ANALOG_CENTRE: Point = Point::new(510, 300);
+const ANALOG_DETAIL: Point = Point::new(330, 220);
+/// Where the hierarchy sheet is reviewed from: its middle, and the two
+/// connectors between its instances with their badges.
+pub(super) const HIERARCHY_CENTRE: Point = Point::new(470, 330);
+const HIERARCHY_DETAIL: Point = Point::new(450, 250);
 
 /// A five-transistor OTA with its supplies, compensation, load and a probe;
 /// a four-bit bus with its declaration and four taps into a resistor array;
 /// T-junctions, a crossing with a dot and two crossings without; local net
-/// labels; a note. One PMOS load and the bias conductor are selected, and
-/// the tail device's bulk is left open.
+/// labels; a note. One PMOS load (M3) and the bias conductor are selected,
+/// and the tail device's bulk is left open. M2, M3 and M5 are mirrored to
+/// face left.
 ///
-/// Spans world x 100 to 920 and y 60 to 600.
-pub(super) fn analog_sheet() -> AnalogSheet {
+/// Spans world x 100 to 920 and y 40 to 520.
+pub(super) fn analog_sheet() -> AppState {
     use ComponentType::{Capacitor, CurrentSource, Ground, Nmos, Pmos, Resistor, VoltageSource};
 
     let mut ids = Ids(0);
@@ -230,7 +233,7 @@ pub(super) fn analog_sheet() -> AnalogSheet {
         SchematicProbe::new(ids.next(), Point::new(700, 260), "V(OUT)", None).expect("probe");
     let note = DesignNote::new(
         ids.next(),
-        Point::new(120, 560),
+        Point::new(120, 40),
         DesignNoteKind::PlainText,
         "Five-transistor OTA, gm/Id = 12 at the input pair",
     )
@@ -251,11 +254,7 @@ pub(super) fn analog_sheet() -> AnalogSheet {
     let selection = &mut state.schematic.session.editor.selection;
     selection.select_component(selected_part);
     selection.select_wire(selected_wire);
-    AnalogSheet {
-        state,
-        selected_part,
-        selected_wire,
-    }
+    state
 }
 
 /// Three instances of the probe's masters wired in a chain, the cell's
@@ -423,14 +422,15 @@ pub(super) struct Framing {
     pub(super) centre: Point,
 }
 
-/// The zoom at which an A1 sheet fits the review canvas, as the canvas's own
-/// framing computes it.
+/// The zoom at which an A1 sheet fits a desktop canvas, as the canvas's own
+/// framing computes it: about 0.4. (On the smaller review canvas it would be
+/// 0.25 again.)
 pub(super) fn a1_fit_zoom() -> f64 {
     let mut probe = crate::state::SchematicState::default();
     probe.zoom_to_fit_world_rect(
         (0.0, 0.0, A1_WORLD.0, A1_WORLD.1),
-        f64::from(SCREEN.x),
-        f64::from(SCREEN.y),
+        f64::from(DESKTOP_CANVAS.x),
+        f64::from(DESKTOP_CANVAS.y),
         rspice_schematic_editor::view::drawing_sheet::FIT_SCREEN_INSET,
         0.0,
     );
@@ -782,13 +782,13 @@ fn render_the_canvas_raster_review_set() {
     let sheets: [Sheet; 3] = [
         (
             "analog",
-            || analog_sheet().state,
-            framings(Point::new(510, 330), Point::new(330, 220)),
+            analog_sheet,
+            framings(ANALOG_CENTRE, ANALOG_DETAIL),
         ),
         (
             "hierarchy",
             hierarchy_sheet,
-            framings(Point::new(470, 330), Point::new(320, 230)),
+            framings(HIERARCHY_CENTRE, HIERARCHY_DETAIL),
         ),
         (
             "scale",
@@ -821,5 +821,75 @@ fn render_the_canvas_raster_review_set() {
                 }
             }
         }
+    }
+}
+
+/// Where `world` lands on a render framed at `centre` and `zoom`.
+fn on_screen(centre: Point, zoom: f64, world: Point) -> egui::Pos2 {
+    egui::pos2(
+        SCREEN.x * 0.5 + ((f64::from(world.x) - f64::from(centre.x)) * zoom) as f32,
+        SCREEN.y * 0.5 + ((f64::from(world.y) - f64::from(centre.y)) * zoom) as f32,
+    )
+}
+
+fn at_zoom(zoom: f64, centre: Point) -> Framing {
+    Framing {
+        name: "test",
+        zoom: Zoom::Fixed(zoom),
+        centre,
+    }
+}
+
+/// A transistor letters its value on the side of its body away from its
+/// gate. A differential pair is always drawn with one half mirrored, and the
+/// mirrored half's value stood on its gate side, across the gate lead and the
+/// wire leaving it: on the analog sheet M2's value ran over its input wire
+/// and the compensation capacitor's labels, M3's over the mirror's gate tie
+/// and M5's over the bias line.
+#[test]
+fn a_transistor_letters_its_value_away_from_its_gate() {
+    let mut state = analog_sheet();
+    let framing = at_zoom(1.0, ANALOG_CENTRE);
+    let render = render(&mut state, themes()[0].1, framing, 1.0);
+    let values = painted_text(&render.shapes)
+        .into_iter()
+        .filter(|text| text.text.contains("W="))
+        .collect::<Vec<_>>();
+    let transistors = state
+        .schematic
+        .document()
+        .components
+        .iter()
+        .filter(|component| matches!(component.kind, ComponentType::Nmos | ComponentType::Pmos))
+        .collect::<Vec<_>>();
+    assert_eq!(transistors.len(), 5);
+    assert_eq!(values.len(), 5, "every transistor letters its value");
+    for transistor in transistors {
+        let body = on_screen(framing.centre, render.zoom, transistor.pos);
+        let gate = transistor
+            .terminal_positions()
+            .into_iter()
+            .find(|(name, _)| *name == "G")
+            .map(|(_, at)| on_screen(framing.centre, render.zoom, at))
+            .expect("a gate");
+        let value = values
+            .iter()
+            .min_by(|a, b| {
+                a.rect
+                    .center()
+                    .distance(body)
+                    .total_cmp(&b.rect.center().distance(body))
+            })
+            .expect("a value");
+        let away = if gate.x > body.x {
+            value.rect.max.x <= body.x
+        } else {
+            value.rect.min.x >= body.x
+        };
+        assert!(
+            away,
+            "{}: the value {:?} at {:?} stands on the gate's side (gate at {gate:?}, body at {body:?})",
+            transistor.name, value.text, value.rect
+        );
     }
 }
