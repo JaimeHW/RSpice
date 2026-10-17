@@ -1411,33 +1411,67 @@ fn orthogonalize_connected_rubber_bands(
 /// moved end comes level with the next corner and lands on the run beyond
 /// it. Such a fold is taken out again when nothing in `document` but this
 /// wire reaches the stretch it doubles over, or another wire runs all of it.
-/// A fold the wire was drawn with is the operator's and stays.
+/// One that something else needs, as when the vertex is a moved pin, is
+/// laid instead by turning runs' corners the other way round, one run at a
+/// time, while that leaves fewer folds. A fold the wire was drawn with is
+/// the operator's and stays.
 pub fn orthogonal_route_for_corresponding_points(
     document: &SchematicDocument,
     wire_id: u64,
     original: &[Point],
     moved: &[Point],
 ) -> Result<(Vec<Point>, Vec<usize>), MoveSelectionError> {
-    let (mut route, mut point_indices) = squared_route(wire_id, original, moved)?;
+    let mut flipped = vec![false; original.len().saturating_sub(1)];
+    let lay = |flipped: &[bool]| {
+        squared_route(wire_id, original, moved, flipped).map(|(mut route, mut point_indices)| {
+            wire_edit::retract_fold_backs(
+                document,
+                wire_id,
+                &mut route,
+                &mut point_indices,
+                wire_edit::FoldStretch::CarriedOrBare,
+            );
+            (route, point_indices)
+        })
+    };
     let drawn_folded = original
         .windows(3)
         .any(|corner| wire_edit::folds_back(corner[0], corner[1], corner[2]));
-    if !drawn_folded {
-        wire_edit::retract_fold_backs(
-            document,
-            wire_id,
-            &mut route,
-            &mut point_indices,
-            wire_edit::FoldStretch::CarriedOrBare,
-        );
+    if drawn_folded {
+        return squared_route(wire_id, original, moved, &flipped);
     }
-    Ok((route, point_indices))
+    let folds = |route: &[Point]| {
+        route
+            .windows(3)
+            .filter(|corner| wire_edit::folds_back(corner[0], corner[1], corner[2]))
+            .count()
+    };
+    let mut best = lay(&flipped)?;
+    let mut improved = true;
+    while improved && folds(&best.0) > 0 {
+        improved = false;
+        for run in 0..flipped.len() {
+            flipped[run] = !flipped[run];
+            match lay(&flipped) {
+                Ok(candidate) if folds(&candidate.0) < folds(&best.0) => {
+                    best = candidate;
+                    improved = true;
+                }
+                _ => flipped[run] = !flipped[run],
+            }
+        }
+    }
+    Ok(best)
 }
 
+/// Square the wire with each run's corner turned the way the run was drawn,
+/// or the other way round where `flipped` says so. A wire with one end moved
+/// is laid as a rubber band from that end, and `flipped` does not apply.
 fn squared_route(
     wire_id: u64,
     original: &[Point],
     moved: &[Point],
+    flipped: &[bool],
 ) -> Result<(Vec<Point>, Vec<usize>), MoveSelectionError> {
     if original.len() != moved.len() || original.len() < 2 {
         return Err(MoveSelectionError::UnsupportedInteriorConnection { wire_id });
@@ -1471,12 +1505,19 @@ fn squared_route(
         let old_end = original[index + 1];
         let new_start = moved[index];
         let new_end = moved[index + 1];
-        let bend = if old_start.y == old_end.y {
-            Point::new(new_end.x, new_start.y)
+        let along = Point::new(new_end.x, new_start.y);
+        let across = Point::new(new_start.x, new_end.y);
+        let (drawn, other) = if old_start.y == old_end.y {
+            (along, across)
         } else if old_start.x == old_end.x {
-            Point::new(new_start.x, new_end.y)
+            (across, along)
         } else {
             return Err(MoveSelectionError::NonOrthogonalWire { wire_id });
+        };
+        let bend = if flipped.get(index).copied().unwrap_or(false) {
+            other
+        } else {
+            drawn
         };
         push_distinct_point(&mut route, bend);
         push_distinct_point(&mut route, new_end);
@@ -2536,5 +2577,35 @@ mod tests {
             folded[..3],
             "a fold the wire was drawn with stays"
         );
+    }
+
+    /// A corner on a pin, carried past the run beyond it, would send the
+    /// wire straight back from the pin, and the stretch to the pin cannot
+    /// simply come out. The run that arrives there turns its corner the
+    /// other way round instead and comes in from the far side.
+    #[test]
+    fn a_carried_corner_on_a_pin_is_laid_without_a_fold() {
+        let p = Point::new;
+        let drawn = [p(200, 140), p(120, 140), p(120, 180), p(40, 180)];
+        let mut moved = drawn;
+        moved[2] = p(140, 260);
+        let mut document = SchematicDocument::default();
+        document
+            .components
+            .push(Component::new(2, ComponentType::Resistor, p(160, 260)));
+        let (route, point_indices) =
+            orthogonal_route_for_corresponding_points(&document, 1, &drawn, &moved)
+                .expect("a square route");
+        assert_eq!(
+            route,
+            vec![
+                p(200, 140),
+                p(140, 140),
+                p(140, 260),
+                p(40, 260),
+                p(40, 180)
+            ]
+        );
+        assert_eq!(point_indices, vec![0, 1, 2, 4]);
     }
 }

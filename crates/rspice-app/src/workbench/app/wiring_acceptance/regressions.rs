@@ -135,6 +135,37 @@ fn a_route_laid_over_existing_wires_adds_no_step() {
     ]);
 }
 
+/// A wire drawn from R4's right pin out over R4 holds that pin at one of
+/// its corners. R4 dragged down and right carried the corner with it, and
+/// the run beyond was squared the way it was drawn, straight back from the
+/// pin over R4: [(200, 140), (120, 140), (120, 260), (140, 260), (100, 260)].
+#[test]
+fn a_dragged_pin_at_a_wire_corner_never_doubles_the_wire_back() {
+    holds(&[
+        Transform(
+            vec![Pick::Wire(8), Pick::Part(3), Pick::Wire(7)],
+            Turn::Clockwise,
+        ),
+        Draw(vec![p(120, 180), p(40, 180)]),
+        Drag(3, vec![p(40, 20), p(80, -40)]),
+        Drag(4, vec![p(40, 60), p(80, 100), p(20, 80)]),
+    ]);
+}
+
+/// On Sheet 2, the wire drawn from R2's pin back over R1 turns down at
+/// R1's left pin. Dragging R1 up carried that corner up the wire's own
+/// downward run, which was squared out to the corner and straight back
+/// down: [(140, 40), (140, 100), (80, 100), (80, 80), (80, 180)].
+#[test]
+fn a_pin_dragged_onto_its_own_wire_never_doubles_it_back() {
+    holds(&[
+        Sheet,
+        Draw(vec![p(280, 100), p(80, 180)]),
+        Transform(vec![Pick::Wire(19), Pick::Wire(25)], Turn::Clockwise),
+        Drag(13, vec![p(60, 40), p(0, -20)]),
+    ]);
+}
+
 /// Undoing the switch to Sheet 2 and then moving a part on Sheet 1 is a
 /// new edit after the undo: the switch can no longer be redone. Redo
 /// replayed it anyway.
