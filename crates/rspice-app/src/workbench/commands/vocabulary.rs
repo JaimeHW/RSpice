@@ -778,7 +778,7 @@ impl Command {
             ),
             Self::OpenTaskDeck => spec("open-task-deck", OPEN_TASK_DECK, "Results"),
             Self::RevealProducerLog => {
-                spec("reveal-producer-log", "Reveal producer log", "Results")
+                spec("reveal-producer-log", "Open producing run log", "Results")
             }
             Self::CreateResultDocument => spec(
                 "create-result-document",
