@@ -465,11 +465,17 @@ impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
         self.wave.as_ref().is_some_and(|wave| wave.analog_feedback)
     }
 
-    fn analog_threshold_sample(&self, instance: usize, port: &str, element: usize) -> Option<f64> {
+    fn analog_threshold_sample(
+        &self,
+        instance: usize,
+        port: &str,
+        element: usize,
+        threshold: usize,
+    ) -> Option<f64> {
         self.circuit
             .xspice_instances
             .get(instance)?
-            .analog_threshold_sample(port, element)
+            .analog_threshold_sample(port, element, threshold)
     }
 
     fn analog_boundaries_ready(&mut self) -> bool {

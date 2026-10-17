@@ -25,7 +25,8 @@ use super::move_interaction::handle_armed_move_selection;
 use super::navigation::primary_pan_gesture_active;
 use super::selection_drag::handle_select_dragging;
 use super::sheet_visibility::{
-    active_junction_at, active_wire_at, objects_on_active_sheet, retain_selection_on_active_sheet,
+    active_junction_at, active_wire_at, finish_wire_on_active_sheet, objects_on_active_sheet,
+    retain_selection_on_active_sheet, with_active_wire_topology_in,
 };
 use super::snap_resolution::resolve_grid_pointer;
 use super::stretch_interaction::handle_armed_stretch_selection;
@@ -57,6 +58,11 @@ pub(super) fn handle_tool_interactions(
     }
     retain_selection_on_active_sheet(state);
     if primary_pan_gesture_active(ui, response) {
+        return;
+    }
+    // The armed zoom box owns the next primary drag, whatever the tool.
+    if state.schematic.session.editor.zoom_box.armed {
+        super::zoom_box::handle_zoom_box(ui, response, state, viewport);
         return;
     }
     let grid_size = state.schematic.document().grid_size;
@@ -141,7 +147,7 @@ pub(super) fn handle_tool_interactions(
                 Some(wire_pos) if state.schematic.session.editor.wire_drawing.active => {
                     state.schematic.extend_wire(wire_pos);
                     if finish_on_conductor {
-                        let _ = state.schematic.finish_wire();
+                        let _ = finish_wire_on_active_sheet(state);
                     }
                 }
                 Some(wire_pos) => state.start_canvas_wire(ui.ctx(), wire_pos),
@@ -188,7 +194,11 @@ pub(super) fn handle_tool_interactions(
             // The armed tool determines whether the naming transaction makes
             // a local label or an off-sheet connector at this shared anchor.
             ToolPointerAction::NetLabel(anchor) => {
-                crate::workbench::app::open_net_label_placement(state, anchor);
+                if label_anchor_on_unmarked_crossing(state, anchor) {
+                    refuse_label_on_unmarked_crossing(ui, state, anchor);
+                } else {
+                    crate::workbench::app::open_net_label_placement(state, anchor);
+                }
             }
         }
     }
@@ -291,7 +301,7 @@ fn finish_active_route(ui: &Ui, state: &mut AppState) -> bool {
         return false;
     }
     if state.schematic.session.editor.wire_drawing.active {
-        return state.schematic.finish_wire().is_some();
+        return finish_wire_on_active_sheet(state).is_some();
     }
     if state.schematic.session.editor.bus_drawing.active {
         return match state.schematic.finish_bus() {
@@ -431,6 +441,57 @@ fn report_unrepresentable_conductor_attachment(state: &mut AppState) {
     state.prompt("No schematic point can be attached to that conductor; the wire was not started.");
 }
 
+/// Whether a label dropped at `anchor` would sit exactly where two of this
+/// sheet's wires cross with no junction, naming neither of them.
+fn label_anchor_on_unmarked_crossing(state: &AppState, anchor: Point) -> bool {
+    let document = state.schematic.document();
+    let wires = objects_on_active_sheet(state, &document.wires, |wire| wire.id);
+    let junctions = objects_on_active_sheet(state, &document.junctions, |junction| junction.id);
+    rspice_design::schematic::junction_edit::CrossingIndex::new(&wires, &junctions)
+        .is_unmarked_crossing(anchor)
+}
+
+fn refuse_label_on_unmarked_crossing(ui: &Ui, state: &mut AppState, anchor: Point) {
+    let message = format!(
+        "A label at ({}, {}) would sit where two wires cross with no junction, and would join \
+         neither. Place a junction there to join the wires, or drop the label onto one wire.",
+        anchor.x, anchor.y
+    );
+    // The toast is the answer: the label the user dropped is not there, and
+    // the reason is longer than the status bar holds.
+    state
+        .ui
+        .toasts
+        .warn_with_title(ui.ctx(), "Label not placed", message);
+}
+
+/// A placed part whose pin lands inside one of this sheet's wires is
+/// connected there: the wire splits so the pin owns a vertex and the wire
+/// follows the part, and the dot the join earns is placed under the
+/// document's junction policy.
+fn connect_pins_inside_wires(
+    workspace: &crate::state::ProjectWorkspace,
+    schematic: &mut crate::state::SchematicState,
+    component: u64,
+    symbols: &SchematicSymbolContext,
+) {
+    with_active_wire_topology_in(workspace, schematic, |schematic, scope| {
+        let placed = std::collections::HashSet::from([component]);
+        if schematic.split_wires_under_pins(
+            &placed,
+            |component| symbols.terminal_points(component),
+            scope,
+        ) && schematic
+            .document()
+            .document_policy
+            .wire_junctions
+            .automatic_junctions()
+        {
+            schematic.update_wire_junctions(scope);
+        }
+    });
+}
+
 fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos: Point) {
     match component_type {
         ComponentType::Port => place_pending_port(state, grid_pos),
@@ -453,10 +514,13 @@ fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos
                 return;
             }
             let library_cell = pending.binding.clone();
+            let symbols = super::schematic_symbol_context(state);
+            let workspace = &state.workspace;
             let changed = state
                 .schematic
                 .with_undo("place library cell", |schematic| {
-                    schematic.add_library_cell_component(grid_pos, library_cell);
+                    let id = schematic.add_library_cell_component(grid_pos, library_cell);
+                    connect_pins_inside_wires(workspace, schematic, id, &symbols);
                 });
             if changed {
                 log::info!("Placed library cell instance at {:?}", grid_pos);
@@ -464,10 +528,13 @@ fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos
         }
         // An armed stimulus definition is placed as an adopter in this undo group.
         _ => {
+            let symbols = super::schematic_symbol_context(state);
+            let workspace = &state.workspace;
             let changed = state.schematic.with_undo(
                 format!("place {}", component_type.display_name()),
                 |schematic| {
-                    schematic.add_armed_component(component_type, grid_pos);
+                    let id = schematic.add_armed_component(component_type, grid_pos);
+                    connect_pins_inside_wires(workspace, schematic, id, &symbols);
                 },
             );
             if changed {

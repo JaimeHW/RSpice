@@ -927,9 +927,9 @@ fn settle_lanes(
         }
         let mut moved = false;
         for host in hosts.iter_mut() {
-            let sampled = host.sample_converter_inputs(|instance, port, element| {
+            let sampled = host.sample_converter_inputs(|instance, port, element, threshold| {
                 participant.as_deref().and_then(|participant| {
-                    participant.analog_threshold_sample(instance, port, element)
+                    participant.analog_threshold_sample(instance, port, element, threshold)
                 })
             });
             named(host, sampled)?;

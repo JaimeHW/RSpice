@@ -82,7 +82,11 @@ fn bus_tap_batch_revalidates_live_geometry_and_preserves_atomic_undo() {
         let bus = state.schematic.document().buses[0].clone();
         state
             .schematic
-            .edit_bus_properties(&bus, Some(BusDeclaration::parse("ADDR[7:0]").unwrap()))
+            .edit_bus_properties(
+                &bus,
+                Some(BusDeclaration::parse("ADDR[7:0]").unwrap()),
+                &|_| true,
+            )
             .unwrap();
         let version = state.schematic.content_version();
         handle_bus_tap_click(&mut state, Point::new(100, 0), 6);

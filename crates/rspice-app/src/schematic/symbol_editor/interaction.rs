@@ -60,16 +60,26 @@ fn apply_canvas_request(
     if outcome.edit_denied {
         state.deny_read_only_edit();
     }
+    if let Some(refusal) = outcome.refusal {
+        state.prompt(refusal);
+    }
     if let Some(before) = outcome.undo_before {
+        // A new gesture: whatever an earlier one held open is over.
+        state.finish_symbol_parent_edit();
         state.record_symbol_edit(&before);
     }
     if outcome.changed {
-        if let Err(error) = state.store_active_symbol_editor_bundle(document, metadata) {
+        if let Err(error) = state.store_symbol_canvas_frame(document, metadata) {
             state.prompt(error);
         } else {
             // Advancing our own revision keeps every event of this drag on one undo entry.
             state.ui.symbol.editor.canvas_source = Some(state.symbol_editor_request_source());
         }
+    }
+    // A drag reaches the parent schematics as one edit, closed when it ends;
+    // a click is an edit of its own.
+    if !request.input.dragged || request.input.drag_stopped {
+        state.finish_symbol_parent_edit();
     }
 }
 

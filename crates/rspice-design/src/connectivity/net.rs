@@ -54,10 +54,8 @@ impl Net {
     /// - "net{id}" otherwise
     pub fn spice_name(&self) -> String {
         if let Some(ref label) = self.label {
-            if label.eq_ignore_ascii_case("0")
-                || label.eq_ignore_ascii_case("gnd")
-                || label.eq_ignore_ascii_case("ground")
-            {
+            // The extractor merges these same nets into the ground net.
+            if crate::schematic::ground_names::is_ground_reference(label) {
                 return "0".to_string();
             }
             return label.clone();

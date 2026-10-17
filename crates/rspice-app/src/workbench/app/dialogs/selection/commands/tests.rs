@@ -237,6 +237,48 @@ fn cut_copies_the_selection_and_then_removes_it() {
     assert_eq!(state.schematic.document().components.len(), 2);
 }
 
+/// Duplicate landed everything two world units off its anchor, off every
+/// grid pitch, and the copy it carried was measured from the selection's
+/// unsnapped middle, so even a whole-grid offset left parts between grid
+/// points (audit E-6).
+#[test]
+fn a_duplicate_lands_on_the_grid_one_step_off_its_anchor() {
+    let mut state = state_with_two_resistors();
+    let capacitor = Component::new(43, ComponentType::Capacitor, Point::new(40, 70));
+    state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(capacitor);
+    let selection = &mut state.schematic.session.editor.selection;
+    for id in [41, 42, 43] {
+        selection.select_component(id);
+    }
+    let grid = state.schematic.document().grid_size;
+    let anchor = state.schematic_paste_anchor();
+
+    assert!(state.duplicate_schematic_selection());
+
+    let copies: Vec<Point> = state
+        .schematic
+        .document()
+        .components
+        .iter()
+        .filter(|component| ![41, 42, 43].contains(&component.id))
+        .map(|component| component.pos)
+        .collect();
+    assert_eq!(copies.len(), 3);
+    assert!(
+        copies
+            .iter()
+            .all(|pos| pos.x % grid == 0 && pos.y % grid == 0),
+        "a duplicate left the grid of {grid}: {copies:?}"
+    );
+    // The copy's grid-snapped middle (50, 40) lands one grid step past the
+    // anchor, so the first resistor at (20, 30) lands 30 left and 10 up of it.
+    assert!(copies.contains(&Point::new(anchor.x + grid - 30, anchor.y + grid - 10)));
+}
+
 #[test]
 fn the_prompt_clauses_are_plural_correct() {
     assert_eq!(open_nets_clause(1), "1 net is now open");

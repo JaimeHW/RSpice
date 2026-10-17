@@ -8,6 +8,7 @@
 use egui::Context;
 use rspice_schematic_editor::requests::EditorRequestSource;
 
+use crate::schematic::view::sheet_visibility::object_is_on_active_sheet;
 use crate::state::{
     Bus, BusDeclaration, BusPropertyImpact, BusSlice, BusTap, BusTapOrientation, DesignNote,
     DesignNoteKind, DesignReviewState, DocumentationShape, DocumentationShapeGeometry, NetLabel,
@@ -238,7 +239,11 @@ impl RSpiceApp {
                     return;
                 };
                 let validation = object_property_session_error(&self.state).map_or_else(
-                    || validate_draft(&self.state.schematic, draft),
+                    || {
+                        validate_draft(&self.state.schematic, draft, &|id| {
+                            object_is_on_active_sheet(&self.state, id)
+                        })
+                    },
                     |message| DraftValidation::Invalid {
                         field: None,
                         message,
@@ -246,7 +251,16 @@ impl RSpiceApp {
                 );
                 match validation {
                     DraftValidation::Valid(commit, _) => {
-                        match apply_commit(&mut self.state.schematic, *commit) {
+                        let content = &self.state.workspace.content;
+                        let catalog = content
+                            .design_management
+                            .sheet_catalog(&content.active_schematic_reference().key());
+                        let on_sheet = |id| {
+                            rspice_schematic_editor::view::design_view::object_is_on_active_sheet(
+                                catalog, id,
+                            )
+                        };
+                        match apply_commit(&mut self.state.schematic, *commit, &on_sheet) {
                             // Closing is the report. A line saying the edit
                             // landed, next to the canvas that now shows it,
                             // is one more thing to read and nothing to act on.
@@ -286,7 +300,9 @@ fn resolve_draft_for_repaint(
         return (cached.validation, cached.bus_choices);
     }
 
-    let validation = validate_draft(&state.schematic, draft);
+    let validation = validate_draft(&state.schematic, draft, &|id| {
+        object_is_on_active_sheet(state, id)
+    });
     let bus_choices = match draft {
         ObjectPropertiesDraft::Bus(_)
         | ObjectPropertiesDraft::NetLabel(_)
@@ -452,13 +468,17 @@ fn object_property_session_error(state: &crate::workbench::app_state::AppState) 
     })
 }
 
-fn apply_commit(schematic: &mut SchematicState, commit: PropertyCommit) -> Result<bool, String> {
+fn apply_commit(
+    schematic: &mut SchematicState,
+    commit: PropertyCommit,
+    on_sheet: &dyn Fn(u64) -> bool,
+) -> Result<bool, String> {
     match commit {
         PropertyCommit::Bus {
             expected,
             declaration,
         } => schematic
-            .edit_bus_properties(&expected, declaration)
+            .edit_bus_properties(&expected, declaration, on_sheet)
             .map_err(|error| error.to_string()),
         PropertyCommit::BusTap {
             expected,
@@ -495,7 +515,13 @@ fn apply_commit(schematic: &mut SchematicState, commit: PropertyCommit) -> Resul
     }
 }
 
-fn validate_draft(schematic: &SchematicState, draft: &ObjectPropertiesDraft) -> DraftValidation {
+/// `on_sheet` admits the active sheet's objects, the only ones a bus edit
+/// there can reach.
+fn validate_draft(
+    schematic: &SchematicState,
+    draft: &ObjectPropertiesDraft,
+    on_sheet: &dyn Fn(u64) -> bool,
+) -> DraftValidation {
     if schematic.session.read_only {
         return DraftValidation::Invalid {
             field: None,
@@ -503,7 +529,7 @@ fn validate_draft(schematic: &SchematicState, draft: &ObjectPropertiesDraft) -> 
         };
     }
     match draft {
-        ObjectPropertiesDraft::Bus(draft) => validate_bus_draft(schematic, draft),
+        ObjectPropertiesDraft::Bus(draft) => validate_bus_draft(schematic, draft, on_sheet),
         ObjectPropertiesDraft::BusTap(draft) => validate_tap_draft(schematic, draft),
         ObjectPropertiesDraft::NetLabel(draft) => validate_net_label_draft(schematic, draft),
         ObjectPropertiesDraft::NamedNet(draft) => validate_named_net_draft(schematic, draft),
@@ -646,6 +672,7 @@ fn validate_design_note_draft(
 fn validate_bus_draft(
     schematic: &SchematicState,
     draft: &BusObjectPropertiesDraft,
+    on_sheet: &dyn Fn(u64) -> bool,
 ) -> DraftValidation {
     let Some(current) = schematic
         .document()
@@ -660,7 +687,7 @@ fn validate_bus_draft(
     }
     let declaration_text = draft.declaration.trim();
     if declaration_text.is_empty() {
-        return match schematic.validate_bus_properties(&draft.original, None) {
+        return match schematic.validate_bus_properties(&draft.original, None, on_sheet) {
             Ok(impact) => DraftValidation::Valid(
                 Box::new(PropertyCommit::Bus {
                     expected: draft.original.clone(),
@@ -692,7 +719,7 @@ fn validate_bus_draft(
 
     // Exercise the domain transaction on a detached clone. This keeps the
     // primary enabled only when all dependent selectors can be rebased.
-    match schematic.validate_bus_properties(&draft.original, Some(&declaration)) {
+    match schematic.validate_bus_properties(&draft.original, Some(&declaration), on_sheet) {
         Ok(impact) => DraftValidation::Valid(
             Box::new(PropertyCommit::Bus {
                 expected: draft.original.clone(),
@@ -941,7 +968,7 @@ mod tests {
         else {
             panic!("valid named-net properties were rejected")
         };
-        assert!(apply_commit(&mut schematic, *commit).unwrap());
+        assert!(apply_commit(&mut schematic, *commit, &|_| true).unwrap());
         assert_eq!(schematic.document().net_labels[0].id, 92);
         assert_eq!(schematic.document().net_labels[0].name, "sense_filtered");
         assert_eq!(schematic.undo_description(), Some("rename named net"));
@@ -1008,20 +1035,22 @@ mod tests {
             original: bus.clone(),
             declaration: "ADDR<0:15>".to_owned(),
         };
-        let DraftValidation::Valid(commit, impact) = validate_bus_draft(&schematic, &draft) else {
+        let DraftValidation::Valid(commit, impact) =
+            validate_bus_draft(&schematic, &draft, &|_| true)
+        else {
             panic!("valid retype was rejected")
         };
         let impact = impact.expect("bus impact");
         assert_eq!(impact.connected_buses, 2);
         assert_eq!(impact.buses_changed, 2);
         assert_eq!(impact.taps_changed, 1);
-        assert!(apply_commit(&mut schematic, *commit).unwrap());
+        assert!(apply_commit(&mut schematic, *commit, &|_| true).unwrap());
         assert_eq!(
             schematic.document().bus_taps[0].slice,
             BusSlice::parse("ADDR<4:6>").unwrap()
         );
 
-        let stale = validate_bus_draft(&schematic, &draft);
+        let stale = validate_bus_draft(&schematic, &draft, &|_| true);
         assert!(matches!(
             stale,
             DraftValidation::Invalid { field: None, .. }
@@ -1060,7 +1089,7 @@ mod tests {
         let DraftValidation::Valid(commit, None) = validate_tap_draft(&schematic, &draft) else {
             panic!("valid tap edit was rejected")
         };
-        assert!(apply_commit(&mut schematic, *commit).unwrap());
+        assert!(apply_commit(&mut schematic, *commit, &|_| true).unwrap());
         assert_eq!(schematic.document().bus_taps[0].bus_point, tap.bus_point);
         assert_eq!(
             schematic.document().bus_taps[0].connection_point,
@@ -1103,7 +1132,7 @@ mod tests {
         else {
             panic!("valid net-label properties were rejected")
         };
-        assert!(apply_commit(&mut schematic, *commit).unwrap());
+        assert!(apply_commit(&mut schematic, *commit, &|_| true).unwrap());
         assert_eq!(
             schematic.document().net_labels,
             vec![NetLabel::new(17, Point::new(-30, 45), "DATA[7]")]
@@ -1164,7 +1193,7 @@ mod tests {
         else {
             panic!("valid design-note properties were rejected")
         };
-        assert!(apply_commit(&mut schematic, *commit).unwrap());
+        assert!(apply_commit(&mut schematic, *commit, &|_| true).unwrap());
         assert_eq!(
             schematic.document().design_notes[0].text,
             "Review updated bias path"
@@ -1240,7 +1269,7 @@ mod tests {
         else {
             panic!("valid documentation-shape properties were rejected")
         };
-        assert!(apply_commit(&mut schematic, *commit).unwrap());
+        assert!(apply_commit(&mut schematic, *commit, &|_| true).unwrap());
         assert_eq!(schematic.document().documentation_shapes[0].id, original.id);
         assert_eq!(
             schematic.document().documentation_shapes[0].layer,
@@ -1290,6 +1319,7 @@ mod tests {
                 expected: bus.clone(),
                 declaration: Some(BusDeclaration::parse("ADDR[7:0]").unwrap()),
             },
+            &|_| true,
         );
         assert_eq!(result, Err(BusParseError::ReadOnly.to_string()));
         assert_eq!(schematic.document().buses[0], bus);

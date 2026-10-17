@@ -1,7 +1,8 @@
 //! Geometry mutations update the live owner's topology revision.
 use super::super::component::Component;
 use super::super::movement::{
-    self, MoveSelectionError, MoveSelectionMode, MovementImpact, MovementSelection,
+    self, DragBaseline, DragRubberBand, MoveSelectionError, MoveSelectionMode, MovementImpact,
+    MovementSelection,
 };
 use super::super::stretch::{self, StretchOrthogonalPolicy, StretchSelectionError, StretchTarget};
 use super::Schematic;
@@ -24,16 +25,29 @@ impl Schematic {
         }
         impact
     }
-    pub fn move_selection_with_rubber_band_resolved(
+    /// One frame of a mouse drag, laid from the document as the pending
+    /// gesture found it.
+    pub fn drag_selection_with_rubber_band_resolved(
         &mut self,
         selection: MovementSelection<'_>,
         delta: Point,
+        rubber_band: DragRubberBand,
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
     ) -> MovementImpact {
-        let impact = movement::move_selection_with_rubber_band_resolved(
+        let baseline = self
+            .history
+            .pending_baseline()
+            .map(|snapshot| DragBaseline {
+                components: &snapshot.components,
+                wires: &snapshot.wires,
+                connections: &snapshot.connections,
+            });
+        let impact = movement::drag_selection_with_rubber_band_resolved(
             &mut self.document,
+            baseline,
             selection,
             delta,
+            rubber_band,
             terminal_points_for,
         );
         if impact.topology_changed {

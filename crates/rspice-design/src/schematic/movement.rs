@@ -5,7 +5,7 @@ use super::{
     component::Component,
     document::SchematicDocument,
     documentation_shape::clamped_documentation_shape_translation,
-    wire::{Wire, WireSegment},
+    wire::{Wire, WireConnection, WireSegment},
 };
 use rspice_design_model::Point;
 use serde::{Deserialize, Serialize};
@@ -393,19 +393,199 @@ pub fn move_junction(
     }
 }
 
-pub fn move_selection_with_rubber_band_resolved(
+/// How a mouse drag lays the unselected wires it stretches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DragRubberBand {
+    /// Keep each stretched wire square with the route the Connected move
+    /// builds. A wire drawn at an angle, or one whose square route would
+    /// leave a bus tap off it, stretches straight instead.
+    #[default]
+    Orthogonal,
+    /// Stretch straight from the moved pin, as 45° and free routing draw.
+    Direct,
+}
+
+/// The document as a drag found it, for laying each frame from scratch.
+#[derive(Debug, Clone, Copy)]
+pub struct DragBaseline<'a> {
+    pub components: &'a [Component],
+    pub wires: &'a [Wire],
+    pub connections: &'a [WireConnection],
+}
+
+/// One frame of a mouse drag.
+///
+/// The selection moves by this frame's `delta`. Every unselected wire is
+/// then laid again from `baseline`, the document as the gesture found it,
+/// for the whole distance travelled: squaring each small step onto the one
+/// before would leave a jog per frame, and a wire whose end the part merely
+/// passed over would be picked up and carried. With no baseline, the
+/// document before this frame is the baseline.
+pub fn drag_selection_with_rubber_band_resolved(
     document: &mut SchematicDocument,
+    baseline: Option<DragBaseline<'_>>,
     selection: MovementSelection<'_>,
     delta: Point,
-    terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+    rubber_band: DragRubberBand,
+    mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
 ) -> MovementImpact {
+    let captured;
+    let baseline = match baseline {
+        Some(baseline) => baseline,
+        None => {
+            captured = (
+                document.components.clone(),
+                document.wires.clone(),
+                document.connections.clone(),
+            );
+            DragBaseline {
+                components: &captured.0,
+                wires: &captured.1,
+                connections: &captured.2,
+            }
+        }
+    };
     let mut state = MovementState {
         document,
         selection,
         impact: MovementImpact::default(),
     };
-    state.move_selection_with_rubber_band_resolved(delta, terminal_points_for);
+    state.move_selection_with_rubber_band_resolved(delta, &mut terminal_points_for);
+    if state.impact.changed {
+        lay_dragged_wires_from(
+            state.document,
+            baseline,
+            selection,
+            rubber_band,
+            terminal_points_for,
+        );
+    }
     state.impact
+}
+
+/// Lay every unselected wire for the distance the selection has travelled
+/// since `baseline`: a wire with both ends on moved pins travels whole, one
+/// with some vertices on them stretches, and every other wire stays exactly
+/// as it was drawn.
+fn lay_dragged_wires_from(
+    document: &mut SchematicDocument,
+    baseline: DragBaseline<'_>,
+    selection: MovementSelection<'_>,
+    rubber_band: DragRubberBand,
+    mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+) {
+    let moved_components = document
+        .components
+        .iter()
+        .filter(|component| selection.components.contains(&component.id))
+        .map(|component| (component.id, component))
+        .collect::<std::collections::HashMap<_, _>>();
+    // Where each selected pin was when the drag began, and where it is now.
+    let mut carried = std::collections::HashMap::new();
+    for before in baseline
+        .components
+        .iter()
+        .filter(|component| selection.components.contains(&component.id))
+    {
+        let Some(after) = moved_components.get(&before.id) else {
+            continue;
+        };
+        for (from, to) in terminal_points_for(before)
+            .into_iter()
+            .zip(terminal_points_for(after))
+        {
+            carried.entry(from).or_insert(to);
+        }
+    }
+    let baseline_wires = baseline
+        .wires
+        .iter()
+        .map(|wire| (wire.id, wire))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut point_maps = std::collections::HashMap::new();
+    for wire_index in 0..document.wires.len() {
+        let wire = &document.wires[wire_index];
+        if selection.wires.contains(&wire.id) {
+            continue;
+        }
+        let Some(before) = baseline_wires.get(&wire.id) else {
+            continue;
+        };
+        let (points, point_map) = dragged_wire_points(document, before, &carried, rubber_band);
+        let wire = &mut document.wires[wire_index];
+        if wire.points != points {
+            wire.points = points;
+        }
+        point_maps.insert(wire.id, point_map);
+    }
+    // The pin connections index the wires' vertices; re-read them from the
+    // baseline through each wire's new vertex numbering.
+    if document.connections.len() == baseline.connections.len() {
+        for (connection, before) in document.connections.iter_mut().zip(baseline.connections) {
+            if connection.wire_id != before.wire_id {
+                continue;
+            }
+            if let Some(point_map) = point_maps.get(&connection.wire_id) {
+                connection.point_index = point_map
+                    .as_ref()
+                    .and_then(|map| map.get(before.point_index).copied())
+                    .unwrap_or(before.point_index);
+            }
+        }
+    }
+}
+
+/// The vertices `before` takes once the pins in `carried` have moved, and
+/// where each of its old vertices went when the route renumbered them.
+fn dragged_wire_points(
+    document: &SchematicDocument,
+    before: &Wire,
+    carried: &std::collections::HashMap<Point, Point>,
+    rubber_band: DragRubberBand,
+) -> (Vec<Point>, Option<Vec<usize>>) {
+    let carried_to = |point: &Point| carried.get(point).copied();
+    let (Some(first), Some(last)) = (before.points.first(), before.points.last()) else {
+        return (before.points.clone(), None);
+    };
+    if let (Some(first_to), Some(_)) = (carried_to(first), carried_to(last)) {
+        // Both ends ride on moved pins: the whole wire travels with them.
+        let travelled = Point::new(
+            first_to.x.saturating_sub(first.x),
+            first_to.y.saturating_sub(first.y),
+        );
+        let points = before
+            .points
+            .iter()
+            .map(|point| offset_point(*point, travelled))
+            .collect();
+        return (points, None);
+    }
+    let moved = before
+        .points
+        .iter()
+        .map(|point| carried_to(point).unwrap_or(*point))
+        .collect::<Vec<_>>();
+    if moved == before.points || rubber_band == DragRubberBand::Direct || !before.is_orthogonal() {
+        return (moved, None);
+    }
+    let Ok((route, point_map)) =
+        orthogonal_route_for_corresponding_points(before.id, &before.points, &moved)
+    else {
+        return (moved, None);
+    };
+    let keeps_its_taps = document
+        .bus_taps
+        .iter()
+        .filter(|tap| {
+            tap.target_kind() == BusTargetKind::Wire
+                && polyline_contains_point(&before.points, tap.connection_point)
+        })
+        .all(|tap| polyline_contains_point(&route, tap.connection_point));
+    if keeps_its_taps {
+        (route, Some(point_map))
+    } else {
+        (moved, None)
+    }
 }
 
 pub fn move_selection_with_mode_resolved(

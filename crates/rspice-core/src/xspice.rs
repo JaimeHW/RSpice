@@ -129,6 +129,7 @@ pub(crate) use resource_transaction::{
     ResourceEntry, ResourceTransaction, ResourceTransactionScope, TransactionalContextResource,
 };
 mod threshold;
+pub(crate) use threshold::AnalogBandLaw;
 pub use threshold::{AnalogInputThreshold, AnalogThresholdBehavior};
 
 pub use traits::{

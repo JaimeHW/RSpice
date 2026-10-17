@@ -95,7 +95,11 @@ impl SchematicState {
     ///   is automatically split at that point (creating a proper vertex)
     /// - This ensures correct rubber-banding: all wires at a T-junction share
     ///   a common endpoint vertex, so moving any wire keeps the junction intact
-    pub fn finish_wire(&mut self) -> Option<u64> {
+    ///
+    /// `hidden` names the conductors of the cell view's other sheets. They
+    /// share this document's coordinates, so a route drawn here would
+    /// otherwise split their wires and re-home the halves onto this sheet.
+    pub fn finish_wire(&mut self, hidden: impl Fn(u64) -> bool) -> Option<u64> {
         if !self.session.editor.wire_drawing.active {
             return None;
         }
@@ -115,31 +119,77 @@ impl SchematicState {
 
         let mut last_wire_id = None;
         self.with_undo("draw wire", |schematic| {
-            // Split the path into individual 2-point wire segments. The
-            // complete route and every topology repair it causes are one
-            // atomic user operation.
-            let mut endpoints_to_check = Vec::new();
+            // The undo record opened with every sheet present; the other
+            // sheets step out only while the route is laid down.
+            schematic.with_active_wire_topology(&hidden, |schematic, scope| {
+                // Split the path into individual 2-point wire segments. The
+                // complete route and every topology repair it causes are one
+                // atomic user operation.
+                let mut endpoints_to_check = Vec::new();
+                let existing = schematic
+                    .design
+                    .document()
+                    .wires
+                    .iter()
+                    .map(|wire| wire.id)
+                    .collect::<std::collections::HashSet<_>>();
 
-            for i in 0..simplified.len() - 1 {
-                let segment = vec![simplified[i], simplified[i + 1]];
-                endpoints_to_check.push(simplified[i]);
-                if i == simplified.len() - 2 {
-                    endpoints_to_check.push(simplified[i + 1]);
+                for i in 0..simplified.len() - 1 {
+                    let segment = vec![simplified[i], simplified[i + 1]];
+                    endpoints_to_check.push(simplified[i]);
+                    if i == simplified.len() - 2 {
+                        endpoints_to_check.push(simplified[i + 1]);
+                    }
+                    if let Some(wire_id) = schematic.add_wire(segment) {
+                        last_wire_id = Some(wire_id);
+                    }
                 }
-                if let Some(wire_id) = schematic.add_wire(segment) {
-                    last_wire_id = Some(wire_id);
+
+                // Professional EDA behavior: split existing wires at T-junction
+                // points. Keeping this inside the route transaction guarantees
+                // that one Undo restores both the route and the prior topology.
+                for point in endpoints_to_check {
+                    schematic.split_wires_at_t_junction(point, scope);
                 }
-            }
 
-            // Professional EDA behavior: split existing wires at T-junction
-            // points. Keeping this inside the route transaction guarantees
-            // that one Undo restores both the route and the prior topology.
-            for point in endpoints_to_check {
-                schematic.split_wires_at_t_junction(point);
-            }
+                // A route drawn along an existing wire is one conductor
+                // there, not two lying on each other.
+                let laid = schematic
+                    .design
+                    .document()
+                    .wires
+                    .iter()
+                    .map(|wire| wire.id)
+                    .filter(|id| !existing.contains(id))
+                    .collect();
+                if schematic.merge_overlapping_wires(&laid, scope) {
+                    let exists = |id: &u64| {
+                        schematic
+                            .design
+                            .document()
+                            .wires
+                            .iter()
+                            .any(|wire| wire.id == *id)
+                    };
+                    last_wire_id = last_wire_id
+                        .filter(exists)
+                        .or_else(|| laid.iter().copied().filter(exists).max());
+                }
 
-            // Add junction markers where 3+ wire endpoints meet.
-            schematic.update_wire_junctions();
+                // Dots follow the document's junction policy, as every other
+                // cleanup does: under manual junctions the user places them.
+                if schematic
+                    .design
+                    .document()
+                    .document_policy
+                    .wire_junctions
+                    .automatic_junctions()
+                {
+                    schematic.update_wire_junctions(scope);
+                } else {
+                    schematic.remove_orphan_junctions(scope);
+                }
+            });
         });
 
         last_wire_id
@@ -154,10 +204,27 @@ impl SchematicState {
     /// This ensures correct rubber-banding: since all wires at the junction
     /// share the same endpoint vertex, moving any attached wire keeps the
     /// junction topology intact.
-    pub fn split_wires_at_t_junction(&mut self, point: Point) {
+    pub fn split_wires_at_t_junction(&mut self, point: Point, _scope: &ActiveSheetTopology) {
         for wire_id in wire_edit::wires_to_split_at(self.design.document(), point) {
             let _ = self.split_wire(wire_id, point);
         }
+    }
+
+    /// Fold each wire in `seeds` together with any wire lying along it on
+    /// one line, so no stretch of conductor is drawn twice.
+    pub fn merge_overlapping_wires(
+        &mut self,
+        seeds: &std::collections::HashSet<u64>,
+        _scope: &ActiveSheetTopology,
+    ) -> bool {
+        if self.session.read_only {
+            return false;
+        }
+        let changed = self.design.merge_collinear_wires(Some(seeds), false);
+        if changed {
+            self.session.is_dirty = true;
+        }
+        changed
     }
 }
 
@@ -179,7 +246,7 @@ mod tests {
         schematic.extend_wire(Point::new(20, 20));
 
         assert!(!schematic.has_pending_operation());
-        assert!(schematic.finish_wire().is_some());
+        assert!(schematic.finish_wire(|_| false).is_some());
         assert_eq!(schematic.history().undo_count(), 1);
         assert_eq!(schematic.undo_description(), Some("draw wire"));
         assert_eq!(schematic.design.document().wires.len(), 3);
@@ -195,6 +262,108 @@ mod tests {
         assert!(schematic.redo());
         assert_eq!(schematic.design.document().wires.len(), 3);
         assert_eq!(schematic.history().undo_count(), 1);
+    }
+
+    fn spans(schematic: &SchematicState) -> Vec<Vec<Point>> {
+        let mut spans = schematic
+            .design
+            .document()
+            .wires
+            .iter()
+            .map(|wire| wire.points.clone())
+            .collect::<Vec<_>>();
+        spans.sort_by_key(|points| (points[0].x, points[0].y));
+        spans
+    }
+
+    /// A route drawn along part of an existing wire is one conductor there:
+    /// no doubled stretch of wire, and no dot where nothing branches.
+    #[test]
+    fn a_route_drawn_over_a_wire_leaves_one_conductor_and_no_dot() {
+        let mut schematic = SchematicState::default();
+        schematic.add_wire(vec![Point::new(0, 0), Point::new(40, 0)]);
+        schematic.reset_undo_history();
+
+        schematic.start_wire(Point::new(20, 0));
+        schematic.extend_wire(Point::new(60, 0));
+        assert!(schematic.finish_wire(|_| false).is_some());
+
+        assert_eq!(
+            spans(&schematic),
+            [
+                vec![Point::new(0, 0), Point::new(20, 0)],
+                vec![Point::new(20, 0), Point::new(60, 0)],
+            ]
+        );
+        assert!(schematic.design.document().junctions.is_empty());
+        assert!(schematic.undo());
+        assert_eq!(
+            spans(&schematic),
+            [vec![Point::new(0, 0), Point::new(40, 0)]]
+        );
+    }
+
+    /// Where the wire drawn over ended on a pin, the pin keeps its vertex,
+    /// so moving the part still carries the wire.
+    #[test]
+    fn a_route_drawn_over_a_wire_keeps_the_vertex_on_a_pin() {
+        let mut schematic = SchematicState::default();
+        let id = schematic.add_component(crate::state::ComponentType::Resistor, Point::origin());
+        let pin = schematic.design.document().components[0].terminal_positions()[0].1;
+        let at = Point::new(40, 0);
+        schematic
+            .design
+            .document_mut_for_test()
+            .components
+            .iter_mut()
+            .find(|component| component.id == id)
+            .expect("the resistor")
+            .pos = Point::new(at.x - pin.x, at.y - pin.y);
+        schematic.add_wire(vec![Point::new(0, 0), at]);
+
+        schematic.start_wire(Point::new(20, 0));
+        schematic.extend_wire(Point::new(60, 0));
+        schematic.finish_wire(|_| false);
+
+        assert_eq!(
+            spans(&schematic),
+            [
+                vec![Point::new(0, 0), Point::new(20, 0)],
+                vec![Point::new(20, 0), at],
+                vec![at, Point::new(60, 0)],
+            ]
+        );
+    }
+
+    /// Under manual junctions the user places every dot: a drawn T still
+    /// splits the wire it lands on, but gets no dot of the tool's making.
+    /// Under automatic junctions it does.
+    #[test]
+    fn a_drawn_t_gets_a_dot_only_under_automatic_junctions() {
+        for (policy, dots) in [
+            (crate::state::WireJunctionPolicy::OrthogonalManual, 0),
+            (crate::state::WireJunctionPolicy::OrthogonalAutomatic, 1),
+            (crate::state::WireJunctionPolicy::AnyAngle, 1),
+        ] {
+            let mut schematic = SchematicState::default();
+            schematic
+                .design
+                .document_mut_for_test()
+                .document_policy
+                .wire_junctions = policy;
+            schematic.add_wire(vec![Point::new(0, 0), Point::new(40, 0)]);
+
+            schematic.start_wire(Point::new(20, 40));
+            schematic.extend_wire(Point::new(20, 0));
+            schematic.finish_wire(|_| false);
+
+            assert_eq!(schematic.design.document().wires.len(), 3, "{policy:?}");
+            assert_eq!(
+                schematic.design.document().junctions.len(),
+                dots,
+                "{policy:?}"
+            );
+        }
     }
 
     #[test]
@@ -214,7 +383,7 @@ mod tests {
         assert!(schematic.design.document().wires.is_empty());
 
         schematic.start_wire(Point::new(5, 5));
-        assert_eq!(schematic.finish_wire(), None);
+        assert_eq!(schematic.finish_wire(|_| false), None);
         assert!(!schematic.has_pending_operation());
         assert!(!schematic.can_undo());
         assert!(schematic.session.is_dirty);
@@ -231,7 +400,7 @@ mod tests {
         schematic.extend_wire(Point::new(10, 0));
 
         assert!(!schematic.session.editor.wire_drawing.active);
-        assert_eq!(schematic.finish_wire(), None);
+        assert_eq!(schematic.finish_wire(|_| false), None);
         assert!(!schematic.can_undo());
         assert!(schematic.design.document().wires.is_empty());
         assert!(!schematic.session.is_dirty);

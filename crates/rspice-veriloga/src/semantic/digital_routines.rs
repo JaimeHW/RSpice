@@ -284,7 +284,7 @@ impl SemanticAnalyzer {
         for argument in &enable.args {
             self.check_digital_expression(argument, signals, index);
         }
-        if enable.name.starts_with("$rspice_reference_") {
+        if is_reference_symbol(&enable.name) {
             // A hierarchical task name; lowering resolves it against the
             // elaborated design.
             return;
@@ -336,6 +336,14 @@ impl SemanticAnalyzer {
         signals: &[AnalyzedDigitalSignal],
         index: &HashMap<SmolStr, usize>,
     ) -> bool {
+        if is_reference_symbol(&call.name) {
+            // A hierarchical function name; lowering resolves it against the
+            // elaborated design, as it does a hierarchical task enable.
+            for argument in &call.args {
+                self.check_digital_expression(argument, signals, index);
+            }
+            return true;
+        }
         let Some(signature) = self.digital_routines.get(&call.name).cloned() else {
             return false;
         };
@@ -382,7 +390,7 @@ impl SemanticAnalyzer {
 
     /// `disable name`: a named block or a task of this module.
     pub(super) fn check_disable(&mut self, disable: &DigitalDisable) {
-        if disable.target.starts_with("$rspice_reference_")
+        if is_reference_symbol(&disable.target)
             || self.digital_scope_names.contains(&disable.target)
         {
             return;
@@ -426,6 +434,11 @@ impl SemanticAnalyzer {
         signals: &[AnalyzedDigitalSignal],
         index: &HashMap<SmolStr, usize>,
     ) {
+        // A borrowed declaration stands at the reference; the target's own
+        // declaration is in another scope.
+        if is_reference_symbol(name) {
+            return;
+        }
         let Some(declared) = index.get(name).map(|position| signals[*position].span) else {
             return;
         };
@@ -459,7 +472,7 @@ impl SemanticAnalyzer {
                 return;
             }
         };
-        if name.starts_with("$rspice_reference_") {
+        if is_reference_symbol(name) && !index.contains_key(name) {
             return;
         }
         if self.names_digital_event(name, signals, index) {

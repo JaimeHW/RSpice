@@ -303,6 +303,260 @@ fn symbol_gesture_cannot_follow_the_same_master_into_another_occurrence() {
     assert!(!state.can_undo_active_symbol_document());
 }
 
+const TOP: &str = "work/top/schematic";
+/// X1's world position in `top`; INP's wire is 10, INN's is 11.
+const X1: Point = Point::new(100, 100);
+
+/// Cell `amp` drawn as an OTA, INP above INN on the left edge, and placed as
+/// X1 in an open parent `top` that wires each input out to the left.
+///
+/// With `hidden_vertex`, `top` has two sheets: X1 and its wires on Sheet 1,
+/// and on Sheet 2 a wire whose vertex sits exactly where INP meets its wire.
+fn ota_placed_in_open_parent(hidden_vertex: bool) -> AppState {
+    use crate::state::{
+        Component, ComponentType, LibraryCellInstance, PortSpec, SchematicState, SheetDefinition,
+        SheetPortPolicy, SheetTemplate, Wire,
+    };
+    let mut state = open_symbol();
+    let document = SymbolDocument {
+        pins: vec![
+            SymbolPin::new("INP", PortDirection::In, Some(Point::new(-30, -10))),
+            SymbolPin::new("INN", PortDirection::In, Some(Point::new(-30, 10))),
+        ],
+        body: vec![SymbolShape::Polyline {
+            points: vec![
+                Point::new(-10, -40),
+                Point::new(10, -40),
+                Point::new(10, 40),
+                Point::new(-10, 40),
+            ],
+            closed: true,
+        }],
+        ..SymbolDocument::default()
+    };
+    state
+        .store_active_symbol_editor_bundle(
+            &document,
+            &SymbolEditorMetadata::for_document(&document),
+        )
+        .unwrap();
+    let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
+    binding.bind_interface(&[
+        PortSpec {
+            name: "INP".to_owned(),
+            direction: PortDirection::In,
+        },
+        PortSpec {
+            name: "INN".to_owned(),
+            direction: PortDirection::In,
+        },
+    ]);
+    let mut parent = SchematicState::default();
+    let drawing = parent.document_mut_for_test();
+    drawing
+        .components
+        .push(Component::new(1, ComponentType::CellInstance, X1).with_library_cell(binding));
+    drawing
+        .wires
+        .push(Wire::segment(10, Point::new(70, 90), Point::new(40, 90)));
+    drawing
+        .wires
+        .push(Wire::segment(11, Point::new(70, 110), Point::new(40, 110)));
+    if hidden_vertex {
+        drawing
+            .wires
+            .push(Wire::segment(12, Point::new(70, 90), Point::new(70, 40)));
+        let catalogs = &mut state.workspace.content.design_management;
+        let first = catalogs
+            .bootstrap_for_cell_view(TOP, "Sheet 1", vec![1, 10, 11, 12])
+            .unwrap();
+        let catalog = catalogs.sheet_catalog_mut(TOP).unwrap();
+        let second = catalog
+            .create_sheet(
+                SheetDefinition {
+                    name: "Sheet 2".to_owned(),
+                    template: SheetTemplate::AnalogSchematic,
+                    port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                    explicit_page_number: Some(2),
+                },
+                Some(first),
+            )
+            .unwrap();
+        catalog
+            .assign_objects(catalog.revision(), second, [12])
+            .unwrap();
+        catalog.set_active(first).unwrap();
+    }
+    state
+        .workspace
+        .insert_schematic_editor(TOP.to_owned(), parent);
+    bind_active_canvas(&mut state);
+    state
+}
+
+fn parent_document(state: &AppState) -> rspice_design::schematic::document::SchematicDocument {
+    state.workspace.content.schematic_buffers[TOP]
+        .document()
+        .clone()
+}
+
+/// The whole of `top` as it would be written, for a bit-for-bit comparison.
+fn parent_bits(state: &AppState) -> serde_json::Value {
+    serde_json::to_value(parent_document(state)).unwrap()
+}
+
+/// Each X1 terminal and the wires its net holds, as the extractor reads
+/// `top` against the symbol as it stands now.
+fn parent_nets(state: &AppState) -> std::collections::BTreeMap<String, Vec<u64>> {
+    use rspice_design::resolved_symbol::ResolvedCellSymbol;
+    let symbol = state.load_active_symbol_document().unwrap();
+    let parent = parent_document(state);
+    let extracted = rspice_design::connectivity::extract(
+        &parent,
+        |_| {
+            Some(ResolvedCellSymbol::from_authored_document(
+                symbol.clone(),
+                &[],
+            ))
+        },
+        |_| None,
+    );
+    extracted
+        .terminals
+        .iter()
+        .map(|terminal| {
+            let mut wires = extracted
+                .net_at(terminal.point)
+                .map(|net| net.wires.clone())
+                .unwrap_or_default();
+            wires.sort_unstable();
+            (terminal.pin.clone(), wires)
+        })
+        .collect()
+}
+
+/// Drag INP through `points`, one frame each, then release.
+fn drag_inp(state: &mut AppState, points: &[Point]) {
+    state.ui.symbol.editor.dragging_pin = Some("INP".to_owned());
+    for point in points {
+        bind_active_canvas(state);
+        let request = request(
+            state,
+            SymbolCanvasInput {
+                pointer: viewport().world_to_screen(*point),
+                dragged: true,
+                ..Default::default()
+            },
+        );
+        apply(state, request);
+    }
+    bind_active_canvas(state);
+    let request = request(
+        state,
+        SymbolCanvasInput {
+            drag_stopped: true,
+            ..Default::default()
+        },
+    );
+    apply(state, request);
+}
+
+/// INP dragged down the left edge, past INN, to below it.
+const PAST_INN: [Point; 4] = [
+    Point::new(-30, 0),
+    Point::new(-30, 10),
+    Point::new(-30, 20),
+    Point::new(-30, 30),
+];
+
+#[test]
+fn dragging_a_pin_past_another_leaves_every_parent_net_as_it_was() {
+    let mut state = ota_placed_in_open_parent(false);
+    let nets = parent_nets(&state);
+    assert_eq!(nets["INP"], vec![10]);
+    assert_eq!(nets["INN"], vec![11]);
+
+    drag_inp(&mut state, &PAST_INN);
+
+    let symbol = state.load_active_symbol_document().unwrap();
+    assert_eq!(
+        symbol.pin("INP").and_then(|pin| pin.position),
+        Some(Point::new(-30, 30))
+    );
+    assert_eq!(parent_nets(&state), nets);
+    let parent = parent_document(&state);
+    assert_eq!(parent.wires[0].points[0], Point::new(70, 130));
+    assert_eq!(parent.wires[1].points[0], Point::new(70, 110));
+}
+
+#[test]
+fn symbol_undo_puts_the_parent_back_exactly() {
+    let mut state = ota_placed_in_open_parent(false);
+    let before = parent_bits(&state);
+    drag_inp(&mut state, &PAST_INN);
+    assert_ne!(parent_bits(&state), before);
+
+    assert!(state.undo_active_symbol_document().unwrap());
+
+    assert_eq!(parent_bits(&state), before);
+}
+
+#[test]
+fn the_parent_undoes_a_whole_pin_drag_as_one_step() {
+    let mut state = ota_placed_in_open_parent(false);
+    let before = parent_bits(&state);
+    let depth = state.workspace.content.schematic_buffers[TOP]
+        .history()
+        .undo_count();
+
+    drag_inp(&mut state, &PAST_INN);
+
+    assert_eq!(
+        state.workspace.content.schematic_buffers[TOP]
+            .history()
+            .undo_count(),
+        depth + 1
+    );
+    let mut undone = false;
+    state
+        .workspace
+        .for_each_schematic_editor_mut(|key, parent| {
+            if key == TOP {
+                undone = parent.undo();
+            }
+        });
+    assert!(undone);
+    assert_eq!(parent_bits(&state), before);
+}
+
+#[test]
+fn a_pin_drag_leaves_another_sheets_vertex_on_the_old_pin_point() {
+    let mut state = ota_placed_in_open_parent(true);
+    let hidden = parent_document(&state).wires[2].clone();
+
+    drag_inp(&mut state, &PAST_INN);
+
+    let parent = parent_document(&state);
+    assert_eq!(parent.wires[0].points[0], Point::new(70, 130));
+    assert_eq!(parent.wires[2], hidden);
+}
+
+#[test]
+fn a_pin_is_never_dropped_on_another_pin() {
+    let mut state = ota_placed_in_open_parent(false);
+    let nets = parent_nets(&state);
+
+    drag_inp(&mut state, &[Point::new(-30, 0), Point::new(-30, 10)]);
+
+    let symbol = state.load_active_symbol_document().unwrap();
+    assert_eq!(
+        symbol.pin("INP").and_then(|pin| pin.position),
+        Some(Point::new(-30, 0)),
+        "INP holds its last free position rather than landing on INN"
+    );
+    assert_eq!(parent_nets(&state), nets);
+}
+
 #[test]
 fn retained_symbol_drafts_require_the_same_open_view_revision_and_window() {
     use crate::workbench::state::WorkspaceDocumentId;

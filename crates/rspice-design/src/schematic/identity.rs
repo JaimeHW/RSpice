@@ -76,15 +76,35 @@ impl SchematicIdentity {
         self.next_id
     }
 
-    /// Generate a unique component name
-    pub fn generate_name(&mut self, kind: ComponentType) -> String {
+    /// The next free reference name for a new part of `kind` in `document`.
+    ///
+    /// A number written by a rename or an import counts as used, so the next
+    /// name follows the highest one present, and a name already present in
+    /// any letter case is never handed out again.
+    pub fn generate_name(&mut self, document: &SchematicDocument, kind: ComponentType) -> String {
         let prefix = kind.spice_prefix();
         if prefix.is_empty() {
             return String::new();
         }
+        let highest = document
+            .components
+            .iter()
+            .filter_map(|component| reference_number(&component.name, prefix))
+            .max()
+            .unwrap_or(0);
         let counter = self.component_counters.entry(prefix).or_insert(0);
-        *counter += 1;
-        format!("{}{}", prefix, counter)
+        *counter = (*counter).max(highest);
+        loop {
+            *counter = counter.saturating_add(1);
+            let candidate = format!("{prefix}{counter}");
+            let taken = document
+                .components
+                .iter()
+                .any(|component| component.name.trim().eq_ignore_ascii_case(&candidate));
+            if !taken || *counter == u32::MAX {
+                return candidate;
+            }
+        }
     }
 
     pub fn record_component_number(&mut self, prefix: &'static str, number: u32) {
@@ -354,6 +374,16 @@ impl SchematicIdentity {
     }
 }
 
+/// The number after `prefix` in a reference name such as `R10` or `r10`.
+fn reference_number(name: &str, prefix: &str) -> Option<u32> {
+    let name = name.trim();
+    let head = name.get(..prefix.len())?;
+    if !head.eq_ignore_ascii_case(prefix) {
+        return None;
+    }
+    name[prefix.len()..].parse().ok()
+}
+
 fn live_id_in_use(document: &SchematicDocument, id: u64) -> bool {
     document.components.iter().any(|item| item.id == id)
         || document.wires.iter().any(|item| item.id == id)
@@ -367,4 +397,80 @@ fn live_id_in_use(document: &SchematicDocument, id: u64) -> bool {
             .iter()
             .any(|item| item.id == id)
         || document.probes.iter().any(|item| item.id == id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{
+        component_edit::{ComponentPlacement, add_component},
+        rotation::Rotation,
+    };
+    use super::*;
+    use rspice_design_model::Point;
+
+    fn place_resistor(document: &mut SchematicDocument, identity: &mut SchematicIdentity) -> u64 {
+        add_component(
+            document,
+            identity,
+            ComponentType::Resistor,
+            ComponentPlacement {
+                position: Point::origin(),
+                rotation: Rotation::R0,
+                mirror_h: false,
+            },
+            None,
+        )
+    }
+
+    /// Place R1 and R2, rename R2 to R10, then place eight more: the
+    /// counter used to walk straight into R10 a second time. A renamed
+    /// number counts as used, and no placement takes a name already there.
+    #[test]
+    fn a_new_part_never_takes_a_name_already_in_use() {
+        let mut document = SchematicDocument::default();
+        let mut identity = SchematicIdentity::default();
+        place_resistor(&mut document, &mut identity);
+        let second = place_resistor(&mut document, &mut identity);
+        document
+            .components
+            .iter_mut()
+            .find(|component| component.id == second)
+            .expect("R2")
+            .name = "R10".to_owned();
+
+        for _ in 0..8 {
+            place_resistor(&mut document, &mut identity);
+        }
+
+        let mut names: Vec<String> = document
+            .components
+            .iter()
+            .map(|component| component.name.to_ascii_uppercase())
+            .collect();
+        names.sort();
+        let count = names.len();
+        names.dedup();
+        assert_eq!(names.len(), count, "a name was handed out twice: {names:?}");
+        assert_eq!(document.components.last().expect("placed").name, "R18");
+    }
+
+    /// A name written by hand in another case is still the same SPICE name.
+    #[test]
+    fn a_name_in_use_in_another_case_is_skipped() {
+        let mut document = SchematicDocument::default();
+        let mut identity = SchematicIdentity::default();
+        let mut taken =
+            super::super::component::Component::new(50, ComponentType::Resistor, Point::origin());
+        taken.name = "r1".to_owned();
+        document.components.push(taken);
+
+        let id = place_resistor(&mut document, &mut identity);
+
+        let placed = document
+            .components
+            .iter()
+            .find(|component| component.id == id)
+            .expect("placed");
+        assert_eq!(placed.name, "R2");
+    }
 }

@@ -3,6 +3,7 @@
 use super::elaboration::parameters::{ParameterDependencies, SourceParameters};
 
 pub(super) mod context;
+mod digital;
 mod functions;
 mod physical;
 mod unnamed;
@@ -354,9 +355,16 @@ impl Resolver {
             .cloned()
         {
             self.import_function(owner, target, function, &symbol)?;
-        } else {
+        } else if !source
+            .digital_routines
+            .iter()
+            .any(|routine| routine.name == *name)
+        {
             self.import_physical(owner, target, name, &symbol, span)?;
         }
+        // A task or function of the discrete domain keeps the target's own
+        // storage, so nothing is borrowed: digital lowering binds the name to
+        // the target instance's routine (IEEE 1364-2005 section 12.5).
         self.active_imports.remove(&key);
         Ok(symbol)
     }
@@ -483,12 +491,21 @@ impl Resolver {
             .last()
             .expect("parsed terminal")
             .name;
-        let name = self.frames[frame].member(&scope, terminal).ok_or_else(|| {
-            error(
-                format!("`{terminal}` is not declared in the selected scope"),
-                span,
-            )
-        })?;
+        let routine = scope.is_empty()
+            && self.frames[frame]
+                .source
+                .digital_routines
+                .iter()
+                .any(|routine| routine.name == *terminal);
+        let name = self.frames[frame]
+            .member(&scope, terminal)
+            .or_else(|| routine.then(|| terminal.clone()))
+            .ok_or_else(|| {
+                error(
+                    format!("`{terminal}` is not declared in the selected scope"),
+                    span,
+                )
+            })?;
         Ok((frame, name))
     }
 

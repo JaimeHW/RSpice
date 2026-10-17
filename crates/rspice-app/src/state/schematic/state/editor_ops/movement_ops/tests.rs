@@ -14,6 +14,74 @@ use crate::state::{
 };
 use std::collections::HashMap;
 
+/// The moves under test, in documents with one sheet, which hide nothing.
+impl SchematicState {
+    fn rubber_band_on_one_sheet(&mut self, delta: Point) {
+        self.with_single_sheet_topology(|state, scope| {
+            state.move_selection_with_rubber_band(delta, DragRubberBand::default(), scope);
+        });
+    }
+
+    fn rubber_band_resolved_on_one_sheet(
+        &mut self,
+        delta: Point,
+        rubber_band: DragRubberBand,
+        terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+    ) {
+        self.with_single_sheet_topology(|state, scope| {
+            state.move_selection_with_rubber_band_resolved(
+                delta,
+                rubber_band,
+                terminal_points_for,
+                scope,
+            );
+        });
+    }
+
+    fn move_with_mode_on_one_sheet(
+        &mut self,
+        delta: Point,
+        mode: MoveSelectionMode,
+    ) -> Result<bool, MoveSelectionError> {
+        self.with_single_sheet_topology(|state, scope| {
+            state.move_selection_with_mode(delta, mode, scope)
+        })
+    }
+
+    fn move_with_mode_resolved_on_one_sheet(
+        &mut self,
+        delta: Point,
+        mode: MoveSelectionMode,
+        terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+    ) -> Result<bool, MoveSelectionError> {
+        self.with_single_sheet_topology(|state, scope| {
+            state.move_selection_with_mode_resolved(delta, mode, terminal_points_for, scope)
+        })
+    }
+
+    fn move_component_on_one_sheet(
+        &mut self,
+        component_id: u64,
+        delta: Point,
+        terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+    ) {
+        self.with_single_sheet_topology(|state, scope| {
+            state.move_component_with_wires_resolved(
+                component_id,
+                delta,
+                terminal_points_for,
+                scope,
+            );
+        });
+    }
+
+    fn move_junction_on_one_sheet(&mut self, old_pos: Point, new_pos: Point) {
+        self.with_single_sheet_topology(|state, scope| {
+            state.move_junction(old_pos, new_pos, scope);
+        });
+    }
+}
+
 fn port(name: &str, direction: PortDirection) -> PortSpec {
     PortSpec {
         name: name.to_owned(),
@@ -116,26 +184,51 @@ fn bus_tap_and_scalar_target() -> SchematicState {
     state
 }
 
+/// The wire follows the cell's resolved pin, not a primitive's, and stays
+/// square on the way: it leaves the moved pin, turns back onto where the
+/// pin was and runs on as drawn.
 #[test]
 fn moving_selected_cell_uses_resolved_symbol_terminals_for_wire_updates() {
     let resolved = resolved_amp_symbol();
     let mut schematic = selected_amp_with_wire(Point::new(60, 40));
 
-    schematic.move_selection_with_rubber_band_resolved(Point::new(10, 5), |component| {
-        resolved_terminal_points(component, &resolved)
-    });
+    schematic.rubber_band_resolved_on_one_sheet(
+        Point::new(10, 5),
+        DragRubberBand::Orthogonal,
+        |component| resolved_terminal_points(component, &resolved),
+    );
 
     assert_eq!(
         schematic.design.document().components[0].pos,
         Point::new(110, 55)
     );
     assert_eq!(
-        schematic.design.document().wires[0].points[0],
-        Point::new(70, 45)
+        schematic.design.document().wires[0].points,
+        vec![
+            Point::new(70, 45),
+            Point::new(70, 40),
+            Point::new(60, 40),
+            Point::new(60, 0),
+        ]
     );
+}
+
+/// Under angled routing the wire stretches straight from the cell's
+/// resolved pin.
+#[test]
+fn an_angled_drag_stretches_the_wire_straight_from_the_resolved_pin() {
+    let resolved = resolved_amp_symbol();
+    let mut schematic = selected_amp_with_wire(Point::new(60, 40));
+
+    schematic.rubber_band_resolved_on_one_sheet(
+        Point::new(10, 5),
+        DragRubberBand::Direct,
+        |component| resolved_terminal_points(component, &resolved),
+    );
+
     assert_eq!(
-        schematic.design.document().wires[0].points[1],
-        Point::new(60, 0)
+        schematic.design.document().wires[0].points,
+        vec![Point::new(70, 45), Point::new(60, 0)]
     );
 }
 
@@ -188,7 +281,7 @@ fn component_rubber_band_and_junction_moves_keep_scalar_tap_attached() {
         .document_mut_for_test()
         .components
         .push(Component::new(4, ComponentType::Resistor, Point::origin()));
-    direct.move_component_with_wires_resolved(4, delta, |_| vec![Point::new(0, 10)]);
+    direct.move_component_on_one_sheet(4, delta, |_| vec![Point::new(0, 10)]);
     assert_eq!(
         direct.design.document().bus_taps[0].connection_point,
         Point::new(3, 14)
@@ -213,7 +306,7 @@ fn component_rubber_band_and_junction_moves_keep_scalar_tap_attached() {
         .document_mut_for_test()
         .junctions
         .push(Junction::new(5, Point::new(0, 10)));
-    junction.move_junction(Point::new(0, 10), Point::new(-2, 12));
+    junction.move_junction_on_one_sheet(Point::new(0, 10), Point::new(-2, 12));
     assert_eq!(
         junction.design.document().bus_taps[0].connection_point,
         Point::new(-2, 12)
@@ -294,7 +387,7 @@ fn selected_label_moves_with_saturation_and_one_drag_undo_transaction() {
     schematic.init_undo_history();
 
     schematic.begin_operation("move selection");
-    schematic.move_selection_with_rubber_band(Point::new(3, 4));
+    schematic.rubber_band_on_one_sheet(Point::new(3, 4));
     schematic.move_selection(Point::new(10, 6));
     assert!(schematic.end_operation());
 
@@ -337,7 +430,7 @@ fn selected_design_note_moves_as_one_non_electrical_drag_transaction() {
     let topology = schematic.topology_version();
 
     schematic.begin_operation("move selection");
-    schematic.move_selection_with_rubber_band(Point::new(3, 4));
+    schematic.rubber_band_on_one_sheet(Point::new(3, 4));
     schematic.move_selection(Point::new(10, 6));
     assert!(schematic.end_operation());
 
@@ -370,7 +463,7 @@ fn selected_probe_moves_as_one_non_electrical_drag_transaction() {
     let topology = schematic.topology_version();
 
     schematic.begin_operation("move selection");
-    schematic.move_selection_with_rubber_band(Point::new(3, 4));
+    schematic.rubber_band_on_one_sheet(Point::new(3, 4));
     schematic.move_selection(Point::new(7, 6));
     assert!(schematic.end_operation());
 
@@ -524,7 +617,7 @@ fn connected_mode_builds_a_deterministic_orthogonal_rubber_band() {
     schematic.session.editor.selection.select_only_component(1);
 
     assert_eq!(
-        schematic.move_selection_with_mode_resolved(
+        schematic.move_with_mode_resolved_on_one_sheet(
             Point::new(0, 5),
             MoveSelectionMode::Connected,
             |_| vec![Point::origin()],
@@ -561,7 +654,7 @@ fn connected_mode_rejects_an_attached_non_orthogonal_wire_atomically() {
     let original = schematic.clone();
 
     assert_eq!(
-        schematic.move_selection_with_mode_resolved(
+        schematic.move_with_mode_resolved_on_one_sheet(
             Point::new(0, 5),
             MoveSelectionMode::Connected,
             |_| vec![Point::origin()],
@@ -601,7 +694,7 @@ fn break_mode_moves_selected_objects_without_attached_conductors() {
     schematic.session.editor.selection.select_only_component(1);
 
     assert_eq!(
-        schematic.move_selection_with_mode_resolved(
+        schematic.move_with_mode_resolved_on_one_sheet(
             Point::new(0, 5),
             MoveSelectionMode::BreakConnections,
             |_| vec![Point::origin()],
@@ -626,7 +719,8 @@ fn break_mode_translates_both_endpoints_of_an_explicitly_selected_tap() {
     schematic.session.editor.selection.select_only_bus_tap(2);
 
     assert_eq!(
-        schematic.move_selection_with_mode(Point::new(1, 0), MoveSelectionMode::BreakConnections,),
+        schematic
+            .move_with_mode_on_one_sheet(Point::new(1, 0), MoveSelectionMode::BreakConnections,),
         Ok(true)
     );
 
@@ -657,7 +751,8 @@ fn break_mode_rejects_a_selected_tap_that_would_leave_its_source_bus() {
     let topology = schematic.topology_version();
 
     assert_eq!(
-        schematic.move_selection_with_mode(Point::new(0, 1), MoveSelectionMode::BreakConnections,),
+        schematic
+            .move_with_mode_on_one_sheet(Point::new(0, 1), MoveSelectionMode::BreakConnections,),
         Err(MoveSelectionError::InvalidTapAttachment { tap_id: 2 })
     );
 
@@ -692,7 +787,7 @@ fn shove_mode_chooses_a_deterministic_clear_orthogonal_route() {
     schematic.session.editor.selection.select_only_component(1);
 
     assert_eq!(
-        schematic.move_selection_with_mode_resolved(
+        schematic.move_with_mode_resolved_on_one_sheet(
             Point::new(0, 5),
             MoveSelectionMode::Shove,
             component_terminal_points,
@@ -733,7 +828,7 @@ fn shove_keeps_a_selected_wire_attached_to_an_unselected_component() {
     schematic.session.editor.selection.select_only_wire(2);
 
     assert_eq!(
-        schematic.move_selection_with_mode_resolved(
+        schematic.move_with_mode_resolved_on_one_sheet(
             Point::new(0, 20),
             MoveSelectionMode::Shove,
             component_terminal_points,
@@ -786,7 +881,7 @@ fn shove_search_lanes_remain_aligned_to_the_active_grid() {
     schematic.session.editor.selection.select_only_component(1);
 
     assert_eq!(
-        schematic.move_selection_with_mode_resolved(
+        schematic.move_with_mode_resolved_on_one_sheet(
             Point::new(0, 10),
             MoveSelectionMode::Shove,
             component_terminal_points,
@@ -826,7 +921,7 @@ fn shove_mode_keeps_a_scalar_tap_on_the_rerouted_wire_endpoint() {
     schematic.session.editor.selection.select_only_component(4);
 
     assert_eq!(
-        schematic.move_selection_with_mode_resolved(
+        schematic.move_with_mode_resolved_on_one_sheet(
             Point::new(0, 5),
             MoveSelectionMode::Shove,
             |_| vec![Point::new(0, 10)],
@@ -866,7 +961,7 @@ fn shove_failure_is_atomic_when_the_bounded_search_is_blocked() {
     let topology = schematic.topology_version();
 
     assert_eq!(
-        schematic.move_selection_with_mode_resolved(
+        schematic.move_with_mode_resolved_on_one_sheet(
             Point::new(0, 5),
             MoveSelectionMode::Shove,
             component_terminal_points,
@@ -903,7 +998,7 @@ fn shove_rejects_an_unrelated_conductor_at_a_moved_endpoint_atomically() {
     let original = schematic.clone();
 
     assert_eq!(
-        schematic.move_selection_with_mode_resolved(
+        schematic.move_with_mode_resolved_on_one_sheet(
             Point::new(0, 20),
             MoveSelectionMode::Shove,
             component_terminal_points,
@@ -954,7 +1049,7 @@ fn shove_rejects_an_unrelated_component_terminal_at_a_moved_endpoint_atomically(
     let original = schematic.clone();
 
     assert_eq!(
-        schematic.move_selection_with_mode_resolved(
+        schematic.move_with_mode_resolved_on_one_sheet(
             Point::new(0, 20),
             MoveSelectionMode::Shove,
             component_terminal_points,
@@ -996,7 +1091,7 @@ fn guarded_modes_reject_coordinate_overflow_without_mutation() {
         let topology = schematic.topology_version();
 
         assert_eq!(
-            schematic.move_selection_with_mode(Point::new(1, 0), mode),
+            schematic.move_with_mode_on_one_sheet(Point::new(1, 0), mode),
             Err(MoveSelectionError::CoordinateOverflow)
         );
         assert_eq!(
@@ -1017,7 +1112,7 @@ fn mode_aware_move_has_clean_zero_stale_and_read_only_noops() {
         .push(Component::new(1, ComponentType::Resistor, Point::origin()));
     zero.session.editor.selection.select_only_component(1);
     assert_eq!(
-        zero.move_selection_with_mode(Point::origin(), MoveSelectionMode::Shove),
+        zero.move_with_mode_on_one_sheet(Point::origin(), MoveSelectionMode::Shove),
         Ok(false)
     );
     assert!(!zero.session.is_dirty);
@@ -1025,7 +1120,7 @@ fn mode_aware_move_has_clean_zero_stale_and_read_only_noops() {
     let mut stale = SchematicState::default();
     stale.session.editor.selection.select_only_component(999);
     assert_eq!(
-        stale.move_selection_with_mode(Point::new(1, 1), MoveSelectionMode::BreakConnections,),
+        stale.move_with_mode_on_one_sheet(Point::new(1, 1), MoveSelectionMode::BreakConnections,),
         Ok(false)
     );
     assert!(!stale.session.is_dirty);
@@ -1033,7 +1128,7 @@ fn mode_aware_move_has_clean_zero_stale_and_read_only_noops() {
     let mut read_only = zero;
     read_only.session.read_only = true;
     assert_eq!(
-        read_only.move_selection_with_mode(Point::new(1, 1), MoveSelectionMode::Connected,),
+        read_only.move_with_mode_on_one_sheet(Point::new(1, 1), MoveSelectionMode::Connected,),
         Ok(false)
     );
     assert_eq!(

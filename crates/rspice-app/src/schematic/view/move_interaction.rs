@@ -1,6 +1,9 @@
 //! Validate move canvas requests and retain the app-owned undo transaction.
 
-use super::{SchematicSymbolContext, requests::editor_request_source, viewport::Viewport};
+use super::{
+    SchematicSymbolContext, requests::editor_request_source,
+    sheet_visibility::with_active_wire_topology, viewport::Viewport,
+};
 use crate::state::{Point, Tool};
 use crate::workbench::{
     app::{armed_move_selection_authority, cancel_armed_move_selection},
@@ -93,22 +96,34 @@ fn commit_armed_move_selection(state: &mut AppState, symbol_context: &SchematicS
         return;
     }
     state.schematic.begin_operation("move selection");
-    let movement = state
-        .schematic
-        .move_selection_with_mode_resolved(delta, mode, |component| {
-            symbol_context.terminal_points(component)
-        });
-    match movement {
-        Ok(true) => {
-            let automatic_junctions = state
-                .schematic
+    // A wire end on another sheet can share a selected pin's coordinates;
+    // the rubber band and its cleanup must not reach it.
+    let movement = with_active_wire_topology(state, |schematic, scope| {
+        let movement = schematic.move_selection_with_mode_resolved(
+            delta,
+            mode,
+            |component| symbol_context.terminal_points(component),
+            scope,
+        );
+        if matches!(movement, Ok(true)) {
+            let automatic_junctions = schematic
                 .document()
                 .document_policy
                 .wire_junctions
                 .automatic_junctions();
-            state
-                .schematic
-                .cleanup_wire_topology_with_junction_policy(automatic_junctions);
+            // A pin moved inside a wire is connected there and owns a vertex.
+            let moved = schematic.session.editor.selection.components.clone();
+            schematic.split_wires_under_pins(
+                &moved,
+                |component| symbol_context.terminal_points(component),
+                scope,
+            );
+            schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope);
+        }
+        movement
+    });
+    match movement {
+        Ok(true) => {
             let recorded = state.schematic.end_operation();
             state.sync_active_schematic_to_workspace();
             state.prompt(if recorded {
@@ -254,6 +269,80 @@ mod tests {
             "the gesture owns one undo record"
         );
     }
+    /// Sheet 2's wire ends where R1's pin sits on Sheet 1. Moving R1 carries
+    /// its own wiring; the other sheet's wire end stays where it was drawn.
+    #[test]
+    fn moving_a_part_leaves_another_sheets_wire_end_in_place() {
+        let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[1], &[20]);
+        state
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(Component::new(1, ComponentType::Resistor, Point::origin()));
+        let terminal = state.schematic.document().components[0].terminal_positions()[0].1;
+        let hidden = Wire::segment(20, terminal, Point::new(terminal.x - 40, terminal.y));
+        state
+            .schematic
+            .document_mut_for_test()
+            .wires
+            .push(hidden.clone());
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(1);
+        state.schematic.init_undo_history();
+        arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
+        state.dialogs.move_selection.canvas.preview_delta = Point::new(0, 10);
+        let symbols = schematic_symbol_context(&state);
+
+        commit_armed_move_selection(&mut state, &symbols);
+
+        assert_eq!(
+            state.schematic.document().components[0].pos,
+            Point::new(0, 10)
+        );
+        assert_eq!(state.schematic.document().wires, vec![hidden]);
+    }
+
+    /// The preview shows what the commit will do, so it runs with the other
+    /// sheets out of reach too: Sheet 2's wire end on the part's pin
+    /// coordinates neither follows the preview nor refuses it.
+    #[test]
+    fn the_move_preview_leaves_another_sheets_wire_end_in_place() {
+        let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[1], &[20]);
+        state
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(Component::new(1, ComponentType::Resistor, Point::origin()));
+        let terminal = state.schematic.document().components[0].terminal_positions()[0].1;
+        let hidden = Wire::segment(20, terminal, Point::new(terminal.x - 40, terminal.y));
+        state
+            .schematic
+            .document_mut_for_test()
+            .wires
+            .push(hidden.clone());
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(1);
+        let symbols = schematic_symbol_context(&state);
+
+        let (candidate, result) = crate::schematic::view::preview::move_preview_candidate(
+            &state,
+            &symbols,
+            Point::new(0, 10),
+            crate::state::MoveSelectionMode::Connected,
+        );
+
+        assert_eq!(result, Ok(true));
+        assert_eq!(candidate.document().wires, vec![hidden]);
+    }
+
     #[test]
     fn cancelling_armed_move_preserves_geometry_selection_and_history() {
         let mut state = AppState::default();

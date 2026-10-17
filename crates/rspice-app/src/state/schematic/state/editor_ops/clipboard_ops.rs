@@ -27,13 +27,16 @@ impl SchematicState {
             return;
         }
 
-        self.session.editor.clipboard = self.capture_complete_selection_resolved(|component| {
-            component
-                .terminal_positions()
-                .into_iter()
-                .map(|(_, point)| point)
-                .collect()
-        });
+        self.session.editor.clipboard = self.capture_complete_selection_resolved(
+            |component| {
+                component
+                    .terminal_positions()
+                    .into_iter()
+                    .map(|(_, point)| point)
+                    .collect()
+            },
+            &|_| true,
+        );
     }
 
     /// Capture the current complete-object selection without modifying the
@@ -45,10 +48,13 @@ impl SchematicState {
     /// primitives.  Whole conductors explicitly selected by the user are
     /// retained, as are conductors whose two endpoints terminate on selected
     /// components.  Bus-tap ownership and explicit junction intent are closed
-    /// over in the same deterministic way as Copy.
+    /// over in the same deterministic way as Copy. `on_sheet` names the objects
+    /// on the sheet being copied from; another sheet's wires and junctions at
+    /// the same coordinates are left behind.
     pub(crate) fn capture_complete_selection_resolved(
         &self,
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+        on_sheet: &dyn Fn(u64) -> bool,
     ) -> ClipboardData {
         clipboard_edit::capture_complete_selection(
             self.design.document(),
@@ -69,6 +75,7 @@ impl SchematicState {
                 .iter()
                 .map(|junction| junction.pos),
             terminal_points_for,
+            on_sheet,
         )
     }
 
@@ -477,7 +484,9 @@ mod tests {
 
     #[test]
     fn label_duplicate_pattern_creates_fresh_identity_in_one_undo_step() {
-        let label = NetLabel::new(90, Point::new(3, 7), "duplicated_net");
+        // On the grid: a copy keeps its objects' places relative to the grid
+        // (audit E-6), so only an on-grid label lands exactly on the target.
+        let label = NetLabel::new(90, Point::new(30, 70), "duplicated_net");
         let mut schematic = SchematicState::default();
         schematic
             .design
@@ -493,7 +502,7 @@ mod tests {
         schematic.init_undo_history();
 
         schematic.copy_selection();
-        assert!(schematic.paste_at(Point::new(13, 17)));
+        assert!(schematic.paste_at(Point::new(130, 170)));
 
         assert_eq!(schematic.design.document().net_labels.len(), 2);
         let duplicate = schematic
@@ -503,7 +512,7 @@ mod tests {
             .iter()
             .find(|candidate| candidate.id != label.id)
             .unwrap();
-        assert_eq!(duplicate.pos, Point::new(13, 17));
+        assert_eq!(duplicate.pos, Point::new(130, 170));
         assert_eq!(duplicate.name, label.name);
         assert_ne!(duplicate.id, label.id);
         assert!(schematic.undo());

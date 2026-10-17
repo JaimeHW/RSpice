@@ -108,6 +108,7 @@ pub(super) fn resolve(
                 child_source,
                 child,
                 &constants,
+                Some(&parent.source),
                 parent.source.time_scale,
                 &path,
             )?;

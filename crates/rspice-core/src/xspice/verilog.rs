@@ -872,7 +872,13 @@ pub fn run_digital_testbench(
     });
     let mut plans = Vec::new();
     let (declared, mut instantiated) = declared_modules(&unit)?;
-    for module in declared {
+    // A module the source instantiates is compiled inside its root, never as
+    // a design of its own: on its own, an upward name in it (IEEE 1364-2005
+    // section 12.6) has no scope above it to reach.
+    for module in declared
+        .into_iter()
+        .filter(|module| !instantiated.contains(module))
+    {
         let artifact = compiler
             .compile_canonical_ir_module(&unit, Some(&module))
             .map_err(|error| DigitalRunError::Compile {

@@ -1,5 +1,6 @@
 //! Validate editor layout requests and apply one connected-movement undo unit.
 
+use super::sheet_visibility::with_active_wire_topology;
 use super::{SchematicSymbolContext, requests::editor_request_source, schematic_symbol_context};
 use crate::state::Point;
 use crate::workbench::app_state::AppState;
@@ -57,23 +58,29 @@ fn apply_request(
     }
 
     state.schematic.begin_operation(command.label());
-    for edit in deltas {
-        let delta = edit.delta;
-        match edit.object {
-            SelectionLayoutObject::Component(id) => state
-                .schematic
-                .move_component_with_wires_resolved(id, delta, |component| {
-                    symbol_context.terminal_points(component)
-                }),
-            SelectionLayoutObject::DesignNote(id) => {
-                state.schematic.translate_layout_design_note(id, delta)
+    // A wire end on another sheet can share a moved pin's coordinates; the
+    // parts carry only their own sheet's wires.
+    with_active_wire_topology(state, |schematic, scope| {
+        for edit in deltas {
+            let delta = edit.delta;
+            match edit.object {
+                SelectionLayoutObject::Component(id) => schematic
+                    .move_component_with_wires_resolved(
+                        id,
+                        delta,
+                        |component| symbol_context.terminal_points(component),
+                        scope,
+                    ),
+                SelectionLayoutObject::DesignNote(id) => {
+                    schematic.translate_layout_design_note(id, delta)
+                }
+                SelectionLayoutObject::DocumentationShape(id) => {
+                    schematic.translate_layout_documentation_shape(id, delta)
+                }
+                SelectionLayoutObject::Probe(id) => schematic.translate_layout_probe(id, delta),
             }
-            SelectionLayoutObject::DocumentationShape(id) => state
-                .schematic
-                .translate_layout_documentation_shape(id, delta),
-            SelectionLayoutObject::Probe(id) => state.schematic.translate_layout_probe(id, delta),
         }
-    }
+    });
     state.schematic.session.is_dirty = true;
     let recorded = state.schematic.end_operation();
     if recorded {
@@ -226,7 +233,108 @@ mod tests {
                 .windows(2)
                 .map(|pair| pair[1].0 - pair[0].1)
                 .collect();
-            assert!(gaps.windows(2).all(|pair| (pair[0] - pair[1]).abs() <= 1));
+            // Every move is a whole number of grid steps, so the gaps are
+            // equal to within one step; part 15 starts off the grid.
+            let grid = state.schematic.document().grid_size;
+            assert!(
+                gaps.windows(2)
+                    .all(|pair| (pair[0] - pair[1]).abs() <= grid),
+                "{gaps:?}"
+            );
+        }
+    }
+
+    /// A source is 28 wide around its origin and a resistor 40, so lining up
+    /// their edges or centres, or spacing them evenly, asks for moves that are
+    /// no whole number of grid steps. Every part still lands on the grid, its
+    /// pins with it, within one step of the exact layout.
+    #[test]
+    fn align_and_distribute_land_mixed_parts_on_the_grid() {
+        use SelectionLayoutCommand::*;
+        for command in [
+            AlignLeft,
+            AlignCenter,
+            AlignRight,
+            AlignTop,
+            AlignMiddle,
+            AlignBottom,
+            DistributeHorizontal,
+            DistributeVertical,
+        ] {
+            let vertical = matches!(
+                command,
+                AlignTop | AlignMiddle | AlignBottom | DistributeVertical
+            );
+            let mut state = AppState::default();
+            for (id, kind, position) in [
+                (1, ComponentType::Resistor, Point::new(100, 0)),
+                (2, ComponentType::VoltageSource, Point::new(200, 100)),
+                (3, ComponentType::CurrentSource, Point::new(330, 250)),
+            ] {
+                let mut component = Component::new(id, kind, position);
+                if vertical {
+                    component.rotation = crate::state::Rotation::R90;
+                }
+                state
+                    .schematic
+                    .document_mut_for_test()
+                    .components
+                    .push(component);
+                state
+                    .schematic
+                    .session
+                    .editor
+                    .selection
+                    .select_component(id);
+            }
+            state.schematic.init_undo_history();
+            let grid = state.schematic.document().grid_size;
+            let context = schematic_symbol_context(&state);
+
+            assert!(
+                apply_selection_layout(&mut state, &context, command).unwrap(),
+                "{command:?}"
+            );
+
+            let components = &state.schematic.document().components;
+            for component in components {
+                let pins = context.terminal_points(component);
+                for point in std::iter::once(component.pos).chain(pins) {
+                    assert!(
+                        point.x % grid == 0 && point.y % grid == 0,
+                        "{command:?}: #{} has {point:?} off the {grid} grid",
+                        component.id
+                    );
+                }
+            }
+            let mut spans: Vec<(i32, i32)> = components
+                .iter()
+                .map(|component| {
+                    let (min, max) = context.component_bounds(component);
+                    if vertical {
+                        (min.y, max.y)
+                    } else {
+                        (min.x, max.x)
+                    }
+                })
+                .collect();
+            spans.sort_unstable();
+            let measured: Vec<i32> = match command {
+                AlignLeft | AlignTop => spans.iter().map(|span| span.0).collect(),
+                AlignRight | AlignBottom => spans.iter().map(|span| span.1).collect(),
+                AlignCenter | AlignMiddle => spans.iter().map(|span| span.0 + span.1).collect(),
+                DistributeHorizontal | DistributeVertical => {
+                    spans.windows(2).map(|pair| pair[1].0 - pair[0].1).collect()
+                }
+            };
+            let spread = measured.iter().max().unwrap() - measured.iter().min().unwrap();
+            // A centre is measured doubled.
+            let tolerance = if matches!(command, AlignCenter | AlignMiddle) {
+                2 * grid
+            } else {
+                grid
+            };
+            assert!(spread <= tolerance, "{command:?}: {measured:?}");
         }
     }
 
@@ -365,6 +473,48 @@ mod tests {
         assert_eq!(state.schematic.document().probes, original);
         assert_eq!(state.schematic.topology_version(), topology);
         assert!(!state.schematic.can_undo());
+    }
+
+    /// Sheet 2 shares Sheet 1's coordinates, not its conductors: aligning
+    /// Sheet 1's parts carries their own wires and leaves Sheet 2's wire end,
+    /// lying on a moved pin's old position, where it was.
+    #[test]
+    fn aligning_parts_leaves_another_sheets_wire_end_in_place() {
+        let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[1, 2], &[90]);
+        for (id, position) in [(1, Point::new(10, 10)), (2, Point::new(40, 50))] {
+            state
+                .schematic
+                .document_mut_for_test()
+                .components
+                .push(Component::new(id, ComponentType::Resistor, position));
+            state
+                .schematic
+                .session
+                .editor
+                .selection
+                .select_component(id);
+        }
+        let context = schematic_symbol_context(&state);
+        let terminal = context.terminal_points(&state.schematic.document().components[1])[0];
+        let hidden = crate::state::Wire::segment(90, terminal, Point::new(300, 300));
+        state
+            .schematic
+            .document_mut_for_test()
+            .wires
+            .push(hidden.clone());
+        state.schematic.init_undo_history();
+
+        assert!(
+            apply_selection_layout(&mut state, &context, SelectionLayoutCommand::AlignLeft)
+                .unwrap()
+        );
+
+        assert_ne!(
+            context.terminal_points(&state.schematic.document().components[1])[0],
+            terminal,
+            "the part moved"
+        );
+        assert_eq!(state.schematic.document().wires, vec![hidden]);
     }
 
     #[test]

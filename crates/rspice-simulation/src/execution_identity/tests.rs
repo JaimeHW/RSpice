@@ -1353,6 +1353,7 @@ fn drc_identity_tags_are_never_renumbered() {
         DrcViolationType::UnloadedOutput => 27,
         DrcViolationType::RecursiveInstantiation => 28,
         DrcViolationType::UnresolvedReference => 29,
+        DrcViolationType::AmbiguousCrossing => 30,
     };
     let types = [
         DrcViolationType::FloatingNode,
@@ -1384,6 +1385,7 @@ fn drc_identity_tags_are_never_renumbered() {
         DrcViolationType::UnloadedOutput,
         DrcViolationType::RecursiveInstantiation,
         DrcViolationType::UnresolvedReference,
+        DrcViolationType::AmbiguousCrossing,
     ];
     let mut seen = std::collections::BTreeSet::new();
     for violation_type in types {

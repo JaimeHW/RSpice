@@ -132,6 +132,13 @@ pub struct EditorSession {
     /// like `needs_fit`; the zoom level is left alone.
     pub center_request: Option<Point>,
 
+    /// One-shot zoom a command asked for, carried out by the canvas on its
+    /// next render with the rectangle it needs, like `center_request`.
+    pub zoom_request: Option<crate::view::navigation::ZoomRequest>,
+
+    /// The zoom box, while its command has it armed.
+    pub zoom_box: crate::view::navigation::ZoomBox,
+
     /// Snap engine configuration (runtime state, not persisted)
     /// Controls cursor snapping behavior during wire drawing
     pub snap_engine: SnapEngine,
@@ -173,6 +180,8 @@ impl Default for EditorSession {
             needs_fit: Default::default(),
             needs_drawing_sheet_fit: Default::default(),
             center_request: Default::default(),
+            zoom_request: Default::default(),
+            zoom_box: Default::default(),
             snap_engine: Default::default(),
             selection_rect: Default::default(),
             net_highlight: Default::default(),

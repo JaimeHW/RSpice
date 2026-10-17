@@ -298,6 +298,14 @@ impl Unroller<'_> {
             continuous_assigns,
             digital_processes
         );
+        // A task or function body names other scopes as a process body does
+        // (IEEE 1364-2005 section 12.5); it is declared only at module level,
+        // so it is rewritten in place.
+        let mut routines = std::mem::take(&mut module.digital_routines);
+        for routine in &mut routines {
+            self.substitute_statement(&mut routine.body);
+        }
+        module.digital_routines = routines;
         for parameter in &mut module.parameters {
             self.substitute_range(&mut parameter.packed_range);
             for dimension in &mut parameter.dimensions {

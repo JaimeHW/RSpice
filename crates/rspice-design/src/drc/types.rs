@@ -75,6 +75,9 @@ pub enum DrcViolationType {
     VectorWidthMismatch,
     /// An off-sheet connector's name is declared on only one sheet.
     OffSheetConnectorWithoutPartner,
+    /// A net label, pin or bus-tap end sits exactly where two wires cross
+    /// with no junction, so it does not say which wire it joins.
+    AmbiguousCrossing,
 
     //-------------------------------------------------------------------------
     // Electrical Issues
@@ -163,6 +166,8 @@ impl DrcViolationType {
             // The engine refuses a card that names an element it does not have.
             Self::UnresolvedReference => DrcSeverity::Error,
             Self::CaseCollidingNetNames => DrcSeverity::Error,
+            // The deck would have to guess which wire was meant.
+            Self::AmbiguousCrossing => DrcSeverity::Error,
             Self::MalformedBus
             | Self::BusRangeConflict
             | Self::DanglingBusTap
@@ -239,6 +244,7 @@ impl DrcViolationType {
             Self::OffSheetConnectorWithoutPartner => {
                 "Off-sheet connector has no partner on another sheet"
             }
+            Self::AmbiguousCrossing => "Label, pin or bus tap on an unmarked wire crossing",
             Self::ShortedOutputs => "Multiple declared outputs connected to the same net",
             Self::RecursiveInstantiation => "Cellview reaches itself through its instances",
             Self::MissingGround => "Circuit has no ground reference (node 0)",
@@ -279,6 +285,9 @@ impl DrcViolationType {
             }
             Self::OffSheetConnectorWithoutPartner => {
                 "Place the matching connector on the other sheet, or make this an ordinary net label"
+            }
+            Self::AmbiguousCrossing => {
+                "Place a junction to join the crossing wires, or move it onto one wire"
             }
             Self::ShortedOutputs => "Leave only one declared output driver on the net",
             Self::RecursiveInstantiation => {

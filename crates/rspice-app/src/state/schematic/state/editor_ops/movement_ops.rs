@@ -39,6 +39,7 @@ impl SchematicState {
         component_id: u64,
         delta: Point,
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+        _scope: &ActiveSheetTopology,
     ) {
         if self.session.read_only {
             return;
@@ -56,26 +57,39 @@ impl SchematicState {
     ///
     /// This is the multi-component version of move_component_with_wires_resolved.
     /// Wires connected to selected components are stretched to maintain
-    /// the connection. Wires that connect two selected components are
-    /// moved entirely (not stretched).
-    /// Runs on every drag frame: one O(1)-membership pass over the wires —
-    /// no nested terminal scans, no per-update id searches.
-    pub fn move_selection_with_rubber_band(&mut self, delta: Point) {
-        self.move_selection_with_rubber_band_resolved(delta, legacy_terminal_points);
+    /// the connection, square unless `rubber_band` asks for angles. Wires
+    /// that connect two selected components are moved entirely (not
+    /// stretched). Runs on every drag frame, laying the wires from where the
+    /// pending gesture began.
+    pub fn move_selection_with_rubber_band(
+        &mut self,
+        delta: Point,
+        rubber_band: DragRubberBand,
+        scope: &ActiveSheetTopology,
+    ) {
+        self.move_selection_with_rubber_band_resolved(
+            delta,
+            rubber_band,
+            legacy_terminal_points,
+            scope,
+        );
     }
 
     /// Move selected components and rubber-band wires using caller-supplied terminal geometry.
     pub fn move_selection_with_rubber_band_resolved(
         &mut self,
         delta: Point,
+        rubber_band: DragRubberBand,
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+        _scope: &ActiveSheetTopology,
     ) {
         if self.session.read_only {
             return;
         }
-        let impact = self.design.move_selection_with_rubber_band_resolved(
+        let impact = self.design.drag_selection_with_rubber_band_resolved(
             movement_selection(&self.session.editor.selection),
             delta,
+            rubber_band,
             terminal_points_for,
         );
         self.apply_movement_impact(impact);
@@ -91,8 +105,9 @@ impl SchematicState {
         &mut self,
         delta: Point,
         mode: MoveSelectionMode,
+        scope: &ActiveSheetTopology,
     ) -> Result<bool, MoveSelectionError> {
-        self.move_selection_with_mode_resolved(delta, mode, legacy_terminal_points)
+        self.move_selection_with_mode_resolved(delta, mode, legacy_terminal_points, scope)
     }
 
     /// Mode-aware selection movement using caller-resolved terminal geometry.
@@ -101,6 +116,7 @@ impl SchematicState {
         delta: Point,
         mode: MoveSelectionMode,
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+        _scope: &ActiveSheetTopology,
     ) -> Result<bool, MoveSelectionError> {
         if self.session.read_only {
             return Ok(false);
@@ -148,7 +164,7 @@ impl SchematicState {
     }
 
     /// Move all wire points at a junction to a new position
-    pub fn move_junction(&mut self, old_pos: Point, new_pos: Point) {
+    pub fn move_junction(&mut self, old_pos: Point, new_pos: Point, _scope: &ActiveSheetTopology) {
         if self.session.read_only {
             return;
         }

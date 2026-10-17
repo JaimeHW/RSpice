@@ -1,9 +1,11 @@
 //! Temporary sheet-topology isolation used by editor operations.
-use super::super::{bus::BusTap, net_label::Junction, wire::Wire};
+use super::super::{bus::BusTap, component::Component, net_label::Junction, wire::Wire};
 use super::Schematic;
 pub struct HiddenWireTopology {
     wires: Vec<(usize, Wire)>,
     junctions: Vec<(usize, Junction)>,
+    /// Parts taken out with their sheet's wires: their pins decide dots.
+    components: Vec<(usize, Component)>,
     preserved_bus_taps: Option<Vec<(usize, BusTap)>>,
 }
 impl HiddenWireTopology {
@@ -12,6 +14,7 @@ impl HiddenWireTopology {
             None => {
                 restore_hidden(&mut design.document.wires, self.wires);
                 restore_hidden(&mut design.document.junctions, self.junctions);
+                restore_hidden(&mut design.document.components, self.components);
             }
             Some(bus_taps) => {
                 restore_authored_by_id(&mut design.document.wires, self.wires, |wire| wire.id);
@@ -51,9 +54,13 @@ impl Schematic {
         let hidden_junctions = take_hidden(&mut self.document.junctions, |junction: &Junction| {
             hidden_junction_ids.contains(&junction.id)
         });
+        let hidden_components = take_hidden(&mut self.document.components, |component| {
+            hidden(component.id)
+        });
         HiddenWireTopology {
             wires: hidden_wires,
             junctions: hidden_junctions,
+            components: hidden_components,
             preserved_bus_taps: None,
         }
     }
@@ -86,6 +93,7 @@ impl Schematic {
         HiddenWireTopology {
             wires: hidden_wires,
             junctions: hidden_junctions,
+            components: Vec::new(),
             preserved_bus_taps: Some(hidden_bus_taps),
         }
     }

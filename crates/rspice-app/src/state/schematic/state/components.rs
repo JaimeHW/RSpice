@@ -1,8 +1,10 @@
 //! Placing and removing components.
 
 use super::*;
+#[cfg(test)]
+use rspice_design::schematic::component_edit::legacy_terminal_points;
 use rspice_design::schematic::component_edit::{
-    self, ComponentModelOverride, ComponentPlacement, ComponentTransform, legacy_terminal_points,
+    self, ComponentModelOverride, ComponentPlacement, SelectionTransform,
 };
 
 impl SchematicState {
@@ -54,102 +56,38 @@ impl SchematicState {
         id
     }
 
-    /// Rotate selected components
-    pub fn rotate_selection(&mut self) {
-        self.rotate_selection_resolved(legacy_terminal_points);
-    }
-
-    /// Rotate selected components using caller-supplied terminal geometry for wire remapping.
-    pub fn rotate_selection_resolved(
+    /// Turn or flip the whole selection about `pivot`. Unselected wires that
+    /// end on what moved follow it with square corners, a pin that lands
+    /// inside a wire splits it, and the junction policy tidies the result.
+    /// The caller owns the undo step and opens it before the sheet scope, so
+    /// the step's snapshot holds every sheet. Returns whether anything moved.
+    pub fn transform_selection(
         &mut self,
-        terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
-    ) {
-        self.transform_selection_resolved(
-            "rotate selection",
-            terminal_points_for,
-            ComponentTransform::RotateClockwise,
-        );
-    }
-
-    /// Mirror selected components horizontally (flip about Y-axis)
-    ///
-    /// This flips components left-to-right, swapping terminal positions.
-    /// Essential for proper transistor orientation in circuit design.
-    /// Matches Cadence Virtuoso 'H' key behavior.
-    pub fn mirror_selection_h(&mut self) {
-        self.mirror_selection_h_resolved(legacy_terminal_points);
-    }
-
-    /// Mirror selected components horizontally using caller-supplied terminal geometry.
-    pub fn mirror_selection_h_resolved(
-        &mut self,
-        terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
-    ) {
-        self.transform_selection_resolved(
-            "mirror horizontally",
-            terminal_points_for,
-            ComponentTransform::MirrorHorizontal,
-        );
-    }
-
-    /// Mirror selected components vertically (flip about X-axis)
-    ///
-    /// This flips components up-to-down, swapping terminal positions.
-    /// Matches Cadence Virtuoso 'V' key behavior.
-    pub fn mirror_selection_v(&mut self) {
-        self.mirror_selection_v_resolved(legacy_terminal_points);
-    }
-
-    /// Mirror selected components vertically using caller-supplied terminal geometry.
-    pub fn mirror_selection_v_resolved(
-        &mut self,
-        terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
-    ) {
-        self.transform_selection_resolved(
-            "mirror vertically",
-            terminal_points_for,
-            ComponentTransform::MirrorVertical,
-        );
-    }
-
-    /// Apply an in-place transform (rotate/mirror) to every selected
-    /// component as one undoable operation, dragging attached wire points
-    /// along so connectivity survives the transform — terminals move under
-    /// rotation/mirror, and a wire endpoint left on the old position would
-    /// silently disconnect.
-    fn transform_selection_resolved(
-        &mut self,
-        description: &str,
-        terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
-        transform: ComponentTransform,
-    ) {
-        if self.session.editor.selection.components.is_empty() {
-            return;
+        transform: SelectionTransform,
+        pivot: Point,
+        mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+        scope: &ActiveSheetTopology,
+    ) -> bool {
+        if self.session.read_only {
+            return false;
         }
-        let mut ids: Vec<u64> = self
-            .session
-            .editor
-            .selection
-            .components
-            .iter()
-            .copied()
-            .collect();
-        ids.sort_unstable();
-        ids.retain(|id| {
-            self.design
-                .document()
-                .components
-                .iter()
-                .any(|component| component.id == *id)
-        });
-        if ids.is_empty() {
-            return;
+        let selection = self.session.editor.selection.clone();
+        if !self
+            .design
+            .transform_selection(&selection, pivot, &mut terminal_points_for, transform)
+        {
+            return false;
         }
-        self.with_undo(description, move |s| {
-            s.design
-                .transform_components_resolved(&ids, terminal_points_for, transform);
-            s.session.is_dirty = true;
-        });
+        self.session.is_dirty = true;
+        let automatic_junctions = self
+            .design
+            .document()
+            .document_policy
+            .wire_junctions
+            .automatic_junctions();
+        self.split_wires_under_pins(&selection.components, &mut terminal_points_for, scope);
+        self.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope);
+        true
     }
 
     /// Emitted loop-probe names in the current sheet.
@@ -265,20 +203,27 @@ mod tests {
             .push(Wire::segment(2, Point::new(60, 40), Point::new(60, 0)));
         schematic.session.editor.selection.select_component(1);
 
-        schematic
-            .rotate_selection_resolved(|component| resolved_terminal_points(component, &resolved));
+        schematic.with_single_sheet_topology(|schematic, scope| {
+            schematic.transform_selection(
+                SelectionTransform::RotateClockwise,
+                Point::new(100, 50),
+                |component| resolved_terminal_points(component, &resolved),
+                scope,
+            )
+        });
 
         assert_eq!(
             schematic.design.document().components[0].rotation,
             Rotation::R90
         );
-        assert_eq!(
-            schematic.design.document().wires[0].points[0],
-            Point::new(110, 10)
-        );
-        assert_eq!(
-            schematic.design.document().wires[0].points[1],
-            Point::new(60, 0)
+        // The wire follows the pin with square corners (audit W-14).
+        let points = &schematic.design.document().wires[0].points;
+        assert_eq!(points.first(), Some(&Point::new(110, 10)));
+        assert_eq!(points.last(), Some(&Point::new(60, 0)));
+        assert!(
+            points
+                .windows(2)
+                .all(|pair| pair[0].x == pair[1].x || pair[0].y == pair[1].y)
         );
     }
 
@@ -307,8 +252,14 @@ mod tests {
             .wires
             .push(Wire::segment(9, Point::new(60, 40), Point::new(60, 0)));
 
-        schematic
-            .rotate_selection_resolved(|component| resolved_terminal_points(component, &resolved));
+        schematic.with_single_sheet_topology(|schematic, scope| {
+            schematic.transform_selection(
+                SelectionTransform::RotateClockwise,
+                Point::new(100, 50),
+                |component| resolved_terminal_points(component, &resolved),
+                scope,
+            )
+        });
 
         assert_eq!(
             schematic.design.document().wires[0].points[0],
@@ -324,7 +275,14 @@ mod tests {
         schematic.session.editor.selection.select_component(404);
         let topology_version = schematic.topology_version();
 
-        schematic.rotate_selection();
+        assert!(!schematic.with_single_sheet_topology(|schematic, scope| {
+            schematic.transform_selection(
+                SelectionTransform::RotateClockwise,
+                Point::origin(),
+                legacy_terminal_points,
+                scope,
+            )
+        }));
 
         assert!(!schematic.session.is_dirty);
         assert_eq!(schematic.topology_version(), topology_version);

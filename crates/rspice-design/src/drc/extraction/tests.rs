@@ -1940,3 +1940,28 @@ fn a_controlling_reference_must_name_one_instance() {
         )]
     );
 }
+
+/// A label exactly on a crossing of two wires with no junction names neither
+/// wire. The check blocks the run and marks the crossing.
+#[test]
+fn a_label_on_an_unmarked_crossing_is_an_error_marked_at_the_crossing() {
+    let mut top = grounded_resistor();
+    top.wires.extend([
+        Wire::segment(20, Point::new(-100, 500), Point::new(100, 500)),
+        Wire::segment(21, Point::new(0, 400), Point::new(0, 600)),
+    ]);
+    top.net_labels
+        .push(NetLabel::new(22, Point::new(0, 500), "OUT"));
+    let views = buffers([]);
+    let hierarchy = HierarchySource::from_buffers(&views);
+
+    let result = run_check_with_hierarchy(&top, &hierarchy, connectivity_only());
+
+    let crossings = of_type(&result, DrcViolationType::AmbiguousCrossing);
+    assert_eq!(crossings.len(), 1, "{:?}", result.violations());
+    assert!(crossings[0].severity >= DrcSeverity::Error);
+    assert_eq!(
+        crossings[0].location,
+        DrcLocation::Point { x: 0.0, y: 500.0 }
+    );
+}

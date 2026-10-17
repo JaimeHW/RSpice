@@ -5,11 +5,16 @@
 //! UI does not advertise speculative or placeholder capability.
 
 use crate::schematic::view::schematic_symbol_context;
+use crate::schematic::view::selection_transform::{
+    SelectionTransform, transform_selection_on_active_sheet,
+};
 use crate::state::{ComponentType, Tool};
 use crate::workbench::app::sheets as sheet_actions;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::menu_bar::{FileMenuAction, dispatch_file_menu_action};
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_schematic_editor::symbol_editor::commands::SymbolTransform;
+use rspice_schematic_editor::view::navigation::ZoomRequest;
 use std::cell::RefCell;
 
 use super::state::{
@@ -23,6 +28,37 @@ pub(crate) mod result_navigation;
 pub(crate) mod vocabulary;
 
 const COMMAND_ZOOM_FACTOR: f64 = 1.2;
+
+/// A test seam on the dispatch boundary. While a recording is open,
+/// [`Command::execute`] notes the command it was handed and returns before
+/// acting, so a test can prove a route reaches the boundary without carrying
+/// the command out.
+#[cfg(test)]
+pub(crate) mod dispatch_probe {
+    use super::Command;
+    use std::cell::RefCell;
+
+    thread_local! {
+        static REACHED: RefCell<Option<Vec<Command>>> = const { RefCell::new(None) };
+    }
+
+    /// Run `route` and return every command it handed to `Command::execute`.
+    pub(crate) fn reached(route: impl FnOnce()) -> Vec<Command> {
+        REACHED.with(|reached| *reached.borrow_mut() = Some(Vec::new()));
+        route();
+        REACHED.with(|reached| reached.borrow_mut().take().unwrap_or_default())
+    }
+
+    pub(super) fn intercept(command: Command) -> bool {
+        REACHED.with(|reached| {
+            reached
+                .borrow_mut()
+                .as_mut()
+                .map(|log| log.push(command))
+                .is_some()
+        })
+    }
+}
 
 fn stop_simulation_enabled(simulation: &crate::state::SimulationState) -> bool {
     simulation.can_request_abort_active_run()
@@ -103,6 +139,7 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::CheckAndSave
             | Command::Place(_)
             | Command::RotateSelection
+            | Command::RotateSelectionCounterClockwise
             | Command::MirrorSelectionHorizontal
             | Command::MirrorSelectionVertical
             | Command::AlignSelectionLeft
@@ -539,16 +576,19 @@ impl Command {
             }
             Self::RotateSelection
             | Self::MirrorSelectionHorizontal
+            | Self::MirrorSelectionVertical
+                if active_symbol_editor(app) =>
+            {
+                !state.active_view_read_only()
+                    && !state.ui.symbol.editor.effective_selection().is_empty()
+            }
+            Self::RotateSelection
+            | Self::RotateSelectionCounterClockwise
+            | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical => {
                 active_schematic_editor(app)
                     && !state.schematic_edit_read_only()
-                    && state.schematic.session.editor.selection.components.iter().any(|id| {
-                        state
-                            .schematic
-                            .document().components
-                            .iter()
-                            .any(|component| component.id == *id)
-                    })
+                    && schematic_selection_has_live_object(&state.schematic)
             }
             Self::AlignSelectionLeft
             | Self::AlignSelectionCenter
@@ -645,6 +685,10 @@ impl Command {
                         && crate::workbench::documents::result_document::zoom_gesture_available(state))
             }
             Self::ZoomOneToOne => active_symbol_editor(app) || active_schematic_editor(app),
+            Self::ZoomToSelection => {
+                active_schematic_editor(app) && schematic_selection_has_live_object(&state.schematic)
+            }
+            Self::ZoomBox => active_schematic_editor(app),
             Self::ResetActiveView => reset_active_view_available(state.workbench.workspace),
             Self::EngineeringTableView => active_schematic_editor(app),
             Self::NewApplicationWindow
@@ -1122,6 +1166,10 @@ impl Command {
     }
 
     pub fn execute(self, app: &mut RSpiceApp) {
+        #[cfg(test)]
+        if dispatch_probe::intercept(self) {
+            return;
+        }
         // Both guards are also `is_enabled`'s, so the command is drawn
         // disabled and a shortcut for it is silent, as in any desktop app.
         if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(&app.state)
@@ -1269,8 +1317,7 @@ impl Command {
             }
             Self::Duplicate => {
                 if active_symbol_editor(app) {
-                    app.copy_selected_symbol_shape();
-                    app.paste_symbol_shape();
+                    app.duplicate_selected_symbol_shape();
                 } else {
                     app.state.duplicate_schematic_selection();
                 }
@@ -1337,8 +1384,8 @@ impl Command {
                     app.state.ui.symbol.editor.zoom =
                         (app.state.ui.symbol.editor.zoom * COMMAND_ZOOM_FACTOR as f32).min(16.0);
                 } else {
-                    app.state.schematic.session.editor.zoom =
-                        (app.state.schematic.session.editor.zoom * COMMAND_ZOOM_FACTOR).min(8.0);
+                    app.state.schematic.session.editor.zoom_request =
+                        Some(ZoomRequest::By(COMMAND_ZOOM_FACTOR));
                 }
             }
             Self::ZoomOut => {
@@ -1351,8 +1398,8 @@ impl Command {
                     app.state.ui.symbol.editor.zoom =
                         (app.state.ui.symbol.editor.zoom / COMMAND_ZOOM_FACTOR as f32).max(0.1);
                 } else {
-                    app.state.schematic.session.editor.zoom =
-                        (app.state.schematic.session.editor.zoom / COMMAND_ZOOM_FACTOR).max(0.25);
+                    app.state.schematic.session.editor.zoom_request =
+                        Some(ZoomRequest::By(COMMAND_ZOOM_FACTOR.recip()));
                 }
             }
             Self::ZoomFit => {
@@ -1378,8 +1425,26 @@ impl Command {
                 if active_symbol_editor(app) {
                     app.state.ui.symbol.editor.zoom = 1.0;
                 } else {
-                    app.state.schematic.session.editor.zoom = 1.0;
+                    app.state.schematic.session.editor.zoom_request = Some(ZoomRequest::To(1.0));
                 }
+            }
+            Self::ZoomToSelection => {
+                let symbol_context = schematic_symbol_context(&app.state);
+                let schematic = &app.state.schematic;
+                if let Some((min_x, min_y, max_x, max_y)) = symbol_context
+                    .selection_bounds(schematic.document(), &schematic.session.editor.selection)
+                {
+                    app.state.schematic.session.editor.zoom_request = Some(ZoomRequest::Frame((
+                        f64::from(min_x),
+                        f64::from(min_y),
+                        f64::from(max_x),
+                        f64::from(max_y),
+                    )));
+                }
+            }
+            Self::ZoomBox => {
+                activate_workspace(app, Workspace::Design);
+                app.state.schematic.session.editor.zoom_box.arm();
             }
             Self::CycleGrid => cycle_canvas_grid(app),
             Self::GridSnapRouting => {
@@ -1693,47 +1758,29 @@ impl Command {
             },
             Self::Place(ComponentType::Port) => Self::PlacePin.execute(app),
             Self::Place(kind) => set_tool(app, Tool::Place(kind)),
-            Self::RotateSelection => {
-                let symbol_context = schematic_symbol_context(&app.state);
-                crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
-                    &mut app.state,
-                );
-                crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
-                    &mut app.state,
-                    |schematic| {
-                        schematic.rotate_selection_resolved(|component| {
-                            symbol_context.terminal_points(component)
-                        })
-                    },
-                );
+            Self::RotateSelection if active_symbol_editor(app) => {
+                app.transform_selected_symbol_item(SymbolTransform::Rotate);
             }
-            Self::MirrorSelectionHorizontal => {
-                let symbol_context = schematic_symbol_context(&app.state);
-                crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
-                    &mut app.state,
-                );
-                crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
-                    &mut app.state,
-                    |schematic| {
-                        schematic.mirror_selection_h_resolved(|component| {
-                            symbol_context.terminal_points(component)
-                        })
-                    },
-                );
+            Self::MirrorSelectionHorizontal if active_symbol_editor(app) => {
+                app.transform_selected_symbol_item(SymbolTransform::MirrorHorizontal);
             }
-            Self::MirrorSelectionVertical => {
+            Self::MirrorSelectionVertical if active_symbol_editor(app) => {
+                app.transform_selected_symbol_item(SymbolTransform::MirrorVertical);
+            }
+            Self::RotateSelection
+            | Self::RotateSelectionCounterClockwise
+            | Self::MirrorSelectionHorizontal
+            | Self::MirrorSelectionVertical => {
+                let transform = match self {
+                    Self::RotateSelectionCounterClockwise => {
+                        SelectionTransform::RotateCounterClockwise
+                    }
+                    Self::MirrorSelectionHorizontal => SelectionTransform::MirrorHorizontal,
+                    Self::MirrorSelectionVertical => SelectionTransform::MirrorVertical,
+                    _ => SelectionTransform::RotateClockwise,
+                };
                 let symbol_context = schematic_symbol_context(&app.state);
-                crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
-                    &mut app.state,
-                );
-                crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
-                    &mut app.state,
-                    |schematic| {
-                        schematic.mirror_selection_v_resolved(|component| {
-                            symbol_context.terminal_points(component)
-                        })
-                    },
-                );
+                transform_selection_on_active_sheet(&mut app.state, &symbol_context, transform);
             }
             Self::AlignSelectionLeft
             | Self::AlignSelectionCenter
@@ -1762,12 +1809,21 @@ impl Command {
                 }
             }
             Self::Cancel => {
-                if app.state.workbench.workspace == Workspace::Design
+                if active_symbol_editor(app) {
+                    // The symbol canvas's one interaction in flight is an
+                    // open polyline; Escape keeps what has been drawn.
+                    app.finish_pending_symbol_polyline();
+                    rspice_schematic_editor::symbol_editor::commands::finish_cancel(
+                        &mut app.state.ui.symbol.editor,
+                    );
+                } else if app.state.workbench.workspace == Workspace::Design
                     && app.state.workbench.inline_edit.session().is_some()
                 {
                     app.state.workbench.inline_edit.end();
                 } else if app.state.cancel_schematic_drag() {
                     // A pointer edit is the innermost active interaction.
+                } else if app.state.schematic.session.editor.zoom_box.armed {
+                    app.state.schematic.session.editor.zoom_box.disarm();
                 } else if app.state.dialogs.descend_hierarchy.open {
                     app.state.dialogs.descend_hierarchy.close();
                 } else if app.state.dialogs.move_selection.armed {

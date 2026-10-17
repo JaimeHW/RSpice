@@ -99,6 +99,8 @@ pub enum Command {
     ZoomFit,
     FitSchematicContent,
     ZoomOneToOne,
+    ZoomToSelection,
+    ZoomBox,
     CycleGrid,
     GridSnapRouting,
     DrawingSheetLayers,
@@ -179,6 +181,7 @@ pub enum Command {
     SymbolSave,
     Place(ComponentType),
     RotateSelection,
+    RotateSelectionCounterClockwise,
     MirrorSelectionHorizontal,
     MirrorSelectionVertical,
     AlignSelectionLeft,
@@ -465,6 +468,8 @@ impl Command {
                 spec("canvas-fit-content", "Fit schematic content", "View")
             }
             Self::ZoomOneToOne => spec("zoom-one-to-one", "Zoom 100%", "View"),
+            Self::ZoomToSelection => spec("zoom-to-selection", "Zoom to selection", "View"),
+            Self::ZoomBox => spec("zoom-box", "Zoom box", "View"),
             Self::CycleGrid => spec("cycle-grid", "Cycle grid display", "View"),
             Self::GridSnapRouting => spec(
                 "grid-snap-routing",
@@ -651,6 +656,9 @@ impl Command {
             Self::Place(ComponentType::Port) => Self::PlacePin.spec(),
             Self::Place(_) => spec("place-component", "Place component", "Design"),
             Self::RotateSelection => spec("rotate-selection", "Rotate clockwise", "Design"),
+            Self::RotateSelectionCounterClockwise => {
+                spec("rotate-selection-ccw", "Rotate counter-clockwise", "Design")
+            }
             Self::MirrorSelectionHorizontal => spec(
                 "mirror-selection-horizontal",
                 "Mirror about vertical axis",
@@ -1192,6 +1200,8 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ZoomFit,
     Command::FitSchematicContent,
     Command::ZoomOneToOne,
+    Command::ZoomToSelection,
+    Command::ZoomBox,
     Command::CycleGrid,
     Command::GridSnapRouting,
     Command::DrawingSheetLayers,
@@ -1270,6 +1280,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::Place(ComponentType::VoltageSource),
     Command::Place(ComponentType::CurrentSource),
     Command::RotateSelection,
+    Command::RotateSelectionCounterClockwise,
     Command::MirrorSelectionHorizontal,
     Command::MirrorSelectionVertical,
     Command::AlignSelectionLeft,

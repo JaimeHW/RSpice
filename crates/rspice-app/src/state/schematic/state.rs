@@ -42,13 +42,16 @@ mod stimulus_placement;
 mod undo;
 mod viewport;
 
+pub use editor_ops::ActiveSheetTopology;
 pub use stimulus_placement::PendingStimulusPlacement;
 
 // =============================================================================
 // Constants
 // =============================================================================
 
-pub use rspice_design::schematic::movement::{MoveSelectionError, MoveSelectionMode};
+pub use rspice_design::schematic::movement::{
+    DragRubberBand, MoveSelectionError, MoveSelectionMode,
+};
 
 pub use rspice_design::schematic::stretch::{
     StretchOrthogonalPolicy, StretchSelectionError, StretchTarget,

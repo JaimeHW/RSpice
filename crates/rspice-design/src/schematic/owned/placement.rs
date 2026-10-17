@@ -1,10 +1,11 @@
 //! Typed placement and orientation changes on the live schematic owner.
 use super::super::{
     component::{Component, LibraryCellInstance},
-    component_edit::{self, ComponentModelOverride, ComponentPlacement, ComponentTransform},
+    component_edit::{self, ComponentModelOverride, ComponentPlacement, SelectionTransform},
     component_type::ComponentType,
     junction_edit,
     net_label::NetLabelKind,
+    selection::Selection,
 };
 use super::Schematic;
 use rspice_design_model::Point;
@@ -40,19 +41,24 @@ impl Schematic {
         self.invalidate_topology();
         id
     }
-    pub fn transform_components_resolved(
+    pub fn transform_selection(
         &mut self,
-        ids: &[u64],
+        selection: &Selection,
+        pivot: Point,
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
-        transform: ComponentTransform,
-    ) {
-        component_edit::transform_components_resolved(
+        transform: SelectionTransform,
+    ) -> bool {
+        let changed = component_edit::transform_selection(
             &mut self.document,
-            ids,
+            selection,
+            pivot,
             terminal_points_for,
             transform,
         );
-        self.invalidate_topology();
+        if changed {
+            self.invalidate_topology();
+        }
+        changed
     }
     pub fn add_junction(&mut self, pos: Point) -> (u64, bool) {
         let (id, inserted) =

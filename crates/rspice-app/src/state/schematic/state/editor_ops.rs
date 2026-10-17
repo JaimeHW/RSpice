@@ -26,3 +26,5 @@ mod symbol_ops;
 mod tool_ops;
 mod wire_management;
 mod wire_operations;
+
+pub use sheet_topology::ActiveSheetTopology;

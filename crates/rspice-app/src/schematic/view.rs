@@ -26,11 +26,13 @@ use rspice_schematic_editor::view::symbol_context::SelectionWindow;
 mod scene;
 mod selection_drag;
 pub(crate) mod selection_layout;
+pub(crate) mod selection_transform;
 pub(crate) mod sheet_visibility;
 mod shelf_drag;
 mod snap_resolution;
 mod stretch_interaction;
 pub(crate) mod violations;
+mod zoom_box;
 
 use rspice_schematic_editor::view::{
     canvas, coordinates,
@@ -228,29 +230,44 @@ pub fn render_schematic_view(
     let available = ui.available_rect_before_wrap();
     let mut symbol_context = schematic_symbol_context(state);
     let drawing_sheet = resolve_active_drawing_sheet(state);
+    let (canvas_width, canvas_height) = (available.width() as f64, available.height() as f64);
+    let min_zoom = crate::state::SchematicState::zoom_floor_for_sheet(
+        drawing_sheet.geometry.paper.as_tuple(),
+        canvas_width,
+        canvas_height,
+        drawing_sheet::FIT_SCREEN_INSET,
+    );
 
     if state.schematic.session.editor.needs_drawing_sheet_fit {
         state.schematic.session.editor.needs_drawing_sheet_fit = false;
         state.schematic.session.editor.needs_fit = false;
         state.schematic.zoom_to_fit_world_rect(
             drawing_sheet.geometry.paper.as_tuple(),
-            available.width() as f64,
-            available.height() as f64,
+            canvas_width,
+            canvas_height,
             drawing_sheet::FIT_SCREEN_INSET,
+            min_zoom,
         );
     } else if state.schematic.session.editor.needs_fit {
         state.schematic.session.editor.needs_fit = false;
         let bounds = symbol_context.content_bounds(state.schematic.document());
-        state.schematic.zoom_to_fit_bounds(
-            bounds,
-            available.width() as f64,
-            available.height() as f64,
-        );
+        state
+            .schematic
+            .zoom_to_fit_bounds(bounds, canvas_width, canvas_height, min_zoom);
     }
     if let Some(target) = state.schematic.session.editor.center_request.take() {
         state
             .schematic
-            .center_view_on(target, available.width() as f64, available.height() as f64);
+            .center_view_on(target, canvas_width, canvas_height);
+    }
+    if let Some(request) = state.schematic.session.editor.zoom_request.take() {
+        state.schematic.apply_zoom_request(
+            request,
+            canvas_width,
+            canvas_height,
+            drawing_sheet::FIT_SCREEN_INSET,
+            min_zoom,
+        );
     }
 
     let response = canvas::interact(ui, available, || {
@@ -272,6 +289,7 @@ pub fn render_schematic_view(
         available,
         &mut state.schematic.session.editor.zoom,
         &mut state.schematic.session.editor.pan,
+        min_zoom,
     );
     let viewport = viewport_from_camera(
         state.schematic.session.editor.pan,

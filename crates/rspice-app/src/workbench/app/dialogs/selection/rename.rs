@@ -12,6 +12,7 @@
 
 use egui::{Context, Id};
 
+use crate::schematic::view::sheet_visibility::object_is_on_active_sheet;
 use crate::state::{BusDeclaration, Component, NetLabel, SchematicState};
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 
@@ -149,6 +150,7 @@ impl RSpiceApp {
                     &self.state.schematic,
                     target,
                     &self.state.dialogs.rename_selection.draft,
+                    &|id| object_is_on_active_sheet(&self.state, id),
                 )
             },
             RenameValidation::Invalid,
@@ -206,6 +208,7 @@ impl RSpiceApp {
                             &self.state.schematic,
                             &target,
                             &self.state.dialogs.rename_selection.draft,
+                            &|id| object_is_on_active_sheet(&self.state, id),
                         )
                     },
                     RenameValidation::Invalid,
@@ -335,10 +338,13 @@ fn rename_session_error(state: &AppState) -> Option<String> {
     })
 }
 
+/// `on_sheet` admits the active sheet's objects, the only ones a bus rename
+/// there can reach.
 fn validate_draft(
     schematic: &SchematicState,
     target: &RenameSelectionTarget,
     draft: &str,
+    on_sheet: &dyn Fn(u64) -> bool,
 ) -> RenameValidation {
     if schematic.session.read_only {
         return RenameValidation::Invalid(
@@ -449,7 +455,7 @@ fn validate_draft(
                         return RenameValidation::Invalid(format!("Bus name: {error}."));
                     }
                 };
-            match schematic.validate_bus_properties(expected, Some(&declaration)) {
+            match schematic.validate_bus_properties(expected, Some(&declaration), on_sheet) {
                 Ok(_) => RenameValidation::Valid(Box::new(RenameCommit::Bus {
                     expected: expected.clone(),
                     declaration,
@@ -469,6 +475,12 @@ fn stale(message: &str) -> RenameValidation {
 }
 
 fn apply_commit(state: &mut AppState, commit: RenameCommit) -> Result<bool, String> {
+    let content = &state.workspace.content;
+    let catalog = content
+        .design_management
+        .sheet_catalog(&content.active_schematic_reference().key());
+    let on_sheet =
+        |id| rspice_schematic_editor::view::design_view::object_is_on_active_sheet(catalog, id);
     let schematic = &mut state.schematic;
     match commit {
         RenameCommit::Component { expected, name } => {
@@ -482,7 +494,7 @@ fn apply_commit(state: &mut AppState, commit: RenameCommit) -> Result<bool, Stri
             expected,
             declaration,
         } => schematic
-            .edit_bus_properties(&expected, Some(declaration))
+            .edit_bus_properties(&expected, Some(declaration), &on_sheet)
             .map_err(|error| format!("The bus rename was rejected: {error}.")),
     }
 }
@@ -640,7 +652,8 @@ mod tests {
             validate_draft(
                 &app.state.schematic,
                 &RenameSelectionTarget::Component(Box::new(target.clone())),
-                "C7"
+                "C7",
+                &|_| true,
             ),
             RenameValidation::Invalid(_)
         ));
@@ -648,7 +661,8 @@ mod tests {
             validate_draft(
                 &app.state.schematic,
                 &RenameSelectionTarget::Component(Box::new(target.clone())),
-                "rload"
+                "rload",
+                &|_| true,
             ),
             RenameValidation::Invalid(_)
         ));
@@ -656,7 +670,8 @@ mod tests {
             validate_draft(
                 &app.state.schematic,
                 &RenameSelectionTarget::Component(Box::new(target)),
-                "R_GAIN_2"
+                "R_GAIN_2",
+                &|_| true,
             ),
             RenameValidation::Valid(_)
         ));
@@ -668,7 +683,7 @@ mod tests {
         let original_name = app.state.schematic.document().components[0].name.clone();
         assert!(open_selected_object_rename(&mut app.state));
         let target = app.state.dialogs.rename_selection.target.clone().unwrap();
-        let commit = match validate_draft(&app.state.schematic, &target, "R_GAIN") {
+        let commit = match validate_draft(&app.state.schematic, &target, "R_GAIN", &|_| true) {
             RenameValidation::Valid(commit) => commit,
             other => panic!("expected valid rename, got {other:?}"),
         };
@@ -708,14 +723,15 @@ mod tests {
             .select_only_component(id);
         assert!(open_selected_object_rename(&mut app.state));
         let target = app.state.dialogs.rename_selection.target.clone().unwrap();
-        let pending_commit = match validate_draft(&app.state.schematic, &target, "R_STALE") {
-            RenameValidation::Valid(commit) => commit,
-            other => panic!("expected initially valid rename, got {other:?}"),
-        };
+        let pending_commit =
+            match validate_draft(&app.state.schematic, &target, "R_STALE", &|_| true) {
+                RenameValidation::Valid(commit) => commit,
+                other => panic!("expected initially valid rename, got {other:?}"),
+            };
         app.state.schematic.document_mut_for_test().components[0].value = "2k".to_owned();
         let before = app.state.schematic.document().components[0].clone();
         assert!(matches!(
-            validate_draft(&app.state.schematic, &target, "R_STALE"),
+            validate_draft(&app.state.schematic, &target, "R_STALE", &|_| true),
             RenameValidation::Invalid(_)
         ));
         assert!(apply_commit(&mut app.state, *pending_commit).is_err());
@@ -739,6 +755,7 @@ mod tests {
             &schematic,
             &RenameSelectionTarget::NetLabel(expected),
             "gain_node",
+            &|_| true,
         ) {
             RenameValidation::Valid(commit) => commit,
             other => panic!("expected valid label rename, got {other:?}"),
@@ -769,7 +786,12 @@ mod tests {
         )
         .unwrap();
         schematic.document_mut_for_test().buses.push(bus.clone());
-        let commit = match validate_draft(&schematic, &RenameSelectionTarget::Bus(bus), "ADDR") {
+        let commit = match validate_draft(
+            &schematic,
+            &RenameSelectionTarget::Bus(bus),
+            "ADDR",
+            &|_| true,
+        ) {
             RenameValidation::Valid(commit) => commit,
             other => panic!("expected valid bus rename, got {other:?}"),
         };
@@ -892,7 +914,7 @@ mod tests {
             .select_only_component(id);
         assert!(open_selected_object_rename(&mut app.state));
         let target = app.state.dialogs.rename_selection.target.clone().unwrap();
-        let commit = match validate_draft(&app.state.schematic, &target, "RLOAD") {
+        let commit = match validate_draft(&app.state.schematic, &target, "RLOAD", &|_| true) {
             RenameValidation::Valid(commit) => commit,
             other => panic!("expected valid rename, got {other:?}"),
         };
@@ -974,6 +996,137 @@ mod tests {
                 .saved_outputs[0]
                 .source_expression,
             "I(RLOAD)"
+        );
+    }
+
+    fn declaration(text: &str) -> crate::state::BusDeclaration {
+        crate::state::BusDeclaration::parse(text).unwrap()
+    }
+
+    fn bus_by_id(state: &AppState, id: u64) -> Bus {
+        state
+            .schematic
+            .document()
+            .buses
+            .iter()
+            .find(|bus| bus.id == id)
+            .unwrap()
+            .clone()
+    }
+
+    /// `DATA[7:0]` with a multi-bit `DATA[3:0]` tap ending at (50, 20) on
+    /// the active sheet, optionally on a `DATA[3:0]` bus there, and on a
+    /// second sheet a `DATA[3:0]` bus passing through that same point.
+    /// Returns the tapped bus, the active-sheet destination, and the bus on
+    /// the other sheet.
+    fn tap_over_another_sheets_bus(state: &mut AppState, destination: bool) -> (u64, u64, u64) {
+        use crate::state::{
+            BusSlice, BusTapOrientation, SheetDefinition, SheetPortPolicy, SheetTemplate,
+        };
+        let schematic = &mut state.schematic;
+        let source = schematic
+            .add_bus(
+                vec![Point::new(0, 0), Point::new(100, 0)],
+                Some(declaration("DATA[7:0]")),
+            )
+            .unwrap();
+        let target = if destination {
+            schematic
+                .add_bus(
+                    vec![Point::new(0, 20), Point::new(100, 20)],
+                    Some(declaration("DATA[3:0]")),
+                )
+                .unwrap()
+        } else {
+            0
+        };
+        schematic
+            .place_bus_tap(
+                source,
+                Point::new(50, 0),
+                Point::new(50, 20),
+                BusSlice::parse("DATA[3:0]").unwrap(),
+                BusTapOrientation::Down,
+            )
+            .unwrap();
+        let hidden = schematic
+            .add_bus(
+                vec![Point::new(50, 10), Point::new(50, 40)],
+                Some(declaration("DATA[3:0]")),
+            )
+            .unwrap();
+        let document = state.schematic.document();
+        let ids: Vec<u64> = document
+            .buses
+            .iter()
+            .map(|bus| bus.id)
+            .chain(document.bus_taps.iter().map(|tap| tap.id))
+            .collect();
+        let key = state.workspace.content.active_schematic_reference().key();
+        let management = &mut state.workspace.content.design_management;
+        let first = management
+            .bootstrap_for_cell_view(&key, "Sheet 1", ids)
+            .unwrap();
+        let catalog = management.sheet_catalog_mut(&key).unwrap();
+        let second = catalog
+            .create_sheet(
+                SheetDefinition {
+                    name: "Sheet 2".to_owned(),
+                    template: SheetTemplate::AnalogSchematic,
+                    port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                    explicit_page_number: Some(2),
+                },
+                Some(first),
+            )
+            .unwrap();
+        catalog
+            .assign_objects(catalog.revision(), second, [hidden])
+            .unwrap();
+        catalog.set_active(first).unwrap();
+        (source, target, hidden)
+    }
+
+    #[test]
+    fn a_bus_rename_is_not_refused_over_another_sheets_bus() {
+        let mut state = AppState::default();
+        let (source, target, hidden) = tap_over_another_sheets_bus(&mut state, true);
+
+        let commit = RenameCommit::Bus {
+            expected: bus_by_id(&state, source),
+            declaration: declaration("ADDR[7:0]"),
+        };
+        apply_commit(&mut state, commit)
+            .expect("the tap has one destination on this sheet, which is renamed with it");
+
+        assert_eq!(
+            bus_by_id(&state, target).declaration,
+            Some(declaration("ADDR[3:0]"))
+        );
+        assert_eq!(
+            bus_by_id(&state, hidden).declaration,
+            Some(declaration("DATA[3:0]"))
+        );
+    }
+
+    #[test]
+    fn a_bus_rename_never_renames_another_sheets_bus() {
+        let mut state = AppState::default();
+        let (source, _, hidden) = tap_over_another_sheets_bus(&mut state, false);
+
+        let commit = RenameCommit::Bus {
+            expected: bus_by_id(&state, source),
+            declaration: declaration("ADDR[7:0]"),
+        };
+        apply_commit(&mut state, commit).unwrap();
+
+        assert_eq!(
+            bus_by_id(&state, source).declaration,
+            Some(declaration("ADDR[7:0]"))
+        );
+        assert_eq!(
+            bus_by_id(&state, hidden).declaration,
+            Some(declaration("DATA[3:0]")),
+            "the other sheet's bus kept its name"
         );
     }
 }

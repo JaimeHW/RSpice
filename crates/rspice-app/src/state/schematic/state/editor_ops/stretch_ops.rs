@@ -40,6 +40,7 @@ impl SchematicState {
         delta: Point,
         target: StretchTarget,
         policy: StretchOrthogonalPolicy,
+        scope: &ActiveSheetTopology,
     ) -> Result<bool, StretchSelectionError> {
         self.stretch_target_resolved(
             delta,
@@ -53,6 +54,7 @@ impl SchematicState {
                     .collect()
             },
             Component::bounding_box,
+            scope,
         )
     }
 
@@ -63,6 +65,7 @@ impl SchematicState {
         delta: Point,
         target: StretchTarget,
         policy: StretchOrthogonalPolicy,
+        hidden: impl Fn(u64) -> bool,
     ) -> Result<Option<SchematicDocument>, StretchSelectionError> {
         self.preview_stretch_target_resolved(
             delta,
@@ -76,6 +79,7 @@ impl SchematicState {
                     .collect()
             },
             Component::bounding_box,
+            hidden,
         )
     }
 
@@ -108,6 +112,7 @@ impl SchematicState {
         policy: StretchOrthogonalPolicy,
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
         component_bounds_for: impl FnMut(&Component) -> (i32, i32, i32, i32),
+        _scope: &ActiveSheetTopology,
     ) -> Result<bool, StretchSelectionError> {
         if !self.stretch_request_is_selected(delta, target)? {
             return Ok(false);
@@ -126,6 +131,10 @@ impl SchematicState {
     }
 
     /// Build the validated document preview without cloning editor state.
+    ///
+    /// `hidden` names the conductors of the cell view's other sheets. The
+    /// commit runs with them out of reach, so the preview leaves them out too:
+    /// a wire or junction of another sheet is neither an anchor nor carried.
     pub fn preview_stretch_target_resolved(
         &self,
         delta: Point,
@@ -133,12 +142,31 @@ impl SchematicState {
         policy: StretchOrthogonalPolicy,
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
         component_bounds_for: impl FnMut(&Component) -> (i32, i32, i32, i32),
+        hidden: impl Fn(u64) -> bool,
     ) -> Result<Option<SchematicDocument>, StretchSelectionError> {
         if !self.stretch_request_is_selected(delta, target)? {
             return Ok(None);
         }
+        let document = self.design.document();
+        let visible;
+        let document = if document.wires.iter().any(|wire| hidden(wire.id))
+            || document
+                .junctions
+                .iter()
+                .any(|junction| hidden(junction.id))
+        {
+            let mut only_this_sheet = document.clone();
+            only_this_sheet.wires.retain(|wire| !hidden(wire.id));
+            only_this_sheet
+                .junctions
+                .retain(|junction| !hidden(junction.id));
+            visible = only_this_sheet;
+            &visible
+        } else {
+            document
+        };
         stretch::preview_stretch_target_resolved(
-            self.design.document(),
+            document,
             delta,
             target,
             policy,
@@ -156,6 +184,40 @@ mod tests {
         Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType,
         DocumentationShape, Junction, NetLabel, SchematicSnapshot, Wire, WireConnection,
     };
+
+    impl SchematicState {
+        /// Stretch in a document with one sheet, which hides nothing.
+        fn stretch_on_one_sheet(
+            &mut self,
+            delta: Point,
+            target: StretchTarget,
+            policy: StretchOrthogonalPolicy,
+        ) -> Result<bool, StretchSelectionError> {
+            self.with_single_sheet_topology(|state, scope| {
+                state.stretch_target(delta, target, policy, scope)
+            })
+        }
+
+        fn stretch_resolved_on_one_sheet(
+            &mut self,
+            delta: Point,
+            target: StretchTarget,
+            policy: StretchOrthogonalPolicy,
+            terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+            component_bounds_for: impl FnMut(&Component) -> (i32, i32, i32, i32),
+        ) -> Result<bool, StretchSelectionError> {
+            self.with_single_sheet_topology(|state, scope| {
+                state.stretch_target_resolved(
+                    delta,
+                    target,
+                    policy,
+                    terminal_points_for,
+                    component_bounds_for,
+                    scope,
+                )
+            })
+        }
+    }
 
     fn wire_target(wire_id: u64, segment_index: usize) -> StretchTarget {
         StretchTarget::WireSegment {
@@ -225,7 +287,7 @@ mod tests {
     fn stretches_horizontal_interior_segment_and_keeps_outer_anchors_fixed() {
         let mut state = selected_u_wire();
         assert_eq!(
-            state.stretch_target(
+            state.stretch_on_one_sheet(
                 Point::new(0, 5),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -262,7 +324,7 @@ mod tests {
             .selection
             .select_only_wire_segment(1, 1);
         state
-            .stretch_target(
+            .stretch_on_one_sheet(
                 Point::new(5, 0),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -334,7 +396,7 @@ mod tests {
                 .selection
                 .select_only_wire_segment(1, segment_index);
             assert_eq!(
-                state.stretch_target(
+                state.stretch_on_one_sheet(
                     delta,
                     wire_target(1, segment_index),
                     StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -348,7 +410,7 @@ mod tests {
     fn preserve_orthogonal_rejects_parallel_or_nonorthogonal_contracts() {
         let mut state = selected_u_wire();
         assert_eq!(
-            state.stretch_target(
+            state.stretch_on_one_sheet(
                 Point::new(5, 0),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -364,7 +426,7 @@ mod tests {
             .push(Wire::new(2, vec![Point::new(0, 0), Point::new(10, 10)]));
         diagonal.session.editor.selection.select_only_wire(2);
         assert_eq!(
-            diagonal.stretch_target(
+            diagonal.stretch_on_one_sheet(
                 Point::new(0, 5),
                 wire_target(2, 0),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -377,7 +439,7 @@ mod tests {
     fn allow_diagonal_preserves_exact_requested_geometry() {
         let mut state = selected_u_wire();
         state
-            .stretch_target(
+            .stretch_on_one_sheet(
                 Point::new(5, 5),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::AllowDiagonal,
@@ -404,12 +466,13 @@ mod tests {
                 Point::new(0, 5),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
+                |_| false,
             )
             .unwrap()
             .unwrap();
         assert!(before.is_equal(&SchematicSnapshot::capture(state.design.document())));
         state
-            .stretch_target(
+            .stretch_on_one_sheet(
                 Point::new(0, 5),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -442,7 +505,7 @@ mod tests {
             .connections
             .push(WireConnection::new(1, 1, 44, "OUT"));
         assert!(matches!(
-            state.stretch_target(
+            state.stretch_on_one_sheet(
                 Point::new(0, 5),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -475,7 +538,7 @@ mod tests {
             ));
         state.session.editor.selection.select_only_wire(1);
         assert!(matches!(
-            state.stretch_target(
+            state.stretch_on_one_sheet(
                 Point::new(5, 0),
                 wire_target(1, 0),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -509,7 +572,7 @@ mod tests {
                     .push(Junction::new(2, Point::new(10, 10))),
             }
             assert!(matches!(
-                state.stretch_target(
+                state.stretch_on_one_sheet(
                     Point::new(0, 5),
                     wire_target(1, 1),
                     StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -529,7 +592,7 @@ mod tests {
             .push(NetLabel::new(70, Point::new(10, 10), "SENSE"));
         let before = SchematicSnapshot::capture(existing.design.document());
         assert_eq!(
-            existing.stretch_target(
+            existing.stretch_on_one_sheet(
                 Point::new(0, 5),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -549,7 +612,7 @@ mod tests {
             .push(NetLabel::new(71, Point::new(10, 15), "OTHER"));
         let before = SchematicSnapshot::capture(new_contact.design.document());
         assert_eq!(
-            new_contact.stretch_target(
+            new_contact.stretch_on_one_sheet(
                 Point::new(0, 5),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -587,7 +650,7 @@ mod tests {
         state.design.document_mut_for_test().buses.push(bus);
         state.design.document_mut_for_test().bus_taps.push(tap);
         state
-            .stretch_target(
+            .stretch_on_one_sheet(
                 Point::new(0, 5),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -619,7 +682,7 @@ mod tests {
         state.design.document_mut_for_test().buses.push(bus);
         state.design.document_mut_for_test().bus_taps.push(tap);
         assert_eq!(
-            state.stretch_target(
+            state.stretch_on_one_sheet(
                 Point::new(0, 5),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -658,7 +721,7 @@ mod tests {
         state.design.document_mut_for_test().bus_taps.push(tap);
         state.session.editor.selection.select_bus(5);
         state
-            .stretch_target(
+            .stretch_on_one_sheet(
                 Point::new(0, 5),
                 bus_target(5, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -740,7 +803,7 @@ mod tests {
             state.session.editor.selection.select_documentation_shape(7);
             let before_topology = state.topology_version();
             state
-                .stretch_target(
+                .stretch_on_one_sheet(
                     Point::new(if point_index == 0 { -1 } else { 1 }, 0),
                     StretchTarget::DocumentationShapePoint {
                         shape_id: 7,
@@ -780,7 +843,7 @@ mod tests {
         state.session.editor.selection.select_documentation_shape(7);
         let before = SchematicSnapshot::capture(state.design.document());
         assert_eq!(
-            state.stretch_target(
+            state.stretch_on_one_sheet(
                 Point::new(10, 0),
                 StretchTarget::DocumentationShapePoint {
                     shape_id: 7,
@@ -798,7 +861,7 @@ mod tests {
         let mut state = selected_u_wire();
         let before = SchematicSnapshot::capture(state.design.document());
         assert_eq!(
-            state.stretch_target(
+            state.stretch_on_one_sheet(
                 Point::new(0, 5),
                 wire_target(1, 99),
                 StretchOrthogonalPolicy::AllowDiagonal,
@@ -811,7 +874,7 @@ mod tests {
         state.design.document_mut_for_test().wires[0].points[2].y = i32::MAX;
         let before = SchematicSnapshot::capture(state.design.document());
         assert_eq!(
-            state.stretch_target(
+            state.stretch_on_one_sheet(
                 Point::new(0, 1),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -827,7 +890,7 @@ mod tests {
         let baseline = SchematicSnapshot::capture(state.design.document());
         state.session.read_only = true;
         assert_eq!(
-            state.stretch_target(
+            state.stretch_on_one_sheet(
                 Point::new(0, 5),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -836,7 +899,7 @@ mod tests {
         );
         state.session.read_only = false;
         assert_eq!(
-            state.stretch_target(
+            state.stretch_on_one_sheet(
                 Point::origin(),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -845,7 +908,7 @@ mod tests {
         );
         state.session.editor.selection.clear();
         assert_eq!(
-            state.stretch_target(
+            state.stretch_on_one_sheet(
                 Point::new(0, 5),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -864,7 +927,7 @@ mod tests {
             .wires
             .push(Wire::segment(2, Point::new(5, 15), Point::new(15, 15)));
         assert!(matches!(
-            overlap.stretch_target(
+            overlap.stretch_on_one_sheet(
                 Point::new(0, 5),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -879,7 +942,7 @@ mod tests {
             .wires
             .push(Wire::segment(2, Point::new(10, 15), Point::new(10, 25)));
         assert!(matches!(
-            contact.stretch_target(
+            contact.stretch_on_one_sheet(
                 Point::new(0, 5),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -913,7 +976,7 @@ mod tests {
             .selection
             .select_only_wire_segment(1, 1);
         assert!(matches!(
-            state.stretch_target(
+            state.stretch_on_one_sheet(
                 Point::new(0, 5),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -941,7 +1004,7 @@ mod tests {
                 Point::new(100, 100),
             ));
         assert!(matches!(
-            source_contact.stretch_target_resolved(
+            source_contact.stretch_resolved_on_one_sheet(
                 Point::new(0, 5),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -969,7 +1032,7 @@ mod tests {
                 Point::new(100, 100),
             ));
         assert!(matches!(
-            new_contact.stretch_target_resolved(
+            new_contact.stretch_resolved_on_one_sheet(
                 Point::new(0, 5),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -1000,7 +1063,7 @@ mod tests {
                 Point::new(100, 100),
             ));
         assert_eq!(
-            state.stretch_target_resolved(
+            state.stretch_resolved_on_one_sheet(
                 Point::new(0, 5),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
@@ -1031,7 +1094,7 @@ mod tests {
         let connections = state.design.document().connections.clone();
         let before = state.topology_version();
         state
-            .stretch_target(
+            .stretch_on_one_sheet(
                 Point::new(0, 5),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,

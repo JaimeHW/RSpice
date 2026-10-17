@@ -107,13 +107,16 @@ impl HierarchyElaborator<'_> {
                 parent.time_scale,
             )
             .map_err(|message| {
-                semantic_error(
-                    SemanticErrorKind::UnsupportedFeature(format!(
-                        "parameter '{}' of instance '{path}': {message}",
-                        declaration.name
-                    )),
-                    expression.span(),
-                )
+                crate::semantic::instance_parameters::override_operand_error(expression, parent)
+                    .unwrap_or_else(|| {
+                        semantic_error(
+                            SemanticErrorKind::UnsupportedFeature(format!(
+                                "parameter '{}' of instance '{path}': {message}",
+                                declaration.name
+                            )),
+                            expression.span(),
+                        )
+                    })
             })?;
             let identity = super::super::instance_parameters::override_identity(&value)
                 .map_err(internal_error)?;

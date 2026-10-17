@@ -6,16 +6,17 @@ use super::super::super::{
     SchematicArrayCount, SchematicArrayError, SchematicArrayImpact, SchematicArrayNaming,
     SchematicArrayPlan, SchematicArrayPreview,
     array::ArrayObjectIds,
-    array_edit::{ArraySelection, ArraySource},
+    array_edit::{ArraySelection, ArraySource, every_sheet},
 };
 use super::super::*;
 use rspice_design::schematic::clipboard_edit::CopySelection;
 #[cfg(test)]
 use std::collections::HashSet;
 
-fn array_selection_input(
-    selection: &Selection,
-) -> ArraySelection<'_, impl Iterator<Item = Point> + Clone> {
+fn array_selection_input<'a>(
+    selection: &'a Selection,
+    on_sheet: &'a dyn Fn(u64) -> bool,
+) -> ArraySelection<'a, impl Iterator<Item = Point> + Clone> {
     ArraySelection {
         objects: CopySelection {
             components: &selection.components,
@@ -30,6 +31,7 @@ fn array_selection_input(
         junctions: selection.junctions.iter().map(|junction| junction.pos),
         has_partial_objects: !selection.wire_segments.is_empty()
             || !selection.wire_vertices.is_empty(),
+        on_sheet,
     }
 }
 
@@ -52,11 +54,22 @@ fn array_result_selection(objects: ArrayObjectIds) -> Selection {
 }
 
 impl SchematicState {
+    /// The selection over the whole cell view. Names are unique across every
+    /// sheet, so naming and validation read all of them.
     fn array_source(&self) -> ArraySource<'_, impl Iterator<Item = Point> + Clone> {
+        self.array_source_on(&every_sheet)
+    }
+
+    /// The selection on the sheet `on_sheet` admits, which is the only
+    /// geometry its replicas can meet.
+    fn array_source_on<'a>(
+        &'a self,
+        on_sheet: &'a dyn Fn(u64) -> bool,
+    ) -> ArraySource<'a, impl Iterator<Item = Point> + Clone> {
         ArraySource {
             document: self.design.document(),
             identity_cursor: self.identity_cursor(),
-            selection: array_selection_input(&self.session.editor.selection),
+            selection: array_selection_input(&self.session.editor.selection, on_sheet),
         }
     }
 
@@ -78,6 +91,7 @@ impl SchematicState {
     ) -> Result<SchematicArrayPreview, SchematicArrayError> {
         self.preview_array_selection_resolved(
             plan,
+            &every_sheet,
             |component| {
                 component
                     .terminal_positions()
@@ -94,6 +108,7 @@ impl SchematicState {
     ) -> Result<SchematicArrayImpact, SchematicArrayError> {
         self.array_selection_resolved(
             plan,
+            &every_sheet,
             |component| {
                 component
                     .terminal_positions()
@@ -105,25 +120,26 @@ impl SchematicState {
         )
     }
 
+    /// Preview the array of the selection drawn on the sheet `on_sheet`
+    /// admits.
     pub fn preview_array_selection_resolved(
         &self,
         plan: &SchematicArrayPlan,
+        on_sheet: &dyn Fn(u64) -> bool,
         terminal_points_for: impl FnMut(&Component) -> Vec<(String, Point)>,
         component_bounds_for: impl FnMut(&Component) -> (i32, i32, i32, i32),
     ) -> Result<SchematicArrayPreview, SchematicArrayError> {
         if self.session.read_only {
             return Err(SchematicArrayError::ReadOnly);
         }
-        self.array_source().preview_array_selection_resolved(
-            plan,
-            terminal_points_for,
-            component_bounds_for,
-        )
+        self.array_source_on(on_sheet)
+            .preview_array_selection_resolved(plan, terminal_points_for, component_bounds_for)
     }
 
     pub fn array_selection_resolved(
         &mut self,
         plan: &SchematicArrayPlan,
+        on_sheet: &dyn Fn(u64) -> bool,
         terminal_points_for: impl FnMut(&Component) -> Vec<(String, Point)>,
         component_bounds_for: impl FnMut(&Component) -> (i32, i32, i32, i32),
     ) -> Result<SchematicArrayImpact, SchematicArrayError> {
@@ -131,7 +147,7 @@ impl SchematicState {
             return Err(SchematicArrayError::ReadOnly);
         }
         let edit = self.design.array_selection_resolved(
-            array_selection_input(&self.session.editor.selection),
+            array_selection_input(&self.session.editor.selection, on_sheet),
             plan,
             terminal_points_for,
             component_bounds_for,

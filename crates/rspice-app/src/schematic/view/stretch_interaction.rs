@@ -1,6 +1,9 @@
 //! Validate stretch canvas requests before the app-owned atomic commit.
 
-use super::{SchematicSymbolContext, requests::editor_request_source, viewport::Viewport};
+use super::{
+    SchematicSymbolContext, requests::editor_request_source,
+    sheet_visibility::with_active_wire_topology, viewport::Viewport,
+};
 use crate::state::{Point, Tool};
 use crate::workbench::{
     app::{armed_stretch_selection_authority, cancel_armed_stretch_selection},
@@ -117,13 +120,19 @@ fn commit_armed_stretch_selection(state: &mut AppState, symbol_context: &Schemat
     }
 
     state.schematic.begin_operation("stretch selection");
-    match state.schematic.stretch_target_resolved(
-        delta,
-        target,
-        policy,
-        |component| symbol_context.terminal_points(component),
-        |component| symbol_context.component_bounds_tuple(component),
-    ) {
+    // Another sheet's wire or junction can share the stretched segment's
+    // coordinates; it neither anchors the stretch nor moves with it.
+    let stretched = with_active_wire_topology(state, |schematic, scope| {
+        schematic.stretch_target_resolved(
+            delta,
+            target,
+            policy,
+            |component| symbol_context.terminal_points(component),
+            |component| symbol_context.component_bounds_tuple(component),
+            scope,
+        )
+    });
+    match stretched {
         Ok(true) => {
             let recorded = state.schematic.end_operation();
             state.sync_active_schematic_to_workspace();
@@ -161,7 +170,10 @@ mod tests {
     use crate::state::{Junction, Wire};
 
     fn selected_stretch_wire() -> AppState {
-        let mut state = AppState::default();
+        selected_stretch_wire_in(AppState::default())
+    }
+
+    fn selected_stretch_wire_in(mut state: AppState) -> AppState {
         state
             .schematic
             .document_mut_for_test()
@@ -320,6 +332,112 @@ mod tests {
             crate::state::Tool::Select
         );
         assert!(!state.schematic.can_undo());
+    }
+
+    /// A junction on Sheet 2 sits on the stretched segment's coordinates. It
+    /// is another sheet's wiring: it neither anchors the stretch nor moves.
+    #[test]
+    fn another_sheets_junction_neither_anchors_nor_follows_a_stretch() {
+        let mut state = selected_stretch_wire_in(
+            crate::schematic::view::sheet_visibility::two_sheet_state(&[7], &[21]),
+        );
+        let hidden = Junction::new(21, Point::new(10, 20));
+        state
+            .schematic
+            .document_mut_for_test()
+            .junctions
+            .push(hidden);
+        arm_test_stretch(&mut state);
+        state.dialogs.stretch_selection.canvas.gesture.preview_delta = Point::new(0, 10);
+        let symbols = schematic_symbol_context(&state);
+
+        commit_armed_stretch_selection(&mut state, &symbols);
+
+        assert_eq!(
+            state.schematic.document().wires[0].points[1],
+            Point::new(0, 30)
+        );
+        assert_eq!(state.schematic.document().junctions, vec![hidden]);
+        assert_eq!(
+            state.schematic.undo_description(),
+            Some("stretch selection")
+        );
+    }
+
+    /// A drawn route stretches with the segment beside it, which is its own
+    /// wire. Sheet 2's wire ends on the other corner: it is another sheet's
+    /// wiring, so it neither follows the corner nor pins it.
+    #[test]
+    fn a_route_stretches_with_its_neighbour_and_leaves_another_sheets_wire() {
+        let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[7, 8], &[21]);
+        let hidden = Wire::segment(21, Point::new(20, 20), Point::new(20, 0));
+        state.schematic.document_mut_for_test().wires = vec![
+            Wire::segment(8, Point::new(0, 0), Point::new(0, 20)),
+            Wire::segment(7, Point::new(0, 20), Point::new(20, 20)),
+            hidden.clone(),
+        ];
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_wire_segment(7, 0);
+        state.schematic.init_undo_history();
+        arm_test_stretch(&mut state);
+        state.dialogs.stretch_selection.canvas.gesture.preview_delta = Point::new(0, 10);
+        let symbols = schematic_symbol_context(&state);
+
+        commit_armed_stretch_selection(&mut state, &symbols);
+
+        let wire = |id: u64| {
+            state
+                .schematic
+                .document()
+                .wires
+                .iter()
+                .find(|wire| wire.id == id)
+                .cloned()
+        };
+        assert_eq!(
+            wire(7).map(|wire| wire.points),
+            Some(vec![Point::new(0, 30), Point::new(20, 30)])
+        );
+        assert_eq!(
+            wire(8).map(|wire| wire.points),
+            Some(vec![Point::new(0, 0), Point::new(0, 30)])
+        );
+        assert_eq!(wire(21), Some(hidden));
+    }
+
+    /// The preview runs with the other sheets out of reach, as the commit
+    /// does: Sheet 2's junction on the segment refuses neither.
+    #[test]
+    fn another_sheets_junction_does_not_refuse_the_stretch_preview() {
+        let mut state = selected_stretch_wire_in(
+            crate::schematic::view::sheet_visibility::two_sheet_state(&[7], &[21]),
+        );
+        let hidden = Junction::new(21, Point::new(10, 20));
+        state
+            .schematic
+            .document_mut_for_test()
+            .junctions
+            .push(hidden);
+        let symbols = schematic_symbol_context(&state);
+
+        let candidate = crate::schematic::view::preview::stretch_preview_candidate(
+            &state,
+            &symbols,
+            Point::new(0, 10),
+            crate::state::StretchTarget::WireSegment {
+                wire_id: 7,
+                segment_index: 1,
+            },
+            crate::state::StretchOrthogonalPolicy::default(),
+        )
+        .expect("the hidden junction is no anchor")
+        .expect("the stretch moves the segment");
+
+        assert_eq!(candidate.wires[0].points[1], Point::new(0, 30));
     }
 
     #[test]

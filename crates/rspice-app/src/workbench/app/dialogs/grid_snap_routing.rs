@@ -44,7 +44,12 @@ pub(crate) fn open_grid_snap_routing_dialog(state: &mut AppState) -> bool {
         grid_style: state.ui.grid,
         snap_spacing: spacing,
         snap_engine: state.schematic.session.editor.snap_engine.clone(),
-        wire_routing: state.schematic.session.editor.wire_drawing.routing_mode,
+        // A session left in angled routing opens on Orthogonal where the
+        // document cannot take angled wires, so the draft can be applied.
+        wire_routing: match state.schematic.session.editor.wire_drawing.routing_mode {
+            mode if mode.is_orthogonal() || angled_routing_allowed(state) => mode,
+            _ => WireRoutingMode::HorizontalFirst,
+        },
     };
     let authority = SchematicEditAuthority::capture(state);
     state.dialogs.grid_snap_routing.open(draft, authority);
@@ -59,6 +64,7 @@ impl RSpiceApp {
 
         let dirty = self.state.dialogs.grid_snap_routing.dirty();
         let read_only = self.state.schematic_edit_read_only();
+        let angled_routing = angled_routing_allowed(&self.state);
         let validation_error = self
             .state
             .dialogs
@@ -78,6 +84,7 @@ impl RSpiceApp {
                 ui,
                 &mut self.state.dialogs.grid_snap_routing,
                 read_only,
+                angled_routing,
             ))
         });
 
@@ -153,6 +160,9 @@ fn commit_grid_snap_routing(state: &mut AppState) -> Result<(), GridSnapRoutingC
         transaction.draft.wire_routing,
         state.schematic.session.editor.wire_drawing.routing_mode,
     );
+    if !routing_mode.is_orthogonal() && !angled_routing_allowed(state) {
+        return Err(GridSnapRoutingCommitError::new(ANGLED_ROUTING_REASON, None));
+    }
 
     if let Some(pitch) = requested_pitch.filter(|_| pitch_changed) {
         let changed = state.schematic.change_grid_pitch(pitch);
@@ -192,6 +202,17 @@ const fn any_snap_target_enabled(snap: &crate::state::SnapEngine) -> bool {
         || snap.snap_to_wire_segments
 }
 
+/// Why 45° and free routing are unavailable under an orthogonal policy.
+const ANGLED_ROUTING_REASON: &str = "45\u{00b0} and free routing need the any-angle junction policy; \
+     this document keeps its wiring and junctions orthogonal.";
+
+/// Angled wires are drawn only where the document's junction policy keeps
+/// dots at angled joins too.
+fn angled_routing_allowed(state: &AppState) -> bool {
+    state.schematic.document().document_policy.wire_junctions
+        == crate::state::WireJunctionPolicy::AnyAngle
+}
+
 fn canonical_routing_mode(requested: WireRoutingMode, current: WireRoutingMode) -> WireRoutingMode {
     if requested.is_orthogonal() && current.is_orthogonal() {
         current
@@ -216,6 +237,7 @@ fn grid_snap_routing_body(
     ui: &mut Ui,
     transaction: &mut GridSnapRoutingDialogState,
     read_only: bool,
+    angled_routing: bool,
 ) -> egui::Id {
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
 
@@ -256,14 +278,22 @@ fn grid_snap_routing_body(
         transaction.validation_error = None;
     }
 
-    let routing = enum_row(
-        ui,
-        "Wire routing",
-        "Shared interactive routing policy for wires and buses.",
-        "grid-snap-routing-wire-routing",
-        routing_label(transaction.draft.wire_routing),
-        &["Orthogonal", "45\u{00b0}", "Free"],
-    );
+    let routing = ui
+        .add_enabled_ui(angled_routing, |ui| {
+            enum_row(
+                ui,
+                "Wire routing",
+                if angled_routing {
+                    "Shared interactive routing policy for wires and buses."
+                } else {
+                    ANGLED_ROUTING_REASON
+                },
+                "grid-snap-routing-wire-routing",
+                routing_label(transaction.draft.wire_routing),
+                &["Orthogonal", "45\u{00b0}", "Free"],
+            )
+        })
+        .inner;
     if let Some(index) = routing.0 {
         transaction.draft.wire_routing = match index {
             1 => WireRoutingMode::FortyFiveDegree,
@@ -455,6 +485,12 @@ mod tests {
     #[test]
     fn apply_publishes_every_owner_and_records_only_the_document_pitch() {
         let mut state = AppState::default();
+        // 45° routing is offered only under the any-angle junction policy.
+        state
+            .schematic
+            .document_mut_for_test()
+            .document_policy
+            .wire_junctions = crate::state::WireJunctionPolicy::AnyAngle;
         assert!(open_grid_snap_routing_dialog(&mut state));
         let draft = &mut state.dialogs.grid_snap_routing.draft;
         draft.grid_style = GridStyle::Lines;
@@ -517,9 +553,49 @@ mod tests {
         assert!(!state.dialogs.grid_snap_routing.open);
     }
 
+    /// Under an orthogonal junction policy nothing maintains dots at angled
+    /// crossings the policy promises not to have, so 45° and free routing
+    /// are refused there with the reason, and offered under any-angle.
+    #[test]
+    fn angled_routing_needs_the_any_angle_junction_policy() {
+        for mode in [WireRoutingMode::FortyFiveDegree, WireRoutingMode::Diagonal] {
+            let mut state = AppState::default();
+            assert!(open_grid_snap_routing_dialog(&mut state));
+            state.dialogs.grid_snap_routing.draft.wire_routing = mode;
+
+            let error = commit_grid_snap_routing(&mut state)
+                .expect_err("an orthogonal junction policy refuses angled routing");
+            assert!(error.message.contains("junction"), "{}", error.message);
+            assert_eq!(
+                state.schematic.session.editor.wire_drawing.routing_mode,
+                WireRoutingMode::HorizontalFirst
+            );
+
+            let mut state = AppState::default();
+            state
+                .schematic
+                .document_mut_for_test()
+                .document_policy
+                .wire_junctions = crate::state::WireJunctionPolicy::AnyAngle;
+            assert!(open_grid_snap_routing_dialog(&mut state));
+            state.dialogs.grid_snap_routing.draft.wire_routing = mode;
+            assert!(commit_grid_snap_routing(&mut state).is_ok());
+            assert_eq!(
+                state.schematic.session.editor.wire_drawing.routing_mode,
+                mode
+            );
+        }
+    }
+
     #[test]
     fn free_snap_and_session_only_choices_do_not_dirty_document_history() {
         let mut state = AppState::default();
+        // Free routing is offered only under the any-angle junction policy.
+        state
+            .schematic
+            .document_mut_for_test()
+            .document_policy
+            .wire_junctions = crate::state::WireJunctionPolicy::AnyAngle;
         let topology = state.schematic.topology_version();
         let pitch = state.schematic.document().document_policy.grid_pitch;
         assert!(open_grid_snap_routing_dialog(&mut state));

@@ -96,6 +96,7 @@ mod expressions;
 mod local_arrays;
 mod local_storage;
 mod overrides;
+mod references;
 mod routines;
 mod system_calls;
 pub(crate) use connection_shapes::ConnectionShapes;
@@ -478,11 +479,17 @@ fn lower_with_analog_variables(
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let (mut signals, mut arrays, root_signal_ids) = lower_signals(&digital.signals)?;
+    // A declaration borrowed for a hierarchical reference takes no storage: it
+    // is bound to its target's signal once every scope's signals exist.
+    let root_references = &digital.signal_references;
+    let (mut signals, mut arrays, mut root_signal_ids) = lower_signals(&digital.signals, |name| {
+        references::is_reference(root_references, name)
+    })?;
     let mut elaborated: HashMap<SmolStr, DigitalSignalId> = digital
         .signals
         .iter()
         .zip(&root_signal_ids)
+        .filter(|(signal, _)| !references::is_reference(root_references, &signal.name))
         .map(|(signal, id)| (signal.name.clone(), *id))
         .collect();
     elaborated.extend(
@@ -490,15 +497,52 @@ fn lower_with_analog_variables(
             .iter()
             .map(|signal| (signal.name.clone(), signal.id)),
     );
+    let root_names: HashSet<&str> = digital
+        .signals
+        .iter()
+        .map(|signal| signal.name.as_str())
+        .collect();
     let mut real_aliases = Vec::new();
     let mut frame_signal_ids = Vec::with_capacity(digital.instances.len());
     for instance in &digital.instances {
         let mut ids = vec![DigitalSignalId::new(0); instance.signals.len()];
         for (index, signal) in instance.signals.iter().enumerate() {
-            if signal.declared.element_alias.is_some() {
+            if signal.declared.element_alias.is_some()
+                || references::is_reference(&instance.signal_references, &signal.declared.name)
+            {
                 continue;
             }
-            let id = match elaborated.get(&signal.name) {
+            // An escaped root identifier may itself contain a period
+            // (IEEE 1364-2005 section 3.7.1): `\bot.r ` is not the `r` of
+            // instance `bot`, so an instance's own signal never reuses it.
+            let own = signal
+                .name
+                .strip_prefix(instance.path.as_str())
+                .and_then(|rest| rest.strip_prefix('.'))
+                == Some(signal.declared.name.as_str());
+            let shadowed = own && root_names.contains(signal.name.as_str());
+            if shadowed {
+                // The root's signal takes its escaped spelling, so the plan's
+                // names stay unique and print as the author wrote them.
+                let name = signal.name.as_str();
+                let escaped = format!("\\{name} ");
+                for cell in &mut signals {
+                    if cell.name == name {
+                        cell.name = escaped.clone().into();
+                    } else if let Some(rest) = cell.name.strip_prefix(name)
+                        && rest.starts_with('[')
+                    {
+                        cell.name = format!("{escaped}{rest}").into();
+                    }
+                }
+                for array in &mut arrays {
+                    if array.name == name {
+                        array.name = escaped.clone().into();
+                    }
+                }
+            }
+            let existing = elaborated.get(&signal.name).filter(|_| !shadowed);
+            let id = match existing {
                 Some(existing) => *existing,
                 None => {
                     let start = signals.len();
@@ -549,8 +593,12 @@ fn lower_with_analog_variables(
         }
         frame_signal_ids.push(ids);
     }
+    references::bind(digital, &mut root_signal_ids, &mut frame_signal_ids)?;
 
     for (declared, id) in digital.signals.iter().zip(&root_signal_ids) {
+        if references::is_reference(root_references, &declared.name) {
+            continue;
+        }
         initialize_signal(
             declared,
             *id,
@@ -1332,6 +1380,7 @@ fn lower_continuous_assign(
 
 fn lower_signals(
     declarations: &[AnalyzedDigitalSignal],
+    borrowed: impl Fn(&str) -> bool,
 ) -> Result<
     (
         Vec<DigitalSignal>,
@@ -1345,7 +1394,7 @@ fn lower_signals(
     let mut ids = vec![DigitalSignalId::new(0); declarations.len()];
     let mut allocated = HashMap::new();
     for (index, signal) in declarations.iter().enumerate() {
-        if signal.element_alias.is_none() {
+        if signal.element_alias.is_none() && !borrowed(&signal.name) {
             let id = append_signal(signal, signal.name.clone(), &mut signals, &mut arrays);
             ids[index] = id;
             allocated.insert(signal.name.as_str(), id);
