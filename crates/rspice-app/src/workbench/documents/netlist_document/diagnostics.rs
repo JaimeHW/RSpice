@@ -507,12 +507,20 @@ pub(super) fn in_authored_text(
         .collect()
 }
 
-pub(super) fn unknown_reference_diagnostics(buffer: &str) -> Vec<Diagnostic> {
+/// One finding per model or subcircuit reference in `buffer` that no
+/// definition visible to it names.
+///
+/// `unread` is what the parse of `buffer` did not read: a definition there
+/// defines nothing, and a reference there is not one.
+pub(super) fn unknown_reference_diagnostics(
+    buffer: &str,
+    unread: &[rspice_core::netlist::UnreadSourceRegion],
+) -> Vec<Diagnostic> {
     if has_external_model_sources(buffer) {
         return Vec::new();
     }
 
-    let map = rspice_core::netlist::source_map_for_editor(buffer);
+    let map = rspice_core::netlist::source_map_for_editor_as_read(buffer, unread);
     let mut diagnostics = Vec::new();
 
     for reference in map.references {
@@ -862,7 +870,7 @@ mod tests {
             rspice_simulation::netlist_preparation::splice_before_terminal_end_card(base, authored);
 
         let diagnostics = in_authored_text(
-            unknown_reference_diagnostics(&composed),
+            unknown_reference_diagnostics(&composed, &[]),
             &composed,
             authored,
         );
@@ -902,7 +910,7 @@ mod tests {
     fn unknown_model_lint_suggests_nearest_known_model() {
         let src = "deck\nM1 d g s b nchh W=1u L=1u\n.model nch nmos\n.end\n";
 
-        let diagnostics = unknown_reference_diagnostics(src);
+        let diagnostics = unknown_reference_diagnostics(src, &[]);
 
         assert_eq!(diagnostics.len(), 1);
         let diagnostic = &diagnostics[0];
@@ -945,7 +953,7 @@ mod tests {
     fn unknown_subckt_lint_suggests_nearest_known_subckt() {
         let src = "deck\nX1 in out invv\n.subckt inv in out\n.ends\n.end\n";
 
-        let diagnostics = unknown_reference_diagnostics(src);
+        let diagnostics = unknown_reference_diagnostics(src, &[]);
 
         assert_eq!(diagnostics.len(), 1);
         let diagnostic = &diagnostics[0];
@@ -958,7 +966,7 @@ mod tests {
     fn unknown_reference_lint_skips_decks_with_external_includes() {
         let src = "deck\n.include models.scs\nM1 d g s b nchh W=1u L=1u\n.end\n";
 
-        let diagnostics = unknown_reference_diagnostics(src);
+        let diagnostics = unknown_reference_diagnostics(src, &[]);
 
         assert!(diagnostics.is_empty());
     }
@@ -971,7 +979,7 @@ mod tests {
     fn unknown_reference_lint_skips_decks_with_a_veriloga_source() {
         let bare = "deck\nX1 a k my_diode\n.end\n";
         assert_eq!(
-            unknown_reference_diagnostics(bare).len(),
+            unknown_reference_diagnostics(bare, &[]).len(),
             1,
             "a master nothing declares is still reported"
         );
@@ -983,7 +991,7 @@ mod tests {
             ] {
                 let src = format!("deck\n{cased} \"models/dev.va\"\nX1 a k my_diode\n.end\n");
                 assert!(
-                    unknown_reference_diagnostics(&src).is_empty(),
+                    unknown_reference_diagnostics(&src, &[]).is_empty(),
                     "{cased} declares the master"
                 );
             }
@@ -991,14 +999,14 @@ mod tests {
 
         // A card that only looks like one of them is not one.
         let near_miss = "deck\n.vams2 \"models/dev.va\"\nX1 a k my_diode\n.end\n";
-        assert_eq!(unknown_reference_diagnostics(near_miss).len(), 1);
+        assert_eq!(unknown_reference_diagnostics(near_miss, &[]).len(), 1);
     }
 
     #[test]
     fn unknown_model_lint_does_not_resolve_sibling_local_model() {
         let src = "deck\n.subckt amp in out\n.model nch nmos\n.ends\n.subckt buf in out\nM1 out in 0 0 nch\n.ends\n.end\n";
 
-        let diagnostics = unknown_reference_diagnostics(src);
+        let diagnostics = unknown_reference_diagnostics(src, &[]);
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(&src[diagnostics[0].span.clone().unwrap()], "nch");

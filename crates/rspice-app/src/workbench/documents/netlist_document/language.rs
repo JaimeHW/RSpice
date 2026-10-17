@@ -6,7 +6,9 @@
 
 use std::sync::Arc;
 
-use rspice_core::netlist::{NetlistSourceMap, NetlistValueKind, NetlistValueSpan};
+use rspice_core::netlist::{
+    NetlistSourceMap, NetlistValueKind, NetlistValueSpan, UnreadSourceReason, UnreadSourceRegion,
+};
 
 use super::{ActiveNetlistDocument, AppState, canonical_root_document};
 use crate::workbench::{MessageCatalog, MessageId};
@@ -521,18 +523,24 @@ pub(crate) struct NetlistValueHover {
     pub(crate) value: Option<String>,
     /// Where the value came from, or why there is none.
     pub(crate) detail: Option<String>,
+    /// Whether the answer, with no value, is the parser's: the token is on a
+    /// line it does not read, or names a parameter only such lines define.
+    pub(crate) not_read: bool,
 }
 
 /// The editor's value index for one buffer revision, plus the last answer it
 /// gave.
 ///
 /// A hover is a paint-rate query and must never cost a parse. The span index
-/// is derived once per buffer revision; a pointer that has not moved reads the
-/// retained answer, and a pointer that moved within one scope reuses the
-/// retained parameter environment.
+/// is derived once per buffer revision, and again when the debounced parse of
+/// that revision arrives with the lines it did not read; a pointer that has
+/// not moved reads the retained answer, and a pointer that moved within one
+/// scope reuses the retained parameter environment.
 #[derive(Debug, Clone)]
 pub(super) struct CachedValueIndex {
     revision: u64,
+    /// Whether `map` applies what a parse of `revision` left unread.
+    read_by_parse: bool,
     map: Arc<NetlistSourceMap>,
     /// Parameter environment last built, with the scope it is for.
     context: Option<(Option<String>, rspice_core::netlist::ParamContext)>,
@@ -541,10 +549,17 @@ pub(super) struct CachedValueIndex {
 }
 
 impl CachedValueIndex {
-    fn build(revision: u64, buffer: &str) -> Self {
+    /// The index of `buffer` at `revision`, read as its parse read it when
+    /// `unread` carries what that parse left out.
+    fn build(revision: u64, buffer: &str, unread: Option<&[UnreadSourceRegion]>) -> Self {
+        let map = match unread {
+            Some(unread) => rspice_core::netlist::source_map_for_editor_as_read(buffer, unread),
+            None => rspice_core::netlist::source_map_for_editor(buffer),
+        };
         Self {
             revision,
-            map: Arc::new(rspice_core::netlist::source_map_for_editor(buffer)),
+            read_by_parse: unread.is_some(),
+            map: Arc::new(map),
             context: None,
             hovered: None,
         }
@@ -578,6 +593,12 @@ impl CachedValueIndex {
         char_index: usize,
         messages: MessageCatalog,
     ) -> Option<NetlistValueHover> {
+        // Which lines of a `.if` block or an inline `.lib` section are read is
+        // the parser's decision. Until a parse of this revision has made it,
+        // no value in the deck can be vouched for.
+        if !self.read_by_parse && self.map.decided_by_parse {
+            return None;
+        }
         let byte = buffer
             .char_indices()
             .nth(char_index)
@@ -590,6 +611,17 @@ impl CachedValueIndex {
                 span.name.clone()
             }
         };
+        if let Some(reason) = &span.unread {
+            return Some(NetlistValueHover {
+                token,
+                value: None,
+                detail: Some(messages.format(
+                    MessageId::NetlistHoverNotRead,
+                    &[("reason", &unread_reason(reason, messages))],
+                )),
+                not_read: true,
+            });
+        }
         let binding = match span.kind {
             NetlistValueKind::Expression => None,
             NetlistValueKind::ParamDefinition | NetlistValueKind::ParamReference => {
@@ -607,6 +639,7 @@ impl CachedValueIndex {
         };
         let context = self.context_for(span.scope.as_deref());
         let evaluated = rspice_core::netlist::expr::eval_expression(expression, context);
+        let mut not_read = false;
         let (value, detail) = match evaluated {
             Ok(value) => (
                 Some(format_hover_value(value)),
@@ -620,13 +653,27 @@ impl CachedValueIndex {
                         )
                     }),
             ),
-            Err(rspice_core::netlist::expr::ExprError::UndefinedParam(name)) => (
-                None,
-                Some(messages.format(
-                    MessageId::NetlistHoverUndefinedParameter,
-                    &[("name", &name)],
-                )),
-            ),
+            Err(rspice_core::netlist::expr::ExprError::UndefinedParam(name)) => {
+                let unread_definition = map
+                    .unread_definition_for(&name, span.scope.as_deref())
+                    .and_then(|definition| Some((definition, definition.unread.as_ref()?)));
+                not_read = unread_definition.is_some();
+                let detail = match unread_definition {
+                    Some((definition, reason)) => messages.format(
+                        MessageId::NetlistHoverDefinedOnlyUnread,
+                        &[
+                            ("name", &definition.name),
+                            ("line", &definition.line.to_string()),
+                            ("reason", &unread_reason(reason, messages)),
+                        ],
+                    ),
+                    None => messages.format(
+                        MessageId::NetlistHoverUndefinedParameter,
+                        &[("name", &name)],
+                    ),
+                };
+                (None, Some(detail))
+            }
             Err(error) => (
                 None,
                 Some(messages.format(
@@ -639,7 +686,24 @@ impl CachedValueIndex {
             token,
             value,
             detail,
+            not_read,
         })
+    }
+}
+
+/// Why the parser did not read a line, as the hover says it.
+fn unread_reason(reason: &UnreadSourceReason, messages: MessageCatalog) -> String {
+    match reason {
+        UnreadSourceReason::ConditionalBranch { condition, holds } => messages.format(
+            MessageId::NetlistHoverUntakenBranch,
+            &[
+                ("condition", condition),
+                ("holds", if *holds { "true" } else { "false" }),
+            ],
+        ),
+        UnreadSourceReason::LibrarySection { name } => {
+            messages.format(MessageId::NetlistHoverUnselectedSection, &[("name", name)])
+        }
     }
 }
 
@@ -684,9 +748,12 @@ pub(crate) fn value_hover_at(
     }
     let revision = state.ui.netlist.revision;
     let messages = state.ui.messages();
+    let unread = state.ui.netlist.unread_source_at(revision);
     let index = match &mut state.ui.netlist.value_index {
-        Some(index) if index.revision == revision => index,
-        slot => slot.insert(CachedValueIndex::build(revision, buffer)),
+        Some(index) if index.revision == revision && index.read_by_parse == unread.is_some() => {
+            index
+        }
+        slot => slot.insert(CachedValueIndex::build(revision, buffer, unread.as_deref())),
     };
     if let Some((resolved_at, hover)) = &index.hovered
         && *resolved_at == char_index
