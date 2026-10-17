@@ -112,7 +112,7 @@ impl AppState {
         .with_route(route);
         records.push(record);
         let published = match dispatched {
-            Some(digest) => self.diagnostics.insert(digest, inputs, records),
+            Some(digest) => self.diagnostics.insert(digest, inputs, records, None),
             None => self.publish_diagnostics(inputs, records),
         };
         self.state_refusal(published);

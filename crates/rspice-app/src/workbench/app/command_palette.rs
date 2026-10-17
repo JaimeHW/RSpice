@@ -1577,7 +1577,10 @@ fn row_icon(entry: &PaletteEntry) -> Icon {
         Command::RuleSetup => Icon::Check,
         Command::RunSimulation => Icon::Run,
         Command::StopSimulation => Icon::Stop,
-        Command::RunChecks | Command::CheckAndSave | Command::PreflightChecks => Icon::Check,
+        Command::CheckCellview
+        | Command::CheckDesign
+        | Command::CheckAndSave
+        | Command::PreflightChecks => Icon::Check,
         Command::OpenProject
         | Command::ProjectLauncher
         | Command::RecentProjects

@@ -80,7 +80,7 @@ pub(crate) fn open_check_and_save_dialog(state: &mut AppState) {
         return;
     }
     state.sync_active_schematic_to_workspace();
-    crate::workbench::menu_bar::run_design_rule_check(state);
+    crate::workbench::menu_bar::check_cellview(state);
     match CheckAndSaveValidationReport::collect(state) {
         Ok(report) => {
             let blockers = report.blockers().len();

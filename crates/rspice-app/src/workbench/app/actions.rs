@@ -325,9 +325,6 @@ impl RSpiceApp {
                     self.state.push_sim_message(ConsoleMessage::warning(error));
                 }
             }
-            ShortcutCommand::RunChecks => {
-                crate::workbench::menu_bar::run_design_rule_check(&mut self.state);
-            }
             ShortcutCommand::NextViolation => {
                 crate::schematic::view::violations::cycle_violation(&mut self.state, 1);
             }
@@ -513,7 +510,7 @@ impl RSpiceApp {
                 self.state.ui.symbol.editor.pan = (0.0, 0.0);
                 true
             }
-            ShortcutCommand::RunChecks => {
+            ShortcutCommand::CheckCellview => {
                 self.state.run_active_symbol_pin_checks();
                 true
             }

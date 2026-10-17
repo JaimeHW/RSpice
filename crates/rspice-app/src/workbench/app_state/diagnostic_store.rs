@@ -36,10 +36,10 @@ use rspice_app_types::diagnostics::{CanonicalDiagnosticMetadata, DiagnosticSever
 
 use crate::diagnostics::LogAnchor;
 use crate::product::{ContentDigest, ProjectId};
-use crate::state::CellViewRef;
+use crate::state::{CanonicalCellViewOwnerKey, CellViewRef};
 use crate::workbench::state::PreflightRemediation;
 
-use super::AppState;
+use super::{AppState, design_checks};
 
 const DIAGNOSTIC_INPUT_DIGEST_DOMAIN: &[u8] = b"rspice-diagnostic-inputs/v1\0";
 
@@ -295,6 +295,12 @@ pub(in crate::workbench) struct DiagnosticRecord {
     /// the waiver covering it, or — `None` — nothing, because it is not a
     /// design-rule finding or its rule may not be waived.
     pub(in crate::workbench) waiver_action: Option<super::waivers::WaiverAction>,
+    /// The cellview the object a design-rule finding is about is drawn in,
+    /// which is not the checked subject for a finding stated inside an
+    /// instance. A later check that states that cellview's findings takes
+    /// this one over: see [`super::design_checks::RuleCoverage`]. `None` for
+    /// every other producer's records.
+    pub(in crate::workbench) drawn_in: Option<CanonicalCellViewOwnerKey>,
 }
 
 impl DiagnosticRecord {
@@ -322,7 +328,18 @@ impl DiagnosticRecord {
             rule: String::new(),
             route: None,
             waiver_action: None,
+            drawn_in: None,
         }
+    }
+
+    /// State the cellview the finding's object is drawn in.
+    pub(in crate::workbench) fn drawn_in(mut self, cell_view: &CellViewRef) -> Self {
+        self.drawn_in = Some(crate::state::canonical_cell_view_owner_key(
+            &cell_view.library,
+            &cell_view.cell,
+            &cell_view.view,
+        ));
+        self
     }
 
     pub(in crate::workbench) fn with_waiver_action(
@@ -1023,44 +1040,75 @@ impl DiagnosticStore {
     /// An empty batch is still evidence: it is what says the checks ran and
     /// found nothing, which the page states differently from "nobody has
     /// looked".
+    ///
+    /// With a `coverage`, the batch takes over every finding an earlier
+    /// design-rule batch states under it: those records leave the earlier
+    /// batch, so the finding is listed once, by the newest check that looked
+    /// at it, and the identity they shared with this batch's own record of
+    /// the same finding is this batch's.
     fn insert(
         &mut self,
         digest: ContentDigest,
         inputs: DiagnosticInputs,
         records: Vec<DiagnosticRecord>,
+        coverage: Option<&design_checks::RuleCoverage>,
     ) -> Result<(), String> {
         self.capture_current_key();
         let key = inputs.key();
-        let replaced = self.batches.remove(&key);
-        if let Some(replaced) = &replaced {
-            for record in &replaced.records {
-                self.owners.remove(&record.canonical.diagnostic_id);
-            }
-        }
-        // One pass answers both questions: an identity already claimed is
-        // either another batch's or one this batch minted twice.
-        let mut claimed = Vec::with_capacity(records.len());
+        let superseded: std::collections::HashSet<uuid::Uuid> =
+            coverage.map_or_else(Default::default, |coverage| {
+                self.batches
+                    .iter()
+                    .filter(|(other, batch)| {
+                        **other != key && batch.inputs.owner() == DiagnosticOwner::DesignRules
+                    })
+                    .flat_map(|(_, batch)| batch.records.iter())
+                    .filter(|record| coverage.covers(record))
+                    .map(|record| record.canonical.diagnostic_id)
+                    .collect()
+            });
+        // Decided before anything moves, so a refused publication leaves the
+        // store exactly as it found it. An identity already claimed is
+        // either another batch's or one this batch minted twice; one held by
+        // the batch this replaces, or by a record this batch supersedes, is
+        // free.
+        let mut claimed = std::collections::HashSet::with_capacity(records.len());
         for record in &records {
             let id = record.canonical.diagnostic_id;
-            if self.owners.contains_key(&id) {
-                // Put back what was taken out, so a refused publication
-                // leaves the store exactly as it found it.
-                for id in claimed {
-                    self.owners.remove(&id);
-                }
-                if let Some(replaced) = replaced {
-                    for record in &replaced.records {
-                        self.owners
-                            .insert(record.canonical.diagnostic_id, key.clone());
-                    }
-                    self.batches.insert(key, replaced);
-                }
+            let held_elsewhere = self
+                .owners
+                .get(&id)
+                .is_some_and(|owner| *owner != key && !superseded.contains(&id));
+            if held_elsewhere || !claimed.insert(id) {
                 return Err(format!(
                     "Diagnostic collection contains duplicate canonical ID {id}."
                 ));
             }
+        }
+        if !superseded.is_empty() {
+            for (other, batch) in &mut self.batches {
+                if *other == key {
+                    continue;
+                }
+                let before = batch.records.len();
+                batch
+                    .records
+                    .retain(|record| !superseded.contains(&record.canonical.diagnostic_id));
+                if batch.records.len() != before {
+                    batch.fingerprint = fingerprint(&batch.records);
+                }
+            }
+            for id in &superseded {
+                self.owners.remove(id);
+            }
+        }
+        if let Some(replaced) = self.batches.remove(&key) {
+            for record in &replaced.records {
+                self.owners.remove(&record.canonical.diagnostic_id);
+            }
+        }
+        for id in claimed {
             self.owners.insert(id, key.clone());
-            claimed.push(id);
         }
         self.batches.insert(
             key,
@@ -1099,7 +1147,20 @@ impl AppState {
         records: Vec<DiagnosticRecord>,
     ) -> Result<(), String> {
         let digest = inputs.live_digest(&DigestScope::new(self))?;
-        self.diagnostics.insert(digest, inputs, records)
+        self.diagnostics.insert(digest, inputs, records, None)
+    }
+
+    /// Publish a design-rule pass that takes over every finding an earlier
+    /// pass states under `coverage`.
+    pub(in crate::workbench) fn publish_superseding(
+        &mut self,
+        inputs: DiagnosticInputs,
+        records: Vec<DiagnosticRecord>,
+        coverage: &design_checks::RuleCoverage,
+    ) -> Result<(), String> {
+        let digest = inputs.live_digest(&DigestScope::new(self))?;
+        self.diagnostics
+            .insert(digest, inputs, records, Some(coverage))
     }
 
     /// Withdraw a batch, for a producer whose evidence no longer exists at

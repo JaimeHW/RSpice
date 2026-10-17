@@ -82,6 +82,13 @@ const DESIGN_MANAGEMENT_COMMANDS: [Command; 8] = [
     Command::ReviewComments,
     Command::RevisionHistory,
 ];
+/// The design checks, narrowest first: the cellview in front of the reader,
+/// the whole design, and the check that gates a save.
+const DESIGN_CHECK_COMMANDS: [Command; 3] = [
+    Command::CheckCellview,
+    Command::CheckDesign,
+    Command::CheckAndSave,
+];
 const WINDOW_LAYOUT_COMMANDS: [Command; 5] = [
     Command::ToggleNavigator,
     Command::ToggleInspector,
@@ -1336,7 +1343,8 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::RunSimulation | Command::ModelRunQualificationTests => WorkbenchIcon::Run,
         Command::StopSimulation => WorkbenchIcon::Stop,
         Command::PreflightChecks
-        | Command::RunChecks
+        | Command::CheckCellview
+        | Command::CheckDesign
         | Command::CheckAndSave
         | Command::ModelValidate => WorkbenchIcon::Check,
         Command::CompileVerilogA => WorkbenchIcon::Code,
@@ -1641,7 +1649,10 @@ fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         "Specialist workspaces\u{2026}",
         None,
     );
-    command_item(ui, app, Command::CheckAndSave);
+    menu_separator(ui);
+    for command in DESIGN_CHECK_COMMANDS {
+        command_item(ui, app, command);
+    }
     menu_separator(ui);
     scoped_palette_item(ui, app, "Browse all design commands\u{2026}", "Design");
 }

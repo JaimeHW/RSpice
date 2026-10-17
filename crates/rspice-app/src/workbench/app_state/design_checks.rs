@@ -15,7 +15,7 @@ use crate::product::{ContentDigest, ProjectId};
 use crate::state::{
     CanonicalCellViewOwnerKey, CellViewRef, ViewType, canonical_cell_view_owner_key,
 };
-use rspice_design::drc::{DrcConfig, DrcResult};
+use rspice_design::drc::{CheckReach, DrcConfig, DrcLocation, DrcResult, DrcViolationType};
 
 use super::AppState;
 use super::diagnostic_store::{
@@ -35,6 +35,89 @@ pub(crate) struct CellViewCheckReceipt {
     pub(crate) subject: CellViewRef,
     pub(crate) input_digest: ContentDigest,
     pub(crate) result: DrcResult,
+    /// How much of the design the check stated.
+    pub(crate) scope: CheckScope,
+    /// Where it stands in the order the checks were published in, which is
+    /// the order a waiver edit states them again in: a later check took over
+    /// the findings it shares with an earlier one, and still does after.
+    sequence: u64,
+}
+
+/// How much of the design one check states, which is what it takes over from
+/// the checks published before it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CheckScope {
+    /// The subject's own findings: Check Cellview, and Check and Save.
+    Cellview,
+    /// The subject and every cellview its walk reaches.
+    Hierarchy,
+    /// The configured design, walked from the simulation root, and every
+    /// schematic of the project's own libraries the walk never reaches:
+    /// Check Design.
+    Design,
+}
+
+impl CheckScope {
+    const fn reach(self) -> CheckReach {
+        match self {
+            Self::Cellview => CheckReach::Cellview,
+            Self::Hierarchy | Self::Design => CheckReach::Hierarchy,
+        }
+    }
+}
+
+/// What one design-rule pass states: for each cellview, the rules whose
+/// findings about objects drawn in it the pass reports.
+///
+/// A pass published with its coverage takes over every finding an earlier
+/// pass states under it, so a finding is listed once, by the newest check
+/// that looked at it. That is how Check Cellview, Check Design and the
+/// checks beside them compose: a check of `amp` after a check of the whole
+/// design states `amp`'s findings itself, and the design check's statements
+/// of them at `X1` and `X2` leave the list; a check of the design after that
+/// takes them back.
+#[derive(Debug, Clone, Default)]
+pub(in crate::workbench) struct RuleCoverage {
+    cellviews: BTreeMap<CanonicalCellViewOwnerKey, RuleScope>,
+}
+
+/// Which rules a pass states about one cellview.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuleScope {
+    /// Every rule a check of the cellview's contents decides: all but
+    /// whether the cellview is used, which only a check of the whole design
+    /// can say.
+    Contents,
+    /// Every rule.
+    Every,
+    /// Only whether the cellview is used.
+    Use,
+}
+
+impl RuleScope {
+    fn covers(self, code: &str) -> bool {
+        let unused = DrcViolationType::UnusedCellView.rule_code();
+        match self {
+            Self::Every => true,
+            Self::Contents => code != unused,
+            Self::Use => code == unused,
+        }
+    }
+}
+
+impl RuleCoverage {
+    fn state(&mut self, cell_view: &CellViewRef, scope: RuleScope) {
+        self.cellviews.insert(owner_key(cell_view), scope);
+    }
+
+    /// Whether this pass states the finding `record` holds.
+    pub(in crate::workbench) fn covers(&self, record: &DiagnosticRecord) -> bool {
+        record
+            .drawn_in
+            .as_ref()
+            .and_then(|cell_view| self.cellviews.get(cell_view))
+            .is_some_and(|scope| scope.covers(&record.canonical.code))
+    }
 }
 
 #[derive(Debug)]
@@ -68,6 +151,8 @@ impl DesignCheckStatus<'_> {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct DesignCheckRuntime {
     receipts: BTreeMap<CanonicalCellViewOwnerKey, CellViewCheckReceipt>,
+    /// The sequence the next receipt is stored under.
+    published: u64,
 }
 
 impl DesignCheckRuntime {
@@ -75,7 +160,9 @@ impl DesignCheckRuntime {
         self.receipts.get(&owner_key(subject))
     }
 
-    fn insert(&mut self, receipt: CellViewCheckReceipt) {
+    fn insert(&mut self, mut receipt: CellViewCheckReceipt) {
+        receipt.sequence = self.published;
+        self.published = self.published.wrapping_add(1);
         self.receipts.insert(owner_key(&receipt.subject), receipt);
     }
 
@@ -89,11 +176,43 @@ impl DesignCheckRuntime {
 }
 
 impl AppState {
+    /// Check Cellview: the open cellview's own findings.
+    ///
+    /// The hierarchy below is walked only for what no single cellview can
+    /// answer — whether the design reaches ground and whether a cycle runs
+    /// through it — so it answers in the time the one drawing takes.
+    pub(crate) fn check_active_cellview(&mut self) -> Result<DrcResult, String> {
+        if !matches!(
+            self.workspace.content.active_view_type(),
+            ViewType::Schematic | ViewType::Testbench
+        ) {
+            return Err("only a schematic or a testbench has design rules to check".to_owned());
+        }
+        let subject = self.workspace.content.active_schematic_reference();
+        self.run_design_check(subject, CheckScope::Cellview)
+    }
+
+    /// Check Design: the configured design, walked from the simulation root,
+    /// with every schematic of the project's own libraries it never reaches.
+    pub(crate) fn check_design(&mut self) -> Result<DrcResult, String> {
+        let root = self.workspace.content.simulation_root_reference();
+        self.run_design_check(root, CheckScope::Design)
+    }
+
+    /// The open cellview and every cellview its walk reaches.
     pub(crate) fn run_active_design_checks(&mut self) -> Result<DrcResult, String> {
+        let subject = self.workspace.content.active_schematic_reference();
+        self.run_design_check(subject, CheckScope::Hierarchy)
+    }
+
+    fn run_design_check(
+        &mut self,
+        subject: CellViewRef,
+        scope: CheckScope,
+    ) -> Result<DrcResult, String> {
         if self.workspace.annotation_restoration_error().is_some() {
             self.sync_active_schematic_to_workspace();
         }
-        let subject = self.workspace.content.active_schematic_reference();
         let config = self.design_check_config(&subject);
         // Checks run over the design as configured, not over the editor
         // buffer. That is what makes two sheets with coincident authored
@@ -107,24 +226,29 @@ impl AppState {
                 &self.schematic,
             )
             .map_err(|error| error.to_string())?;
-        let checked = projection
-            .schematic_buffers()
-            .iter()
-            .find(|(key, _)| key.eq_ignore_ascii_case(&subject.key()))
-            .map(|(_, schematic)| schematic)
-            .ok_or_else(|| {
-                format!(
-                    "{} is not part of the configured design.",
-                    subject.display_path()
-                )
-            })?;
+        let checked = projected_buffer(&projection, &subject)?;
         let hierarchy = rspice_design::hierarchy::HierarchySource::from_design_projection(
             self.library_manager.catalog(),
             &projection,
         );
-        let result =
-            rspice_design::drc::run_check_with_hierarchy(checked, &hierarchy, config.clone());
-        self.publish_design_check_result(subject, config, result.clone())?;
+        let mut result = rspice_design::drc::run_check_of_cellview(
+            checked,
+            &subject,
+            &hierarchy,
+            config.clone(),
+            scope.reach(),
+        );
+        if scope == CheckScope::Design {
+            let reads = rspice_design::drc::check_reads(checked, &subject, &hierarchy);
+            rspice_design::drc::append_unused_cellviews(
+                &mut result,
+                &subject,
+                project_schematics(self),
+                &reads,
+                &config,
+            );
+        }
+        self.publish_design_check_result(subject, config, result.clone(), scope)?;
         Ok(result)
     }
 
@@ -143,7 +267,7 @@ impl AppState {
         }
         let subject = self.workspace.content.active_schematic_reference();
         let config = self.design_check_config(&subject);
-        self.publish_design_check_result(subject, config, result)
+        self.publish_design_check_result(subject, config, result, CheckScope::Hierarchy)
     }
 
     /// The configuration the design rules are checked under for the
@@ -168,7 +292,7 @@ impl AppState {
     ) -> Result<(), String> {
         let subject = self.workspace.content.simulation_root_reference();
         let config = self.design_check_config(&subject);
-        self.publish_design_check_result(subject, config, result)
+        self.publish_design_check_result(subject, config, result, CheckScope::Hierarchy)
     }
 
     fn publish_design_check_result(
@@ -176,6 +300,7 @@ impl AppState {
         subject: CellViewRef,
         config: DrcConfig,
         mut result: DrcResult,
+        scope: CheckScope,
     ) -> Result<(), String> {
         if !result.completed {
             return Err(
@@ -197,21 +322,25 @@ impl AppState {
         // one of them needs to ask the live drawing where its object is and
         // both insertions take the state mutably.
         let records = design_rule_records(self, &subject, &result);
+        let coverage = check_coverage(self, &subject, scope)?;
         // Published before the receipt is stored, because the store can
         // refuse a batch and the receipt cannot: a receipt stored first would
         // put findings on the canvas and the check pill that the Problems
         // page, refusing them, does not list.
-        self.publish_diagnostics(
+        self.publish_superseding(
             DiagnosticInputs::DesignCheck {
                 subject: subject.clone(),
             },
             records,
+            &coverage,
         )?;
         self.design_checks.insert(CellViewCheckReceipt {
             project_id: self.workspace.content.project.id(),
             subject,
             input_digest,
             result,
+            scope,
+            sequence: 0,
         });
         if is_active_subject {
             self.refresh_active_design_check_projection();
@@ -219,35 +348,28 @@ impl AppState {
         Ok(())
     }
 
-    /// What the published rule findings for `subject` are called, in the order
-    /// the checks reported them.
+    /// What the rule findings of the check of `subject` are called, in the
+    /// order the check reported them: [`DrcResult::violations`]' own, so a
+    /// surface holding the result names the finding at an ordinal.
     ///
-    /// The order is [`DrcResult::violations`]' own, because the records are
-    /// derived from it one for one — which is what lets a surface holding the
-    /// result name the finding at an ordinal without recomputing an identity.
-    /// Each identity is structural: it names the object the finding is about,
-    /// so an unrelated edit and a re-check name the same finding the same
-    /// way.
+    /// Minted from the receipt the way its records were, rather than read
+    /// off the subject's batch, because a later check may have taken a
+    /// finding over: the identity is structural, so it is the record's
+    /// wherever the store now holds it, and the batch no longer lines up with
+    /// the result.
     ///
-    /// Empty where these checks published no records for `subject`. A symbol
-    /// view's findings are never among them: they are the pin checks', owned
-    /// by [`DiagnosticInputs::SymbolPins`] and named there. The records about
-    /// the subject's stored waivers follow the findings, so an ordinal below
-    /// the result's length still names its finding.
+    /// Empty where no check of `subject` is on record. A symbol view's
+    /// findings are never among them: they are the pin checks', owned by
+    /// [`DiagnosticInputs::SymbolPins`] and named there.
     pub(crate) fn design_rule_finding_identities(&self, subject: &CellViewRef) -> Vec<uuid::Uuid> {
-        let published = DiagnosticInputs::DesignCheck {
-            subject: subject.clone(),
+        let Some(receipt) = self.design_checks.receipt(subject) else {
+            return Vec::new();
         };
-        self.diagnostics
-            .batch(&published)
-            .map(|batch| {
-                batch
-                    .records
-                    .iter()
-                    .map(|record| record.canonical.diagnostic_id)
-                    .collect()
-            })
-            .unwrap_or_default()
+        let keys = finding_keys(&receipt.subject, &receipt.result);
+        mint_canonical(&keys, 0, "")
+            .into_iter()
+            .map(|canonical| canonical.diagnostic_id)
+            .collect()
     }
 
     /// The worst rule finding published for `subject`, first among equals in
@@ -306,8 +428,10 @@ impl AppState {
         self.design_check_status(&self.workspace.content.active_schematic_reference())
     }
 
-    pub(crate) fn project_root_design_check_status(&self) -> DesignCheckStatus<'_> {
-        self.design_check_status(&project_root_reference(self))
+    /// Where Check Design's evidence about the configured design stands: the
+    /// receipt is filed under the simulation root it walked from.
+    pub(crate) fn simulation_root_design_check_status(&self) -> DesignCheckStatus<'_> {
+        self.design_check_status(&self.workspace.content.simulation_root_reference())
     }
 
     pub(crate) fn clear_active_design_check(&mut self) {
@@ -333,19 +457,23 @@ impl AppState {
     /// as it is: re-stating it would publish findings about a design that has
     /// moved under the digest of the one in front of the reader.
     pub(in crate::workbench) fn refresh_waived_findings(&mut self) {
-        let subjects = self
+        // In the order they were published, so each still takes over from the
+        // checks before it what it took over then.
+        let mut subjects = self
             .design_checks
             .receipts
             .values()
-            .map(|receipt| receipt.subject.clone())
+            .map(|receipt| (receipt.sequence, receipt.subject.clone()))
             .collect::<Vec<_>>();
-        for subject in subjects {
+        subjects.sort_by_key(|(sequence, _)| *sequence);
+        for (_, subject) in subjects {
             let DesignCheckStatus::Current(receipt) = self.design_check_status(&subject) else {
                 continue;
             };
             let result = receipt.result.clone();
+            let scope = receipt.scope;
             let config = self.design_check_config(&subject);
-            if let Err(error) = self.publish_design_check_result(subject, config, result) {
+            if let Err(error) = self.publish_design_check_result(subject, config, result, scope) {
                 self.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
                     "Findings could not be stated again against the waivers: {error}"
                 )));
@@ -407,20 +535,7 @@ fn design_rule_records(
     let project = state.workspace.content.project.id();
     let revision = state.workspace.content.project.revision().get();
     let document_id = subject.key();
-    let producer: Arc<str> = Arc::from(DESIGN_RULE_PRODUCER);
-    let document: Arc<str> = Arc::from(document_id.as_str());
-    let keys: Vec<FindingKey> = result
-        .violations()
-        .iter()
-        .map(|violation| {
-            FindingKey::new(
-                Arc::clone(&producer),
-                violation.violation_type.rule_code(),
-                Arc::clone(&document),
-                location_key(&violation.location),
-            )
-        })
-        .collect();
+    let keys = finding_keys(subject, result);
     let canonicals = mint_canonical(&keys, revision, &format!("design-check:{document_id}"));
     let mut records = result
         .violations()
@@ -435,14 +550,24 @@ fn design_rule_records(
             )
             .map(DiagnosticRoute::Anchor);
             canonical.suppression = violation.waiver.as_ref().map(waivers::suppression_of);
+            let drawn_in = rspice_design::drc::waiver_site(&violation.location)
+                .0
+                .unwrap_or(subject);
+            // A finding about a whole cellview is stated in that cellview, not
+            // in the one whose check found it.
+            let cell_view = match &violation.location {
+                DrcLocation::CellView { reference } => reference.clone(),
+                _ => subject.clone(),
+            };
             DiagnosticRecord::new(
                 canonical,
                 violation.severity.into(),
                 DiagnosticSubject::new(project, violation.location.display())
-                    .in_cell_view(subject.clone()),
+                    .in_cell_view(cell_view),
                 violation.message.clone(),
             )
             .keyed(key)
+            .drawn_in(drawn_in)
             .with_details(violation.violation_type.suggested_fix())
             .with_rule(violation.violation_type.rule().explanation)
             .with_route(route)
@@ -452,11 +577,118 @@ fn design_rule_records(
     // The subject's own waivers that do not do what they say are stated with
     // the pass that found that out.
     if let Some(stored) = state.schematic_waivers(subject) {
-        records.extend(waivers::stored_waiver_records(
-            state, subject, stored, result,
-        ));
+        records.extend(
+            waivers::stored_waiver_records(state, subject, stored, result)
+                .into_iter()
+                .map(|record| record.drawn_in(subject)),
+        );
     }
     records
+}
+
+/// What each finding in `result` is about, in its order: the key its
+/// record's identity is minted from.
+fn finding_keys(subject: &CellViewRef, result: &DrcResult) -> Vec<FindingKey> {
+    let producer: Arc<str> = Arc::from(DESIGN_RULE_PRODUCER);
+    let document: Arc<str> = Arc::from(subject.key().as_str());
+    result
+        .violations()
+        .iter()
+        .map(|violation| {
+            FindingKey::new(
+                Arc::clone(&producer),
+                violation.violation_type.rule_code(),
+                Arc::clone(&document),
+                location_key(&violation.location),
+            )
+        })
+        .collect()
+}
+
+/// The cellview `subject` names, as the configured design projects it.
+fn projected_buffer<'p>(
+    projection: &'p rspice_design::projection::DesignProjection,
+    subject: &CellViewRef,
+) -> Result<&'p rspice_design::projection::ProjectedSchematic, String> {
+    projection
+        .schematic_buffers()
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(&subject.key()))
+        .map(|(_, schematic)| schematic)
+        .ok_or_else(|| {
+            format!(
+                "{} is not part of the configured design.",
+                subject.display_path()
+            )
+        })
+}
+
+/// Every schematic in the project's own libraries.
+///
+/// A reference or technology library is attached read-only, which is how the
+/// project tells it from its own everywhere else — what a cell may be created
+/// in, copied to or edited in — and a cellview in one is never unused: the
+/// project borrows what it needs from it and owes nothing for the rest. A
+/// testbench is a root of its own, not a cell waiting to be placed.
+fn project_schematics(state: &AppState) -> Vec<CellViewRef> {
+    state
+        .library_manager
+        .catalog()
+        .libraries_by_key()
+        .filter(|(_, library)| !library.read_only)
+        .flat_map(|(_, library)| {
+            library.cells.values().flat_map(move |cell| {
+                cell.views
+                    .values()
+                    .filter(|view| view.view_type == ViewType::Schematic)
+                    .map(move |view| CellViewRef::new(&library.name, &cell.name, &view.name))
+            })
+        })
+        .collect()
+}
+
+/// What a pass of `scope` over `subject` states, read off the same projected
+/// design and walk the check took.
+fn check_coverage(
+    state: &AppState,
+    subject: &CellViewRef,
+    scope: CheckScope,
+) -> Result<RuleCoverage, String> {
+    let mut coverage = RuleCoverage::default();
+    if scope == CheckScope::Cellview {
+        coverage.state(subject, RuleScope::Contents);
+        return Ok(coverage);
+    }
+    let projection = state
+        .workspace
+        .design_projection(
+            &state.library_manager,
+            &state.workspace.content.active_view,
+            &state.schematic,
+        )
+        .map_err(|error| error.to_string())?;
+    let checked = projected_buffer(&projection, subject)?;
+    let hierarchy = rspice_design::hierarchy::HierarchySource::from_design_projection(
+        state.library_manager.catalog(),
+        &projection,
+    );
+    let reads = rspice_design::drc::check_reads(checked, subject, &hierarchy);
+    let reached = if scope == CheckScope::Design {
+        // Whether a cellview is used is decided for every schematic of the
+        // project's own: the ones the walk reached by being reached, and the
+        // rest by being reported.
+        for candidate in project_schematics(state) {
+            coverage.state(&candidate, RuleScope::Use);
+        }
+        RuleScope::Every
+    } else {
+        RuleScope::Contents
+    };
+    coverage.state(subject, reached);
+    for cell_view in &reads.reached {
+        coverage.state(cell_view, reached);
+    }
+    Ok(coverage)
 }
 
 /// A stable key of the object a rule finding is located at: the design
@@ -465,14 +697,6 @@ pub(in crate::workbench) use rspice_design::drc::location_key;
 
 fn owner_key(subject: &CellViewRef) -> CanonicalCellViewOwnerKey {
     canonical_cell_view_owner_key(&subject.library, &subject.cell, &subject.view)
-}
-
-fn project_root_reference(state: &AppState) -> CellViewRef {
-    CellViewRef::new(
-        &state.workspace.content.project.root_library,
-        &state.workspace.content.project.top_cell,
-        crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
-    )
 }
 
 impl AppState {

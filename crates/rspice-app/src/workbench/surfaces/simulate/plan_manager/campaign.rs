@@ -487,7 +487,7 @@ pub(super) fn commit_simulation_campaign(
         return Err("A simulation is already running or waiting to start".to_owned());
     }
     app.state.sync_active_schematic_to_workspace();
-    crate::workbench::menu_bar::run_design_rule_check(&mut app.state);
+    crate::workbench::menu_bar::check_design(&mut app.state);
     let receipt =
         app.simulation_controller
             .prepare_and_start_campaign(&mut app.state, name, member_ids)?;

@@ -189,7 +189,7 @@ fn report_collects_all_independent_blocker_classes() {
     let transient_id = plan.instances()[0].id();
     plan.set_enabled(transient_id, false)
         .expect("the sole analysis disables");
-    crate::workbench::menu_bar::run_design_rule_check(&mut state);
+    crate::workbench::menu_bar::check_design(&mut state);
 
     let report = collect_report(&state);
     let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
@@ -463,7 +463,7 @@ fn a_valid_attached_technology_reports_no_technology_row_at_all() {
 #[test]
 fn report_is_bound_to_the_exact_project_topology_and_plan_revision() {
     let mut state = AppState::default();
-    crate::workbench::menu_bar::run_design_rule_check(&mut state);
+    crate::workbench::menu_bar::check_design(&mut state);
 
     let report = collect_report(&state);
 
@@ -620,7 +620,7 @@ fn unresolved_hierarchy_is_an_ordered_preflight_blocker() {
             .is_empty(),
         "fixture must remain unsynchronized to exercise the live overlay"
     );
-    crate::workbench::menu_bar::run_design_rule_check(&mut state);
+    crate::workbench::menu_bar::check_design(&mut state);
 
     let report = collect_report(&state);
 

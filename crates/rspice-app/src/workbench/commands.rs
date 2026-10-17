@@ -781,7 +781,9 @@ impl Command {
             // A symbol cellview checks its pin contract. The editor's own
             // keyboard route always did this; the command must agree, or the
             // toolbar shows a dead control beside a working shortcut.
-            Self::RunChecks => active_schematic_editor(app) || active_symbol_editor(app),
+            Self::CheckCellview => active_schematic_editor(app) || active_symbol_editor(app),
+            // The design is the configured one, whichever view is open.
+            Self::CheckDesign => true,
             Self::CheckAndSave => {
                 active_schematic_editor(app) && !state.schematic_edit_read_only()
             }
@@ -1103,7 +1105,8 @@ impl Command {
                     | Self::DescendHierarchyDirect
                     | Self::RunSimulation
                     | Self::GenerateNetlist
-                    | Self::RunChecks
+                    | Self::CheckCellview
+                    | Self::CheckDesign
                     | Self::PreflightChecks
                     | Self::ShowInNetlist
                     | Self::SimulationPage(_)
@@ -1842,10 +1845,11 @@ impl Command {
                 app.state.open_selected_instance_master();
             }
             Self::ShowInNetlist => app.state.show_selected_instance_in_netlist(),
-            Self::RunChecks if active_symbol_editor(app) => {
+            Self::CheckCellview if active_symbol_editor(app) => {
                 app.state.run_active_symbol_pin_checks();
             }
-            Self::RunChecks => crate::workbench::menu_bar::run_design_rule_check(&mut app.state),
+            Self::CheckCellview => crate::workbench::menu_bar::check_cellview(&mut app.state),
+            Self::CheckDesign => crate::workbench::menu_bar::check_design(&mut app.state),
             Self::CheckAndSave => {
                 crate::workbench::app::open_check_and_save_dialog(&mut app.state);
             }

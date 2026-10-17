@@ -532,7 +532,7 @@ impl OverviewSnapshot {
                 detail: checks.detail,
                 action: "Run checks",
                 tone: checks.tone,
-                intent: OverviewIntent::ProjectRootCommand(Command::RunChecks),
+                intent: OverviewIntent::ProjectRootCommand(Command::CheckDesign),
                 enabled,
                 disabled_reason: (!enabled).then_some("no project is open"),
             }
@@ -1939,7 +1939,7 @@ fn activity_row(
 }
 
 fn checks_snapshot(app: &RSpiceApp) -> HealthCopy {
-    match app.state.project_root_design_check_status() {
+    match app.state.simulation_root_design_check_status() {
         DesignCheckStatus::Current(receipt) => {
             let summary = receipt.result.summary();
             drc_copy(
@@ -1977,7 +1977,7 @@ fn problem_snapshot(app: &RSpiceApp) -> Option<ProblemSnapshot> {
         app.state.workspace.content.project.root_library,
         app.state.workspace.content.project.top_cell
     );
-    let result = match app.state.project_root_design_check_status() {
+    let result = match app.state.simulation_root_design_check_status() {
         DesignCheckStatus::Current(receipt) => &receipt.result,
         DesignCheckStatus::NotRun => {
             return Some(ProblemSnapshot {
