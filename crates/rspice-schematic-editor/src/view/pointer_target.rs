@@ -113,7 +113,11 @@ fn hits<T: Clone>(
     };
     let mut found = vec![hit];
     if all {
-        let mut rest: Vec<T> = items.iter().filter(|item| id(item) != hit).cloned().collect();
+        let mut rest: Vec<T> = items
+            .iter()
+            .filter(|item| id(item) != hit)
+            .cloned()
+            .collect();
         while let Some(hit) = first(&rest) {
             found.push(hit);
             rest.retain(|item| id(item) != hit);
@@ -223,7 +227,11 @@ fn collect_targets(
         }
         let slop = pick_slop(ctx);
         let junctions = junctions_at_screen(view, viewport, pointer_pos, slop);
-        let junctions = if all { &junctions[..] } else { &junctions[..junctions.len().min(1)] };
+        let junctions = if all {
+            &junctions[..]
+        } else {
+            &junctions[..junctions.len().min(1)]
+        };
         targets.extend(junctions.iter().copied().map(PointerTarget::Junction));
         if settled(&targets) {
             return targets;

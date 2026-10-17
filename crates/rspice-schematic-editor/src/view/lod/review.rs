@@ -302,9 +302,7 @@ fn render_hover_review() {
         pointer_target::PointerTarget,
         scene::{SceneOverlays, SceneSymbols, SceneView, draw_content},
     };
-    use rspice_design::schematic::{
-        document::SchematicDocument, net_label::Junction, wire::Wire,
-    };
+    use rspice_design::schematic::{document::SchematicDocument, net_label::Junction, wire::Wire};
     let library = SymbolLibrary::load_embedded().expect("symbol library");
     let context = SchematicSymbolContext::default();
     let mut resistor = Component::new(1, ComponentType::Resistor, Point::new(0, 30));
@@ -541,7 +539,10 @@ fn render_operating_point_review() {
         },
         OperatingPointCanvasAnnotation {
             subject: BadgeSubject::Device { component: 1 },
-            lines: vec!["I(r1) = 91.2 \u{03bc}A".to_owned(), "P(r1) = 83.2 \u{00b5}W".to_owned()],
+            lines: vec![
+                "I(r1) = 91.2 \u{03bc}A".to_owned(),
+                "P(r1) = 83.2 \u{00b5}W".to_owned(),
+            ],
             class: 0,
             key: "r1".to_owned(),
             selected_current: true,
@@ -713,8 +714,7 @@ fn render_pick_chooser_review() {
                 ui.painter().rect_filled(bounds, 0.0, palette.canvas_bg);
                 paint_circuit(ui.painter(), &viewport);
                 // A headless pass has no clock for the popup's fade-in.
-                ui.ctx()
-                    .all_styles_mut(|style| style.animation_time = 0.0);
+                ui.ctx().all_styles_mut(|style| style.animation_time = 0.0);
                 let anchor = viewport.schematic_to_screen(Point::new(0, 0));
                 let mut chooser = PickChooser::open(anchor, rows.clone(), false).expect("rows");
                 chooser.focused = 1;

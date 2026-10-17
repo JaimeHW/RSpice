@@ -1063,12 +1063,47 @@ mod tests {
         let (start, end, middle) = (Align::Min, Align::Max, Align::Center);
         let (top, bottom) = (Align::Min, Align::Max);
         let cases = [
-            ("R0", Rotation::R0, false, false, [start, middle], [start, middle]),
+            (
+                "R0",
+                Rotation::R0,
+                false,
+                false,
+                [start, middle],
+                [start, middle],
+            ),
             ("R90", Rotation::R90, false, false, [start, top], [end, top]),
-            ("R180", Rotation::R180, false, false, [end, middle], [end, middle]),
-            ("R270", Rotation::R270, false, false, [end, bottom], [start, bottom]),
-            ("mirror X", Rotation::R0, true, false, [end, middle], [end, middle]),
-            ("mirror Y", Rotation::R0, false, true, [start, middle], [start, middle]),
+            (
+                "R180",
+                Rotation::R180,
+                false,
+                false,
+                [end, middle],
+                [end, middle],
+            ),
+            (
+                "R270",
+                Rotation::R270,
+                false,
+                false,
+                [end, bottom],
+                [start, bottom],
+            ),
+            (
+                "mirror X",
+                Rotation::R0,
+                true,
+                false,
+                [end, middle],
+                [end, middle],
+            ),
+            (
+                "mirror Y",
+                Rotation::R0,
+                false,
+                true,
+                [start, middle],
+                [start, middle],
+            ),
         ];
         for (orientation, rotation, mirror_h, mirror_v, name_align, value_align) in cases {
             let mut component = Component::new(1, ComponentType::CellInstance, Point::origin());
@@ -1113,7 +1148,8 @@ mod tests {
                 .unwrap_or_else(|| panic!("no {text} in {svg}"))
                 .to_owned()
         };
-        let (name_x, name_y) = to_svg_symbol(&component, &symbol, symbol.document().name_anchor, &config);
+        let (name_x, name_y) =
+            to_svg_symbol(&component, &symbol, symbol.document().name_anchor, &config);
         let name = line("X1");
         assert!(name.contains(r#"text-anchor="start""#), "{name}");
         assert!(
@@ -1123,7 +1159,10 @@ mod tests {
         assert!(name.contains("font-size: 10px; font-weight: 500"), "{name}");
         let value = line("ota");
         assert!(value.contains(r#"text-anchor="end""#), "{value}");
-        assert!(value.contains("font-size: 9px; font-weight: 400"), "{value}");
+        assert!(
+            value.contains("font-size: 9px; font-weight: 400"),
+            "{value}"
+        );
         assert!(!name.contains("dominant-baseline"), "{name}");
     }
 

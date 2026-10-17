@@ -1348,7 +1348,9 @@ pub fn draw_open_pin_marks(
     // A whole, odd number of device pixels between the outline's centres:
     // with the centre on the pixel corner a lead's crisp stroke is centred
     // on, the 1-dpx edges then land on pixel centres, square about the lead.
-    let side_px = (lod::open_pin_side_pt(viewport.zoom) * ppp).round().max(1.0);
+    let side_px = (lod::open_pin_side_pt(viewport.zoom) * ppp)
+        .round()
+        .max(1.0);
     let side = (side_px + 1.0 - side_px % 2.0) / ppp;
     let stroke = Stroke::new(lod::mark_outline_pt(ppp), colour);
     for terminal in open {

@@ -1242,7 +1242,10 @@ mod tests {
             )),
             "the name stands on the canvas's anchor above the body: {flat}"
         );
-        assert!(flat.contains("font-size: 100px; font-weight: 500"), "{flat}");
+        assert!(
+            flat.contains("font-size: 100px; font-weight: 500"),
+            "{flat}"
+        );
         let (turned, _) = name_line(Rotation::R90);
         assert!(turned.contains(r#"text-anchor="end""#), "{turned}");
     }

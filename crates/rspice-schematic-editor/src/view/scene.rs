@@ -6,9 +6,8 @@ use super::{
     documentation_shapes::{draw_documentation_shape, world_bounds as documentation_shape_bounds},
     drawing::{
         ConductorInk, JunctionPaint, ProbeVisualStatus, bus_band_width_pt, bus_tap_width_pt,
-        chain_conductors, draw_bus, draw_bus_tap, draw_component, draw_conductor,
-        draw_hover_halo, draw_hover_outline, draw_junction, draw_open_pin_marks, draw_probe,
-        probe_world_bounds,
+        chain_conductors, draw_bus, draw_bus_tap, draw_component, draw_conductor, draw_hover_halo,
+        draw_hover_outline, draw_junction, draw_open_pin_marks, draw_probe, probe_world_bounds,
     },
     net_labels::{NetLabelPaint, draw_net_label_attached, world_bounds as net_label_world_bounds},
     pointer_target::PointerTarget,
@@ -33,8 +32,8 @@ mod annotations;
 mod empty;
 mod focus;
 mod parent;
-pub use annotations::{BadgeSubject, OperatingPointCanvasAnnotation};
 use annotations::draw_operating_point_annotations;
+pub use annotations::{BadgeSubject, OperatingPointCanvasAnnotation};
 pub use empty::draw_empty_hint;
 pub use focus::{draw_keyboard_focus, keyboard_focus_matches_selection};
 pub use parent::draw_parent_context;
@@ -482,7 +481,12 @@ fn draw_conductor_hover(
         PointerTarget::BusTap(id) => {
             if let Some(tap) = document.bus_taps.iter().find(|tap| tap.id == id) {
                 let route = crate::bus_geometry::bus_tap_route_points(tap);
-                draw_hover_halo(painter, viewport, &route, bus_tap_width_pt(viewport.zoom, ppp));
+                draw_hover_halo(
+                    painter,
+                    viewport,
+                    &route,
+                    bus_tap_width_pt(viewport.zoom, ppp),
+                );
             }
         }
         PointerTarget::Component(_)
@@ -795,7 +799,11 @@ mod hover_tests {
 
     fn resistor() -> SchematicDocument {
         SchematicDocument {
-            components: vec![Component::new(1, ComponentType::Resistor, Point::new(100, 0))],
+            components: vec![Component::new(
+                1,
+                ComponentType::Resistor,
+                Point::new(100, 0),
+            )],
             ..SchematicDocument::default()
         }
     }
@@ -817,7 +825,8 @@ mod hover_tests {
             "a dashed outline, not a solid rect: {} dashes",
             dashes.len()
         );
-        let (min, max) = SchematicSymbolContext::default().component_bounds(&document.components[0]);
+        let (min, max) =
+            SchematicSymbolContext::default().component_bounds(&document.components[0]);
         let viewport_offset = egui::vec2(50.0, 100.0);
         let pick = Rect::from_min_max(
             egui::pos2(min.x as f32, min.y as f32) + viewport_offset,
@@ -826,7 +835,9 @@ mod hover_tests {
         let drawn = dashes
             .iter()
             .flat_map(|points| points.iter().copied())
-            .fold(Rect::NOTHING, |rect, point| rect.union(Rect::from_min_max(point, point)));
+            .fold(Rect::NOTHING, |rect, point| {
+                rect.union(Rect::from_min_max(point, point))
+            });
         assert!(
             (drawn.min.x - (pick.min.x - 3.0)).abs() <= 1.0
                 && (drawn.max.x - (pick.max.x + 3.0)).abs() <= 1.0
@@ -930,7 +941,11 @@ mod hover_tests {
             Some(&(halo_ink, wire_width + 4.0)),
             "the halo is painted first, 4 pt wider than the wire"
         );
-        assert_eq!(&hovered[1..], plain.as_slice(), "the wire itself is unchanged");
+        assert_eq!(
+            &hovered[1..],
+            plain.as_slice(),
+            "the wire itself is unchanged"
+        );
 
         let mut selected = EditorSession::default();
         selected.selection.wires.insert(1);

@@ -373,7 +373,13 @@ mod tests {
             "the second click of a double click does not cycle"
         );
         assert_eq!(
-            cycle_index(Some(&cycle(0)), Pos2::new(105.0, 100.0), 2.0, 0.3, &candidates),
+            cycle_index(
+                Some(&cycle(0)),
+                Pos2::new(105.0, 100.0),
+                2.0,
+                0.3,
+                &candidates
+            ),
             0,
             "5 pt away is another spot"
         );
@@ -423,8 +429,16 @@ mod tests {
         frame(&ctx, 0.0, vec![egui::Event::PointerMoved(here)]);
         frame(&ctx, 0.1, vec![button(here, true)]);
         let moved = here + egui::vec2(drift, 0.0);
-        frame(&ctx, 0.1 + held / 2.0, vec![egui::Event::PointerMoved(moved)]);
-        frame(&ctx, 0.1 + held, vec![egui::Event::PointerMoved(here), button(here, false)])
+        frame(
+            &ctx,
+            0.1 + held / 2.0,
+            vec![egui::Event::PointerMoved(moved)],
+        );
+        frame(
+            &ctx,
+            0.1 + held,
+            vec![egui::Event::PointerMoved(here), button(here, false)],
+        )
     }
 
     /// A press held 500 ms or more that stays within 4 pt is a long click; a
@@ -434,6 +448,10 @@ mod tests {
         assert_eq!(long_click(0.6, 2.0), Some(Pos2::new(100.0, 100.0)));
         assert_eq!(long_click(1.5, 0.0), Some(Pos2::new(100.0, 100.0)));
         assert_eq!(long_click(0.3, 0.0), None, "a short press is a click");
-        assert_eq!(long_click(0.6, 6.0), None, "a press that strayed 6 pt is a drag");
+        assert_eq!(
+            long_click(0.6, 6.0),
+            None,
+            "a press that strayed 6 pt is a drag"
+        );
     }
 }

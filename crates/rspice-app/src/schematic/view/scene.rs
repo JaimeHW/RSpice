@@ -82,10 +82,11 @@ fn canvas_hover(
         ToolPointerAction::Probe(grid) => active_wire_at(state, grid)
             .map(PointerTarget::Wire)
             .or_else(|| {
-                let components =
-                    objects_on_active_sheet(state, &state.schematic.document().components, |item| {
-                        item.id
-                    });
+                let components = objects_on_active_sheet(
+                    state,
+                    &state.schematic.document().components,
+                    |item| item.id,
+                );
                 symbol_context
                     .component_at_resolved_symbol(components.as_ref(), grid)
                     .map(PointerTarget::Component)
@@ -1067,7 +1068,10 @@ mod tests {
                 label: None
             }
         );
-        assert!(text(&annotations[0]).starts_with("out 1.25"), "{annotations:?}");
+        assert!(
+            text(&annotations[0]).starts_with("out 1.25"),
+            "{annotations:?}"
+        );
         assert_eq!(annotations[0].class, 3);
         assert_eq!(
             annotations[1].subject,
@@ -1162,7 +1166,11 @@ mod tests {
 
         assert!(text(&annotations[1]).contains("P(vbias)"));
         assert!(text(&annotations[1]).ends_with('W'));
-        assert_eq!(annotations[1].lines.len(), 2, "current and power, one a line");
+        assert_eq!(
+            annotations[1].lines.len(),
+            2,
+            "current and power, one a line"
+        );
     }
 
     #[test]

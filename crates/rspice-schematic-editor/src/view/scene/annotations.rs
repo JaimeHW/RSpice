@@ -215,7 +215,10 @@ fn candidates(
             };
             vec![
                 first,
-                at(Pos2::new(anchor.x + CORNER_OFFSET_WU, anchor.y + CORNER_OFFSET_WU)),
+                at(Pos2::new(
+                    anchor.x + CORNER_OFFSET_WU,
+                    anchor.y + CORNER_OFFSET_WU,
+                )),
                 at(Pos2::new(
                     anchor.x - CORNER_OFFSET_WU - size.x,
                     anchor.y - CORNER_OFFSET_WU - size.y,
@@ -282,9 +285,8 @@ fn obstacles(view: &DesignView<'_>, symbols: &SchematicSymbolContext) -> Vec<Obs
             owner,
             rect: world_rect(symbols.component_bounds(component)),
         });
-        obstacles.extend(
-            instance_name_rect(component, symbols).map(|rect| Obstacle { owner, rect }),
-        );
+        obstacles
+            .extend(instance_name_rect(component, symbols).map(|rect| Obstacle { owner, rect }));
     }
     obstacles
 }
@@ -424,7 +426,10 @@ mod tests {
         );
         assert_eq!(placed.len(), 2);
         let named = placed.iter().find(|badge| badge.index == 1).expect("named");
-        let unnamed = placed.iter().find(|badge| badge.index == 0).expect("unnamed");
+        let unnamed = placed
+            .iter()
+            .find(|badge| badge.index == 0)
+            .expect("unnamed");
         assert_eq!(named.rect, rect(0.0, 0.0), "class 1 places first");
         assert_eq!(unnamed.rect, rect(0.0, 20.0));
         assert!(!named.rect.expand(1.0).intersects(unnamed.rect));
@@ -436,8 +441,14 @@ mod tests {
     #[test]
     fn blocked_badges_drop_unless_they_annotate_the_selection() {
         let obstacles = [
-            obstacle(Rect::from_min_size(Pos2::new(-5.0, -5.0), Vec2::new(30.0, 10.0))),
-            obstacle(Rect::from_min_size(Pos2::new(-5.0, 35.0), Vec2::new(30.0, 4.0))),
+            obstacle(Rect::from_min_size(
+                Pos2::new(-5.0, -5.0),
+                Vec2::new(30.0, 10.0),
+            )),
+            obstacle(Rect::from_min_size(
+                Pos2::new(-5.0, 35.0),
+                Vec2::new(30.0, 4.0),
+            )),
         ];
         let candidates = [rect(0.0, 0.0), rect(0.0, 36.0)];
         assert!(layout_badges(&[badge(2, "R1", &candidates)], &obstacles, 1.0, VIEW).is_empty());
@@ -485,7 +496,12 @@ mod tests {
         let rects = |placed: &[PlacedBadge], input: &[BadgeLayoutInput]| {
             let mut rects: Vec<(String, [f32; 2])> = placed
                 .iter()
-                .map(|badge| (input[badge.index].key.clone(), [badge.rect.min.x, badge.rect.min.y]))
+                .map(|badge| {
+                    (
+                        input[badge.index].key.clone(),
+                        [badge.rect.min.x, badge.rect.min.y],
+                    )
+                })
                 .collect();
             rects.sort_by(|left, right| left.0.cmp(&right.0));
             rects

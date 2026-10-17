@@ -602,7 +602,8 @@ fn grid_dots_register_with_the_content_lattice() {
                 / 4.0;
             let steps = (centre - origin.to_vec2()) / 10.0;
             assert!(
-                (steps.x - steps.x.round()).abs() < 1e-3 && (steps.y - steps.y.round()).abs() < 1e-3,
+                (steps.x - steps.x.round()).abs() < 1e-3
+                    && (steps.y - steps.y.round()).abs() < 1e-3,
                 "a dot at {centre:?} is off the lattice through {origin:?}"
             );
             dots += 1;

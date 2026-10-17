@@ -192,7 +192,11 @@ impl PickChooser {
         .open_bool(&mut open)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .align(RectAlign::BOTTOM_START)
-        .align_alternatives(&[RectAlign::TOP_START, RectAlign::BOTTOM_END, RectAlign::TOP_END])
+        .align_alternatives(&[
+            RectAlign::TOP_START,
+            RectAlign::BOTTOM_END,
+            RectAlign::TOP_END,
+        ])
         .gap(0.0)
         .width(width)
         .frame(frame)
@@ -224,7 +228,8 @@ impl PickChooser {
                 }
             }
             if let Some(text) = &overflow {
-                let (rect, _) = ui.allocate_exact_size(Vec2::new(width, row_height), Sense::hover());
+                let (rect, _) =
+                    ui.allocate_exact_size(Vec2::new(width, row_height), Sense::hover());
                 paint_row(
                     ui.painter(),
                     rect,
@@ -352,7 +357,10 @@ mod tests {
     /// Every kind has its word.
     #[test]
     fn kinds_read_as_the_design_names_them() {
-        assert_eq!(kind_label(PointerTarget::Junction(Point::new(0, 0))), "Junction");
+        assert_eq!(
+            kind_label(PointerTarget::Junction(Point::new(0, 0))),
+            "Junction"
+        );
         assert_eq!(kind_label(PointerTarget::NetLabel(1)), "Net label");
         assert_eq!(kind_label(PointerTarget::BusTap(1)), "Tap");
     }
