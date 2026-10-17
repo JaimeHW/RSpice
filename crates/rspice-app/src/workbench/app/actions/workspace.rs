@@ -311,6 +311,7 @@ impl AppState {
                 y,
                 component,
                 wire,
+                sheet,
             } => {
                 // The point and the object are the drawing's own, so the
                 // drawing opens first. A view that will not open — an edit
@@ -329,6 +330,16 @@ impl AppState {
                         ));
                         return;
                     }
+                }
+                // An object on another sheet is drawn nowhere until its sheet
+                // is in view, and selecting it there would select something
+                // the reader cannot see. A sheet that will not come forward
+                // has said why, and the reader stays where they were.
+                if let Some(sheet) = sheet
+                    && super::sheets::active_sheet_id(self) != Some(sheet)
+                    && super::sheets::activate_sheet(self, sheet).is_err()
+                {
+                    return;
                 }
                 self.workbench
                     .activate(crate::workbench::state::Workspace::Design);

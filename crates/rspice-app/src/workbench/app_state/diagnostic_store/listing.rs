@@ -1081,6 +1081,7 @@ mod tests {
                 y: 0,
                 component: None,
                 wire: None,
+                sheet: None,
             }),
         ));
         let inputs = DiagnosticInputs::DesignCheck {

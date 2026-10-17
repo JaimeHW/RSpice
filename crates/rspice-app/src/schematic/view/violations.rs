@@ -145,7 +145,8 @@ pub(crate) fn location_anchor(
 /// The drawing in front of the reader is asked through its live editor, and
 /// any other cell view through the working copy the workspace holds for it,
 /// so a finding about a view that is not open still says where it is. The
-/// anchor carries the view, and following it opens that view first.
+/// anchor carries the view and the sheet the object is drawn on, and
+/// following it opens that view and brings that sheet forward first.
 pub(crate) fn location_anchor_in(
     state: &AppState,
     cell_view: &crate::state::CellViewRef,
@@ -165,9 +166,9 @@ pub(crate) fn location_anchor_in(
     }
 
     let key = cell_view.key();
-    let world =
+    let placed =
         if key.eq_ignore_ascii_case(&state.workspace.content.active_schematic_reference().key()) {
-            markers::anchor(&super::schematic_design_view(state), location)?
+            markers::placement(&super::schematic_design_view(state), location)?
         } else {
             let (_, schematic) = state
                 .workspace
@@ -185,7 +186,7 @@ pub(crate) fn location_anchor_in(
                     .sheet_catalog(&key),
                 review_markers: state.ui.schematic_visibility.review_markers,
             };
-            markers::anchor(&view, location)?
+            markers::placement(&view, location)?
         };
     let (component, wire) = match location {
         DrcLocation::Component { id, .. } => (Some(*id), None),
@@ -194,10 +195,11 @@ pub(crate) fn location_anchor_in(
     };
     Some(crate::diagnostics::LogAnchor::Schematic {
         cell_view: cell_view.clone(),
-        x: world.x,
-        y: world.y,
+        x: placed.point.x,
+        y: placed.point.y,
         component,
         wire,
+        sheet: placed.sheet,
     })
 }
 

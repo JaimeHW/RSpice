@@ -20,9 +20,8 @@ use rspice_core::ContinuationAid;
 use rspice_core::notice::{EngineNotice, ParameterReplacement, ParameterScope, RecordedNotice};
 use rspice_results::convergence_quality::TransientConvergenceEvidence;
 
-use crate::diagnostics::LogAnchor;
 use crate::quantity::engineering::{EngineeringPrecision, format_engineering_display_with};
-use crate::state::{CellViewRef, InstancePath, Point};
+use crate::state::{CellViewRef, InstancePath};
 use crate::workbench::state::PreflightRemediation;
 
 use super::super::AppState;
@@ -81,16 +80,18 @@ pub(crate) enum RunNotice {
 /// Everything one run's analyses raised, in the order they reported it.
 pub(super) type RunNoticeFacts = Vec<(String, RunNotice)>;
 
-/// Where a drawn component the engine named is: the occurrence it was solved
-/// in, the cell view that draws it, the component, and its place on that
-/// sheet.
+/// Which drawn component the engine named: the occurrence it was solved in,
+/// the cell view that draws it, and the component.
+///
+/// Not where it is: the component was found in the projected design, which
+/// lays each sheet a stride along, so its position there is not where any
+/// sheet draws it. The route asks the drawing itself.
 #[derive(Debug, Clone, PartialEq)]
 pub(in crate::workbench) struct DrawnElement {
     pub(in crate::workbench) occurrence: InstancePath,
     pub(in crate::workbench) cell_view: CellViewRef,
     pub(in crate::workbench) component: u64,
     pub(in crate::workbench) name: String,
-    pub(in crate::workbench) position: Point,
 }
 
 impl DrawnElement {
@@ -394,16 +395,20 @@ impl AppState {
         if let Some(drawn) = &located {
             subject = subject.in_cell_view(drawn.cell_view.clone());
         }
+        // Resolved where the master draws the component, as a rule finding's
+        // route is, so a part on a later sheet brings that sheet forward.
         let route = located
-            .map(|drawn| {
-                DiagnosticRoute::Anchor(LogAnchor::Schematic {
-                    cell_view: drawn.cell_view,
-                    x: drawn.position.x,
-                    y: drawn.position.y,
-                    component: Some(drawn.component),
-                    wire: None,
-                })
+            .and_then(|drawn| {
+                crate::schematic::view::violations::location_anchor_in(
+                    self,
+                    &drawn.cell_view,
+                    &rspice_design::drc::DrcLocation::Component {
+                        id: drawn.component,
+                        name: drawn.name,
+                    },
+                )
             })
+            .map(DiagnosticRoute::Anchor)
             .or(fallback);
         DiagnosticRecord::new(canonical, level, subject, message)
             .keyed(condition.key.clone())
@@ -457,7 +462,6 @@ impl AppState {
             cell_view: master,
             component: component.id,
             name: component.name.clone(),
-            position: component.pos,
         })
     }
 }
@@ -642,8 +646,9 @@ fn engineering(value: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics::LogAnchor;
     use crate::state::{
-        Cell, Component, ComponentType, Library, LibraryCellInstance, SchematicState, View,
+        Cell, Component, ComponentType, Library, LibraryCellInstance, Point, SchematicState, View,
         ViewType,
     };
     use crate::workbench::app_state::diagnostic_store::{BatchStanding, listing};

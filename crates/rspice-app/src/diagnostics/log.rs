@@ -33,13 +33,20 @@ pub enum LogAnchor {
     /// The cell view is part of the place: a point and an object id mean
     /// something only in the drawing they were read off, and following one
     /// into whichever view happened to be open selected an unrelated object
-    /// there.
+    /// there. So is the sheet, where the drawing has sheets: an object on a
+    /// sheet other than the one in view is drawn nowhere until that sheet is
+    /// brought forward.
     Schematic {
         cell_view: crate::state::CellViewRef,
         x: i32,
         y: i32,
         component: Option<u64>,
         wire: Option<u64>,
+        /// The sheet the place is drawn on. `None` where the drawing has no
+        /// sheets, or no sheet claims the object and it is drawn on the sheet
+        /// in view.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sheet: Option<crate::state::SheetId>,
     },
     /// A symbol pin in a symbol view.
     Symbol {

@@ -1,9 +1,11 @@
-//! Read-only check markers and active-sheet location resolution.
+//! Read-only check markers, and where a finding's objects are drawn, on
+//! whichever sheet.
 
 use super::{design_view::DesignView, viewport::Viewport};
 use egui::{Painter, Pos2, Shape, Stroke, pos2, vec2};
 use rspice_design::drc::{DrcLocation, DrcSeverity, DrcViolation};
 use rspice_design_model::Point;
+use rspice_design_model::design_management::{SheetCatalog, SheetId};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::active_palette;
 
@@ -59,52 +61,102 @@ fn severity_color(
     }
 }
 
-/// Resolve a violation to a schematic-space anchor, when it has one.
+/// Where a location is drawn: the point, and the sheet it is drawn on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Placement {
+    pub point: Point,
+    /// The sheet the object is drawn on. `None` where the drawing has no
+    /// sheets or no sheet claims the object, which draws it on the sheet in
+    /// view.
+    pub sheet: Option<SheetId>,
+}
+
+impl Placement {
+    /// Whether the sheet in view draws it.
+    pub fn is_in_view(&self, view: &DesignView<'_>) -> bool {
+        self.sheet.is_none_or(|sheet| {
+            view.sheet_catalog
+                .and_then(SheetCatalog::active_sheet_id)
+                .is_none_or(|active| active == sheet)
+        })
+    }
+}
+
+/// Resolve a violation to a schematic-space anchor on the sheet in view, when
+/// it has one there.
+pub fn anchor(view: &DesignView<'_>, location: &DrcLocation) -> Option<Point> {
+    placement(view, location)
+        .filter(|placed| placed.is_in_view(view))
+        .map(|placed| placed.point)
+}
+
+/// Resolve a location to where it is drawn, on whichever sheet that is.
+///
+/// What follows a finding to an object on another sheet brings that sheet
+/// forward first; what marks the canvas keeps to the sheet in view, through
+/// [`anchor`]. One resolver serves both, so the two cannot disagree about
+/// where an object is.
+///
 /// `Node`, `Global` and findings inside an instantiated cellview have no single
 /// spot in this drawing — they live in the console summary and the ERC pill
 /// only.
-pub fn anchor(view: &DesignView<'_>, location: &DrcLocation) -> Option<Point> {
+pub fn placement(view: &DesignView<'_>, location: &DrcLocation) -> Option<Placement> {
+    let on_sheet_of = |id: u64, point: Point| Placement {
+        point,
+        sheet: view
+            .sheet_catalog
+            .and_then(|sheets| sheets.sheet_for_object(id)),
+    };
     match location {
         DrcLocation::Point { x, y } => {
-            live_point(view.sheet_catalog, Point::new(*x as i32, *y as i32))
+            projected_point(view.sheet_catalog, Point::new(*x as i32, *y as i32))
         }
         DrcLocation::Component { id, .. } => view
             .document
             .components
             .iter()
-            .find(|component| component.id == *id && view.object_is_visible(component.id))
-            .map(|c| c.pos),
+            .find(|component| component.id == *id)
+            .map(|component| on_sheet_of(component.id, component.pos)),
         DrcLocation::Wire { id } => view
             .document
             .wires
             .iter()
-            .find(|wire| wire.id == *id && view.object_is_visible(wire.id))
-            .and_then(|w| {
-                let first = w.points.first()?;
-                let second = w.points.get(1).unwrap_or(first);
-                Some(Point::new(
+            .find(|wire| wire.id == *id)
+            .and_then(|wire| {
+                let first = wire.points.first()?;
+                let second = wire.points.get(1).unwrap_or(first);
+                let middle = Point::new(
                     ((i64::from(first.x) + i64::from(second.x)) / 2) as i32,
                     ((i64::from(first.y) + i64::from(second.y)) / 2) as i32,
-                ))
+                );
+                Some(on_sheet_of(wire.id, middle))
             }),
         DrcLocation::Bus { id } => view
             .document
             .buses
             .iter()
-            .find(|bus| bus.id == *id && view.object_is_visible(bus.id))
-            .and_then(|bus| bus.points.first().copied()),
+            .find(|bus| bus.id == *id)
+            .and_then(|bus| Some(on_sheet_of(bus.id, *bus.points.first()?))),
         DrcLocation::BusTap { id } => view
             .document
             .bus_taps
             .iter()
-            .find(|tap| tap.id == *id && view.object_is_visible(tap.id))
-            .map(|tap| tap.connection_point),
-        DrcLocation::NetLabel { name } => view
-            .document
-            .net_labels
-            .iter()
-            .find(|label| label.name == *name && view.object_is_visible(label.id))
-            .map(|l| l.pos),
+            .find(|tap| tap.id == *id)
+            .map(|tap| on_sheet_of(tap.id, tap.connection_point)),
+        // A label is named, not numbered, and a name may be drawn on several
+        // sheets: the one on the sheet in view is the one meant there.
+        DrcLocation::NetLabel { name } => {
+            let named = || {
+                view.document
+                    .net_labels
+                    .iter()
+                    .filter(|label| label.name == *name)
+            };
+            let label = named()
+                .find(|label| view.object_is_visible(label.id))
+                .or_else(|| named().next())?;
+            Some(on_sheet_of(label.id, label.pos))
+        }
         // The checks locate a terminal in the projected document, which lays
         // each sheet a stride further along; the canvas draws the sheet where
         // it is authored, so the projection's offset comes back off.
@@ -116,8 +168,13 @@ pub fn anchor(view: &DesignView<'_>, location: &DrcLocation) -> Option<Point> {
             .document
             .components
             .iter()
-            .any(|component| component.id == *component_id && view.object_is_visible(*component_id))
-            .then(|| live_terminal_point(view.sheet_catalog, *component_id, *point)),
+            .any(|component| component.id == *component_id)
+            .then(|| {
+                on_sheet_of(
+                    *component_id,
+                    live_terminal_point(view.sheet_catalog, *component_id, *point),
+                )
+            }),
         // A finding inside an instantiated cellview has no coordinate in this
         // one. Placing it on the instance symbol would point the author at a
         // drawing that does not contain the defect.
@@ -148,24 +205,24 @@ pub fn live_terminal_point(
     )
 }
 
-/// Where a point the checks located on the projected document is drawn, or
-/// `None` where it is on a sheet other than the one in view.
+/// Where a point the checks located on the projected document is drawn, and
+/// on which sheet.
 ///
 /// A bare point names no object to ask for its sheet, so the sheet is the one
 /// the projection laid the coordinate on. A drawing with no sheets is its own
-/// projection, and one with no active sheet shows every sheet.
-pub fn live_point(
-    sheets: Option<&rspice_design_model::design_management::SheetCatalog>,
-    projected: Point,
-) -> Option<Point> {
+/// projection.
+fn projected_point(sheets: Option<&SheetCatalog>, projected: Point) -> Option<Placement> {
     let Some(sheets) = sheets.filter(|sheets| !sheets.sheets().is_empty()) else {
-        return Some(projected);
+        return Some(Placement {
+            point: projected,
+            sheet: None,
+        });
     };
     let (sheet, point) = rspice_design::schematic::owned::projected_point_sheet(sheets, projected)?;
-    sheets
-        .active_sheet_id()
-        .is_none_or(|active| active == sheet)
-        .then_some(point)
+    Some(Placement {
+        point,
+        sheet: Some(sheet),
+    })
 }
 
 /// The cursor in screen space, derived from the grid-unit hover the canvas
