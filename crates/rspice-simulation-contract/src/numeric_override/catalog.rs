@@ -61,9 +61,10 @@
 //!   so it can only restate a ceiling the analysis can already state through
 //!   [`NumericOverrideOption::MaximumTimestep`] or the transient form's own Max
 //!   step field. One bound, one copy.
-//! - **`RSHUNT`, `CSHUNT`** — read by the engine, but they add real resistors
-//!   and capacitors to every node. They change the circuit, not one analysis's
-//!   numerics, and the plan states no policy for them to depart from.
+//! - **`CSHUNT`** — read by the engine, but it adds a real capacitor to every
+//!   node. It changes the circuit, not one analysis's numerics, and the plan
+//!   states no policy for it to depart from. `RSHUNT` is listed: the plan
+//!   states it, and it is the stated escape from a node with no DC path.
 //! - **`HBINT NUMFREQ`** — read, but not on the route a Studio run takes. The
 //!   only reader is `HbConfig::from_hb_card`
 //!   (`rspice-core/src/analysis/harmonic_balance/config.rs:328`), which the
