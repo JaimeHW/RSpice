@@ -369,8 +369,8 @@ const BAND_GAP: f32 = 3.0;
 
 mod transform;
 pub use transform::{
-    TransformPreviewStyle, draw_array_candidate, draw_move_candidate, draw_stretch_candidate,
-    draw_transform_feedback,
+    TransformCandidateDiff, TransformPreviewStyle, draw_array_candidate, draw_move_diff,
+    draw_stretch_diff, draw_transform_feedback,
 };
 
 pub fn draw_placement_badge(

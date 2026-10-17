@@ -15,8 +15,16 @@ use super::PreviewView;
 use crate::{session::visibility::SchematicParameterLabelVisibility, symbols::SymbolLibrary};
 use egui::{Painter, Rect, Response, Stroke, Vec2};
 use rspice_design::schematic::{
-    array::SchematicArrayPreview, design_note::DesignNoteRenderContext, document::SchematicDocument,
+    array::SchematicArrayPreview,
+    bus::{Bus, BusTap},
+    component::Component,
+    design_note::{DesignNote, DesignNoteRenderContext},
+    document::SchematicDocument,
+    documentation_shape::DocumentationShape,
+    net_label::{Junction, NetLabel},
+    wire::Wire,
 };
+use std::collections::HashMap;
 
 pub struct TransformPreviewStyle<'a> {
     pub symbol_library: Option<&'a SymbolLibrary>,
@@ -25,24 +33,70 @@ pub struct TransformPreviewStyle<'a> {
     pub hover_wire_vertex: Option<(i32, i32)>,
 }
 
-pub fn draw_move_candidate(
+/// What a move or stretch candidate changes against the document it was
+/// derived from: every object whose content differs, or that the candidate
+/// adds.
+///
+/// Taken once per candidate through id maps. Searching the source for each
+/// candidate object, every frame, was quadratic in the drawing's size.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TransformCandidateDiff {
+    wires: Vec<Wire>,
+    buses: Vec<Bus>,
+    bus_taps: Vec<BusTap>,
+    components: Vec<Component>,
+    junctions: Vec<Junction>,
+    net_labels: Vec<NetLabel>,
+    design_notes: Vec<DesignNote>,
+    documentation_shapes: Vec<DocumentationShape>,
+}
+
+/// The objects of `candidate` that `source` does not hold as they are. The
+/// first source object under an id is the one compared, as a search would
+/// find it.
+fn changed<T: PartialEq + Clone>(source: &[T], candidate: &[T], id: impl Fn(&T) -> u64) -> Vec<T> {
+    let mut by_id = HashMap::with_capacity(source.len());
+    for object in source {
+        by_id.entry(id(object)).or_insert(object);
+    }
+    candidate
+        .iter()
+        .filter(|object| by_id.get(&id(object)).is_none_or(|held| *held != *object))
+        .cloned()
+        .collect()
+}
+
+impl TransformCandidateDiff {
+    pub fn between(source: &SchematicDocument, candidate: &SchematicDocument) -> Self {
+        Self {
+            wires: changed(&source.wires, &candidate.wires, |wire| wire.id),
+            buses: changed(&source.buses, &candidate.buses, |bus| bus.id),
+            bus_taps: changed(&source.bus_taps, &candidate.bus_taps, |tap| tap.id),
+            components: changed(&source.components, &candidate.components, |c| c.id),
+            junctions: changed(&source.junctions, &candidate.junctions, |j| j.id),
+            net_labels: changed(&source.net_labels, &candidate.net_labels, |l| l.id),
+            design_notes: changed(&source.design_notes, &candidate.design_notes, |n| n.id),
+            documentation_shapes: changed(
+                &source.documentation_shapes,
+                &candidate.documentation_shapes,
+                |shape| shape.id,
+            ),
+        }
+    }
+}
+
+/// Paint what a move changes, over the unchanged drawing.
+pub fn draw_move_diff(
     painter: &Painter,
     viewport: &Viewport,
     view: &PreviewView<'_>,
-    candidate: &SchematicDocument,
+    diff: &TransformCandidateDiff,
     style: &TransformPreviewStyle<'_>,
     view_path: impl Fn() -> String,
 ) {
-    draw_changed_conductors(painter, viewport, view.design.document, candidate);
+    draw_changed_conductors(painter, viewport, diff);
 
-    for component in candidate.components.iter().filter(|candidate_component| {
-        view.design
-            .document
-            .components
-            .iter()
-            .find(|component| component.id == candidate_component.id)
-            != Some(*candidate_component)
-    }) {
+    for component in &diff.components {
         draw_component(
             painter,
             viewport,
@@ -53,14 +107,7 @@ pub fn draw_move_candidate(
             style.parameter_labels,
         );
     }
-    for junction in candidate.junctions.iter().filter(|candidate_junction| {
-        !view
-            .design
-            .document
-            .junctions
-            .iter()
-            .any(|junction| junction == *candidate_junction)
-    }) {
+    for junction in &diff.junctions {
         draw_junction(
             painter,
             viewport,
@@ -73,44 +120,23 @@ pub fn draw_move_candidate(
             },
         );
     }
-    for label in candidate.net_labels.iter().filter(|candidate_label| {
-        view.design
-            .document
-            .net_labels
-            .iter()
-            .find(|label| label.id == candidate_label.id)
-            != Some(*candidate_label)
-    }) {
+    for label in &diff.net_labels {
         draw_net_label(painter, viewport, label, true, false, true);
     }
-    for note in candidate.design_notes.iter().filter(|candidate_note| {
-        view.design
-            .document
-            .design_notes
-            .iter()
-            .find(|note| note.id == candidate_note.id)
-            != Some(*candidate_note)
-    }) {
-        draw_design_note(
-            painter,
-            viewport,
-            note,
-            &DesignNoteRenderContext::for_document(view.design.document, &view_path()),
-            true,
-            false,
-        );
+    if !diff.design_notes.is_empty() {
+        let path = view_path();
+        let context = DesignNoteRenderContext::for_document(view.design.document, &path);
+        for note in &diff.design_notes {
+            draw_design_note(painter, viewport, note, &context, true, false);
+        }
     }
-    draw_changed_documentation_shapes(painter, viewport, view.design.document, candidate);
+    draw_changed_documentation_shapes(painter, viewport, diff);
 }
 
-pub fn draw_stretch_candidate(
-    painter: &Painter,
-    viewport: &Viewport,
-    view: &PreviewView<'_>,
-    candidate: &SchematicDocument,
-) {
-    draw_changed_conductors(painter, viewport, view.design.document, candidate);
-    draw_changed_documentation_shapes(painter, viewport, view.design.document, candidate);
+/// Paint what a stretch changes, over the unchanged drawing.
+pub fn draw_stretch_diff(painter: &Painter, viewport: &Viewport, diff: &TransformCandidateDiff) {
+    draw_changed_conductors(painter, viewport, diff);
+    draw_changed_documentation_shapes(painter, viewport, diff);
 }
 
 pub fn draw_array_candidate(
@@ -171,33 +197,14 @@ pub fn draw_array_candidate(
     }
 }
 
-fn draw_changed_conductors(
-    painter: &Painter,
-    viewport: &Viewport,
-    source: &SchematicDocument,
-    candidate: &SchematicDocument,
-) {
-    for wire in candidate.wires.iter().filter(|candidate_wire| {
-        source
-            .wires
-            .iter()
-            .find(|wire| wire.id == candidate_wire.id)
-            != Some(*candidate_wire)
-    }) {
+fn draw_changed_conductors(painter: &Painter, viewport: &Viewport, diff: &TransformCandidateDiff) {
+    for wire in &diff.wires {
         draw_wire(painter, viewport, wire, ConductorInk::Selected);
     }
-    for bus in candidate.buses.iter().filter(|candidate_bus| {
-        source.buses.iter().find(|bus| bus.id == candidate_bus.id) != Some(*candidate_bus)
-    }) {
+    for bus in &diff.buses {
         draw_bus(painter, viewport, bus, true);
     }
-    for tap in candidate.bus_taps.iter().filter(|candidate_tap| {
-        source
-            .bus_taps
-            .iter()
-            .find(|tap| tap.id == candidate_tap.id)
-            != Some(*candidate_tap)
-    }) {
+    for tap in &diff.bus_taps {
         draw_bus_tap(painter, viewport, tap, true);
     }
 }
@@ -205,20 +212,9 @@ fn draw_changed_conductors(
 fn draw_changed_documentation_shapes(
     painter: &Painter,
     viewport: &Viewport,
-    source: &SchematicDocument,
-    candidate: &SchematicDocument,
+    diff: &TransformCandidateDiff,
 ) {
-    for shape in candidate
-        .documentation_shapes
-        .iter()
-        .filter(|candidate_shape| {
-            source
-                .documentation_shapes
-                .iter()
-                .find(|shape| shape.id == candidate_shape.id)
-                != Some(*candidate_shape)
-        })
-    {
+    for shape in &diff.documentation_shapes {
         draw_documentation_shape(painter, viewport, shape, true, false);
     }
 }
@@ -273,7 +269,9 @@ fn feedback_font() -> egui::FontId {
 
 #[cfg(test)]
 mod tests {
-    use super::feedback_font;
+    use super::*;
+    use rspice_design::schematic::component_type::ComponentType;
+    use rspice_design_model::Point;
 
     /// Every pixel a run of `text` paints in the readout face.
     fn ink(text: &str) -> Vec<egui::Color32> {
@@ -316,5 +314,52 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The diff holds exactly what a search of the source for each candidate
+    /// object would call changed: moved and added objects, nothing untouched.
+    #[test]
+    fn the_diff_holds_moved_and_added_objects_and_nothing_untouched() {
+        let source = SchematicDocument {
+            components: (1..=3)
+                .map(|id| {
+                    Component::new(id, ComponentType::Resistor, Point::new(40 * id as i32, 0))
+                })
+                .collect(),
+            wires: (10..=12)
+                .map(|id| {
+                    Wire::new(
+                        id,
+                        vec![
+                            Point::new(0, 10 * id as i32),
+                            Point::new(40, 10 * id as i32),
+                        ],
+                    )
+                })
+                .collect(),
+            junctions: vec![Junction::new(20, Point::new(0, 100))],
+            ..Default::default()
+        };
+        let mut candidate = source.clone();
+        candidate.components[1].pos = Point::new(500, 0);
+        candidate.wires[2].points[1] = Point::new(80, 120);
+        candidate
+            .wires
+            .push(Wire::new(13, vec![Point::new(0, 0), Point::new(0, 40)]));
+        candidate.junctions[0].pos = Point::new(0, 140);
+
+        let diff = TransformCandidateDiff::between(&source, &candidate);
+
+        assert_eq!(diff.components, vec![candidate.components[1].clone()]);
+        assert_eq!(
+            diff.wires.iter().map(|wire| wire.id).collect::<Vec<_>>(),
+            vec![12, 13]
+        );
+        assert_eq!(diff.junctions, vec![Junction::new(20, Point::new(0, 140))]);
+        assert!(diff.net_labels.is_empty() && diff.buses.is_empty());
+        assert_eq!(
+            TransformCandidateDiff::between(&source, &source),
+            TransformCandidateDiff::default()
+        );
     }
 }

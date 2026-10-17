@@ -53,6 +53,7 @@ use rspice_schematic_editor::session::snap;
 pub(crate) mod operating_point_memo;
 mod state;
 pub(crate) mod symbol_context_cache;
+pub(crate) mod transform_preview_memo;
 use rspice_schematic_editor::session::tool;
 mod undo_history;
 mod validated_revision;

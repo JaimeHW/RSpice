@@ -186,6 +186,9 @@ pub struct SchematicSession {
     /// The canvas's operating-point voltage badges, kept while what they are
     /// read from stands still.
     pub(crate) operating_point_badges: super::operating_point_memo::OperatingPointMemo,
+
+    /// The armed Move or Stretch preview, kept while its inputs stand still.
+    pub(crate) transform_preview: super::transform_preview_memo::TransformPreviewMemo,
 }
 
 impl Default for SchematicState {
