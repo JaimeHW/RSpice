@@ -225,8 +225,11 @@ pub(super) enum FoldStretch {
 /// Take out of `route`, wire `wire_id`'s vertices, each vertex it turns
 /// straight back at where `may_go` lets the stretch it doubles over go: from
 /// the vertex back to the nearer of its neighbours, which stays on the wire.
-/// The ends stay where they are. `point_indices` says where each earlier
-/// vertex went and is renumbered to match. Returns whether a vertex went.
+/// The ends stay where they are, except an end that runs out and straight
+/// back onto the vertex before the turn: that point stays a vertex, so the
+/// wire ends at the turn instead and nothing is parted. `point_indices` says
+/// where each earlier vertex went and is renumbered to match. Returns
+/// whether a vertex went.
 pub(super) fn retract_fold_backs(
     document: &SchematicDocument,
     wire_id: u64,
@@ -236,6 +239,23 @@ pub(super) fn retract_fold_backs(
 ) -> bool {
     let mut retracted = route.clone();
     let mut renumbered = point_indices.to_vec();
+    loop {
+        let last = retracted.len().saturating_sub(1);
+        if last >= 2 && retracted[0] == retracted[2] {
+            // The start goes; what went to it goes to its copy.
+            for moved_to in &mut renumbered {
+                *moved_to = if *moved_to == 0 { 1 } else { *moved_to - 1 };
+            }
+            retracted.remove(0);
+        } else if last >= 2 && retracted[last] == retracted[last - 2] {
+            for moved_to in renumbered.iter_mut().filter(|moved_to| **moved_to == last) {
+                *moved_to = last - 2;
+            }
+            retracted.pop();
+        } else {
+            break;
+        }
+    }
     let mut index = 1;
     while index + 1 < retracted.len() {
         let (before, vertex, after) =
@@ -767,5 +787,20 @@ mod tests {
         ];
         assert!(!optimize_all_wires(&mut document));
         assert_eq!(document.wires[0].points, folded);
+    }
+
+    /// A wire that runs out to a point and straight back to where it began
+    /// ends at the turn instead: both points stay on the wire.
+    #[test]
+    fn cleanup_ends_a_wire_that_runs_out_and_back_at_its_turn() {
+        let p = Point::new;
+        let mut document = SchematicDocument {
+            wires: vec![Wire::new(1, vec![p(160, 120), p(200, 120), p(160, 120)])],
+            connections: vec![super::super::wire::WireConnection::new(1, 2, 7, "-")],
+            ..SchematicDocument::default()
+        };
+        assert!(optimize_all_wires(&mut document));
+        assert_eq!(document.wires[0].points, vec![p(200, 120), p(160, 120)]);
+        assert_eq!(document.connections[0].point_index, 1);
     }
 }

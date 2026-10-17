@@ -166,6 +166,19 @@ fn a_pin_dragged_onto_its_own_wire_never_doubles_it_back() {
     ]);
 }
 
+/// A resistor dropped across the T's left branch, then R1 and the new
+/// resistor dragged in turn, left a wire from the pins they share out to
+/// the new resistor's other pin and straight back to where it began:
+/// [(160, 120), (200, 120), (160, 120)].
+#[test]
+fn a_wire_never_runs_out_and_back_to_where_it_began() {
+    holds(&[
+        Place(p(160, 100), Rotation::R180),
+        Drag(1, vec![p(40, 20)]),
+        Drag(25, vec![p(60, -40), p(40, 20)]),
+    ]);
+}
+
 /// A junction-tool click on the dot where a wire tees into R3's moved
 /// stem took the dot away, though the wires still meet there and automatic
 /// junctions mark that point.
