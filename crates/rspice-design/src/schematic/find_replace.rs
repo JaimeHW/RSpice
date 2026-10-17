@@ -340,13 +340,14 @@ mod tests {
     }
 
     fn document() -> SchematicDocument {
-        let mut document = SchematicDocument::default();
-        document.components = vec![
-            resistor(1, "R1", "10k", "tc1=1m"),
-            resistor(2, "R12", "rload", ""),
-        ];
-        document.net_labels = vec![NetLabel::new(3, Point::origin(), "vout_r1")];
-        document
+        SchematicDocument {
+            components: vec![
+                resistor(1, "R1", "10k", "tc1=1m"),
+                resistor(2, "R12", "rload", ""),
+            ],
+            net_labels: vec![NetLabel::new(3, Point::origin(), "vout_r1")],
+            ..SchematicDocument::default()
+        }
     }
 
     fn query(find: &str, replace: &str, options: FindOptions) -> FindQuery {
