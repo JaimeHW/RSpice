@@ -423,6 +423,9 @@ pub struct DialogState {
     /// Connectivity-aware selected-object movement transaction.
     pub(crate) move_selection: MoveSelectionDialogState,
 
+    /// A Paste or Duplicate following the pointer until a click places it.
+    pub(crate) floating_paste: Option<FloatingPaste>,
+
     /// Anchor-preserving conductor/documentation stretch transaction.
     pub(crate) stretch_selection: StretchSelectionDialogState,
 

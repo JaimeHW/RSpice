@@ -15,6 +15,7 @@ mod array_interaction;
 mod bus_interaction;
 mod context_menu;
 pub(crate) mod drawing_sheet;
+mod floating_paste;
 mod interaction;
 mod keyboard_navigation;
 mod mobile_controls;

@@ -225,7 +225,7 @@ impl RSpiceApp {
     /// into that edit's undo record when it lands, so it is refused, with a
     /// line saying why.
     fn history_waits_for_the_edit_in_progress(&mut self, step: &str) -> bool {
-        if !self.state.schematic.has_pending_operation() {
+        if !self.state.schematic_edit_in_progress() {
             return false;
         }
         self.state.prompt(format!(
@@ -339,7 +339,7 @@ impl RSpiceApp {
         let anchor = self.state.schematic_paste_anchor();
         let message = match self.state.paste_schematic_clipboard_at(anchor) {
             Ok(true) => return,
-            Ok(false) => "Paste could not be completed at the current canvas target".to_owned(),
+            Ok(false) => "Nothing to paste.".to_owned(),
             Err(reason) => reason,
         };
         self.state.prompt(message);

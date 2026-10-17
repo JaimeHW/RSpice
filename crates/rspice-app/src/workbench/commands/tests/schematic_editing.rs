@@ -598,6 +598,7 @@ fn delete_cut_and_duplicate_act_on_the_schematic_without_a_dialog() {
 
     Command::Duplicate.execute(&mut app);
     assert!(!app.state.dialogs.application_modal_open());
+    assert!(app.state.place_floating_paste());
     assert_eq!(app.state.schematic.document().components.len(), 2);
 
     Command::Cut.execute(&mut app);
@@ -1359,6 +1360,7 @@ fn a_pasted_wire_ending_inside_another_splits_it_and_dots_the_t() {
     let mut app = app_with_copied_wire(vec![through.clone(), stub.clone()], 2, (10.0, 5.0));
 
     Command::Paste.execute(&mut app);
+    assert!(app.state.place_floating_paste());
 
     let document = app.state.schematic.document();
     let tee = Point::new(100, 100);
@@ -1415,6 +1417,7 @@ fn a_pasted_pin_landing_inside_a_wire_splits_it() {
     app.state.ui.canvas_hover = Some((f64::from(target.x) / grid, f64::from(target.y) / grid));
 
     Command::Paste.execute(&mut app);
+    assert!(app.state.place_floating_paste());
 
     let document = app.state.schematic.document();
     assert_eq!(document.components.len(), 2, "the part was pasted");
@@ -1500,6 +1503,7 @@ fn a_copy_in_one_cell_pastes_into_another_with_its_coupling() {
     );
 
     Command::Paste.execute(&mut app);
+    assert!(app.state.place_floating_paste());
 
     let document = app.state.schematic.document();
     assert_eq!(document.components.len(), 6);

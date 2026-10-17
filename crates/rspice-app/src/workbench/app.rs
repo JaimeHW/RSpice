@@ -232,6 +232,9 @@ pub(crate) use dialogs::selection::array::{
     armed_array_selection_authority, armed_array_selection_plan, cancel_armed_array_selection,
     open_array_selection_dialog,
 };
+pub(crate) use dialogs::selection::commands::floating::{
+    cancel_floating_paste, floating_paste_scope, on_grid, turn_floating_paste,
+};
 pub(crate) use dialogs::selection::move_selection::{
     arm_move_selection, armed_move_selection_authority, cancel_armed_move_selection,
 };

@@ -23,7 +23,10 @@ use rspice_design::connectivity::summary::{
 use rspice_design::hierarchy::HierarchySource;
 use rspice_design::schematic::clipboard::ClipboardData;
 
+use crate::workbench::app::dialogs::state::FloatingPasteOrigin;
 use crate::workbench::app_state::AppState;
+
+pub(in crate::workbench) mod floating;
 
 impl AppState {
     /// Delete what is selected on the active sheet.
@@ -103,8 +106,8 @@ impl AppState {
         true
     }
 
-    /// Duplicate what is selected, placed one grid step off the current paste
-    /// anchor.
+    /// Duplicate what is selected: the copy floats one grid step off the
+    /// current paste anchor until a click places it.
     pub(crate) fn duplicate_schematic_selection(&mut self) -> bool {
         let state = self;
         let anchor = state.schematic_paste_anchor() + state.schematic_grid_step();
@@ -119,7 +122,8 @@ impl AppState {
         Point::new(grid, grid)
     }
 
-    /// Duplicate what is selected, placed at `anchor`.
+    /// Duplicate what is selected: the copy floats at `anchor` and follows
+    /// the pointer until a click places it.
     ///
     /// The user's clipboard is theirs: Duplicate carries its own copy and never
     /// touches it.
@@ -166,39 +170,28 @@ impl AppState {
             0
         };
 
-        let pasted = state.paste_schematic_objects_at(&copy, anchor);
-        if !matches!(pasted, Ok(true)) {
+        let origin = FloatingPasteOrigin::Duplicate {
+            count,
+            kept,
+            unresolved_nets,
+        };
+        if let Err(reason) = state.float_schematic_objects(&copy, anchor, origin) {
             state.schematic.session.editor.selection = previous_selection;
-            state.prompt(
-                pasted
-                    .err()
-                    .unwrap_or_else(|| "Nothing was duplicated.".to_owned()),
-            );
+            state.prompt(reason);
             return false;
         }
-
-        state.prompt(if unresolved_nets {
-            format!(
-                "Duplicated {}; named-net connections could not be resolved.",
-                object_count(count)
-            )
-        } else if kept == 0 {
-            format!("Duplicated {}.", object_count(count))
-        } else {
-            format!(
-                "Duplicated {}; kept {}.",
-                object_count(count),
-                named_net_connections(kept)
-            )
-        });
         true
     }
 
-    /// Paste the app's clipboard at `anchor`, whichever cell view it was
-    /// copied from. Returns whether anything was pasted.
+    /// Float the app's clipboard at `anchor`, whichever cell view it was
+    /// copied from, until a click places it. Returns whether anything floats.
     pub(crate) fn paste_schematic_clipboard_at(&mut self, anchor: Point) -> Result<bool, String> {
+        if self.schematic_edit_read_only() || !self.ui.schematic_clipboard.has_content() {
+            return Ok(false);
+        }
         let clipboard = self.ui.schematic_clipboard.clone();
-        self.paste_schematic_objects_at(&clipboard, anchor)
+        self.float_schematic_objects(&clipboard, anchor, FloatingPasteOrigin::Paste)?;
+        Ok(true)
     }
 
     /// Paste `objects` at `anchor` into the active cell view as one undo step,

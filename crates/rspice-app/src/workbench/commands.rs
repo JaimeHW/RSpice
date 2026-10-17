@@ -493,7 +493,7 @@ impl Command {
             }
             Self::Undo => {
                 if state.workbench.safe_mode.project_read_only()
-                    || state.schematic.has_pending_operation()
+                    || state.schematic_edit_in_progress()
                 {
                     false
                 } else if (netlist_page_is_visible(state)
@@ -511,7 +511,7 @@ impl Command {
             }
             Self::Redo => {
                 if state.workbench.safe_mode.project_read_only()
-                    || state.schematic.has_pending_operation()
+                    || state.schematic_edit_in_progress()
                 {
                     false
                 } else if (netlist_page_is_visible(state)
@@ -595,7 +595,8 @@ impl Command {
             | Self::MirrorSelectionVertical => {
                 active_schematic_editor(app)
                     && !state.schematic_edit_read_only()
-                    && schematic_selection_has_live_object(&state.schematic)
+                    && (schematic_selection_has_live_object(&state.schematic)
+                        || state.dialogs.floating_paste.is_some())
             }
             Self::AlignSelectionLeft
             | Self::AlignSelectionCenter
@@ -1799,8 +1800,11 @@ impl Command {
                     Self::MirrorSelectionVertical => SelectionTransform::MirrorVertical,
                     _ => SelectionTransform::RotateClockwise,
                 };
-                let symbol_context = schematic_symbol_context(&app.state);
-                transform_selection_on_active_sheet(&mut app.state, &symbol_context, transform);
+                // A copy floating under the pointer is what these act on.
+                if !crate::workbench::app::turn_floating_paste(&mut app.state, transform) {
+                    let symbol_context = schematic_symbol_context(&app.state);
+                    transform_selection_on_active_sheet(&mut app.state, &symbol_context, transform);
+                }
             }
             Self::JoinCollinearWires => {
                 app.state.join_collinear_wires_on_active_sheet();
@@ -1849,6 +1853,8 @@ impl Command {
                     app.state.schematic.session.editor.zoom_box.disarm();
                 } else if app.state.dialogs.descend_hierarchy.open {
                     app.state.dialogs.descend_hierarchy.close();
+                } else if crate::workbench::app::cancel_floating_paste(&mut app.state) {
+                    // The floating copy is let go; the drawing never changed.
                 } else if app.state.dialogs.move_selection.armed {
                     crate::workbench::app::cancel_armed_move_selection(&mut app.state);
                 } else if app.state.dialogs.stretch_selection.armed {

@@ -1035,3 +1035,116 @@ fn gesture_new_window_owner_and_owner_window_close_restore_the_old_buffer() {
         assert_eq!(buffer.document().components[0].pos, Point::new(100, 100));
     }
 }
+
+fn key(key: egui::Key) -> egui::Event {
+    egui::Event::Key {
+        key,
+        physical_key: Some(key),
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }
+}
+
+/// Copy the fixture's resistor and Paste it, with the pointer over the
+/// canvas at screen `(x, 100)`.
+fn float_a_pasted_resistor(fixture: &mut Fixture, x: f32) {
+    use crate::workbench::commands::vocabulary::Command;
+    let id = fixture.app.state.schematic.document().components[0].id;
+    fixture
+        .app
+        .state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(id);
+    Command::Copy.execute(&mut fixture.app);
+    fixture.frame(
+        vec![egui::Event::PointerMoved(
+            fixture.origin + egui::vec2(x, 100.0),
+        )],
+        true,
+    );
+    Command::Paste.execute(&mut fixture.app);
+}
+
+/// Paste floats the copy under the pointer: nothing lands until the click,
+/// R turns the ghost, history waits while it floats, and the click places
+/// it as one undo step where the pointer put it (audit G-1).
+#[test]
+fn a_paste_follows_the_pointer_turns_with_r_and_lands_on_the_click() {
+    use crate::state::Rotation;
+    use crate::workbench::commands::vocabulary::Command;
+
+    let mut fixture = Fixture::new(false);
+    float_a_pasted_resistor(&mut fixture, 300.0);
+    assert_eq!(fixture.app.state.schematic.document().components.len(), 1);
+    let start = fixture
+        .app
+        .state
+        .dialogs
+        .floating_paste
+        .as_ref()
+        .expect("the paste floats")
+        .at();
+    assert!(!Command::Undo.is_enabled(&fixture.app));
+
+    fixture.frame(vec![key(egui::Key::R)], true);
+    fixture.frame(
+        vec![egui::Event::PointerMoved(
+            fixture.origin + egui::vec2(400.0, 100.0),
+        )],
+        true,
+    );
+    let floating = fixture
+        .app
+        .state
+        .dialogs
+        .floating_paste
+        .as_ref()
+        .expect("still floating");
+    let at = floating.at();
+    assert!(
+        at.x > start.x && at.y == start.y,
+        "the copy did not follow: {start:?} -> {at:?}"
+    );
+    assert_eq!(floating.objects.components[0].rotation, Rotation::R90);
+    assert_eq!(fixture.app.state.schematic.document().components.len(), 1);
+
+    fixture.frame(vec![fixture.button(400.0, true)], true);
+    fixture.frame(vec![fixture.button(400.0, false)], true);
+
+    assert!(fixture.app.state.dialogs.floating_paste.is_none());
+    let document = fixture.app.state.schematic.document();
+    assert_eq!(document.components.len(), 2, "the click placed the copy");
+    let pasted = &document.components[1];
+    assert_eq!(pasted.rotation, Rotation::R90);
+    let grid = document.grid_size;
+    assert!(pasted.pos.x % grid == 0 && pasted.pos.y % grid == 0);
+    assert!(Command::Undo.is_enabled(&fixture.app));
+    assert!(
+        fixture.app.state.schematic.undo(),
+        "the paste is one undo step"
+    );
+    assert_eq!(fixture.app.state.schematic.document().components.len(), 1);
+    assert!(!fixture.app.state.schematic.can_undo());
+}
+
+/// Esc lets a floating paste go and the drawing never changed.
+#[test]
+fn escape_lets_a_floating_paste_go() {
+    let mut fixture = Fixture::new(false);
+    let before = crate::state::SchematicSnapshot::capture(fixture.app.state.schematic.document());
+    float_a_pasted_resistor(&mut fixture, 300.0);
+    assert!(fixture.app.state.dialogs.floating_paste.is_some());
+
+    fixture.frame(vec![key(egui::Key::Escape)], true);
+
+    assert!(fixture.app.state.dialogs.floating_paste.is_none());
+    assert!(before.is_equal_document(fixture.app.state.schematic.document()));
+    assert!(!fixture.app.state.schematic.can_undo());
+    fixture.frame(vec![fixture.button(400.0, true)], true);
+    fixture.frame(vec![fixture.button(400.0, false)], true);
+    assert_eq!(fixture.app.state.schematic.document().components.len(), 1);
+}

@@ -10,7 +10,7 @@ use crate::workbench::app_state::AppState;
 use egui::{Painter, Response};
 use rspice_schematic_editor::view::preview::{self, PreviewView, TransformPreviewStyle};
 
-fn preview_view(state: &AppState) -> PreviewView<'_> {
+pub(super) fn preview_view(state: &AppState) -> PreviewView<'_> {
     PreviewView {
         design: super::schematic_design_view(state),
         editor: &state.schematic.session.editor,
@@ -18,7 +18,7 @@ fn preview_view(state: &AppState) -> PreviewView<'_> {
     }
 }
 
-fn transform_preview_style<'a>(
+pub(super) fn transform_preview_style<'a>(
     state: &AppState,
     symbol_context: &'a SchematicSymbolContext,
     symbol_library: Option<&'a SymbolLibrary>,
@@ -40,6 +40,14 @@ pub(super) fn draw_interaction_previews(
     symbol_library: Option<&SymbolLibrary>,
 ) {
     draw_move_selection_preview(
+        painter,
+        response,
+        state,
+        viewport,
+        symbol_context,
+        symbol_library,
+    );
+    super::floating_paste::draw_floating_paste_preview(
         painter,
         response,
         state,

@@ -1219,6 +1219,13 @@ impl AppState {
             .unwrap_or((20.0, 20.0));
         crate::state::Point::new((x.round() as i32) * grid, (y.round() as i32) * grid)
     }
+
+    /// Whether a schematic edit is under way: an undo step still open, as
+    /// while a drag is held, or a copy floating under the pointer. History
+    /// waits for either to land or be cancelled.
+    pub(crate) fn schematic_edit_in_progress(&self) -> bool {
+        self.schematic.has_pending_operation() || self.dialogs.floating_paste.is_some()
+    }
 }
 
 fn schematic_has_authored_content(

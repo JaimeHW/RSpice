@@ -187,6 +187,20 @@ pub(crate) fn handle_pre_render_placement_transform(
     canvas_has_focus: bool,
 ) -> bool {
     let pointer_over_canvas = rspice_schematic_editor::view::canvas::contains_pointer(ctx);
+    if state.dialogs.floating_paste.is_some() && (canvas_has_focus || pointer_over_canvas) {
+        let Some(transform) = ctx.input_mut(consume_placement_transform) else {
+            return false;
+        };
+        crate::workbench::app::turn_floating_paste(
+            state,
+            match transform {
+                PlacementTransform::RotateClockwise => SelectionTransform::RotateClockwise,
+                PlacementTransform::ToggleHorizontalMirror => SelectionTransform::MirrorHorizontal,
+            },
+        );
+        ctx.request_repaint();
+        return true;
+    }
     if state.dialogs.move_selection.armed && (canvas_has_focus || pointer_over_canvas) {
         return turn_the_floating_move(ctx, state);
     }
