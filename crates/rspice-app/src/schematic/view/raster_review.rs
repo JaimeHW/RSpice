@@ -926,3 +926,39 @@ fn an_operating_point_badge_reads_four_digits_and_a_prefixed_unit() {
     .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(badges, expected);
 }
+
+/// An off-sheet connector's tab is stroked in whole device pixels, like the
+/// symbol beside it. It was stroked in proportion to its text's height, which
+/// at 100 % on a 1x display is 1.19 px: a soft two-pixel smear beside crisp
+/// one-pixel wires.
+#[test]
+fn an_off_sheet_connector_tab_is_stroked_in_whole_device_pixels() {
+    for (zoom, pixels_per_point) in [(1.0, 1.0_f32), (4.0, 2.0)] {
+        let mut state = hierarchy_sheet();
+        let render = render(
+            &mut state,
+            themes()[0].1,
+            at_zoom(zoom, HIERARCHY_DETAIL),
+            pixels_per_point,
+        );
+        let net_label = render.tokens.color.net_label;
+        let widths = leaf_shapes(&render.shapes)
+            .into_iter()
+            .filter_map(|(_, shape)| match shape {
+                Shape::Rect(rect) if rect.stroke.color == net_label => Some(rect.stroke.width),
+                Shape::LineSegment { stroke, .. } if stroke.color == net_label => {
+                    Some(stroke.width)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(!widths.is_empty(), "zoom {zoom}: no connector tab painted");
+        for width in widths {
+            let device = width * pixels_per_point;
+            assert!(
+                device >= 1.0 && (device - device.round()).abs() < 1e-3,
+                "zoom {zoom} at {pixels_per_point}x: a tab stroke is {device} device pixels"
+            );
+        }
+    }
+}

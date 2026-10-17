@@ -194,14 +194,25 @@ fn screen_layout(
 /// The marks are the schematic port glyph's, scaled to the tab: an arrow whose
 /// head sits at the end the signal travels toward, both heads when the net is
 /// bidirectional, and a barred stem for a supply.
+///
+/// The tab is the connector's symbol, so it is stroked at the symbol weight
+/// the level of detail gives this zoom: whole device pixels while thin, as
+/// crisp as the body of the part beside it. (Paper, which has no pixels,
+/// strokes it in proportion to its height.)
 fn paint_connector_tab(
     painter: &Painter,
+    zoom: f32,
     rect: Rect,
     direction: CrossSheetPortDirection,
     color: Color32,
 ) {
     let stroke = Stroke::new(
-        (rect.height() * CONNECTOR_TAB_STROKE_PER_HEIGHT).clamp(0.8, 1.6),
+        lod::stroke_pt(
+            lod::StrokeRole::Symbol,
+            zoom,
+            painter.pixels_per_point(),
+            lod::Emphasis::Plain,
+        ),
         color,
     );
     painter.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
@@ -325,7 +336,7 @@ pub fn draw_net_label_attached(
         LabelText::Shaped(galley) => {
             painter.galley(layout.text_rect.min, galley, text_color);
             if let Some((tab, direction)) = layout.connector_tab {
-                paint_connector_tab(painter, tab, direction, text_color);
+                paint_connector_tab(painter, viewport.zoom, tab, direction, text_color);
             }
         }
         LabelText::Greeked(bar) => {
