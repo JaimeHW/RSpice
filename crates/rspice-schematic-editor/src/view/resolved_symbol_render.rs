@@ -17,7 +17,10 @@ use super::lod;
 use crate::export::SvgExportConfig;
 use rspice_design::{
     resolved_symbol::ResolvedCellSymbol,
-    schematic::{component::Component, component_display::SchematicParameterLabelVisibility},
+    schematic::{
+        component::Component, component_display::SchematicParameterLabelVisibility, label_layout,
+        value_label::cell_instance_value as instance_value,
+    },
     symbol::{SymbolShape, SymbolTextAlign, SymbolTextPlacement, symbol_text_bounds},
     symbol_generation::{GENERATED_PIN_LABEL_SIZE, fit_pin_name, inward_step},
 };
@@ -303,64 +306,27 @@ pub(crate) fn instance_name_anchor(
     component: &Component,
     symbol: &ResolvedCellSymbol,
 ) -> (Pos2, Align2) {
-    let anchor = symbol.document().name_anchor;
-    let world = component.pos + component.transform_point(symbol.effective_point(anchor));
+    let placed = label_layout::symbol_label_placement(
+        component,
+        symbol.document(),
+        symbol.document().name_anchor,
+    );
     (
-        Pos2::new(world.x as f32, world.y as f32),
-        instance_label_align(component, symbol, anchor),
+        super::drawing::layout_pos(placed.anchor),
+        super::drawing::text_align(placed.horizontal, placed.vertical),
     )
 }
 
-/// The value a cell instance shows: its own, else the cell it places.
-fn instance_value(component: &Component) -> &str {
-    if component.value.is_empty() {
-        component
-            .library_cell
-            .as_ref()
-            .map(|binding| binding.cell.as_str())
-            .unwrap_or("")
-    } else {
-        component.value.as_str()
-    }
-}
-
 /// How an instance's name or value hangs off its anchor once the instance
-/// is rotated or mirrored (D1 section 7). The text stays upright; the
-/// authored run grows rightward from its anchor, and its justification
-/// turns with the instance, so the run still grows away from the body. A
-/// run turned to grow vertically, which upright text cannot, hangs below or
-/// stands above its anchor, and starts or ends on the side of the body the
-/// anchor is on.
+/// is rotated or mirrored (D1 section 7), from the shared layout
+/// (`label_layout::symbol_label_placement`) the printed page reads too.
 fn instance_label_align(
     component: &Component,
     symbol: &ResolvedCellSymbol,
     anchor: Point,
 ) -> Align2 {
-    let growth = component.transform_point(Point::new(1, 0));
-    if growth.x != 0 {
-        return if growth.x > 0 {
-            Align2::LEFT_CENTER
-        } else {
-            Align2::RIGHT_CENTER
-        };
-    }
-    let place = |point: Point| component.transform_point(symbol.effective_point(point));
-    let anchor = place(anchor);
-    let horizontal = symbol
-        .document()
-        .drawn_body_bounds()
-        .map_or(Align::Center, |(min, max)| {
-            let (min, max) = (place(min), place(max));
-            if anchor.x > min.x.max(max.x) {
-                Align::Min
-            } else if anchor.x < min.x.min(max.x) {
-                Align::Max
-            } else {
-                Align::Center
-            }
-        });
-    let vertical = if growth.y > 0 { Align::Min } else { Align::Max };
-    Align2([horizontal, vertical])
+    let placed = label_layout::symbol_label_placement(component, symbol.document(), anchor);
+    super::drawing::text_align(placed.horizontal, placed.vertical)
 }
 
 fn write_symbol_body_svg(

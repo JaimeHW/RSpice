@@ -42,5 +42,6 @@ pub mod stimulus_provenance;
 pub mod stretch;
 pub mod terminal_connection;
 pub mod validated_revision;
+pub mod value_label;
 pub mod wire;
 pub mod wire_edit;

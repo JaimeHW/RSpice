@@ -7,9 +7,10 @@
 //! on paper. It is pure geometry: a renderer scales and offsets it into its
 //! own space and sets the type itself.
 
-use rspice_design_model::design_management::CrossSheetPortDirection;
+use rspice_design_model::{Point, design_management::CrossSheetPortDirection};
 
 use super::{component::Component, component_type::ComponentType, net_label::NetLabel};
+use crate::symbol::SymbolDocument;
 
 /// An instance name's type size, in world units.
 pub const INSTANCE_NAME_WORLD: f32 = 10.0;
@@ -45,6 +46,11 @@ pub const CONNECTOR_TAB_GAP_WORLD: f32 = 3.0;
 pub const CONNECTOR_TAB_WIDTH_WORLD: f32 = 12.0;
 /// One em of a line box: Plex's ascent plus descent.
 pub const LINE_BOX_EM: f32 = 1.3;
+/// Plex's ascent, in em: a line's baseline sits this far below its top.
+pub const TEXT_ASCENT_EM: f32 = 1.025;
+/// A run's estimated advance per glyph, in em: wide enough for Plex Sans and
+/// Plex Mono alike, so a box built on it holds the text it stands for.
+pub const GLYPH_ADVANCE_EM: f32 = 0.62;
 
 /// A point in whatever linear space the caller evaluates the layout in:
 /// world units, screen points or page units.
@@ -235,6 +241,100 @@ pub fn instance_label_layout(
             name: above,
             value: PlacedText::new(LayoutPoint::new(x, y + half_h + margin), Center, Start),
         }
+    }
+}
+
+/// Where an instance of an authored symbol letters its name or value: the
+/// symbol's own `anchor`, turned with the instance, in world units.
+///
+/// The text stays upright. The authored run grows rightward from its anchor
+/// and its justification turns with the instance, so the run still grows
+/// away from the body. A run turned to grow vertically, which upright text
+/// cannot, hangs below or stands above its anchor, and starts or ends on the
+/// side of the body the anchor is on.
+pub fn symbol_label_placement(
+    component: &Component,
+    document: &SymbolDocument,
+    anchor: Point,
+) -> PlacedText {
+    let place = |point: Point| component.transform_point(point - document.origin);
+    let local = place(anchor);
+    let at = LayoutPoint::new(
+        (component.pos.x + local.x) as f32,
+        (component.pos.y + local.y) as f32,
+    );
+    let growth = component.transform_point(Point::new(1, 0));
+    if growth.x != 0 {
+        let horizontal = if growth.x > 0 {
+            TextEdge::Start
+        } else {
+            TextEdge::End
+        };
+        return PlacedText::new(at, horizontal, TextEdge::Center);
+    }
+    let horizontal = document
+        .drawn_body_bounds()
+        .map_or(TextEdge::Center, |(min, max)| {
+            let (min, max) = (place(min), place(max));
+            if local.x > min.x.max(max.x) {
+                TextEdge::Start
+            } else if local.x < min.x.min(max.x) {
+                TextEdge::End
+            } else {
+                TextEdge::Center
+            }
+        });
+    let vertical = if growth.y > 0 {
+        TextEdge::Start
+    } else {
+        TextEdge::End
+    };
+    PlacedText::new(at, horizontal, vertical)
+}
+
+/// The baselines of `lines` stacked lines of `size` type hung off `y` the way
+/// `vertical` hangs the block, top line first: one line box per line, each
+/// baseline [`TEXT_ASCENT_EM`] below its line's top.
+pub fn text_baselines(
+    y: f32,
+    vertical: TextEdge,
+    size: f32,
+    lines: usize,
+) -> impl Iterator<Item = f32> {
+    let advance = LINE_BOX_EM * size;
+    let height = advance * lines as f32;
+    let top = match vertical {
+        TextEdge::Start => y,
+        TextEdge::Center => y - height * 0.5,
+        TextEdge::End => y - height,
+    };
+    (0..lines).map(move |line| top + advance * line as f32 + TEXT_ASCENT_EM * size)
+}
+
+/// The box a block of text takes when hung off its anchor: the widest
+/// line's estimated advance across, and a line box per line down.
+pub fn text_box(placed: PlacedText, text: &str, size: f32) -> LayoutRect {
+    let lines = text.lines().count().max(1);
+    let glyphs = text
+        .lines()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0);
+    let width = glyphs as f32 * size * GLYPH_ADVANCE_EM;
+    let height = lines as f32 * size * LINE_BOX_EM;
+    let left = match placed.horizontal {
+        TextEdge::Start => placed.anchor.x,
+        TextEdge::Center => placed.anchor.x - width * 0.5,
+        TextEdge::End => placed.anchor.x - width,
+    };
+    let top = match placed.vertical {
+        TextEdge::Start => placed.anchor.y,
+        TextEdge::Center => placed.anchor.y - height * 0.5,
+        TextEdge::End => placed.anchor.y - height,
+    };
+    LayoutRect {
+        min: LayoutPoint::new(left, top),
+        max: LayoutPoint::new(left + width, top + height),
     }
 }
 
