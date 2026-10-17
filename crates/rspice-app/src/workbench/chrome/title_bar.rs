@@ -1321,7 +1321,8 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         | Command::AlignSelectionMiddle
         | Command::AlignSelectionBottom
         | Command::DistributeSelectionHorizontal
-        | Command::DistributeSelectionVertical => WorkbenchIcon::Grid,
+        | Command::DistributeSelectionVertical
+        | Command::SnapSelectionToGrid => WorkbenchIcon::Grid,
         Command::ReplaceInstance => WorkbenchIcon::Refresh,
         Command::CreateHierarchy | Command::DesignManagement => WorkbenchIcon::Folder,
         Command::ConnectivityManager => WorkbenchIcon::Bus,

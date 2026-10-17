@@ -17,6 +17,7 @@ mod context_menu;
 pub(crate) mod drawing_sheet;
 mod edge_pan;
 mod floating_paste;
+pub(crate) mod grid_snap_selection;
 mod interaction;
 mod keyboard_navigation;
 mod mobile_controls;

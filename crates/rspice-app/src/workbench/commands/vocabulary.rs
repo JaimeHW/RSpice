@@ -196,6 +196,8 @@ pub enum Command {
     AlignSelectionBottom,
     DistributeSelectionHorizontal,
     DistributeSelectionVertical,
+    /// Move every selected object's anchor to the nearest grid point.
+    SnapSelectionToGrid,
     /// Lay the active sheet's wires that run on one line, end to end or
     /// overlapping, as one wire each.
     JoinCollinearWires,
@@ -712,6 +714,9 @@ impl Command {
                 "Distribute vertically",
                 "Design",
             ),
+            Self::SnapSelectionToGrid => {
+                spec("snap-selection-to-grid", "Snap selection to grid", "Design")
+            }
             Self::JoinCollinearWires => {
                 spec("join-collinear-wires", "Join collinear wires", "Design")
             }
@@ -1321,6 +1326,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::AlignSelectionBottom,
     Command::DistributeSelectionHorizontal,
     Command::DistributeSelectionVertical,
+    Command::SnapSelectionToGrid,
     Command::JoinCollinearWires,
     Command::AscendHierarchy,
     Command::DescendHierarchy,

@@ -5,8 +5,9 @@ use egui::containers::menu::{MenuState, SubMenu};
 
 use super::*;
 
-/// The submenu's rows, group by group: turn and flip, line up, space out.
-pub(super) const ARRANGE_GROUPS: [&[Command]; 3] = [
+/// The submenu's rows, group by group: turn and flip, line up, space out,
+/// put back on the grid.
+pub(super) const ARRANGE_GROUPS: [&[Command]; 4] = [
     &[
         Command::RotateSelection,
         Command::RotateSelectionCounterClockwise,
@@ -25,6 +26,7 @@ pub(super) const ARRANGE_GROUPS: [&[Command]; 3] = [
         Command::DistributeSelectionHorizontal,
         Command::DistributeSelectionVertical,
     ],
+    &[Command::SnapSelectionToGrid],
 ];
 pub(super) const ARRANGE_ROW_ID: &str = "workbench.title_menu.arrange";
 

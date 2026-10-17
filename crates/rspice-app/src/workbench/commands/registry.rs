@@ -783,6 +783,7 @@ impl Command {
             | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical
+            | Self::SnapSelectionToGrid
             | Self::NextSheet
             | Self::PreviousSheet
             | Self::NewSheet
@@ -1163,6 +1164,7 @@ impl Command {
             | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical
+            | Self::SnapSelectionToGrid
             | Self::JoinCollinearWires
                 if !super::active_schematic_editor(app) =>
             {
@@ -1177,6 +1179,7 @@ impl Command {
             | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical
+            | Self::SnapSelectionToGrid
             | Self::JoinCollinearWires
                 if app.state.schematic_edit_read_only() =>
             {
@@ -1194,7 +1197,8 @@ impl Command {
             | Self::RotateSelection
             | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
-            | Self::MirrorSelectionVertical => "select an editable object",
+            | Self::MirrorSelectionVertical
+            | Self::SnapSelectionToGrid => "select an editable object",
             Self::NextSheet | Self::PreviousSheet if !super::active_schematic_editor(app) => {
                 "open a schematic or testbench"
             }

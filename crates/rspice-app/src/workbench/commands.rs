@@ -153,6 +153,7 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::AlignSelectionBottom
             | Command::DistributeSelectionHorizontal
             | Command::DistributeSelectionVertical
+            | Command::SnapSelectionToGrid
             | Command::JoinCollinearWires
     )
 }
@@ -617,6 +618,11 @@ impl Command {
             }
             Self::JoinCollinearWires => {
                 active_schematic_editor(app) && !state.schematic_edit_read_only()
+            }
+            Self::SnapSelectionToGrid => {
+                active_schematic_editor(app)
+                    && !state.schematic_edit_read_only()
+                    && !state.schematic.session.editor.selection.is_empty()
             }
             Self::MoveSelection => {
                 active_schematic_editor(app)
@@ -1811,6 +1817,21 @@ impl Command {
             }
             Self::JoinCollinearWires => {
                 app.state.join_collinear_wires_on_active_sheet();
+            }
+            Self::SnapSelectionToGrid => {
+                let symbol_context = schematic_symbol_context(&app.state);
+                let result = crate::schematic::view::grid_snap_selection::snap_selection_to_grid(
+                    &mut app.state,
+                    &symbol_context,
+                );
+                match result {
+                    Ok(0) => app.state.prompt("The selection is on the grid already."),
+                    Ok(moved) => app.state.prompt(format!(
+                        "Snapped {moved} {} to the grid.",
+                        if moved == 1 { "object" } else { "objects" }
+                    )),
+                    Err(error) => app.state.prompt(error),
+                }
             }
             Self::AlignSelectionLeft
             | Self::AlignSelectionCenter
