@@ -921,8 +921,44 @@ pub(crate) struct DiagnosticStore {
     generation: u64,
     /// What the current rendering pass decided about the list.
     pass_memo: PassMemoCell,
+    /// The current finding's other objects, as of one generation: what the
+    /// canvas marks on every frame without looking the finding up again.
+    places_memo: PlacesMemoCell,
     /// Each batch's live digest, by the key of what it read.
     digests: digest_memo::DigestMemo,
+}
+
+/// The other objects the current finding involves, with what marking them
+/// needs: how bad the finding is, and the batch whose standing says whether
+/// they still describe the design.
+#[derive(Debug)]
+pub(in crate::workbench) struct CurrentPlaces {
+    /// The key the store files the finding's batch under.
+    batch: String,
+    pub(in crate::workbench) level: DiagnosticLevel,
+    pub(in crate::workbench) places: Vec<RelatedPlace>,
+}
+
+/// The current finding's places, by the finding and the store generation they
+/// were read at. Behind a lock for the reason [`PassMemoCell`] is, and empty
+/// in a clone for the same reason.
+#[derive(Default)]
+struct PlacesMemoCell(std::sync::Mutex<Option<PlacesMemo>>);
+
+/// One reading: the finding, the generation, and what it involves, `None`
+/// where it involves nothing else or the store does not hold it.
+type PlacesMemo = (uuid::Uuid, u64, Option<Arc<CurrentPlaces>>);
+
+impl Clone for PlacesMemoCell {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl std::fmt::Debug for PlacesMemoCell {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("PlacesMemoCell")
+    }
 }
 
 /// The list's standings and counts for one rendering pass.
@@ -1064,6 +1100,46 @@ impl DiagnosticStore {
             .map(|record| record.key.clone());
         self.source_anchor = None;
         self.unresolved = None;
+    }
+
+    /// The other objects the current finding involves, where it involves any.
+    ///
+    /// Read off its record once per finding and generation, and remembered:
+    /// the canvas asks on every frame, and a frame must cost the current
+    /// finding's objects, not a search of the batch that holds it.
+    pub(in crate::workbench) fn current_places(&self) -> Option<Arc<CurrentPlaces>> {
+        let current = self.current?;
+        let mut memo = self
+            .places_memo
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((finding, generation, places)) = memo.as_ref()
+            && *finding == current
+            && *generation == self.generation
+        {
+            return places.clone();
+        }
+        let places = self.owners.get(&current).and_then(|batch| {
+            let record = self
+                .record(current)
+                .filter(|record| !record.related_places.is_empty())?;
+            Some(Arc::new(CurrentPlaces {
+                batch: batch.clone(),
+                level: record.level,
+                places: record.related_places.clone(),
+            }))
+        });
+        *memo = Some((current, self.generation, places.clone()));
+        places
+    }
+
+    /// The batch the current finding's places were read from.
+    pub(in crate::workbench) fn batch_of(
+        &self,
+        places: &CurrentPlaces,
+    ) -> Option<&DiagnosticBatch> {
+        self.batches.get(&places.batch)
     }
 
     /// The record a held identity names, where this store holds it.

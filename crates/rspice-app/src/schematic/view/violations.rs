@@ -203,8 +203,30 @@ pub(crate) fn location_anchor_in(
     })
 }
 
-/// Draw only check results that remain current for the active schematic.
+/// Where the canvas marks the other objects the current finding involves:
+/// each one the drawing in front of the reader draws on the sheet in view,
+/// with the finding's severity.
+///
+/// The current finding may come from a check of another cellview — a loop
+/// stated inside an instance of this one — so this asks the store for it
+/// rather than the active drawing's own results.
+pub(crate) fn related_marks(state: &AppState) -> Option<(DrcSeverity, Vec<crate::state::Point>)> {
+    let subject = state.workspace.content.active_schematic_reference();
+    let (severity, locations) = state.current_finding_related_marks(&subject)?;
+    let view = super::schematic_design_view(state);
+    let points = locations
+        .iter()
+        .filter_map(|location| markers::anchor(&view, location))
+        .collect();
+    Some((severity, points))
+}
+
+/// Draw only check results that remain current for the active schematic,
+/// with the current finding's other objects marked beneath them.
 pub(super) fn draw_violation_markers(painter: &Painter, viewport: &Viewport, state: &AppState) {
+    if let Some((severity, points)) = related_marks(state) {
+        markers::draw_related_marks(painter, viewport, &points, severity);
+    }
     let Some(result) = &state.dialogs.drc_results else {
         return;
     };

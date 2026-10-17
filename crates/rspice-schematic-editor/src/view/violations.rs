@@ -50,6 +50,29 @@ pub fn draw_violation_markers(
     }
 }
 
+/// Ring radius of a related-object mark in screen px, clear of the badge the
+/// object may carry for a finding of its own.
+const RING: f32 = HALF + 4.0;
+
+/// Mark the other objects the current finding involves, at `points` on the
+/// sheet in view: a hollow ring in the finding's severity colour, secondary
+/// to the filled badge the finding itself is marked with.
+pub fn draw_related_marks(
+    painter: &Painter,
+    viewport: &Viewport,
+    points: &[Point],
+    severity: DrcSeverity,
+) {
+    let palette = active_palette();
+    let stroke = Stroke::new(1.5, severity_color(severity, &palette));
+    for world in points {
+        let pos = viewport.schematic_to_screen(*world);
+        if viewport.bounds.expand(RING * 2.0).contains(pos) {
+            painter.circle_stroke(pos, RING, stroke);
+        }
+    }
+}
+
 fn severity_color(
     severity: DrcSeverity,
     palette: &rspice_ui_kit::palette::Palette,

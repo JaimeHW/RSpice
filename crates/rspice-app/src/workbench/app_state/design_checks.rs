@@ -478,6 +478,45 @@ impl AppState {
         finding_identities(&self.workspace.content.active_schematic_reference(), result)
     }
 
+    /// The other objects the current finding involves that `cell_view` draws,
+    /// and how bad the finding is: what the canvas marks beside the finding's
+    /// own badge.
+    ///
+    /// Read through the store's memo of the current finding's places, so a
+    /// frame costs that finding's objects and no walk over the others. A
+    /// finding whose batch no longer describes the design marks nothing, as
+    /// its row offers no jump.
+    pub(crate) fn current_finding_related_marks(
+        &self,
+        cell_view: &CellViewRef,
+    ) -> Option<(rspice_design::drc::DrcSeverity, Vec<DrcLocation>)> {
+        use super::diagnostic_store::DiagnosticLevel;
+        use rspice_design::drc::DrcSeverity;
+
+        let current = self.diagnostics.current_places()?;
+        let key = cell_view.key();
+        let drawn: Vec<DrcLocation> = current
+            .places
+            .iter()
+            .filter(|place| place.cell_view.key().eq_ignore_ascii_case(&key))
+            .map(|place| place.location.clone())
+            .collect();
+        if drawn.is_empty() {
+            return None;
+        }
+        let batch = self.diagnostics.batch_of(&current)?;
+        if !self.diagnostic_batch_standing(batch).is_current() {
+            return None;
+        }
+        let severity = match current.level {
+            DiagnosticLevel::Critical => DrcSeverity::Critical,
+            DiagnosticLevel::Error => DrcSeverity::Error,
+            DiagnosticLevel::Warning => DrcSeverity::Warning,
+            DiagnosticLevel::Info | DiagnosticLevel::Hint => DrcSeverity::Info,
+        };
+        Some((severity, drawn))
+    }
+
     /// The worst rule finding published for `subject`, first among equals in
     /// the order the checks reported them — where a worst-first tour starts.
     pub(in crate::workbench) fn worst_design_rule_finding(
