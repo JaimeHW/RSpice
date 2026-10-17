@@ -23,6 +23,8 @@ use crate::simulation::execution::preparation::reject_deferred_corner_model_sour
 use rspice_app_types::canonical::content_digest;
 
 #[cfg(test)]
+mod ground_expression_tests;
+#[cfg(test)]
 mod measurement_tests;
 
 use rspice_simulation::model_sources::validate_projected_model_binding_authority;
