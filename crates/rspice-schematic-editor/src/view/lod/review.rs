@@ -484,6 +484,65 @@ fn render_open_pin_review() {
     }
 }
 
+/// A generated cell, X1 / ota, at R0, R90, R180, R270 and mirrored, at zoom
+/// 2: the name and value stay upright and grow away from the body.
+#[test]
+#[ignore = "writes review PNGs to RSPICE_RASTER_DIR"]
+fn render_instance_label_review() {
+    use crate::view::resolved_symbol_render::draw_resolved_symbol;
+    use rspice_design::{resolved_symbol::ResolvedCellSymbol, schematic::rotation::Rotation};
+    use rspice_design_model::port::{PortDirection, PortSpec};
+    let port = |name: &str, direction| PortSpec {
+        name: name.to_owned(),
+        direction,
+    };
+    let symbol = ResolvedCellSymbol::from_generated(&[
+        port("in", PortDirection::In),
+        port("out", PortDirection::Out),
+    ]);
+    let cases = [
+        (Rotation::R0, false),
+        (Rotation::R90, false),
+        (Rotation::R180, false),
+        (Rotation::R270, false),
+        (Rotation::R0, true),
+    ];
+    let cell = Vec2::new(220.0, 220.0);
+    for (mode, theme) in themes() {
+        let canvas = rspice_ui_kit::raster::render_themed(
+            theme,
+            Vec2::new(cell.x * cases.len() as f32, cell.y),
+            |ui, _| {
+                let palette = rspice_ui_kit::tokens::active_palette();
+                for (index, (rotation, mirror_h)) in cases.into_iter().enumerate() {
+                    let bounds = Rect::from_min_size(Pos2::new(index as f32 * cell.x, 0.0), cell);
+                    let painter = ui.painter().with_clip_rect(bounds.shrink(1.0));
+                    painter.rect_filled(bounds.shrink(1.0), 0.0, palette.canvas_bg);
+                    let mut component =
+                        Component::new(1, ComponentType::CellInstance, Point::new(0, 0));
+                    component.name = "X1".to_owned();
+                    component.value = "ota".to_owned();
+                    component.rotation = rotation;
+                    component.mirror_h = mirror_h;
+                    draw_resolved_symbol(
+                        &painter,
+                        bounds.center(),
+                        2.0,
+                        &component,
+                        &symbol,
+                        egui::Stroke::new(2.0, palette.symbol),
+                    );
+                }
+            },
+        );
+        write_png(
+            &format!("labels-{mode}-{}", review_stage()),
+            &canvas,
+            cell.y as usize,
+        );
+    }
+}
+
 /// The overlap chooser over the review circuit, its second row focused,
 /// dark and light; then the same chooser with fourteen candidates, which
 /// lists nine and counts the rest.

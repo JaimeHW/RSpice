@@ -36,9 +36,10 @@ const PROBE_CROSSHAIR_HALF_SPAN: f32 = 13.0;
 const SMALL_TEXT_WORLD: f32 = 9.0;
 /// Mono advance per glyph at [`SMALL_TEXT_WORLD`], for a greeked bar.
 const SMALL_TEXT_GLYPH_WORLD: f32 = 6.7 * SMALL_TEXT_WORLD / 11.0;
-/// Instance name and value, in world units.
-const INSTANCE_NAME_WORLD: f32 = 10.0;
-const INSTANCE_VALUE_WORLD: f32 = 9.0;
+/// Instance name and value, in world units: one type for primitives and
+/// cells, on the canvas and in the SVG.
+pub(crate) const INSTANCE_NAME_WORLD: f32 = 10.0;
+pub(crate) const INSTANCE_VALUE_WORLD: f32 = 9.0;
 
 /// Draw a wire on the canvas
 pub fn draw_wire(painter: &Painter, viewport: &Viewport, wire: &Wire, ink: ConductorInk) {
@@ -1037,12 +1038,15 @@ enum TerminalAxis {
     Mixed,
 }
 
+/// Where a primitive's name and value sit and how they hang off their
+/// anchors. Linear in `pos` and `scale`, so the SVG evaluates it in its own
+/// units.
 #[derive(Debug, Clone, Copy)]
-struct LabelLayout {
-    name_pos: Pos2,
-    name_align: egui::Align2,
-    value_pos: Pos2,
-    value_align: egui::Align2,
+pub(crate) struct LabelLayout {
+    pub(crate) name_pos: Pos2,
+    pub(crate) name_align: egui::Align2,
+    pub(crate) value_pos: Pos2,
+    pub(crate) value_align: egui::Align2,
 }
 
 /// Infer the dominant terminal direction after mirror/rotation transforms.
@@ -1085,7 +1089,7 @@ fn infer_terminal_axis(component: &Component) -> TerminalAxis {
     }
 }
 
-fn compute_label_layout(pos: Pos2, scale: f32, component: &Component) -> LabelLayout {
+pub(crate) fn compute_label_layout(pos: Pos2, scale: f32, component: &Component) -> LabelLayout {
     let (width, height) = component.symbol_dimensions();
     let is_rotated_vertical = component.rotation.is_vertical(); // R90 or R270
 
