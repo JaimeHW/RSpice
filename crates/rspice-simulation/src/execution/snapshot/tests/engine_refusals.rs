@@ -229,8 +229,9 @@ fn a_boundary_the_connect_rules_cannot_bridge_is_the_builders_refusal() {
         .engine_refusals(&rspice_core::NoAbort);
 
     assert_eq!(refusals.len(), 1, "{refusals:?}");
-    let EngineRefusalKind::Build { message, .. } = &refusals[0].kind else {
-        panic!("{refusals:?}");
+    let EngineRefusalKind::ConnectRules { message, instance } = &refusals[0].kind else {
+        panic!("a connect-rule refusal is told apart from other builds: {refusals:?}");
     };
     assert!(message.contains("NotThere"), "{message}");
+    assert_eq!(instance, &None, "an unknown block is no instance's");
 }

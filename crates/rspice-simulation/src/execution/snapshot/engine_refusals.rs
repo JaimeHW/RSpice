@@ -34,8 +34,17 @@ pub enum EngineRefusalKind {
     /// geometry and temperature. Boxed: the gap carries the nearest card's
     /// whole geometry, several times the size of every other refusal.
     UncoveredModelBin(Box<ModelBinCoverageGap>),
-    /// Any other refusal the build raised — a mixed-discipline connection the
-    /// connect rules cannot bridge, among others — in the engine's words.
+    /// A Verilog-AMS connect-rule refusal (clause 7), in the engine's words:
+    /// a mixed-discipline boundary the selected rules cannot bridge, or no
+    /// single block to select. Apart from [`Self::Build`] because its remedy
+    /// is the run's `.OPTIONS CONNECTRULES` as well as the design.
+    ConnectRules {
+        message: String,
+        /// The instance whose port the boundary is. `None` for a refusal
+        /// about the rules themselves, which no instance owns.
+        instance: Option<String>,
+    },
+    /// Any other refusal the build raised, in the engine's words.
     Build {
         message: String,
         /// The deck instance the engine named, when it named one.
@@ -331,9 +340,14 @@ impl PreparedRunSnapshot {
                     .map(|gap| EngineRefusalKind::UncoveredModelBin(Box::new(gap)))
                     .collect();
                 if !stopped_on_a_gap {
-                    refused.push(EngineRefusalKind::Build {
-                        instance: error.instance_name().map(str::to_owned),
-                        message,
+                    let instance = error.instance_name().map(str::to_owned);
+                    refused.push(match &error {
+                        rspice_core::SimulationError::Elaboration(elaboration)
+                            if elaboration.kind == rspice_core::ElaborationErrorKind::ConnectRule =>
+                        {
+                            EngineRefusalKind::ConnectRules { message, instance }
+                        }
+                        _ => EngineRefusalKind::Build { message, instance },
                     });
                 }
                 Some(DeckVerdict::Refused(refused))
