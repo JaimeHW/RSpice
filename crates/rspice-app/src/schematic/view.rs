@@ -224,10 +224,20 @@ pub(crate) fn select_signal_conductor(
     let (document, editor) = state.schematic.document_and_editor();
     let view = cross_probe::CrossProbeView {
         document,
-        sheet_catalog: state.workspace.content.design_management.sheet_catalog(&key),
+        sheet_catalog: state
+            .workspace
+            .content
+            .design_management
+            .sheet_catalog(&key),
         occurrence: &occurrence,
-        net_to_points: current
-            .then_some(&state.simulation.source.cross_probe.on_sheet(sheet).net_to_points),
+        net_to_points: current.then_some(
+            &state
+                .simulation
+                .source
+                .cross_probe
+                .on_sheet(sheet)
+                .net_to_points,
+        ),
     };
     cross_probe::select_signal_conductor(&view, editor, signal)
 }
@@ -271,10 +281,20 @@ pub(crate) fn select_failure_sites(
     let (document, editor) = state.schematic.document_and_editor();
     let view = cross_probe::CrossProbeView {
         document,
-        sheet_catalog: state.workspace.content.design_management.sheet_catalog(&key),
+        sheet_catalog: state
+            .workspace
+            .content
+            .design_management
+            .sheet_catalog(&key),
         occurrence: &occurrence,
-        net_to_points: current
-            .then_some(&state.simulation.source.cross_probe.on_sheet(sheet).net_to_points),
+        net_to_points: current.then_some(
+            &state
+                .simulation
+                .source
+                .cross_probe
+                .on_sheet(sheet)
+                .net_to_points,
+        ),
     };
     cross_probe::select_failure_sites(&view, editor, nets, devices)
 }

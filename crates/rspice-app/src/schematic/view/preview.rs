@@ -319,9 +319,10 @@ pub(super) fn stretch_preview_diff(
     };
     held_transform_preview(state, key, |state| {
         match stretch_preview_candidate(state, symbol_context, delta, target, policy) {
-            Ok(Some(candidate)) => Ok(Some(Arc::new(
-                preview::TransformCandidateDiff::between(state.schematic.document(), &candidate),
-            ))),
+            Ok(Some(candidate)) => Ok(Some(Arc::new(preview::TransformCandidateDiff::between(
+                state.schematic.document(),
+                &candidate,
+            )))),
             Ok(None) => Ok(None),
             Err(error) => Err(error.to_string()),
         }

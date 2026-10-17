@@ -1526,7 +1526,9 @@ fn schematic_cross_probe_unavailability(
         Err(_) => net.to_owned(),
     };
     let mut nets = map
-        .on_sheet(crate::schematic::view::sheet_visibility::active_sheet_id(state))
+        .on_sheet(crate::schematic::view::sheet_visibility::active_sheet_id(
+            state,
+        ))
         .net_to_points
         .iter();
     let known = nets.any(|(name, points)| name.eq_ignore_ascii_case(&leaf) && !points.is_empty());
