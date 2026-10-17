@@ -386,9 +386,9 @@ fn follow_with_unselected_wires(
             continue;
         }
         let wire_id = wire.id;
-        let rerouted = wire
-            .is_orthogonal()
-            .then(|| orthogonal_route_for_corresponding_points(wire_id, &wire.points, &followed));
+        let rerouted = wire.is_orthogonal().then(|| {
+            orthogonal_route_for_corresponding_points(document, wire_id, &wire.points, &followed)
+        });
         match rerouted {
             Some(Ok((route, point_indices))) => {
                 for connection in document

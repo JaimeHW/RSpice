@@ -570,7 +570,7 @@ fn dragged_wire_points(
         return (moved, None);
     }
     let Ok((route, point_map)) =
-        orthogonal_route_for_corresponding_points(before.id, &before.points, &moved)
+        orthogonal_route_for_corresponding_points(document, before.id, &before.points, &moved)
     else {
         return (moved, None);
     };
@@ -1369,6 +1369,7 @@ fn orthogonalize_connected_rubber_bands(
             });
         }
         let (route, point_indices) = orthogonal_route_for_corresponding_points(
+            candidate.document,
             old_wire.id,
             &old_wire.points,
             &candidate_points,
@@ -1402,7 +1403,31 @@ fn orthogonalize_connected_rubber_bands(
     Ok(())
 }
 
+/// Square the wire `wire_id` from `original` onto `moved`, the same vertices
+/// after some of them moved, and say where each old vertex went.
+///
+/// Squaring can lay the wire out past a vertex and straight back, as when a
+/// moved end comes level with the next corner and lands on the run beyond
+/// it. Such a fold is taken out again when nothing in `document` but this
+/// wire reaches the stretch it doubles over, or another wire runs all of it.
+/// A fold the wire was drawn with is the operator's and stays.
 pub fn orthogonal_route_for_corresponding_points(
+    document: &SchematicDocument,
+    wire_id: u64,
+    original: &[Point],
+    moved: &[Point],
+) -> Result<(Vec<Point>, Vec<usize>), MoveSelectionError> {
+    let (mut route, mut point_indices) = squared_route(wire_id, original, moved)?;
+    let drawn_folded = original
+        .windows(3)
+        .any(|corner| folds_back(corner[0], corner[1], corner[2]));
+    if !drawn_folded {
+        retract_fold_backs(document, wire_id, &mut route, &mut point_indices);
+    }
+    Ok((route, point_indices))
+}
+
+fn squared_route(
     wire_id: u64,
     original: &[Point],
     moved: &[Point],
@@ -1518,6 +1543,114 @@ fn endpoint_rubber_band_route(
         return Err(MoveSelectionError::NonOrthogonalWire { wire_id });
     }
     Ok((route, point_indices))
+}
+
+/// Whether the run from `before` to `vertex` turns straight back on itself
+/// to `after`.
+fn folds_back(before: Point, vertex: Point, after: Point) -> bool {
+    let delta = |from: i32, to: i32| i64::from(to) - i64::from(from);
+    let (in_x, in_y) = (delta(before.x, vertex.x), delta(before.y, vertex.y));
+    let (out_x, out_y) = (delta(vertex.x, after.x), delta(vertex.y, after.y));
+    in_x * out_y == in_y * out_x && in_x * out_x + in_y * out_y < 0
+}
+
+/// Take out of `route` each vertex it turns straight back at, where the
+/// stretch it doubles over can go: from the vertex back to the nearer of its
+/// neighbours, which stays on the wire. The ends stay where they are.
+fn retract_fold_backs(
+    document: &SchematicDocument,
+    wire_id: u64,
+    route: &mut Vec<Point>,
+    point_indices: &mut [usize],
+) {
+    let mut retracted = route.clone();
+    let mut renumbered = point_indices.to_vec();
+    let mut index = 1;
+    while index + 1 < retracted.len() {
+        let (before, vertex, after) =
+            (retracted[index - 1], retracted[index], retracted[index + 1]);
+        let reach = |point: Point| {
+            (i64::from(point.x) - i64::from(vertex.x)).abs()
+                + (i64::from(point.y) - i64::from(vertex.y)).abs()
+        };
+        let kept = if reach(before) <= reach(after) {
+            before
+        } else {
+            after
+        };
+        if !folds_back(before, vertex, after) || !stretch_can_go(document, wire_id, kept, vertex) {
+            index += 1;
+            continue;
+        }
+        remove_route_vertex(&mut retracted, &mut renumbered, index);
+        if before == after {
+            // Out and back to the same point: one of the two copies goes,
+            // never an end of the wire.
+            if index + 1 < retracted.len() {
+                remove_route_vertex(&mut retracted, &mut renumbered, index);
+            } else if index > 1 {
+                remove_route_vertex(&mut retracted, &mut renumbered, index - 1);
+            }
+        }
+        index = index.saturating_sub(1).max(1);
+    }
+    let square = retracted.len() >= 2
+        && retracted
+            .windows(2)
+            .all(|pair| pair[0] != pair[1] && (pair[0].x == pair[1].x || pair[0].y == pair[1].y));
+    if square {
+        *route = retracted;
+        point_indices.copy_from_slice(&renumbered);
+    }
+}
+
+/// Whether the stretch from `kept` to `dropped` can come out of wire
+/// `wire_id` with every connection left as it was: another wire runs all of
+/// it, and so carries whatever reaches it and meets this wire at `kept`; or
+/// nothing but this wire reaches it, `kept` aside: no other wire, dot, pin,
+/// net label or bus tap.
+fn stretch_can_go(document: &SchematicDocument, wire_id: u64, kept: Point, dropped: Point) -> bool {
+    let others = move || document.wires.iter().filter(move |wire| wire.id != wire_id);
+    let carried = others().any(|wire| {
+        wire.segments()
+            .any(|segment| segment.contains_point(kept) && segment.contains_point(dropped))
+    });
+    if carried {
+        return true;
+    }
+    let stretch = WireSegment::new(kept, dropped);
+    let on_stretch = |point: Point| point != kept && stretch.contains_point(point);
+    let touches_a_wire = others()
+        .any(|wire| wire.points.iter().copied().any(on_stretch) || wire.contains_point(dropped));
+    !touches_a_wire
+        && !document
+            .junctions
+            .iter()
+            .any(|junction| on_stretch(junction.pos))
+        && !document
+            .net_labels
+            .iter()
+            .any(|label| on_stretch(label.pos))
+        && !document
+            .bus_taps
+            .iter()
+            .any(|tap| on_stretch(tap.connection_point))
+        && !super::junction_edit::placed_pins(document)
+            .into_iter()
+            .any(on_stretch)
+}
+
+/// Take vertex `index` out of `route` and renumber where the old vertices
+/// went: those past it move one place back, and one that went to it goes to
+/// the vertex that takes its place.
+fn remove_route_vertex(route: &mut Vec<Point>, point_indices: &mut [usize], index: usize) {
+    route.remove(index);
+    for moved_to in point_indices
+        .iter_mut()
+        .filter(|moved_to| **moved_to > index)
+    {
+        *moved_to -= 1;
+    }
 }
 
 fn push_distinct_point(route: &mut Vec<Point>, point: Point) {
@@ -2455,6 +2588,54 @@ mod tests {
                 Point::new(100, 10),
                 Point::new(100, 20),
             ]
+        );
+    }
+
+    /// An end moved level with the next corner and onto the run beyond it
+    /// stops there; it reaches back to the corner only while something else
+    /// still needs the stretch it would give up, and a fold the wire was
+    /// drawn with stays.
+    #[test]
+    fn a_squared_wire_folds_back_only_where_something_needs_the_fold() {
+        let p = Point::new;
+        let drawn = [p(140, 220), p(200, 220), p(200, 140), p(240, 140)];
+        let mut moved = drawn;
+        moved[0] = p(200, 200);
+        let mut document = SchematicDocument::default();
+        let route = |document: &SchematicDocument, original: &[Point], moved: &[Point]| {
+            orthogonal_route_for_corresponding_points(document, 1, original, moved)
+                .expect("a square route")
+                .0
+        };
+
+        assert_eq!(
+            route(&document, &drawn, &moved),
+            vec![p(200, 200), p(200, 140), p(240, 140)]
+        );
+
+        document
+            .wires
+            .push(Wire::segment(2, p(200, 210), p(260, 210)));
+        assert_eq!(
+            route(&document, &drawn, &moved),
+            vec![p(200, 200), p(200, 220), p(200, 140), p(240, 140)],
+            "a wire ends on the stretch below the end"
+        );
+
+        document.wires[0] = Wire::segment(2, p(200, 100), p(200, 260));
+        assert_eq!(
+            route(&document, &drawn, &moved),
+            vec![p(200, 200), p(200, 140), p(240, 140)],
+            "another wire runs the whole stretch and carries what is on it"
+        );
+
+        let folded = [p(0, 0), p(40, 0), p(20, 0), p(20, 40)];
+        let mut moved = folded;
+        moved[3] = p(30, 40);
+        assert_eq!(
+            route(&SchematicDocument::default(), &folded, &moved)[..3],
+            folded[..3],
+            "a fold the wire was drawn with stays"
         );
     }
 }

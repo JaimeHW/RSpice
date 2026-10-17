@@ -21,6 +21,40 @@ fn deleting_a_t_branch_drops_its_dot_though_another_sheet_has_a_t_there() {
     holds(&[Delete(Pick::Wire(8))]);
 }
 
+/// R3 hangs upright under the T's stem. Turned, flipped and moved, then
+/// dragged up and right, its top pin came to rest on the stem's line short
+/// of the stem's lower end, and the stem ran down past the pin and back up
+/// to it: [(240, 140), (200, 140), (200, 220), (200, 200)].
+#[test]
+fn a_dragged_part_never_leaves_its_wire_doubled_back() {
+    holds(&[
+        Transform(
+            vec![Pick::Part(4), Pick::Wire(8), Pick::Part(2)],
+            Turn::Clockwise,
+        ),
+        Transform(vec![Pick::Part(3), Pick::Part(4)], Turn::MirrorHorizontal),
+        Move(
+            vec![Pick::Wire(8), Pick::Part(3), Pick::Part(1)],
+            p(-20, 0),
+            false,
+        ),
+        Drag(3, vec![p(60, -20)]),
+    ]);
+}
+
+/// The L right of R2 is two wires: a run from R2's pin to the corner and a
+/// leg down from it. Flipping the leg top to bottom twice puts it back
+/// where it was drawn; the run followed both flips, and after the second
+/// it ran down to (360, 160) and back up over itself:
+/// [(320, 100), (360, 100), (360, 160), (360, 100)].
+#[test]
+fn a_wire_flipped_back_leaves_its_neighbour_square() {
+    holds(&[
+        Transform(vec![Pick::Wire(12)], Turn::MirrorVertical),
+        Transform(vec![Pick::Wire(12)], Turn::MirrorVertical),
+    ]);
+}
+
 /// A wire drawn from R2's pin on the T's right branch to the crossing
 /// wire, then R1 mirrored top to bottom with two wires: the mirror moved a
 /// dot onto a point that already had one, leaving two dots on (140, 100).

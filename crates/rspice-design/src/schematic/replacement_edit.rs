@@ -614,6 +614,7 @@ pub(super) fn build_wire_edits(
         }
         let (replacement_points, point_indices) =
             super::movement::orthogonal_route_for_corresponding_points(
+                state,
                 wire_id,
                 &wire.points,
                 &moved_points,
