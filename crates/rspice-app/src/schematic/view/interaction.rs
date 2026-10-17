@@ -862,8 +862,11 @@ fn handle_select_click(
     pointer_pos: egui::Pos2,
 ) {
     // Ctrl, Shift, and the platform command modifier extend the selection;
-    // a plain click replaces it.
-    let additive = ui.input(|i| i.modifiers.ctrl || i.modifiers.shift || i.modifiers.command);
+    // a plain click replaces it. On touch the strip's add latch stands in
+    // for the modifier.
+    let additive = ui.input(|i| i.modifiers.ctrl || i.modifiers.shift || i.modifiers.command)
+        || (rspice_schematic_editor::view::pointer_target::canvas_touch_mode(ui.ctx())
+            && rspice_schematic_editor::view::mobile_controls::touch_latches(ui.ctx()).select_add);
     let alt_held = ui.input(|i| i.modifiers.alt);
 
     // The click that opens or closes the overlap chooser selects nothing; a

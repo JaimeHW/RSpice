@@ -114,6 +114,18 @@ pub fn handle_viewport_navigation(
         apply_pan_delta(pan, delta);
     }
 
+    // One finger pans once the selection gesture has handed it the drag
+    // (R-3); a second finger hands over to the pinch below.
+    if super::selection_drag::touch_pan_active(ui.ctx()) {
+        if !ui.input(|input| input.pointer.primary_down()) {
+            super::selection_drag::set_touch_pan(ui.ctx(), false);
+        } else if response.dragged_by(egui::PointerButton::Primary)
+            && ui.input(|input| input.multi_touch().is_none())
+        {
+            apply_pan_delta(pan, ui.input(|input| input.pointer.delta()));
+        }
+    }
+
     if let Some(touch) = ui.input(|i| i.multi_touch())
         && available.contains(touch.start_pos)
     {

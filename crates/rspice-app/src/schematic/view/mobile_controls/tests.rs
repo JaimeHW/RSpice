@@ -177,6 +177,31 @@ impl Finger {
             .center();
         self.tap(at);
     }
+
+    fn slide(&mut self, pos: Pos2) {
+        self.frame(vec![
+            Self::touch(TouchPhase::Move, pos),
+            Event::PointerMoved(pos),
+        ]);
+    }
+
+    /// One finger from `from` to `to` in four steps, then lifted.
+    fn drag(&mut self, from: Pos2, to: Pos2) {
+        self.down(from);
+        for step in 1..=4 {
+            self.slide(from + (to - from) * (step as f32 / 4.0));
+        }
+        self.up(to);
+        self.frame(Vec::new());
+    }
+
+    fn pan(&self) -> (f64, f64) {
+        self.app.state.schematic.session.editor.pan
+    }
+
+    fn selection(&self) -> &rspice_design::schematic::selection::Selection {
+        &self.app.state.schematic.session.editor.selection
+    }
 }
 
 /// G-12: a landscape iPad is 1180 pt wide, so the old 620 px breakpoint
@@ -316,4 +341,96 @@ fn fit_executes_the_schematic_camera_command() {
     execute_action(&Context::default(), &mut app, request);
     assert!(app.state.schematic.session.editor.needs_drawing_sheet_fit);
     assert!(!app.state.schematic.session.editor.needs_fit);
+}
+
+/// E-11, R-3: a finger dragged across a part that is not selected pans the
+/// sheet and leaves the part where it is. On a dense sheet there is little
+/// empty canvas to pan from, and the strip once said "Drag to pan" while
+/// this drag moved the part.
+#[test]
+fn a_finger_drag_on_an_unselected_part_pans_and_leaves_it() {
+    let mut finger = Finger::new(Vec2::new(1024.0, 768.0));
+    finger.resistor(Point::new(200, 200));
+    let from = finger.screen(Point::new(200, 200));
+    let before = finger.pan();
+    finger.drag(from, from + egui::vec2(120.0, 40.0));
+
+    assert_eq!(
+        finger.app.state.schematic.document().components[0].pos,
+        Point::new(200, 200),
+        "the part stays put"
+    );
+    let after = finger.pan();
+    assert_eq!((after.0 - before.0, after.1 - before.1), (120.0, 40.0));
+    assert!(finger.selection().is_empty(), "a pan selects nothing");
+    assert!(!finger.app.state.schematic.can_undo(), "a pan is no edit");
+}
+
+/// A finger on empty canvas pans too; with the box latch on, the same drag
+/// draws a selection box instead, as a mouse drag there does.
+#[test]
+fn a_finger_drag_on_empty_canvas_pans_unless_the_box_latch_is_on() {
+    let mut finger = Finger::new(Vec2::new(1024.0, 768.0));
+    let id = finger.resistor(Point::new(200, 200));
+    let empty = finger.screen(Point::new(400, 400));
+    let before = finger.pan();
+    finger.drag(empty, empty + egui::vec2(-40.0, 80.0));
+    let after = finger.pan();
+    assert_eq!((after.0 - before.0, after.1 - before.1), (-40.0, 80.0));
+    assert!(finger.selection().is_empty());
+
+    finger.press("Select with a box");
+    let still = finger.pan();
+    let corner = finger.screen(Point::new(120, 120));
+    finger.drag(corner, finger.screen(Point::new(300, 300)));
+    assert!(
+        finger.selection().has_component(id),
+        "the box takes the part"
+    );
+    assert_eq!(finger.pan(), still, "a box does not pan");
+}
+
+/// Only a drag that starts on the selection moves it.
+#[test]
+fn a_finger_drag_on_the_selection_moves_it() {
+    let mut finger = Finger::new(Vec2::new(1024.0, 768.0));
+    let id = finger.resistor(Point::new(200, 200));
+    let at = finger.screen(Point::new(200, 200));
+    finger.tap(at);
+    assert!(finger.selection().has_component(id));
+    let before = finger.pan();
+    finger.drag(at, at + egui::vec2(60.0, 0.0));
+    assert_eq!(
+        finger.app.state.schematic.document().components[0].pos,
+        Point::new(260, 200)
+    );
+    assert_eq!(finger.pan(), before, "a move does not pan");
+}
+
+/// The add latch stands in for Shift: a tap takes an object into the
+/// selection or out of it.
+#[test]
+fn the_add_latch_makes_a_tap_add_or_remove() {
+    let mut finger = Finger::new(Vec2::new(1024.0, 768.0));
+    let first = finger.resistor(Point::new(200, 200));
+    let second = finger.resistor(Point::new(400, 200));
+    finger.tap(finger.screen(Point::new(200, 200)));
+    finger.press("Add to selection");
+    finger.tap(finger.screen(Point::new(400, 200)));
+    assert!(finger.selection().has_component(first));
+    assert!(finger.selection().has_component(second));
+    finger.tap(finger.screen(Point::new(200, 200)));
+    assert!(
+        !finger.selection().has_component(first),
+        "a second tap takes it out"
+    );
+    assert!(finger.selection().has_component(second));
+
+    finger.press("Add to selection");
+    finger.tap(finger.screen(Point::new(200, 200)));
+    assert!(finger.selection().has_component(first));
+    assert!(
+        !finger.selection().has_component(second),
+        "unlatched, a tap replaces"
+    );
 }

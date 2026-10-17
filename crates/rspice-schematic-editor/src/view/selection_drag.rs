@@ -3,7 +3,8 @@
 use super::{
     coordinates::screen_to_schematic,
     design_view::DesignView,
-    pointer_target::{PointerHit, PointerQuery, PointerTarget, pointer_target},
+    mobile_controls::touch_latches,
+    pointer_target::{PointerHit, PointerQuery, PointerTarget, canvas_touch_mode, pointer_target},
     snap_resolution::{resolve_grid_pointer, resolve_target_pointer, target_acquisition_radius},
     symbol_context::SchematicSymbolContext,
     viewport::Viewport,
@@ -44,6 +45,10 @@ pub enum SelectionDragAction {
     },
     BeginWireVertex(Point),
     BeginMarquee(Point),
+    /// A finger's drag that pans the sheet: it began on empty canvas or on
+    /// an object outside the selection (R-3). The view follows the finger
+    /// until it lifts; see [`touch_pan_active`].
+    BeginTouchPan,
     MoveSelection {
         operation_id: u64,
         from: Point,
@@ -145,6 +150,16 @@ pub fn start(
     );
     // The rubber band follows the pointer, not the grid.
     let band = screen_to_schematic(viewport, position);
+    if canvas_touch_mode(ui.ctx()) {
+        let start = TouchDragStart {
+            grid,
+            wire,
+            band,
+            read_only,
+            box_latched: touch_latches(ui.ctx()).select_box,
+        };
+        return Some(start.action(view, target));
+    }
     if read_only {
         return Some(SelectionDragAction::BeginMarquee(band));
     }
@@ -168,6 +183,86 @@ pub fn start(
         }
         _ => SelectionDragAction::BeginMarquee(band),
     })
+}
+
+/// Where a one-finger drag began, for [`TouchDragStart::action`].
+struct TouchDragStart {
+    grid: Point,
+    wire: Point,
+    band: Point,
+    read_only: bool,
+    box_latched: bool,
+}
+
+impl TouchDragStart {
+    /// What a one-finger drag starts (D1 section 10, R-3). Only a drag that
+    /// begins on the selection moves it; anywhere else the finger pans, so
+    /// a pan on a dense sheet cannot pick up the part under it (E-11). With
+    /// the box latch on, a drag off the selection draws a selection box.
+    fn action(
+        &self,
+        view: &SelectionDragView<'_>,
+        target: Option<PointerTarget>,
+    ) -> SelectionDragAction {
+        match target {
+            Some(target)
+                if !self.read_only && target_is_selected(&view.editor.selection, target) =>
+            {
+                match target {
+                    PointerTarget::Junction(_) | PointerTarget::Wire(_) => {
+                        if view.filter.wires
+                            && view.design.active_wire_point_is_draggable(self.wire)
+                        {
+                            SelectionDragAction::BeginWireVertex(self.wire)
+                        } else {
+                            SelectionDragAction::BeginTouchPan
+                        }
+                    }
+                    target => SelectionDragAction::BeginSelection {
+                        target,
+                        position: self.grid,
+                    },
+                }
+            }
+            _ if self.box_latched => SelectionDragAction::BeginMarquee(self.band),
+            _ => SelectionDragAction::BeginTouchPan,
+        }
+    }
+}
+
+/// Whether `target` is in `selection`.
+pub fn target_is_selected(selection: &Selection, target: PointerTarget) -> bool {
+    match target {
+        PointerTarget::Component(id) => selection.has_component(id),
+        PointerTarget::DesignNote(id) => selection.has_design_note(id),
+        PointerTarget::DocumentationShape(id) => selection.has_documentation_shape(id),
+        PointerTarget::Probe(id) => selection.has_probe(id),
+        PointerTarget::NetLabel(id) => selection.has_net_label(id),
+        PointerTarget::BusTap(id) => selection.has_bus_tap(id),
+        PointerTarget::Bus(id) => selection.has_bus(id),
+        PointerTarget::Wire(id) => selection.has_wire(id),
+        PointerTarget::Junction(position) => selection.has_junction(position),
+    }
+}
+
+fn touch_pan_id() -> egui::Id {
+    egui::Id::new("rspice.schematic.touch_pan")
+}
+
+/// Whether a one-finger pan is under way. The navigation pass moves the
+/// view with the finger while it is, and ends it when the finger lifts.
+pub fn touch_pan_active(ctx: &egui::Context) -> bool {
+    ctx.data(|data| data.get_temp(touch_pan_id()).unwrap_or(false))
+}
+
+pub fn set_touch_pan(ctx: &egui::Context, active: bool) {
+    ctx.data_mut(|data| {
+        if active {
+            data.insert_temp(touch_pan_id(), true);
+        } else {
+            data.remove::<bool>(touch_pan_id());
+        }
+    });
 }
 
 pub fn update(
@@ -232,7 +327,9 @@ pub fn finish(
             operation_id: drag.operation_id,
         },
         None => SelectionDragAction::FinishMarquee {
-            additive: ui.input(|i| i.modifiers.ctrl || i.modifiers.shift || i.modifiers.command),
+            // The add latch stands in for the modifier on touch.
+            additive: ui.input(|i| i.modifiers.ctrl || i.modifiers.shift || i.modifiers.command)
+                || (canvas_touch_mode(ui.ctx()) && touch_latches(ui.ctx()).select_add),
         },
     })
 }

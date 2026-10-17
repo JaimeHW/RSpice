@@ -119,6 +119,18 @@ fn apply(
             .editor
             .selection_rect
             .start_at(position),
+        SelectionDragAction::BeginTouchPan => {
+            selection_drag::set_touch_pan(ctx, true);
+            // The finger crossed the drag threshold before the pan began;
+            // the sheet catches up with it now, and follows it from here.
+            if let Some(travel) = ctx
+                .input(|input| Some(input.pointer.interact_pos()? - input.pointer.press_origin()?))
+            {
+                let pan = &mut state.schematic.session.editor.pan;
+                pan.0 += f64::from(travel.x);
+                pan.1 += f64::from(travel.y);
+            }
+        }
         SelectionDragAction::UpdateMarquee(position) => state
             .schematic
             .session
