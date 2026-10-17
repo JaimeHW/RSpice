@@ -275,6 +275,47 @@ fn a_ground_label_whose_net_took_another_name_is_an_error() {
             name: "GND".to_owned()
         }
     );
+    assert_eq!(
+        stray[0].related,
+        [DrcRelated::new(
+            DrcLocation::NetLabel {
+                name: "VSS".to_owned()
+            },
+            DrcRelation::NetName
+        )],
+        "the finding involves the label whose name the net took"
+    );
+}
+
+/// An interface port's name claims its net over a ground label on it, and the
+/// finding involves the port, named as the port is.
+#[test]
+fn a_ground_label_lost_to_a_port_involves_the_port() {
+    let port =
+        Component::new(5, ComponentType::Port, Point::new(4000, 0)).with_name_value("", "VSS");
+    let pin = terminal_positions_with_hierarchy(&port, None)[0].1;
+    let mut drawing = labelled(vec![
+        two(1, ComponentType::VoltageSource, "V1", "in", "0"),
+        two(2, ComponentType::Resistor, "R1", "in", "0"),
+    ]);
+    drawing.components.push(port);
+    drawing.net_labels.push(NetLabel::new(900, pin, "GND"));
+    let views = buffers([("top", drawing)]);
+    let result = checked_under(&unaliased(), &views["work/top/schematic"], &views);
+
+    let stray = of_type(&result, DrcViolationType::GroundNotNodeZero);
+    assert_eq!(stray.len(), 1, "{:?}", result.violations());
+    assert_eq!(
+        stray[0].related,
+        [DrcRelated::new(
+            DrcLocation::Component {
+                id: 5,
+                name: "VSS".to_owned()
+            },
+            DrcRelation::NetName
+        )]
+    );
+    assert_eq!(stray[0].related_items(), ["VSS"]);
 }
 
 /// A waiver names a lost ground label by the label's name, so no two findings
@@ -325,6 +366,18 @@ fn a_ground_label_below_the_subject_is_stated_inside_its_occurrence() {
             }
         )
     );
+    assert!(
+        matches!(
+            stray[0].related.as_slice(),
+            [DrcRelated {
+                location: DrcLocation::InsideInstance { path: within, .. },
+                relation: DrcRelation::NetName,
+            }] if within == path
+        ),
+        "the label that named the net is stated in the same occurrence: {:?}",
+        stray[0].related
+    );
+    assert_eq!(stray[0].related_items(), ["VSS"]);
 }
 
 /// Every ground name is node 0 however it is spelled, and so is any label
@@ -407,6 +460,17 @@ fn a_supply_global_tied_to_ground_in_one_cellview_is_an_error() {
                 name: "VDD!".to_owned()
             }
         )
+    );
+    assert!(
+        matches!(
+            tied[0].related.as_slice(),
+            [DrcRelated {
+                location: DrcLocation::InsideInstance { path: within, inner, .. },
+                relation: DrcRelation::GroundTie,
+            }] if within == path && matches!(inner.as_ref(), DrcLocation::Component { id: 2, .. })
+        ),
+        "the finding involves the ground symbol that ties the net: {:?}",
+        tied[0].related
     );
     assert!(
         of_type(&result, DrcViolationType::SourceToSource).is_empty(),

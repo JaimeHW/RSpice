@@ -28,7 +28,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::deck_bit_name;
+use super::{ConnectivityAnchor, deck_bit_name};
 use crate::schematic::bus::{Bus, BusDeclaration, BusNotation, BusTargetKind};
 use crate::schematic::document::SchematicDocument;
 use rspice_design_model::Point;
@@ -49,6 +49,9 @@ pub struct BusDiagnostic {
     pub point: Point,
     pub bus_id: Option<u64>,
     pub tap_id: Option<u64>,
+    /// The other objects it is about: the bus whose declaration a conflict is
+    /// with, or the geometry a tap lands on that is the wrong kind for it.
+    pub related: Vec<ConnectivityAnchor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,6 +83,7 @@ pub fn analyze_bus_connectivity(schematic: &SchematicDocument) -> BusConnectivit
                 point: bus.points.first().copied().unwrap_or(Point::origin()),
                 bus_id: Some(bus.id),
                 tap_id: None,
+                related: Vec::new(),
             });
         } else if bus.declaration.is_none() {
             analysis.diagnostics.push(BusDiagnostic {
@@ -91,6 +95,7 @@ pub fn analyze_bus_connectivity(schematic: &SchematicDocument) -> BusConnectivit
                 point: bus.points.first().copied().unwrap_or(Point::origin()),
                 bus_id: Some(bus.id),
                 tap_id: None,
+                related: Vec::new(),
             });
         }
     }
@@ -123,6 +128,7 @@ pub fn analyze_bus_connectivity(schematic: &SchematicDocument) -> BusConnectivit
                     point,
                     bus_id: Some(right.id),
                     tap_id: None,
+                    related: vec![ConnectivityAnchor::Bus(left.id)],
                 });
             }
         }
@@ -141,6 +147,7 @@ pub fn analyze_bus_connectivity(schematic: &SchematicDocument) -> BusConnectivit
                 point: tap.bus_point,
                 bus_id: None,
                 tap_id: Some(tap.id),
+                related: Vec::new(),
             });
             continue;
         };
@@ -151,14 +158,18 @@ pub fn analyze_bus_connectivity(schematic: &SchematicDocument) -> BusConnectivit
                 point: tap.bus_point,
                 bus_id: Some(source.id),
                 tap_id: Some(tap.id),
+                related: vec![ConnectivityAnchor::Bus(source.id)],
             });
             continue;
         }
 
-        let touches_wire = schematic
+        let destination_wires: Vec<ConnectivityAnchor> = schematic
             .wires
             .iter()
-            .any(|wire| wire.contains_point(tap.connection_point));
+            .filter(|wire| wire.contains_point(tap.connection_point))
+            .map(|wire| ConnectivityAnchor::Wire(wire.id))
+            .collect();
+        let touches_wire = !destination_wires.is_empty();
         let destination_buses: Vec<&Bus> = schematic
             .buses
             .iter()
@@ -177,6 +188,7 @@ pub fn analyze_bus_connectivity(schematic: &SchematicDocument) -> BusConnectivit
                         point: tap.connection_point,
                         bus_id: Some(source.id),
                         tap_id: Some(tap.id),
+                        related: bus_anchors(&destination_buses),
                     });
                 } else if !touches_wire {
                     analysis.diagnostics.push(BusDiagnostic {
@@ -188,6 +200,7 @@ pub fn analyze_bus_connectivity(schematic: &SchematicDocument) -> BusConnectivit
                         point: tap.connection_point,
                         bus_id: Some(source.id),
                         tap_id: Some(tap.id),
+                        related: Vec::new(),
                     });
                 } else {
                     analysis.scalar_taps.push(ScalarTapBinding {
@@ -209,6 +222,7 @@ pub fn analyze_bus_connectivity(schematic: &SchematicDocument) -> BusConnectivit
                         point: tap.connection_point,
                         bus_id: Some(source.id),
                         tap_id: Some(tap.id),
+                        related: destination_wires,
                     });
                     continue;
                 }
@@ -222,6 +236,7 @@ pub fn analyze_bus_connectivity(schematic: &SchematicDocument) -> BusConnectivit
                         point: tap.connection_point,
                         bus_id: Some(source.id),
                         tap_id: Some(tap.id),
+                        related: Vec::new(),
                     });
                     continue;
                 }
@@ -251,6 +266,7 @@ pub fn analyze_bus_connectivity(schematic: &SchematicDocument) -> BusConnectivit
                         point: tap.connection_point,
                         bus_id: Some(source.id),
                         tap_id: Some(tap.id),
+                        related: bus_anchors(&destination_buses),
                     });
                 }
             }
@@ -258,6 +274,13 @@ pub fn analyze_bus_connectivity(schematic: &SchematicDocument) -> BusConnectivit
     }
 
     analysis
+}
+
+fn bus_anchors(buses: &[&Bus]) -> Vec<ConnectivityAnchor> {
+    buses
+        .iter()
+        .map(|bus| ConnectivityAnchor::Bus(bus.id))
+        .collect()
 }
 
 fn declaration_label(declaration: Option<&BusDeclaration>) -> String {
@@ -323,6 +346,7 @@ fn two_notation_stem_diagnostics(
                 point: right.points.first().copied().unwrap_or(Point::origin()),
                 bus_id: Some(right.id),
                 tap_id: None,
+                related: vec![ConnectivityAnchor::Bus(left.id)],
             })
         })
         .collect()
@@ -489,6 +513,47 @@ mod tests {
         assert!(analysis.scalar_taps.is_empty());
     }
 
+    /// A tap that ends on the wrong kind of geometry is about that geometry
+    /// as well as about itself.
+    #[test]
+    fn a_tap_on_the_wrong_kind_of_geometry_names_what_it_ends_on() {
+        let source = declared_bus(1, "DATA[7:0]", 0);
+        let tap = |id: u64, slice: &str| {
+            BusTap::new(
+                id,
+                &source,
+                Point::new(20, 0),
+                Point::new(20, 10),
+                BusSlice::parse(slice).unwrap(),
+                BusTapOrientation::Down,
+            )
+            .unwrap()
+        };
+        let mixed = |schematic: &SchematicDocument| {
+            analyze_bus_connectivity(schematic)
+                .diagnostics
+                .into_iter()
+                .filter(|item| item.kind == BusDiagnosticKind::MixedTap)
+                .map(|item| item.related)
+                .collect::<Vec<_>>()
+        };
+
+        let scalar_on_a_bus = SchematicDocument {
+            buses: vec![source.clone(), declared_bus(2, "ADDR[7:0]", 10)],
+            bus_taps: vec![tap(3, "DATA[3]")],
+            ..SchematicDocument::default()
+        };
+        assert_eq!(mixed(&scalar_on_a_bus), [[ConnectivityAnchor::Bus(2)]]);
+
+        let multi_bit_on_a_wire = SchematicDocument {
+            buses: vec![source.clone()],
+            wires: vec![Wire::segment(5, Point::new(0, 10), Point::new(40, 10))],
+            bus_taps: vec![tap(4, "DATA[3:0]")],
+            ..SchematicDocument::default()
+        };
+        assert_eq!(mixed(&multi_bit_on_a_wire), [[ConnectivityAnchor::Wire(5)]]);
+    }
+
     #[test]
     fn touching_same_name_with_conflicting_range_is_reported() {
         let schematic = SchematicDocument {
@@ -530,6 +595,9 @@ mod tests {
             "{}",
             diagnostics[0].message
         );
+        // Located on one bus, about the other as well.
+        assert_eq!(diagnostics[0].bus_id, Some(2));
+        assert_eq!(diagnostics[0].related, [ConnectivityAnchor::Bus(1)]);
     }
 
     /// The hole the deck opens: nothing joins these two declarations on the
@@ -560,6 +628,7 @@ mod tests {
         );
         assert_eq!(finding.bus_id, Some(2));
         assert_eq!(finding.point, Point::new(0, 40));
+        assert_eq!(finding.related, [ConnectivityAnchor::Bus(1)]);
     }
 
     /// Sheets are a membership overlay on one drawing, so two sheets of a cell

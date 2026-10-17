@@ -580,6 +580,19 @@ pub enum DrcRelation {
     OtherSpelling,
     /// An instance the reference answers to, one of several.
     Candidate,
+    /// A wire that runs through both pins of the part.
+    ShortingWire,
+    /// A wire that crosses another there, with no junction to join them.
+    CrossingWire,
+    /// The label or port whose name the net took.
+    NetName,
+    /// A ground symbol or ground label that makes the net node 0.
+    GroundTie,
+    /// A bus whose declaration the finding's bus or tap disagrees with.
+    ConflictingBus,
+    /// Geometry a tap ends on that is the wrong kind for it: a bus under a
+    /// scalar tap, a wire under a multi-bit one.
+    TapLanding,
 }
 
 impl DrcRelation {
@@ -594,6 +607,12 @@ impl DrcRelation {
             Self::OnNode => "on the node".to_owned(),
             Self::OtherSpelling => "same name, other case".to_owned(),
             Self::Candidate => "answers to the reference".to_owned(),
+            Self::ShortingWire => "runs through both pins".to_owned(),
+            Self::CrossingWire => "crosses without a junction".to_owned(),
+            Self::NetName => "names the net".to_owned(),
+            Self::GroundTie => "ties it to ground".to_owned(),
+            Self::ConflictingBus => "declares it differently".to_owned(),
+            Self::TapLanding => "where the tap ends".to_owned(),
         }
     }
 }

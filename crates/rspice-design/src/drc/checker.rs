@@ -37,6 +37,7 @@ pub(super) fn diagnostic_location(anchor: &ConnectivityAnchor) -> DrcLocation {
             id: *id,
             name: name.clone(),
         },
+        ConnectivityAnchor::Wire(id) => DrcLocation::Wire { id: *id },
     }
 }
 
@@ -1231,18 +1232,45 @@ pub(super) fn append_ground_not_node_zero(
     labels.sort_by_key(|label| label.id);
     let mut stated = std::collections::HashSet::new();
     let mut next_id = result.total_count();
-    for label in labels {
+    for label in &labels {
         if !label.is_ground() {
             continue;
         }
-        let Some(node) = connectivity.net_at(label.pos).map(|net| net.spice_name()) else {
+        let Some(net) = connectivity.net_at(label.pos) else {
             continue;
         };
+        let node = net.spice_name();
         if crate::schematic::ground_names::is_ground_reference(&node)
             || !stated.insert(node.to_ascii_lowercase())
         {
             continue;
         }
+        // What gave the net the name it took instead: an earlier label on it,
+        // or the interface port it continues through. A name the project's
+        // connectivity contract promoted the label onto is no object.
+        let namer = labels
+            .iter()
+            .find(|other| {
+                !other.is_ground()
+                    && other.name.trim().eq_ignore_ascii_case(&node)
+                    && connectivity
+                        .net_at(other.pos)
+                        .is_some_and(|other_net| other_net.id == net.id)
+            })
+            .map(|other| DrcLocation::NetLabel {
+                name: other.name.clone(),
+            })
+            .or_else(|| {
+                schematic.components.iter().find_map(|component| {
+                    let spec = component.port_spec()?;
+                    spec.name
+                        .eq_ignore_ascii_case(&node)
+                        .then(|| DrcLocation::Component {
+                            id: component.id,
+                            name: spec.name,
+                        })
+                })
+            });
         let mut violation = DrcViolation::new(
             next_id,
             DrcViolationType::GroundNotNodeZero,
@@ -1254,6 +1282,12 @@ pub(super) fn append_ground_not_node_zero(
             DrcLocation::NetLabel {
                 name: label.name.clone(),
             },
+        )
+        .with_related(
+            namer
+                .into_iter()
+                .map(|namer| DrcRelated::new(namer, DrcRelation::NetName))
+                .collect(),
         );
         if let Some(severity) = severity_overrides.get(&DrcViolationType::GroundNotNodeZero) {
             violation.severity = *severity;

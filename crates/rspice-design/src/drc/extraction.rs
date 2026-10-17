@@ -1137,14 +1137,27 @@ fn append_connectivity_diagnostics(
 ) {
     let mut next_id = result.total_count();
     for diagnostic in &connectivity.diagnostics {
-        let violation_type = match diagnostic.kind {
-            ConnectivityDiagnosticKind::MalformedBus => DrcViolationType::MalformedBus,
-            ConnectivityDiagnosticKind::UnnamedBus => DrcViolationType::UnnamedBus,
-            ConnectivityDiagnosticKind::BusRangeConflict => DrcViolationType::BusRangeConflict,
-            ConnectivityDiagnosticKind::DanglingBusTap => DrcViolationType::DanglingBusTap,
-            ConnectivityDiagnosticKind::MixedBusTap => DrcViolationType::MixedBusTap,
-            ConnectivityDiagnosticKind::AmbiguousCrossing => DrcViolationType::AmbiguousCrossing,
-            ConnectivityDiagnosticKind::ShortedPart => DrcViolationType::ShortedPart,
+        // The rule, and what each other object the diagnostic names is to
+        // its finding.
+        let (violation_type, relation) = match diagnostic.kind {
+            ConnectivityDiagnosticKind::MalformedBus => (DrcViolationType::MalformedBus, None),
+            ConnectivityDiagnosticKind::UnnamedBus => (DrcViolationType::UnnamedBus, None),
+            ConnectivityDiagnosticKind::BusRangeConflict => (
+                DrcViolationType::BusRangeConflict,
+                Some(DrcRelation::ConflictingBus),
+            ),
+            ConnectivityDiagnosticKind::DanglingBusTap => (DrcViolationType::DanglingBusTap, None),
+            ConnectivityDiagnosticKind::MixedBusTap => {
+                (DrcViolationType::MixedBusTap, Some(DrcRelation::TapLanding))
+            }
+            ConnectivityDiagnosticKind::AmbiguousCrossing => (
+                DrcViolationType::AmbiguousCrossing,
+                Some(DrcRelation::CrossingWire),
+            ),
+            ConnectivityDiagnosticKind::ShortedPart => (
+                DrcViolationType::ShortedPart,
+                Some(DrcRelation::ShortingWire),
+            ),
             // The checker raises the orphan label itself, under the gate that
             // governs attachment findings. A width mismatch is raised by
             // `append_vector_width_violations`, which is where the project's
@@ -1154,12 +1167,20 @@ fn append_connectivity_diagnostics(
             | ConnectivityDiagnosticKind::VectorWidthMismatch
             | ConnectivityDiagnosticKind::NetNaming => continue,
         };
+        let related = relation.map_or_else(Vec::new, |relation| {
+            diagnostic
+                .related
+                .iter()
+                .map(|anchor| DrcRelated::new(diagnostic_location(anchor), relation.clone()))
+                .collect()
+        });
         let mut violation = DrcViolation::new(
             next_id,
             violation_type,
             diagnostic.message.clone(),
             diagnostic_location(&diagnostic.anchor),
-        );
+        )
+        .with_related(related);
         if let Some(severity) = severity_overrides.get(&violation_type) {
             violation.severity = *severity;
         }
@@ -1418,8 +1439,9 @@ impl GlobalTouches {
 #[derive(Default)]
 struct GroundTies {
     /// By folded node name: the first cellview that ties the global to node
-    /// 0, the label there that ties it, and the global as the deck names it.
-    tied: BTreeMap<String, (usize, String, String)>,
+    /// 0, the label there that ties it, the global as the deck names it, and
+    /// the ground marks on the label's net there that make it node 0.
+    tied: BTreeMap<String, (usize, String, String, Vec<DrcLocation>)>,
     /// Folded names of the globals a terminal stands on as a node of its own.
     reached: HashSet<String>,
 }
@@ -1457,14 +1479,19 @@ impl GroundTies {
             {
                 continue;
             }
-            let grounded = connectivity.net_at(label.pos).is_some_and(|net| {
+            let Some(net) = connectivity.net_at(label.pos).filter(|net| {
                 crate::schematic::ground_names::is_ground_reference(&net.spice_name())
+            }) else {
+                continue;
+            };
+            self.tied.entry(key).or_insert_with(|| {
+                (
+                    view,
+                    label.name.clone(),
+                    global,
+                    ground_marks(schematic, connectivity, components, net.id),
+                )
             });
-            if grounded {
-                self.tied
-                    .entry(key)
-                    .or_insert_with(|| (view, label.name.clone(), global));
-            }
         }
     }
 
@@ -1474,7 +1501,7 @@ impl GroundTies {
         self.tied
             .iter()
             .filter(|(key, _)| self.reached.contains(*key))
-            .map(|(_, (view, label, global))| {
+            .map(|(_, (view, label, global, ties))| {
                 (
                     *view,
                     DrcViolation::new(
@@ -1487,11 +1514,50 @@ impl GroundTies {
                         DrcLocation::NetLabel {
                             name: label.clone(),
                         },
+                    )
+                    .with_related(
+                        ties.iter()
+                            .map(|tie| DrcRelated::new(tie.clone(), DrcRelation::GroundTie))
+                            .collect(),
                     ),
                 )
             })
             .collect()
     }
+}
+
+/// The ground marks on the net `net` of one cellview: each ground symbol whose
+/// terminal is on it, and each label naming it ground. A label is placed by
+/// its name, so a name the net carries twice is one mark.
+fn ground_marks(
+    schematic: &SchematicDocument,
+    connectivity: &ExtractedConnectivity,
+    components: &[ComponentInfo],
+    net: usize,
+) -> Vec<DrcLocation> {
+    let on_net = |point| connectivity.net_at(point).is_some_and(|on| on.id == net);
+    let symbols = components
+        .iter()
+        .filter(|component| {
+            component.is_ground_symbol && component.pins.iter().any(|pin| on_net(pin.point))
+        })
+        .map(|component| DrcLocation::Component {
+            id: component.id,
+            name: component.name.clone(),
+        });
+    let mut labels = schematic
+        .net_labels
+        .iter()
+        .filter(|label| label.is_ground() && on_net(label.pos))
+        .collect::<Vec<_>>();
+    labels.sort_by_key(|label| label.id);
+    let mut named = HashSet::new();
+    labels.retain(|label| named.insert(label.name.as_str()));
+    symbols
+        .chain(labels.into_iter().map(|label| DrcLocation::NetLabel {
+            name: label.name.clone(),
+        }))
+        .collect()
 }
 
 /// What drives one global node, or one pair of them, across the walk.

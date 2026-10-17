@@ -2147,6 +2147,49 @@ fn a_label_on_an_unmarked_crossing_is_an_error_marked_at_the_crossing() {
         crossings[0].location,
         DrcLocation::Point { x: 0.0, y: 500.0 }
     );
+    assert_eq!(
+        crossings[0].related,
+        [20, 21]
+            .map(|id| DrcRelated::new(DrcLocation::Wire { id }, DrcRelation::CrossingWire))
+            .to_vec(),
+        "the finding involves both wires that cross"
+    );
+    assert_eq!(crossings[0].related_items(), ["wire #20", "wire #21"]);
+}
+
+/// Two touching buses that declare different ranges: the finding is located on
+/// one and involves the other, whose declaration it conflicts with.
+#[test]
+fn a_bus_range_conflict_involves_the_bus_it_conflicts_with() {
+    use crate::schematic::bus::{Bus, BusDeclaration};
+    let bus = |id, declared| {
+        Bus::segment(
+            id,
+            Point::new(1000, 0),
+            Point::new(1100, 0),
+            Some(BusDeclaration::parse(declared).unwrap()),
+        )
+        .unwrap()
+    };
+    let mut top = grounded_resistor();
+    top.buses
+        .extend([bus(30, "DATA[7:0]"), bus(31, "DATA[15:0]")]);
+    let views = buffers([]);
+    let hierarchy = HierarchySource::from_buffers(&views);
+
+    let result = run_check_with_hierarchy(&top, &hierarchy, connectivity_only());
+
+    let conflicts = of_type(&result, DrcViolationType::BusRangeConflict);
+    assert_eq!(conflicts.len(), 1, "{:?}", result.violations());
+    assert_eq!(conflicts[0].location, DrcLocation::Bus { id: 31 });
+    assert_eq!(
+        conflicts[0].related,
+        [DrcRelated::new(
+            DrcLocation::Bus { id: 30 },
+            DrcRelation::ConflictingBus
+        )]
+    );
+    assert_eq!(conflicts[0].related_items(), ["bus #30"]);
 }
 
 /// A capacitor beside the grounded resistor, and the line through its two
@@ -2196,6 +2239,14 @@ fn a_part_with_one_wire_running_through_both_pins_is_shorted() {
             name: "C1".to_owned()
         }
     );
+    assert_eq!(
+        shorted[0].related,
+        [DrcRelated::new(
+            DrcLocation::Wire { id: 20 },
+            DrcRelation::ShortingWire
+        )],
+        "the finding involves the wire that shorts the part"
+    );
 }
 
 /// Placement splits a wire at the pins it lands on. The piece left between
@@ -2215,5 +2266,14 @@ fn the_piece_of_a_split_wire_between_the_pins_shorts_the_part() {
 
     top.wires.push(Wire::segment(22, first, second));
 
-    assert_eq!(shorted_parts(&top).len(), 1);
+    let shorted = shorted_parts(&top);
+    assert_eq!(shorted.len(), 1);
+    assert_eq!(
+        shorted[0].related,
+        [DrcRelated::new(
+            DrcLocation::Wire { id: 22 },
+            DrcRelation::ShortingWire
+        )],
+        "only the piece between the pins shorts the part"
+    );
 }
