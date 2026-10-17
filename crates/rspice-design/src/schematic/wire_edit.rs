@@ -621,10 +621,15 @@ fn merge_wire_pair(
         .zip(&ids)
         .map(|(pair, id)| Wire::new(*id, pair.to_vec()))
         .collect::<Vec<_>>();
+    // The pieces take the place in the drawing of the wire whose id they
+    // keep, so a route that lays nothing new over existing wires leaves the
+    // drawing exactly as it was and commits no step.
+    let kept = first.min(second);
     let position = document
         .wires
         .iter()
-        .position(|wire| wire.id == first || wire.id == second)
+        .filter(|wire| wire.id != first.max(second))
+        .position(|wire| wire.id == kept)
         .unwrap_or(document.wires.len());
     document
         .wires

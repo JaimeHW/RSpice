@@ -118,6 +118,23 @@ fn deleting_a_wire_places_the_dot_it_makes_due() {
     ]);
 }
 
+/// A wire drawn along Sheet 2's top wire where wires already run adds
+/// nothing, but the merge laid one of those wires again at another place
+/// in the drawing order: a step nobody can see, which Undo then took back
+/// instead of the flip before it.
+#[test]
+fn a_route_laid_over_existing_wires_adds_no_step() {
+    holds(&[
+        Sheet,
+        Transform(
+            vec![Pick::Part(15), Pick::Wire(23), Pick::Part(14)],
+            Turn::MirrorHorizontal,
+        ),
+        Draw(vec![p(120, 100), p(240, 100)]),
+        Undo,
+    ]);
+}
+
 /// Undoing the switch to Sheet 2 and then moving a part on Sheet 1 is a
 /// new edit after the undo: the switch can no longer be redone. Redo
 /// replayed it anyway.
