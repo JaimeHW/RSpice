@@ -419,7 +419,7 @@ pub(super) fn variants_manager_body(
             &[
                 (
                     crate::state::VariantResultCompatibility::ExactVariantIdentityRequired,
-                    "Exact variant identity required",
+                    "Same variant only",
                 ),
                 (
                     crate::state::VariantResultCompatibility::AllowReviewedOverlay,

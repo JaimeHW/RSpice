@@ -157,10 +157,10 @@ impl RSpiceApp {
         };
         let description = match target {
             LibraryDeletionTarget::Cell { .. } => {
-                "Permanently remove the exact cell, all of its views, owned sources, open documents, and loaded workspace buffers."
+                "Permanently remove this cell, all of its views, owned sources, open documents, and loaded workspace buffers."
             }
             LibraryDeletionTarget::View { .. } => {
-                "Permanently remove the exact view, its owned source, open document, and loaded workspace buffer."
+                "Permanently remove this view, its owned source, open document, and loaded workspace buffer."
             }
         };
         let placement_question = (placements > 0).then(|| {

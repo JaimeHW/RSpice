@@ -22,7 +22,8 @@ use crate::workbench::app::dialogs::review_primitives::{
 use crate::workbench::app_state::AppState;
 
 const MANAGER_TITLE: &str = "Testbench configuration sets";
-const MANAGER_DESCRIPTION: &str = "Own exact testbench roots, DUT paths, ordered executable views, model profiles, and scoped hierarchy overrides.";
+const MANAGER_DESCRIPTION: &str =
+    "Set testbench roots, DUT paths, view search order, model profiles, and hierarchy overrides.";
 const MANAGER_PRIMARY: &str = "Save configuration set";
 const NEW_TITLE: &str = "Create configuration set";
 const NEW_DESCRIPTION: &str = "Create a stable configuration for cell/view resolution, model sections, environment, and netlisting.";
@@ -354,7 +355,7 @@ impl RSpiceApp {
             dialog = dialog.transaction_state(
                 crate::ui::widgets::DialogTransactionTone::Error,
                 "Discard unsaved configuration edits?",
-                "The persisted configuration remains unchanged. This cannot affect retained run evidence.",
+                "The saved configuration stays unchanged. Results from earlier runs are not affected.",
             );
         } else if let Some(error) = transaction_error.as_deref() {
             dialog = dialog.transaction_state(
@@ -899,7 +900,7 @@ fn manager_body(
                 .configurations()
                 .is_empty()
             {
-                "No configuration sets exist. Create the first exact testbench binding."
+                "No configuration sets exist. Create the first one for a testbench."
             } else {
                 "No configuration matches the current filter."
             },
@@ -1388,7 +1389,7 @@ fn configuration_ownership_form(
             &mut draft.dut_path,
             "/XAFE",
             dut_rejection.as_deref(),
-            "Exact absolute instance path of the design under test",
+            "Absolute instance path of the design under test",
         );
         read_only_field(
             ui,
@@ -1983,7 +1984,7 @@ fn view_name_hint(library_views: &[String], fallback: &str) -> String {
 fn view_name_rejection(view: &str) -> Option<String> {
     crate::state::workspace::validate_cell_view_name_segment(view)
         .err()
-        .map(|error| format!("View name {view:?} {error}"))
+        .map(|error| format!("View name '{view}' {error}"))
 }
 
 /// The same rule over an ordered policy. A single empty trailing entry is the
@@ -2061,7 +2062,7 @@ fn optional_text_field(
         &mut text,
         hint,
         rejection,
-        "Optional exact configuration override",
+        "Optional configuration override",
     )
     .changed()
     {
@@ -2110,7 +2111,7 @@ fn instance_path_rejection(text: &str) -> Option<String> {
     match InstancePath::parse(text) {
         Err(error) => Some(error.to_string()),
         Ok(path) if path.to_string() != text => Some(format!(
-            "{text:?} is the engine spelling of this instance; write it as {path}"
+            "'{text}' is the engine spelling of this instance; write it as {path}"
         )),
         Ok(_) => None,
     }

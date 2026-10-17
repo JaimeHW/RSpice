@@ -310,7 +310,7 @@ impl RSpiceApp {
 
         let choice = Dialog::new("Delete library", "Delete")
             .description(
-                "Permanently remove the exact library, every cell and view it owns, and every loaded workspace buffer beneath it.",
+                "Permanently remove this library, every cell and view it owns, and every loaded workspace buffer beneath it.",
             )
             .size(DialogSize::Transaction)
             .ghost("Cancel")

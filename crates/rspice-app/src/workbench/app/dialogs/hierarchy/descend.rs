@@ -17,7 +17,8 @@ use crate::workbench::app_state::AppState;
 
 const TITLE: &str = "Descend into hierarchy";
 const PRIMARY: &str = "Open edit context";
-const DESCRIPTION: &str = "Review the operation, its exact inputs, impact, validation state, and available transaction actions.";
+const DESCRIPTION: &str =
+    "Review the operation, its inputs, impact, validation state, and available actions.";
 
 pub(crate) fn open_descend_hierarchy_dialog(state: &mut AppState) -> bool {
     if state.dialogs.descend_hierarchy.open {

@@ -1332,7 +1332,7 @@ fn append_buffer_rows(
                         SelectionBulkRowKind::DocumentationShape,
                         shape.id,
                         "Documentation shape",
-                        format!("{:?}", shape.kind()),
+                        shape.kind().label().to_owned(),
                         active_owner,
                     ));
                 }
