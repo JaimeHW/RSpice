@@ -330,22 +330,57 @@ impl RSpiceApp {
     }
 
     /// Prepare and queue a run as Automation does, in this frame and from
-    /// the live session. Returns the digest it prepared.
-    fn queued_as_automation_queues(&mut self) -> crate::product::ContentDigest {
+    /// the live session. Returns the digest it prepared, and what Automation
+    /// keeps of what the run was prepared from for its evidence check.
+    fn queued_as_automation_queues(
+        &mut self,
+    ) -> (
+        crate::product::ContentDigest,
+        crate::simulation::controller::PreparedRunSetInputs,
+    ) {
         use crate::simulation::controller::prepared_run::thread_preparations;
 
         self.invalidate_simulation_preflight();
-        let prepared = self
+        let (prepared, inputs) = self
             .simulation_controller
-            .prepare_run_set_for_preflight(&self.state)
-            .expect("the inverter prepares");
+            .prepare_run_set_for_evidence(&self.state)
+            .expect("the design prepares");
         self.state.request_run_set_simulation();
         assert_eq!(
             thread_preparations::take(),
             [crate::simulation::execution::SimulationRunIntent::SimulateRunSet],
             "Automation prepares its run in its own frame"
         );
-        prepared.snapshot_digest
+        (prepared.snapshot_digest, inputs)
+    }
+
+    /// Automation's evidence check, with the preparations it ran.
+    fn evidence_check(
+        &self,
+        inputs: &crate::simulation::controller::PreparedRunSetInputs,
+    ) -> (
+        Result<(), crate::simulation::execution::PreparationError>,
+        Vec<crate::simulation::execution::SimulationRunIntent>,
+    ) {
+        use crate::simulation::controller::prepared_run::thread_preparations;
+
+        let earlier = thread_preparations::take();
+        assert!(earlier.is_empty(), "{earlier:?}");
+        let verdict = inputs.still_current(&self.state);
+        (verdict, thread_preparations::take())
+    }
+
+    /// Let the run a dispatch started finish, as the frames after it would.
+    fn finish_the_run(&mut self) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
+        while self.simulation_controller.is_running()
+            || self.state.simulation.execution.has_active_execution()
+        {
+            assert!(std::time::Instant::now() < deadline, "the run did not end");
+            self.simulation_controller
+                .update(&mut self.state, &*self.export_workflow_io);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
     }
 
     /// The frame that dispatches a queued run, with the preparations it ran.
@@ -547,7 +582,7 @@ fn selecting_a_device_refuses_a_run_with_an_operating_point() {
 #[test]
 fn the_run_automation_prepares_is_checked_at_dispatch_as_a_run_press_is() {
     let mut unchanged = inverter_over_a_run_set();
-    let authorized = unchanged.queued_as_automation_queues();
+    let (authorized, _) = unchanged.queued_as_automation_queues();
     assert!(unchanged.dispatch_frame().is_empty());
     assert_eq!(
         unchanged
@@ -570,6 +605,121 @@ fn the_run_automation_prepares_is_checked_at_dispatch_as_a_run_press_is() {
         .push('0');
     assert!(edited.dispatch_frame().is_empty());
     assert_refused_for(&edited, "the design");
+}
+
+/// Automation checks its evidence is still the design's on each frame it
+/// waits for the dispatch and again when it publishes. On an unedited design
+/// the check passes at each of those frames, before the dispatch, while the
+/// run is in flight and once it has finished, and prepares nothing: the run
+/// Automation dispatched does not expire the evidence it produces.
+#[test]
+fn an_automation_evidence_check_on_an_unedited_design_prepares_nothing() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.authority.open_session();
+    enable_only(&mut app.state, &[]);
+    crate::workbench::examples::load_example("RC Lowpass Filter", &mut app.state.schematic);
+    let (authorized, inputs) = app.queued_as_automation_queues();
+
+    let (before_dispatch, prepared) = app.evidence_check(&inputs);
+    assert_eq!(before_dispatch, Ok(()));
+    assert!(prepared.is_empty(), "{prepared:?}");
+
+    assert!(app.dispatch_frame().is_empty());
+    assert!(app.state.simulation.execution.has_active_execution());
+    let (in_flight, prepared) = app.evidence_check(&inputs);
+    assert_eq!(in_flight, Ok(()));
+    assert!(prepared.is_empty(), "{prepared:?}");
+
+    app.finish_the_run();
+    let run = app
+        .state
+        .simulation
+        .retained
+        .runs
+        .first()
+        .expect("the run is retained");
+    assert!(run.success, "{:?}", run.analyses);
+    assert_eq!(
+        run.prepared_receipt()
+            .map(|receipt| receipt.prepared_snapshot_digest()),
+        Some(authorized)
+    );
+    let (at_publication, prepared) = app.evidence_check(&inputs);
+    assert_eq!(at_publication, Ok(()));
+    assert!(prepared.is_empty(), "{prepared:?}");
+}
+
+/// An edit made while Automation's run is in flight expires its evidence, and
+/// the check names the input that moved in the words a dispatch refused for
+/// it uses. Nothing is prepared to find it.
+#[test]
+fn an_edit_after_automation_prepared_its_run_is_named_by_its_evidence_check() {
+    let mut app = inverter_over_a_run_set();
+    let (_, inputs) = app.queued_as_automation_queues();
+    assert!(app.dispatch_frame().is_empty());
+    assert!(app.state.simulation.execution.has_active_execution());
+
+    app.state.schematic.document_mut_for_test().components[0]
+        .value
+        .push('0');
+    let (verdict, prepared) = app.evidence_check(&inputs);
+
+    assert!(prepared.is_empty(), "{prepared:?}");
+    let error = verdict.expect_err("the edited design is not the one the run solves");
+    assert_eq!(
+        error.stage(),
+        crate::simulation::execution::PreparationStage::Authorization
+    );
+    assert_eq!(
+        error.message(),
+        format!("{DESIGN_CHANGED} · the design changed")
+    );
+    app.stop_the_run();
+}
+
+/// For the same edit, Automation's evidence check and the dispatch of the
+/// run it queued refuse alike, in the same words: the evidence check is the
+/// dispatch's own question, not a second judgement of the design.
+#[test]
+fn the_evidence_check_and_the_dispatch_agree_for_the_same_edit() {
+    let edits: [(&str, fn(&mut RSpiceApp)); 3] = [
+        ("the design", |app| {
+            app.state.schematic.document_mut_for_test().components[0]
+                .value
+                .push('0');
+        }),
+        ("the model library", |app| {
+            app.state
+                .model_library_manager
+                .add_library(rspice_model_library::ModelLibrary {
+                    name: "scratch".to_owned(),
+                    ..Default::default()
+                });
+        }),
+        ("the simulation setup", |app| {
+            app.state
+                .sim_setup
+                .set_reference_pvt(crate::product::ProcessCorner::TT, 125.0)
+                .expect("a physical temperature");
+        }),
+    ];
+    for (moved, edit) in edits {
+        let mut app = inverter_over_a_run_set();
+        let (_, inputs) = app.queued_as_automation_queues();
+        edit(&mut app);
+
+        let (verdict, prepared) = app.evidence_check(&inputs);
+        assert!(prepared.is_empty(), "{moved}: {prepared:?}");
+        let evidence = verdict.expect_err(moved).to_string();
+        assert!(app.dispatch_frame().is_empty(), "{moved}");
+
+        assert_refused_for(&app, moved);
+        assert_eq!(
+            app.state.prompt_text(),
+            Some(evidence.as_str()),
+            "the evidence check and the dispatch name {moved} alike"
+        );
+    }
 }
 
 /// The run the worker prepares from the inputs frozen at the press is the run
