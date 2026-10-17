@@ -247,6 +247,15 @@ impl Rows {
             return;
         }
         if !appended {
+            // Keys are a channel's own, and a run's line 5 is not the
+            // session's entry 5: a measured height belongs to its channel.
+            if self
+                .filter
+                .as_ref()
+                .is_some_and(|built| built.channel != filter.channel)
+            {
+                self.measured.clear();
+            }
             self.keys.clear();
             self.heights.clear();
             self.counts = [0; 3];
@@ -476,5 +485,34 @@ mod tests {
         );
         rows.sync_heights(Source::Session(&log), metrics());
         assert_eq!(rows.height(), 16.0 + 30.0 + 16.0);
+    }
+
+    /// A run's line 1 is not the session's entry 1, so a height measured in
+    /// one channel is never lent to the other.
+    #[test]
+    fn a_measured_height_stays_with_its_channel() {
+        let mut log = LogBuffer::new(10);
+        for message in ["a", "b"] {
+            log.log(LogSeverity::Info, LogSource::Studio, message);
+        }
+        let mut rows = Rows::default();
+        rows.sync(Source::Session(&log), &ConsoleView::default());
+        rows.sync_heights(Source::Session(&log), metrics());
+        rows.measure(1, 40.0);
+
+        let mut run = RunLog::default();
+        for message in ["x", "y"] {
+            run.push(rspice_app_types::run_log::RunLogLine {
+                unix_ms: 0,
+                severity: LogSeverity::Info,
+                source: LogSource::Run,
+                message: message.to_owned(),
+            });
+        }
+        let mut view = ConsoleView::default();
+        view.open(ConsoleChannel::Run(1));
+        rows.sync(Source::Run(&run), &view);
+        rows.sync_heights(Source::Run(&run), metrics());
+        assert_eq!(rows.height(), 32.0);
     }
 }
