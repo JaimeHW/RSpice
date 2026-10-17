@@ -214,7 +214,7 @@ pub(super) fn parse_command(
         }
         ".FUNC" => {
             // Parse user-defined function: .FUNC name(arg1, arg2, ...) = expression
-            parse_func_statement(stream, line_num, params, root_redefinitions.as_deref_mut())?;
+            parse_func_statement(stream, line_num, params, root_redefinitions)?;
         }
         ".PREPROCESS" => parse_preprocess_command(stream, line_num, diagnostics)?,
         ".OPTIONS" | ".OPTION" | ".OPT" => {

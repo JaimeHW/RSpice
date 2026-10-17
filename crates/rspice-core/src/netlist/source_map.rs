@@ -1,7 +1,9 @@
+use super::expr::ParameterResolver;
 use super::lexer::{Token, TokenKind, tokenize};
 use super::model_resolution::builtin_model_names;
 use super::{Netlist, SubcircuitDef};
-use std::collections::HashSet;
+use crate::abort_signal::NoAbort;
+use std::collections::{HashMap, HashSet};
 
 /// Byte range on one physical source line.
 ///
@@ -958,76 +960,142 @@ pub struct NetlistSourceMap {
 }
 
 impl NetlistSourceMap {
-    /// The parameter environment an editor reader sees at `line` inside
-    /// `scope`.
+    /// The parameter environment every editor reader inside `scope` sees: the
+    /// values the engine binds, wherever in the scope the reader is written.
     ///
-    /// Definitions are applied in source order up to and including `line`, so
-    /// a later redefinition shadows an earlier one exactly the way the
-    /// engine's default [`ParameterRedefinitionPolicy::UseLast`] does, and a
-    /// definition further down the deck is not yet visible. Top-level
-    /// definitions are visible inside every subcircuit; a subcircuit's own
-    /// definitions are visible only in that subcircuit and its descendants.
+    /// Where one scope defines a name more than once, the definition the
+    /// engine's default [`ParameterRedefinitionPolicy`] selects
+    /// ([`binding_definition`]: the last) binds every reader in that scope,
+    /// above, between and below the definitions, and a definition may read a
+    /// parameter written further down the deck. Top-level definitions are
+    /// visible inside every subcircuit; a subcircuit's own definitions are
+    /// visible only in that subcircuit and its descendants, where they shadow
+    /// the enclosing ones. A definition that does not evaluate leaves its name
+    /// unbound, so a reader is told why rather than shown a value the engine
+    /// would refuse.
     ///
     /// Statistical operators evaluate at their nominal value
     /// ([`StatisticalParamMode::Nominal`]): a reader hovering a parameter is
     /// asking what the deck says, not what one seeded draw of a Monte Carlo
     /// family produced.
     ///
-    /// [`ParameterRedefinitionPolicy::UseLast`]: super::ParameterRedefinitionPolicy::UseLast
+    /// [`ParameterRedefinitionPolicy`]: super::ParameterRedefinitionPolicy
+    /// [`binding_definition`]: super::ParameterRedefinitionPolicy::binding_definition
     /// [`StatisticalParamMode::Nominal`]: super::StatisticalParamMode::Nominal
-    pub fn param_context_at(&self, line: usize, scope: Option<&str>) -> super::ParamContext {
+    pub fn param_context_in(&self, scope: Option<&str>) -> super::ParamContext {
         let mut context = super::ParamContext::new();
         context.set_statistical_mode(super::StatisticalParamMode::Nominal);
-        for function in &self.functions {
-            if function.line <= line && scope_encloses(function.scope.as_deref(), scope) {
+        let mut unresolved = HashSet::new();
+        for level in scope_levels(scope) {
+            let functions = self
+                .functions
+                .iter()
+                .filter(|function| same_scope(function.scope.as_deref(), level));
+            for function in binding_definitions(functions, |function| &function.name) {
                 context.define_function(&function.name, function.arguments.clone(), &function.body);
             }
-        }
-        for definition in &self.value_spans {
-            if definition.kind != NetlistValueKind::ParamDefinition
-                || definition.line > line
-                || !scope_encloses(definition.scope.as_deref(), scope)
-            {
-                continue;
+            let definitions = binding_definitions(self.param_definitions_in(level), |definition| {
+                &definition.name
+            });
+            for definition in &definitions {
+                unresolved.remove(&definition.name.to_ascii_uppercase());
+                context.define_parameter_expression(
+                    &definition.name,
+                    definition.expression.as_str(),
+                    None,
+                );
             }
-            if let Ok(value) = super::expr::eval_expression(&definition.expression, &context) {
-                context.set(&definition.name, value);
+            // An enclosing definition that did not evaluate must not resolve
+            // here against a name this scope shadows.
+            let mut resolver = ParameterResolver::with_blocked_parameters(unresolved.clone());
+            for definition in &definitions {
+                if resolver
+                    .resolve(&definition.name, &definition.expression, &context, &NoAbort)
+                    .is_err()
+                {
+                    unresolved.insert(definition.name.to_ascii_uppercase());
+                }
             }
+            resolver.materialize_into(&mut context);
         }
         context
     }
 
-    /// The definition a reference resolves to: the last same-named definition
-    /// at or above `line` whose scope encloses `scope`.
+    /// The definition a reader of `name` inside `scope` binds: the one the
+    /// engine's default policy selects in the innermost scope enclosing the
+    /// reader that defines the name, wherever in that scope it is written.
     pub fn param_definition_for(
         &self,
         name: &str,
-        line: usize,
         scope: Option<&str>,
     ) -> Option<&NetlistValueSpan> {
-        self.value_spans.iter().rfind(|span| {
+        scope_levels(scope).into_iter().rev().find_map(|level| {
+            let definitions = self
+                .param_definitions_in(level)
+                .filter(|definition| definition.name.eq_ignore_ascii_case(name));
+            binding_definitions(definitions, |definition| &definition.name)
+                .into_iter()
+                .next()
+        })
+    }
+
+    /// The parameter definitions written directly in `level`, in source order.
+    fn param_definitions_in<'a>(
+        &'a self,
+        level: Option<&str>,
+    ) -> impl Iterator<Item = &'a NetlistValueSpan> {
+        self.value_spans.iter().filter(move |span| {
             span.kind == NetlistValueKind::ParamDefinition
-                && span.line <= line
-                && span.name.eq_ignore_ascii_case(name)
-                && scope_encloses(span.scope.as_deref(), scope)
+                && same_scope(span.scope.as_deref(), level)
         })
     }
 }
 
-/// Whether a definition written in `definition_scope` is visible from
-/// `reader_scope`. `None` is the top level, which every scope can see.
-fn scope_encloses(definition_scope: Option<&str>, reader_scope: Option<&str>) -> bool {
-    let Some(definition_scope) = definition_scope else {
-        return true;
-    };
-    let Some(reader_scope) = reader_scope else {
-        return false;
-    };
-    reader_scope.eq_ignore_ascii_case(definition_scope)
-        || reader_scope
-            .get(..definition_scope.len())
-            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(definition_scope))
-            && reader_scope.as_bytes().get(definition_scope.len()) == Some(&b'.')
+/// The definitions among `definitions`, all written in one scope, that bind
+/// their name under the engine's default redefinition policy, in source order.
+fn binding_definitions<'a, T>(
+    definitions: impl Iterator<Item = &'a T>,
+    name: impl Fn(&T) -> &str,
+) -> Vec<&'a T> {
+    let definitions = definitions.collect::<Vec<_>>();
+    let mut counts = HashMap::<String, usize>::new();
+    for definition in &definitions {
+        *counts
+            .entry(name(definition).to_ascii_uppercase())
+            .or_default() += 1;
+    }
+    let policy = super::ParameterRedefinitionPolicy::default();
+    let mut ordinals = HashMap::<String, usize>::new();
+    definitions
+        .into_iter()
+        .filter(|definition| {
+            let key = name(definition).to_ascii_uppercase();
+            let binding = policy.binding_definition(counts[&key]);
+            let ordinal = ordinals.entry(key).or_default();
+            *ordinal += 1;
+            *ordinal - 1 == binding
+        })
+        .collect()
+}
+
+/// `scope` and every scope enclosing it, the top level (`None`) first.
+fn scope_levels(scope: Option<&str>) -> Vec<Option<&str>> {
+    let mut levels = vec![None];
+    if let Some(scope) = scope {
+        levels.extend(scope.match_indices('.').map(|(at, _)| Some(&scope[..at])));
+        levels.push(Some(scope));
+    }
+    levels
+}
+
+/// Whether a definition written in `definition_scope` is written directly in
+/// `level`. `None` is the top level.
+fn same_scope(definition_scope: Option<&str>, level: Option<&str>) -> bool {
+    match (definition_scope, level) {
+        (None, None) => true,
+        (Some(definition_scope), Some(level)) => definition_scope.eq_ignore_ascii_case(level),
+        _ => false,
+    }
 }
 
 pub fn source_map_for_editor(buffer: &str) -> NetlistSourceMap {
@@ -1943,14 +2011,9 @@ M1 d g s b nch W={w} L={l*2}\n\
             "a literal value slot such as a node or model name carries no expression span"
         );
 
-        let context = map.param_context_at(4, None);
+        let context = map.param_context_in(None);
         assert_eq!(context.get("w"), Some(2e-6));
         assert_eq!(context.get("l"), Some(6e-6));
-        assert_eq!(
-            map.param_context_at(2, None).get("l"),
-            None,
-            "a definition below the reader's line is not visible yet"
-        );
     }
 
     #[test]
@@ -1969,53 +2032,124 @@ M1 d g s b nch W={w} L={l*2}\n\
             vec![("w", "w", 4, "w")]
         );
         assert_eq!(
-            rspice_core_eval(&map, 4, "w *2"),
+            rspice_core_eval(&map, "w *2"),
             Some(2e-6),
-            "the joined expression evaluates against the line it is hovered on"
+            "the joined expression evaluates as one"
         );
     }
 
-    fn rspice_core_eval(map: &NetlistSourceMap, line: usize, expression: &str) -> Option<f64> {
-        crate::netlist::expr::eval_expression(expression, &map.param_context_at(line, None)).ok()
+    fn rspice_core_eval(map: &NetlistSourceMap, expression: &str) -> Option<f64> {
+        crate::netlist::expr::eval_expression(expression, &map.param_context_in(None)).ok()
     }
 
+    /// The engine binds a redefined name's last definition at every reader,
+    /// as ngspice-46 does (a = 10, b = c = 20, a redefined `.func` reaches a
+    /// call above it), so the editor must too.
     #[test]
-    fn param_context_at_line_applies_definitions_in_source_order() {
-        let src = "deck\n.param a=1\n.param b={a*2}\n.param a=10\n.param c={a*2}\n.end\n";
+    fn every_reader_binds_the_last_definition_of_a_redefined_parameter() {
+        let src = "deck\n\
+.func f(x) {2*x}\n\
+.param a=1\n\
+.param b={a*2} e={f(a)}\n\
+R1 n 0 {a}\n\
+.param a=10\n\
+.param c={a*2}\n\
+.func f(x) {100*x}\n\
+.end\n";
 
         let map = source_map_for_editor(src);
+        let context = map.param_context_in(None);
 
-        let early = map.param_context_at(3, None);
-        assert_eq!(early.get("a"), Some(1.0));
-        assert_eq!(early.get("b"), Some(2.0));
-
-        let late = map.param_context_at(5, None);
+        assert_eq!(context.get("a"), Some(10.0), "the reader above binds a=10");
         assert_eq!(
-            late.get("a"),
-            Some(10.0),
-            "a redefinition shadows the first"
+            context.get("b"),
+            Some(20.0),
+            "a definition between the two reads the last a"
         );
-        assert_eq!(late.get("b"), Some(2.0));
-        assert_eq!(late.get("c"), Some(20.0));
+        assert_eq!(context.get("c"), Some(20.0));
+        assert_eq!(context.get("e"), Some(1000.0), "f(a) calls the last f");
+        assert_eq!(
+            map.param_definition_for("a", None)
+                .map(|definition| definition.line),
+            Some(6),
+            "a reader of a resolves to the definition that binds it"
+        );
+        let netlist = Netlist::parse(src).expect("deck parses");
+        for name in ["a", "b", "c", "e"] {
+            assert_eq!(
+                context.get(name),
+                netlist.params.get(name),
+                "the editor and the engine disagree on {name}"
+            );
+        }
     }
 
     #[test]
-    fn param_context_at_line_scopes_subcircuit_parameters() {
+    fn a_definition_further_down_the_deck_reaches_a_reader_above_it() {
+        let src = "deck\nM1 d g s b nch L={l}\n.param l={w*3}\n.param w=2u\n.end\n";
+
+        let map = source_map_for_editor(src);
+        let context = map.param_context_in(None);
+
+        assert_eq!(context.get("w"), Some(2e-6));
+        assert_eq!(context.get("l"), Some(6e-6));
+        assert_eq!(
+            map.param_definition_for("l", None)
+                .map(|definition| definition.line),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn param_context_scopes_subcircuit_parameters() {
         let src = "deck\n\
 .param g=1\n\
 .subckt cell in out params: g=5\n\
 .param k={g*2}\n\
+R1 in out {k}\n\
+R2 in out {t}\n\
+.param k={g*3}\n\
 .ends\n\
 .param t={g*2}\n\
+V1 n 0 1\n\
+X1 n 0 cell\n\
 .end\n";
 
         let map = source_map_for_editor(src);
 
-        let inside = map.param_context_at(4, Some("cell"));
-        assert_eq!(inside.get("g"), Some(5.0), "the subcircuit default shadows");
-        assert_eq!(inside.get("k"), Some(10.0));
+        let netlist = Netlist::parse(src).expect("deck parses");
+        let circuit = crate::Engine::new(crate::SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("deck builds");
+        for (resistor, local) in [("X1.R1", "k"), ("X1.R2", "t")] {
+            let index = circuit
+                .resistors
+                .names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case(resistor))
+                .expect("resistor exists");
+            let engine = circuit.resistors.conductances[index].recip();
+            let editor = map.param_context_in(Some("cell")).get(local).unwrap();
+            assert!(
+                (engine / editor - 1.0).abs() < 1e-12,
+                "the editor ({editor}) and the engine ({engine}) disagree on {local} inside the subcircuit"
+            );
+        }
 
-        let outside = map.param_context_at(6, None);
+        let inside = map.param_context_in(Some("cell"));
+        assert_eq!(inside.get("g"), Some(5.0), "the subcircuit default shadows");
+        assert_eq!(
+            inside.get("k"),
+            Some(15.0),
+            "the last local definition binds the reader above it"
+        );
+        assert_eq!(
+            inside.get("t"),
+            Some(2.0),
+            "a top-level definition below the subcircuit reaches it, evaluated at the top level"
+        );
+
+        let outside = map.param_context_in(None);
         assert_eq!(outside.get("g"), Some(1.0));
         assert_eq!(outside.get("t"), Some(2.0));
         assert_eq!(
@@ -2024,19 +2158,49 @@ M1 d g s b nch W={w} L={l*2}\n\
             "a subcircuit-local parameter is invisible at the top level"
         );
         assert_eq!(
-            map.param_definition_for("g", 4, Some("cell"))
+            map.param_definition_for("g", Some("cell"))
                 .map(|definition| definition.line),
             Some(3)
         );
         assert_eq!(
-            map.param_definition_for("g", 6, None)
+            map.param_definition_for("k", Some("cell"))
+                .map(|definition| definition.line),
+            Some(7)
+        );
+        assert_eq!(
+            map.param_definition_for("g", None)
                 .map(|definition| definition.line),
             Some(2)
         );
     }
 
     #[test]
-    fn param_context_at_line_resolves_functions_and_nominal_statistics() {
+    fn a_local_definition_that_does_not_evaluate_leaves_its_name_unbound() {
+        let src = "deck\n\
+.param g=1 t={missing*2}\n\
+.subckt cell in out\n\
+.param g={nope}\n\
+.param missing=4 u={t}\n\
+.ends\n\
+.end\n";
+
+        let map = source_map_for_editor(src);
+        let inside = map.param_context_in(Some("cell"));
+
+        assert_eq!(
+            inside.get("g"),
+            None,
+            "the enclosing g=1 is shadowed by a definition that does not evaluate"
+        );
+        assert_eq!(
+            inside.get("u"),
+            None,
+            "a top-level t the engine cannot resolve does not resolve against a local name"
+        );
+    }
+
+    #[test]
+    fn param_context_resolves_functions_and_nominal_statistics() {
         let src = "deck\n\
 .param w=2u\n\
 .func dbl(x)={x*2}\n\
@@ -2045,7 +2209,7 @@ M1 d g s b nch W={w} L={l*2}\n\
 .end\n";
 
         let map = source_map_for_editor(src);
-        let context = map.param_context_at(5, None);
+        let context = map.param_context_in(None);
 
         assert_eq!(context.get("d"), Some(4e-6));
         assert_eq!(

@@ -528,14 +528,14 @@ pub(crate) struct NetlistValueHover {
 ///
 /// A hover is a paint-rate query and must never cost a parse. The span index
 /// is derived once per buffer revision; a pointer that has not moved reads the
-/// retained answer, and a pointer that moved within one line and scope reuses
-/// the retained parameter environment.
+/// retained answer, and a pointer that moved within one scope reuses the
+/// retained parameter environment.
 #[derive(Debug, Clone)]
 pub(super) struct CachedValueIndex {
     revision: u64,
     map: Arc<NetlistSourceMap>,
-    /// Parameter environment last built, with the line and scope it is for.
-    context: Option<(usize, Option<String>, rspice_core::netlist::ParamContext)>,
+    /// Parameter environment last built, with the scope it is for.
+    context: Option<(Option<String>, rspice_core::netlist::ParamContext)>,
     /// Character index the last hover was resolved at, with its answer.
     hovered: Option<(usize, Option<NetlistValueHover>)>,
 }
@@ -557,31 +557,19 @@ impl CachedValueIndex {
         self.hovered.as_ref().and_then(|(_, hover)| hover.as_ref())
     }
 
-    fn context_for(
-        &mut self,
-        line: usize,
-        scope: Option<&str>,
-    ) -> &rspice_core::netlist::ParamContext {
+    fn context_for(&mut self, scope: Option<&str>) -> &rspice_core::netlist::ParamContext {
         let retained = self
             .context
             .as_ref()
-            .is_some_and(|(retained_line, retained_scope, _)| {
-                *retained_line == line && retained_scope.as_deref() == scope
-            });
+            .is_some_and(|(retained_scope, _)| retained_scope.as_deref() == scope);
         if !retained {
             self.context = None;
         }
         let map = Arc::clone(&self.map);
         &self
             .context
-            .get_or_insert_with(|| {
-                (
-                    line,
-                    scope.map(str::to_owned),
-                    map.param_context_at(line, scope),
-                )
-            })
-            .2
+            .get_or_insert_with(|| (scope.map(str::to_owned), map.param_context_in(scope)))
+            .1
     }
 
     fn resolve(
@@ -602,38 +590,51 @@ impl CachedValueIndex {
                 span.name.clone()
             }
         };
-        let context = self.context_for(span.line, span.scope.as_deref());
-        let (value, detail) =
-            match rspice_core::netlist::expr::eval_expression(&span.expression, context) {
-                Ok(value) => (
-                    Some(format_hover_value(value)),
-                    (span.kind == NetlistValueKind::ParamReference)
-                        .then(|| {
-                            map.param_definition_for(&span.name, span.line, span.scope.as_deref())
-                        })
-                        .flatten()
-                        .map(|definition| {
-                            messages.format(
-                                MessageId::NetlistHoverDefinedLine,
-                                &[("line", &definition.line.to_string())],
-                            )
-                        }),
-                ),
-                Err(rspice_core::netlist::expr::ExprError::UndefinedParam(name)) => (
-                    None,
-                    Some(messages.format(
-                        MessageId::NetlistHoverUndefinedParameter,
-                        &[("name", &name)],
-                    )),
-                ),
-                Err(error) => (
-                    None,
-                    Some(messages.format(
-                        MessageId::NetlistHoverNotEvaluable,
-                        &[("reason", &error.to_string())],
-                    )),
-                ),
-            };
+        let binding = match span.kind {
+            NetlistValueKind::Expression => None,
+            NetlistValueKind::ParamDefinition | NetlistValueKind::ParamReference => {
+                map.param_definition_for(&span.name, span.scope.as_deref())
+            }
+        };
+        // A definition a later one in its scope supersedes binds nothing: the
+        // name reads as the value the binding definition gives every reader.
+        let superseded = span.kind == NetlistValueKind::ParamDefinition
+            && binding.is_some_and(|definition| definition.span != span.span);
+        let expression = if superseded {
+            &span.name
+        } else {
+            &span.expression
+        };
+        let context = self.context_for(span.scope.as_deref());
+        let evaluated = rspice_core::netlist::expr::eval_expression(expression, context);
+        let (value, detail) = match evaluated {
+            Ok(value) => (
+                Some(format_hover_value(value)),
+                (span.kind == NetlistValueKind::ParamReference || superseded)
+                    .then_some(binding)
+                    .flatten()
+                    .map(|definition| {
+                        messages.format(
+                            MessageId::NetlistHoverDefinedLine,
+                            &[("line", &definition.line.to_string())],
+                        )
+                    }),
+            ),
+            Err(rspice_core::netlist::expr::ExprError::UndefinedParam(name)) => (
+                None,
+                Some(messages.format(
+                    MessageId::NetlistHoverUndefinedParameter,
+                    &[("name", &name)],
+                )),
+            ),
+            Err(error) => (
+                None,
+                Some(messages.format(
+                    MessageId::NetlistHoverNotEvaluable,
+                    &[("reason", &error.to_string())],
+                )),
+            ),
+        };
         Some(NetlistValueHover {
             token,
             value,
@@ -666,8 +667,9 @@ fn format_hover_value(value: f64) -> String {
     }
 }
 
-/// What the parameter or expression under the pointer evaluates to at its own
-/// line, without running anything.
+/// What the parameter or expression under the pointer evaluates to where it is
+/// written, with the bindings the engine gives its scope, without running
+/// anything.
 ///
 /// `buffer` is the visible source, which is also what a generated document or
 /// a read-only run snapshot projects; a unified comparison is not a deck and
@@ -1821,6 +1823,40 @@ M1 d g s b nch W={w} L={l*2}\n\
         assert_eq!(reference.token, "w");
         assert_eq!(reference.value.as_deref(), Some("2u"));
         assert_eq!(reference.detail.as_deref(), Some("defined line 2"));
+    }
+
+    /// A reader above a redefinition hovers the value the engine binds there,
+    /// the last definition's, as every ngspice-46 reader does.
+    #[test]
+    fn value_hover_over_a_reader_above_a_redefinition_shows_the_final_value() {
+        let deck = "hover\n.param w=1u\nM1 d g s b nch W={w}\n.param w=2u\n.end\n";
+        let mut state = AppState::default();
+        state.simulation.source.netlist_content = deck.to_owned();
+        let mut hover = |needle: &str| {
+            let index = deck.find(needle).expect("deck contains the token");
+            value_hover_at(&mut state, deck, index).expect("hover")
+        };
+
+        let reader = hover("w}");
+        assert_eq!(reader.token, "w");
+        assert_eq!(reader.value.as_deref(), Some("2u"));
+        assert_eq!(reader.detail.as_deref(), Some("defined line 4"));
+
+        let superseded = hover("w=1u");
+        assert_eq!(superseded.token, "w");
+        assert_eq!(
+            superseded.value.as_deref(),
+            Some("2u"),
+            "a superseded definition binds nothing"
+        );
+        assert_eq!(superseded.detail.as_deref(), Some("defined line 4"));
+
+        let binding = hover("w=2u");
+        assert_eq!(binding.value.as_deref(), Some("2u"));
+        assert_eq!(
+            binding.detail, None,
+            "the binding definition is the one shown"
+        );
     }
 
     #[test]

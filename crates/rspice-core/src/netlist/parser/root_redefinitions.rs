@@ -13,12 +13,13 @@
 //!
 //! The first pass records each binding a redefinition superseded. When one
 //! of them differs from the name's final binding, the deck is parsed again
-//! with that final binding pinned at every definition except the last,
-//! which still evaluates its own expression. A last definition that reads
-//! another redefined name can move under the pins, so passes repeat until no
-//! superseded binding differs.
+//! with that final binding pinned at every definition except the one
+//! [`binding_definition`] selects (the last), which still evaluates its own
+//! expression. A last definition that reads another redefined name can move
+//! under the pins, so passes repeat until no superseded binding differs.
 //!
 //! [`UseLast`]: crate::netlist::ParameterRedefinitionPolicy::UseLast
+//! [`binding_definition`]: crate::netlist::ParameterRedefinitionPolicy::binding_definition
 
 use super::temperature::TemperaturePassError;
 use crate::netlist::expr::{
@@ -62,15 +63,19 @@ impl RootBinding {
             RootDefinitionKind::Parameter => params.get_complex(&self.name),
             RootDefinitionKind::GlobalParameter => params.get_global_complex(&self.name),
             RootDefinitionKind::Function => {
-                return params.get_function(&self.name).map(|function| Bound::Function {
-                    args: function.args.clone(),
-                    body: function.body.clone(),
-                });
+                return params
+                    .get_function(&self.name)
+                    .map(|function| Bound::Function {
+                        args: function.args.clone(),
+                        body: function.body.clone(),
+                    });
             }
         };
-        number
-            .map(Bound::Number)
-            .or_else(|| params.get_string(&self.name).map(|text| Bound::Text(text.to_owned())))
+        number.map(Bound::Number).or_else(|| {
+            params
+                .get_string(&self.name)
+                .map(|text| Bound::Text(text.to_owned()))
+        })
     }
 }
 
@@ -135,14 +140,15 @@ impl RootRedefinitions {
         let ordinal = {
             let count = self.definitions.entry(binding.clone()).or_default();
             *count += 1;
-            *count
+            *count - 1
         };
+        let policy = params.parameter_redefinition_policy();
         let pin = self
             .pins
             .get(&binding)
-            .filter(|pin| ordinal < pin.definitions)
+            .filter(|pin| ordinal != policy.binding_definition(pin.definitions))
             .cloned();
-        if ordinal > 1
+        if ordinal > 0
             && let Some(current) = binding.bound(params)
         {
             self.superseded.push((binding, current));
