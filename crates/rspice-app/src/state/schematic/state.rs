@@ -179,20 +179,23 @@ pub struct SchematicSession {
     pub(in crate::state::schematic) operation_cancel:
         Option<super::undo_history::OperationCancelState>,
 
+    // The canvas memos below are boxed: together they are over a kilobyte,
+    // and the session sits inline in the application root, which test
+    // fixtures move by value under a 40 KiB stack budget.
     /// The canvas's resolved symbols, kept while what they resolve from
     /// stands still.
-    pub(crate) symbol_context: super::symbol_context_cache::SymbolContextCache,
+    pub(crate) symbol_context: Box<super::symbol_context_cache::SymbolContextCache>,
 
     /// The canvas's operating-point voltage badges, kept while what they are
     /// read from stands still.
-    pub(crate) operating_point_badges: super::operating_point_memo::OperatingPointMemo,
+    pub(crate) operating_point_badges: Box<super::operating_point_memo::OperatingPointMemo>,
 
     /// The armed Move or Stretch preview, kept while its inputs stand still.
-    pub(crate) transform_preview: super::transform_preview_memo::TransformPreviewMemo,
+    pub(crate) transform_preview: Box<super::transform_preview_memo::TransformPreviewMemo>,
 
     /// The sheet's overflow advisories, kept while the drawing and the sheet
     /// stand still.
-    pub(crate) overflow_summary: super::overflow_memo::OverflowSummaryMemo,
+    pub(crate) overflow_summary: Box<super::overflow_memo::OverflowSummaryMemo>,
 }
 
 impl Default for SchematicState {
