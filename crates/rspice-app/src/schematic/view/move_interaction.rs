@@ -82,7 +82,10 @@ fn apply(state: &mut AppState, symbols: &SchematicSymbolContext, request: MoveIn
     }
 }
 
-fn commit_armed_move_selection(state: &mut AppState, symbol_context: &SchematicSymbolContext) {
+pub(super) fn commit_armed_move_selection(
+    state: &mut AppState,
+    symbol_context: &SchematicSymbolContext,
+) {
     if let Err(message) = armed_move_selection_authority(state) {
         state.prompt(format!("Move cancelled: {message}"));
         cancel_armed_move_selection(state);

@@ -1587,6 +1587,9 @@ mod chrome_review_tests;
 mod gesture_tests;
 
 #[cfg(test)]
+mod wiring_acceptance;
+
+#[cfg(test)]
 mod veriloga_design_tests;
 
 #[cfg(test)]

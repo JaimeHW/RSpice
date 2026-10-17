@@ -86,7 +86,10 @@ fn apply(state: &mut AppState, symbols: &SchematicSymbolContext, request: Stretc
     }
 }
 
-fn commit_armed_stretch_selection(state: &mut AppState, symbol_context: &SchematicSymbolContext) {
+pub(super) fn commit_armed_stretch_selection(
+    state: &mut AppState,
+    symbol_context: &SchematicSymbolContext,
+) {
     if let Err(message) = armed_stretch_selection_authority(state) {
         state.prompt(format!("Stretch cancelled: {message}"));
         cancel_armed_stretch_selection(state);

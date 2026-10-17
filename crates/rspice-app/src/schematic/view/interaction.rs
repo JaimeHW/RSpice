@@ -504,7 +504,11 @@ fn connect_pins_inside_wires(
     });
 }
 
-fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos: Point) {
+pub(super) fn place_component(
+    state: &mut AppState,
+    component_type: ComponentType,
+    grid_pos: Point,
+) {
     match component_type {
         ComponentType::Port => place_pending_port(state, grid_pos),
         ComponentType::CellInstance => {
@@ -834,7 +838,7 @@ fn commit_explicit_junction(state: &mut AppState, requested: Point) -> JunctionP
     JunctionPlacementOutcome::Placed(target)
 }
 
-fn handle_junction_click(state: &mut AppState, requested: Point) {
+pub(super) fn handle_junction_click(state: &mut AppState, requested: Point) {
     let message = match commit_explicit_junction(state, requested) {
         JunctionPlacementOutcome::Placed(point) => {
             format!("Added a junction at ({}, {}).", point.x, point.y)

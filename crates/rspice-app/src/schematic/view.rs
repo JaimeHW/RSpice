@@ -22,6 +22,8 @@ mod edge_pan;
 mod floating_paste;
 #[cfg(test)]
 mod frame_cost;
+#[cfg(test)]
+pub(crate) mod gesture_commits;
 pub(crate) mod grid_snap_selection;
 mod interaction;
 mod keyboard_navigation;
