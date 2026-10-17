@@ -524,15 +524,26 @@ fn pin_findings_digest_nothing_while_idle_and_stale_on_either_input() {
 
     reset_computed_digests();
     assert!(current(&state));
-    assert_eq!(computed_digests(), 0, "a reading with no edit digests nothing");
+    assert_eq!(
+        computed_digests(),
+        0,
+        "a reading with no edit digests nothing"
+    );
 
     state
         .store_active_symbol_document(&SymbolDocument {
-            pins: vec![SymbolPin::new("P0", PortDirection::In, Some(Point::new(0, 0)))],
+            pins: vec![SymbolPin::new(
+                "P0",
+                PortDirection::In,
+                Some(Point::new(0, 0)),
+            )],
             ..SymbolDocument::default()
         })
         .expect("symbol document stores");
-    assert!(!current(&state), "an edit to the artwork stales the findings");
+    assert!(
+        !current(&state),
+        "an edit to the artwork stales the findings"
+    );
 
     state.run_active_symbol_pin_checks();
     assert!(current(&state));

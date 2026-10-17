@@ -172,7 +172,10 @@ impl AppState {
     /// Beside [`Self::symbol_ports`] because it must take the same branches:
     /// a stamp of any other drawing would let an edit to the contract leave
     /// the pin findings reading current.
-    pub(in crate::workbench) fn symbol_contract_stamp(&self, reference: &CellViewRef) -> Option<u64> {
+    pub(in crate::workbench) fn symbol_contract_stamp(
+        &self,
+        reference: &CellViewRef,
+    ) -> Option<u64> {
         let schematic_ref = CellViewRef::new(&reference.library, &reference.cell, "schematic");
         if self.workspace.content.active_view == schematic_ref {
             return Some(self.schematic.content_stamp());
