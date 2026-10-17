@@ -19,7 +19,6 @@ pub(crate) const OFFSET_Y_WORLD: f32 = 3.0;
 pub(crate) const MARKER_RADIUS_WORLD: f32 = 2.0;
 const GLYPH_WIDTH_WORLD: f32 = 7.2;
 const POINTER_SLOP: f32 = 3.0;
-const MIN_VISIBLE_FONT_SIZE: f32 = 4.0;
 
 #[derive(Clone)]
 struct DesignNoteScreenLayout {
@@ -35,10 +34,10 @@ fn screen_layout(
     text: &str,
     color: Color32,
 ) -> Option<DesignNoteScreenLayout> {
-    let font_size = (((FONT_WORLD_SIZE * viewport.zoom) * 4.0).round() * 0.25).max(1.0);
-    if font_size < MIN_VISIBLE_FONT_SIZE {
-        return None;
-    }
+    // A note is annotation: below the one legibility floor it hides, with
+    // its marker, rather than painting a smudge.
+    let font_size =
+        super::lod::annotation_size(FONT_WORLD_SIZE, viewport.zoom, ctx.pixels_per_point())?;
     let anchor = viewport.schematic_to_screen(note.pos);
     let text_origin = anchor
         + vec2(

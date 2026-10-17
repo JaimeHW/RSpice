@@ -1000,3 +1000,33 @@ fn a_named_net_badge_is_centred_on_its_label_name() {
         }
     }
 }
+
+/// Every run of text the canvas paints is legible (D1 section 1: at least
+/// 6 device pixels and 3.5 pt), at the zoom that fits A1 and at 0.25, on 1x
+/// and 2x. A design note kept its own 4-pt floor, compared in points: at the
+/// A1 fit on a 1x display it painted its text 4.75 px tall.
+#[test]
+fn no_canvas_text_is_painted_below_the_legibility_floor() {
+    for (zoom, pixels_per_point) in [
+        (Zoom::FitA1, 1.0_f32),
+        (Zoom::FitA1, 2.0),
+        (Zoom::Fixed(0.25), 2.0),
+    ] {
+        let mut state = analog_sheet();
+        let framing = Framing {
+            name: "test",
+            zoom,
+            centre: ANALOG_CENTRE,
+        };
+        let render = render(&mut state, themes()[0].1, framing, pixels_per_point);
+        for text in painted_text(&render.shapes) {
+            assert!(
+                text.size * pixels_per_point >= 6.0 - 1e-3 && text.size >= 3.5 - 1e-3,
+                "zoom {:.3} at {pixels_per_point}x: {:?} is painted at {} pt",
+                render.zoom,
+                text.text,
+                text.size
+            );
+        }
+    }
+}
