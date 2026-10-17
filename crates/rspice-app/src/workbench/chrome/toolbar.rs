@@ -217,7 +217,13 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.x = TOOLBAR_CONTEXT_GAP;
-                        ui.horizontal_centered(|ui| workspace_tools(ui, app, layout));
+                        // The workspace's tools, and behind More tools
+                        // whatever a narrow row has no slot for (U-11).
+                        ui.horizontal_centered(|ui| {
+                            overflow::reset(ui);
+                            workspace_tools(ui, app, layout);
+                            overflow::more_tools(ui, app, layout);
+                        });
                     });
 
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -458,19 +464,11 @@ fn trailing_controls_width(
     width + (controls.saturating_sub(1) as f32 * TOOLBAR_CONTEXT_GAP) + outer_gap
 }
 
-/// The workspace's tools, and behind More tools whatever a narrow row has no
-/// slot for (U-11).
 fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    let workspace = app.state.workbench.workspace;
     ui.data_mut(|data| {
         data.insert_temp(projected_tool_count_id(), 0_usize);
     });
-    overflow::reset(ui);
-    workspace_tool_row(ui, app, layout);
-    overflow::more_tools(ui, app, layout);
-}
-
-fn workspace_tool_row(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    let workspace = app.state.workbench.workspace;
     if !app.state.project_lifecycle.is_open() {
         no_project_tools(ui, app, layout);
         return;
@@ -845,9 +843,9 @@ fn generated_netlist_tool(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Layout
         .messages()
         .text(crate::workbench::MessageId::CodeGeneratedNetlist);
     if !take_projected_tool_slot(ui, layout) {
-        let action = overflow::OverflowAction::Run(|app| {
-            crate::workbench::documents::netlist_document::show_generated_deck(&mut app.state);
-        });
+        let action = overflow::OverflowAction::Run(
+            crate::workbench::documents::netlist_document::show_generated_deck,
+        );
         let (icon, selected) = (WorkbenchIcon::Netlist, false);
         overflow::set_aside(
             ui,

@@ -13,6 +13,7 @@ use super::ToolbarCommandPresentation;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::AppState;
 use crate::workbench::commands::CommandAvailability;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{WorkbenchIcon, icon_button};
@@ -33,7 +34,7 @@ pub(super) enum OverflowAction {
     Command(Command, ToolbarCommandPresentation),
     /// A toolbar action that is not a command, such as opening the
     /// generated deck. Always available.
-    Run(fn(&mut RSpiceApp)),
+    Run(fn(&mut AppState)),
 }
 
 impl OverflowTool {
@@ -58,13 +59,6 @@ impl OverflowTool {
         match self.action {
             OverflowAction::Command(command, _) => command.availability(app),
             OverflowAction::Run(_) => CommandAvailability::Available,
-        }
-    }
-
-    fn run(&self, app: &mut RSpiceApp, ctx: &egui::Context) {
-        match self.action {
-            OverflowAction::Command(command, _) => command.execute_with_feedback(app, ctx),
-            OverflowAction::Run(run) => run(app),
         }
     }
 }
@@ -102,7 +96,7 @@ pub(super) fn more_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutS
             }
             OverflowAction::Run(run) => {
                 if icon_button(ui, tool.icon, &tool.label, tool.selected, size).clicked() {
-                    run(app);
+                    run(&mut app.state);
                 }
             }
         }
@@ -123,7 +117,12 @@ pub(super) fn more_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutS
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         for tool in &tools {
             if tool_row(ui, app, tool, row_height) {
-                tool.run(app, ui.ctx());
+                match tool.action {
+                    OverflowAction::Command(command, _) => {
+                        command.execute_with_feedback(app, ui.ctx());
+                    }
+                    OverflowAction::Run(run) => run(&mut app.state),
+                }
                 ui.close();
             }
         }
