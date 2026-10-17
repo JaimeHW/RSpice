@@ -210,48 +210,72 @@ fn an_edit_during_preparation_queues_nothing_and_stales_what_the_pass_found() {
     assert!(stated(&app, "Preflight stale"), "the staleness is stated");
 }
 
-/// Press Run and let the pass authorize and queue the run, as the frames
-/// before the one that dispatches it would. Returns the digest it authorized.
-fn queued_by_its_check(app: &mut RSpiceApp) -> crate::product::ContentDigest {
-    run_and_queue(app);
-    app.settle_preflight();
-    assert!(
-        app.state.simulation.execution.trigger_simulation,
-        "the pass queues the run it authorized"
-    );
-    app.state
-        .workbench
-        .preflight
-        .report
-        .as_ref()
-        .and_then(|report| report.prepared.as_ref())
-        .expect("the pass authorizes the run")
-        .snapshot_digest
-}
+/// The frames that queue a run and dispatch it, driven on the application
+/// they run in.
+impl RSpiceApp {
+    /// Press Run and let the pass authorize and queue the run, as the frames
+    /// before the one that dispatches it would. Returns the digest it
+    /// authorized.
+    fn queued_by_its_check(&mut self) -> crate::product::ContentDigest {
+        run_and_queue(self);
+        self.settle_preflight();
+        assert!(
+            self.state.simulation.execution.trigger_simulation,
+            "the pass queues the run it authorized"
+        );
+        self.state
+            .workbench
+            .preflight
+            .report
+            .as_ref()
+            .and_then(|report| report.prepared.as_ref())
+            .expect("the pass authorizes the run")
+            .snapshot_digest
+    }
 
-/// The frame that dispatches a queued run, with the preparations it ran.
-fn dispatch_frame(app: &mut RSpiceApp) -> Vec<crate::simulation::execution::SimulationRunIntent> {
-    use crate::simulation::controller::prepared_run::thread_preparations;
+    /// Prepare and queue a run as Automation does, in this frame and from
+    /// the live session. Returns the digest it prepared.
+    fn queued_as_automation_queues(&mut self) -> crate::product::ContentDigest {
+        use crate::simulation::controller::prepared_run::thread_preparations;
 
-    let earlier = thread_preparations::take();
-    assert!(
-        earlier.is_empty(),
-        "nothing is prepared on the UI thread before the dispatch: {earlier:?}"
-    );
-    app.simulation_controller
-        .update(&mut app.state, &*app.export_workflow_io);
-    thread_preparations::take()
-}
+        self.invalidate_simulation_preflight();
+        let prepared = self
+            .simulation_controller
+            .prepare_run_set_for_preflight(&self.state)
+            .expect("the inverter prepares");
+        self.state.request_run_set_simulation();
+        assert_eq!(
+            thread_preparations::take(),
+            [crate::simulation::execution::SimulationRunIntent::SimulateRunSet],
+            "Automation prepares its run in its own frame"
+        );
+        prepared.snapshot_digest
+    }
 
-/// Stop the run a dispatch started and wait for the engine to let it go.
-fn stop_the_run(app: &mut RSpiceApp) {
-    app.simulation_controller.abort();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
-    while app.simulation_controller.is_running() {
-        assert!(std::time::Instant::now() < deadline, "the run did not stop");
-        app.simulation_controller
-            .update(&mut app.state, &*app.export_workflow_io);
-        std::thread::sleep(std::time::Duration::from_millis(1));
+    /// The frame that dispatches a queued run, with the preparations it ran.
+    fn dispatch_frame(&mut self) -> Vec<crate::simulation::execution::SimulationRunIntent> {
+        use crate::simulation::controller::prepared_run::thread_preparations;
+
+        let earlier = thread_preparations::take();
+        assert!(
+            earlier.is_empty(),
+            "nothing is prepared on the UI thread before the dispatch: {earlier:?}"
+        );
+        self.simulation_controller
+            .update(&mut self.state, &*self.export_workflow_io);
+        thread_preparations::take()
+    }
+
+    /// Stop the run a dispatch started and wait for the engine to let it go.
+    fn stop_the_run(&mut self) {
+        self.simulation_controller.abort();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
+        while self.simulation_controller.is_running() {
+            assert!(std::time::Instant::now() < deadline, "the run did not stop");
+            self.simulation_controller
+                .update(&mut self.state, &*self.export_workflow_io);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
     }
 }
 
@@ -285,9 +309,9 @@ fn stated_exactly(app: &RSpiceApp, message: &str) -> bool {
 #[test]
 fn the_dispatch_frame_runs_the_checked_snapshot_and_prepares_nothing() {
     let mut app = inverter_over_a_run_set();
-    let authorized = queued_by_its_check(&mut app);
+    let authorized = app.queued_by_its_check();
 
-    let prepared = dispatch_frame(&mut app);
+    let prepared = app.dispatch_frame();
 
     assert!(
         prepared.is_empty(),
@@ -307,7 +331,7 @@ fn the_dispatch_frame_runs_the_checked_snapshot_and_prepares_nothing() {
         dispatched, authorized,
         "the run is the snapshot the pass authorized"
     );
-    stop_the_run(&mut app);
+    app.stop_the_run();
 }
 
 /// An edit between the verdict and the dispatch refuses the run in the frame
@@ -317,12 +341,12 @@ fn the_dispatch_frame_runs_the_checked_snapshot_and_prepares_nothing() {
 #[test]
 fn an_edit_after_the_check_refuses_the_dispatch() {
     let mut app = inverter_over_a_run_set();
-    queued_by_its_check(&mut app);
+    app.queued_by_its_check();
     app.state.schematic.document_mut_for_test().components[0]
         .value
         .push('0');
 
-    let prepared = dispatch_frame(&mut app);
+    let prepared = app.dispatch_frame();
 
     assert!(
         prepared.is_empty(),
@@ -337,16 +361,16 @@ fn an_edit_after_the_check_refuses_the_dispatch() {
 #[test]
 fn a_library_change_after_the_check_refuses_the_dispatch() {
     let mut cells = inverter_over_a_run_set();
-    queued_by_its_check(&mut cells);
+    cells.queued_by_its_check();
     cells
         .state
         .library_manager
         .add_library(rspice_design::library::Library::new("scratch"));
-    assert!(dispatch_frame(&mut cells).is_empty());
+    assert!(cells.dispatch_frame().is_empty());
     assert_refused_for(&cells, "the design");
 
     let mut models = inverter_over_a_run_set();
-    queued_by_its_check(&mut models);
+    models.queued_by_its_check();
     models
         .state
         .model_library_manager
@@ -354,7 +378,7 @@ fn a_library_change_after_the_check_refuses_the_dispatch() {
             name: "scratch".to_owned(),
             ..Default::default()
         });
-    assert!(dispatch_frame(&mut models).is_empty());
+    assert!(models.dispatch_frame().is_empty());
     assert_refused_for(&models, "the model library");
 }
 
@@ -364,7 +388,7 @@ fn a_library_change_after_the_check_refuses_the_dispatch() {
 #[test]
 fn a_selection_the_run_does_not_read_does_not_refuse_it() {
     let mut app = inverter_over_a_run_set();
-    let authorized = queued_by_its_check(&mut app);
+    let authorized = app.queued_by_its_check();
     let symbol = app
         .state
         .schematic
@@ -382,7 +406,7 @@ fn a_selection_the_run_does_not_read_does_not_refuse_it() {
         .components
         .insert(symbol);
 
-    assert!(dispatch_frame(&mut app).is_empty());
+    assert!(app.dispatch_frame().is_empty());
 
     assert!(app.state.simulation.execution.has_active_execution());
     assert_eq!(
@@ -395,7 +419,7 @@ fn a_selection_the_run_does_not_read_does_not_refuse_it() {
             .map(|receipt| receipt.prepared_snapshot_digest()),
         Some(authorized)
     );
-    stop_the_run(&mut app);
+    app.stop_the_run();
 }
 
 /// Selecting a device that writes a card names it in the operating point's
@@ -404,7 +428,7 @@ fn a_selection_the_run_does_not_read_does_not_refuse_it() {
 #[test]
 fn selecting_a_device_refuses_a_run_with_an_operating_point() {
     let mut app = inverter_over_a_run_set();
-    queued_by_its_check(&mut app);
+    app.queued_by_its_check();
     let pull_down = app
         .state
         .schematic
@@ -422,7 +446,7 @@ fn selecting_a_device_refuses_a_run_with_an_operating_point() {
         .components
         .insert(pull_down);
 
-    assert!(dispatch_frame(&mut app).is_empty());
+    assert!(app.dispatch_frame().is_empty());
     assert_refused_for(&app, "the devices or results the operating point reports");
 }
 
@@ -432,26 +456,9 @@ fn selecting_a_device_refuses_a_run_with_an_operating_point() {
 /// starts, and nothing is prepared again; edited, it is refused.
 #[test]
 fn the_run_automation_prepares_is_checked_at_dispatch_as_a_run_press_is() {
-    use crate::simulation::controller::prepared_run::thread_preparations;
-
-    fn prepared_as_automation_prepares(app: &mut RSpiceApp) -> crate::product::ContentDigest {
-        app.invalidate_simulation_preflight();
-        let prepared = app
-            .simulation_controller
-            .prepare_run_set_for_preflight(&app.state)
-            .expect("the inverter prepares");
-        app.state.request_run_set_simulation();
-        assert_eq!(
-            thread_preparations::take(),
-            [crate::simulation::execution::SimulationRunIntent::SimulateRunSet],
-            "Automation prepares its run in its own frame"
-        );
-        prepared.snapshot_digest
-    }
-
     let mut unchanged = inverter_over_a_run_set();
-    let authorized = prepared_as_automation_prepares(&mut unchanged);
-    assert!(dispatch_frame(&mut unchanged).is_empty());
+    let authorized = unchanged.queued_as_automation_queues();
+    assert!(unchanged.dispatch_frame().is_empty());
     assert_eq!(
         unchanged
             .state
@@ -464,14 +471,14 @@ fn the_run_automation_prepares_is_checked_at_dispatch_as_a_run_press_is() {
         Some(authorized),
         "the run is the snapshot Automation prepared"
     );
-    stop_the_run(&mut unchanged);
+    unchanged.stop_the_run();
 
     let mut edited = inverter_over_a_run_set();
-    prepared_as_automation_prepares(&mut edited);
+    edited.queued_as_automation_queues();
     edited.state.schematic.document_mut_for_test().components[0]
         .value
         .push('0');
-    assert!(dispatch_frame(&mut edited).is_empty());
+    assert!(edited.dispatch_frame().is_empty());
     assert_refused_for(&edited, "the design");
 }
 
