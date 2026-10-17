@@ -1609,3 +1609,34 @@ fn undo_and_redo_wait_for_the_edit_in_progress() {
     Command::Redo.execute(&mut app);
     assert_eq!(app.state.schematic.document().components.len(), 2);
 }
+
+/// Two wires drawn end to end on one line stayed two wires, with a vertex
+/// in the middle of a straight run, and there was no command to lay them as
+/// one (audit W-C5). Join collinear wires does, as one undo step.
+#[test]
+fn join_collinear_wires_lays_a_straight_run_as_one_wire_in_one_undo_step() {
+    use crate::state::{Point, Wire};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    let first = Wire::segment(1, Point::new(0, 0), Point::new(50, 0));
+    let second = Wire::segment(2, Point::new(50, 0), Point::new(100, 0));
+    let document = app.state.schematic.document_mut_for_test();
+    document.components.clear();
+    document.junctions.clear();
+    document.wires = vec![first.clone(), second.clone()];
+    app.state.schematic.init_undo_history();
+    assert!(Command::JoinCollinearWires.is_enabled(&app));
+
+    Command::JoinCollinearWires.execute(&mut app);
+
+    let wires = &app.state.schematic.document().wires;
+    assert_eq!(wires.len(), 1, "{wires:?}");
+    assert_eq!(
+        (wires[0].points[0], *wires[0].points.last().expect("end")),
+        (Point::new(0, 0), Point::new(100, 0))
+    );
+    assert!(app.state.schematic.undo());
+    assert_eq!(app.state.schematic.document().wires, vec![first, second]);
+    assert!(!app.state.schematic.can_undo(), "one step, not two");
+}

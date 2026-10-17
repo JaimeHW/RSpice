@@ -150,6 +150,7 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::AlignSelectionBottom
             | Command::DistributeSelectionHorizontal
             | Command::DistributeSelectionVertical
+            | Command::JoinCollinearWires
     )
 }
 
@@ -609,6 +610,9 @@ impl Command {
                         )
                         .is_ok()
                     })
+            }
+            Self::JoinCollinearWires => {
+                active_schematic_editor(app) && !state.schematic_edit_read_only()
             }
             Self::MoveSelection => {
                 active_schematic_editor(app)
@@ -1784,6 +1788,9 @@ impl Command {
                 };
                 let symbol_context = schematic_symbol_context(&app.state);
                 transform_selection_on_active_sheet(&mut app.state, &symbol_context, transform);
+            }
+            Self::JoinCollinearWires => {
+                app.state.join_collinear_wires_on_active_sheet();
             }
             Self::AlignSelectionLeft
             | Self::AlignSelectionCenter

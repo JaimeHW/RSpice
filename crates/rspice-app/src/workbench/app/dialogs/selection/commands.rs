@@ -1,4 +1,5 @@
-//! Delete, Cut, Paste, Duplicate and Select all, acting immediately.
+//! Delete, Cut, Paste, Duplicate, Select all and Join collinear wires,
+//! acting immediately.
 //!
 //! Every professional schematic editor treats these as direct commands
 //! with undo as the safety net; a modal in front of Ctrl+D is a modal the
@@ -253,6 +254,41 @@ impl AppState {
         }
         state.prompt(format!("Selected {}.", object_count(count)));
         true
+    }
+
+    /// Join Collinear Wires on the active sheet, as one undo step: every pair
+    /// of wires that runs on one line, end to end or overlapping, becomes one
+    /// wire, and the junction policy tidies what is left. Returns whether
+    /// anything was joined.
+    pub(crate) fn join_collinear_wires_on_active_sheet(&mut self) -> bool {
+        if refuse_read_only(self) {
+            return false;
+        }
+        let automatic_junctions = self
+            .schematic
+            .document()
+            .document_policy
+            .wire_junctions
+            .automatic_junctions();
+        // The undo step opens with every sheet present; the cell view's
+        // other sheets, which share these coordinates, step out of reach
+        // only while this one's wires are joined.
+        self.schematic.begin_operation("join collinear wires");
+        with_active_wire_topology(self, |schematic, scope| {
+            if schematic.join_collinear_wires(scope) {
+                schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope);
+            }
+        });
+        let joined = self.schematic.end_operation();
+        if joined {
+            self.sync_active_schematic_to_workspace();
+        }
+        self.push_user_message(ConsoleMessage::info(if joined {
+            "Joined collinear wires."
+        } else {
+            "No collinear wires to join on this sheet."
+        }));
+        joined
     }
 }
 

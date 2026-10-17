@@ -1287,7 +1287,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::ToggleFocusMode | Command::ToggleFullScreen => WorkbenchIcon::Focus,
         Command::PlaceInstance => WorkbenchIcon::Component,
         Command::Place(_) => WorkbenchIcon::Add,
-        Command::PlaceWire => WorkbenchIcon::Wire,
+        Command::PlaceWire | Command::JoinCollinearWires => WorkbenchIcon::Wire,
         Command::PlaceBus => WorkbenchIcon::Bus,
         Command::PlaceBusTap => WorkbenchIcon::Bus,
         Command::PlaceJunction => WorkbenchIcon::Grid,
@@ -1624,6 +1624,7 @@ fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
             }
         }
     });
+    command_item(ui, app, Command::JoinCollinearWires);
     menu_separator(ui);
     for command in DESIGN_SHEET_COMMANDS {
         command_item(ui, app, command);

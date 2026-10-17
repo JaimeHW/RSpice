@@ -1140,6 +1140,7 @@ impl Command {
             | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical
+            | Self::JoinCollinearWires
                 if !super::active_schematic_editor(app) =>
             {
                 "open an editable schematic or testbench"
@@ -1153,6 +1154,7 @@ impl Command {
             | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical
+            | Self::JoinCollinearWires
                 if app.state.schematic_edit_read_only() =>
             {
                 "the active schematic is read-only"

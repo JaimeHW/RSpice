@@ -107,7 +107,10 @@ fn command_scopes_and_metadata_search_only_return_registered_commands() {
         .filter(|command| PaletteScope::Design.contains(*command))
         .filter(|command| match_entry(&PaletteEntry::Command(*command), "wire").is_some())
         .collect::<Vec<_>>();
-    assert_eq!(design, vec![Command::PlaceWire]);
+    assert_eq!(
+        design,
+        vec![Command::PlaceWire, Command::JoinCollinearWires]
+    );
 
     assert_eq!(
         PaletteScope::for_command(Command::PlaceProbe),
