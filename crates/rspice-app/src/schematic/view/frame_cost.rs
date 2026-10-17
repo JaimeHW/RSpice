@@ -66,7 +66,7 @@ fn port(name: &str, direction: PortDirection) -> PortSpec {
     }
 }
 
-fn master_ports() -> [PortSpec; 3] {
+pub(super) fn master_ports() -> [PortSpec; 3] {
     [
         port("IN", PortDirection::In),
         port("OUT", PortDirection::Out),
@@ -75,8 +75,10 @@ fn master_ports() -> [PortSpec; 3] {
 }
 
 /// One library with the three masters every instance binds to, each with an
-/// authored symbol the canvas resolves.
-fn master_library() -> Library {
+/// authored symbol the canvas resolves: `amp`, `buf` and `bias`, with `IN`
+/// at `(-w, 0)`, `OUT` at `(w, 0)` and `BIAS` at `(0, 40)`, where `w` is 40,
+/// 50 and 60.
+pub(super) fn master_library() -> Library {
     let mut library = Library::new("work");
     for (ordinal, master) in MASTERS.iter().enumerate() {
         let mut cell = Cell::new(*master);

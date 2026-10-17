@@ -1,0 +1,825 @@
+//! The canvas raster review set: three fixture sheets rendered through the
+//! real paint path ([`super::render_schematic_view`]) at the zooms, themes
+//! and pixel densities a customer meets, and the measurements a review reads
+//! off them.
+//!
+//! The sheets are a dense analog stage, a hierarchy sheet with its
+//! operating-point overlay on, and the frame-cost probe's production-scale
+//! sheet. [`render`] drives a headless context through three whole frames and
+//! hands back both the rasterized canvas (device pixels) and the shapes the
+//! last frame painted (points), so an assertion can measure either.
+//!
+//! The PNGs are for a person: `render_the_canvas_raster_review_set` is
+//! `#[ignore]`d and writes them, with a measurement table beside each, to
+//! `RSPICE_RASTER_DIR`. No image or fingerprint is pinned: every claim a
+//! review makes is pinned as a measured-geometry assertion instead.
+
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
+
+use egui::{Color32, Rect, Shape, epaint::ClippedShape};
+use rspice_design::schematic::{
+    bus::{Bus, BusTap, BusTapOrientation},
+    design_note::{DesignNote, DesignNoteKind},
+    net_label::NetLabel,
+    probe::SchematicProbe,
+    rotation::Rotation,
+};
+use rspice_design_model::bus::{BusDeclaration, BusSlice};
+
+use crate::state::{
+    AnalysisResult, AnalysisType, Component, ComponentType, CrossSheetPortDirection, DcOpResult,
+    Junction, LibraryCellInstance, OperatingPointValue, Point, SchematicAnnotationVisibility,
+    SimulationRun, Wire,
+};
+
+use super::AppState;
+
+/// The canvas, in points.
+pub(super) const SCREEN: egui::Vec2 = egui::vec2(960.0, 640.0);
+/// An ISO A1 sheet in world units (841 mm by 594 mm at 4 wu/mm).
+const A1_WORLD: (f64, f64) = (3364.0, 2376.0);
+
+/// Hands out object ids in order.
+struct Ids(u64);
+
+impl Ids {
+    fn next(&mut self) -> u64 {
+        self.0 += 1;
+        self.0
+    }
+}
+
+fn part(ids: &mut Ids, kind: ComponentType, at: (i32, i32), name: &str, value: &str) -> Component {
+    let mut component = Component::new(ids.next(), kind, Point::new(at.0, at.1));
+    component.name = name.to_owned();
+    component.value = value.to_owned();
+    component
+}
+
+fn wire(ids: &mut Ids, points: &[(i32, i32)]) -> Wire {
+    Wire::new(
+        ids.next(),
+        points.iter().map(|(x, y)| Point::new(*x, *y)).collect(),
+    )
+}
+
+fn junction(ids: &mut Ids, at: (i32, i32)) -> Junction {
+    Junction::new(ids.next(), Point::new(at.0, at.1))
+}
+
+fn label(ids: &mut Ids, at: (i32, i32), name: &str) -> NetLabel {
+    NetLabel::new(ids.next(), Point::new(at.0, at.1), name)
+}
+
+/// Finish a fixture the way a load does: runtime state, topology, and the
+/// workspace's copy of the active schematic.
+fn settle(state: &mut AppState) {
+    state.schematic.recalculate_runtime_state();
+    state.schematic.bump_topology_version();
+    state.sync_active_schematic_to_workspace();
+}
+
+/// Ids of the objects the analog sheet's review assertions address.
+pub(super) struct AnalogSheet {
+    pub(super) state: AppState,
+    /// The selected PMOS load.
+    pub(super) selected_part: u64,
+    /// The selected bias conductor.
+    pub(super) selected_wire: u64,
+}
+
+/// A five-transistor OTA with its supplies, compensation, load and a probe;
+/// a four-bit bus with its declaration and four taps into a resistor array;
+/// T-junctions, a crossing with a dot and two crossings without; local net
+/// labels; a note. One PMOS load and the bias conductor are selected, and
+/// the tail device's bulk is left open.
+///
+/// Spans world x 100 to 920 and y 60 to 600.
+pub(super) fn analog_sheet() -> AnalogSheet {
+    use ComponentType::{Capacitor, CurrentSource, Ground, Nmos, Pmos, Resistor, VoltageSource};
+
+    let mut ids = Ids(0);
+    let mut components = Vec::new();
+    let mut wires = Vec::new();
+    let mut junctions = Vec::new();
+    let mut labels = Vec::new();
+
+    // The stage. MOS pins sit at D (20, -40), G (-20, 0), S (20, 40) and
+    // B (20, 0) before mirroring.
+    let m3 = part(&mut ids, Pmos, (300, 180), "M3", "pch W=4u L=1u")
+        .with_mirror_h(true)
+        .with_mirror_v(true);
+    let selected_part = m3.id;
+    components.push(m3);
+    components.push(part(&mut ids, Pmos, (500, 180), "M4", "pch W=4u L=1u").with_mirror_v(true));
+    components.push(part(&mut ids, Nmos, (260, 300), "M1", "nch W=8u L=0.5u"));
+    components.push(part(&mut ids, Nmos, (540, 300), "M2", "nch W=8u L=0.5u").with_mirror_h(true));
+    components.push(part(&mut ids, Nmos, (420, 400), "M5", "nch W=4u L=2u").with_mirror_h(true));
+    // Supplies and stimulus.
+    components.push(part(&mut ids, VoltageSource, (160, 180), "VDD", "1.8"));
+    components.push(part(&mut ids, Ground, (160, 230), "", ""));
+    components.push(part(&mut ids, VoltageSource, (140, 340), "VIP", "0.9"));
+    components.push(part(&mut ids, Ground, (140, 380), "", ""));
+    components.push(part(&mut ids, VoltageSource, (140, 460), "VIN", "0.9"));
+    components.push(part(&mut ids, Ground, (140, 510), "", ""));
+    components.push(part(&mut ids, CurrentSource, (660, 440), "IB", "20u"));
+    components.push(part(&mut ids, Ground, (660, 480), "", ""));
+    components.push(part(&mut ids, Ground, (400, 470), "", ""));
+    // Compensation and load.
+    components.push(part(&mut ids, Capacitor, (600, 300), "CC", "1p").with_rotation(Rotation::R90));
+    components.push(part(&mut ids, Ground, (600, 340), "", ""));
+    components
+        .push(part(&mut ids, Resistor, (700, 300), "RL", "100k").with_rotation(Rotation::R90));
+    components.push(part(&mut ids, Ground, (700, 340), "", ""));
+    // The bus's resistor array.
+    for (bit, y) in [160, 240, 320, 400].into_iter().enumerate() {
+        components.push(part(
+            &mut ids,
+            Resistor,
+            (860, y),
+            &format!("RD{bit}"),
+            "10k",
+        ));
+    }
+    components.push(part(&mut ids, Ground, (880, 450), "", ""));
+
+    // VDD rail and the loads' sources and bulks.
+    wires.push(wire(&mut ids, &[(160, 160), (160, 100), (680, 100)]));
+    wires.push(wire(&mut ids, &[(280, 140), (280, 100)]));
+    wires.push(wire(&mut ids, &[(520, 140), (520, 100)]));
+    wires.push(wire(&mut ids, &[(280, 180), (240, 180), (240, 100)]));
+    wires.push(wire(&mut ids, &[(520, 180), (560, 180), (560, 100)]));
+    for at in [(240, 100), (280, 100), (520, 100), (560, 100)] {
+        junctions.push(junction(&mut ids, at));
+    }
+    labels.push(label(&mut ids, (640, 100), "VDD"));
+    wires.push(wire(&mut ids, &[(160, 200), (160, 220)]));
+    // The mirror: gates tied, M3 diode-connected.
+    wires.push(wire(&mut ids, &[(320, 180), (480, 180)]));
+    wires.push(wire(&mut ids, &[(360, 180), (360, 240), (280, 240)]));
+    wires.push(wire(&mut ids, &[(280, 220), (280, 260)]));
+    junctions.push(junction(&mut ids, (360, 180)));
+    junctions.push(junction(&mut ids, (280, 240)));
+    // The output: M4's drain to the load, with a crossing that carries a dot
+    // where the compensation leg passes through it.
+    wires.push(wire(&mut ids, &[(520, 220), (520, 260)]));
+    wires.push(wire(&mut ids, &[(520, 240), (700, 240), (700, 280)]));
+    wires.push(wire(&mut ids, &[(600, 200), (600, 280)]));
+    junctions.push(junction(&mut ids, (520, 240)));
+    junctions.push(junction(&mut ids, (600, 240)));
+    labels.push(label(&mut ids, (660, 240), "OUT"));
+    wires.push(wire(&mut ids, &[(600, 320), (600, 330)]));
+    wires.push(wire(&mut ids, &[(700, 320), (700, 330)]));
+    // The tail and the pair's bulks.
+    wires.push(wire(
+        &mut ids,
+        &[(280, 340), (280, 360), (520, 360), (520, 340)],
+    ));
+    wires.push(wire(&mut ids, &[(280, 300), (300, 300), (300, 360)]));
+    wires.push(wire(&mut ids, &[(520, 300), (500, 300), (500, 360)]));
+    junctions.push(junction(&mut ids, (300, 360)));
+    junctions.push(junction(&mut ids, (400, 360)));
+    junctions.push(junction(&mut ids, (500, 360)));
+    wires.push(wire(&mut ids, &[(400, 440), (400, 460)]));
+    // Inputs. INN runs down past the bias line, which crosses it with no dot.
+    wires.push(wire(&mut ids, &[(240, 300), (140, 300), (140, 320)]));
+    labels.push(label(&mut ids, (200, 300), "INP"));
+    wires.push(wire(&mut ids, &[(140, 360), (140, 370)]));
+    wires.push(wire(&mut ids, &[(560, 300), (580, 300), (580, 520)]));
+    labels.push(label(&mut ids, (580, 500), "INN"));
+    wires.push(wire(&mut ids, &[(140, 440), (140, 420), (220, 420)]));
+    labels.push(label(&mut ids, (200, 420), "INN"));
+    wires.push(wire(&mut ids, &[(140, 480), (140, 500)]));
+    // The bias line from M5's gate to the bias source.
+    let bias = wire(&mut ids, &[(440, 400), (660, 400), (660, 420)]);
+    let selected_wire = bias.id;
+    wires.push(bias);
+    labels.push(label(&mut ids, (620, 400), "VB"));
+    wires.push(wire(&mut ids, &[(660, 460), (660, 470)]));
+
+    // The bus, its taps and the array they feed.
+    let declaration = BusDeclaration::parse("D[3:0]").expect("bus declaration");
+    let bus = Bus::new(
+        ids.next(),
+        vec![Point::new(780, 120), Point::new(780, 440)],
+        Some(declaration),
+    )
+    .expect("bus");
+    let mut taps = Vec::new();
+    for (bit, y) in [160, 240, 320, 400].into_iter().enumerate() {
+        taps.push(
+            BusTap::new(
+                ids.next(),
+                &bus,
+                Point::new(780, y),
+                Point::new(800, y),
+                BusSlice::parse(&format!("D[{bit}]")).expect("tap slice"),
+                BusTapOrientation::Right,
+            )
+            .expect("bus tap"),
+        );
+        wires.push(wire(&mut ids, &[(800, y), (840, y)]));
+    }
+    wires.push(wire(&mut ids, &[(880, 160), (880, 440)]));
+    for y in [240, 320, 400] {
+        junctions.push(junction(&mut ids, (880, y)));
+    }
+
+    let probe =
+        SchematicProbe::new(ids.next(), Point::new(700, 260), "V(OUT)", None).expect("probe");
+    let note = DesignNote::new(
+        ids.next(),
+        Point::new(120, 560),
+        DesignNoteKind::PlainText,
+        "Five-transistor OTA, gm/Id = 12 at the input pair",
+    )
+    .expect("note");
+
+    let mut state = AppState::default();
+    let document = state.schematic.document_mut_for_test();
+    document.components = components;
+    document.wires = wires;
+    document.junctions = junctions;
+    document.net_labels = labels;
+    document.buses = vec![bus];
+    document.bus_taps = taps;
+    document.probes = vec![probe];
+    document.design_notes = vec![note];
+    settle(&mut state);
+    state.ui.schematic_visibility.annotations = SchematicAnnotationVisibility::Hidden;
+    let selection = &mut state.schematic.session.editor.selection;
+    selection.select_component(selected_part);
+    selection.select_wire(selected_wire);
+    AnalogSheet {
+        state,
+        selected_part,
+        selected_wire,
+    }
+}
+
+/// Three instances of the probe's masters wired in a chain, the cell's
+/// ports in each direction, an off-sheet connector of each direction, and a
+/// solved operating point over five named nets with the overlay on. `X2` is
+/// selected, so its device block shows.
+///
+/// Spans world x 140 to 800 and y 160 to 500.
+pub(super) fn hierarchy_sheet() -> AppState {
+    let mut ids = Ids(0);
+    let mut components = Vec::new();
+    let instance = |ids: &mut Ids, master: &str, at: (i32, i32), name: &str| {
+        let mut binding = LibraryCellInstance::new("work", master, "schematic");
+        binding.bind_interface(&super::frame_cost::master_ports());
+        let mut component = Component::new(
+            ids.next(),
+            ComponentType::CellInstance,
+            Point::new(at.0, at.1),
+        );
+        component.name = name.to_owned();
+        component.library_cell = Some(binding);
+        component
+    };
+    // amp (w 40), buf (w 50), bias (w 60): IN (-w, 0), OUT (w, 0), BIAS (0, 40).
+    components.push(instance(&mut ids, "amp", (300, 200), "X1"));
+    let selected = instance(&mut ids, "buf", (600, 200), "X2");
+    let selected_id = selected.id;
+    components.push(selected);
+    components.push(instance(&mut ids, "bias", (450, 380), "X3"));
+    let port = |ids: &mut Ids, at: (i32, i32), name: &str, direction: &str, rotation| {
+        let mut component = Component::new(ids.next(), ComponentType::Port, Point::new(at.0, at.1))
+            .with_rotation(rotation);
+        component.value = name.to_owned();
+        component.params = format!("dir={direction}");
+        component
+    };
+    components.push(port(&mut ids, (150, 200), "IN", "in", Rotation::R180));
+    components.push(port(&mut ids, (770, 200), "OUT", "out", Rotation::R0));
+    components.push(port(&mut ids, (150, 380), "VREF", "inout", Rotation::R180));
+    components.push(port(&mut ids, (460, 480), "VDD", "supply", Rotation::R0));
+
+    let wires = vec![
+        wire(&mut ids, &[(160, 200), (260, 200)]),
+        wire(&mut ids, &[(340, 200), (550, 200)]),
+        wire(&mut ids, &[(650, 200), (760, 200)]),
+        wire(&mut ids, &[(510, 380), (600, 380), (600, 240)]),
+        wire(&mut ids, &[(300, 240), (300, 300), (600, 300)]),
+        wire(&mut ids, &[(160, 380), (390, 380)]),
+        wire(&mut ids, &[(450, 420), (450, 480)]),
+    ];
+    let junctions = vec![junction(&mut ids, (600, 300))];
+    let labels = vec![
+        NetLabel::off_sheet(
+            ids.next(),
+            Point::new(450, 200),
+            "MID",
+            CrossSheetPortDirection::Output,
+        ),
+        NetLabel::off_sheet(
+            ids.next(),
+            Point::new(400, 300),
+            "NBIAS",
+            CrossSheetPortDirection::Input,
+        ),
+        NetLabel::off_sheet(
+            ids.next(),
+            Point::new(260, 380),
+            "VREF",
+            CrossSheetPortDirection::InOut,
+        ),
+        NetLabel::off_sheet(
+            ids.next(),
+            Point::new(450, 450),
+            "VDD",
+            CrossSheetPortDirection::Supply,
+        ),
+    ];
+    let nets = [
+        ("IN", &wires[0]),
+        ("MID", &wires[1]),
+        ("OUT", &wires[2]),
+        ("NBIAS", &wires[3]),
+        ("VREF", &wires[5]),
+        ("VDD", &wires[6]),
+    ]
+    .into_iter()
+    .map(|(net, wire)| (net.to_owned(), wire.points.clone()))
+    .chain(std::iter::once((
+        "NBIAS".to_owned(),
+        wires[4].points.clone(),
+    )))
+    .fold(
+        std::collections::HashMap::<String, Vec<Point>>::new(),
+        |mut nets, (net, points)| {
+            nets.entry(net).or_default().extend(points);
+            nets
+        },
+    );
+
+    let mut state = AppState::default();
+    state
+        .library_manager
+        .add_library(super::frame_cost::master_library());
+    let document = state.schematic.document_mut_for_test();
+    document.components = components;
+    document.wires = wires;
+    document.junctions = junctions;
+    document.net_labels = labels;
+    settle(&mut state);
+
+    super::frame_cost::install_projected_run_geometry(&mut state, nets);
+    let mut run = SimulationRun::new(1);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::DcOp, "OP").with_dc_op(DcOpResult {
+            node_voltages: [
+                ("V(in)", 0.9),
+                ("V(mid)", 1.2134),
+                ("V(out)", 0.91243),
+                ("V(nbias)", 0.6512),
+                ("V(vref)", 0.6),
+                ("V(vdd)", 1.8),
+            ]
+            .into_iter()
+            .map(|(name, value)| OperatingPointValue {
+                name: name.to_owned(),
+                value,
+                unit: "V".to_owned(),
+            })
+            .collect(),
+            branch_currents: vec![OperatingPointValue {
+                name: "I(X2)".to_owned(),
+                value: 21.4e-6,
+                unit: "A".to_owned(),
+            }],
+            power_dissipation: Vec::new(),
+        }),
+    );
+    state.simulation.retained.runs.insert(0, run);
+    state.simulation.view.active_run_idx = Some(0);
+    state.simulation.view.active_analysis_idx = Some(0);
+    state.ui.schematic_visibility.annotations = SchematicAnnotationVisibility::OperatingPoint;
+    state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_component(selected_id);
+    state
+}
+
+/// How a render frames its sheet.
+#[derive(Clone, Copy)]
+pub(super) enum Zoom {
+    /// Points per world unit.
+    Fixed(f64),
+    /// The zoom at which an A1 sheet fits the canvas.
+    FitA1,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct Framing {
+    pub(super) name: &'static str,
+    pub(super) zoom: Zoom,
+    /// The world point at the middle of the canvas.
+    pub(super) centre: Point,
+}
+
+/// The zoom at which an A1 sheet fits the review canvas, as the canvas's own
+/// framing computes it.
+pub(super) fn a1_fit_zoom() -> f64 {
+    let mut probe = crate::state::SchematicState::default();
+    probe.zoom_to_fit_world_rect(
+        (0.0, 0.0, A1_WORLD.0, A1_WORLD.1),
+        f64::from(SCREEN.x),
+        f64::from(SCREEN.y),
+        rspice_schematic_editor::view::drawing_sheet::FIT_SCREEN_INSET,
+        0.0,
+    );
+    probe.session.editor.zoom
+}
+
+/// One rendered frame.
+pub(super) struct Render {
+    pub(super) canvas: crate::ui::raster::Canvas,
+    /// What the last frame painted, in points.
+    pub(super) shapes: Vec<ClippedShape>,
+    pub(super) pixels_per_point: f32,
+    pub(super) zoom: f64,
+    pub(super) tokens: std::sync::Arc<crate::ui::tokens::Tokens>,
+}
+
+/// The dark and the light canvas.
+pub(super) fn themes() -> [(&'static str, crate::ui::Theme); 2] {
+    [
+        ("dark", crate::ui::Theme::default()),
+        (
+            "light",
+            crate::ui::Theme {
+                mode: rspice_ui_kit::Mode::Light,
+                canvas_theme: rspice_ui_kit::EngineeringCanvasTheme::Light,
+                ..crate::ui::Theme::default()
+            },
+        ),
+    ]
+}
+
+/// Render `state` through the real canvas at `framing`, under `theme`, on a
+/// display of `pixels_per_point`.
+pub(super) fn render(
+    state: &mut AppState,
+    theme: crate::ui::Theme,
+    framing: Framing,
+    pixels_per_point: f32,
+) -> Render {
+    let zoom = match framing.zoom {
+        Zoom::Fixed(zoom) => zoom,
+        Zoom::FitA1 => a1_fit_zoom(),
+    };
+    let ctx = egui::Context::default();
+    ctx.set_os(egui::os::OperatingSystem::Nix);
+    theme.apply(&ctx);
+    let symbols = super::super::symbols::SymbolLibrary::load_embedded().ok();
+    let mut output = None;
+    for _ in 0..3 {
+        let editor = &mut state.schematic.session.editor;
+        editor.needs_fit = false;
+        editor.needs_drawing_sheet_fit = false;
+        editor.zoom = zoom;
+        editor.pan = (
+            f64::from(SCREEN.x) * 0.5 - f64::from(framing.centre.x) * zoom,
+            f64::from(SCREEN.y) * 0.5 - f64::from(framing.centre.y) * zoom,
+        );
+        output = Some(ctx.run_ui(
+            crate::ui::raster::display_input(SCREEN, pixels_per_point),
+            |ui| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ui, |ui| {
+                        super::render_schematic_view(ui, state, symbols.as_ref());
+                    });
+            },
+        ));
+    }
+    let output = output.expect("three frames");
+    assert!(
+        (ctx.pixels_per_point() - pixels_per_point).abs() < f32::EPSILON,
+        "the context renders at {} px/pt, not {pixels_per_point}",
+        ctx.pixels_per_point()
+    );
+    Render {
+        canvas: crate::ui::raster::rasterize(&ctx, SCREEN, &output),
+        shapes: output.shapes,
+        pixels_per_point,
+        zoom,
+        tokens: crate::ui::tokens::Tokens::get(&ctx),
+    }
+}
+
+/// Every leaf shape a frame painted, with its clip, flattened out of nested
+/// `Shape::Vec`s.
+pub(super) fn leaf_shapes(shapes: &[ClippedShape]) -> Vec<(Rect, &Shape)> {
+    fn walk<'a>(clip: Rect, shape: &'a Shape, out: &mut Vec<(Rect, &'a Shape)>) {
+        match shape {
+            Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk(clip, shape, out);
+                }
+            }
+            shape => out.push((clip, shape)),
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in shapes {
+        walk(clipped.clip_rect, &clipped.shape, &mut out);
+    }
+    out
+}
+
+/// One painted run of text: its colour, size, family and layout box.
+pub(super) struct PaintedText {
+    pub(super) text: String,
+    pub(super) colour: Color32,
+    pub(super) size: f32,
+    pub(super) family: egui::FontFamily,
+    pub(super) rect: Rect,
+}
+
+pub(super) fn painted_text(shapes: &[ClippedShape]) -> Vec<PaintedText> {
+    leaf_shapes(shapes)
+        .into_iter()
+        .filter_map(|(clip, shape)| {
+            let Shape::Text(text) = shape else {
+                return None;
+            };
+            let section = text.galley.job.sections.first()?;
+            let rect = Rect::from_min_size(text.pos, text.galley.size());
+            if !clip.intersects(rect) || text.galley.text().trim().is_empty() {
+                return None;
+            }
+            let colour = text
+                .override_text_color
+                .unwrap_or(if section.format.color == Color32::PLACEHOLDER {
+                    text.fallback_color
+                } else {
+                    section.format.color
+                })
+                .gamma_multiply(text.opacity_factor);
+            Some(PaintedText {
+                text: text.galley.text().to_owned(),
+                colour,
+                size: section.format.font_id.size,
+                family: section.format.font_id.family.clone(),
+                rect,
+            })
+        })
+        .collect()
+}
+
+fn hex(colour: Color32) -> String {
+    let [r, g, b, a] = colour.to_srgba_unmultiplied();
+    if a == 255 {
+        format!("#{r:02X}{g:02X}{b:02X}")
+    } else {
+        format!("#{r:02X}{g:02X}{b:02X}@{a}")
+    }
+}
+
+fn relative_luminance(colour: Color32) -> f64 {
+    let linear = |channel: u8| {
+        let channel = f64::from(channel) / 255.0;
+        if channel <= 0.040_45 {
+            channel / 12.92
+        } else {
+            ((channel + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * linear(colour.r()) + 0.7152 * linear(colour.g()) + 0.0722 * linear(colour.b())
+}
+
+/// WCAG 2.x contrast of `ink` composited over an opaque `ground`.
+pub(super) fn contrast(ink: Color32, ground: Color32) -> f64 {
+    let alpha = f32::from(ink.a()) / 255.0;
+    // `Color32` is premultiplied: over an opaque ground, src + dst * (1 - a).
+    let over = |src: u8, dst: u8| {
+        (f32::from(src) + f32::from(dst) * (1.0 - alpha))
+            .round()
+            .clamp(0.0, 255.0) as u8
+    };
+    let composed = Color32::from_rgb(
+        over(ink.r(), ground.r()),
+        over(ink.g(), ground.g()),
+        over(ink.b(), ground.b()),
+    );
+    let (a, b) = (relative_luminance(composed), relative_luminance(ground));
+    let (bright, dark) = if a > b { (a, b) } else { (b, a) };
+    (bright + 0.05) / (dark + 0.05)
+}
+
+/// The measurement table a review reads: stroke widths and circle radii by
+/// colour, and text sizes by colour with their contrast on the canvas.
+pub(super) fn measurement_table(render: &Render) -> String {
+    let canvas_bg = render.tokens.color.canvas_bg;
+    let mut strokes: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
+    let mut circles: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
+    let add = |table: &mut BTreeMap<String, BTreeMap<String, usize>>, key, value| {
+        *table.entry(key).or_default().entry(value).or_default() += 1;
+    };
+    let rgb = |colour: Color32| {
+        let [r, g, b, _] = colour.to_srgba_unmultiplied();
+        [r, g, b]
+    };
+    let named = |colour: Color32| {
+        let c = &render.tokens.color;
+        let tokens = [
+            ("wire", c.wire),
+            ("symbol", c.symbol),
+            ("net_label", c.net_label),
+            ("text", c.text),
+            ("text_dim", c.text_dim),
+            ("text_faint", c.text_faint),
+            ("canvas_select", c.canvas_select),
+            ("canvas_grid", c.canvas_grid),
+            ("canvas_bg", c.canvas_bg),
+            ("info", c.info),
+            ("accent", c.accent),
+            ("border", c.border),
+        ];
+        tokens
+            .iter()
+            .find(|(_, token)| colour.a() > 0 && rgb(*token) == rgb(colour))
+            .map_or_else(
+                || hex(colour),
+                |(name, _)| {
+                    if colour.a() == 255 {
+                        (*name).to_owned()
+                    } else {
+                        format!("{name}@{}", colour.a())
+                    }
+                },
+            )
+    };
+    for (_, shape) in leaf_shapes(&render.shapes) {
+        match shape {
+            Shape::LineSegment { stroke, .. } => add(
+                &mut strokes,
+                format!("line {}", named(stroke.color)),
+                format!("{:.2}", stroke.width),
+            ),
+            Shape::Path(path) => {
+                if path.stroke.width > 0.0
+                    && let egui::epaint::ColorMode::Solid(colour) = path.stroke.color
+                {
+                    add(
+                        &mut strokes,
+                        format!(
+                            "path{} {}",
+                            if path.closed { " closed" } else { "" },
+                            named(colour)
+                        ),
+                        format!("{:.2}", path.stroke.width),
+                    );
+                }
+            }
+            Shape::Circle(circle) => add(
+                &mut circles,
+                format!(
+                    "circle fill {} stroke {}",
+                    named(circle.fill),
+                    named(circle.stroke.color)
+                ),
+                format!("r {:.2} w {:.2}", circle.radius, circle.stroke.width),
+            ),
+            Shape::Rect(rect) => add(
+                &mut strokes,
+                format!(
+                    "rect fill {} stroke {}",
+                    named(rect.fill),
+                    named(rect.stroke.color)
+                ),
+                format!(
+                    "{:.1}x{:.1} w {:.2}",
+                    rect.rect.width(),
+                    rect.rect.height(),
+                    rect.stroke.width
+                ),
+            ),
+            _ => {}
+        }
+    }
+    let mut texts: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
+    for text in painted_text(&render.shapes) {
+        add(
+            &mut texts,
+            format!(
+                "text {} ({:.2}:1) {:?}",
+                named(text.colour),
+                contrast(text.colour, canvas_bg),
+                text.family
+            ),
+            format!("{:.2} pt", text.size),
+        );
+    }
+    let mut out = format!(
+        "zoom {:.4} pt/wu, {} px/pt, canvas {}\n",
+        render.zoom,
+        render.pixels_per_point,
+        hex(canvas_bg)
+    );
+    for (title, table) in [("strokes", strokes), ("marks", circles), ("text", texts)] {
+        let _ = writeln!(out, "-- {title}");
+        for (key, values) in table {
+            let values = values
+                .iter()
+                .map(|(value, count)| format!("{value} x{count}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let _ = writeln!(out, "{key}: {values}");
+        }
+    }
+    out
+}
+
+/// The review set: each sheet at zoom 0.25, at the zoom that fits A1, at 1
+/// and at 4; dark and light; at 1x and 2x. Writes `<sheet>-<zoom>-<theme>-
+/// <density>.png` and a `.txt` measurement table beside each into
+/// `RSPICE_RASTER_DIR`.
+#[test]
+#[ignore = "writes PNGs and measurement tables for a person to review; run with --ignored"]
+fn render_the_canvas_raster_review_set() {
+    use std::io::Write as _;
+
+    let directory = std::env::var("RSPICE_RASTER_DIR")
+        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+    std::fs::create_dir_all(&directory).expect("raster output directory");
+    let only = std::env::var("RSPICE_REVIEW_ONLY").ok();
+    let stderr = std::io::stderr();
+    let mut report = stderr.lock();
+
+    let framings = |whole: Point, detail: Point| {
+        [
+            Framing {
+                name: "z0.25",
+                zoom: Zoom::Fixed(0.25),
+                centre: whole,
+            },
+            Framing {
+                name: "fitA1",
+                zoom: Zoom::FitA1,
+                centre: whole,
+            },
+            Framing {
+                name: "z1",
+                zoom: Zoom::Fixed(1.0),
+                centre: whole,
+            },
+            Framing {
+                name: "z4",
+                zoom: Zoom::Fixed(4.0),
+                centre: detail,
+            },
+        ]
+    };
+    type Sheet = (&'static str, fn() -> AppState, [Framing; 4]);
+    let sheets: [Sheet; 3] = [
+        (
+            "analog",
+            || analog_sheet().state,
+            framings(Point::new(510, 330), Point::new(330, 220)),
+        ),
+        (
+            "hierarchy",
+            hierarchy_sheet,
+            framings(Point::new(470, 330), Point::new(320, 230)),
+        ),
+        (
+            "scale",
+            || super::frame_cost::scale_fixture().state,
+            framings(Point::new(1400, 1100), Point::new(1210, 1060)),
+        ),
+    ];
+    for (sheet, build, framings) in sheets {
+        if only.as_deref().is_some_and(|only| !only.contains(sheet)) {
+            continue;
+        }
+        for (theme_name, theme) in themes() {
+            for pixels_per_point in [1.0_f32, 2.0] {
+                let mut state = build();
+                for framing in framings {
+                    let render = render(&mut state, theme, framing, pixels_per_point);
+                    let name = format!(
+                        "{sheet}-{}-{theme_name}-{}x",
+                        framing.name, pixels_per_point as u32
+                    );
+                    let png = directory.join(format!("{name}.png"));
+                    std::fs::write(&png, render.canvas.png(render.canvas.height()))
+                        .expect("write the render");
+                    std::fs::write(
+                        directory.join(format!("{name}.txt")),
+                        measurement_table(&render),
+                    )
+                    .expect("write the measurements");
+                    writeln!(report, "{}", png.display()).ok();
+                }
+            }
+        }
+    }
+}

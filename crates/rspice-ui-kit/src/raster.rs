@@ -66,6 +66,15 @@ impl Canvas {
         self.width
     }
 
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    /// The pixel at `(x, y)`, premultiplied, or `None` off the canvas.
+    pub fn pixel(&self, x: usize, y: usize) -> Option<Color32> {
+        (x < self.width && y < self.height).then(|| self.pixels[y * self.width + x])
+    }
+
     pub fn background(&self) -> Color32 {
         self.background
     }
@@ -367,10 +376,30 @@ fn render_with_output(
 /// through input (a menu a press opens, a context menu a right-click
 /// opens) never reaches it. Drive the context through those frames, then
 /// hand its last output here. `ctx` must be the context that produced
-/// `output`, at one pixel per point: the glyphs come from its font atlas.
+/// `output`: the glyphs come from its font atlas.
+///
+/// `size` is in points. The canvas is `size` times the context's pixels per
+/// point, in device pixels, so a context set to 2 renders what a 2x display
+/// shows: twice the pixels, with the glyphs from a 2x atlas.
 pub fn rasterize(ctx: &egui::Context, size: Vec2, output: &egui::FullOutput) -> Canvas {
     let background = super::tokens::Tokens::get(ctx).color.bg_app;
     rasterize_onto(ctx, size, background, output)
+}
+
+/// The input of a display `size` points across at `pixels_per_point`, the way
+/// a real 2x display reports itself (its native scale, not a zoom), for a
+/// caller that drives its own context into [`rasterize`].
+pub fn display_input(size: Vec2, pixels_per_point: f32) -> egui::RawInput {
+    let mut input = egui::RawInput {
+        screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
+        ..Default::default()
+    };
+    input
+        .viewports
+        .entry(egui::ViewportId::ROOT)
+        .or_default()
+        .native_pixels_per_point = Some(pixels_per_point);
+    input
 }
 
 fn rasterize_onto(
@@ -380,20 +409,31 @@ fn rasterize_onto(
     output: &egui::FullOutput,
 ) -> Canvas {
     let atlas = ctx.fonts(|fonts| fonts.image());
-    let primitives = ctx.tessellate(output.shapes.clone(), 1.0);
+    let pixels_per_point = ctx.pixels_per_point();
+    let primitives = ctx.tessellate(output.shapes.clone(), pixels_per_point);
 
-    let mut canvas = Canvas::new(size.x as usize, size.y as usize, background);
+    let device = size * pixels_per_point;
+    let mut canvas = Canvas::new(device.x as usize, device.y as usize, background);
+    // The tessellator works in points; the canvas is device pixels.
+    let to_device = |point: egui::Pos2| (point.to_vec2() * pixels_per_point).to_pos2();
     for primitive in &primitives {
         let egui::epaint::Primitive::Mesh(mesh) = &primitive.primitive else {
             continue;
         };
-        let clip = primitive.clip_rect;
+        let clip = Rect::from_min_max(
+            to_device(primitive.clip_rect.min),
+            to_device(primitive.clip_rect.max),
+        );
         for triangle in mesh.indices.chunks_exact(3) {
             let vertices = [
                 mesh.vertices[triangle[0] as usize],
                 mesh.vertices[triangle[1] as usize],
                 mesh.vertices[triangle[2] as usize],
-            ];
+            ]
+            .map(|vertex| egui::epaint::Vertex {
+                pos: to_device(vertex.pos),
+                ..vertex
+            });
             let glyph_triangle = mesh.texture_id == egui::TextureId::Managed(0)
                 && vertices
                     .iter()
@@ -407,16 +447,21 @@ fn rasterize_onto(
     // position, extent, clipping, opacity and tone remain authenticated while
     // the spelling continues to be owned by the galley contract tests.
     for shape in &output.shapes {
-        paint_text_regression_shape(&mut canvas, &shape.shape, shape.clip_rect);
+        paint_text_regression_shape(&mut canvas, &shape.shape, shape.clip_rect, pixels_per_point);
     }
     canvas
 }
 
-fn paint_text_regression_shape(canvas: &mut Canvas, shape: &egui::Shape, clip: Rect) {
+fn paint_text_regression_shape(
+    canvas: &mut Canvas,
+    shape: &egui::Shape,
+    clip: Rect,
+    pixels_per_point: f32,
+) {
     match shape {
         egui::Shape::Vec(shapes) => {
             for shape in shapes {
-                paint_text_regression_shape(canvas, shape, clip);
+                paint_text_regression_shape(canvas, shape, clip, pixels_per_point);
             }
         }
         egui::Shape::Text(text) => {
@@ -434,8 +479,14 @@ fn paint_text_regression_shape(canvas: &mut Canvas, shape: &egui::Shape, clip: R
             // one equal-advance monospace character changes it. The galley's
             // layout rectangle is the contract the surrounding UI actually
             // reserves and remains stable for equal-width runtime values.
-            let layout_rect = Rect::from_min_size(text.pos, text.galley.size());
-            canvas.fill_regression_rect(layout_rect.intersect(clip), color);
+            let layout_rect = Rect::from_min_size(text.pos, text.galley.size()).intersect(clip);
+            canvas.fill_regression_rect(
+                Rect::from_min_max(
+                    (layout_rect.min.to_vec2() * pixels_per_point).to_pos2(),
+                    (layout_rect.max.to_vec2() * pixels_per_point).to_pos2(),
+                ),
+                color,
+            );
         }
         _ => {}
     }
@@ -622,6 +673,36 @@ fn a_painted_rect_covers_its_own_pixels_and_nothing_else() {
         outside.iter().all(|pixel| *pixel == canvas.background()),
         "something painted below the rect"
     );
+}
+
+/// A context at two pixels per point rasterizes what a 2x display shows: the
+/// same rect in points covers twice the device pixels each way.
+#[test]
+fn a_render_at_two_pixels_per_point_lands_in_device_pixels() {
+    let painted = Rect::from_min_size(egui::pos2(10.0, 6.0), egui::vec2(20.0, 12.0));
+    let ink = Color32::from_rgb(40, 200, 90);
+    let size = egui::vec2(60.0, 40.0);
+    let ctx = egui::Context::default();
+    super::Theme::default().apply(&ctx);
+    let input = || display_input(size, 2.0);
+    let mut output = None;
+    for _ in 0..3 {
+        output = Some(ctx.run_ui(input(), |ui| {
+            ui.painter().rect_filled(painted, 0.0, ink);
+        }));
+    }
+    let canvas = rasterize(&ctx, size, &output.expect("three passes"));
+    assert_eq!((canvas.width(), canvas.height()), (120, 80));
+    let inside: Vec<Color32> = canvas
+        .pixels_in(Rect::from_min_max(
+            egui::pos2(21.0, 13.0),
+            egui::pos2(59.0, 35.0),
+        ))
+        .collect();
+    assert_eq!(inside.len(), 38 * 22);
+    assert!(inside.iter().all(|pixel| *pixel == ink));
+    assert_eq!(canvas.pixel(62, 20), Some(canvas.background()));
+    assert_eq!(canvas.pixel(40, 38), Some(canvas.background()));
 }
 
 /// A surface that paints the host's own vocabulary — a shortcut keycap reads

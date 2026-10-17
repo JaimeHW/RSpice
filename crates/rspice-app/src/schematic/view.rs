@@ -29,6 +29,8 @@ mod mobile_controls;
 mod move_interaction;
 mod pick_chooser;
 mod preview;
+#[cfg(test)]
+mod raster_review;
 mod requests;
 pub(crate) use rspice_schematic_editor::view::symbol_context::SchematicSymbolContext;
 use rspice_schematic_editor::view::symbol_context::SelectionWindow;
