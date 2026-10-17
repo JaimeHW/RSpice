@@ -78,6 +78,9 @@ const ANY: DrcFloor = DrcFloor::every(DrcSeverity::Info);
 /// The deck is built and runs, with a value nobody entered in place of the
 /// one the finding is about: never lower than a warning.
 const INVENTED_VALUE: DrcFloor = DrcFloor::every(DrcSeverity::Warning);
+/// The drawing does not say which of two nets an object joins, and the deck
+/// does not guess: the run waits until the author says.
+const AUTHOR_MUST_DECIDE: DrcFloor = DrcFloor::every(DrcSeverity::Error);
 /// A note on an instance the netlister still writes; the run is refused on
 /// one it cannot write under any name.
 const UNWRITTEN_REFUSES: DrcFloor = DrcFloor {
@@ -240,6 +243,18 @@ impl DrcViolationType {
                 default_severity: DrcSeverity::Info,
                 floor: ANY,
                 waivable: true,
+            },
+            Self::AmbiguousCrossing => &DrcRule {
+                code: "DRC-AMBIGUOUS-CROSSING",
+                title: "Ambiguous crossing",
+                explanation: "A net label, pin or bus-tap end sits exactly where two wires cross \
+                    with no junction. Two wires crossing without a junction are two nets, so the \
+                    object does not say which one it joins, and it is joined to neither rather \
+                    than to a guess. The run waits until the drawing says: place a junction to \
+                    join the wires, or move the object onto one of them.",
+                default_severity: DrcSeverity::Error,
+                floor: AUTHOR_MUST_DECIDE,
+                waivable: false,
             },
             Self::ShortedOutputs => &DrcRule {
                 code: "DRC-SHORTED-OUTPUTS",
@@ -486,6 +501,7 @@ mod tests {
             DrcViolationType::OffSheetConnectorWithoutPartner => {
                 "DRC-OFF-SHEET-CONNECTOR-WITHOUT-PARTNER"
             }
+            DrcViolationType::AmbiguousCrossing => "DRC-AMBIGUOUS-CROSSING",
             DrcViolationType::ShortedOutputs => "DRC-SHORTED-OUTPUTS",
             DrcViolationType::MissingGround => "DRC-MISSING-GROUND",
             DrcViolationType::SourceToSource => "DRC-SOURCE-TO-SOURCE",
