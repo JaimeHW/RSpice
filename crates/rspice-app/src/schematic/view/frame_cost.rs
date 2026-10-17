@@ -702,12 +702,120 @@ fn operating_point_overlay() -> FrameTimes {
     })
 }
 
+/// One suspected site's cost on its own: the median of seven calls, in
+/// milliseconds. `work` returns something read off its result, so the call
+/// cannot be optimized away.
+fn site_ms(mut work: impl FnMut() -> usize) -> f64 {
+    let mut samples = (0..7)
+        .map(|_| {
+            let started = crate::time_compat::Instant::now();
+            std::hint::black_box(work());
+            started.elapsed().as_secs_f64() * 1_000.0
+        })
+        .collect::<Vec<_>>();
+    samples.sort_by(f64::total_cmp);
+    samples[samples.len() / 2]
+}
+
+/// Each per-frame site the canvas audit named, timed alone over the fixture,
+/// so a site that costs nothing measurable at this scale is reported rather
+/// than optimized.
+fn print_site_costs() {
+    let mut fixture = fixture_without_overlay();
+    for id in fixture.components[0].iter().take(40) {
+        fixture
+            .state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(*id);
+    }
+    fixture.state.ui.schematic_visibility.annotations =
+        SchematicAnnotationVisibility::OperatingPoint;
+    fixture.state.schematic.ensure_canvas_cache();
+    let state = &fixture.state;
+    let symbols = super::schematic_symbol_context(state);
+    let design = super::schematic_design_view(state);
+    let sheet = super::drawing_sheet::resolve_active_drawing_sheet(state);
+    let viewport = super::viewport::Viewport {
+        offset: egui::Pos2::ZERO,
+        zoom: 0.15,
+        bounds: egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN),
+    };
+    let pointer = egui::pos2(SCREEN.x * 0.5, SCREEN.y * 0.5);
+    let near = Point::new(ORIGIN + PITCH * 3, ORIGIN + 100);
+    let mode = state.dialogs.move_selection.mode;
+    let sites = [
+        (
+            "symbol context, resolved afresh (C-6)",
+            site_ms(|| {
+                usize::from(symbols.revision() == super::schematic_symbol_context(state).revision())
+            }),
+        ),
+        (
+            "selection kept to the active sheet",
+            site_ms(|| super::sheet_visibility::selection_on_active_sheet(state).count()),
+        ),
+        (
+            "snap target under the pointer (C-14)",
+            site_ms(|| {
+                let target = rspice_schematic_editor::view::snap_resolution::resolve_target_pointer(
+                    &design,
+                    &state.schematic.session.editor.snap_engine,
+                    &symbols,
+                    &viewport,
+                    pointer,
+                );
+                usize::try_from(target.snapped_position.x.unsigned_abs()).unwrap_or(0)
+            }),
+        ),
+        (
+            "junction candidate near a point (C-8)",
+            site_ms(|| {
+                design
+                    .nearest_junction_candidate(near, state.schematic.document().grid_size)
+                    .map_or(0, |point| point.x.unsigned_abs() as usize)
+            }),
+        ),
+        (
+            "overflow advisories (C-9)",
+            site_ms(|| {
+                super::drawing_sheet::drawing_sheet_overflow_summary(state, &symbols, &sheet)
+                    .items
+                    .len()
+            }),
+        ),
+        (
+            "move candidate, delta (40, 0) (C-5)",
+            site_ms(|| {
+                let (candidate, moved) = super::preview::move_preview_candidate(
+                    state,
+                    &symbols,
+                    Point::new(40, 0),
+                    mode,
+                );
+                candidate.document().wires.len() + usize::from(matches!(moved, Ok(true)))
+            }),
+        ),
+        (
+            "operating-point badges, read afresh (C-7)",
+            site_ms(|| super::scene::operating_point_annotations(state).len()),
+        ),
+    ];
+    println!("site                                           median ms");
+    for (site, milliseconds) in sites {
+        println!("{site:<46} {milliseconds:>10.3}");
+    }
+}
+
 /// Desktop release budgets: idle hover under 4 ms; the move preview, Stretch
 /// and the operating-point overlay under 8 ms. Every scenario is printed
 /// before any budget is asserted, so a failing run still reports them all.
 #[test]
 #[ignore = "frame-cost probe"]
 fn canvas_frame_cost_at_scale() {
+    print_site_costs();
     let scenarios = [
         idle_hover(),
         move_preview(),
