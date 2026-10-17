@@ -778,7 +778,7 @@ fn validate_driver_devmode(printer: &mut ResolvedWindowsPrinter) -> Result<(), H
         Ok(())
     } else {
         Err(HardcopyPrintError::DriverRejected {
-            operation: "immutable print settings validation",
+            operation: "the print settings",
         })
     }
 }
@@ -817,7 +817,7 @@ fn validate_devmode_matches_job(
         || !source_matches
     {
         return Err(HardcopyPrintError::DriverRejected {
-            operation: "exact immutable print settings (driver substituted a value)",
+            operation: "the requested print settings (driver substituted a value)",
         });
     }
     Ok(())
@@ -845,7 +845,7 @@ fn validate_devmode_mode(
         || mode.dmYResolution != resolution_dpi as i16
     {
         return Err(HardcopyPrintError::DriverRejected {
-            operation: "exact paper, orientation, and resolution (driver substituted a value)",
+            operation: "the requested paper, orientation, and resolution (driver substituted a value)",
         });
     }
     Ok(())

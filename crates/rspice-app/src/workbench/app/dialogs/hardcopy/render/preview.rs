@@ -89,10 +89,7 @@ fn preview_desk(ui: &mut Ui, draft: &mut HardcopyDialogState, width: f32, height
                 vec2(width, height),
                 Layout::centered_and_justified(egui::Direction::LeftToRight),
                 |ui| {
-                    ui.add(
-                        egui::Label::new("Resolve the configuration to render an exact page.")
-                            .wrap(),
-                    );
+                    ui.add(egui::Label::new("Complete the setup to render a page preview.").wrap());
                 },
             );
             return;

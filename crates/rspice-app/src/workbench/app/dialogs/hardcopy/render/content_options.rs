@@ -53,7 +53,7 @@ pub(super) fn source_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
                                 action = BodyAction::SelectSource { source_key, scope };
                             } else if candidate.is_none() {
                                 response.on_disabled_hover_text(
-                                    "No authenticated retained document of this type is available.",
+                                    "No document of this type is available.",
                                 );
                             }
                         }
@@ -206,7 +206,7 @@ pub(super) fn page_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAc
                                     "Match each authored sheet",
                                 )
                                 .on_hover_text(
-                                    "Use each governed schematic sheet's exact authored physical size and orientation. Mixed sheet sets retain per-page media.",
+                                    "Use each schematic sheet's own size and orientation. A set of mixed sheets keeps each page's own paper size.",
                                 );
                                 ui.separator();
                             }
@@ -1366,7 +1366,7 @@ mod tests {
     fn a_resolution_left_behind_by_the_region_switch_is_still_the_one_published() {
         let mut studio = Studio::narrow();
         studio.type_resolution("300");
-        let preview = studio.control(Role::Button, "Exact preview");
+        let preview = studio.control(Role::Button, "Preview");
         let _ = studio.pass(click(preview.center()));
         assert_eq!(
             studio.app.state.dialogs.hardcopy.region,

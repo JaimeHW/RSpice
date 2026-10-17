@@ -193,9 +193,7 @@ fn validate_start(
 ) -> Result<(), String> {
     validate_generation(generation)?;
     if plan.source() != source.authority() {
-        return Err(
-            "The native hardcopy source authority does not match the immutable plan.".to_owned(),
-        );
+        return Err("The source document no longer matches the prepared print plan.".to_owned());
     }
     if plan.content_extent()
         != source
@@ -203,7 +201,7 @@ fn validate_start(
             .map_err(|error| error.to_string())?
     {
         return Err(
-            "The native hardcopy source extent does not match the immutable plan.".to_owned(),
+            "The source document's extent no longer matches the prepared print plan.".to_owned(),
         );
     }
     validate_operation(plan.setup().render().format(), operation)

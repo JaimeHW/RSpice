@@ -147,7 +147,7 @@ fn noise_quick_view_rejects_contributor_only_evidence() {
     assert!(matches!(
         resolve_quick_view(&state),
         Err(HardcopySourceError::UnretainedResult(reason))
-            if reason.contains("no retained analysis can provide exact evidence")
+            if reason.contains("no saved analysis has results")
     ));
 }
 

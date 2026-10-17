@@ -190,14 +190,13 @@ fn resolve_inventory_entry(
         ReportSourceId::VerificationEvidence { .. } => {
             if captured.dataset_bindings.len() != 1 {
                 return Err(HardcopySourceError::InvalidReportSource(
-                    "linked verification evidence must name exactly one retained dataset"
-                        .to_owned(),
+                    "linked verification results must name exactly one dataset".to_owned(),
                 ));
             }
             let run = unique_run_for_dataset(
                 state,
                 captured.dataset_bindings[0].dataset_id,
-                "verification evidence dataset",
+                "verification results dataset",
             )?;
             let binding = DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
             ReportReferenceInventoryEntry::new(
@@ -230,7 +229,7 @@ fn resolve_linked_figure_artifact(
     };
     let locator = figure.source_locator.clone().ok_or_else(|| {
         HardcopySourceError::InvalidReportSource(format!(
-            "linked plot block {block_id} has no exact page and pane locator"
+            "linked plot block {block_id} does not name its page and pane"
         ))
     })?;
     let matches = state
