@@ -79,16 +79,19 @@ pub struct DeckBuildProgress {
     pub total: usize,
 }
 
-/// The temperature the runner applies to a task's deck before parsing it.
+/// The temperature the runner applies to a task's deck.
 #[derive(Clone, Copy, PartialEq)]
 enum RunTemperature {
     /// The deck's own `.TEMP`.
     Deck,
-    /// A Run Set point's temperature, set on the parsed deck.
+    /// A Run Set point's temperature, set on the parsed deck, of an analysis
+    /// whose deck already states it or that takes it from its operating
+    /// point.
     Point(f64),
-    /// An operating point's own temperature, which the runner also splices
-    /// into the source so parameter evaluation sees it.
-    OperatingPoint(f64),
+    /// A temperature the runner writes into the source before parsing it
+    /// (`runner::spliced_run_temperature`), so parameter evaluation and
+    /// `.if` selection see it, and sets on the parsed deck.
+    Spliced(f64),
 }
 
 impl RunTemperature {
@@ -96,14 +99,14 @@ impl RunTemperature {
         match self {
             Self::Deck => (0, 0),
             Self::Point(celsius) => (1, celsius.to_bits()),
-            Self::OperatingPoint(celsius) => (2, celsius.to_bits()),
+            Self::Spliced(celsius) => (2, celsius.to_bits()),
         }
     }
 
     fn celsius(self) -> Option<f64> {
         match self {
             Self::Deck => None,
-            Self::Point(celsius) | Self::OperatingPoint(celsius) => Some(celsius),
+            Self::Point(celsius) | Self::Spliced(celsius) => Some(celsius),
         }
     }
 }
@@ -228,16 +231,12 @@ impl PreparedRunSnapshot {
             .executable_netlist_override
             .as_deref()
             .unwrap_or(&self.executable_netlist);
-        let temperature = match (&task.task.spec, &task.execution_environment) {
-            (
-                AnalysisSpec::DcOp {
-                    temperature_celsius,
-                    ..
-                },
-                _,
-            ) => RunTemperature::OperatingPoint(*temperature_celsius),
-            (_, Some(environment)) => RunTemperature::Point(environment.temperature_celsius),
-            (_, None) => RunTemperature::Deck,
+        let environment = task.execution_environment.as_ref();
+        let temperature = match crate::runner::spliced_run_temperature(&task.task, environment) {
+            Some(celsius) => RunTemperature::Spliced(celsius),
+            None => environment.map_or(RunTemperature::Deck, |point| {
+                RunTemperature::Point(point.temperature_celsius)
+            }),
         };
         DispatchedDeck {
             source,
@@ -257,11 +256,22 @@ impl PreparedRunSnapshot {
         limits.max_netlist_bytes = limits.max_expanded_source_bytes;
         let spliced;
         let source = match temperature {
-            RunTemperature::OperatingPoint(celsius) => {
-                spliced = crate::netlist_preparation::source_with_run_temperature_with_abort(
+            RunTemperature::Spliced(celsius) => {
+                // A temperature the splice refuses fails the runner's
+                // materialization as a configuration error, and is that refusal
+                // here.
+                spliced = match crate::netlist_preparation::source_with_run_temperature_with_abort(
                     source, celsius, abort,
-                )
-                .ok()?;
+                ) {
+                    Ok(spliced) => spliced,
+                    Err(error) if error.is_aborted() => return None,
+                    Err(error) => {
+                        return Some(DeckVerdict::Refused(vec![EngineRefusalKind::Build {
+                            message: error.to_string(),
+                            instance: None,
+                        }]));
+                    }
+                };
                 spliced.as_str()
             }
             RunTemperature::Deck | RunTemperature::Point(_) => source,

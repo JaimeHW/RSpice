@@ -32,6 +32,39 @@ pub(super) use periodic::{
 mod recorded_fft;
 mod sweeps;
 
+/// The temperature the runner writes into a task's deck before parsing it,
+/// so that `TEMP`, temperature-dependent parameters and `.if` selection see
+/// it, or `None` where it parses the deck as it stands.
+///
+/// An analysis the runner evaluates through a configuration, the one the
+/// task carries or the one its specification lowers to, is written at
+/// [`run_temperature`](crate::engine_bridge::run_temperature). A Monte Carlo
+/// study writes the temperature its environment resolves to into every
+/// trial's deck. Every other analysis reads the deck its preparation
+/// composed, which states its point's temperature itself.
+pub(crate) fn spliced_run_temperature(
+    task: &crate::preparation::QueuedAnalysis,
+    environment: Option<&AnalysisExecutionEnvironment>,
+) -> Option<f64> {
+    if let Some(config) = &task.config {
+        return crate::engine_bridge::run_temperature(config, environment);
+    }
+    if let Some(config) = config::analysis_config_from_spec(&task.spec) {
+        return crate::engine_bridge::run_temperature(&config, environment);
+    }
+    match (&task.spec, &task.spec_options.study_base) {
+        (AnalysisSpec::MonteCarlo { .. }, Some(base)) => {
+            crate::study::resolved_study_environment(base, environment.cloned())
+                .1
+                .map(|point| point.temperature_celsius)
+        }
+        (AnalysisSpec::MonteCarlo { .. }, None) => {
+            environment.map(|point| point.temperature_celsius)
+        }
+        _ => None,
+    }
+}
+
 pub(super) fn run_periodic_study_consumer(
     spec: AnalysisSpec,
     options: Option<&crate::study::StudyPeriodicOptions>,

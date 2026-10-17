@@ -61,6 +61,21 @@ struct SimulationInput<'a> {
     environment: Option<crate::runner::AnalysisExecutionEnvironment>,
 }
 
+/// The temperature an analysis run through `config` is evaluated at: an
+/// operating point's own, else that of the Run Set point it is dispatched
+/// at, else `None`, which leaves the deck's own. The bridge writes it into
+/// the source before parsing, so `TEMP`, temperature-dependent parameters and
+/// `.if` selection see it, and sets it on the parsed deck.
+pub(crate) fn run_temperature(
+    config: &AnalysisConfig,
+    environment: Option<&crate::runner::AnalysisExecutionEnvironment>,
+) -> Option<f64> {
+    match config {
+        AnalysisConfig::DcOp(config) => Some(config.temperature_celsius),
+        _ => environment.map(|point| point.temperature_celsius),
+    }
+}
+
 impl Default for EngineBridge {
     fn default() -> Self {
         Self::new()
@@ -277,13 +292,7 @@ impl EngineBridge {
             ))
         })?;
         ensure_not_aborted(abort_flag)?;
-        let temperature = match input.config {
-            AnalysisConfig::DcOp(config) => Some(config.temperature_celsius),
-            _ => input
-                .environment
-                .as_ref()
-                .map(|point| point.temperature_celsius),
-        };
+        let temperature = run_temperature(input.config, input.environment.as_ref());
         let temperature_source = temperature
             .map(|temperature| {
                 crate::netlist_preparation::source_with_run_temperature_with_abort(

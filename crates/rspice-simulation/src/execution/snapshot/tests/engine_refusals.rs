@@ -202,6 +202,69 @@ X1 d cell\n\
     );
 }
 
+/// A Run Set point's deck is built at the temperature the runner writes into
+/// it before parsing, so `.if (TEMP > 50)` selects as the run will. The deck
+/// at its own temperature takes a length its bins cover; at 75 °C it takes
+/// one below every bin. The pass refuses the hot point alone, and the runner,
+/// given each point as it dispatches it, refuses exactly the points the pass
+/// refused.
+#[test]
+fn a_run_set_point_is_built_at_the_temperature_the_runner_writes_into_its_deck() {
+    let mut run = parts();
+    run.executable_netlist = "temperature selects the length\n\
+.if (TEMP > 50)\n\
+.param lval=0.1u\n\
+.else\n\
+.param lval=0.5u\n\
+.endif\n\
+M1 d d 0 0 NCH W=1u L={lval}\n\
+V1 d 0 1\n\
+.model NCH.0 NMOS LEVEL=1 LMIN=0.28u LMAX=0.5u WMIN=0.5u WMAX=2u VTO=0.4\n\
+.tran 1n 1u\n\
+.end\n"
+        .to_owned();
+    run.tasks = vec![prepared("tran", "Transient", transient_task())];
+    run.run_set = Some(global_temperature_run_set(&["27", "75"]));
+    let snapshot = PreparedRunSnapshot::new(run).expect("the deck's own length is covered");
+
+    let refusals = snapshot.engine_refusals(&rspice_core::NoAbort);
+
+    assert_eq!(refusals.len(), 1, "{refusals:?}");
+    let EngineRefusalKind::UncoveredModelBin(gap) = &refusals[0].kind else {
+        panic!("{refusals:?}");
+    };
+    assert!(
+        gap.length
+            .is_some_and(|length| (length - 0.1e-6).abs() < 1e-15),
+        "{gap:?}"
+    );
+    assert_eq!(refusals[0].tasks.len(), 1, "{refusals:?}");
+    assert!(refusals[0].tasks[0].label.contains("75"), "{refusals:?}");
+    for task in &snapshot.tasks {
+        let ran = crate::engine_bridge::EngineBridge::new()
+            .run_with_abort_and_source_path_and_environment(
+                task.task
+                    .config
+                    .as_ref()
+                    .expect("a transient runs through its configuration"),
+                task.executable_netlist_override
+                    .as_deref()
+                    .unwrap_or(&snapshot.executable_netlist),
+                None,
+                task.execution_environment.clone(),
+                &rspice_core::NoAbort,
+            );
+        let refused = refusals[0].tasks.iter().any(|refused| refused.label == task.label);
+        assert_eq!(
+            ran.is_err(),
+            refused,
+            "{}: {:?}",
+            task.label,
+            ran.err()
+        );
+    }
+}
+
 /// A Stop raised anywhere in the pass, the scan that names the instances no
 /// bin covers included, leaves no refusal: the pass states what the engine
 /// refuses of a run it finished checking, and a stopped pass finished none.

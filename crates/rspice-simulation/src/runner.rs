@@ -48,6 +48,7 @@ mod device_e2e_tests;
 #[cfg(test)]
 pub(crate) mod pvt_point_evidence;
 mod spec;
+pub(crate) use spec::spliced_run_temperature;
 #[cfg(any(target_arch = "wasm32", test))]
 mod wasm_worker;
 #[cfg(any(target_arch = "wasm32", test))]
