@@ -467,3 +467,96 @@ fn every_pane_reads_one_projection_of_the_design() {
         );
     }
 }
+
+/// Sheet 1 draws `DATA[7:0]` from (0, 0) to (200, 0). Sheet 2 draws
+/// `ADDR[7:0]` down from (100, 0), a T at the same coordinates, and
+/// `DATA<7:0>` well clear of both.
+fn buses_on_two_sheets() -> AppState {
+    use crate::state::{Bus, SheetDefinition, SheetPortPolicy, SheetTemplate};
+    let declared = |text| Some(BusDeclaration::parse(text).unwrap());
+    let mut state = AppState::default();
+    state.schematic.document_mut_for_test().buses = vec![
+        Bus::segment(
+            1,
+            Point::new(0, 0),
+            Point::new(200, 0),
+            declared("DATA[7:0]"),
+        )
+        .unwrap(),
+        Bus::segment(
+            2,
+            Point::new(100, 0),
+            Point::new(100, 100),
+            declared("ADDR[7:0]"),
+        )
+        .unwrap(),
+        Bus::segment(
+            3,
+            Point::new(400, 0),
+            Point::new(500, 0),
+            declared("DATA<7:0>"),
+        )
+        .unwrap(),
+    ];
+    state.sync_active_schematic_to_workspace();
+    let key = state.workspace.content.active_schematic_reference().key();
+    let management = &mut state.workspace.content.design_management;
+    let first = management
+        .bootstrap_for_cell_view(&key, "Sheet 1", vec![1, 2, 3])
+        .expect("first sheet");
+    let catalog = management.sheet_catalog_mut(&key).expect("sheet catalog");
+    let second = catalog
+        .create_sheet(
+            SheetDefinition {
+                name: "Sheet 2".to_owned(),
+                template: SheetTemplate::AnalogSchematic,
+                port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                explicit_page_number: Some(2),
+            },
+            Some(first),
+        )
+        .expect("second sheet");
+    catalog
+        .assign_objects(catalog.revision(), second, [2, 3])
+        .expect("Sheet 2 assignments");
+    catalog.set_active(first).expect("active sheet");
+    state
+}
+
+/// A cell view's sheets share one coordinate space, so a bus drawn on one
+/// sheet where another sheet's bus runs touches nothing: neither row reports
+/// a conflict between them. A stem declared in two notations is one deck
+/// name across sheets, and is still reported.
+#[test]
+fn the_bus_report_pairs_touching_buses_only_on_one_sheet() {
+    let state = buses_on_two_sheets();
+
+    let report = build_report(&state, &ConnectivityPolicy::default()).expect("a resolved design");
+
+    let status = |index: usize| report.buses[index].status.as_str();
+    assert_eq!(status(0), "valid");
+    assert_eq!(
+        status(1),
+        "valid",
+        "Sheet 2's bus touches nothing on Sheet 1"
+    );
+    assert!(status(2).contains("two notations"), "{}", status(2));
+    assert!(
+        !report
+            .repairs
+            .iter()
+            .any(|repair| repair.before.contains("Touching buses")),
+        "no repair is offered for a conflict between sheets"
+    );
+
+    // The finding is located where Sheet 2 draws the bus, not where the
+    // projection lays Sheet 2.
+    let projection = preview_projection(&state, &ConnectivityPolicy::default()).unwrap();
+    let analysis = canvas_bus_analysis(&state, projected_open_view(&state, &projection).unwrap());
+    let located: Vec<_> = analysis
+        .diagnostics
+        .iter()
+        .map(|diagnostic| (diagnostic.bus_id, diagnostic.point))
+        .collect();
+    assert_eq!(located, vec![(Some(3), Point::new(400, 0))]);
+}
