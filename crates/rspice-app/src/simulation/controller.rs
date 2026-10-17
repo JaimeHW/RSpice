@@ -458,16 +458,7 @@ impl SimulationController {
                 if state.simulation.execution.run_intent == SimulationRunIntent::SimulateRunSet {
                     state.workbench.preflight.invalidate();
                 }
-                state.push_sim_message(ConsoleMessage::warning(error.to_string()));
-                state.simulation.execution.status = if error
-                    .message()
-                    .starts_with(run_inputs::DESIGN_CHANGED_SINCE_CHECK)
-                {
-                    run_inputs::DESIGN_CHANGED_SINCE_CHECK
-                } else {
-                    "Run blocked"
-                }
-                .to_owned();
+                run_inputs::state_refused_dispatch(state, &error);
                 return;
             }
         };

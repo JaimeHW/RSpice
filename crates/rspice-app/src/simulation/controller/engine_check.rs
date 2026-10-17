@@ -112,7 +112,7 @@ impl SimulationController {
             cancel: Arc::clone(&cancel),
             stage: Arc::clone(&stage),
             generation: self.retained_run_generation,
-            identity: RunInputIdentity::capture(state),
+            identity: RunInputIdentity::of_run_set(state),
         };
         #[cfg(test)]
         let hooks = self.preflight_test_hooks.take_for_worker();
@@ -203,10 +203,10 @@ impl SimulationController {
                 let retained = if current {
                     self.retain_prepared_run(
                         *snapshot,
-                        Some(RetainedRunInputs {
+                        RetainedRunInputs {
                             identity: pending.identity,
                             source_files,
-                        }),
+                        },
                     )
                 } else {
                     Ok(())

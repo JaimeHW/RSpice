@@ -565,18 +565,27 @@ impl SimulationController {
     /// dependency expansion, source checks, task construction, model binding,
     /// and execution-target contract used immediately before dispatch.
     ///
-    /// The validated snapshot is retained behind a one-shot execution permit.
-    /// Run rebuilds the complete source/dependency/target contract and must
-    /// match this exact snapshot, so a dependency changed after validation
-    /// cannot execute under a stale receipt.
+    /// The validated snapshot is retained behind a one-shot execution permit,
+    /// with the identity of everything it was prepared from. Run dispatches
+    /// this very snapshot once none of it has moved, the deck's text, its
+    /// file, its includes and its model files among it, so a dependency
+    /// changed after validation cannot execute under a stale receipt; nothing
+    /// is prepared again in the frame that starts it.
     pub(crate) fn validate_manual_deck_document(
         &mut self,
         state: &AppState,
     ) -> Result<PreparedRunMetadata, PreparationError> {
         self.clear_prepared_run();
         let snapshot = Self::build_prepared_snapshot(state, SimulationRunIntent::ManualDeck)?;
+        let identity = super::run_inputs::RunInputIdentity::of_manual_deck(state, &snapshot)?;
         let metadata = snapshot.metadata();
-        self.retain_prepared_run(snapshot, None)?;
+        self.retain_prepared_run(
+            snapshot,
+            super::run_inputs::RetainedRunInputs {
+                identity,
+                source_files: Default::default(),
+            },
+        )?;
         Ok(metadata)
     }
 
@@ -592,32 +601,31 @@ impl SimulationController {
         &mut self,
         state: &AppState,
     ) -> Result<PreparedRunMetadata, PreparationError> {
-        let identity = super::run_inputs::RunInputIdentity::capture(state);
+        let identity = super::run_inputs::RunInputIdentity::of_run_set(state);
         let files = super::run_inputs::RecordingSourceFiles::default();
         let snapshot = Self::build_prepared_run_set_reading(state, &files)?;
         let metadata = snapshot.metadata();
         self.retain_prepared_run(
             snapshot,
-            Some(super::run_inputs::RetainedRunInputs {
+            super::run_inputs::RetainedRunInputs {
                 identity,
                 source_files: files.into_answers(),
-            }),
+            },
         )?;
         Ok(metadata)
     }
 
-    /// Retain `snapshot` for dispatch, replacing whatever was retained.
-    /// A run set is retained with what it was prepared from, which its
-    /// dispatch checks; a manual deck is prepared again when it dispatches.
+    /// Retain `snapshot` for dispatch, replacing whatever was retained, with
+    /// what it was prepared from, which its dispatch checks.
     pub(super) fn retain_prepared_run(
         &mut self,
         snapshot: PreparedRunSnapshot,
-        inputs: Option<super::run_inputs::RetainedRunInputs>,
+        inputs: super::run_inputs::RetainedRunInputs,
     ) -> Result<(), PreparationError> {
         self.retained_run_generation = self.retained_run_generation.wrapping_add(1);
         self.retained_run_inputs = None;
         self.run_authorization.retain(snapshot)?;
-        self.retained_run_inputs = inputs;
+        self.retained_run_inputs = Some(inputs);
         Ok(())
     }
 
@@ -897,33 +905,20 @@ impl SimulationController {
     /// owning workflow before they request dispatch; the controller never
     /// manufactures hidden authorization at this final boundary.
     ///
-    /// A run set dispatches the very snapshot its preparation authorized,
-    /// once nothing it was prepared from has moved, and nothing is prepared
-    /// here. A manual deck is prepared again and must match.
+    /// A run set or a manual deck dispatches the very snapshot its
+    /// preparation authorized, once nothing it was prepared from has moved;
+    /// nothing is prepared here.
     pub(super) fn consume_snapshot_for_dispatch(
         &mut self,
         state: &AppState,
     ) -> Result<AuthorizedRunDispatch, PreparationError> {
         let intent = state.simulation.execution.run_intent;
         let inputs = self.retained_run_inputs.take();
-        match intent {
-            SimulationRunIntent::SimulateRunSet => {
-                self.run_authorization
-                    .consume_retained(intent, |snapshot| {
-                        inputs
-                            .ok_or_else(|| {
-                                PreparationError::new(
-                                    PreparationStage::Authorization,
-                                    "The prepared run does not say what it was prepared from; run again",
-                                )
-                            })?
-                            .still_current(state, snapshot)
-                    })
-            }
-            SimulationRunIntent::ManualDeck => self
-                .run_authorization
-                .consume(intent, || Self::build_prepared_snapshot(state, intent)),
-        }
+        self.run_authorization.consume(intent, |snapshot| {
+            inputs
+                .ok_or_else(super::run_inputs::unaccounted_run)?
+                .still_current(state, snapshot)
+        })
     }
 
     fn build_prepared_snapshot(
@@ -969,51 +964,61 @@ impl SimulationController {
     ) -> Result<PreparedRunSnapshot, PreparationError> {
         #[cfg(test)]
         thread_preparations::record(SimulationRunIntent::ManualDeck);
-        if state.ui.netlist.active_document_initialized
-            && state.ui.netlist.active_document
-                == crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
-        {
-            return Err(PreparationError::new(
-                PreparationStage::SourceChecks,
-                "Generated comparison documents cannot be executed",
-            ));
-        }
-        let owned_active = state.ui.netlist.active_document
-            == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
-            || (!state.ui.netlist.active_document_initialized
-                && state.simulation.source.netlist_content.is_empty()
-                && state.workspace.content.netlist_source.is_some());
-        let source = if owned_active {
-            state
-                .workspace
-                .content
-                .netlist_source
-                .as_deref()
-                .unwrap_or(state.simulation.source.netlist_content.as_str())
-        } else {
-            state.simulation.source.netlist_content.as_str()
-        };
-        let origin = if owned_active {
-            state.workspace.content.netlist_source_path.as_deref()
-        } else {
-            state.schematic.session.current_file.as_deref()
-        };
         crate::simulation::execution::preparation::build_prepared_manual_deck(
             &run_preparation_inputs(state),
-            crate::simulation::execution::preparation::ManualSourceInputs {
-                source,
-                descriptor: state.workspace.content.netlist_descriptor.as_ref(),
-                generated_artifact: state
-                    .workspace
-                    .content
-                    .netlist_document
-                    .as_ref()
-                    .and_then(|document| document.generated_artifact()),
-                owned: owned_active,
-                origin,
-            },
+            manual_source_inputs(state)?,
         )
     }
+}
+
+/// The deck a manual run is prepared from: the netlist document the session
+/// shows, the file it came from, and what composing it reads.
+pub(super) fn manual_source_inputs(
+    state: &AppState,
+) -> Result<crate::simulation::execution::preparation::ManualSourceInputs<'_>, PreparationError> {
+    if state.ui.netlist.active_document_initialized
+        && state.ui.netlist.active_document
+            == crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
+    {
+        return Err(PreparationError::new(
+            PreparationStage::SourceChecks,
+            "Generated comparison documents cannot be executed",
+        ));
+    }
+    let owned_active = state.ui.netlist.active_document
+        == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
+        || (!state.ui.netlist.active_document_initialized
+            && state.simulation.source.netlist_content.is_empty()
+            && state.workspace.content.netlist_source.is_some());
+    let source = if owned_active {
+        state
+            .workspace
+            .content
+            .netlist_source
+            .as_deref()
+            .unwrap_or(state.simulation.source.netlist_content.as_str())
+    } else {
+        state.simulation.source.netlist_content.as_str()
+    };
+    let origin = if owned_active {
+        state.workspace.content.netlist_source_path.as_deref()
+    } else {
+        state.schematic.session.current_file.as_deref()
+    };
+    Ok(
+        crate::simulation::execution::preparation::ManualSourceInputs {
+            source,
+            descriptor: state.workspace.content.netlist_descriptor.as_ref(),
+            generated_artifact: state
+                .workspace
+                .content
+                .netlist_document
+                .as_ref()
+                .and_then(|document| document.generated_artifact()),
+            owned: owned_active,
+            origin,
+        },
+    )
 }
 
 /// Stable cache identity for analysis-independent design inspection.
@@ -1080,21 +1085,29 @@ fn reject_deferred_external_sources(netlist: &str) -> Result<(), PreparationErro
 #[cfg(test)]
 impl SimulationController {
     /// Retain a snapshot a test prepared from `state` as a preparation does:
-    /// a run set with the identity of `state`'s inputs, which its dispatch
-    /// checks. The test prepared it with the plain data-file host, so no
-    /// data-file answer is held for dispatch to ask again.
+    /// with the identity of `state`'s inputs, which its dispatch checks. The
+    /// test prepared it with the plain data-file host, so no data-file answer
+    /// is held for dispatch to ask again.
     pub(in crate::simulation::controller) fn retain_prepared_from(
         &mut self,
         state: &AppState,
         snapshot: PreparedRunSnapshot,
     ) -> Result<(), PreparationError> {
-        let inputs = (snapshot.intent() == SimulationRunIntent::SimulateRunSet).then(|| {
-            super::run_inputs::RetainedRunInputs {
-                identity: super::run_inputs::RunInputIdentity::capture(state),
-                source_files: Default::default(),
+        let identity = match snapshot.intent() {
+            SimulationRunIntent::SimulateRunSet => {
+                super::run_inputs::RunInputIdentity::of_run_set(state)
             }
-        });
-        self.retain_prepared_run(snapshot, inputs)
+            SimulationRunIntent::ManualDeck => {
+                super::run_inputs::RunInputIdentity::of_manual_deck(state, &snapshot)?
+            }
+        };
+        self.retain_prepared_run(
+            snapshot,
+            super::run_inputs::RetainedRunInputs {
+                identity,
+                source_files: Default::default(),
+            },
+        )
     }
 }
 

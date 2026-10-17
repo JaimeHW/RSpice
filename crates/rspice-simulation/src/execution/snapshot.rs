@@ -1574,6 +1574,20 @@ impl PreparedRunSnapshot {
         &self.sealed_source_dependencies
     }
 
+    /// The deck a manual run was prepared from, as written; `None` for a run
+    /// generated from the design.
+    pub fn manual_source(&self) -> Option<&str> {
+        self.manual_source.as_deref()
+    }
+
+    /// Whether any task solves S-parameters. Only then does preparing the run
+    /// read the RF ports its Touchstone export names.
+    pub fn solves_s_parameters(&self) -> bool {
+        self.tasks
+            .iter()
+            .any(|task| matches!(task.task.spec, AnalysisSpec::SParameter { .. }))
+    }
+
     pub fn metadata(&self) -> PreparedRunMetadata {
         PreparedRunMetadata {
             snapshot_digest: self.digest,

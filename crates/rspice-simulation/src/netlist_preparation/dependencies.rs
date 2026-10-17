@@ -129,7 +129,9 @@ pub fn verify_host_dependencies(
     Ok(())
 }
 
-pub(crate) fn absolute_source_identity(path: &Path) -> Result<PathBuf, PreparationError> {
+/// The host's identity for a deck's file: what a manual deck's receipt names
+/// and its includes are searched from, as the host resolves it now.
+pub fn absolute_source_identity(path: &Path) -> Result<PathBuf, PreparationError> {
     #[cfg(target_arch = "wasm32")]
     if rspice_model_library::is_portable_absolute_path(path) {
         return Ok(path.to_path_buf());
