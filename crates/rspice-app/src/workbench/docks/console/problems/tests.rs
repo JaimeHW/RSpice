@@ -22,6 +22,8 @@ use crate::workbench::documents::netlist_document::diagnostics::DiagnosticFix;
 use crate::workbench::documents::netlist_document::{Diagnostic, NetlistDiagnosticCollection};
 use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
+mod waivers;
+
 const WIDTH: f32 = 900.0;
 const HEIGHT: f32 = 420.0;
 
@@ -29,6 +31,16 @@ fn open_state() -> AppState {
     let mut state = AppState::default();
     state.project_lifecycle.authority.open_session();
     state
+}
+
+/// A waiver of a finding of `rule`, recorded at review.
+fn waiver(rule: &str) -> rspice_app_types::diagnostics::DiagnosticSuppression {
+    rspice_app_types::diagnostics::DiagnosticSuppression {
+        rule: rule.to_owned(),
+        reason: "accepted at review".to_owned(),
+        author: "ana".to_owned(),
+        waived_at_ms: 1_760_000_000_000,
+    }
 }
 
 /// One finding from the test producer, about one node, saying `message`.
@@ -859,11 +871,7 @@ fn the_waiver_toggle_counts_what_it_would_list() {
         DiagnosticLevel::Error,
         "a waived finding",
     );
-    waived.canonical.suppression = Some(rspice_app_types::diagnostics::DiagnosticSuppression {
-        rule: "T-WAIVED".to_owned(),
-        scope: "cell".to_owned(),
-        justification_required: false,
-    });
+    waived.canonical.suppression = Some(waiver("T-WAIVED"));
     let open = record(
         &state,
         "T-OPEN",
@@ -902,11 +910,7 @@ fn the_waiver_toggle_counts_what_it_would_list() {
 fn a_waived_error_is_marked_without_the_failure_colour() {
     let mut state = open_state();
     let mut waived = record(&state, "T-WAIVED", DiagnosticLevel::Error, "a waived error");
-    waived.canonical.suppression = Some(rspice_app_types::diagnostics::DiagnosticSuppression {
-        rule: "T-WAIVED".to_owned(),
-        scope: "cell".to_owned(),
-        justification_required: false,
-    });
+    waived.canonical.suppression = Some(waiver("T-WAIVED"));
     publish(&mut state, vec![waived]);
     let palette = crate::ui::tokens::Tokens::default().color;
 
@@ -1035,7 +1039,7 @@ fn a_copied_row_keeps_tabs_and_line_breaks_inside_their_cell() {
     let row = listed.row(0).expect("listed");
     assert_eq!(
         copy_of(&row),
-        "Error\tT-1\tNode 'n1'\trspice.test\t\t\"two\tcolumns\nand \"\"two\"\" lines\"",
+        "Error\tT-1\tNode 'n1'\trspice.test\t\t\"two\tcolumns\nand \"\"two\"\" lines\"\t",
     );
 }
 
@@ -2019,8 +2023,12 @@ fn explain_is_offered_only_where_the_rule_has_words() {
     state.problems_view.explain = true;
     let explained = render(&mut state, sized(egui::RawInput::default()));
     assert!(
-        explained.has("Required component parameter is missing"),
-        "Explain states the rule in the rule's own words: {:?}",
+        explained.has(
+            rspice_design::drc::DrcViolationType::MissingParameter
+                .rule()
+                .explanation
+        ),
+        "Explain states the rule in the rule table's own words: {:?}",
         explained.texts,
     );
 
@@ -2079,7 +2087,8 @@ fn the_detail_region_states_where_the_batch_stands_only_when_it_is_not_current()
 
     let current = render(&mut state, sized(egui::RawInput::default()));
     assert!(
-        current.has("R1 has no resistance") && current.has("Rule DRC-MISSING"),
+        current.has("R1 has no resistance")
+            && current.has("Missing parameter \u{00b7} DRC-MISSING-PARAMETER"),
         "precondition: the detail region is drawn: {:?}",
         current.texts,
     );
@@ -2250,6 +2259,7 @@ fn bare_row(
         quick_fixes: &[],
         suppression,
         route: None,
+        waiver_action: None,
     }
 }
 
@@ -2285,14 +2295,7 @@ fn every_severity_cell_fits_the_widest_measured_cell() {
             RowStanding::Stale("inputs".to_owned()),
             RowStanding::Unavailable("unreadable".to_owned()),
         ] {
-            for waiver in [
-                None,
-                Some(rspice_app_types::diagnostics::DiagnosticSuppression {
-                    rule: "T-1".to_owned(),
-                    scope: "cell".to_owned(),
-                    justification_required: false,
-                }),
-            ] {
+            for waiver in [None, Some(waiver("T-1"))] {
                 let cell = severity_cell(&bare_row(level, standing.clone(), waiver.as_ref()));
                 let (bound, longest) = if matches!(standing, RowStanding::Unavailable(_)) {
                     (
@@ -2405,11 +2408,7 @@ fn the_arrangement_is_rebuilt_when_a_row_changes_in_place() {
     );
 
     republish(&mut state, &|record| {
-        record.canonical.suppression = Some(rspice_app_types::diagnostics::DiagnosticSuppression {
-            rule: "T-00".to_owned(),
-            scope: "cell".to_owned(),
-            justification_required: false,
-        });
+        record.canonical.suppression = Some(waiver("T-00"));
     });
     let waived = arranged(&state);
     assert!(!Arc::ptr_eq(&built, &waived), "a new waiver rebuilds it");

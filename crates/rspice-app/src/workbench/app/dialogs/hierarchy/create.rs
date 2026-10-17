@@ -729,6 +729,10 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
         &next_workspace.content.schematic_buffers,
         &state.library_manager,
         &next_libraries,
+        // Both sides under the configuration the parent is checked under
+        // everywhere else. A ground the extraction moves into the child is
+        // still reached through the instance that places it.
+        state.design_check_config(&state.workspace.content.active_view),
     )?;
     candidate
         .validate_connectivity(
@@ -891,13 +895,8 @@ fn validate_candidate_drc(
     >,
     baseline_libraries: &crate::state::LibraryManager,
     candidate_libraries: &crate::state::LibraryManager,
+    config: DrcConfig,
 ) -> Result<(), String> {
-    let config = DrcConfig {
-        // A reusable cell need not own a local node-0 symbol. Canonical
-        // netlisting and connectivity validation separately prove node 0.
-        check_missing_ground: false,
-        ..DrcConfig::default()
-    };
     let baseline_hierarchy =
         HierarchySource::from_workspace(baseline_libraries.catalog(), baseline_buffers);
     let candidate_hierarchy =

@@ -26,7 +26,7 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::design_checks::location_key;
 use crate::workbench::app_state::diagnostic_store::{
     DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject,
-    FindingKey, mint_canonical, symbol_pin_rule_code,
+    FindingKey, mint_canonical,
 };
 use crate::workbench::{SymbolCommitIntent, SymbolDocumentSnapshot};
 use rspice_design::symbol::publication::{
@@ -653,7 +653,17 @@ impl AppState {
         let subject = self.workspace.content.active_view.clone();
         // Derived before the batch is inserted, because resolving a route
         // reads the state the insertion takes mutably.
-        let records = symbol_pin_records(self, &subject, result);
+        let mut records = symbol_pin_records(self, &subject, result);
+        // The symbol's own waivers that do not do what they say are stated
+        // with the pass that found that out.
+        if let Ok(document) = self.load_symbol_document(&subject) {
+            records.extend(crate::workbench::app_state::waivers::stored_waiver_records(
+                self,
+                &subject,
+                &document.waivers,
+                result,
+            ));
+        }
         self.publish_diagnostics(DiagnosticInputs::SymbolPins { subject }, records)
     }
 
@@ -746,7 +756,9 @@ impl AppState {
                 return;
             }
         };
-        let result = check_symbol_pins(&inputs.document, &inputs.ports, &reference);
+        let mut result = check_symbol_pins(&inputs.document, &inputs.ports, &reference);
+        // The symbol's own waivers, stored in the document the checks read.
+        rspice_design::drc::CheckWaivers::for_subject(&inputs.document.waivers).apply(&mut result);
         let found = result.total_count();
         if let Err(error) = self.publish_active_symbol_pin_check_result(&result) {
             self.push_user_message(ConsoleMessage::warning(format!(
@@ -818,7 +830,7 @@ fn symbol_pin_records(
         .map(|violation| {
             FindingKey::new(
                 SYMBOL_PIN_PRODUCER,
-                symbol_pin_rule_code(violation.violation_type),
+                violation.violation_type.rule_code(),
                 document_id.as_str(),
                 location_key(&violation.location),
             )
@@ -830,10 +842,13 @@ fn symbol_pin_records(
         .iter()
         .zip(keys)
         .zip(canonicals)
-        .map(|((violation, key), canonical)| {
+        .map(|((violation, key), mut canonical)| {
+            use crate::workbench::app_state::waivers;
+
             let route =
                 crate::schematic::view::violations::location_anchor(state, &violation.location)
                     .map(DiagnosticRoute::Anchor);
+            canonical.suppression = violation.waiver.as_ref().map(waivers::suppression_of);
             DiagnosticRecord::new(
                 canonical,
                 violation.severity.into(),
@@ -843,8 +858,9 @@ fn symbol_pin_records(
             )
             .keyed(key)
             .with_details(violation.violation_type.suggested_fix())
-            .with_rule(violation.violation_type.description())
+            .with_rule(violation.violation_type.rule().explanation)
             .with_route(route)
+            .with_waiver_action(waivers::finding_waiver_action(subject, violation))
         })
         .collect()
 }

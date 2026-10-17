@@ -21,6 +21,7 @@ pub(crate) mod diagnostic_store;
 mod full_screen;
 pub(in crate::workbench) mod interaction_state;
 pub(in crate::workbench) mod problems_view;
+mod rule_deck;
 pub(in crate::workbench) mod run_identity;
 pub(crate) mod run_preflight;
 pub(in crate::workbench) mod session;
@@ -30,6 +31,7 @@ mod stack_budget;
 #[cfg(test)]
 mod technology_demand_tests;
 pub(in crate::workbench) mod viewer_capabilities;
+pub(in crate::workbench) mod waivers;
 
 use crate::diagnostics::{ConsoleLevel, ConsoleMessage};
 use crate::product::{AnalysisInstanceId, DatasetId};

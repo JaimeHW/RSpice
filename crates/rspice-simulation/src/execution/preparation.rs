@@ -56,6 +56,10 @@ pub struct RunPreparationInputs<'a, R, A> {
     /// parallelism the host reports.
     pub max_parallel_workers: Option<usize>,
     pub compilation: Option<&'a crate::project_veriloga::receipt::ProjectCompileReceipt>,
+    /// The configuration the project checks the configured root under — its
+    /// rule deck and its connectivity policy — which the source-check gate
+    /// judges the run by. The project's to decide, so the caller passes it.
+    pub design_checks: rspice_design::drc::DrcConfig,
 }
 
 impl<R, A> RunPreparationInputs<'_, R, A> {
@@ -141,8 +145,12 @@ where
         &execution_projection,
     );
     let source_data = inputs.source_data;
-    let drc =
-        crate::preparation::check_generated_design(root_schematic, &root_reference, &hierarchy)?;
+    let drc = crate::preparation::check_generated_design(
+        root_schematic,
+        &root_reference,
+        &hierarchy,
+        inputs.design_checks.clone(),
+    )?;
     validate_projected_model_binding_authority(
         inputs.technology.models,
         inputs.technology.resolutions,

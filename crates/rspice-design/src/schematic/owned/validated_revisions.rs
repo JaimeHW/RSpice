@@ -108,6 +108,11 @@ impl Schematic {
             // deleting them.
             probes: self.document().probes.clone(),
             connections: snapshot.connections.to_vec(),
+            // A waiver is a decision about findings, not part of the drawing
+            // a revision validated, so the live ones are kept; a waiver whose
+            // finding the restored drawing no longer raises is then reported
+            // as covering nothing.
+            waivers: self.document().waivers.clone(),
             // A stored revision restores the drawing. Sheet membership belongs
             // to the project catalog, which still holds the live one.
             sheet_assignments: std::collections::BTreeMap::new(),

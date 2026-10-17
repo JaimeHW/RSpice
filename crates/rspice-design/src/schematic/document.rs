@@ -12,6 +12,7 @@ use super::port::PortSpec;
 use super::probe::SchematicProbe;
 use super::validated_revision::ValidatedRevisionJournal;
 use super::wire::{Wire, WireConnection};
+use crate::drc::DrcWaivers;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename = "SchematicState")]
@@ -68,6 +69,15 @@ pub struct SchematicDocument {
     /// state and undo history are intentionally excluded.
     #[serde(default)]
     pub validated_revisions: ValidatedRevisionJournal,
+
+    /// The design-rule findings this cellview's team has accepted as they
+    /// stand, stored with the cellview so they travel with its library.
+    ///
+    /// Not written while empty, so a schematic nobody waived anything in is
+    /// written exactly as a build that predates waivers wrote it, and such a
+    /// build can still open it.
+    #[serde(default, skip_serializing_if = "DrcWaivers::is_empty")]
+    pub waivers: DrcWaivers,
 }
 
 impl Default for SchematicDocument {
@@ -88,6 +98,7 @@ impl Default for SchematicDocument {
             junctions: Vec::new(),
             connections: Vec::new(),
             validated_revisions: ValidatedRevisionJournal::default(),
+            waivers: DrcWaivers::default(),
         }
     }
 }

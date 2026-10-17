@@ -59,6 +59,15 @@ pub struct ProjectWorkspace {
     /// to strict fail-closed defaults instead of inheriting UI state.
     #[serde(default)]
     pub connectivity: rspice_design::connectivity_contract::ConnectivityContract,
+    /// Project-owned design-rule severities. Which findings block a sign-off
+    /// is a decision the team shares, so it is versioned with the project
+    /// rather than kept per install; a project that has decided nothing stores
+    /// nothing and every rule keeps its own default.
+    #[serde(
+        default,
+        skip_serializing_if = "rspice_design::drc::DesignRuleDeck::is_empty"
+    )]
+    pub design_rules: rspice_design::drc::DesignRuleDeck,
     pub active_view: CellViewRef,
     pub open_views: Vec<OpenCellView>,
     /// Masters on the active document's occurrence, outermost first — a
@@ -221,6 +230,7 @@ impl Default for ProjectWorkspace {
             design_management:
                 rspice_design_model::design_management::DesignManagementCatalog::default(),
             connectivity: rspice_design::connectivity_contract::ConnectivityContract::default(),
+            design_rules: rspice_design::drc::DesignRuleDeck::default(),
             active_view: active_view.clone(),
             open_views: vec![OpenCellView::new(active_view.clone(), ViewType::Schematic)],
             hierarchy_stack: vec![active_view],

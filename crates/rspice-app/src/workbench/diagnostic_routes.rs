@@ -232,6 +232,7 @@ pub(in crate::workbench) fn apply_remediation(
                 app.state.push_user_message(ConsoleMessage::warning(error));
             }
         }
+        PreflightRemediation::RuleSetup => Command::RuleSetup.execute(app),
     }
 }
 

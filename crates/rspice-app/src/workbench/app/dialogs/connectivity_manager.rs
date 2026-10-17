@@ -25,7 +25,7 @@ use crate::ui::widgets::{
 use crate::workbench::design_system::section_header;
 use rspice_design::connectivity::summary::{DesignNet, NetClass, projection_nets};
 use rspice_design::drc::{
-    CheckReach, DrcConfig, DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
+    CheckReach, DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
     run_check_of_cellview,
 };
 use rspice_design::hierarchy::HierarchySource;
@@ -327,18 +327,26 @@ fn projection_with_open_view(
 /// The cellview is named rather than recognized from the buffer, so a
 /// configured root is walked as its configuration runs it whichever document
 /// holds the drawing — the projection's own buffer or a repair candidate's.
+///
+/// Checked under the configuration the project checks the open view under
+/// everywhere else, with `policy` — the one on screen, which the projection
+/// was resolved under — standing for the project's, so this page cannot state
+/// a finding the Problems page and the run gate judge differently.
 fn check_projected_open_view(
     state: &AppState,
+    policy: &ConnectivityPolicy,
     projection: &DesignProjection,
 ) -> Result<DrcResult, String> {
     let subject = projected_open_view(state, projection)?;
     let hierarchy =
         HierarchySource::from_design_projection(state.library_manager.catalog(), projection);
+    let mut config = state.design_check_config(&state.workspace.content.active_view);
+    config.connectivity = policy.clone();
     Ok(run_check_of_cellview(
         subject,
         &state.workspace.content.active_view,
         &hierarchy,
-        connectivity_drc_config(state),
+        config,
         CheckReach::Hierarchy,
     ))
 }
@@ -372,7 +380,7 @@ fn build_report(
         &projection,
         &state.workspace.content.active_view.key(),
     );
-    let drc = check_projected_open_view(state, &projection)?;
+    let drc = check_projected_open_view(state, policy, &projection)?;
     // Typed-bus geometry, the bus rows, and every reveal anchor below stay on
     // the document the canvas paints: a materialized page carries namespaced
     // coordinates that would scroll the editor off the design.
@@ -452,18 +460,6 @@ fn build_report(
         repairs,
         drc,
     })
-}
-
-fn connectivity_drc_config(state: &AppState) -> DrcConfig {
-    let root = crate::state::CellViewRef::new(
-        &state.workspace.content.project.root_library,
-        &state.workspace.content.project.top_cell,
-        "schematic",
-    );
-    DrcConfig {
-        check_missing_ground: state.workspace.content.active_schematic_reference() == root,
-        ..DrcConfig::default()
-    }
 }
 
 fn build_net_row(
@@ -1535,7 +1531,7 @@ fn validate_repair_candidate(
 ) -> Result<(), String> {
     let check = |open_view: &SchematicState| -> Result<DrcResult, String> {
         let projection = projection_with_open_view(state, policy, open_view)?;
-        check_projected_open_view(state, &projection)
+        check_projected_open_view(state, policy, &projection)
     };
     let before = severe_drc_counts(&check(&state.schematic)?);
     let after = severe_drc_counts(&check(candidate)?);

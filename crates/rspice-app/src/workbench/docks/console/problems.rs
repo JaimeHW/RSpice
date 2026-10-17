@@ -55,10 +55,11 @@ use crate::workbench::app_state::diagnostic_store::listing::{
     DiagnosticListing, DiagnosticRow, EmptyReason, RowStanding, listing_in_pass,
 };
 use crate::workbench::app_state::diagnostic_store::{DiagnosticLevel, DiagnosticRoute};
-use crate::workbench::app_state::problems_view::ProblemsView;
+use crate::workbench::app_state::problems_view::{ProblemsView, WaiverDraft};
 use crate::workbench::app_state::session::shortcuts::{
     report_escape_owner, request_engineering_canvas_focus,
 };
+use crate::workbench::app_state::waivers::{WaiverAction, WaiverTarget};
 
 use crate::ui::widgets::Problem;
 use arrange::{Arrangement, Line};
@@ -117,6 +118,17 @@ struct PageIntent {
     /// A finding whose producer-offered edits the reader asked to apply.
     fix: Option<uuid::Uuid>,
     clipboard: Option<String>,
+    /// A waiver the reader asked to record, or to take away.
+    waiver: Option<WaiverEdit>,
+}
+
+/// A change to a waiver stored with a cellview, as the page asks for it.
+enum WaiverEdit {
+    Record {
+        target: WaiverTarget,
+        reason: String,
+    },
+    Remove(WaiverTarget),
 }
 
 /// The current row, as this frame is reading and editing it.
@@ -168,7 +180,10 @@ impl BodyMemory {
     }
 }
 
-pub(super) fn problems(ui: &mut Ui, state: &mut AppState) {
+/// Draw the page. Returns whether the reader recorded or took away a waiver:
+/// that changes what refuses a run, so the caller drops whatever run was
+/// prepared or checked under the waivers as they stood.
+pub(super) fn problems(ui: &mut Ui, state: &mut AppState) -> bool {
     let mut view = state.problems_view.clone();
     let mut selection = Selection {
         listed: None,
@@ -182,7 +197,7 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) {
             // Nothing to list is not a table with no rows: it is one claim,
             // and a toolbar over it would offer to filter nothing.
             muted(ui, &empty_state(listed.empty_reason()));
-            return;
+            return false;
         }
         let (arrangement, current) = arrange::arrange(ui.ctx(), &listed, &view, selection.finding);
         let columns = Columns::measure(
@@ -259,6 +274,21 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) {
                 .route
                 .as_ref()
                 .and_then(|route| route_refusal(state, route));
+            // A finding can stop being waivable while its reason is being
+            // typed — waived from elsewhere, or gone stale under a re-check —
+            // and the reason then has nothing left to be recorded against.
+            if view
+                .waiving
+                .as_ref()
+                .is_some_and(|draft| draft.finding == row.id)
+                && !matches!(row.waiver_action, Some(WaiverAction::Waive(_)))
+            {
+                view.waiving = None;
+            }
+            let waiving = view
+                .waiving
+                .as_mut()
+                .filter(|draft| draft.finding == row.id);
             let actions = ui
                 .allocate_ui_with_layout(
                     Vec2::new(ui.available_width(), detail_height),
@@ -273,6 +303,7 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) {
                                 collapsed: arrangement.hides_collapsed_rows(),
                             },
                             refusal.as_deref(),
+                            waiving,
                         )
                     },
                 )
@@ -295,9 +326,37 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) {
             if actions.copy_listed {
                 intent.clipboard = Some(copy_of_listed(&listed, &arrangement));
             }
+            match (actions.waiver, row.waiver_action) {
+                (Some(detail::WaiverStep::Begin), Some(WaiverAction::Waive(_))) => {
+                    view.waiving = Some(WaiverDraft::new(row.id));
+                }
+                (Some(detail::WaiverStep::Record), Some(WaiverAction::Waive(target))) => {
+                    if let Some(draft) = &view.waiving {
+                        intent.waiver = Some(WaiverEdit::Record {
+                            target: target.clone(),
+                            reason: draft.reason.clone(),
+                        });
+                    }
+                }
+                (Some(detail::WaiverStep::Cancel), _) => view.waiving = None,
+                (
+                    Some(detail::WaiverStep::Remove),
+                    Some(WaiverAction::Remove(target) | WaiverAction::Delete(target)),
+                ) => intent.waiver = Some(WaiverEdit::Remove(target.clone())),
+                _ => {}
+            }
         }
     }
 
+    // A reason typed for one finding is never recorded against another: the
+    // draft goes when the reader stands anywhere else.
+    if view
+        .waiving
+        .as_ref()
+        .is_some_and(|draft| selection.finding != Some(draft.finding))
+    {
+        view.waiving = None;
+    }
     state.problems_view = view;
     state.diagnostics.set_current_finding(selection.finding);
     if let Some(route) = intent.route {
@@ -321,6 +380,29 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) {
             }
         }
     }
+    intent
+        .waiver
+        .is_some_and(|edit| apply_waiver_edit(state, edit))
+}
+
+/// Record or take away a waiver, as an edit of the cellview that stores it.
+/// Returns whether it was made.
+///
+/// A recorded waiver closes the reason it was written in. A refused one keeps
+/// it, so what the reader typed is not lost to a refusal they can repair —
+/// a read-only project made writable, a cellview opened.
+fn apply_waiver_edit(state: &mut AppState, edit: WaiverEdit) -> bool {
+    let outcome = match edit {
+        WaiverEdit::Record { target, reason } => state
+            .waive_finding(&target, &reason)
+            .map(|()| state.problems_view.waiving = None),
+        WaiverEdit::Remove(target) => state.remove_finding_waiver(&target),
+    };
+    outcome
+        .map_err(|refused| {
+            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(refused));
+        })
+        .is_ok()
 }
 
 /// Everything the table needs to draw itself, so the row loop takes one
@@ -401,7 +483,7 @@ fn table(
                     }
                     Some(Line::Row(index)) => {
                         let Some((id, rect, pressed)) =
-                            finding_row(ui, table, index, selection, intent, state)
+                            finding_row(ui, table, index, view, selection, intent, state)
                         else {
                             continue;
                         };
@@ -512,13 +594,14 @@ fn shrink_hid(line: usize, body: &BodyMemory, height: f32, pitch: f32) -> bool {
     showed && bottom - 0.5 > body.offset + height
 }
 
-/// One finding's row, with the click that selects it and the click that
-/// follows it. Returns the row's identity and rectangle, and how a press on
-/// it left the keyboard.
+/// One finding's row, with the click that selects it, the click that follows
+/// it and the menu that waives it. Returns the row's identity and rectangle,
+/// and how a press on it left the keyboard.
 fn finding_row(
     ui: &mut Ui,
     table: &Table<'_, '_>,
     index: usize,
+    view: &mut ProblemsView,
     selection: &mut Selection,
     intent: &mut PageIntent,
     state: &AppState,
@@ -558,6 +641,26 @@ fn finding_row(
             Press::Stayed
         });
         intent.route = route;
+    }
+    if let Some(action) = row.waiver_action {
+        response.context_menu(|ui| {
+            if ui.button(detail::waiver_verb(action)).clicked() {
+                match action {
+                    // The reason is asked for in the detail region, which
+                    // the row has to be current to open.
+                    WaiverAction::Waive(_) => {
+                        selection.finding = Some(row.id);
+                        selection.listed = Some(index);
+                        view.current_group = None;
+                        view.waiving = Some(WaiverDraft::new(row.id));
+                    }
+                    WaiverAction::Remove(target) | WaiverAction::Delete(target) => {
+                        intent.waiver = Some(WaiverEdit::Remove(target.clone()));
+                    }
+                }
+                ui.close();
+            }
+        });
     }
     let rect = response.rect;
     response.on_hover_text(hover(&row));
@@ -872,8 +975,13 @@ fn hover(row: &DiagnosticRow<'_>) -> String {
 /// One row as text, tab-separated in the column order the grid prints — the
 /// shape that pastes into a sheet or a report as a row rather than as a
 /// sentence somebody has to take apart again.
+///
+/// The waiver covering the finding follows, as the last column: a waived
+/// finding pasted into a review without who accepted it and why is a finding
+/// the review cannot audit.
 fn copy_of(row: &DiagnosticRow<'_>) -> String {
     let severity = severity_cell(row);
+    let waiver = row.suppression.map(detail::waiver_text).unwrap_or_default();
     [
         severity.as_str(),
         row.code,
@@ -881,10 +989,14 @@ fn copy_of(row: &DiagnosticRow<'_>) -> String {
         row.producer,
         row.location.as_str(),
         row.message,
+        waiver.as_str(),
     ]
     .map(tsv_field)
     .join("\t")
 }
+
+/// The heading of the copied waiver column.
+const WAIVER_COLUMN: &str = "Waiver";
 
 /// One field of tab-separated text, quoted the way spreadsheets write and
 /// read it: a field holding a tab, a line break or a quote is wrapped in
@@ -908,6 +1020,7 @@ fn copy_of_listed(listed: &DiagnosticListing<'_>, arrangement: &Arrangement) -> 
     let mut text = ProblemColumn::ALL
         .iter()
         .map(|column| column.label())
+        .chain([WAIVER_COLUMN])
         .collect::<Vec<_>>()
         .join("\t");
     for index in arrangement.listed_rows() {

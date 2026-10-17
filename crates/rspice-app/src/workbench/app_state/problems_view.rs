@@ -140,6 +140,33 @@ pub(crate) struct ProblemsView {
     pub(in crate::workbench) current_group: Option<String>,
     /// Whether the detail region states the rule's own words.
     pub(in crate::workbench) explain: bool,
+    /// The waiver being written, where the reader asked to waive a finding
+    /// and has not yet recorded or abandoned it.
+    pub(in crate::workbench) waiving: Option<WaiverDraft>,
+}
+
+/// A waiver being written in the detail region: the finding it is for and
+/// the reason typed so far.
+///
+/// It belongs to one finding. Standing on another lets it go, so a reason
+/// typed for one finding is never recorded against the next.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workbench) struct WaiverDraft {
+    pub(in crate::workbench) finding: uuid::Uuid,
+    pub(in crate::workbench) reason: String,
+    /// Whether the reason field has yet to take the keyboard: true on the
+    /// frame the draft opens, so the reader types straight into it.
+    pub(in crate::workbench) focus: bool,
+}
+
+impl WaiverDraft {
+    pub(in crate::workbench) const fn new(finding: uuid::Uuid) -> Self {
+        Self {
+            finding,
+            reason: String::new(),
+            focus: true,
+        }
+    }
 }
 
 /// The reading position a session starts from: every severity, waivers
@@ -162,6 +189,7 @@ impl Default for ProblemsView {
             collapsed: BTreeSet::new(),
             current_group: None,
             explain: false,
+            waiving: None,
         }
     }
 }
@@ -203,6 +231,7 @@ impl ProblemsView {
             collapsed: _,
             current_group: _,
             explain: _,
+            waiving: _,
         } = self;
         *severities = SeverityFilter::default();
         *producer = None;
@@ -256,6 +285,7 @@ impl ProblemsView {
             collapsed,
             current_group: _,
             explain: _,
+            waiving: _,
         } = self;
         *sort == other.sort
             && *descending == other.descending

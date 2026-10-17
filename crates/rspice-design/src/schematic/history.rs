@@ -79,6 +79,9 @@ pub struct SchematicSnapshot {
     pub probes: Vec<SchematicProbe>,
     /// Wire-to-terminal connections (for rubber-banding)
     pub connections: Vec<WireConnection>,
+    /// The design-rule findings accepted as they stand. Recording or removing
+    /// one is an edit like any other, and undone like one.
+    pub waivers: crate::drc::DrcWaivers,
     /// Which sheet each object sat on while this snapshot was the live design.
     ///
     /// Sheet membership belongs to the project's sheet catalog, not to the
@@ -109,6 +112,7 @@ impl SchematicSnapshot {
             documentation_shapes: state.documentation_shapes.clone(),
             probes: state.probes.clone(),
             connections: state.connections.clone(),
+            waivers: state.waivers.clone(),
             sheet_assignments: BTreeMap::new(),
         }
     }
@@ -137,6 +141,7 @@ impl SchematicSnapshot {
         state.documentation_shapes = self.documentation_shapes.clone();
         state.probes = self.probes.clone();
         state.connections = self.connections.clone();
+        state.waivers = self.waivers.clone();
 
         electrical_changed
     }
@@ -157,6 +162,7 @@ impl SchematicSnapshot {
             && self.documentation_shapes == other.documentation_shapes
             && self.probes == other.probes
             && self.connections == other.connections
+            && self.waivers == other.waivers
     }
 
     /// Compare the retained design baseline directly with live document data
@@ -176,6 +182,7 @@ impl SchematicSnapshot {
             && self.documentation_shapes == state.documentation_shapes
             && self.probes == state.probes
             && self.connections == state.connections
+            && self.waivers == state.waivers
     }
 }
 

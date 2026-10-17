@@ -743,6 +743,7 @@ fn design_management_menu_matches_the_upgraded_governed_group() {
             Command::SelectionBulkEdit,
             Command::ConnectivityManager,
             Command::ConfigurationSets,
+            Command::RuleSetup,
             Command::ReviewComments,
             Command::RevisionHistory,
         ]

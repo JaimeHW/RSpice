@@ -55,9 +55,14 @@ pub struct CanonicalQuickFix {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiagnosticSuppression {
+    /// The code of the rule the waived finding is an instance of.
     pub rule: String,
-    pub scope: String,
-    pub justification_required: bool,
+    /// Why the finding is accepted as it stands.
+    pub reason: String,
+    /// Who recorded the decision.
+    pub author: String,
+    /// When it was recorded, in milliseconds since the Unix epoch.
+    pub waived_at_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

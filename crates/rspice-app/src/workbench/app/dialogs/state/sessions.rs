@@ -448,6 +448,9 @@ pub struct DialogState {
     /// Project-owned hierarchy/view configuration manager.
     pub(crate) configuration_sets: ConfigurationSetsDialogState,
 
+    /// The project's design-rule deck.
+    pub(crate) rule_setup: crate::workbench::app::dialogs::rule_setup::RuleSetupDialogState,
+
     /// Project-owned sheet, variant, annotation, and hierarchy manager.
     pub(crate) design_management: DesignManagementDialogState,
 
@@ -569,6 +572,7 @@ impl DialogState {
             || self.symbol_import.open
             || self.symbol_parameter_form.open
             || self.configuration_sets.open
+            || self.rule_setup.open
             || self.object_properties.open
             || self.rename_selection.open
             || self.technology_attachment.open

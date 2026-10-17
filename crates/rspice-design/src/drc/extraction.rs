@@ -373,6 +373,10 @@ fn check_subject(
         }
     }
 
+    // Waivers are stated last, over the findings as the report states them:
+    // a finding inside an instance is waived by the cellview it is drawn in,
+    // which only its restated location names.
+    config.waivers.apply(&mut result);
     result.completed = true;
     result.duration_ms = start.elapsed().as_millis() as u64;
     result
@@ -420,6 +424,7 @@ fn restated(
         mut message,
         location,
         related_items,
+        waiver,
         ..
     } = finding.clone();
     let Some((path, reference)) = occurrence else {
@@ -430,6 +435,7 @@ fn restated(
             message,
             location,
             related_items,
+            waiver,
         };
     };
     if let Some(note) = note {
@@ -446,6 +452,7 @@ fn restated(
             inner: Box::new(location),
         },
         related_items,
+        waiver,
     }
 }
 

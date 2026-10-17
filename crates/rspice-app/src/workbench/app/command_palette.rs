@@ -1574,6 +1574,7 @@ fn row_icon(entry: &PaletteEntry) -> Icon {
         Command::CreateHierarchy => Icon::Folder,
         Command::ConnectivityManager => Icon::Bus,
         Command::ConfigurationSets => Icon::Grid,
+        Command::RuleSetup => Icon::Check,
         Command::RunSimulation => Icon::Run,
         Command::StopSimulation => Icon::Stop,
         Command::RunChecks | Command::CheckAndSave | Command::PreflightChecks => Icon::Check,

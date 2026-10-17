@@ -78,6 +78,14 @@ pub struct DrcConfig {
     /// contract is the only authority that may set it.
     #[serde(skip_deserializing)]
     pub connectivity: crate::connectivity_contract::ConnectivityPolicy,
+    /// The waivers the check states on the findings they cover, from the
+    /// documents of the subject and of every cellview it instantiates.
+    ///
+    /// Not part of what a check finds — a waiver changes whether a finding
+    /// counts, not whether it is there — so it is neither serialized into an
+    /// input digest nor read back.
+    #[serde(skip)]
+    pub waivers: super::CheckWaivers,
 }
 
 impl Default for DrcConfig {
@@ -93,6 +101,7 @@ impl Default for DrcConfig {
             min_connections: 2,
             severity_overrides: HashMap::new(),
             connectivity: crate::connectivity_contract::ConnectivityPolicy::default(),
+            waivers: super::CheckWaivers::default(),
         }
     }
 }
@@ -128,6 +137,32 @@ impl DrcChecker {
             .get(&violation.violation_type)
         {
             violation.severity = *severity;
+        }
+        result.add_violation(violation);
+    }
+
+    /// Publish one finding about an emitted instance, `written` saying
+    /// whether the deck still writes it.
+    ///
+    /// The finding starts at what the instance makes it worth, and the
+    /// project's override then wins down to the floor for that instance and
+    /// no further: a deck that lowers the warning on an instance the
+    /// netlister renamed does not lower the error on one it cannot write,
+    /// which would only move the refusal from this report to the run.
+    fn add_instance_violation(
+        &self,
+        result: &mut DrcResult,
+        violation: DrcViolation,
+        written: bool,
+    ) {
+        let mut violation = violation.with_instance_severity(written);
+        if let Some(severity) = self
+            .config
+            .severity_overrides
+            .get(&violation.violation_type)
+        {
+            violation.severity =
+                (*severity).max(violation.violation_type.floor_for_instance(written));
         }
         result.add_violation(violation);
     }
@@ -216,7 +251,7 @@ impl DrcChecker {
             };
             if component.name.trim().is_empty() {
                 let id = self.next_id();
-                self.add_violation(
+                self.add_instance_violation(
                     result,
                     DrcViolation::new(
                         id,
@@ -229,12 +264,12 @@ impl DrcChecker {
                             id: component.id,
                             name: String::new(),
                         },
-                    )
-                    .with_instance_severity(written),
+                    ),
+                    written,
                 );
             } else if let Some(error) = component.reference_error.as_deref() {
                 let id = self.next_id();
-                self.add_violation(
+                self.add_instance_violation(
                     result,
                     DrcViolation::new(
                         id,
@@ -248,8 +283,8 @@ impl DrcChecker {
                             id: component.id,
                             name: component.name.clone(),
                         },
-                    )
-                    .with_instance_severity(written),
+                    ),
+                    written,
                 );
             }
         }
@@ -331,7 +366,7 @@ impl DrcChecker {
         for component in components {
             let component_name = component_identity(component);
             let id = self.next_id();
-            self.add_violation(
+            self.add_instance_violation(
                 result,
                 DrcViolation::new(
                     id,
@@ -345,8 +380,8 @@ impl DrcChecker {
                         name: component.name.clone(),
                     },
                 )
-                .with_instance_severity(false)
                 .with_related(vec![component_name]),
+                false,
             );
         }
     }
@@ -990,14 +1025,14 @@ pub(super) fn append_off_sheet_connector_violations(
 
 /// Report every vector connection whose two ends declare different widths.
 ///
-/// This is where [`crate::connectivity_contract::BundleWidthMismatchPolicy`] decides something.
-/// Under `BlockConnection` a mismatched join is an error: the deck would have
-/// to invent or drop conductors to emit it. Under `ExplicitSliceOrExtend` the
-/// project has said it will slice or extend deliberately, so a mismatch the
-/// designer can resolve with an explicit selector is stated as a warning — but
-/// only when the bus is at least as wide as the connection asks for. A bus with
-/// too few conductors cannot be sliced into a wider connection under any
-/// policy, so that one stays an error.
+/// An error under either [`crate::connectivity_contract::BundleWidthMismatchPolicy`]: a
+/// mismatched join that reaches the checker is one the netlister refuses
+/// whatever the policy says, because emitting it would mean inventing or
+/// dropping conductors (see `rspice_simulation::netlist_gen::vector_nets`).
+/// Under `ExplicitSliceOrExtend` the project has said it will slice or extend
+/// deliberately, and a bus at least as wide as the connection can be, so the
+/// finding says how; it was stated as a warning there, which let preflight
+/// pass a design the run then refused to netlist.
 pub(super) fn append_vector_width_violations(
     connectivity: &ExtractedConnectivity,
     policy: &crate::connectivity_contract::ConnectivityPolicy,
@@ -1009,18 +1044,23 @@ pub(super) fn append_vector_width_violations(
         let sliceable = policy.width_mismatch
             == crate::connectivity_contract::BundleWidthMismatchPolicy::ExplicitSliceOrExtend
             && mismatch.found_width >= mismatch.declared_width;
+        let message = if sliceable {
+            format!(
+                "{}; tap an explicit slice of the bus to connect it.",
+                mismatch.message()
+            )
+        } else {
+            format!("{}.", mismatch.message())
+        };
         let mut violation = DrcViolation::new(
             next_id,
             DrcViolationType::VectorWidthMismatch,
-            format!("{}.", mismatch.message()),
+            message,
             DrcLocation::Point {
                 x: f64::from(mismatch.point.x),
                 y: f64::from(mismatch.point.y),
             },
         );
-        if sliceable {
-            violation.severity = DrcSeverity::Warning;
-        }
         if let Some(severity) = severity_overrides.get(&DrcViolationType::VectorWidthMismatch) {
             violation.severity = *severity;
         }

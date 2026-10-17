@@ -21,6 +21,9 @@ use crate::ui::tokens::Tokens;
 use crate::ui::widgets::Button;
 use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use crate::workbench::app_state::diagnostic_store::listing::DiagnosticRow;
+use crate::workbench::app_state::problems_view::WaiverDraft;
+use crate::workbench::app_state::session::shortcuts::report_escape_owner;
+use crate::workbench::app_state::waivers::WaiverAction;
 
 /// The height of the verb row above the detail lines.
 const ACTION_ROW_HEIGHT: f32 = 24.0;
@@ -43,6 +46,40 @@ pub(super) struct DetailActions {
     pub(super) quick_fix: bool,
     /// A related place the reader asked to go to.
     pub(super) related: Option<DiagnosticRoute>,
+    /// What the reader asked to do about the finding's waiver.
+    pub(super) waiver: Option<WaiverStep>,
+}
+
+/// One step of waiving a finding, or of taking a waiver away.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum WaiverStep {
+    /// Ask for the reason, in place of the verbs.
+    Begin,
+    /// Record the waiver for the reason typed.
+    Record,
+    /// Abandon the waiver being written.
+    Cancel,
+    /// Take the waiver covering the finding away, or delete a stored one
+    /// that does nothing.
+    Remove,
+}
+
+/// The verb that acts on a finding's waiver, as the grid's menu and the
+/// detail region both print it.
+pub(super) const fn waiver_verb(action: &WaiverAction) -> &'static str {
+    match action {
+        WaiverAction::Waive(_) => "Waive\u{2026}",
+        WaiverAction::Remove(_) => "Remove waiver",
+        WaiverAction::Delete(_) => "Delete waiver",
+    }
+}
+
+/// What the verb for `action` does when it is pressed.
+pub(super) const fn waiver_step(action: &WaiverAction) -> WaiverStep {
+    match action {
+        WaiverAction::Waive(_) => WaiverStep::Begin,
+        WaiverAction::Remove(_) | WaiverAction::Delete(_) => WaiverStep::Remove,
+    }
 }
 
 /// What the copy-everything verb copies.
@@ -67,13 +104,15 @@ pub(super) fn height(available: f32) -> f32 {
 ///
 /// `refusal` is why its route cannot be followed, where the page checked and
 /// found one; `listed` is what the filters are listing, which is what the
-/// copy-everything verb promises to copy.
+/// copy-everything verb promises to copy; `waiving` is the waiver being
+/// written for this finding, which asks for its reason in place of the verbs.
 pub(super) fn detail(
     ui: &mut Ui,
     row: &DiagnosticRow<'_>,
     explaining: bool,
     listed: Listed,
     refusal: Option<&str>,
+    waiving: Option<&mut WaiverDraft>,
 ) -> DetailActions {
     let tokens = Tokens::get(ui.ctx());
     let mut actions = DetailActions::default();
@@ -88,6 +127,13 @@ pub(super) fn detail(
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
+            // A waiver is asked for where the finding is read, not in a
+            // dialog over it: the reason takes the verbs' place until it is
+            // recorded or abandoned.
+            if let Some(draft) = waiving {
+                actions.waiver = waiver_reason(ui, draft);
+                return;
+            }
             if row.route.is_some() && refusal.is_none() {
                 actions.follow = Button::new("Follow")
                     .compact()
@@ -136,6 +182,17 @@ pub(super) fn detail(
                     .show(ui)
                     .clicked();
             }
+            // Offered only where the producer said a waiver is possible: a
+            // current design-rule finding whose rule may be waived, or a
+            // stored waiver that does nothing.
+            if let Some(action) = row.waiver_action
+                && Button::new(waiver_verb(action))
+                    .compact()
+                    .show(ui)
+                    .clicked()
+            {
+                actions.waiver = Some(waiver_step(action));
+            }
         },
     );
     egui::ScrollArea::vertical()
@@ -151,23 +208,14 @@ pub(super) fn detail(
             }
             line(
                 ui,
-                &format!("Rule {} · {}", row.code, row.producer),
+                &rule_reference(row),
                 tokens.color.text_faint,
                 FontWeight::Medium,
             );
             if let Some(waiver) = row.suppression {
                 line(
                     ui,
-                    &format!(
-                        "Waived · rule {} · scope {} · {}",
-                        waiver.rule,
-                        waiver.scope,
-                        if waiver.justification_required {
-                            "a justification is required"
-                        } else {
-                            "no justification is required"
-                        }
-                    ),
+                    &format!("Waived \u{00b7} {}", waiver_text(waiver)),
                     tokens.color.text_faint,
                     FontWeight::Medium,
                 );
@@ -186,6 +234,90 @@ pub(super) fn detail(
             }
         });
     actions
+}
+
+/// The rule the finding is an instance of, and who reported it.
+///
+/// A design rule is named the way the rule table names it — its title, then
+/// its code — so the reader has the name they look it up by and the code a
+/// deck and a waiver store it under. A finding whose code is not a design
+/// rule's, a parser's or a run's, is named by its code alone.
+fn rule_reference(row: &DiagnosticRow<'_>) -> String {
+    match rspice_design::drc::DrcViolationType::from_rule_code(row.code) {
+        Some(rule) => format!(
+            "{} \u{00b7} {} \u{00b7} {}",
+            rule.rule().title,
+            row.code,
+            row.producer
+        ),
+        None => format!("Rule {} \u{00b7} {}", row.code, row.producer),
+    }
+}
+
+/// The reason field of a waiver being written, and its two verbs. Enter
+/// records it and Escape abandons it, as the verbs beside it do.
+fn waiver_reason(ui: &mut Ui, draft: &mut WaiverDraft) -> Option<WaiverStep> {
+    let tokens = Tokens::get(ui.ctx());
+    let given = !draft.reason.trim().is_empty();
+    let record = Button::new("Waive")
+        .compact()
+        .enabled(given)
+        .accessible_label("Record the waiver for this reason");
+    let cancel = Button::new("Cancel")
+        .compact()
+        .accessible_label("Abandon this waiver");
+    ui.label(
+        egui::RichText::new("Reason")
+            .font(theme::mono(CONSOLE_FONT_SIZE, FontWeight::Medium))
+            .color(tokens.color.text_dim),
+    );
+    // The field takes what the verbs leave, so the reason is read whole.
+    let verbs =
+        record.measured_width(ui) + cancel.measured_width(ui) + 2.0 * ui.spacing().item_spacing.x;
+    let response = ui.add_sized(
+        [
+            (ui.available_width() - verbs).max(0.0),
+            tokens.metrics.ctl_h,
+        ],
+        egui::TextEdit::singleline(&mut draft.reason)
+            .id(egui::Id::new("workbench.problems.waiver-reason"))
+            .hint_text("why this finding is accepted")
+            .font(theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular)),
+    );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label("Reason for waiving this finding");
+    });
+    if std::mem::take(&mut draft.focus) {
+        response.request_focus();
+    }
+    report_escape_owner(&response);
+    let mut step = None;
+    if response.lost_focus() {
+        if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            step = Some(WaiverStep::Cancel);
+        } else if given && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+            step = Some(WaiverStep::Record);
+        }
+    }
+    if record.show(ui).clicked() {
+        step = Some(WaiverStep::Record);
+    }
+    if cancel.show(ui).clicked() {
+        step = Some(WaiverStep::Cancel);
+    }
+    step
+}
+
+/// The waiver covering a finding: why it was accepted, by whom and when. The
+/// time is UTC, so a library mailed across a border states one time for one
+/// decision.
+pub(super) fn waiver_text(waiver: &rspice_app_types::diagnostics::DiagnosticSuppression) -> String {
+    format!(
+        "{} \u{00b7} {} \u{00b7} {}",
+        waiver.reason,
+        waiver.author,
+        crate::time_compat::utc_stamp(waiver.waived_at_ms)
+    )
 }
 
 /// Where the current finding's batch stands, where that is not simply current,
@@ -327,6 +459,7 @@ mod tests {
             quick_fixes: &[],
             suppression: None,
             route,
+            waiver_action: None,
         }
     }
 
@@ -406,6 +539,23 @@ mod tests {
         assert!(
             applicable_fix(&source).is_none(),
             "no owner outside the netlist editor can apply these edits yet",
+        );
+    }
+
+    /// A design rule is referred to by the title and code the rule table
+    /// gives it; anything else by its code.
+    #[test]
+    fn a_design_rule_is_referred_to_by_its_title_and_code() {
+        let mut finding = row(None);
+        finding.code = "DRC-FLOATING-NODE";
+        finding.producer = "rspice.design.drc";
+        assert_eq!(
+            rule_reference(&finding),
+            "Floating node \u{00b7} DRC-FLOATING-NODE \u{00b7} rspice.design.drc"
+        );
+        assert_eq!(
+            rule_reference(&row(None)),
+            "Rule VA-REDECLARED \u{00b7} rspice.veriloga.compiler"
         );
     }
 }

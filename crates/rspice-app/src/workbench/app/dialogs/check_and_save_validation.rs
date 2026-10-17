@@ -19,10 +19,9 @@ use crate::workbench::lifecycle::project_lifecycle::{
     SaveScope, accepted_generation, effective_save_scope, snapshot,
 };
 use rspice_design::drc::{
-    CheckReach, DrcConfig, DrcLocation, DrcSeverity, DrcViolation, run_check_of_cellview,
+    CheckReach, DrcLocation, DrcSeverity, DrcViolation, run_check_of_cellview,
 };
 use rspice_design::hierarchy::HierarchySource;
-use rspice_design::library::ViewType;
 use rspice_simulation::netlist_gen::generate_netlist_hierarchical;
 
 use crate::workbench::app_state::AppState;
@@ -371,14 +370,13 @@ impl CheckAndSaveValidationReport {
                 let configured_hierarchy = configured_hierarchy
                     .as_ref()
                     .expect("a resolved projection binds a hierarchy source");
+                // The configuration the run gate judges the same root under,
+                // so a validated save blocks on exactly what the run refuses.
                 let drc = run_check_of_cellview(
                     root,
                     projection.root(),
                     configured_hierarchy,
-                    DrcConfig {
-                        check_missing_ground: true,
-                        ..DrcConfig::default()
-                    },
+                    state.design_check_config(projection.root()),
                     CheckReach::Hierarchy,
                 );
                 if !drc.completed {
@@ -492,10 +490,9 @@ impl CheckAndSaveValidationReport {
             // through everything it places, as its own drawing binds it,
             // because no other walk reaches that.
             //
-            // A cell takes its reference from whatever places it, so it is not
-            // asked for a ground. A document the root does not place and that
-            // presents no interface, or is a testbench, is a design of its own,
-            // and it is.
+            // Each is checked under the configuration the project checks that
+            // cellview under everywhere else, which is also what decides
+            // whether it is a design of its own that must reach a ground.
             let projected = projected_document(execution_projection.as_ref().ok(), key)
                 .filter(|_| !key.eq_ignore_ascii_case(&root_schematic_key));
             let reference = cell_view_reference(key);
@@ -503,17 +500,11 @@ impl CheckAndSaveValidationReport {
                 (configured_hierarchy.as_ref(), projected, reference.as_ref())
             {
                 let placed = placed_by_root.contains(&key.to_ascii_lowercase());
-                let own_design = !placed
-                    && (!schematic.document().has_interface()
-                        || hierarchy.resolved_view_type(reference) == ViewType::Testbench);
                 let drc = run_check_of_cellview(
                     schematic,
                     reference,
                     hierarchy,
-                    DrcConfig {
-                        check_missing_ground: own_design,
-                        ..DrcConfig::default()
-                    },
+                    state.design_check_config(reference),
                     if placed {
                         CheckReach::Cellview
                     } else {

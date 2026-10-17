@@ -118,6 +118,15 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
                 app.state
                     .publish_run_failure("Transient", message, Some(&attribution), 1);
             }
+            DiagnosticOwner::RuleDeck => {
+                // A deck written under a schema this build does not read: none
+                // of it is applied, which the team has to know before it signs
+                // off under it.
+                app.state.workspace.content.design_rules =
+                    serde_json::from_str(r#"{"schema_version":2}"#)
+                        .expect("a stored deck always reads");
+                app.state.publish_rule_deck_issues();
+            }
         }
 
         let batch = app
@@ -163,8 +172,14 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
                 record.message
             );
         }
+        // A deck that is not applied does not stop a run, so it is a warning,
+        // not an error; it still has to count.
+        let counted = match owner {
+            DiagnosticOwner::RuleDeck => listed.counts().warnings,
+            _ => listed.counts().errors,
+        };
         assert!(
-            listed.counts().errors > 0,
+            counted > 0,
             "{owner:?} reported a failure that counts as nothing: {:?}",
             listed.counts()
         );

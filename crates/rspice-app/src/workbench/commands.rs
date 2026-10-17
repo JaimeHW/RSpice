@@ -613,7 +613,7 @@ impl Command {
             Self::SelectionBulkEdit => {
                 active_schematic_editor(app) && state.project_lifecycle.is_open()
             }
-            Self::ConfigurationSets => state.project_lifecycle.is_open(),
+            Self::ConfigurationSets | Self::RuleSetup => state.project_lifecycle.is_open(),
             Self::ReviewComments => {
                 active_schematic_editor(app) && state.project_lifecycle.is_open()
             }
@@ -1676,6 +1676,9 @@ impl Command {
             }
             Self::ConfigurationSets => {
                 crate::workbench::app::open_configuration_sets_dialog(&mut app.state);
+            }
+            Self::RuleSetup => {
+                crate::workbench::app::open_rule_setup(&mut app.state);
             }
             Self::ReviewComments => {
                 crate::workbench::app::open_design_review_comments(&mut app.state);

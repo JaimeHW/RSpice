@@ -289,6 +289,10 @@ pub(in crate::workbench) struct DiagnosticRecord {
     /// is empty rather than restate the message under a different heading.
     pub(in crate::workbench) rule: String,
     pub(in crate::workbench) route: Option<DiagnosticRoute>,
+    /// What the reader may do about this finding's waiver: waive it, remove
+    /// the waiver covering it, or — `None` — nothing, because it is not a
+    /// design-rule finding or its rule may not be waived.
+    pub(in crate::workbench) waiver_action: Option<super::waivers::WaiverAction>,
 }
 
 impl DiagnosticRecord {
@@ -315,7 +319,16 @@ impl DiagnosticRecord {
             details: String::new(),
             rule: String::new(),
             route: None,
+            waiver_action: None,
         }
+    }
+
+    pub(in crate::workbench) fn with_waiver_action(
+        mut self,
+        action: Option<super::waivers::WaiverAction>,
+    ) -> Self {
+        self.waiver_action = action;
+        self
     }
 
     /// State the key the record's identity was minted from.
@@ -346,8 +359,8 @@ impl DiagnosticRecord {
     /// went away, so it stays in the store and stays on the page — it just
     /// stops counting against the design. The decision itself rides on the
     /// canonical record's suppression, so there is exactly one place a waiver
-    /// can be stated. Nothing records a waiver yet; this is the field one is
-    /// recorded in when something does.
+    /// can be stated: the design-rule producers state there the waiver stored
+    /// with the cellview that covers the finding.
     pub(in crate::workbench) const fn waived(&self) -> bool {
         self.canonical.suppression.is_some()
     }
@@ -376,6 +389,8 @@ pub(in crate::workbench) enum DiagnosticOwner {
     Dispatch,
     /// One failed run, attributed to the objects the engine named.
     Run,
+    /// What the project's stored rule deck could not apply as written.
+    RuleDeck,
 }
 
 impl DiagnosticOwner {
@@ -386,11 +401,12 @@ impl DiagnosticOwner {
     /// the assertion below holds this list to one owner per place. The tests
     /// that must drive every owner walk this list rather than naming the
     /// owners they happen to know about.
-    pub(in crate::workbench) const ALL: [Self; 4] = [
+    pub(in crate::workbench) const ALL: [Self; 5] = [
         Self::DesignRules,
         Self::SymbolPins,
         Self::Dispatch,
         Self::Run,
+        Self::RuleDeck,
     ];
 
     /// This owner's place in [`Self::ALL`].
@@ -400,6 +416,7 @@ impl DiagnosticOwner {
             Self::SymbolPins => 1,
             Self::Dispatch => 2,
             Self::Run => 3,
+            Self::RuleDeck => 4,
         }
     }
 
@@ -409,6 +426,7 @@ impl DiagnosticOwner {
             Self::SymbolPins => "symbol-pins",
             Self::Dispatch => "dispatch",
             Self::Run => "run",
+            Self::RuleDeck => "rule-deck",
         }
     }
 }
@@ -450,6 +468,9 @@ pub(in crate::workbench) enum DiagnosticInputs {
         campaign: crate::product::SimulationCampaignId,
         member_index: u32,
     },
+    /// The project's stored rule deck: what it holds that this build did not
+    /// apply as written.
+    RuleDeck,
 }
 
 impl DiagnosticInputs {
@@ -459,6 +480,7 @@ impl DiagnosticInputs {
             Self::SymbolPins { .. } => DiagnosticOwner::SymbolPins,
             Self::Dispatch => DiagnosticOwner::Dispatch,
             Self::Run { .. } | Self::CampaignMember { .. } => DiagnosticOwner::Run,
+            Self::RuleDeck => DiagnosticOwner::RuleDeck,
         }
     }
 
@@ -490,6 +512,9 @@ impl DiagnosticInputs {
                 "the design or solver setup campaign member {member_index} was to run against has \
                  changed since this was reported"
             ),
+            Self::RuleDeck => {
+                "the project's rule deck has changed since this was reported".to_owned()
+            }
         }
     }
 
@@ -510,7 +535,7 @@ impl DiagnosticInputs {
                 );
                 format!("{owner}\u{1f}{subject}")
             }
-            Self::Dispatch => owner.to_owned(),
+            Self::Dispatch | Self::RuleDeck => owner.to_owned(),
             Self::Run { run_sequence } => format!("{owner}\u{1f}{run_sequence:020}"),
             // After every run, and in the order the campaign dispatched them.
             Self::CampaignMember {
@@ -572,6 +597,7 @@ impl DiagnosticInputs {
                 campaign,
                 member_index,
             } => dispatched_setup_digest(scope, &(campaign, member_index)),
+            Self::RuleDeck => super::rule_deck::live_input_digest(state),
         }
     }
 }
@@ -647,7 +673,7 @@ impl<'a> DigestScope<'a> {
     }
 }
 
-fn digest_of(material: &impl serde::Serialize) -> Result<ContentDigest, String> {
+pub(super) fn digest_of(material: &impl serde::Serialize) -> Result<ContentDigest, String> {
     let encoded = serde_json::to_vec(material)
         .map_err(|error| format!("could not encode diagnostic inputs: {error}"))?;
     let mut digest = Sha256::new();
@@ -1075,7 +1101,8 @@ impl AppState {
                 } => campaign != Some(member_campaign),
                 DiagnosticInputs::DesignCheck { .. }
                 | DiagnosticInputs::SymbolPins { .. }
-                | DiagnosticInputs::Dispatch => false,
+                | DiagnosticInputs::Dispatch
+                | DiagnosticInputs::RuleDeck => false,
             })
             .map(|batch| batch.inputs.clone())
             .collect();
@@ -1107,7 +1134,8 @@ impl AppState {
                 DiagnosticInputs::DesignCheck { .. }
                 | DiagnosticInputs::SymbolPins { .. }
                 | DiagnosticInputs::Dispatch
-                | DiagnosticInputs::CampaignMember { .. } => false,
+                | DiagnosticInputs::CampaignMember { .. }
+                | DiagnosticInputs::RuleDeck => false,
             })
             .map(|batch| batch.inputs.clone())
             .collect();
@@ -1143,66 +1171,9 @@ fn batch_standing(batch: &DiagnosticBatch, scope: &DigestScope<'_>) -> BatchStan
     }
 }
 
-/// The stable rule code for a schematic check finding.
-///
-/// `FloatingNode` becomes `DRC-FLOATING-NODE`. Derived from the variant rather
-/// than authored beside it so a new rule cannot ship without a code, and
-/// shaped so the rule deck can address it as one word.
-pub(in crate::workbench) fn design_rule_code(
-    violation_type: rspice_design::drc::DrcViolationType,
-) -> String {
-    format!("DRC-{}", screaming_variant(violation_type))
-}
-
-/// The stable rule code for a symbol pin finding.
-///
-/// `SymbolUnplacedPin` becomes `SYMBOL-UNPLACED-PIN`. Derived from the variant
-/// exactly as [`design_rule_code`] is, and without its `DRC-` family: a
-/// symbol's pin contract is not one of a schematic's electrical rules, and a
-/// reader filtering the page by code is entitled to that distinction.
-pub(in crate::workbench) fn symbol_pin_rule_code(
-    violation_type: rspice_design::drc::DrcViolationType,
-) -> String {
-    screaming_variant(violation_type)
-}
-
-/// `FloatingNode` becomes `FLOATING-NODE`.
-///
-/// One derivation for every family, so two codes for one rule cannot drift
-/// apart on the word the rule is named by.
-fn screaming_variant(violation_type: rspice_design::drc::DrcViolationType) -> String {
-    let variant = format!("{violation_type:?}");
-    let mut code = String::with_capacity(variant.len() + 8);
-    for (index, character) in variant.char_indices() {
-        if character.is_ascii_uppercase() && index > 0 {
-            code.push('-');
-        }
-        code.push(character.to_ascii_uppercase());
-    }
-    code
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_rule_code_is_derived_from_its_variant() {
-        use rspice_design::drc::DrcViolationType;
-        assert_eq!(
-            design_rule_code(DrcViolationType::FloatingNode),
-            "DRC-FLOATING-NODE"
-        );
-        assert_eq!(
-            design_rule_code(DrcViolationType::ShortedOutputs),
-            "DRC-SHORTED-OUTPUTS"
-        );
-        assert_eq!(
-            symbol_pin_rule_code(DrcViolationType::SymbolUnplacedPin),
-            "SYMBOL-UNPLACED-PIN",
-            "a symbol's pin contract is not one of a schematic's rules",
-        );
-    }
 
     /// A symbol view whose pins the checks can read: `work/amp/symbol`, with
     /// one pin, beside a schematic that declares the matching port.
@@ -1263,6 +1234,7 @@ mod tests {
                         vec![crate::state::SimulationRun::new(3)].into();
                     DiagnosticInputs::Run { run_sequence: 3 }
                 }
+                DiagnosticOwner::RuleDeck => DiagnosticInputs::RuleDeck,
             };
             state
                 .publish_diagnostics(inputs.clone(), Vec::new())
@@ -1312,6 +1284,12 @@ mod tests {
                         crate::state::ComponentType::Resistor,
                         crate::state::Point::new(0, 0),
                     );
+                }
+                DiagnosticOwner::RuleDeck => {
+                    // A deck holding something this build does not apply.
+                    state.workspace.content.design_rules =
+                        serde_json::from_str(r#"{"schema_version":2}"#)
+                            .expect("a stored deck always reads");
                 }
             }
 
@@ -1365,7 +1343,8 @@ mod tests {
                 DiagnosticInputs::DesignCheck { .. }
                 | DiagnosticInputs::SymbolPins { .. }
                 | DiagnosticInputs::Dispatch
-                | DiagnosticInputs::CampaignMember { .. } => None,
+                | DiagnosticInputs::CampaignMember { .. }
+                | DiagnosticInputs::RuleDeck => None,
             })
             .collect()
     }

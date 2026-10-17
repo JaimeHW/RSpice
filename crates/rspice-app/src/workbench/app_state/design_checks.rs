@@ -14,13 +14,14 @@ use crate::product::{ContentDigest, ProjectId};
 use crate::state::{
     CanonicalCellViewOwnerKey, CellViewRef, ViewType, canonical_cell_view_owner_key,
 };
-use rspice_design::drc::{DrcConfig, DrcLocation, DrcResult};
+use rspice_design::drc::{DrcConfig, DrcResult};
 
 use super::AppState;
 use super::diagnostic_store::{
     DiagnosticInputs, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject, FindingKey,
-    design_rule_code, mint_canonical,
+    mint_canonical,
 };
+use super::waivers;
 
 /// Producer identity every schematic and electrical rule finding carries.
 const DESIGN_RULE_PRODUCER: &str = "rspice.design.rules";
@@ -92,7 +93,7 @@ impl AppState {
             self.sync_active_schematic_to_workspace();
         }
         let subject = self.workspace.content.active_schematic_reference();
-        let config = design_check_config(self, &subject);
+        let config = self.design_check_config(&subject);
         // Checks run over the design as configured, not over the editor
         // buffer. That is what makes two sheets with coincident authored
         // coordinates two nets: the projection namespaces the pages apart
@@ -140,15 +141,16 @@ impl AppState {
             );
         }
         let subject = self.workspace.content.active_schematic_reference();
-        let config = design_check_config(self, &subject);
+        let config = self.design_check_config(&subject);
         self.publish_design_check_result(subject, config, result)
     }
 
     /// The configuration the design rules are checked under for the
     /// configured simulation root — the profile the Check command uses for
-    /// that cell view, so a pass run by either is the same evidence.
-    pub(in crate::workbench) fn configured_root_design_check_config(&self) -> DrcConfig {
-        design_check_config(self, &self.workspace.content.simulation_root_reference())
+    /// that cell view, so a pass run by either is the same evidence, and the
+    /// one the run gate judges the root under.
+    pub(crate) fn configured_root_design_check_config(&self) -> DrcConfig {
+        self.design_check_config(&self.workspace.content.simulation_root_reference())
     }
 
     /// Publish the design-rule findings of the configured simulation root, as
@@ -164,7 +166,7 @@ impl AppState {
         result: DrcResult,
     ) -> Result<(), String> {
         let subject = self.workspace.content.simulation_root_reference();
-        let config = design_check_config(self, &subject);
+        let config = self.design_check_config(&subject);
         self.publish_design_check_result(subject, config, result)
     }
 
@@ -172,13 +174,19 @@ impl AppState {
         &mut self,
         subject: CellViewRef,
         config: DrcConfig,
-        result: DrcResult,
+        mut result: DrcResult,
     ) -> Result<(), String> {
         if !result.completed {
             return Err(
                 "an incomplete design-check result cannot become current evidence".to_owned(),
             );
         }
+        // The waivers as the documents store them now, whoever produced the
+        // pass: a check states them itself, and a pass handed in from
+        // elsewhere, or re-stated after a waiver changed, is held to the same
+        // ones. Applying them again to a pass that already states them
+        // changes nothing.
+        config.waivers.apply(&mut result);
         let is_active_subject =
             owner_key(&subject) == owner_key(&self.workspace.content.active_schematic_reference());
         let input_digest = design_check_input_digest(self, &subject, &config)?;
@@ -220,7 +228,9 @@ impl AppState {
     ///
     /// Empty where these checks published no records for `subject`. A symbol
     /// view's findings are never among them: they are the pin checks', owned
-    /// by [`DiagnosticInputs::SymbolPins`] and named there.
+    /// by [`DiagnosticInputs::SymbolPins`] and named there. The records about
+    /// the subject's stored waivers follow the findings, so an ordinal below
+    /// the result's length still names its finding.
     pub(crate) fn design_rule_finding_identities(&self, subject: &CellViewRef) -> Vec<uuid::Uuid> {
         let published = DiagnosticInputs::DesignCheck {
             subject: subject.clone(),
@@ -268,7 +278,7 @@ impl AppState {
         if receipt.project_id != self.workspace.content.project.id() {
             return DesignCheckStatus::Stale(receipt);
         }
-        let config = design_check_config(self, subject);
+        let config = self.design_check_config(subject);
         match design_check_input_digest(self, subject, &config) {
             Ok(digest) if digest == receipt.input_digest => DesignCheckStatus::Current(receipt),
             Ok(_) => DesignCheckStatus::Stale(receipt),
@@ -304,6 +314,36 @@ impl AppState {
         let subject = self.workspace.content.active_schematic_reference();
         self.design_checks.clear_subject(&subject);
         self.withdraw_diagnostics(&DiagnosticInputs::DesignCheck { subject });
+    }
+
+    /// State every current design-rule finding again against the waivers as
+    /// they now stand: after a waiver is recorded or removed, and after an
+    /// undo or redo that may have done either.
+    ///
+    /// Only a current pass is re-stated. Its findings still describe the
+    /// design, and a waiver changes whether each counts, not what was found,
+    /// so the pass keeps its digest and stays current. A stale pass is left
+    /// as it is: re-stating it would publish findings about a design that has
+    /// moved under the digest of the one in front of the reader.
+    pub(in crate::workbench) fn refresh_waived_findings(&mut self) {
+        let subjects = self
+            .design_checks
+            .receipts
+            .values()
+            .map(|receipt| receipt.subject.clone())
+            .collect::<Vec<_>>();
+        for subject in subjects {
+            let DesignCheckStatus::Current(receipt) = self.design_check_status(&subject) else {
+                continue;
+            };
+            let result = receipt.result.clone();
+            let config = self.design_check_config(&subject);
+            if let Err(error) = self.publish_design_check_result(subject, config, result) {
+                self.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+                    "Findings could not be stated again against the waivers: {error}"
+                )));
+            }
+        }
     }
 
     pub(crate) fn clear_all_design_checks(&mut self) {
@@ -368,25 +408,26 @@ fn design_rule_records(
         .map(|violation| {
             FindingKey::new(
                 Arc::clone(&producer),
-                design_rule_code(violation.violation_type),
+                violation.violation_type.rule_code(),
                 Arc::clone(&document),
                 location_key(&violation.location),
             )
         })
         .collect();
     let canonicals = mint_canonical(&keys, revision, &format!("design-check:{document_id}"));
-    result
+    let mut records = result
         .violations()
         .iter()
         .zip(keys)
         .zip(canonicals)
-        .map(|((violation, key), canonical)| {
+        .map(|((violation, key), mut canonical)| {
             let route = crate::schematic::view::violations::location_anchor_in(
                 state,
                 subject,
                 &violation.location,
             )
             .map(DiagnosticRoute::Anchor);
+            canonical.suppression = violation.waiver.as_ref().map(waivers::suppression_of);
             DiagnosticRecord::new(
                 canonical,
                 violation.severity.into(),
@@ -396,56 +437,24 @@ fn design_rule_records(
             )
             .keyed(key)
             .with_details(violation.violation_type.suggested_fix())
-            .with_rule(violation.violation_type.description())
+            .with_rule(violation.violation_type.rule().explanation)
             .with_route(route)
+            .with_waiver_action(waivers::finding_waiver_action(subject, violation))
         })
-        .collect()
+        .collect::<Vec<_>>();
+    // The subject's own waivers that do not do what they say are stated with
+    // the pass that found that out.
+    if let Some(stored) = state.schematic_waivers(subject) {
+        records.extend(waivers::stored_waiver_records(
+            state, subject, stored, result,
+        ));
+    }
+    records
 }
 
-/// A stable key of the object a rule finding is located at.
-///
-/// What survives an unrelated edit is the object's own identity, so that is
-/// what the key is: a component or wire by its id, a terminal by its
-/// component and pin, a net or a label by its name. Where the object is drawn
-/// and what the message says about it are not part of it. A finding inside an
-/// instantiated cell view is keyed by the occurrence path down to that view
-/// and its own key inside it, which is what tells `X1/M3` from `X2/M3`. A
-/// point is the last resort, for a finding that names no object at all.
-pub(in crate::workbench) fn location_key(location: &DrcLocation) -> String {
-    match location {
-        DrcLocation::Terminal {
-            component_id,
-            pin_name,
-            ..
-        } => format!("terminal:{component_id}:{pin_name}"),
-        DrcLocation::Component { id, .. } => format!("component:{id}"),
-        DrcLocation::Node { net_name } => format!("net:{net_name}"),
-        DrcLocation::Wire { id } => format!("wire:{id}"),
-        DrcLocation::NetLabel { name } => format!("label:{name}"),
-        DrcLocation::Bus { id } => format!("bus:{id}"),
-        DrcLocation::BusTap { id } => format!("bus-tap:{id}"),
-        DrcLocation::InsideInstance { path, view, inner } => {
-            // Length-prefixed, because an instance name or a net name inside
-            // may contain any separator chosen here.
-            let path = path.to_string();
-            let view = view.key();
-            let inner = location_key(inner);
-            format!(
-                "instance:{}:{path}{}:{view}{}:{inner}",
-                path.len(),
-                view.len(),
-                inner.len()
-            )
-        }
-        DrcLocation::Global => "global".to_owned(),
-        DrcLocation::SymbolPin {
-            reference,
-            pin_name,
-            ..
-        } => format!("symbol-pin:{}:{pin_name}", reference.key()),
-        DrcLocation::Point { x, y } => format!("point:{x}:{y}"),
-    }
-}
+/// A stable key of the object a rule finding is located at: the design
+/// crate's, which a waiver is keyed by too.
+pub(in crate::workbench) use rspice_design::drc::location_key;
 
 fn owner_key(subject: &CellViewRef) -> CanonicalCellViewOwnerKey {
     canonical_cell_view_owner_key(&subject.library, &subject.cell, &subject.view)
@@ -459,19 +468,101 @@ fn project_root_reference(state: &AppState) -> CellViewRef {
     )
 }
 
-/// The profile one cell view is checked under.
-///
-/// A missing ground is a defect only where the design is simulated from: the
-/// project's top cell, and the configured simulation root, which is often a
-/// testbench beside it. Anywhere else a cell is a subcircuit, and its ground
-/// arrives through its ports.
-fn design_check_config(state: &AppState, subject: &CellViewRef) -> DrcConfig {
-    let subject = owner_key(subject);
-    DrcConfig {
-        check_missing_ground: subject == owner_key(&project_root_reference(state))
-            || subject == owner_key(&state.workspace.content.simulation_root_reference()),
-        ..DrcConfig::default()
+impl AppState {
+    /// The configuration `subject` is checked under in this project.
+    ///
+    /// The one authority for it. The Check command, the digest that decides
+    /// whether its findings are current, preflight, check-and-save, the
+    /// connectivity manager, hierarchy extraction and the run gate all take
+    /// their configuration from here. Each used to build its own, so the
+    /// project's rule deck changed what the Problems page said and not what
+    /// the run refused, and the gate checked every root under the shipped
+    /// defaults whatever the project had decided.
+    ///
+    /// It carries the project's rule deck and its connectivity policy — the
+    /// width-mismatch rule reads the policy from here, and was reading the
+    /// default — the waivers stored with the subject and every schematic it
+    /// may instantiate, so a waived error is waived for the run gate as it is
+    /// on the page, and asks for a ground where the subject is a design of
+    /// its own.
+    pub(crate) fn design_check_config(&self, subject: &CellViewRef) -> DrcConfig {
+        DrcConfig {
+            check_missing_ground: asks_for_ground(self, subject),
+            severity_overrides: self.workspace.content.design_rules.severity_overrides(),
+            connectivity: self.workspace.content.connectivity.policy.clone(),
+            waivers: self.check_waivers(subject),
+            ..DrcConfig::default()
+        }
     }
+}
+
+/// Whether `subject` is a design of its own, which must reach a reference.
+///
+/// The configured simulation root always is. Any other cellview the root's
+/// walk places is a cell, which takes its reference from whatever places it,
+/// and so is one that presents an interface: its ground arrives through its
+/// ports. One the root does not place, that presents no interface or is a
+/// testbench, is a design of its own and is asked.
+///
+/// Read cheapest first: the common subject, a cell with ports, is decided
+/// without resolving the configured hierarchy.
+fn asks_for_ground(state: &AppState, subject: &CellViewRef) -> bool {
+    let subject_key = owner_key(subject);
+    if subject_key == owner_key(&state.workspace.content.simulation_root_reference()) {
+        return true;
+    }
+    let testbench = state
+        .library_manager
+        .catalog()
+        .get_library(&subject.library)
+        .and_then(|library| library.get_cell(&subject.cell))
+        .and_then(|cell| cell.get_view(&subject.view))
+        .is_some_and(|view| view.view_type == ViewType::Testbench);
+    if !testbench && subject_has_interface(state, subject) {
+        return false;
+    }
+    // A hierarchy that does not resolve places nothing that can be found, so
+    // the subject is asked: the stricter answer, where the looser one would
+    // pass a design nobody could tell was grounded.
+    let placed = state
+        .workspace
+        .inspect_design_projection(
+            &state.library_manager,
+            &state.workspace.content.active_view,
+            &state.schematic,
+        )
+        .is_ok_and(|projection| {
+            projection
+                .hierarchy_resolution()
+                .bindings
+                .iter()
+                .any(|binding| {
+                    binding.status.is_resolved() && owner_key(&binding.reference) == subject_key
+                })
+        });
+    !placed
+}
+
+/// Whether the drawing behind `subject` declares any port, read from the live
+/// editor where the subject is the view in front of the reader.
+fn subject_has_interface(state: &AppState, subject: &CellViewRef) -> bool {
+    let key = subject.key();
+    if state
+        .workspace
+        .content
+        .active_view
+        .key()
+        .eq_ignore_ascii_case(&key)
+    {
+        return state.schematic.document().has_interface();
+    }
+    state
+        .workspace
+        .content
+        .schematic_buffers
+        .iter()
+        .find(|(buffer, _)| buffer.eq_ignore_ascii_case(&key))
+        .is_none_or(|(_, schematic)| schematic.document().has_interface())
 }
 
 /// The digest of everything one cell view's checks read, as it stands now.
@@ -485,7 +576,7 @@ pub(in crate::workbench) fn live_input_digest(
     state: &AppState,
     subject: &CellViewRef,
 ) -> Result<ContentDigest, String> {
-    let config = design_check_config(state, subject);
+    let config = state.design_check_config(subject);
     design_check_input_digest(state, subject, &config)
 }
 
@@ -566,6 +657,7 @@ fn design_check_input_digest(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rspice_design::drc::DrcLocation;
 
     fn completed_result() -> DrcResult {
         let mut result = DrcResult::new();
@@ -790,7 +882,7 @@ mod tests {
         // A record that already holds the identity this pass will mint.
         let key = FindingKey::new(
             DESIGN_RULE_PRODUCER,
-            design_rule_code(rspice_design::drc::DrcViolationType::UnconnectedPin),
+            rspice_design::drc::DrcViolationType::UnconnectedPin.rule_code(),
             subject.key(),
             location_key(&location),
         );

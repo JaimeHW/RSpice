@@ -1206,6 +1206,9 @@ fn apply_loaded_project_authorized(
         accepted_baseline,
         binding,
     );
+    // What the stored rule deck holds that this build does not apply, on the
+    // page before anything is checked under it.
+    state.publish_rule_deck_issues();
     true
 }
 

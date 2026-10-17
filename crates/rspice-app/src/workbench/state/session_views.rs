@@ -1145,6 +1145,9 @@ pub enum PreflightRemediation {
         /// landing on an arbitrary one would be worse than landing on none.
         line: Option<usize>,
     },
+    /// The project's design rule setup, where the deck a finding is about is
+    /// edited.
+    RuleSetup,
 }
 
 impl PreflightRemediation {

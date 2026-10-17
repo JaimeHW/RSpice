@@ -717,6 +717,31 @@ impl RSpiceApp {
     }
 
     pub(crate) fn action_edit_undo(&mut self) {
+        let waivers = self.state.stored_waivers();
+        self.step_undo();
+        self.after_history_step(&waivers);
+    }
+
+    pub(crate) fn action_edit_redo(&mut self) {
+        let waivers = self.state.stored_waivers();
+        self.step_redo();
+        self.after_history_step(&waivers);
+    }
+
+    /// What an undo or redo that recorded or took away a waiver changes
+    /// beyond the document: the published findings are stated again, and a
+    /// run prepared or checked under the old waivers is dropped, as a waiver
+    /// recorded from the Problems page drops it.
+    fn after_history_step(
+        &mut self,
+        waivers: &crate::workbench::app_state::waivers::StoredWaivers,
+    ) {
+        if self.state.restate_waived_findings(waivers) {
+            self.invalidate_simulation_preflight();
+        }
+    }
+
+    fn step_undo(&mut self) {
         // A stimulus draft is the workspace's own edit history, like the
         // symbol document's. It is stepped first while that workspace is open
         // so Ctrl+Z means "take back what I just typed" rather than reaching
@@ -758,7 +783,7 @@ impl RSpiceApp {
             .push_user_message(ConsoleMessage::info("Nothing to undo"));
     }
 
-    pub(crate) fn action_edit_redo(&mut self) {
+    fn step_redo(&mut self) {
         if self.state.workbench.workspace == crate::workbench::state::Workspace::Stimulus
             && stimulus::redo_draft(&mut self.state)
         {

@@ -20,6 +20,14 @@ pub enum DrcSeverity {
 }
 
 impl DrcSeverity {
+    /// Every severity a rule can be reported at, weakest first.
+    ///
+    /// Declared so a surface offering the choice offers all of it: a rule deck
+    /// that could only promote, because the control listed three of the four,
+    /// would be a deck a team cannot use to demote a finding they have
+    /// reviewed and accepted.
+    pub const ALL: [Self; 4] = [Self::Info, Self::Warning, Self::Error, Self::Critical];
+
     /// Get display name
     pub fn display_name(&self) -> &'static str {
         match self {
@@ -31,8 +39,36 @@ impl DrcSeverity {
     }
 }
 
+/// Which part of the design a rule reads.
+///
+/// The same grouping the violation types are declared in, named so a surface
+/// listing every rule can band them instead of printing twenty-eight rows in
+/// one run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DrcRuleCategory {
+    Connectivity,
+    Electrical,
+    Hierarchy,
+    Naming,
+    Component,
+    SymbolContract,
+}
+
+impl DrcRuleCategory {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Connectivity => "Connectivity",
+            Self::Electrical => "Electrical",
+            Self::Hierarchy => "Hierarchy",
+            Self::Naming => "Naming",
+            Self::Component => "Components",
+            Self::SymbolContract => "Symbol contract",
+        }
+    }
+}
+
 /// Type of DRC violation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum DrcViolationType {
     //-------------------------------------------------------------------------
     // Connectivity Issues
@@ -145,98 +181,126 @@ pub enum DrcViolationType {
 }
 
 impl DrcViolationType {
-    /// Get the default severity for this violation type.
+    /// Every rule the checker can report, in the order they are declared.
     ///
-    /// Three of them have no answer that holds for every object that can raise
-    /// them: an empty reference, an invalid one, and a type that resolves to
-    /// nothing each matter only as far as they change what the deck writes.
-    /// This returns what they are worth on an object that writes nothing;
-    /// [`Self::severity_for_instance`] is what a rule holding the instance
-    /// asks.
-    pub fn default_severity(&self) -> DrcSeverity {
-        match self {
-            // Critical - simulation cannot run
-            Self::MissingGround => DrcSeverity::Critical,
-            Self::DuplicateName => DrcSeverity::Critical,
-            // A cellview that reaches itself has no finite expansion, so there
-            // is no deck to run.
-            Self::RecursiveInstantiation => DrcSeverity::Critical,
+    /// Declaration order groups the rules by [`Self::category`], so a surface
+    /// walking this list in order can band each run without sorting it.
+    /// The array's fixed length does not make it exhaustive — a variant added
+    /// to the enum and not here still compiles — so a test in `rules` holds it
+    /// to the variants serde's derive declares.
+    pub const ALL: [Self; 32] = [
+        Self::FloatingNode,
+        Self::UnconnectedPin,
+        Self::UndrivenInput,
+        Self::UnloadedOutput,
+        Self::OrphanNetLabel,
+        Self::DanglingWire,
+        Self::MalformedBus,
+        Self::UnnamedBus,
+        Self::BusRangeConflict,
+        Self::DanglingBusTap,
+        Self::MixedBusTap,
+        Self::DuplicateBusMemberDriver,
+        Self::VectorWidthMismatch,
+        Self::OffSheetConnectorWithoutPartner,
+        Self::ShortedOutputs,
+        Self::MissingGround,
+        Self::SourceToSource,
+        Self::UndrivenNet,
+        Self::GroundNotNodeZero,
+        Self::SupplyTiedToGround,
+        Self::RecursiveInstantiation,
+        Self::DuplicateName,
+        Self::EmptyName,
+        Self::InvalidName,
+        Self::CaseCollidingNetNames,
+        Self::MissingParameter,
+        Self::ValueOutOfRange,
+        Self::UnknownComponent,
+        Self::UnresolvedReference,
+        Self::SymbolUnplacedPin,
+        Self::SymbolOrphanedPin,
+        Self::SymbolPinOffGrid,
+    ];
 
-            // Error - likely to cause simulation failure
-            // An input nothing drives is a terminal the solver has no source
-            // for. It is a stronger claim than an open passive leg because the
-            // interface said what the pin is for.
-            Self::UndrivenInput => DrcSeverity::Error,
-            Self::ShortedOutputs => DrcSeverity::Error,
-            Self::SourceToSource => DrcSeverity::Error,
-            // Inputs tied to nothing that drives them are a node the solver
-            // has no source for, as one open input is.
-            Self::UndrivenNet => DrcSeverity::Error,
-            // Everything the drawing returns to that net is returned to a node
-            // of its own, not to the reference the author drew.
-            Self::GroundNotNodeZero => DrcSeverity::Error,
-            // The deck keeps the rail and the cellview's node 0 apart, so the
-            // circuit that runs is neither the short the drawing shows nor the
-            // rail the rest of the design uses.
-            Self::SupplyTiedToGround => DrcSeverity::Error,
-            Self::MissingParameter => DrcSeverity::Error,
-            // The engine refuses a card that names an element it does not have.
-            Self::UnresolvedReference => DrcSeverity::Error,
-            Self::CaseCollidingNetNames => DrcSeverity::Error,
-            Self::MalformedBus
+    /// The part of the design this rule reads.
+    pub const fn category(&self) -> DrcRuleCategory {
+        match self {
+            Self::FloatingNode
+            | Self::UnconnectedPin
+            | Self::UndrivenInput
+            | Self::UnloadedOutput
+            | Self::OrphanNetLabel
+            | Self::DanglingWire
+            | Self::MalformedBus
+            | Self::UnnamedBus
             | Self::BusRangeConflict
             | Self::DanglingBusTap
             | Self::MixedBusTap
             | Self::DuplicateBusMemberDriver
-            | Self::VectorWidthMismatch => DrcSeverity::Error,
+            | Self::VectorWidthMismatch
+            | Self::OffSheetConnectorWithoutPartner => DrcRuleCategory::Connectivity,
+            Self::ShortedOutputs
+            | Self::MissingGround
+            | Self::SourceToSource
+            | Self::UndrivenNet
+            | Self::GroundNotNodeZero
+            | Self::SupplyTiedToGround => DrcRuleCategory::Electrical,
+            Self::RecursiveInstantiation => DrcRuleCategory::Hierarchy,
+            Self::DuplicateName
+            | Self::EmptyName
+            | Self::InvalidName
+            | Self::CaseCollidingNetNames => DrcRuleCategory::Naming,
+            Self::MissingParameter
+            | Self::ValueOutOfRange
+            | Self::UnknownComponent
+            | Self::UnresolvedReference => DrcRuleCategory::Component,
             Self::SymbolUnplacedPin | Self::SymbolOrphanedPin | Self::SymbolPinOffGrid => {
-                DrcSeverity::Error
+                DrcRuleCategory::SymbolContract
             }
-
-            // Warning - may affect results
-            //
-            // A node with one connection is almost always a wiring slip, but
-            // it never stops the solver: a dangling resistor leg sits at the
-            // potential of its other end, and a dangling capacitor plate is an
-            // unforced island the conditioning shunt settles. The engine
-            // refuses the islands that cannot be solved on its own account,
-            // so an error here would refuse runs it completes.
-            Self::FloatingNode => DrcSeverity::Warning,
-            Self::UnconnectedPin => DrcSeverity::Warning,
-            // An output nothing loads still solves; the design just loses the
-            // signal it drew.
-            Self::UnloadedOutput => DrcSeverity::Warning,
-            Self::DanglingWire => DrcSeverity::Warning,
-            Self::OrphanNetLabel => DrcSeverity::Warning,
-            Self::ValueOutOfRange => DrcSeverity::Warning,
-            Self::UnnamedBus => DrcSeverity::Warning,
-
-            // Info
-            Self::OffSheetConnectorWithoutPartner => DrcSeverity::Info,
-
-            // Info on an object that emits no instance. See
-            // `severity_for_instance` for one that does.
-            Self::EmptyName => DrcSeverity::Info,
-            Self::InvalidName => DrcSeverity::Info,
-            Self::UnknownComponent => DrcSeverity::Info,
         }
     }
 
-    /// The severity this violation type carries on one emitted instance.
+    /// Get the default severity for this violation type, from its entry in
+    /// the rule table, where the reason for each one is written.
+    ///
+    /// A finding on an emitted instance the deck cannot write is reported no
+    /// lower than its floor for such an instance; see
+    /// [`Self::severity_for_instance`].
+    pub const fn default_severity(&self) -> DrcSeverity {
+        self.rule().default_severity
+    }
+
+    /// The severity this violation type carries on one emitted instance when
+    /// the project's deck says nothing.
     ///
     /// `written` says whether the deck still writes the instance. A run that
     /// will not start is an error, not a note: an instance the netlist cannot
     /// carry — a cell instance whose reference is not a path segment, or whose
     /// master resolves to nothing — refuses the run. An instance the netlister
     /// writes under a name it chose still runs, and the results carry that
-    /// name, so the finding is a warning the author has to see.
+    /// name, so the finding is reported at the rule's default, a warning the
+    /// author has to see.
     pub fn severity_for_instance(&self, written: bool) -> DrcSeverity {
-        match self {
-            Self::EmptyName | Self::InvalidName | Self::UnknownComponent if written => {
-                DrcSeverity::Warning
-            }
-            Self::EmptyName | Self::InvalidName | Self::UnknownComponent => DrcSeverity::Error,
-            _ => self.default_severity(),
+        self.default_severity()
+            .max(self.floor_for_instance(written))
+    }
+
+    /// The lowest severity a finding of this type on one emitted instance is
+    /// reported at, whatever the project's deck sets.
+    ///
+    /// The deck's own floor where the deck still writes the instance; where it
+    /// cannot, the rule's floor for an unwritten instance, which is an error
+    /// for every rule whose finding there refuses the run. Holding only those
+    /// findings there, rather than every finding of the rule, is what lets a
+    /// deck lower the warning on an instance the netlister renamed without
+    /// letting through one it cannot write.
+    pub fn floor_for_instance(&self, written: bool) -> DrcSeverity {
+        let floor = self.rule().floor;
+        if written {
+            floor.deck
+        } else {
+            floor.unwritten_instance
         }
     }
 
@@ -354,6 +418,12 @@ pub struct DrcViolation {
     pub location: DrcLocation,
     /// Related component names (for cross-referencing)
     pub related_items: Vec<String>,
+    /// The waiver that covers this finding, where one does. A waived finding
+    /// is still reported, at its own severity; it does not count against the
+    /// design. Stated by the check from the waivers its configuration
+    /// carries — see [`super::CheckWaivers::apply`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiver: Option<super::DrcWaiver>,
 }
 
 impl DrcViolation {
@@ -371,7 +441,13 @@ impl DrcViolation {
             message: message.into(),
             location,
             related_items: Vec::new(),
+            waiver: None,
         }
+    }
+
+    /// Whether this finding counts against the design: it is not waived.
+    pub const fn counts(&self) -> bool {
+        self.waiver.is_none()
     }
 
     /// Add related items
@@ -386,7 +462,8 @@ impl DrcViolation {
     /// stays a property of the finding rather than of its type alone, because
     /// a naming or binding failure stops a run only where it costs the deck
     /// the instance: see [`DrcViolationType::severity_for_instance`]. A
-    /// project's configured override is applied after this and still wins.
+    /// project's configured override is applied after this and wins, down to
+    /// [`DrcViolationType::floor_for_instance`] and no further.
     pub fn with_instance_severity(mut self, written: bool) -> Self {
         self.severity = self.violation_type.severity_for_instance(written);
         self
@@ -511,32 +588,38 @@ impl DrcResult {
         self.violations.push(violation);
     }
 
-    /// Get all violations
+    /// Get all violations, waived ones included.
     pub fn violations(&self) -> &[DrcViolation] {
         &self.violations
     }
 
-    /// Get only errors (Error and Critical)
+    pub(super) fn violations_mut(&mut self) -> &mut [DrcViolation] {
+        &mut self.violations
+    }
+
+    /// The errors (Error and Critical) that count against the design: a
+    /// waived finding is listed, and is not one of them.
     pub fn errors(&self) -> Vec<&DrcViolation> {
         self.violations
             .iter()
-            .filter(|v| v.severity >= DrcSeverity::Error)
+            .filter(|v| v.counts() && v.severity >= DrcSeverity::Error)
             .collect()
     }
 
-    /// Get only warnings
+    /// The warnings that count against the design.
     pub fn warnings(&self) -> Vec<&DrcViolation> {
         self.violations
             .iter()
-            .filter(|v| v.severity == DrcSeverity::Warning)
+            .filter(|v| v.counts() && v.severity == DrcSeverity::Warning)
             .collect()
     }
 
-    /// Check if there are any errors
+    /// Whether any error counts against the design. A waived error does not:
+    /// this is what the run gate refuses on.
     pub fn has_errors(&self) -> bool {
         self.violations
             .iter()
-            .any(|v| v.severity >= DrcSeverity::Error)
+            .any(|v| v.counts() && v.severity >= DrcSeverity::Error)
     }
 
     /// Check if the design passed (no errors or critical)
@@ -544,17 +627,22 @@ impl DrcResult {
         !self.has_errors()
     }
 
-    /// Get total violation count
+    /// Get total violation count, waived findings included.
     pub fn total_count(&self) -> usize {
         self.violations.len()
     }
 
-    /// Get count by severity
+    /// How many findings at `severity` count against the design.
     pub fn count_by_severity(&self, severity: DrcSeverity) -> usize {
         self.violations
             .iter()
-            .filter(|v| v.severity == severity)
+            .filter(|v| v.counts() && v.severity == severity)
             .count()
+    }
+
+    /// How many findings a waiver covers.
+    pub fn waived_count(&self) -> usize {
+        self.violations.iter().filter(|v| !v.counts()).count()
     }
 
     /// Get summary statistics

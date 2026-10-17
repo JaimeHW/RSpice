@@ -356,7 +356,13 @@ fn a_source_written_as_a_sense_source_is_refused_before_the_run() {
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_buffers(&views);
     let root = rspice_design_model::cell_view::CellViewRef::new("work", "top", "schematic");
     assert!(
-        crate::preparation::check_generated_design(&bench.state, &root, &hierarchy).is_err(),
+        crate::preparation::check_generated_design(
+            &bench.state,
+            &root,
+            &hierarchy,
+            rspice_design::drc::DrcConfig::default(),
+        )
+        .is_err(),
         "the design check passes a deck the engine refuses:\n{netlist}"
     );
     let findings = rspice_design::drc::run_check_with_hierarchy(
