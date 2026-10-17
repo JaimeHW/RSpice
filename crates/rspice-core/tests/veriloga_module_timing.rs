@@ -1,8 +1,8 @@
 #![cfg(feature = "veriloga")]
 
 use rspice_core::{
-    Engine, Netlist, ProjectVerilogARuntimeRegistration,
-    register_project_veriloga_runtimes_for_session,
+    Engine, Netlist, ProjectVerilogARuntimeRegistration, ProjectVerilogASourceRegistration,
+    ResourceLimits, hold_project_veriloga_sources_for_session,
 };
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::path::PathBuf;
@@ -55,12 +55,17 @@ endmodule
         "__rspice_project__/module-time-queries-{}/queries.va",
         std::process::id()
     ));
-    register_project_veriloga_runtimes_for_session([ProjectVerilogARuntimeRegistration {
-        source_key: key.clone(),
-        aliases: vec!["timing_queries".into()],
-        model: runtime.model,
-        canonical_ir: runtime.canonical_ir,
-    }])
+    let _installed = hold_project_veriloga_sources_for_session(
+        [ProjectVerilogASourceRegistration::Runtime(
+            ProjectVerilogARuntimeRegistration {
+                source_key: key.clone(),
+                aliases: vec!["timing_queries".into()],
+                model: runtime.model,
+                canonical_ir: runtime.canonical_ir,
+            },
+        )],
+        ResourceLimits::default(),
+    )
     .unwrap();
     let deck = Netlist::parse(&format!("* declaration-owned digital queries\nV1 in 0 1\nR1 in p 1000\nX1 p 0 timing_queries\n.va \"{}\" timing_queries\n.end\n", key.display())).unwrap();
     let result = Engine::default().run_tran(&deck, 1e-9, 0.2e-9).unwrap();
@@ -106,13 +111,20 @@ fn module_timescales_drive_exact_mixed_breakpoints_from_file_and_sealed_sources(
         "__rspice_project__/module-timing-{}/timed.va",
         std::process::id()
     ));
-    register_project_veriloga_runtimes_for_session([ProjectVerilogARuntimeRegistration {
-        source_key: key.clone(),
-        aliases: vec!["timed".into()],
-        model: runtime.model,
-        canonical_ir: serde_json::from_slice(&serde_json::to_vec(&runtime.canonical_ir).unwrap())
-            .unwrap(),
-    }])
+    let _installed = hold_project_veriloga_sources_for_session(
+        [ProjectVerilogASourceRegistration::Runtime(
+            ProjectVerilogARuntimeRegistration {
+                source_key: key.clone(),
+                aliases: vec!["timed".into()],
+                model: runtime.model,
+                canonical_ir: serde_json::from_slice(
+                    &serde_json::to_vec(&runtime.canonical_ir).unwrap(),
+                )
+                .unwrap(),
+            },
+        )],
+        ResourceLimits::default(),
+    )
     .unwrap();
 
     for (source, selection) in [(path, " module=timed"), (key, "")] {

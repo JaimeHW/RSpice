@@ -2878,24 +2878,6 @@ fn prepare_project_veriloga_registration(
     })
 }
 
-#[cfg(feature = "veriloga")]
-fn register_project_veriloga_runtimes_for_session_with_limit(
-    registrations: impl IntoIterator<Item = ProjectVerilogARuntimeRegistration>,
-    max_shared_cache_bytes: usize,
-) -> Result<(), String> {
-    install_project_veriloga_sources(
-        registrations
-            .into_iter()
-            .map(ProjectVerilogASourceRegistration::Runtime),
-        ResourceLimits {
-            max_shared_cache_bytes,
-            ..Default::default()
-        },
-        false,
-    )
-    .map(drop)
-}
-
 /// Sealed Verilog-A sources an execution installed, held in the shared cache
 /// until this is dropped.
 ///
@@ -2931,26 +2913,29 @@ impl Drop for HeldVerilogASources {
 /// caller-selected source and cache limits, holding every installed source
 /// until the returned value is dropped.
 ///
-/// Both kinds share key and alias collision checks and the bounded in-memory
-/// cache. Validation, collision and budget failures leave the installed set
-/// unchanged.
+/// This is the only way to install a sealed source: one installed and not
+/// held could be evicted by the next install before the execution that
+/// installed it builds. Both kinds share key and alias collision checks and
+/// the bounded in-memory cache: duplicate or case-colliding keys, and model
+/// aliases within one project, signed package or model library, may only
+/// identify identical artifacts. Validation, collision and budget failures
+/// leave the installed set unchanged. File-backed cache persistence is
+/// bypassed for these sealed artifacts.
 #[cfg(feature = "veriloga")]
 pub fn hold_project_veriloga_sources_for_session(
     registrations: impl IntoIterator<Item = ProjectVerilogASourceRegistration>,
     limits: ResourceLimits,
 ) -> Result<HeldVerilogASources, String> {
-    install_project_veriloga_sources(registrations, limits, true)
-        .map(|keys| HeldVerilogASources { keys })
+    install_project_veriloga_sources(registrations, limits).map(|keys| HeldVerilogASources { keys })
 }
 
-/// Install the set in one transaction under the cache lock; with `hold`, each
-/// installed key is held before the lock is released, so no other install can
-/// evict it in between. Returns the held keys.
+/// Install the set in one transaction under the cache lock, holding each
+/// installed key before the lock is released, so no other install can evict
+/// it in between. Returns the held keys.
 #[cfg(feature = "veriloga")]
 fn install_project_veriloga_sources(
     registrations: impl IntoIterator<Item = ProjectVerilogASourceRegistration>,
     limits: ResourceLimits,
-    hold: bool,
 ) -> Result<Vec<VerilogASourceKey>, String> {
     let max_shared_cache_bytes = limits.max_shared_cache_bytes;
     let mut prepared_by_key = BTreeMap::<PathBuf, PreparedProjectVerilogARegistration>::new();
@@ -3107,68 +3092,10 @@ fn install_project_veriloga_sources(
         .map(|(key, _, _)| key.clone())
         .collect::<Vec<VerilogASourceKey>>();
     cache.try_replace_batch(replacements, max_shared_cache_bytes)?;
-    if !hold {
-        return Ok(Vec::new());
-    }
     for key in &keys {
         cache.hold(key);
     }
     Ok(keys)
-}
-
-/// Atomically register a set of exact in-memory project- or signed-PDK-owned
-/// Verilog-A runtimes for this process session.
-///
-/// The entire set is validated, collision-checked, and budgeted before the
-/// shared cache changes. Duplicate or case-colliding keys and model aliases
-/// may only identify byte-for-byte identical runtime artifacts. Any validation,
-/// collision, allocation, or resource failure leaves the cache unchanged.
-/// File-backed cache persistence is intentionally bypassed for these sealed
-/// sealed artifacts.
-#[cfg(feature = "veriloga")]
-pub fn register_project_veriloga_runtimes_for_session(
-    registrations: impl IntoIterator<Item = ProjectVerilogARuntimeRegistration>,
-) -> Result<(), String> {
-    register_project_veriloga_runtimes_for_session_with_limits(
-        registrations,
-        ResourceLimits::default(),
-    )
-}
-
-/// Atomically register project-owned Verilog-A runtimes under caller-selected
-/// resource governance.
-///
-/// This is equivalent to [`register_project_veriloga_runtimes_for_session`]
-/// except that `limits.max_shared_cache_bytes` bounds the aggregate retained
-/// size of the requested runtime set.
-#[cfg(feature = "veriloga")]
-pub fn register_project_veriloga_runtimes_for_session_with_limits(
-    registrations: impl IntoIterator<Item = ProjectVerilogARuntimeRegistration>,
-    limits: ResourceLimits,
-) -> Result<(), String> {
-    register_project_veriloga_runtimes_for_session_with_limit(
-        registrations,
-        limits.max_shared_cache_bytes,
-    )
-}
-
-/// Register one exact in-memory project-owned Verilog-A runtime for this
-/// process session.
-///
-/// This compatibility wrapper delegates to the atomic plural API. The compiled
-/// module identity is registered as the runtime's sole model alias.
-#[cfg(feature = "veriloga")]
-pub fn register_project_veriloga_runtime_for_session(
-    source_key: impl AsRef<Path>,
-    model: rspice_veriloga::CompiledModel,
-    canonical_ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact,
-) -> Result<(), String> {
-    register_project_veriloga_runtimes_for_session([ProjectVerilogARuntimeRegistration {
-        source_key: source_key.as_ref().to_path_buf(),
-        aliases: Vec::new(),
-        model,
-        canonical_ir,
-    }])
 }
 
 /// Register a precompiled Verilog-A model in the global engine cache.
@@ -3415,6 +3342,36 @@ endmodule
         for key in keys {
             cache.remove(&VerilogASourceKey::new(key, None));
         }
+    }
+
+    /// Install a runtime set and release the hold at once. The set stays
+    /// installed until a later install evicts it, so an entry a check still
+    /// finds after a refused install was left by the refusal, not kept by a
+    /// hold, and these tests hold nothing against the others' budgets.
+    fn install_runtimes(
+        registrations: impl IntoIterator<Item = ProjectVerilogARuntimeRegistration>,
+    ) -> Result<(), String> {
+        hold_project_veriloga_sources_for_session(
+            registrations
+                .into_iter()
+                .map(ProjectVerilogASourceRegistration::Runtime),
+            ResourceLimits::default(),
+        )
+        .map(drop)
+    }
+
+    /// [`install_runtimes`] for one runtime, its module name its only alias.
+    fn install_runtime(
+        source_key: &Path,
+        model: rspice_veriloga::CompiledModel,
+        canonical_ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact,
+    ) -> Result<(), String> {
+        install_runtimes([ProjectVerilogARuntimeRegistration {
+            source_key: source_key.to_path_buf(),
+            aliases: Vec::new(),
+            model,
+            canonical_ir,
+        }])
     }
 
     #[test]
@@ -3716,12 +3673,8 @@ endmodule
             )
             .expect("compile in-memory project source");
 
-        register_project_veriloga_runtime_for_session(
-            &source_key,
-            report.model,
-            report.canonical_ir,
-        )
-        .expect("register in-memory project runtime");
+        install_runtime(&source_key, report.model, report.canonical_ir)
+            .expect("register in-memory project runtime");
 
         let error = resolve_cached_or_compile_veriloga_with_limits_and_abort(
             &source_key,
@@ -3759,12 +3712,8 @@ endmodule
             )
             .expect("compile in-memory model-library source");
 
-        register_project_veriloga_runtime_for_session(
-            &source_key,
-            report.model,
-            report.canonical_ir,
-        )
-        .expect("register sealed model-library runtime");
+        install_runtime(&source_key, report.model, report.canonical_ir)
+            .expect("register sealed model-library runtime");
 
         let key = VerilogASourceKey::new(&source_key, None);
         let mut cache = veriloga_source_cache().write().expect("cache lock");
@@ -3797,14 +3746,8 @@ endmodule
         );
         let first = compile("first_owned");
         let second = compile("second_owned");
-        register_project_veriloga_runtime_for_session(&first_key, first.model, first.canonical_ir)
-            .unwrap();
-        register_project_veriloga_runtime_for_session(
-            &second_key,
-            second.model,
-            second.canonical_ir,
-        )
-        .unwrap();
+        install_runtime(&first_key, first.model, first.canonical_ir).unwrap();
+        install_runtime(&second_key, second.model, second.canonical_ir).unwrap();
 
         assert_eq!(
             resolve_cached_or_compile_veriloga(&first_key)
@@ -3835,7 +3778,7 @@ endmodule
         let second_key =
             PathBuf::from("__rspice_project__/00000000-0000-0000-0000-000000000101/b/second.va");
 
-        register_project_veriloga_runtimes_for_session([
+        install_runtimes([
             project_registration(&first_key, "batch_first", &["FIRST_ALIAS"]),
             project_registration(&second_key, "batch_second", &["SECOND_ALIAS"]),
         ])
@@ -3866,14 +3809,10 @@ endmodule
         let installed_key = PathBuf::from(format!("__rspice_project__/{project}/stable/model.va"));
         let candidate_key =
             PathBuf::from(format!("__rspice_project__/{project}/candidate/model.va"));
-        register_project_veriloga_runtimes_for_session([project_registration(
-            &installed_key,
-            "stable_model",
-            &[],
-        )])
-        .expect("install stable runtime");
+        install_runtimes([project_registration(&installed_key, "stable_model", &[])])
+            .expect("install stable runtime");
 
-        let error = register_project_veriloga_runtimes_for_session([
+        let error = install_runtimes([
             project_registration(&candidate_key, "candidate_model", &[]),
             project_registration(&installed_key, "conflicting_model", &[]),
         ])
@@ -3902,12 +3841,8 @@ endmodule
         let candidate_key = PathBuf::from(
             "__rspice_project__/00000000-0000-0000-0000-000000000103/candidate/model.va",
         );
-        register_project_veriloga_runtimes_for_session([project_registration(
-            &stable_key,
-            "resource_stable",
-            &[],
-        )])
-        .expect("install stable runtime");
+        install_runtimes([project_registration(&stable_key, "resource_stable", &[])])
+            .expect("install stable runtime");
 
         let candidate = project_registration(&candidate_key, "resource_candidate", &[]);
         let prepared = prepare_project_veriloga_registration(candidate.clone())
@@ -3917,9 +3852,12 @@ endmodule
             &prepared.entry,
         )
         .expect("size candidate runtime");
-        let error = register_project_veriloga_runtimes_for_session_with_limit(
-            [candidate],
-            required.saturating_sub(1),
+        let error = hold_project_veriloga_sources_for_session(
+            [ProjectVerilogASourceRegistration::Runtime(candidate)],
+            ResourceLimits {
+                max_shared_cache_bytes: required.saturating_sub(1),
+                ..ResourceLimits::default()
+            },
         )
         .expect_err("an undersized aggregate budget must reject the whole batch");
         assert!(
@@ -3946,7 +3884,7 @@ endmodule
         let lower_key = PathBuf::from(
             "__rspice_project__/00000000-0000-0000-0000-000000000104/digest/model.va",
         );
-        let error = register_project_veriloga_runtimes_for_session([
+        let error = install_runtimes([
             project_registration(&upper_key, "upper_model", &[]),
             project_registration(&lower_key, "lower_model", &[]),
         ])
@@ -3962,7 +3900,7 @@ endmodule
             PathBuf::from("__rspice_project__/00000000-0000-0000-0000-000000000105/a/first.va");
         let second_key =
             PathBuf::from("__rspice_project__/00000000-0000-0000-0000-000000000105/b/second.va");
-        let error = register_project_veriloga_runtimes_for_session([
+        let error = install_runtimes([
             project_registration(&first_key, "alias_first", &["SharedAlias"]),
             project_registration(&second_key, "alias_second", &["sharedalias"]),
         ])
@@ -3978,12 +3916,10 @@ endmodule
             "__rspice_project__/00000000-0000-0000-0000-000000000106/digest/model.va",
         );
         let registration = project_registration(&key, "idempotent_model", &["stable_alias"]);
-        register_project_veriloga_runtimes_for_session([registration.clone()])
-            .expect("initial registration");
+        install_runtimes([registration.clone()]).expect("initial registration");
         let before = resolve_cached_or_compile_veriloga(&key).expect("initial cached runtime");
 
-        register_project_veriloga_runtimes_for_session([registration])
-            .expect("identical reinstall");
+        install_runtimes([registration]).expect("identical reinstall");
         let after = resolve_cached_or_compile_veriloga(&key).expect("reinstalled cached runtime");
         assert!(std::sync::Arc::ptr_eq(&before.model, &after.model));
         remove_project_runtime_keys(&[&key]);
@@ -3994,12 +3930,8 @@ endmodule
         let key = PathBuf::from(
             "__rspice_project__/00000000-0000-0000-0000-000000000109/digest/telemetry.va",
         );
-        register_project_veriloga_runtimes_for_session([project_registration(
-            &key,
-            "telemetry_model",
-            &[],
-        )])
-        .expect("register telemetry runtime");
+        install_runtimes([project_registration(&key, "telemetry_model", &[])])
+            .expect("register telemetry runtime");
         let before = veriloga_cache_telemetry();
 
         resolve_cached_or_compile_veriloga(&key).expect("first memory hit");
@@ -4082,7 +4014,7 @@ endmodule
         let second_key = PathBuf::from(
             "__rspice_project__/00000000-0000-0000-0000-000000000108/digest/device.va",
         );
-        register_project_veriloga_runtimes_for_session([
+        install_runtimes([
             project_registration(&first_key, "isolated_first", &["device_alias"]),
             project_registration(&second_key, "isolated_second", &["DEVICE_ALIAS"]),
         ])

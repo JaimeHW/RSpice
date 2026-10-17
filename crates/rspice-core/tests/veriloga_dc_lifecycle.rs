@@ -725,10 +725,16 @@ endmodule"#,
             Some("implicit_integrator_pair"),
         )
         .unwrap();
-    rspice_core::register_project_veriloga_runtime_for_session(
-        &source_key,
-        runtime.model,
-        runtime.canonical_ir,
+    let _installed = rspice_core::hold_project_veriloga_sources_for_session(
+        [rspice_core::ProjectVerilogASourceRegistration::Runtime(
+            rspice_core::ProjectVerilogARuntimeRegistration {
+                source_key,
+                aliases: Vec::new(),
+                model: runtime.model,
+                canonical_ir: runtime.canonical_ir,
+            },
+        )],
+        rspice_core::ResourceLimits::default(),
     )
     .unwrap();
     let point = engine.run_dc_op(&netlist).unwrap();

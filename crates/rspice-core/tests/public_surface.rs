@@ -207,8 +207,15 @@ use rspice_core::analysis::harmonic_balance::{
 // them. Nothing outside the core called them, and a caller that did would
 // leave what it installed for the next install to evict before it built;
 // the core's integration tests install through the hold instead.
-// The census is 5,735, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5735;
+// The census was 5,735, with no slack.
+// Three more are removed for the same reason:
+// `register_project_veriloga_runtimes_for_session`, its `_with_limits` form
+// and the one-runtime `register_project_veriloga_runtime_for_session`, which
+// installed sealed runtimes without holding them and had no caller outside
+// the core. `hold_project_veriloga_sources_for_session` is now the only way
+// to install a sealed source.
+// The census is 5,732, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5732;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

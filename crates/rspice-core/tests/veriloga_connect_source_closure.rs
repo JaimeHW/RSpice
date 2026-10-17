@@ -1,8 +1,8 @@
 #![cfg(feature = "veriloga")]
 
 use rspice_core::{
-    Engine, Netlist, ProjectVerilogARuntimeRegistration,
-    register_project_veriloga_runtimes_for_session,
+    Engine, HeldVerilogASources, Netlist, ProjectVerilogARuntimeRegistration,
+    ProjectVerilogASourceRegistration, ResourceLimits, hold_project_veriloga_sources_for_session,
 };
 use rspice_veriloga::{
     CompilerOptions, VerilogACompiler, VirtualCompileLimits, VirtualSourceBundle, VirtualSourceFile,
@@ -34,6 +34,19 @@ impl Drop for SourceTree {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
+}
+
+/// Install sealed runtimes as an execution does, held until the hold drops.
+fn install(
+    registrations: impl IntoIterator<Item = ProjectVerilogARuntimeRegistration>,
+) -> HeldVerilogASources {
+    hold_project_veriloga_sources_for_session(
+        registrations
+            .into_iter()
+            .map(ProjectVerilogASourceRegistration::Runtime),
+        ResourceLimits::default(),
+    )
+    .unwrap()
 }
 
 struct EditDuringCompilation {
@@ -156,7 +169,7 @@ fn virtual_models_share_active_included_connection_rules_after_transport_and_cac
         });
         keys.push(source_key);
     }
-    register_project_veriloga_runtimes_for_session(registrations).unwrap();
+    let _installed = install(registrations);
     let deck = Netlist::parse(&format!(
         "* sealed active connection closure\nV1 p 0 1\nVclk clk 0 1\nX1 p clk q1 first\nX2 p clk q2 second\n.va \"{}\" first\n.va \"{}\" second\n.end\n",
         keys[0].display(), keys[1].display()
@@ -269,13 +282,12 @@ fn named_configuration_changes_file_cached_and_transported_virtual_boundaries() 
     let canonical_ir =
         serde_json::from_slice(&serde_json::to_vec(&compiled.runtime.canonical_ir).unwrap())
             .unwrap();
-    register_project_veriloga_runtimes_for_session(vec![ProjectVerilogARuntimeRegistration {
+    let _installed = install([ProjectVerilogARuntimeRegistration {
         source_key: virtual_key.clone(),
         aliases: vec!["DRIVER".to_owned()],
         model: compiled.runtime.model,
         canonical_ir,
-    }])
-    .unwrap();
+    }]);
     for path in [&file, &virtual_key] {
         let deck_text = format!(
             "* named connections\nV1 p 0 1\nX1 p q DRIVER gain=2e-3\n.va \"{}\" DRIVER\n",
@@ -404,7 +416,7 @@ fn source_qualified_configuration_resolves_duplicate_names_after_virtual_remappi
         });
         virtual_keys.push(source_key);
     }
-    register_project_veriloga_runtimes_for_session(registrations).unwrap();
+    let _installed = install(registrations);
     for sources in [&file_keys, &virtual_keys] {
         let deck_text = format!(
             "* qualified connections\nV1 p 0 1\nX1 p q LOWLIB\n.va \"{}\" LOWLIB\n.va \"{}\" HIGHLIB\n.options connectrules=Shared\n",
@@ -463,7 +475,6 @@ fn source_qualified_configuration_resolves_duplicate_names_after_virtual_remappi
 fn standalone_virtual_connections_register_atomically_with_devices() {
     use rspice_core::{
         ProjectVerilogAConnectionLibraryRegistration, ProjectVerilogASourceRegistration as Source,
-        ResourceLimits, hold_project_veriloga_sources_for_session,
     };
     let compiler = VerilogACompiler::new(CompilerOptions {
         enable_ams: true,
