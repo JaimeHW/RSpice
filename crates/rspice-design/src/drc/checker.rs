@@ -1142,18 +1142,18 @@ pub(super) fn append_case_collision_violations(
     }
 }
 
-/// Report each net the drawing names as ground that the deck does not write
-/// as node 0, at the first label that names it so.
+/// Report each net a ground label names that the deck does not write as node
+/// 0, at the first such label on it.
 ///
-/// The canvas reads `GND!` as ground because Xyce's `REPLACEGROUND` folds it,
-/// but the netlister writes it as a global node of its own unless the
-/// project's technology global-net catalog promotes it onto a name the deck
-/// writes as node 0, so everything returned through it is returned to that
-/// node instead of the reference. A label spelled as node 0 can lose its net
-/// the same way to a name that claimed it first, an interface port's or an
-/// earlier label's, and the deck then writes that name. Either way the
-/// drawing says ground where the deck does not. A label on no net is the
-/// orphan-label rule's.
+/// A ground label makes its net node 0 only when it is the name the net
+/// takes. A name that claimed the net first, an interface port's or an earlier
+/// label's, keeps it: the extractor reports the conflict as a naming warning,
+/// the net stays apart from ground, and the deck writes that name, so
+/// everything returned through the label is returned to that node instead of
+/// the reference. The same holds for a label the project's connectivity
+/// contract promotes onto a name that is not ground. Either way the drawing
+/// says ground where the deck does not. A label on no net is the orphan-label
+/// rule's.
 pub(super) fn append_ground_not_node_zero(
     schematic: &crate::schematic::document::SchematicDocument,
     connectivity: &ExtractedConnectivity,
@@ -1172,7 +1172,7 @@ pub(super) fn append_ground_not_node_zero(
         let Some(node) = connectivity.net_at(label.pos).map(|net| net.spice_name()) else {
             continue;
         };
-        if crate::schematic::ground_names::writes_node_zero(&node)
+        if crate::schematic::ground_names::is_ground_reference(&node)
             || !stated.insert(node.to_ascii_lowercase())
         {
             continue;

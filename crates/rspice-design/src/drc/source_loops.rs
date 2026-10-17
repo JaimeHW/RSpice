@@ -10,10 +10,9 @@
 //! ground beside V2 from `in` to `vb` is an ordinary circuit.
 //!
 //! The engine's graph has the independent sources as its only edges, and
-//! node 0 as one node however the deck spells it, so this one does too. A
-//! global the deck writes under its own name — `GND!` — is a node of its own
-//! there, whatever it reads as on the canvas: V1 from `vdd` to `0` beside V2
-//! from `vdd` to `GND!` closes no loop the engine sees. An inductor
+//! ground as one node however it is spelled, so this one does too: the deck
+//! writes every ground name as `0`, so V1 from `vdd` to `0` beside V2 from
+//! `vdd` to `GND!` is two sources across one pair of nodes. An inductor
 //! or a dependent source can also close a loop the engine cannot solve, but
 //! that is for the engine to say about the deck it actually builds; a rule
 //! that guessed at it would refuse designs the engine solves.
@@ -21,13 +20,13 @@
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 
-/// The node every name the deck writes as node 0 is in the engine's graph.
+/// The node every spelling of ground is in the engine's graph.
 pub(super) const GROUND_KEY: &str = "0";
 
-/// The node a source terminal stands on, as the engine's graph has it: node 0
-/// is one node whichever of its names the drawing used.
+/// The node a source terminal stands on, as the engine's graph has it: ground
+/// is one node whatever the drawing calls it.
 pub(super) fn node_key(net: &str) -> &str {
-    if crate::schematic::ground_names::writes_node_zero(net) {
+    if crate::schematic::ground_names::is_ground_reference(net) {
         GROUND_KEY
     } else {
         net

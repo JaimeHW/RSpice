@@ -1,45 +1,25 @@
 //! Which names denote the simulation reference node.
 //!
-//! Two questions with two answers. [`is_ground_reference`] says what reads as
-//! ground on the canvas: the union over every `rspice_core::netlist::GroundPolicy`
-//! variant, because a deck may be executed under any of them, so a name that
-//! some dialect folds onto node `0` has to read as ground here too. The drift
-//! between those two authorities is what `ground_aliases_cover_every_engine_policy`
-//! forbids. [`writes_node_zero`] says which net the deck the netlister writes
-//! actually puts on node `0`, and that is what every electrical judgement of
-//! the drawing asks.
+//! One authority for the whole editor. The alias set is the union over every
+//! `rspice_core::netlist::GroundPolicy` variant, because the deck a schematic
+//! produces may be executed under any of them: a name that some dialect folds
+//! onto node `0` has to read as ground here too, or the canvas and the engine
+//! disagree about how many nodes the design has. The drift between those two
+//! authorities is what `ground_aliases_cover_every_engine_policy` forbids.
+//!
+//! The extractor merges every net so named into the ground net and the
+//! netlister writes it as `0`, so no deck a schematic produces carries a
+//! ground alias under its own spelling, and every rule that reasons about the
+//! reference node asks this same question.
 
 /// Every spelling some engine dialect folds onto node `0`.
 pub const GROUND_ALIASES: [&str; 4] = ["0", "GND", "GND!", "GROUND"];
 
-/// The net names the netlister writes as node `0`.
-///
-/// Narrower than [`GROUND_ALIASES`]: `GND!` folds onto node `0` only under
-/// Xyce's `.PREPROCESS REPLACEGROUND`, which no deck the netlister writes asks
-/// for, so a net named `GND!` is written as a global node of that name.
-const DECK_NODE_ZERO_NAMES: [&str; 3] = ["0", "GND", "GROUND"];
-
-/// `true` when the deck writes a net carrying this name as node `0`.
-///
-/// `name` is the net's name after the project's connectivity contract has
-/// promoted it — the name every extracted net and terminal carries. That
-/// promotion is the one alias setting the netlister honours: a technology
-/// global-net catalog that lists `GND` makes an authored `GND!` arrive here as
-/// `GND`, and node `0`, exactly as it reaches the deck. A drawn ground symbol
-/// names its net `0`.
-///
-/// The netlister names every node through this, and every rule that reasons
-/// about the reference node asks it, so a check cannot ground a net the deck
-/// writes as an ordinary node, or the reverse.
-pub fn writes_node_zero(name: &str) -> bool {
-    DECK_NODE_ZERO_NAMES
-        .iter()
-        .any(|zero| name.eq_ignore_ascii_case(zero))
-}
-
 /// `true` when `name` denotes the reference node under any dialect the engine
 /// can be asked to run.
 ///
+/// `name` is a net's name after the project's connectivity contract has
+/// promoted it, which is the name every extracted net and terminal carries.
 /// `VSS`, `VEE`, `AGND` and friends are ordinary supply rails: no dialect ties
 /// them to node `0`, so neither does this.
 pub fn is_ground_reference(name: &str) -> bool {

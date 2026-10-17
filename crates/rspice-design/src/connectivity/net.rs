@@ -49,13 +49,13 @@ impl Net {
     /// Get SPICE node name
     ///
     /// Returns:
-    /// - "0" for a net whose name the deck writes as node 0
-    ///   ([`writes_node_zero`](crate::schematic::ground_names::writes_node_zero))
+    /// - "0" for ground nets
     /// - User label if provided
     /// - "net{id}" otherwise
     pub fn spice_name(&self) -> String {
         if let Some(ref label) = self.label {
-            if crate::schematic::ground_names::writes_node_zero(label) {
+            // The extractor merges these same nets into the ground net.
+            if crate::schematic::ground_names::is_ground_reference(label) {
                 return "0".to_string();
             }
             return label.clone();

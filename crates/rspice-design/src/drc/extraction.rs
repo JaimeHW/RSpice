@@ -463,8 +463,6 @@ fn restated(
 /// its own net map: a ground-named node is evidence only once some terminal
 /// that is not a drawn ground symbol's stands on it. Node 0 is global, so the
 /// evidence is about the whole design wherever in the hierarchy it is found.
-/// It is node 0 as the deck writes it: a terminal on a `GND!` the deck writes
-/// under its own name grounds nothing.
 fn reaches_ground(components: &[ComponentInfo]) -> bool {
     components
         .iter()
@@ -473,7 +471,7 @@ fn reaches_ground(components: &[ComponentInfo]) -> bool {
             component
                 .pins
                 .iter()
-                .any(|pin| crate::schematic::ground_names::writes_node_zero(&pin.net_name))
+                .any(|pin| crate::schematic::ground_names::is_ground_reference(&pin.net_name))
         })
 }
 
@@ -1066,7 +1064,7 @@ impl GlobalTouches {
             let Some((view, _, node)) = touched.touches.first() else {
                 continue;
             };
-            if touched.continues || crate::schematic::ground_names::writes_node_zero(node) {
+            if touched.continues || crate::schematic::ground_names::is_ground_reference(node) {
                 continue;
             }
             let total = touched
@@ -1096,14 +1094,15 @@ impl GlobalTouches {
 /// Globals a cellview ties to ground, and the globals the walk reaches as
 /// nodes of their own, gathered across the walk.
 ///
-/// A ground symbol names its net `0` over every label on it, so a global label
-/// that shares a net with one is node 0 in that cellview, while every other
-/// cellview that names the global writes it as the global's own node. The deck
-/// shorts nothing: the tie the drawing shows is not in it, and the rail and
-/// that cellview's node 0 stay apart. Within one cellview the two cannot part,
-/// because each label of the name joins the one net; a source on it then
-/// stands across node 0, which the source rule states. And a global no other
-/// cellview reaches is only another name for node 0 where it is tied.
+/// A ground symbol names its net `0` over every label on it, and so does a
+/// ground label that named the net before the global's label did, so a global
+/// label that shares a net with either is node 0 in that cellview, while every
+/// other cellview that names the global writes it as the global's own node.
+/// The deck shorts nothing: the tie the drawing shows is not in it, and the
+/// rail and that cellview's node 0 stay apart. Within one cellview the two
+/// cannot part, because each label of the name joins the one net; a source on
+/// it then stands across node 0, which the source rule states. And a global no
+/// other cellview reaches is only another name for node 0 where it is tied.
 #[derive(Default)]
 struct GroundTies {
     /// By folded node name: the first cellview that ties the global to node
@@ -1141,12 +1140,13 @@ impl GroundTies {
                 continue;
             };
             let key = global.to_ascii_lowercase();
-            if !globals.contains(&key) || crate::schematic::ground_names::writes_node_zero(&global)
+            if !globals.contains(&key)
+                || crate::schematic::ground_names::is_ground_reference(&global)
             {
                 continue;
             }
             let grounded = connectivity.net_at(label.pos).is_some_and(|net| {
-                crate::schematic::ground_names::writes_node_zero(&net.spice_name())
+                crate::schematic::ground_names::is_ground_reference(&net.spice_name())
             });
             if grounded {
                 self.tied

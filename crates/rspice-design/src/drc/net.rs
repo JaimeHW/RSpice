@@ -37,8 +37,6 @@ pub(super) struct NetInfo {
     pub(super) ground_symbol_count: usize,
     pub(super) has_voltage_source: bool,
     pub(super) has_current_source: bool,
-    /// The deck writes this node as node 0. A global that reads as ground on
-    /// the canvas but is written under its own name is not.
     pub(super) is_ground: bool,
     pub(super) connected_components: Vec<String>,
     pub(super) output_drivers: HashSet<String>,
@@ -74,7 +72,7 @@ pub(super) fn fold_nets(
         let name = net.spice_name();
         let tapped = connectivity.tapped_nets.contains(&net.id);
         let entry = nets.entry(name.clone()).or_default();
-        entry.is_ground |= crate::schematic::ground_names::writes_node_zero(&name);
+        entry.is_ground |= crate::schematic::ground_names::is_ground_reference(&name);
         entry.wire_ids.extend(net.wires.iter().copied());
         entry.tapped |= tapped;
     }
@@ -83,7 +81,7 @@ pub(super) fn fold_nets(
         let identity = component_identity(component);
         for pin in &component.pins {
             let entry = nets.entry(pin.net_name.clone()).or_default();
-            entry.is_ground |= crate::schematic::ground_names::writes_node_zero(&pin.net_name);
+            entry.is_ground |= crate::schematic::ground_names::is_ground_reference(&pin.net_name);
             entry.connection_count += 1;
             if !pin.attached {
                 entry.unattached_count += 1;

@@ -127,9 +127,8 @@ pub enum DrcViolationType {
     SourceToSource,
     /// A node that joins declared inputs and nothing that drives them.
     UndrivenNet,
-    /// A net the drawing names as ground — a `GND!` global, or a ground
-    /// label that lost its net to another name — that the deck does not
-    /// write as node 0.
+    /// A ground label whose net took another name — an interface port's, an
+    /// earlier label's — which the deck writes instead of node 0.
     GroundNotNodeZero,
     /// A global net tied to ground in one cellview — a ground symbol on the
     /// net its label names — while the rest of the design writes it as a node
@@ -331,7 +330,7 @@ impl DrcViolationType {
             Self::AmbiguousCrossing => "Label, pin or bus tap on an unmarked wire crossing",
             Self::ShortedOutputs => "Multiple declared outputs connected to the same net",
             Self::UndrivenNet => "Net joins declared inputs and nothing drives it",
-            Self::GroundNotNodeZero => "Net named as ground is not node 0 in the deck",
+            Self::GroundNotNodeZero => "Ground label's net is written under another name",
             Self::SupplyTiedToGround => "Global net is tied to ground in only one cellview",
             Self::RecursiveInstantiation => "Cellview reaches itself through its instances",
             Self::MissingGround => "Circuit has no ground reference (node 0)",
@@ -380,7 +379,9 @@ impl DrcViolationType {
             Self::UndrivenNet => {
                 "Connect a driver to the net, or declare one of its pins an output"
             }
-            Self::GroundNotNodeZero => "Use a ground symbol, or a net label named 0 or GND",
+            Self::GroundNotNodeZero => {
+                "Remove the net's other name, or move this label to the net meant as ground"
+            }
             Self::SupplyTiedToGround => {
                 "Remove the tie to ground, or give this net a name of its own"
             }

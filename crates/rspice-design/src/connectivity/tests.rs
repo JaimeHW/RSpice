@@ -210,8 +210,9 @@ fn every_ground_spelling_is_one_net_with_the_ground_symbol() {
     );
 }
 
-/// `GND!` is a ground alias every dialect folds onto node 0, so a net that
-/// carries it is written as `0` even with no ground symbol in the drawing.
+/// `GND!` is a ground alias, so a net that carries it is written as `0` even
+/// with no ground symbol in the drawing, and is node 0 under every dialect,
+/// not only the ones that fold `GND!` themselves.
 #[test]
 fn a_global_ground_label_is_node_zero() {
     let document = SchematicDocument {

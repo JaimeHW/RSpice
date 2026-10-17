@@ -303,10 +303,11 @@ impl DrcViolationType {
             Self::GroundNotNodeZero => &DrcRule {
                 code: "DRC-GROUND-NOT-NODE-ZERO",
                 title: "Ground not node 0",
-                explanation: "A net the drawing names as ground, a GND! global or a ground label \
-                    whose net took another name, is written to the deck as a node of its own \
-                    rather than as node 0. Everything returned to it is returned to that node, not \
-                    to the reference. Use a ground symbol, or a net label named 0 or GND.",
+                explanation: "A ground label sits on a net that already took another name, an \
+                    interface port's or a label placed before it, so the deck writes the net \
+                    under that name rather than as node 0. Everything returned through the label \
+                    is returned to that node, not to the reference. Remove the net's other name, \
+                    or move the label to the net meant as ground.",
                 default_severity: DrcSeverity::Error,
                 floor: ANY,
                 waivable: true,
