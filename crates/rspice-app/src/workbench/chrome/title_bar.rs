@@ -83,10 +83,11 @@ const DESIGN_MANAGEMENT_COMMANDS: [Command; 8] = [
     Command::RevisionHistory,
 ];
 /// The design checks, narrowest first: the cellview in front of the reader,
-/// the whole design, and the check that gates a save.
-const DESIGN_CHECK_COMMANDS: [Command; 3] = [
+/// the whole design and its sign-off report, and the check that gates a save.
+const DESIGN_CHECK_COMMANDS: [Command; 4] = [
     Command::CheckCellview,
     Command::CheckDesign,
+    Command::ExportSignoffReport,
     Command::CheckAndSave,
 ];
 const WINDOW_LAYOUT_COMMANDS: [Command; 5] = [
@@ -1289,6 +1290,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         | Command::ExportSchematicSvg
         | Command::ExportWaveformsCsv
         | Command::ExportPublicationSnapshot
+        | Command::ExportSignoffReport
         | Command::ExportNetlist(_)
         | Command::PrintHardcopy
         | Command::ExportActiveView => WorkbenchIcon::Export,

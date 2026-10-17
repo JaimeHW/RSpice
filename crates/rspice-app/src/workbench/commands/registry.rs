@@ -568,6 +568,7 @@ impl Command {
                 | Self::FindInDesign
                 | Self::ToggleResultsSplit
                 | Self::CheckDesign
+                | Self::ExportSignoffReport
                 | Self::CheckAndSave
                 | Self::ConnectivityManager
                 | Self::DesignManagement
@@ -770,6 +771,7 @@ impl Command {
             | Self::VisibilityOptions
             | Self::CheckCellview
             | Self::CheckDesign
+            | Self::ExportSignoffReport
             | Self::CheckAndSave
             | Self::ConnectivityManager
             | Self::DesignManagement
@@ -978,6 +980,7 @@ impl Command {
             // layouts, and every other chord of the check family is taken;
             // the Design menu, the toolbar and the palette are its routes.
             Self::CheckDesign => NONE,
+            Self::ExportSignoffReport => NONE,
             Self::CheckAndSave => CHECK_AND_SAVE,
             Self::NextViolation => NEXT_VIOLATION,
             Self::RunSimulation => RUN_SIMULATION,

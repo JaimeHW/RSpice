@@ -6,6 +6,10 @@
 
 use std::path::{Path, PathBuf};
 
+mod signoff;
+
+pub(crate) use signoff::export_signoff_report;
+
 /// Save dialog configuration for export workflows.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SaveDialogConfig<'a> {
