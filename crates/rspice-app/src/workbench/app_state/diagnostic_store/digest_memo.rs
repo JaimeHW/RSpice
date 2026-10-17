@@ -29,6 +29,14 @@ pub(super) enum DigestKey {
         deck: u64,
         project: ProjectId,
     },
+    /// A symbol's published artwork and editor metadata, which the library
+    /// holds and its revision covers, and the drawing its interface contract
+    /// is read from, by that drawing's stamp.
+    SymbolPins {
+        library: u64,
+        contract: Option<u64>,
+        project: ProjectId,
+    },
     Dispatch {
         design: DesignProjectionKey,
         root_topology: Option<u64>,
@@ -59,8 +67,7 @@ pub(super) enum DigestKey {
 impl DigestKey {
     /// The key of what `inputs` reads, or `None` where it cannot be stated
     /// cheaply and exactly, which recomputes the digest every time: a design
-    /// whose authorities cannot be serialized has no projection key, and a
-    /// symbol's pin contract is read from documents with no stamp.
+    /// whose authorities cannot be serialized has no projection key.
     pub(super) fn of(state: &AppState, inputs: &DiagnosticInputs) -> Option<Self> {
         let project = state.workspace.content.project.id();
         let design = || {
@@ -76,7 +83,11 @@ impl DigestKey {
                 deck: state.workspace.content.design_rules.stamp(),
                 project,
             }),
-            DiagnosticInputs::SymbolPins { .. } => None,
+            DiagnosticInputs::SymbolPins { subject } => Some(Self::SymbolPins {
+                library: state.library_manager.revision(),
+                contract: state.symbol_contract_stamp(subject),
+                project,
+            }),
             DiagnosticInputs::Dispatch => Some(Self::Dispatch {
                 design: design()?,
                 root_topology: state

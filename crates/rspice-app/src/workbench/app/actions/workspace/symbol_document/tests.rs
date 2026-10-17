@@ -498,3 +498,50 @@ fn symbol_pin_checks_keep_every_finding_and_log_one_line() {
     );
     assert!(lines[0].message.contains("55 findings"));
 }
+
+/// The pin findings are decided by the stamps of what the checks read: a
+/// reading with no edit digests nothing, and an edit to the artwork or to the
+/// drawing the contract is read from stales them.
+#[test]
+fn pin_findings_digest_nothing_while_idle_and_stale_on_either_input() {
+    use crate::workbench::app_state::diagnostic_store::digest_memo::{
+        computed_digests, reset_computed_digests,
+    };
+
+    let subject = CellViewRef::new("work", "amp", "symbol");
+    let current = |state: &AppState| {
+        let batch = state
+            .diagnostics
+            .batch(&DiagnosticInputs::SymbolPins {
+                subject: subject.clone(),
+            })
+            .expect("the pin checks published");
+        state.diagnostic_batch_standing(batch).is_current()
+    };
+    let mut state = state_with_unplaced_amp_symbol_pins(1);
+    state.run_active_symbol_pin_checks();
+    assert!(current(&state));
+
+    reset_computed_digests();
+    assert!(current(&state));
+    assert_eq!(computed_digests(), 0, "a reading with no edit digests nothing");
+
+    state
+        .store_active_symbol_document(&SymbolDocument {
+            pins: vec![SymbolPin::new("P0", PortDirection::In, Some(Point::new(0, 0)))],
+            ..SymbolDocument::default()
+        })
+        .expect("symbol document stores");
+    assert!(!current(&state), "an edit to the artwork stales the findings");
+
+    state.run_active_symbol_pin_checks();
+    assert!(current(&state));
+    state.workspace.insert_schematic_editor(
+        CellViewRef::new("work", "amp", "schematic").key(),
+        SchematicState::default(),
+    );
+    assert!(
+        !current(&state),
+        "an edit to the drawing the contract is read from stales the findings"
+    );
+}

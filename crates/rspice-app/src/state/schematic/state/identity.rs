@@ -32,6 +32,13 @@ impl SchematicState {
         self.design.topology_version()
     }
 
+    /// The stamp of the document as it stands: equal stamps, equal
+    /// documents, and every edit issues a new one. See
+    /// [`rspice_design::stamped`].
+    pub(crate) const fn content_stamp(&self) -> u64 {
+        self.design.content_stamp()
+    }
+
     /// Increment the topology version
     ///
     /// Call this after any structural change to invalidate caches.
