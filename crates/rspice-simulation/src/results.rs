@@ -102,8 +102,9 @@ pub enum SimulationResult {
         /// points (design P2 section 4.3): `$display` and its kin, severity
         /// reports and finish notices, in emission order. Bounded at 64 MiB of
         /// text; an overflow ends in one explicit truncation record. Empty for
-        /// a transient with no HDL design, and for one this runner did not
-        /// solve itself (a PSS rebuild, a worker transport).
+        /// a transient with no HDL design and for a PSS rebuild. A result
+        /// that crossed the browser worker keeps only its `$error` and
+        /// `$fatal` records: the rest streamed to the run log as it ran.
         hdl_output: Vec<rspice_core::config::HdlOutputRecord>,
     },
 

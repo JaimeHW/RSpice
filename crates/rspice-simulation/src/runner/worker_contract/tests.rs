@@ -1255,6 +1255,7 @@ fn an_hb_wire_written_before_the_solver_controls_restores_with_the_engine_defaul
 fn transient_worker_result_round_trips_through_json() {
     let result = WorkerSimulationResult::Transient {
         spectra: Vec::new(),
+        testbench_errors: Vec::new(),
         convergence: None,
         time: vec![0.0, 1e-9],
         waveforms: vec![WorkerWaveform {
@@ -1333,6 +1334,7 @@ fn response_with_measurement(measurement: WorkerMeasurement) -> WorkerResponse {
         id: 901,
         outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Transient {
             spectra: Vec::new(),
+            testbench_errors: Vec::new(),
             convergence: None,
             time: vec![0.0],
             waveforms: Vec::new(),
@@ -1647,6 +1649,7 @@ fn monte_carlo_worker_result_round_trips_seed_and_exact_samples_through_json() {
 fn worker_result_payload_estimate_counts_high_volume_arrays() {
     let transient = WorkerSimulationResult::Transient {
         spectra: Vec::new(),
+        testbench_errors: Vec::new(),
         convergence: None,
         time: vec![0.0, 1.0],
         waveforms: vec![WorkerWaveform {
@@ -1768,6 +1771,7 @@ fn worker_transport_extracts_transient_waveform_buffers() {
         id: 77,
         outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Transient {
             spectra: Vec::new(),
+            testbench_errors: Vec::new(),
             convergence: None,
             time: vec![0.0, 1.0],
             waveforms: vec![WorkerWaveform {
@@ -2176,6 +2180,7 @@ fn worker_transport_rejects_missing_or_mismatched_buffers() {
         id: 12,
         outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Transient {
             spectra: Vec::new(),
+            testbench_errors: Vec::new(),
             convergence: None,
             time: vec![0.0, 1.0],
             waveforms: vec![WorkerWaveform {
@@ -2215,6 +2220,7 @@ fn worker_transport_validates_complex_waveform_shape() {
             id: 44,
             outcome: WorkerOutcomeTransport::Success(WorkerSimulationResultTransport::Transient {
                 spectra: Vec::new(),
+                testbench_errors: Vec::new(),
                 convergence: None,
                 time: WorkerF64Series::Buffer { buffer: 0, len: 2 },
                 waveforms: vec![WorkerWaveformTransport {
@@ -2242,6 +2248,7 @@ fn worker_transport_validates_complex_waveform_shape() {
             id: 45,
             outcome: WorkerOutcomeTransport::Success(WorkerSimulationResultTransport::Transient {
                 spectra: Vec::new(),
+                testbench_errors: Vec::new(),
                 convergence: None,
                 time: WorkerF64Series::Buffer { buffer: 0, len: 2 },
                 waveforms: vec![WorkerWaveformTransport {

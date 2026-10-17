@@ -1194,6 +1194,10 @@ pub(crate) enum WorkerSimulationResultTransport {
         events: WorkerEventHistory,
         #[serde(default)]
         spectra: Vec<WorkerRecordedFftSpectrumTransport>,
+        /// The testbench's error records ride the JSON envelope as events do:
+        /// they are a few lines of text, with no samples to buffer.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        testbench_errors: Vec<rspice_core::config::HdlOutputRecord>,
     },
     Fft {
         spectrum: WorkerRecordedFftSpectrumTransport,
