@@ -202,6 +202,37 @@ X1 d cell\n\
     );
 }
 
+/// A Stop raised anywhere in the pass, the scan that names the instances no
+/// bin covers included, leaves no refusal: the pass states what the engine
+/// refuses of a run it finished checking, and a stopped pass finished none.
+#[test]
+fn a_pass_stopped_at_any_poll_states_no_refusal() {
+    use rspice_core::abort_signal::CountingAbort;
+
+    let mut run = parts();
+    run.executable_netlist = "binned at one point\n\
+.param LVAL=0.5u\n\
+M1 d d 0 0 NCH W=1u L={LVAL}\n\
+V1 d 0 1\n\
+.model NCH.0 NMOS LEVEL=1 LMIN=0.28u LMAX=0.5u WMIN=0.5u WMAX=2u VTO=0.4\n\
+.op\n\
+.end\n"
+        .to_owned();
+    run.run_set = Some(global_parameter_run_set("LVAL", &["0.5u", "0.1u"]));
+    let snapshot = PreparedRunSnapshot::new(run).expect("the reference deck is covered");
+    let unstopped = CountingAbort::new(usize::MAX);
+    assert_eq!(snapshot.engine_refusals(&unstopped).len(), 1);
+
+    for threshold in 0..unstopped.count() {
+        let refusals = snapshot.engine_refusals(&CountingAbort::new(threshold));
+        assert!(
+            refusals.is_empty(),
+            "a Stop at poll {}: {refusals:?}",
+            threshold + 1
+        );
+    }
+}
+
 /// A corner run's points dispatch the decks their preparation composed, each
 /// with its own process's binned cards, and the engine builds exactly those;
 /// the declaration assembles the points' results and never reaches it, so it

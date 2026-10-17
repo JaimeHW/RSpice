@@ -300,7 +300,17 @@ impl PreparedRunSnapshot {
                 | rspice_core::SimulationError::TimeLimitExceeded,
             ) => None,
             Err(error) => {
-                let gaps = engine.model_bin_coverage_gaps(&netlist).unwrap_or_default();
+                // The scan walks the whole design again, so a Stop ends it as
+                // it ends the build. A card it cannot read failed the build
+                // too, whose own refusal states it.
+                let gaps = match engine.model_bin_coverage_gaps(&netlist, abort) {
+                    Ok(gaps) => gaps,
+                    Err(
+                        rspice_core::SimulationError::Aborted
+                        | rspice_core::SimulationError::TimeLimitExceeded,
+                    ) => return None,
+                    Err(_) => Vec::new(),
+                };
                 let message = error.to_string();
                 // The build stops at the first instance no bin covers. When
                 // that is what it stopped on, the gaps say it with the
