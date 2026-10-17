@@ -1356,7 +1356,7 @@ fn drc_identity_tags_are_never_renumbered() {
         DrcViolationType::UndrivenNet => 30,
         DrcViolationType::GroundNotNodeZero => 31,
         DrcViolationType::SupplyTiedToGround => 32,
-        DrcViolationType::UnusedCellView => 33,
+        DrcViolationType::UnusedCellView => 34,
     };
     let types = [
         DrcViolationType::FloatingNode,

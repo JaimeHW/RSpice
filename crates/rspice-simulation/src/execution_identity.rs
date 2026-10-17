@@ -1263,7 +1263,7 @@ fn drc_violation_type_tag(violation_type: DrcViolationType) -> u8 {
         DrcViolationType::UndrivenNet => 30,
         DrcViolationType::GroundNotNodeZero => 31,
         DrcViolationType::SupplyTiedToGround => 32,
-        DrcViolationType::UnusedCellView => 33,
+        DrcViolationType::UnusedCellView => 34,
     }
 }
 
