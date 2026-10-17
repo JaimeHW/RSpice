@@ -110,6 +110,12 @@ impl SimulationController {
                     });
 
                 self.apply_result_side_effects(state, &sim_result);
+                // A recorded FFT carries the quality of the transient it
+                // transformed, which that transient has already reported.
+                let solved_transient = match &sim_result {
+                    crate::simulation::SimulationResult::Fft { .. } => None,
+                    solved => solved.transient_convergence().cloned(),
+                };
                 if let Some(quality) = sim_result.transient_convergence()
                     && quality.has_lte_exceptions()
                 {
@@ -151,6 +157,7 @@ impl SimulationController {
                     state.publish_run_notices(
                         &current_label,
                         notices,
+                        solved_transient.as_deref(),
                         &analysis_result.measurements,
                         run_sequence,
                     );
@@ -345,7 +352,7 @@ impl SimulationController {
                 // A clamp the analysis raised before it failed is part of
                 // the account of the failure.
                 if let Some(run_sequence) = self.target_run_id(state) {
-                    state.publish_run_notices(&failed_label, notices, &[], run_sequence);
+                    state.publish_run_notices(&failed_label, notices, None, &[], run_sequence);
                 }
                 let failed_type = self
                     .current_spec

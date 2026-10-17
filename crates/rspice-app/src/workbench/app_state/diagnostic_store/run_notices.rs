@@ -3,8 +3,9 @@
 //! The engine states each advisory in the Console as it happens, and the
 //! Console keeps that prose: it is the run's transcript. These records are
 //! the other statement, the one an engineer signs off against: a clamped
-//! parameter, a convergence aid, a held timestep, a measurement that never
-//! triggered. Each is one record per condition for the whole run, however
+//! parameter, a convergence aid, a held timestep, time points accepted past
+//! the truncation-error tolerance, a measurement that never triggered. Each
+//! is one record per condition for the whole run, however
 //! many analyses, sweep points or Monte Carlo trials raised it, and it says
 //! where it was raised.
 //!
@@ -14,6 +15,7 @@
 
 use rspice_core::ContinuationAid;
 use rspice_core::notice::{EngineNotice, ParameterReplacement, ParameterScope, RecordedNotice};
+use rspice_results::convergence_quality::TransientConvergenceEvidence;
 
 use crate::diagnostics::LogAnchor;
 use crate::quantity::engineering::{EngineeringPrecision, format_engineering_display_with};
@@ -39,11 +41,18 @@ const MEASURE_PRODUCER: &str = "rspice.engine.measure";
 const PARAMETER_CODE: &str = "MODEL-PARAMETER-CLAMPED";
 const AID_CODE: &str = "RUN-CONVERGENCE-AID";
 const TIMESTEP_CODE: &str = "RUN-TIMESTEP-FLOOR";
+const TRUNCATION_CODE: &str = "RUN-TRUNCATION-EXCEEDED";
 const MEASURE_CODE: &str = "RUN-MEASURE-FAILED";
 
 /// Every rule code a notice record carries, which is what tells a notice
 /// from a failure in the batch they share.
-const NOTICE_CODES: [&str; 4] = [PARAMETER_CODE, AID_CODE, TIMESTEP_CODE, MEASURE_CODE];
+const NOTICE_CODES: [&str; 5] = [
+    PARAMETER_CODE,
+    AID_CODE,
+    TIMESTEP_CODE,
+    TRUNCATION_CODE,
+    MEASURE_CODE,
+];
 
 /// The analyses, or the sweep points, one record names. Past this many, it
 /// counts.
@@ -53,6 +62,12 @@ const MAX_NAMED: usize = 8;
 #[derive(Debug, Clone)]
 pub(crate) enum RunNotice {
     Engine(RecordedNotice),
+    /// Transient time points the stepper accepted although they failed the
+    /// local truncation-error test, and the first time it did.
+    TruncationExceeded {
+        points: u64,
+        first_time: Option<f64>,
+    },
     /// A `.MEASURE` that produced no value, in the engine's words.
     MeasureFailed {
         name: String,
@@ -118,16 +133,22 @@ impl AppState {
     /// rebuilt from everything its analyses have raised so far, so a clamp
     /// the second analysis raises again is counted on the first one's record
     /// rather than listed twice.
+    ///
+    /// `transient` is the convergence evidence of the transient this analysis
+    /// solved, where it solved one; `failed_measurements` its `.MEASURE`
+    /// results, of which only those that produced no value are kept.
     pub(crate) fn publish_run_notices(
         &mut self,
         analysis: &str,
         notices: Vec<RecordedNotice>,
+        transient: Option<&TransientConvergenceEvidence>,
         failed_measurements: &[rspice_core::MeasureResult],
         run_sequence: u64,
     ) {
         let raised: Vec<RunNotice> = notices
             .into_iter()
             .map(RunNotice::Engine)
+            .chain(transient.and_then(truncation_exceeded))
             .chain(failed_measurements.iter().filter_map(|measure| {
                 measure
                     .error
@@ -296,6 +317,21 @@ impl AppState {
                     )
                 }
             },
+            RunNotice::TruncationExceeded { first_time, .. } => (
+                DiagnosticLevel::Warning,
+                condition.analyses.sentence(),
+                None,
+                match first_time {
+                    Some(time) => format!(
+                        "Time points were accepted past the local truncation-error tolerance, \
+                         the first near t = {}s",
+                        engineering(*time)
+                    ),
+                    None => "Time points were accepted past the local truncation-error tolerance"
+                        .to_owned(),
+                },
+                Some(plan()),
+            ),
             RunNotice::MeasureFailed { name, reason } => (
                 DiagnosticLevel::Warning,
                 name.clone(),
@@ -391,6 +427,9 @@ fn gather<'a>(facts: &'a [(String, RunNotice)], scope: &str) -> Vec<Gathered<'a>
                 recorded.points.as_slice(),
                 recorded.unnamed_points,
             ),
+            RunNotice::TruncationExceeded { points, .. } => {
+                (usize::try_from(*points).unwrap_or(usize::MAX), &[][..], 0)
+            }
             RunNotice::MeasureFailed { .. } => (1, &[][..], 0),
         };
         let index = match gathered.iter().position(|condition| condition.key == key) {
@@ -453,11 +492,37 @@ fn notice_key(notice: &RunNotice, scope: &str) -> FindingKey {
                     .to_ascii_uppercase(),
             ),
         },
+        // One condition of the run's stepping, however many analyses and
+        // points it covers: the record counts them.
+        RunNotice::TruncationExceeded { .. } => (TIMESTEP_PRODUCER, TRUNCATION_CODE, String::new()),
         RunNotice::MeasureFailed { name, .. } => {
             (MEASURE_PRODUCER, MEASURE_CODE, name.to_ascii_uppercase())
         }
     };
     FindingKey::new(producer, code, scope, object)
+}
+
+/// The points a transient accepted past its truncation-error tolerance, if
+/// it accepted any: its own and its periodic initialization's, and the
+/// earliest time on its own axis, which the evidence keeps in source order.
+fn truncation_exceeded(evidence: &TransientConvergenceEvidence) -> Option<RunNotice> {
+    evidence
+        .has_lte_exceptions()
+        .then(|| RunNotice::TruncationExceeded {
+            points: evidence.transient.force_accepted_points.saturating_add(
+                evidence
+                    .initialization
+                    .as_ref()
+                    .map_or(0, |initialization| {
+                        initialization.report.force_accepted_points
+                    }),
+            ),
+            first_time: evidence
+                .transient
+                .time_basis
+                .as_ref()
+                .and_then(|basis| basis.force_accepted_times_s.first().copied()),
+        })
 }
 
 /// `BSIM4 pbs = 50m is below 100m; the model uses 100m`.
@@ -583,12 +648,12 @@ mod tests {
     fn a_rerun_replaces_the_runs_warnings() {
         let mut state = open_state(&[1, 2]);
         state.open_run_outcome(1);
-        state.publish_run_notices("Transient", vec![clamp("M1", "rdsw", &[])], &[], 1);
+        state.publish_run_notices("Transient", vec![clamp("M1", "rdsw", &[])], None, &[], 1);
         assert_eq!(notices(&state).len(), 1);
 
         state.supersede_run_diagnostics(2);
         state.open_run_outcome(2);
-        state.publish_run_notices("Transient", vec![clamp("M2", "rdsw", &[])], &[], 2);
+        state.publish_run_notices("Transient", vec![clamp("M2", "rdsw", &[])], None, &[], 2);
 
         let standing = notices(&state);
         assert_eq!(standing.len(), 1, "{standing:?}");
@@ -601,7 +666,7 @@ mod tests {
     fn an_edit_stales_the_runs_warnings_rather_than_withdrawing_them() {
         let mut state = open_state(&[1]);
         state.open_run_outcome(1);
-        state.publish_run_notices("Transient", vec![clamp("M1", "rdsw", &[])], &[], 1);
+        state.publish_run_notices("Transient", vec![clamp("M1", "rdsw", &[])], None, &[], 1);
         let batch = state
             .diagnostics
             .batch(&DiagnosticInputs::Run { run_sequence: 1 })
@@ -642,12 +707,14 @@ mod tests {
                     unnamed_points: 0,
                 },
             ],
+            None,
             &[],
             1,
         );
         state.publish_run_notices(
             "Transient",
             vec![clamp("m1", "rdsw", &[]), clamp("M1", "prwg", &[])],
+            None,
             &[],
             1,
         );
@@ -679,12 +746,76 @@ mod tests {
         let mut measured = rspice_core::MeasureResult::failed("tpeak", "");
         measured.error = None;
         measured.value = Some(1.0);
-        state.publish_run_notices("Transient", Vec::new(), &[failed, measured], 1);
+        state.publish_run_notices("Transient", Vec::new(), None, &[failed, measured], 1);
 
         let standing = notices(&state);
         assert_eq!(standing.len(), 1, "{standing:?}");
         assert_eq!(standing[0].0, MEASURE_CODE);
         assert_eq!(standing[0].1, "tdelay");
+    }
+
+    /// The convergence evidence of a transient whose stepper accepted the
+    /// points at `accepted` (ascending indices into a 1 ns grid) past the
+    /// truncation-error test.
+    fn transient_accepting(accepted: &[usize]) -> TransientConvergenceEvidence {
+        let mut quality = rspice_core::diagnostics::ConvergenceQuality::default();
+        for &index in accepted {
+            quality.record_force_accept(index);
+        }
+        let time: Vec<f64> = (0..10).map(|step| f64::from(step) * 1e-9).collect();
+        TransientConvergenceEvidence::capture(quality, &time, &rspice_core::abort_signal::NoAbort)
+            .expect("the fixture's evidence captures")
+    }
+
+    /// Points a transient accepted past its truncation-error tolerance are a
+    /// warning about the run's accuracy, counted over every transient that
+    /// accepted any and dated by the first; a transient that accepted none
+    /// raises nothing.
+    #[test]
+    fn points_accepted_past_the_truncation_tolerance_are_one_warning_for_the_run() {
+        let mut state = open_state(&[1]);
+        state.open_run_outcome(1);
+        state.publish_run_notices(
+            "Transient",
+            Vec::new(),
+            Some(&transient_accepting(&[])),
+            &[],
+            1,
+        );
+        assert!(notices(&state).is_empty(), "nothing was accepted past it");
+
+        state.publish_run_notices(
+            "Transient",
+            Vec::new(),
+            Some(&transient_accepting(&[3, 7])),
+            &[],
+            1,
+        );
+        state.publish_run_notices(
+            "Transient 2",
+            Vec::new(),
+            Some(&transient_accepting(&[5])),
+            &[],
+            1,
+        );
+
+        let records: Vec<&DiagnosticRecord> = state
+            .diagnostics
+            .batches()
+            .flat_map(|batch| batch.records.iter())
+            .filter(|record| is_notice(record))
+            .collect();
+        assert_eq!(records.len(), 1, "{records:#?}");
+        let record = records[0];
+        assert_eq!(record.canonical.code.as_ref(), TRUNCATION_CODE);
+        assert_eq!(record.level, DiagnosticLevel::Warning);
+        assert_eq!(record.subject.object, "Transient, Transient 2");
+        assert_eq!(
+            record.message,
+            "Time points were accepted past the local truncation-error tolerance, the first near \
+             t = 3ns"
+        );
+        assert_eq!(record.details, "Raised 3 times in Transient, Transient 2");
     }
 
     /// A root drawing that places `amp` and a memristor, over an `amp`
@@ -746,6 +877,7 @@ mod tests {
         state.publish_run_notices(
             "Operating point",
             vec![clamp("XAMP.M1", "rdsw", &[])],
+            None,
             &[],
             1,
         );
