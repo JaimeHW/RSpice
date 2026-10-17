@@ -125,35 +125,100 @@ impl AppState {
         let after_design = prepared.into_reference_candidate();
         let mut after_schematic = self.schematic.clone_with_design(after_design);
         after_schematic.session.is_dirty = true;
+        let before = self.schematic.clone();
+        self.publish_component_renames(
+            document,
+            before,
+            after_schematic,
+            &[(expected.id, expected.name.clone(), candidate.name.clone())],
+            description,
+        )
+    }
+
+    /// Make the text changes a find and replace listed in `document` as one
+    /// step. Instance renames among them go through the rename a manual
+    /// Rename makes: the other instances, probes, saved outputs and
+    /// configurations that name the instance follow it, in the same step.
+    pub(crate) fn replace_text_carrying_references(
+        &mut self,
+        document: &CellViewRef,
+        matches: &[rspice_design::schematic::find_replace::FindMatch],
+    ) -> Result<usize, String> {
+        let key = document.key();
+        let sources = self.schematic_reference_sources();
+        let (key, source) = sources
+            .iter()
+            .find(|(candidate, _)| candidate.eq_ignore_ascii_case(&key))
+            .map(|(key, source)| (key.clone(), *source))
+            .ok_or_else(|| format!("{} is no longer open.", document.display_path()))?;
+        validate_reference_document(self, &key, source)?;
+        let (design, changed) = source.design.replaced_text_reference_candidate(matches)?;
+        let renames: Vec<(u64, String, String)> = matches
+            .iter()
+            .filter(|found| {
+                found.field == rspice_design::schematic::find_replace::FindField::InstanceName
+            })
+            .map(|found| (found.object_id, found.before.clone(), found.after.clone()))
+            .collect();
+        let before = source.clone_editor();
+        let mut after = source.with_design(design);
+        after.session.is_dirty = true;
+        drop(sources);
+        self.publish_component_renames(
+            reference_from_key(&key)?,
+            before,
+            after,
+            &renames,
+            "replace",
+        )?;
+        Ok(changed)
+    }
+
+    /// Publish `after` over `before` for `document` as one project step,
+    /// with every reference that names a renamed instance carried along and
+    /// each rename recorded as a manual reference edit.
+    fn publish_component_renames(
+        &mut self,
+        document: CellViewRef,
+        before: SchematicState,
+        after: SchematicState,
+        renames: &[(u64, String, String)],
+        description: &str,
+    ) -> Result<bool, String> {
         let transaction = self.prepare_schematic_reference_transaction(
-            BTreeMap::from([(document.key(), self.schematic.clone())]),
-            BTreeMap::from([(document.key(), after_schematic)]),
+            BTreeMap::from([(document.key(), before)]),
+            BTreeMap::from([(document.key(), after)]),
         )?;
         let annotation_before = self.workspace.content.design_management.annotation();
         let mut annotation_after = annotation_before.clone();
-        let annotation = annotation_after
-            .commit_manual_reference_edit(
-                SchematicObjectKey::new(&document.key(), expected.id)
-                    .map_err(|error| error.to_string())?,
-                &expected.name,
-                &candidate.name,
-            )
-            .map_err(|error| error.to_string())?
-            .map(|_| -> Result<_, String> {
-                Ok(AnnotationChange {
-                    before: annotation_before.clone(),
-                    after: annotation_after,
-                    before_revision: self.workspace.content.project.revision(),
-                    after_revision: self
-                        .workspace
-                        .content
-                        .project
-                        .revision()
-                        .next()
+        let mut annotated = false;
+        for (id, old, new) in renames {
+            annotated |= annotation_after
+                .commit_manual_reference_edit(
+                    SchematicObjectKey::new(&document.key(), *id)
                         .map_err(|error| error.to_string())?,
-                })
+                    old,
+                    new,
+                )
+                .map_err(|error| error.to_string())?
+                .is_some();
+        }
+        let annotation = if annotated {
+            Some(AnnotationChange {
+                before: annotation_before.clone(),
+                after: annotation_after,
+                before_revision: self.workspace.content.project.revision(),
+                after_revision: self
+                    .workspace
+                    .content
+                    .project
+                    .revision()
+                    .next()
+                    .map_err(|error| error.to_string())?,
             })
-            .transpose()?;
+        } else {
+            None
+        };
         let record = ComponentRenameRecord {
             description: description.to_owned(),
             document: document.clone(),
@@ -173,8 +238,9 @@ impl AppState {
             record,
         };
         let record = prepared.publish(self, true)?;
+        let active = self.workspace.content.active_schematic_reference().key();
         for key in record.after.keys() {
-            if key.eq_ignore_ascii_case(&document.key()) {
+            if key.eq_ignore_ascii_case(&active) {
                 self.schematic.clear_schematic_redo();
             } else {
                 self.workspace

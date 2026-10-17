@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 use egui::{Context, Id};
 use rspice_design::schematic::document::SchematicDocument;
 use rspice_design::schematic::find_replace::{
-    FindMatch, FindOptions, FindQuery, FindTargets, find_in_document,
+    FindField, FindMatch, FindOptions, FindQuery, FindTargets, find_in_document,
 };
 
 use crate::schematic::view::sheet_visibility::object_is_on_active_sheet;
@@ -209,7 +209,15 @@ pub(crate) fn replace_all(state: &mut AppState) -> Result<(usize, usize), String
     let active = state.workspace.content.active_schematic_reference().key();
     let mut changed = 0;
     for document in &found {
-        changed += if document.key == active {
+        let renames = document
+            .matches
+            .iter()
+            .any(|found| found.field == FindField::InstanceName);
+        changed += if renames {
+            // An instance renamed here is renamed as the Rename form
+            // renames it, references and all.
+            state.replace_text_carrying_references(&document.reference, &document.matches)?
+        } else if document.key == active {
             state.schematic.replace_text(&document.matches)?
         } else if let Some(mut buffer) = state.workspace.schematic_editor_mut(&document.key) {
             buffer.editor.replace_text(&document.matches)?
@@ -396,6 +404,107 @@ mod tests {
         assert!(state.schematic.undo());
         assert_eq!(values(&state), ["10k", "10k"]);
         assert!(!state.schematic.can_undo());
+    }
+
+    /// An instance renamed by Replace all ends as the Rename form leaves
+    /// it: the probe and the saved output that name it follow it, and one
+    /// Undo takes the whole change back.
+    #[test]
+    fn replace_all_renames_an_instance_as_the_rename_form_does() {
+        fn fixture() -> (RSpiceApp, crate::product::SimulationPlanId) {
+            let mut app = RSpiceApp::test_instance();
+            let document = app.state.schematic.document_mut_for_test();
+            document.components = vec![part(1, "R1", "1k"), part(2, "R2", "1k")];
+            document.wires.clear();
+            document.probes = vec![
+                crate::state::SchematicProbe::new(
+                    30,
+                    Point::new(100, 40),
+                    "I(R1)",
+                    Some("I(R1)".to_owned()),
+                )
+                .expect("a current probe"),
+            ];
+            app.state.schematic.init_undo_history();
+            let plan_id = crate::product::SimulationPlanId::new();
+            app.state.workspace.content.simulation_plan_payloads.push(
+                crate::state::SimulationPlanPayloadRecord {
+                    plan_id,
+                    payload: crate::state::SimulationPlanPayload {
+                        saved_outputs: vec![
+                            crate::state::SavedOutput::new(
+                                crate::state::SavedOutputKind::RawVoltageOrCurrent,
+                                "load current",
+                                "I(R1)",
+                                crate::state::SavedOutputCompatibility::OpTranAc,
+                                crate::state::SavedOutputPolicy::EveryAcceptedPoint,
+                                crate::state::SavedOutputPrecision::FullSourcePrecision,
+                                crate::state::SavedOutputStreaming::StoreOnly,
+                            )
+                            .expect("a raw current is a saved output"),
+                        ],
+                        ..Default::default()
+                    },
+                },
+            );
+            (app, plan_id)
+        }
+        fn outcome(
+            app: &RSpiceApp,
+            plan_id: crate::product::SimulationPlanId,
+        ) -> (Vec<String>, Vec<Option<String>>, String) {
+            let document = app.state.schematic.document();
+            (
+                document
+                    .components
+                    .iter()
+                    .map(|component| component.name.clone())
+                    .collect(),
+                document
+                    .probes
+                    .iter()
+                    .map(|probe| probe.source_expression.clone())
+                    .collect(),
+                app.state
+                    .workspace
+                    .content
+                    .plan_data(plan_id)
+                    .expect("the plan this test owns")
+                    .saved_outputs[0]
+                    .source_expression
+                    .clone(),
+            )
+        }
+
+        let (mut by_form, form_plan) = fixture();
+        let expected = by_form.state.schematic.document().components[0].clone();
+        assert_eq!(
+            by_form
+                .state
+                .rename_component_transaction(&expected, "R10".to_owned()),
+            Ok(true)
+        );
+        let (mut by_replace, replace_plan) = fixture();
+        ask(&mut by_replace.state, "R1", "R10", FindScope::CellView);
+        assert_eq!(replace_all(&mut by_replace.state), Ok((1, 1)));
+
+        let renamed = (
+            vec!["R10".to_owned(), "R2".to_owned()],
+            vec![Some("I(R10)".to_owned())],
+            "I(R10)".to_owned(),
+        );
+        assert_eq!(outcome(&by_form, form_plan), renamed, "the Rename form");
+        assert_eq!(outcome(&by_replace, replace_plan), renamed, "Replace all");
+        by_replace.action_edit_undo();
+        assert_eq!(
+            outcome(&by_replace, replace_plan),
+            (
+                vec!["R1".to_owned(), "R2".to_owned()],
+                vec![Some("I(R1)".to_owned())],
+                "I(R1)".to_owned(),
+            ),
+            "one Undo takes the rename and its references back"
+        );
     }
 
     /// The Sheet scope leaves another sheet of the same cell view alone.
