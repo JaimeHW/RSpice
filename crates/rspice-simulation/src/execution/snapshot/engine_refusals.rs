@@ -118,6 +118,10 @@ enum DeckVerdict {
     Refused(Vec<EngineRefusalKind>),
 }
 
+/// What makes two dispatched decks one build: the source, and the
+/// temperature it is built at ([`RunTemperature::key`]).
+type DeckKey<'a> = (Cow<'a, str>, (u8, u64));
+
 /// One deck a task dispatches, and the label it is dispatched under. Borrowed
 /// from the snapshot unless the task composes it.
 struct DispatchedDeck<'a> {
@@ -190,7 +194,7 @@ impl PreparedRunSnapshot {
         let mut built = 0;
         progress(DeckBuildProgress { built, total });
 
-        let mut verdicts: HashMap<(Cow<'_, str>, (u8, u64)), Option<DeckVerdict>> = HashMap::new();
+        let mut verdicts: HashMap<DeckKey<'_>, Option<DeckVerdict>> = HashMap::new();
         for (task, deck) in dispatched {
             if abort.is_aborted() {
                 return Vec::new();

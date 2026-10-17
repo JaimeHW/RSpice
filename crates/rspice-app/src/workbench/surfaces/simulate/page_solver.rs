@@ -317,8 +317,9 @@ enum PendingChange {
     None,
     /// The draft does not parse or does not validate.
     Invalid(Vec<String>),
-    /// The draft is a valid, different option set.
-    Ready(SimulationOptions),
+    /// The draft is a valid, different option set. Boxed: the options are
+    /// ten times the size of either other answer.
+    Ready(Box<SimulationOptions>),
 }
 
 fn pending_change(app: &RSpiceApp) -> PendingChange {
@@ -334,7 +335,7 @@ fn pending_change(app: &RSpiceApp) -> PendingChange {
     if current.is_some() && current == requested {
         PendingChange::None
     } else {
-        PendingChange::Ready(options)
+        PendingChange::Ready(Box::new(options))
     }
 }
 
