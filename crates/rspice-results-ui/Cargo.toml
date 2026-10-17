@@ -16,7 +16,7 @@ workspace = true
 test-support = []
 
 [dependencies]
-egui = { version = "0.35.0", default-features = false }
+egui = { version = "0.36.2", default-features = false }
 egui_extras = { version = "0.35.0", default-features = false }
 rspice-ui-kit = { workspace = true, features = ["plot"] }
 rspice-app-types.workspace = true

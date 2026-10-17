@@ -19,7 +19,7 @@ plot = ["dep:rspice-app-types", "dep:rspice-results"]
 test-support = ["dep:sha2"]
 
 [dependencies]
-egui = { version = "0.35.0", default-features = false }
+egui = { version = "0.36.2", default-features = false }
 serde.workspace = true
 unicode-segmentation = "1.12"
 rspice-app-types = { workspace = true, optional = true }
