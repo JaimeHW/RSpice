@@ -69,13 +69,13 @@ impl ShortcutLibraryPersistenceRuntime {
             }
             #[cfg(target_arch = "wasm32")]
             Self::Publishing { .. } => Some("shortcut library changes are being saved".to_owned()),
-            Self::Missing => Some("canonical shortcut library storage is missing".to_owned()),
+            Self::Missing => Some("the saved shortcut library is missing".to_owned()),
             Self::Incompatible(raw) => Some(format!(
-                "canonical shortcut library is from an incompatible version ({})",
+                "the saved shortcut library is from an incompatible version ({})",
                 digest_prefix(raw.digest())
             )),
             Self::Corrupt(raw) => Some(format!(
-                "canonical shortcut library is corrupt ({})",
+                "the saved shortcut library is corrupt ({})",
                 digest_prefix(raw.digest())
             )),
             Self::Unavailable(message) => Some(message.clone()),
@@ -174,10 +174,7 @@ impl AppState {
                     .unwrap_or_else(|| "shortcut library storage is unavailable".to_owned())
             })?;
         if predecessor.library() != self.ui.preferences.shortcut_profiles() {
-            return Err(
-                "the live shortcut profile no longer matches its canonical storage snapshot"
-                    .to_owned(),
-            );
+            return Err("the shortcut profile in use no longer matches the saved copy".to_owned());
         }
         if predecessor.library() == candidate {
             return Ok(ShortcutLibraryPublication::Published);
@@ -320,7 +317,7 @@ impl AppState {
                     );
                     if error.is_commit_in_doubt() {
                         let message = format!(
-                            "Canonical shortcut storage is commit-in-doubt and has been made read-only until RSpice reloads it: {error}"
+                            "RSpice cannot tell whether the last shortcut change was saved, so shortcuts are read-only until RSpice reloads them: {error}"
                         );
                         self.shortcut_library_persistence =
                             ShortcutLibraryPersistenceRuntime::CommitInDoubt {

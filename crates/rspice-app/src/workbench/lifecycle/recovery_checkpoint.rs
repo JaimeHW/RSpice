@@ -801,7 +801,7 @@ pub(crate) fn discard_bound_checkpoint(
     })?;
     crate::io::durable_file::sync_parent_of(&manifest).map_err(|error| {
         format!(
-            "checkpoint manifest retirement for '{}' could not be synchronized; checkpoint bytes were retained as recovery evidence: {error}",
+            "removing the checkpoint manifest for '{}' could not be flushed to disk; the checkpoint was kept for recovery: {error}",
             checkpoint.display()
         )
     })?;
@@ -885,7 +885,7 @@ fn cleanup_owned_checkpoint(source: &Path, checkpoint: &Path) -> Result<(), Stri
     }
     crate::io::durable_file::sync_parent_of(&manifest).map_err(|error| {
         format!(
-            "checkpoint manifest retirement for '{}' could not be synchronized; checkpoint bytes were retained as recovery evidence: {error}",
+            "removing the checkpoint manifest for '{}' could not be flushed to disk; the checkpoint was kept for recovery: {error}",
             checkpoint.display()
         )
     })?;

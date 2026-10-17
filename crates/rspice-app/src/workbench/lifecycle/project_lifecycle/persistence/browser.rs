@@ -195,7 +195,7 @@ pub(super) async fn run_browser_write_locked(
             Err(read_error) => {
                 return BrowserWriteResult::Failed(
                     format!(
-                        "{error}; current canonical bytes could not be inspected: {read_error}"
+                        "{error}; the saved file's current contents could not be read: {read_error}"
                     )
                     .into(),
                 );
@@ -349,7 +349,7 @@ impl BrowserProjectStorage for BrowserStorage<'_> {
             .await
             .map_err(|error| {
                 if backend == BrowserBindingBackend::ExternalFile {
-                    format!("exclusive canonical-file access is unavailable: {error}")
+                    format!("exclusive access to the project file is unavailable: {error}")
                 } else {
                     error
                 }
@@ -566,7 +566,7 @@ pub(super) async fn persist_browser_binding(
         || expected_generation.is_some_and(|generation| !browser_generation_is_exact(generation))
     {
         return Err(
-            "browser binding generation must be a nonzero JavaScript-exact integer".to_owned(),
+            "browser binding generation must be a nonzero JavaScript safe integer".to_owned(),
         );
     }
     let record = js_sys::Object::new();
@@ -1639,7 +1639,7 @@ pub(super) async fn acquire_browser_web_lock(
     };
     if !acquired {
         let _ = await_browser_promise(request, "unavailable Web Lock cleanup").await;
-        return Err("canonical project is being saved in another RSpice tab".to_owned());
+        return Err("the project is being saved in another RSpice tab".to_owned());
     }
     Ok(Some(BrowserWebLock {
         release,
@@ -1737,7 +1737,7 @@ pub(super) fn js_error(value: wasm_bindgen::JsValue) -> String {
         .ok()
         .and_then(|message| message.as_string())
         .or_else(|| value.as_string())
-        .unwrap_or_else(|| format!("browser error: {value:?}"))
+        .unwrap_or_else(|| "the browser reported an error without a message".to_owned())
 }
 
 #[cfg(target_arch = "wasm32")]

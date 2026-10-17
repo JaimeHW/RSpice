@@ -623,7 +623,7 @@ impl ReportBuilder {
             Some(command_id),
             VscodeDiagnosticSeverity::Error,
             VscodeDiagnosticCode::UnsupportedCommand,
-            "VS Code command has no exact RSpice identity mapping",
+            "VS Code command has no matching RSpice command",
         );
     }
 
@@ -1233,7 +1233,7 @@ fn build_native_artifact(
     String::from_utf8(bytes).map_err(|_| {
         VscodeAdapterError::new(
             "shortcut-adapter.internal-encoding",
-            "canonical shortcut artifact was not UTF-8",
+            "the converted shortcut file was not UTF-8",
         )
     })
 }

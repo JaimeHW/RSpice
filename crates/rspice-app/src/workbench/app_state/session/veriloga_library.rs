@@ -273,7 +273,7 @@ fn global_sources_from_registry(
             .eq_ignore_ascii_case(VERILOGA_LIBRARY_NAME)
         {
             return Err(format!(
-                "global Verilog-A source owner '{}' uses a non-canonical library name",
+                "global Verilog-A source owner '{}' capitalizes the library name differently from '{VERILOGA_LIBRARY_NAME}'",
                 reference.display_path()
             ));
         }
@@ -349,7 +349,7 @@ fn validate_global_library_contract(
         }
         if !expected.contains(&reference.key()) {
             return Err(format!(
-                "global Verilog-A source owner '{}' does not identify an exact Verilog-A view",
+                "global Verilog-A source owner '{}' is not a Verilog-A view in the library",
                 reference.display_path()
             ));
         }
@@ -357,7 +357,7 @@ fn validate_global_library_contract(
     }
     if let Some(missing) = expected.difference(&found).next() {
         return Err(format!(
-            "global Verilog-A view '{}' has no exact executable source bundle",
+            "global Verilog-A view '{}' has no source bundle to run",
             missing
         ));
     }
@@ -589,7 +589,7 @@ mod tests {
         assert!(
             validate_global_library_contract(&library, &empty)
                 .unwrap_err()
-                .contains("no exact executable source bundle")
+                .contains("has no source bundle to run")
         );
 
         let bundle = sources
@@ -612,7 +612,7 @@ mod tests {
         assert!(
             validate_global_library_contract(&library, &wrong_sources)
                 .unwrap_err()
-                .contains("does not identify an exact Verilog-A view")
+                .contains("is not a Verilog-A view in the library")
         );
 
         let mut existing_libraries = LibraryManager::default();

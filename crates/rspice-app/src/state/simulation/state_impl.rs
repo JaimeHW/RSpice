@@ -142,8 +142,8 @@ impl SimulationState {
             SimulationRunLifecycle::Preparing | SimulationRunLifecycle::Running
         ) {
             return Err(format!(
-                "simulation run {} is {:?} and cannot be cancelled",
-                run.id, run.lifecycle
+                "simulation run {} has already finished and cannot be cancelled",
+                run.id
             ));
         }
         self.execution.abort_request = Some(identity);

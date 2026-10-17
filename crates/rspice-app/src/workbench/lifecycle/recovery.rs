@@ -654,14 +654,14 @@ pub(crate) fn open_comparison(
         Ok((baseline, SourceSnapshotRelation::Changed)) => (
             Some(baseline),
             Some(
-                "The saved baseline changed after the recovery checkpoint was committed; the comparison uses the exact current saved bytes"
+                "The saved project changed after this recovery checkpoint was written; the comparison uses the project as it is saved now"
                     .to_owned(),
             ),
         ),
         Ok((baseline, SourceSnapshotRelation::Unrecorded)) => (
             Some(baseline),
             Some(
-                "This legacy checkpoint has no recorded saved-source identity; the comparison uses the exact current saved bytes"
+                "This older checkpoint does not record which saved version it came from; the comparison uses the project as it is saved now"
                     .to_owned(),
             ),
         ),

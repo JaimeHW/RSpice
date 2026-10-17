@@ -631,7 +631,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
             | crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::SavedSessionOnly { .. } => {
                 SaveContinuationEvent::PublishedButNotAdopted(
                     transaction,
-                    "The project bytes were published after this tab lost authority, so RSpice did not adopt them as the canonical live baseline. Reopen the project before continuing."
+                    "The project was saved after this tab lost control of it, so this tab did not take that save as its current version. Reopen the project before continuing."
                         .to_owned(),
                 )
             }

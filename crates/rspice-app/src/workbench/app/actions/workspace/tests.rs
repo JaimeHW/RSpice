@@ -1201,7 +1201,7 @@ fn canonical_cell_collisions_reject_copy_and_rename_without_partial_mutation() {
     let copy_error = state
         .copy_cell("work", "\u{c9}tage", "work", "\u{e9}TAGE")
         .expect_err("accented case aliases cannot create a second cell identity");
-    assert!(copy_error.contains("canonical cell identity"));
+    assert!(copy_error.contains("conflicts with an existing cell"));
     assert_eq!(state.workspace.content.project_sources, before_sources);
     assert_eq!(
         state
@@ -1241,7 +1241,7 @@ fn canonical_cell_collisions_reject_copy_and_rename_without_partial_mutation() {
     let rename_error = state
         .rename_cell("work", "\u{c9}tage", "cIBLE")
         .expect_err("rename cannot alias an existing canonical identity");
-    assert!(rename_error.contains("canonical cell identity"));
+    assert!(rename_error.contains("conflicts with an existing cell"));
     assert_eq!(state.workspace.content.project_sources, before_sources);
     assert_eq!(
         state
@@ -2337,7 +2337,7 @@ fn rename_view_moves_the_buffer_source_and_view_exact_bindings() {
     let error = state
         .rename_view("user", "amp", "behavior", "NETLIST_VIEW")
         .expect_err("a case-folded duplicate is the same view identity");
-    assert!(error.contains("canonical view identity"), "{error}");
+    assert!(error.contains("conflicts with an existing view"), "{error}");
 }
 
 // ===========================================================================
