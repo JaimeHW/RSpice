@@ -77,6 +77,7 @@ pub(super) fn draw_scene(
             net_highlighting: state.ui.schematic_visibility.net_highlighting,
             parameter_labels: state.ui.schematic_visibility.parameter_labels,
             hover_wire_vertex: state.dialogs.interaction.hover_wire_vertex,
+            selection_filter: state.ui.schematic_selection_filter,
         },
         scene::SceneSymbols {
             library: symbol_library,

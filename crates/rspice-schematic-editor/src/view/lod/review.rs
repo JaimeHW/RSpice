@@ -226,6 +226,66 @@ fn render_state_colour_review() {
     }
 }
 
+/// A window band (left to right) and a crossing band (right to left) over
+/// the same circuit at zoom 1, dark and light.
+#[test]
+#[ignore = "writes review PNGs to RSPICE_RASTER_DIR"]
+fn render_rubber_band_review() {
+    use crate::session::{EditorSession, visibility::SchematicReviewMarkerVisibility};
+    use crate::view::{design_view::DesignView, preview::PreviewView};
+    use rspice_design::schematic::document::SchematicDocument;
+    let cell = Vec2::new(300.0, 220.0);
+    let document = SchematicDocument::default();
+    for (mode, theme) in themes() {
+        let canvas = rspice_ui_kit::raster::render_themed(
+            theme,
+            Vec2::new(cell.x * 2.0, cell.y),
+            |ui, _| {
+                let palette = rspice_ui_kit::tokens::active_palette();
+                for (index, (start, current)) in [
+                    (Point::new(-50, -40), Point::new(120, 70)),
+                    (Point::new(120, 70), Point::new(-50, -40)),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let bounds = Rect::from_min_size(Pos2::new(index as f32 * cell.x, 0.0), cell);
+                    let viewport = Viewport {
+                        offset: Pos2::new(cell.x * 0.3, cell.y * 0.35),
+                        zoom: 1.0,
+                        bounds,
+                    };
+                    let painter = ui.painter().with_clip_rect(bounds.shrink(1.0));
+                    painter.rect_filled(bounds.shrink(1.0), 0.0, palette.canvas_bg);
+                    paint_circuit(&painter, &viewport);
+                    let mut editor = EditorSession::default();
+                    editor.selection_rect.start_at(start);
+                    editor.selection_rect.update(current);
+                    crate::view::preview::draw_selection_rect(
+                        &painter,
+                        &PreviewView {
+                            design: DesignView {
+                                document: &document,
+                                canvas_cache: None,
+                                sheet_catalog: None,
+                                review_markers: SchematicReviewMarkerVisibility::All,
+                            },
+                            editor: &editor,
+                            can_edit: true,
+                        },
+                        &viewport,
+                    );
+                }
+            },
+        );
+        write_png(
+            &format!("band-{mode}-{}", review_stage()),
+            &canvas,
+            cell.y as usize,
+        );
+    }
+}
+
 /// The canvas in its dark and its light palette.
 pub(crate) fn themes() -> [(&'static str, rspice_ui_kit::Theme); 2] {
     [

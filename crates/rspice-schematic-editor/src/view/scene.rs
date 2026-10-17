@@ -19,12 +19,13 @@ use super::{
         NetLabelPaint, draw_net_label_attached, net_label_at,
         world_bounds as net_label_world_bounds,
     },
-    symbol_context::SchematicSymbolContext,
+    symbol_context::{SchematicSymbolContext, SelectionWindow},
     viewport::Viewport,
 };
 use crate::{
     session::{
         EditorSession,
+        selection::SchematicSelectionFilter,
         tool::Tool,
         visibility::{SchematicNetHighlighting, SchematicParameterLabelVisibility},
     },
@@ -54,6 +55,8 @@ pub struct SceneView<'a> {
     pub net_highlighting: SchematicNetHighlighting,
     pub parameter_labels: SchematicParameterLabelVisibility,
     pub hover_wire_vertex: Option<(i32, i32)>,
+    /// What a rubber band may select, so its live preview honours it.
+    pub selection_filter: SchematicSelectionFilter,
 }
 
 /// The host resolves run provenance and probe materialization. The canvas only
@@ -81,12 +84,23 @@ pub fn draw_content(
 ) {
     let symbol_library = symbols.library;
     let symbol_context = symbols.context;
-    let preview_bounds = if view.editor.selection_rect.is_active() {
-        let (min_x, min_y, max_x, max_y) = view.editor.selection_rect.bounds();
-        Some((min_x, min_y, max_x, max_y))
-    } else {
-        None
-    };
+    // A live rubber band draws what its release will select, through the
+    // same window and the same selection filter.
+    let band = view.editor.selection_rect.is_active().then(|| {
+        SelectionWindow::from_band(
+            view.editor.selection_rect.start,
+            view.editor.selection_rect.current,
+            view.design.document.document_policy.selection_crossing,
+        )
+    });
+    let filter = view.selection_filter;
+    let band_for = |family: bool| band.filter(|_| family);
+    let (band_wires, band_instances, band_labels, band_annotations) = (
+        band_for(filter.wires),
+        band_for(filter.instances),
+        band_for(filter.labels),
+        band_for(filter.annotations),
+    );
 
     // Viewport culling: only elements whose bounds intersect the visible
     // world rect are transformed and tessellated.
@@ -103,14 +117,8 @@ pub fn draw_content(
         if !polyline_intersects_view(&bus.points, wx0, wy0, wx1, wy1) {
             continue;
         }
-        let mut selected = view.editor.selection.has_bus(bus.id);
-        if !selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
-            selected = bus.points.windows(2).any(|segment| {
-                super::geometry::segment_intersects_rect(
-                    segment[0], segment[1], min_x, min_y, max_x, max_y,
-                )
-            });
-        }
+        let selected = view.editor.selection.has_bus(bus.id)
+            || band_wires.is_some_and(|band| band.takes_polyline(&bus.points));
         draw_bus(painter, viewport, bus, selected);
     }
 
@@ -139,14 +147,8 @@ pub fn draw_content(
         {
             continue;
         }
-        let mut is_selected = view.editor.selection.wires.contains(&wire.id);
-
-        if !is_selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
-            is_selected = wire
-                .points
-                .iter()
-                .any(|p| p.x >= min_x && p.x <= max_x && p.y >= min_y && p.y <= max_y);
-        }
+        let is_selected = view.editor.selection.wires.contains(&wire.id)
+            || band_wires.is_some_and(|band| band.takes_polyline(&wire.points));
 
         let net_ink = match view.net_highlighting {
             SchematicNetHighlighting::SelectedNet
@@ -208,12 +210,8 @@ pub fn draw_content(
         {
             continue;
         }
-        let mut selected = view.editor.selection.has_bus_tap(tap.id);
-        if !selected && let Some((rx0, ry0, rx1, ry1)) = preview_bounds {
-            selected = route.windows(2).any(|segment| {
-                super::geometry::segment_intersects_rect(segment[0], segment[1], rx0, ry0, rx1, ry1)
-            });
-        }
+        let selected = view.editor.selection.has_bus_tap(tap.id)
+            || band_wires.is_some_and(|band| band.takes_polyline(&route));
         draw_bus_tap(painter, viewport, tap, selected);
     }
 
@@ -229,11 +227,8 @@ pub fn draw_content(
         {
             continue;
         }
-        let mut is_selected = view.editor.selection.components.contains(&component.id);
-
-        if !is_selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
-            is_selected = max.x >= min_x && min.x <= max_x && max.y >= min_y && min.y <= max_y;
-        }
+        let is_selected = view.editor.selection.components.contains(&component.id)
+            || band_instances.is_some_and(|band| band.takes_bounds(min, max));
 
         draw_component(
             painter,
@@ -259,7 +254,8 @@ pub fn draw_content(
             viewport,
             junction.pos,
             JunctionPaint {
-                selected: view.editor.selection.has_junction(junction.pos),
+                selected: view.editor.selection.has_junction(junction.pos)
+                    || band_wires.is_some_and(|band| band.takes_point(junction.pos)),
                 hovered: view.hover_wire_vertex == Some((junction.pos.x, junction.pos.y)),
                 incident: incident_ink(view, cache, &inked_wires, junction.pos),
             },
@@ -294,12 +290,8 @@ pub fn draw_content(
         {
             continue;
         }
-        let mut selected = view.editor.selection.has_documentation_shape(shape.id);
-        if !selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
-            selected = super::documentation_shapes::shape_intersects_rect(
-                shape, min_x, min_y, max_x, max_y, false,
-            );
-        }
+        let selected = view.editor.selection.has_documentation_shape(shape.id)
+            || band_annotations.is_some_and(|band| band.takes_documentation_shape(shape));
         draw_documentation_shape(
             painter,
             viewport,
@@ -335,10 +327,8 @@ pub fn draw_content(
         {
             continue;
         }
-        let mut selected = view.editor.selection.has_net_label(label.id);
-        if !selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
-            selected = max.x >= min_x && min.x <= max_x && max.y >= min_y && min.y <= max_y;
-        }
+        let selected = view.editor.selection.has_net_label(label.id)
+            || band_labels.is_some_and(|band| band.takes_bounds(min, max));
         // The attachment diamond follows the junction precedence; the text
         // keeps its own colour.
         let attachment = if selected {
@@ -394,10 +384,8 @@ pub fn draw_content(
         {
             continue;
         }
-        let mut selected = view.editor.selection.has_design_note(note.id);
-        if !selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
-            selected = max.x >= min_x && min.x <= max_x && max.y >= min_y && min.y <= max_y;
-        }
+        let selected = view.editor.selection.has_design_note(note.id)
+            || band_annotations.is_some_and(|band| band.takes_bounds(min, max));
         draw_design_note(
             painter,
             viewport,
@@ -448,9 +436,7 @@ pub fn draw_content(
                     normalized_probe_expression(trace) == normalized_probe_expression(expression)
                 });
         }
-        if !selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
-            selected = max.x >= min_x && min.x <= max_x && max.y >= min_y && min.y <= max_y;
-        }
+        selected = selected || band_annotations.is_some_and(|band| band.takes_bounds(min, max));
         draw_probe(
             painter,
             viewport,
@@ -573,5 +559,110 @@ mod net_class_tests {
         for unclassified in ["VOUT", "afe_in", "bias_n", "D3"] {
             assert_eq!(named_net_class_color(unclassified), None, "{unclassified}");
         }
+    }
+}
+
+#[cfg(test)]
+mod band_tests {
+    use super::*;
+    use crate::session::visibility::SchematicReviewMarkerVisibility;
+    use rspice_design::schematic::{
+        document::SchematicDocument, document_policy::SelectionCrossingPolicy,
+        selection::Selection, wire::Wire,
+    };
+
+    /// The ids of the wires a scene paints in the selection colour.
+    fn painted_selected(document: &SchematicDocument, editor: &EditorSession) -> usize {
+        let ctx = egui::Context::default();
+        let bounds = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 200.0));
+        let painter = Painter::new(
+            ctx,
+            egui::LayerId::new(egui::Order::Foreground, egui::Id::new("band-test")),
+            bounds,
+        );
+        let viewport = Viewport {
+            offset: egui::Pos2::new(50.0, 100.0),
+            zoom: 1.0,
+            bounds,
+        };
+        let context = SchematicSymbolContext::default();
+        draw_content(
+            &painter,
+            bounds,
+            &viewport,
+            &SceneView {
+                design: DesignView {
+                    document,
+                    canvas_cache: None,
+                    sheet_catalog: None,
+                    review_markers: SchematicReviewMarkerVisibility::All,
+                },
+                editor,
+                net_highlighting: SchematicNetHighlighting::Off,
+                parameter_labels: SchematicParameterLabelVisibility::NamesAndValues,
+                hover_wire_vertex: None,
+                selection_filter: SchematicSelectionFilter::default(),
+            },
+            SceneSymbols {
+                library: None,
+                context: &context,
+            },
+            SceneOverlays {
+                net_class_colors: HashMap::new(),
+                operating_point: Vec::new(),
+                probe_status: &|_| ProbeVisualStatus::Materialized,
+                selected_trace_expression: &|| None,
+            },
+            String::new,
+        );
+        let select = rspice_ui_kit::tokens::active_palette().canvas_select;
+        let mut count = 0;
+        painter.for_each_shape(|shape| {
+            if let egui::Shape::Path(path) = &shape.shape
+                && path.stroke.color == egui::epaint::ColorMode::Solid(select)
+            {
+                count += 1;
+            }
+        });
+        count
+    }
+
+    /// One long wire, and the selection a release of `band` would make.
+    fn drag(start: Point, current: Point) -> (usize, Selection) {
+        let mut document = SchematicDocument {
+            wires: vec![Wire::segment(1, Point::new(0, 0), Point::new(200, 0))],
+            ..SchematicDocument::default()
+        };
+        document.document_policy.selection_crossing = SelectionCrossingPolicy::Directional;
+        let mut editor = EditorSession::default();
+        editor.selection_rect.start_at(start);
+        editor.selection_rect.update(current);
+        let mut released = Selection::default();
+        SchematicSymbolContext::default().select_in_rect(
+            &document,
+            &mut released,
+            SelectionWindow::from_band(start, current, document.document_policy.selection_crossing),
+            false,
+        );
+        (painted_selected(&document, &editor), released)
+    }
+
+    /// A left-to-right band is a window: over one end of a long wire it
+    /// neither shows the wire selected nor selects it. A right-to-left band
+    /// is a crossing: across the middle of the wire, with no vertex inside,
+    /// it shows the wire selected and selects it. Before, the preview took
+    /// any vertex inside the box in both modes.
+    #[test]
+    fn the_live_band_shows_exactly_what_its_release_selects() {
+        let (painted, released) = drag(Point::new(-10, -10), Point::new(50, 10));
+        assert_eq!(painted, 0, "a window over one end shows nothing selected");
+        assert!(!released.has_wire(1));
+
+        let (painted, released) = drag(Point::new(110, 10), Point::new(90, -10));
+        assert!(
+            painted > 0,
+            "a crossing band over the middle shows the wire"
+        );
+        assert!(released.has_wire(1));
     }
 }

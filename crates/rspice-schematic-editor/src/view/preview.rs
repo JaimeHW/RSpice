@@ -9,7 +9,7 @@ use super::{
     drawing::{draw_bus, draw_bus_tap},
     net_labels::draw_net_label,
     snap_resolution::{resolve_grid_pointer, resolve_target_pointer},
-    symbol_context::SchematicSymbolContext,
+    symbol_context::{SchematicSymbolContext, SelectionWindow},
     viewport::Viewport,
 };
 use crate::session::{EditorSession, tool::Tool};
@@ -298,24 +298,68 @@ pub fn draw_bus_tap_preview(
     }
 }
 
+/// The rubber band. A window band (enclosed only) is a solid 1-dpx edge; a
+/// crossing band (anything it touches) is dashed, 4 pt on and 3 pt off, with
+/// the dash anchored at the press corner so it does not crawl as the band
+/// grows. The style follows the mode the release will select in, not the
+/// drag direction, so a policy of always-window or always-crossing draws its
+/// own style both ways.
 pub fn draw_selection_rect(painter: &Painter, view: &PreviewView<'_>, tool_viewport: &Viewport) {
-    if view.editor.selection_rect.is_active() {
-        let (min_x, min_y, max_x, max_y) = view.editor.selection_rect.bounds();
-        let top_left = tool_viewport.schematic_to_screen(Point::new(min_x, min_y));
-        let bottom_right = tool_viewport.schematic_to_screen(Point::new(max_x, max_y));
-
-        let selection_rect = Rect::from_min_max(top_left, bottom_right);
-
-        let accent = rspice_ui_kit::tokens::active_palette().accent;
-        painter.rect_filled(selection_rect, 0.0, accent.gamma_multiply(0.14));
-        painter.rect_stroke(
-            selection_rect,
-            0.0,
-            Stroke::new(1.0, accent),
-            egui::StrokeKind::Inside,
-        );
+    let band = &view.editor.selection_rect;
+    if !band.is_active() {
+        return;
+    }
+    let window = SelectionWindow::from_band(
+        band.start,
+        band.current,
+        view.design.document.document_policy.selection_crossing,
+    );
+    let ppp = painter.pixels_per_point();
+    // Corners on device-pixel centres, so a 1-dpx edge is crisp.
+    let crisp = |point: Point| {
+        let screen = tool_viewport.schematic_to_screen(point);
+        egui::pos2(
+            ((screen.x * ppp).floor() + 0.5) / ppp,
+            ((screen.y * ppp).floor() + 0.5) / ppp,
+        )
+    };
+    let anchor = crisp(band.start);
+    let corner = crisp(band.current);
+    if anchor.distance(corner) < BAND_APPEARS_AFTER {
+        return;
+    }
+    let palette = rspice_ui_kit::tokens::active_palette();
+    let stroke = Stroke::new(1.0 / ppp, palette.canvas_select);
+    let rect = Rect::from_two_pos(anchor, corner);
+    if window.enclosed_only() {
+        painter.rect_filled(rect, 0.0, palette.canvas_select.gamma_multiply(0.10));
+        painter.rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Middle);
+    } else {
+        painter.rect_filled(rect, 0.0, palette.canvas_select.gamma_multiply(0.05));
+        // Each edge runs away from the press corner, so the dash phase is
+        // fixed there while the far corner moves.
+        let far_x = egui::pos2(corner.x, anchor.y);
+        let far_y = egui::pos2(anchor.x, corner.y);
+        for (from, to) in [
+            (anchor, far_x),
+            (anchor, far_y),
+            (far_x, corner),
+            (far_y, corner),
+        ] {
+            painter.extend(egui::Shape::dashed_line(
+                &[from, to],
+                stroke,
+                BAND_DASH,
+                BAND_GAP,
+            ));
+        }
     }
 }
+
+/// Travel, in points, before a rubber band is drawn.
+const BAND_APPEARS_AFTER: f32 = 4.0;
+const BAND_DASH: f32 = 4.0;
+const BAND_GAP: f32 = 3.0;
 
 mod transform;
 pub use transform::{
