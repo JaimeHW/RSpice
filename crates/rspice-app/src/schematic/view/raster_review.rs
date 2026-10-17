@@ -470,6 +470,18 @@ pub(super) fn render(
     framing: Framing,
     pixels_per_point: f32,
 ) -> Render {
+    render_pointing(state, theme, framing, pixels_per_point, None)
+}
+
+/// [`render`] with the pointer resting at `pointer` (in points), so the
+/// canvas draws whatever it pre-highlights there.
+pub(super) fn render_pointing(
+    state: &mut AppState,
+    theme: crate::ui::Theme,
+    framing: Framing,
+    pixels_per_point: f32,
+    pointer: Option<egui::Pos2>,
+) -> Render {
     let zoom = match framing.zoom {
         Zoom::Fixed(zoom) => zoom,
         Zoom::FitA1 => a1_fit_zoom(),
@@ -488,16 +500,15 @@ pub(super) fn render(
             f64::from(SCREEN.x) * 0.5 - f64::from(framing.centre.x) * zoom,
             f64::from(SCREEN.y) * 0.5 - f64::from(framing.centre.y) * zoom,
         );
-        output = Some(ctx.run_ui(
-            crate::ui::raster::display_input(SCREEN, pixels_per_point),
-            |ui| {
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::NONE)
-                    .show(ui, |ui| {
-                        super::render_schematic_view(ui, state, symbols.as_ref());
-                    });
-            },
-        ));
+        let mut input = crate::ui::raster::display_input(SCREEN, pixels_per_point);
+        input.events.extend(pointer.map(egui::Event::PointerMoved));
+        output = Some(ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ui, |ui| {
+                    super::render_schematic_view(ui, state, symbols.as_ref());
+                });
+        }));
     }
     let output = output.expect("three frames");
     assert!(
@@ -1255,5 +1266,51 @@ fn a_transistor_value_stands_clear_of_every_pin_line() {
                 transistor.name, value.text, value.rect
             );
         }
+    }
+}
+
+/// A hovered junction's ring is stroked in whole device pixels at every
+/// pixel density, as crisp as the wires it sits on. D1 section 6 gives it
+/// 1.5 pt, which on a 1x display antialiased into a soft two-pixel ring.
+#[test]
+fn a_hovered_junction_ring_is_stroked_in_whole_device_pixels() {
+    // The dot where the compensation leg crosses the output, clear of any
+    // part's pins.
+    let junction = Point::new(600, 240);
+    for pixels_per_point in [1.0_f32, 1.5, 2.0] {
+        let mut state = analog_sheet();
+        let framing = at_zoom(1.0, ANALOG_CENTRE);
+        let pointer = on_screen(framing.centre, 1.0, junction);
+        let render = render_pointing(
+            &mut state,
+            themes()[0].1,
+            framing,
+            pixels_per_point,
+            Some(pointer),
+        );
+        let select = render.tokens.color.canvas_select;
+        let rings = leaf_shapes(&render.shapes)
+            .into_iter()
+            .filter_map(|(_, shape)| match shape {
+                Shape::Circle(circle)
+                    if circle.stroke.color == select
+                        && circle.stroke.width > 0.0
+                        && circle.center.distance(pointer) < 0.5 =>
+                {
+                    Some(circle.stroke.width)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rings.len(),
+            1,
+            "{pixels_per_point}x: the hovered junction draws one ring"
+        );
+        let device = rings[0] * pixels_per_point;
+        assert!(
+            device >= 1.0 && (device - device.round()).abs() < 1e-3,
+            "{pixels_per_point}x: the hover ring is {device} device pixels"
+        );
     }
 }

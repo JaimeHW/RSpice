@@ -1240,7 +1240,11 @@ pub fn draw_junction(
             Stroke::new(lod::mark_outline_pt(ppp), palette.canvas_select),
         );
     } else if paint.hovered {
-        painter.circle_stroke(pos, radius + 3.0, Stroke::new(1.5, palette.canvas_select));
+        painter.circle_stroke(
+            pos,
+            radius + 3.0,
+            Stroke::new(lod::hover_ring_pt(ppp), palette.canvas_select),
+        );
     }
 
     painter.circle_filled(pos, radius, paint.fill(&palette));

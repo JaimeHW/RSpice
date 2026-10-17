@@ -162,6 +162,17 @@ pub fn mark_outline_pt(ppp: f32) -> f32 {
     floor_dpx(1.0, ppp) / ppp
 }
 
+/// A hovered junction's ring, in points (D1 section 6).
+const HOVER_RING_PT: f32 = 1.5;
+
+/// The stroke of a hovered junction's ring in points: D1's 1.5 pt rounded to
+/// whole device pixels, so the ring is as crisp as the wires it sits on at
+/// every pixel density (2 px at 1x, 3 at 2x) rather than a soft blur.
+pub fn hover_ring_pt(ppp: f32) -> f32 {
+    let ppp = ppp_or_one(ppp);
+    floor_dpx(HOVER_RING_PT, ppp) / ppp
+}
+
 /// Quantize a zoom-scaled font size to quarter points: consecutive zoom
 /// frames then reuse egui's cached galleys instead of re-shaping every
 /// label on screen each frame (the dominant zoom-gesture cost).
@@ -355,6 +366,19 @@ mod tests {
         assert_eq!(mark_outline_pt(1.0), 1.0);
         assert_eq!(mark_outline_pt(2.0), 1.0);
         assert!((mark_outline_pt(1.5) * 1.5 - 2.0).abs() < 1e-5);
+    }
+
+    /// A hovered junction's ring is whole device pixels at every density:
+    /// 2 px at 1x, 2 at 1.25x and 1.5x, 3 at 2x, 5 at 3x.
+    #[test]
+    fn a_hover_ring_is_whole_device_pixels() {
+        for (ppp, device) in [(1.0, 2.0), (1.25, 2.0), (1.5, 2.0), (2.0, 3.0), (3.0, 5.0)] {
+            assert!(
+                (hover_ring_pt(ppp) * ppp - device).abs() < 1e-5,
+                "{ppp}x: {} device pixels",
+                hover_ring_pt(ppp) * ppp
+            );
+        }
     }
 
     /// The design's text thresholds: where net names, instance names and pin
