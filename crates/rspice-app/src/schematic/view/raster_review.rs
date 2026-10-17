@@ -1001,6 +1001,92 @@ fn a_named_net_badge_is_centred_on_its_label_name() {
     }
 }
 
+/// The hierarchy sheet's ports: each one's name and position.
+fn ports(state: &AppState) -> Vec<(String, Point)> {
+    state
+        .schematic
+        .document()
+        .components
+        .iter()
+        .filter(|component| component.kind == ComponentType::Port)
+        .map(|component| (component.value.clone(), component.pos))
+        .collect()
+}
+
+/// A port's name is an electrical name (D1 section 1): lettered as an
+/// off-sheet connector's name is, in Plex Mono Medium at 11 wu in the
+/// net-label ink, and greeked to a bar below the legibility floor rather
+/// than vanishing. It was lettered as an instance value, in 9-wu Plex Sans
+/// and the dim ink, so at the A1 fit every port's name disappeared.
+#[test]
+fn a_port_name_letters_and_greeks_as_a_net_name() {
+    let mut state = hierarchy_sheet();
+    let ports = ports(&state);
+    assert_eq!(ports.len(), 4);
+
+    let framing = at_zoom(1.0, HIERARCHY_CENTRE);
+    let close = render(&mut state, themes()[0].1, framing, 1.0);
+    let texts = painted_text(&close.shapes);
+    let connector = texts
+        .iter()
+        .find(|text| text.text == "MID")
+        .expect("the MID connector's name is painted");
+    for (name, at) in &ports {
+        let anchor = on_screen(framing.centre, close.zoom, *at);
+        let painted = texts
+            .iter()
+            .filter(|text| text.text == *name)
+            .min_by(|a, b| {
+                a.rect
+                    .center()
+                    .distance(anchor)
+                    .total_cmp(&b.rect.center().distance(anchor))
+            })
+            .unwrap_or_else(|| panic!("{name}: the port's name is painted"));
+        assert!(
+            painted.rect.center().distance(anchor) < 30.0,
+            "{name}: the nearest {name:?} at {:?} is not the port's",
+            painted.rect
+        );
+        assert_eq!(
+            (painted.colour, painted.size, &painted.family),
+            (connector.colour, connector.size, &connector.family),
+            "{name}: the port's name is lettered as a net name"
+        );
+    }
+
+    let framing = Framing {
+        name: "test",
+        zoom: Zoom::FitA1,
+        centre: HIERARCHY_CENTRE,
+    };
+    let fit = render(&mut state, themes()[0].1, framing, 1.0);
+    let greeked = fit
+        .tokens
+        .color
+        .net_label
+        .gamma_multiply(rspice_schematic_editor::view::lod::GREEK_ALPHA);
+    let bars = leaf_shapes(&fit.shapes)
+        .into_iter()
+        .filter_map(|(_, shape)| match shape {
+            Shape::Rect(rect) if rect.fill == greeked => Some(rect.rect),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    for (name, at) in &ports {
+        let anchor = on_screen(framing.centre, fit.zoom, *at);
+        let near = bars
+            .iter()
+            .filter(|bar| bar.center().distance(anchor) < 30.0 * fit.zoom as f32)
+            .count();
+        assert_eq!(
+            near, 1,
+            "zoom {:.3}: {name}'s name greeks to one bar beside the port (bars: {bars:?})",
+            fit.zoom
+        );
+    }
+}
+
 /// Every run of text the canvas paints is legible (D1 section 1: at least
 /// 6 device pixels and 3.5 pt), at the zoom that fits A1 and at 0.25, on 1x
 /// and 2x. A design note kept its own 4-pt floor, compared in points: at the

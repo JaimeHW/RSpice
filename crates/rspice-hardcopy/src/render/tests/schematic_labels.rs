@@ -496,6 +496,42 @@ fn a_printed_port_shows_which_way_its_signal_goes() {
     assert_eq!(marks.len(), 6, "three strokes for each port");
 }
 
+/// A port's name is an electrical name, printed in the type a connector's
+/// name is: Plex Mono Medium, 11 wu, in the net ink (D1 section 1). It was
+/// set as an instance value, in 9-wu Plex Sans and the value ink.
+#[test]
+fn a_printed_port_name_is_set_as_a_net_name() {
+    let compiled = compile(&review_sheet());
+    let set_in = |wanted: &str| {
+        compiled
+            .primitives
+            .iter()
+            .find_map(|primitive| match primitive {
+                ScenePrimitive::Text {
+                    text,
+                    font,
+                    size,
+                    color,
+                    ..
+                } if text == wanted => Some((*font, size.micrometres(), *color)),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{wanted:?} is printed"))
+    };
+    let connector = set_in("CLK");
+    assert_eq!(
+        connector,
+        (
+            SceneFont::MonospaceMedium,
+            2_750,
+            SemanticColor::Exact(Rgb8::new(0x7D, 0x52, 0x00))
+        )
+    );
+    for port in ["IN", "OUT"] {
+        assert_eq!(set_in(port), connector, "{port} is set as a net name");
+    }
+}
+
 fn resolved_review_sheet() -> ResolvedHardcopyDocument {
     let semantic = review_sheet();
     let identity = HardcopySourceIdentity::try_new(

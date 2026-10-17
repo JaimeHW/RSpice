@@ -1103,20 +1103,84 @@ fn draw_component_labels(
         );
     }
 
-    // Draw component value
-    if let Some(size) = lod::annotation_size(INSTANCE_VALUE_WORLD, scale, ppp)
-        && component.display_mode.show_value(visibility)
-    {
-        let value_text = super::super::source_labels::component_value_label_cached(component);
-        if !value_text.is_empty() {
+    // Draw component value, or a port's name, which is an electrical name.
+    if !component.display_mode.show_value(visibility) {
+        return;
+    }
+    match label_layout::instance_value_class(component) {
+        label_layout::ValueClass::Value => {
+            if let Some(size) = lod::annotation_size(INSTANCE_VALUE_WORLD, scale, ppp) {
+                let value_text =
+                    super::super::source_labels::component_value_label_cached(component);
+                if !value_text.is_empty() {
+                    painter.text(
+                        layout.value_pos,
+                        layout.value_align,
+                        value_text.as_ref(),
+                        rspice_ui_kit::theme::sans(size, rspice_ui_kit::theme::FontWeight::Regular),
+                        palette.text_dim,
+                    );
+                }
+            }
+        }
+        label_layout::ValueClass::NetName => {
+            let name = super::super::source_labels::component_value_label_cached(component);
+            if !name.is_empty() {
+                draw_electrical_name(
+                    painter,
+                    layout.value_pos,
+                    layout.value_align,
+                    name.as_ref(),
+                    scale,
+                    palette.net_label,
+                );
+            }
+        }
+    }
+}
+
+/// A port's name: an electrical name in a net label's type (Plex Mono Medium,
+/// 11 wu), hung off `at` as `align` says. Below the legibility floor it
+/// greeks into a bar where the text would be, as a net label's name does, so
+/// a zoomed-out sheet still shows that a name is there (D1 section 1).
+fn draw_electrical_name(
+    painter: &Painter,
+    at: Pos2,
+    align: egui::Align2,
+    text: &str,
+    zoom: f32,
+    color: egui::Color32,
+) {
+    let ppp = painter.pixels_per_point();
+    let world = label_layout::ValueClass::NetName.size_world();
+    match lod::text_lod(world, zoom, ppp, TextClass::Electrical) {
+        TextLod::Draw(size) => {
             painter.text(
-                layout.value_pos,
-                layout.value_align,
-                value_text.as_ref(),
-                rspice_ui_kit::theme::sans(size, rspice_ui_kit::theme::FontWeight::Regular),
-                palette.text_dim,
+                at,
+                align,
+                text,
+                rspice_ui_kit::theme::mono(size, rspice_ui_kit::theme::FontWeight::Medium),
+                color,
             );
         }
+        TextLod::Greek(bar) => {
+            let width = lod::greek_bar_width_pt(
+                text.chars().count(),
+                label_layout::NET_LABEL_GLYPH_WIDTH_WORLD,
+                zoom,
+                ppp,
+            );
+            let text_box = align.anchor_size(
+                at,
+                Vec2::new(width, label_layout::LINE_BOX_EM * world * zoom),
+            );
+            painter.rect_filled(
+                Rect::from_center_size(text_box.center(), Vec2::new(width, bar.height_pt)),
+                0.0,
+                color.gamma_multiply(lod::GREEK_ALPHA),
+            );
+        }
+        TextLod::Hide => {}
     }
 }
 

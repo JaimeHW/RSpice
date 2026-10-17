@@ -130,6 +130,40 @@ pub struct InstanceLabelLayout {
     pub value: PlacedText,
 }
 
+/// The type an instance's value is set in (D1 section 1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValueClass {
+    /// A part's value or a cell's name: Plex Sans Regular in the dim text
+    /// ink. It hides below the legibility floor.
+    Value,
+    /// A port's name, which is an electrical name like a net label's: Plex
+    /// Mono Medium in the net-label ink. It greeks below the legibility floor
+    /// rather than vanishing, so a zoomed-out sheet still shows a name there.
+    NetName,
+}
+
+impl ValueClass {
+    /// The class's type size, in world units.
+    pub const fn size_world(self) -> f32 {
+        match self {
+            Self::Value => INSTANCE_VALUE_WORLD,
+            Self::NetName => NET_LABEL_FONT_WORLD,
+        }
+    }
+}
+
+/// The class an instance's value is lettered in: a port's value is the name
+/// of the net it carries across the sheet, so it reads as a net name does;
+/// every other part's is an instance value. The canvas, the SVG export and
+/// the printed page all ask here.
+pub fn instance_value_class(component: &Component) -> ValueClass {
+    if component.kind == ComponentType::Port {
+        ValueClass::NetName
+    } else {
+        ValueClass::Value
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TerminalAxis {
     Horizontal,

@@ -668,8 +668,9 @@ struct PrimitiveLabel {
 }
 
 /// A primitive's name and value where the canvas puts them, through the
-/// canvas's own layout evaluated in SVG units, turned with the instance. A
-/// cell's labels are its symbol's; ground has none.
+/// canvas's own layout evaluated in SVG units, turned with the instance, and
+/// in the class the shared layout gives the value (a port's name is a net
+/// name). A cell's labels are its symbol's; ground has none.
 fn primitive_labels(component: &Component, config: &SvgExportConfig) -> Vec<PrimitiveLabel> {
     if component.kind == ComponentType::Ground {
         return Vec::new();
@@ -701,7 +702,9 @@ fn primitive_labels(component: &Component, config: &SvgExportConfig) -> Vec<Prim
         && !value.is_empty()
     {
         labels.push(PrimitiveLabel {
-            kind: InstanceLabel::Value,
+            kind: InstanceLabel::value(
+                rspice_design::schematic::label_layout::instance_value_class(component),
+            ),
             at: at(layout.value_pos),
             align: layout.value_align,
             text: value.to_string(),
@@ -1425,6 +1428,36 @@ mod tests {
         );
         let (turned, _) = name_line(Rotation::R90);
         assert!(turned.contains(r#"text-anchor="end""#), "{turned}");
+    }
+
+    /// A port's name exports in the net-name class, the type a connector's
+    /// name takes (D1 section 1), and its box is the net name's. It was set
+    /// in the instance value's class.
+    #[test]
+    fn a_port_name_exports_as_a_net_name() {
+        let config = SvgExportConfig::default();
+        let mut port = Component::new(1, ComponentType::Port, Point::new(100, 100));
+        port.value = "IN".to_owned();
+        port.params = "dir=in".to_owned();
+        let mut svg = String::new();
+        write_component(&mut svg, &port, &config, None, None);
+        let line = svg
+            .lines()
+            .find(|line| line.ends_with(">IN</text>"))
+            .unwrap_or_else(|| panic!("no port name in {svg}"));
+        assert!(line.starts_with(r#"<text class="net-name""#), "{line}");
+        let labels = primitive_labels(&port, &config);
+        let name = labels
+            .iter()
+            .find(|label| label.text == "IN")
+            .expect("the port's name is a label");
+        assert!(
+            (name.kind.size(&config)
+                - f64::from(crate::view::net_labels::LABEL_FONT_WORLD_SIZE)
+                    * config.units_per_world)
+                .abs()
+                < 1e-9
+        );
     }
 
     #[test]

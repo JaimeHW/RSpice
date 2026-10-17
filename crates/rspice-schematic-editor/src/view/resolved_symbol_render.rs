@@ -533,21 +533,32 @@ fn write_symbol_labels_svg(
     }
 }
 
-/// Which instance label an SVG run is: the name or the value.
+/// Which instance label an SVG run is: the name, the value, or a port's
+/// name, which is set as a net name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InstanceLabel {
     Name,
     Value,
+    NetName,
 }
 
 impl InstanceLabel {
+    /// The run a value of `class` is: a port's name is set as a net name.
+    pub(crate) const fn value(class: label_layout::ValueClass) -> Self {
+        match class {
+            label_layout::ValueClass::Value => Self::Value,
+            label_layout::ValueClass::NetName => Self::NetName,
+        }
+    }
+
     /// The label's size in SVG units: the canvas's world size times the
     /// export's units per world unit.
     pub(crate) fn size(self, config: &SvgExportConfig) -> f64 {
-        use super::drawing::{INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD};
+        use super::drawing::INSTANCE_NAME_WORLD;
         let world = match self {
             Self::Name => INSTANCE_NAME_WORLD,
-            Self::Value => INSTANCE_VALUE_WORLD,
+            Self::Value => label_layout::ValueClass::Value.size_world(),
+            Self::NetName => label_layout::ValueClass::NetName.size_world(),
         };
         f64::from(world) * config.units_per_world
     }
@@ -557,6 +568,7 @@ impl InstanceLabel {
         match self {
             Self::Name => "name",
             Self::Value => "value",
+            Self::NetName => "net-name",
         }
     }
 

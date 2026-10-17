@@ -10,7 +10,7 @@ use rspice_design::schematic::{
     bus::{Bus, BusTap},
     component_display::SchematicParameterLabelVisibility,
     component_type::ComponentType,
-    label_layout::{self, LayoutPoint, LayoutRect, PlacedText, TextEdge},
+    label_layout::{self, LayoutPoint, LayoutRect, PlacedText, TextEdge, ValueClass},
     net_label::NetLabel,
     value_label::{cell_instance_value, component_value_label},
 };
@@ -26,8 +26,8 @@ pub enum SchematicTextClass {
     Value,
     /// A bus declaration or a tap's bit slice: Plex Mono Medium, 9 wu.
     Slice,
-    /// A net label's or an off-sheet connector's name: Plex Mono Medium,
-    /// 11 wu.
+    /// A net label's, an off-sheet connector's or a port's name: Plex Mono
+    /// Medium, 11 wu.
     NetName,
 }
 
@@ -98,7 +98,10 @@ pub fn instance_texts(semantic: &SemanticComponent) -> Vec<SchematicText> {
     }
     if component.display_mode.show_value(visibility) && !value_text.trim().is_empty() {
         texts.push(SchematicText {
-            class: SchematicTextClass::Value,
+            class: match label_layout::instance_value_class(component) {
+                ValueClass::Value => SchematicTextClass::Value,
+                ValueClass::NetName => SchematicTextClass::NetName,
+            },
             placed: value,
             text: value_text,
         });
