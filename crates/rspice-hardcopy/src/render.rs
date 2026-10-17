@@ -60,8 +60,8 @@ use rspice_design_model::design_management::{
 use rspice_hardcopy_contract::RenderTarget;
 use rspice_hardcopy_contract::{
     BackgroundMode, Bleed, ColorMapping, ContentExtent, HardcopyArtifactIdentity, HardcopyPlan,
-    Length, MAX_RASTER_DPI, MIN_RASTER_DPI, OutputFormat, OutsideSheetContentPolicy, PageRect,
-    PreviewPage, PrintColor, PrintMappingTable, PrintObjectKind, PrintRedundancy,
+    LegendGrid, Length, MAX_RASTER_DPI, MIN_RASTER_DPI, OutputFormat, OutsideSheetContentPolicy,
+    PageRect, PreviewPage, PrintColor, PrintMappingTable, PrintObjectKind, PrintRedundancy,
     ResolvedOrientation, ScaleRatio, SchematicHardcopyExtent, SchematicHardcopySetup, Watermark,
 };
 use rspice_hardcopy_contract::{HardcopyDocumentId, HardcopyPlanId};
@@ -108,9 +108,6 @@ const MAX_RASTER_WORKING_BYTES: u64 = 1_024 * 1_048_576;
 const MAX_RASTER_WORKING_BYTES: u64 = 256 * 1_048_576;
 const DEFAULT_STROKE_UM: u64 = 250;
 const DECORATION_TEXT_UM: u64 = 3_000;
-const LEGEND_COLUMN_UM: u64 = 64_000;
-const LEGEND_ROW_UM: u64 = 5_000;
-const LEGEND_VERTICAL_PADDING_UM: u64 = 4_000;
 
 // IBM Plex is licensed for embedding under SIL OFL 1.1. The retained license
 // is assets/fonts/OFL-IBMPlex.txt.

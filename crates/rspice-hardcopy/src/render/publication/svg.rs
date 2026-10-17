@@ -410,7 +410,6 @@ pub(super) fn write_svg_decorations(
 ) -> Result<(), HardcopyRenderError> {
     let geometry = page.geometry();
     let printable = geometry.printable_rect();
-    let content = geometry.content_rect();
     let ink = svg_color(resolve_color(plan, SemanticColor::Foreground));
     let secondary = svg_color(resolve_color(plan, SemanticColor::Secondary));
     if plan.setup().decorations().includes_header() {
@@ -461,17 +460,9 @@ pub(super) fn write_svg_decorations(
         escape_xml_into(&row.text, output);
         output.push_str("</text>");
     }
-    if plan.setup().decorations().includes_legends() && !scene.legend.is_empty() {
-        let legend_band = geometry.legend_band().micrometres();
-        let columns = printable.width.micrometres() / LEGEND_COLUMN_UM;
-        let rows = legend_band.saturating_sub(LEGEND_VERTICAL_PADDING_UM) / LEGEND_ROW_UM;
-        let legend_top = content
-            .y
-            .micrometres()
-            .saturating_add(content.height.micrometres());
-        let box_height = rows
-            .saturating_mul(LEGEND_ROW_UM)
-            .saturating_add(LEGEND_VERTICAL_PADDING_UM);
+    if let Some(legend) = legend_layout(plan, scene, page)? {
+        let legend_top = legend.top_um;
+        let box_height = geometry.legend_band().micrometres();
         write!(
             output,
             "<g data-rspice-decoration=\"legend\"><rect x=\"{}\" y=\"{legend_top}\" width=\"{}\" height=\"{box_height}\" fill=\"#ffffff\" fill-opacity=\"0.92\" stroke=\"{secondary}\" stroke-width=\"150\"/>",
@@ -479,21 +470,9 @@ pub(super) fn write_svg_decorations(
             printable.width.micrometres(),
         )
         .expect("write to string");
-        for (index, entry) in scene.legend.iter().enumerate() {
-            let index = index as u64;
-            let column = index / rows.max(1);
-            let row = index % rows.max(1);
-            if column >= columns {
-                break;
-            }
-            let x = printable
-                .x
-                .micrometres()
-                .saturating_add(column.saturating_mul(LEGEND_COLUMN_UM))
-                .saturating_add(2_000);
-            let y = legend_top
-                .saturating_add(3_500)
-                .saturating_add(row.saturating_mul(LEGEND_ROW_UM));
+        for slot in &legend.slots {
+            let entry = slot.entry;
+            let (x, y) = slot.swatch;
             let stroke = resolve_stroke(plan, page_transform(page), entry.stroke);
             if entry.fill.is_some() {
                 write!(
@@ -517,12 +496,11 @@ pub(super) fn write_svg_decorations(
             }
             write!(
                 output,
-                "<text x=\"{}\" y=\"{}\" fill=\"{ink}\" font-family=\"{PUBLICATION_SANS}\" font-size=\"2600\">",
-                x + 15_000,
-                y + 900
+                "<text x=\"{}\" y=\"{}\" fill=\"{ink}\" font-family=\"{PUBLICATION_SANS}\" font-size=\"{LEGEND_TEXT_UM}\">",
+                slot.origin.0, slot.origin.1
             )
             .expect("write to string");
-            escape_xml_into(&entry.label, output);
+            escape_xml_into(&slot.label, output);
             output.push_str("</text>");
         }
         output.push_str("</g>");

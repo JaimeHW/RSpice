@@ -76,7 +76,8 @@ pub(super) fn provenance_rows(
             let mut word_break = None;
             let mut advance = 0;
             for (offset, grapheme) in remaining.grapheme_indices(true) {
-                let next = advance + grapheme_width(&face, grapheme)?;
+                let next = advance
+                    + grapheme_width(&face, "IBM Plex Mono Regular", grapheme, "page provenance")?;
                 if next > width_units {
                     break;
                 }
@@ -115,7 +116,13 @@ pub(super) fn provenance_rows(
 
 /// Include glyph overhangs as well as advances. Graphemes stay intact when a
 /// key must wrap; conservative widths also cover decomposed accented names.
-fn grapheme_width(face: &ttf_parser::Face<'_>, text: &str) -> Result<u64, HardcopyRenderError> {
+/// The width is in `face`'s font units.
+pub(super) fn grapheme_width(
+    face: &ttf_parser::Face<'_>,
+    font: &'static str,
+    text: &str,
+    context: &'static str,
+) -> Result<u64, HardcopyRenderError> {
     let mut advance = 0i64;
     let mut left = 0;
     let mut right = 0;
@@ -124,15 +131,16 @@ fn grapheme_width(face: &ttf_parser::Face<'_>, text: &str) -> Result<u64, Hardco
             .glyph_index(character)
             .ok_or(HardcopyRenderError::UnsupportedGlyph {
                 codepoint: character as u32,
-                context: "page provenance",
+                context,
             })?;
         if let Some(bounds) = face.glyph_bounding_box(glyph) {
             left = left.min(advance + i64::from(bounds.x_min));
             right = right.max(advance + i64::from(bounds.x_max));
         }
-        advance += i64::from(face.glyph_hor_advance(glyph).ok_or(
-            HardcopyRenderError::InvalidEmbeddedFont("IBM Plex Mono Regular"),
-        )?);
+        advance += i64::from(
+            face.glyph_hor_advance(glyph)
+                .ok_or(HardcopyRenderError::InvalidEmbeddedFont(font))?,
+        );
         right = right.max(advance);
     }
     Ok((right - left) as u64)

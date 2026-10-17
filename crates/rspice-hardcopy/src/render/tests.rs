@@ -3,6 +3,7 @@
 //! These cases pin semantic-scene compilation, pagination, archival output,
 //! worker transfer, and exact output parity across supported formats.
 
+mod legend;
 mod plot_overlay;
 mod provenance;
 mod schematic_labels;

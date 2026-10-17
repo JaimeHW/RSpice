@@ -7,9 +7,11 @@
 //! neither pagination nor content identities depend on host floating-point
 //! behavior.
 
+mod legend;
 mod mapping;
 mod page_setup;
 
+pub use legend::*;
 pub use mapping::*;
 pub use page_setup::*;
 
@@ -33,9 +35,6 @@ pub const MAX_PREVIEW_PAGES: u32 = 10_000;
 const MAX_MANUAL_AXIS_PAGES: u16 = 512;
 const HEADER_BAND_UM: u64 = 8_000;
 const PROVENANCE_BAND_UM: u64 = 8_000;
-const LEGEND_COLUMN_UM: u64 = 64_000;
-const LEGEND_ROW_UM: u64 = 5_000;
-const LEGEND_VERTICAL_PADDING_UM: u64 = 4_000;
 
 /// Stable identity of the source document whose page setup follows it across
 /// ordinary content revisions.
@@ -1098,16 +1097,9 @@ impl ValidatedPageGeometry {
         let legend_band = if legend_entries == 0 {
             0
         } else {
-            let columns = printable_width / LEGEND_COLUMN_UM;
-            if columns == 0 {
-                return Err(HardcopyError::NoPrintableContentArea);
-            }
-            let entries =
-                u64::try_from(legend_entries).map_err(|_| HardcopyError::ScaledGeometryOverflow)?;
-            let rows = entries.div_ceil(columns);
-            rows.checked_mul(LEGEND_ROW_UM)
-                .and_then(|height| height.checked_add(LEGEND_VERTICAL_PADDING_UM))
-                .ok_or(HardcopyError::ScaledGeometryOverflow)?
+            LegendGrid::reserve(Length(printable_width), legend_entries)?
+                .band_height()?
+                .0
         };
         let decoration_height = header_band
             .checked_add(legend_band)

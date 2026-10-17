@@ -14,11 +14,13 @@
 //! part count it was issued for, and a response that does not match is
 //! rejected rather than trusted.
 
+mod legend;
 mod pdf;
 mod provenance;
 mod raster;
 mod svg;
 
+use legend::*;
 use pdf::*;
 use provenance::*;
 /// The dialog asks the publisher what it can afford rather than predicting it,
@@ -1757,13 +1759,8 @@ fn validate_decoration_capacity(
     if decorations.includes_legends() {
         for page in plan.pagination().pages() {
             let geometry = page.geometry();
-            let columns = geometry.printable_rect().width.micrometres() / LEGEND_COLUMN_UM;
-            let usable_height = geometry
-                .legend_band()
-                .micrometres()
-                .saturating_sub(LEGEND_VERTICAL_PADDING_UM);
-            let rows = usable_height / LEGEND_ROW_UM;
-            let maximum = usize::try_from(columns.saturating_mul(rows)).unwrap_or(usize::MAX);
+            let grid = LegendGrid::of_band(geometry.printable_rect().width, geometry.legend_band());
+            let maximum = usize::try_from(grid.capacity()).unwrap_or(usize::MAX);
             if scene.legend.len() > maximum {
                 return Err(HardcopyRenderError::DecorationOverflow {
                     decoration: "legend",

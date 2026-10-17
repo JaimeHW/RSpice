@@ -613,7 +613,6 @@ pub(super) fn draw_pdf_decorations(
     let outlined = !plan.setup().render().fonts().preserve_searchable_text();
     let geometry = page.geometry();
     let printable = geometry.printable_rect();
-    let content = geometry.content_rect();
     let ink = resolve_color(plan, SemanticColor::Foreground);
     let secondary = resolve_color(plan, SemanticColor::Secondary);
     if plan.setup().decorations().includes_header() {
@@ -684,14 +683,9 @@ pub(super) fn draw_pdf_decorations(
             },
         );
     }
-    if plan.setup().decorations().includes_legends() && !scene.legend.is_empty() {
+    if let Some(legend) = legend_layout(plan, scene, page)? {
         let legend_band = geometry.legend_band().micrometres();
-        let columns = printable.width.micrometres() / LEGEND_COLUMN_UM;
-        let rows = legend_band.saturating_sub(LEGEND_VERTICAL_PADDING_UM) / LEGEND_ROW_UM;
-        let legend_top = content
-            .y
-            .micrometres()
-            .saturating_add(content.height.micrometres());
+        let legend_top = legend.top_um;
         let background = Rect::from_xywh(
             um_to_points(printable.x.micrometres()),
             um_to_points(legend_top),
@@ -720,21 +714,9 @@ pub(super) fn draw_pdf_decorations(
                 surface.draw_path(&path);
             }
         }
-        for (index, entry) in scene.legend.iter().enumerate() {
-            let index = index as u64;
-            let column = index / rows.max(1);
-            let row = index % rows.max(1);
-            if column >= columns {
-                break;
-            }
-            let x_um = printable
-                .x
-                .micrometres()
-                .saturating_add(column.saturating_mul(LEGEND_COLUMN_UM))
-                .saturating_add(2_000);
-            let y_um = legend_top
-                .saturating_add(3_500)
-                .saturating_add(row.saturating_mul(LEGEND_ROW_UM));
+        for slot in &legend.slots {
+            let entry = slot.entry;
+            let (x_um, y_um) = slot.swatch;
             let mut builder = PathBuilder::new();
             let transform = page_transform(page);
             if entry.fill.is_some() {
@@ -777,12 +759,12 @@ pub(super) fn draw_pdf_decorations(
             }
             draw_pdf_text(
                 surface,
-                (um_to_points(x_um + 15_000), um_to_points(y_um + 900)),
-                &entry.label,
+                (um_to_points(slot.origin.0), um_to_points(slot.origin.1)),
+                &slot.label,
                 TextAnchor::Start,
                 PdfTextStyle {
                     font: &fonts.sans,
-                    size: um_to_points(2_600),
+                    size: um_to_points(LEGEND_TEXT_UM),
                     color: ink,
                     outlined,
                     opacity: NormalizedF32::ONE,
