@@ -376,6 +376,7 @@ fn render_hover_review() {
                             operating_point: Vec::new(),
                             probe_status: &|_| ProbeVisualStatus::Materialized,
                             selected_trace_expression: &|| None,
+                            open_pins: &std::collections::HashMap::new(),
                         },
                         String::new,
                     );
@@ -384,6 +385,99 @@ fn render_hover_review() {
         );
         write_png(
             &format!("hover-{mode}-{}", review_stage()),
+            &canvas,
+            cell.y as usize,
+        );
+    }
+}
+
+/// A resistor wired at one end and open at the other, at zoom 1, 2 and 4
+/// (the open-pin square at its 4-pt floor, at 6 pt, and at its 7-pt
+/// ceiling), then the same resistor selected at zoom 2.
+#[test]
+#[ignore = "writes review PNGs to RSPICE_RASTER_DIR"]
+fn render_open_pin_review() {
+    use crate::session::{
+        EditorSession,
+        selection::SchematicSelectionFilter,
+        visibility::{SchematicNetHighlighting, SchematicReviewMarkerVisibility},
+    };
+    use crate::view::{
+        design_view::DesignView,
+        scene::{SceneOverlays, SceneSymbols, SceneView, draw_content},
+    };
+    use rspice_design::schematic::{document::SchematicDocument, wire::Wire};
+    let library = SymbolLibrary::load_embedded().expect("symbol library");
+    let context = SchematicSymbolContext::default();
+    let mut resistor = Component::new(1, ComponentType::Resistor, Point::new(0, 0));
+    resistor.name = "R1".to_owned();
+    resistor.value = "10k".to_owned();
+    let mut terminals = context.terminal_points(&resistor);
+    terminals.sort_by_key(|terminal| terminal.x);
+    let (wired, open) = (terminals[0], terminals[1]);
+    let document = SchematicDocument {
+        components: vec![resistor],
+        wires: vec![Wire::segment(2, Point::new(wired.x - 30, wired.y), wired)],
+        ..SchematicDocument::default()
+    };
+    let open_pins = std::collections::HashMap::from([(1, vec![open])]);
+    let cells = [(1.0, false), (2.0, false), (4.0, false), (2.0, true)];
+    let cell = Vec2::new(240.0, 160.0);
+    for (mode, theme) in themes() {
+        let canvas = rspice_ui_kit::raster::render_themed(
+            theme,
+            Vec2::new(cell.x * cells.len() as f32, cell.y),
+            |ui, _| {
+                let palette = rspice_ui_kit::tokens::active_palette();
+                for (index, (zoom, selected)) in cells.into_iter().enumerate() {
+                    let bounds = Rect::from_min_size(Pos2::new(index as f32 * cell.x, 0.0), cell);
+                    let viewport = Viewport {
+                        offset: Pos2::new(cell.x * 0.5, cell.y * 0.5),
+                        zoom,
+                        bounds,
+                    };
+                    let painter = ui.painter().with_clip_rect(bounds.shrink(1.0));
+                    painter.rect_filled(bounds.shrink(1.0), 0.0, palette.canvas_bg);
+                    let mut editor = EditorSession::default();
+                    if selected {
+                        editor.selection.components.insert(1);
+                    }
+                    draw_content(
+                        &painter,
+                        bounds,
+                        &viewport,
+                        &SceneView {
+                            design: DesignView {
+                                document: &document,
+                                canvas_cache: None,
+                                sheet_catalog: None,
+                                review_markers: SchematicReviewMarkerVisibility::All,
+                            },
+                            editor: &editor,
+                            net_highlighting: SchematicNetHighlighting::Off,
+                            parameter_labels: SchematicParameterLabelVisibility::NamesAndValues,
+                            hover_wire_vertex: None,
+                            selection_filter: SchematicSelectionFilter::default(),
+                            hover: None,
+                        },
+                        SceneSymbols {
+                            library: Some(&library),
+                            context: &context,
+                        },
+                        SceneOverlays {
+                            net_class_colors: std::collections::HashMap::new(),
+                            operating_point: Vec::new(),
+                            probe_status: &|_| ProbeVisualStatus::Materialized,
+                            selected_trace_expression: &|| None,
+                            open_pins: &open_pins,
+                        },
+                        String::new,
+                    );
+                }
+            },
+        );
+        write_png(
+            &format!("pins-{mode}-{}", review_stage()),
             &canvas,
             cell.y as usize,
         );

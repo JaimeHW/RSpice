@@ -1329,6 +1329,36 @@ pub fn draw_hover_halo(painter: &Painter, viewport: &Viewport, points: &[Point],
     );
 }
 
+/// An instance's open pins: a hollow square centred on each terminal nothing
+/// meets, 3 wu a side held between 4 and 7 pt, outlined 1 pt in the
+/// instance's own stroke colour. A connected pin has no mark. It is an
+/// editing aid, so only the scene draws it: never a ghost, an export or a
+/// print.
+pub fn draw_open_pin_marks(
+    painter: &Painter,
+    viewport: &Viewport,
+    open: &[Point],
+    colour: egui::Color32,
+) {
+    let ppp = painter.pixels_per_point().max(f32::EPSILON);
+    // A whole, odd number of device pixels between the outline's centres:
+    // with the centre on the pixel corner a lead's crisp stroke is centred
+    // on, the 1-dpx edges then land on pixel centres, square about the lead.
+    let side_px = (lod::open_pin_side_pt(viewport.zoom) * ppp).round().max(1.0);
+    let side = (side_px + 1.0 - side_px % 2.0) / ppp;
+    let stroke = Stroke::new(lod::mark_outline_pt(ppp), colour);
+    for terminal in open {
+        let centre = viewport.schematic_to_screen(*terminal);
+        let snap = |value: f32| (value * ppp).round() / ppp;
+        painter.rect_stroke(
+            Rect::from_center_size(Pos2::new(snap(centre.x), snap(centre.y)), Vec2::splat(side)),
+            0.0,
+            stroke,
+            egui::StrokeKind::Middle,
+        );
+    }
+}
+
 /// The drawn width of a bus as one band, in points: its outer strands'
 /// span, or its collapsed stroke.
 pub fn bus_band_width_pt(zoom: f32, pixels_per_point: f32) -> f32 {

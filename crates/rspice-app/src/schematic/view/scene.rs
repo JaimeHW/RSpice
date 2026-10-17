@@ -18,7 +18,8 @@ use crate::state::{
 };
 use crate::workbench::app_state::AppState;
 use egui::{Painter, Rect};
-use rspice_design::connectivity::summary::projection_nets;
+use rspice_design::connectivity::{extract_with_hierarchy, summary::projection_nets};
+use rspice_design::hierarchy::HierarchySource;
 use rspice_schematic_editor::view::{
     cross_probe::wrapped_signal_name,
     design_view::DesignView,
@@ -163,6 +164,7 @@ pub(super) fn draw_scene(
             operating_point: operating_point_annotations(state),
             probe_status: &probe_status,
             selected_trace_expression: &selected_trace_expression,
+            open_pins: &open_pins(painter.ctx(), state),
         },
         || state.workspace.content.active_view.display_path(),
     );
@@ -339,6 +341,59 @@ fn probe_visual_statuses(state: &AppState) -> ProbeMaterializationStatuses {
 /// A version-keyed cache of our own would be wrong as well as redundant: net
 /// identity moves with instance values and port parameters, which deliberately
 /// do not advance the schematic topology version.
+/// The open-pin set: every terminal nothing meets, by instance. One per
+/// topology and symbol revision.
+type OpenPins = std::sync::Arc<std::collections::HashMap<u64, Vec<Point>>>;
+
+/// Each instance's open terminals: `ExtractedTerminal::attached == false`,
+/// the same judgement the design check reports as an unconnected pin, so
+/// the mark and the finding cannot disagree. Extracted once per topology
+/// and symbol revision, not per frame.
+fn open_pins(ctx: &egui::Context, state: &AppState) -> OpenPins {
+    let key = (
+        state.schematic.topology_version(),
+        super::symbol_context_revision(state),
+    );
+    let id = egui::Id::new("rspice.schematic.open_pins");
+    if let Some((cached, pins)) = ctx.data(|data| data.get_temp::<((u64, u64), OpenPins)>(id))
+        && cached == key
+    {
+        return pins;
+    }
+    let pins = OpenPins::new(extract_open_pins(state));
+    ctx.data_mut(|data| data.insert_temp(id, (key, OpenPins::clone(&pins))));
+    pins
+}
+
+fn extract_open_pins(state: &AppState) -> std::collections::HashMap<u64, Vec<Point>> {
+    let mut open = std::collections::HashMap::<u64, Vec<Point>>::new();
+    let Ok(projection) = state.workspace.design_projection(
+        &state.library_manager,
+        &state.workspace.content.active_view,
+        &state.schematic,
+    ) else {
+        return open;
+    };
+    let key = state.workspace.content.active_view.key();
+    let Some((_, schematic)) = projection
+        .schematic_buffers()
+        .iter()
+        .find(|(buffer, _)| buffer.eq_ignore_ascii_case(&key))
+    else {
+        return open;
+    };
+    let hierarchy =
+        HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
+    for terminal in extract_with_hierarchy(schematic, Some(&hierarchy)).terminals {
+        if !terminal.attached {
+            open.entry(terminal.component_id)
+                .or_default()
+                .push(terminal.point);
+        }
+    }
+    open
+}
+
 fn net_class_colors(state: &AppState) -> std::collections::HashMap<u64, egui::Color32> {
     let mut colors = std::collections::HashMap::new();
     let Ok(projection) = state.workspace.design_projection(

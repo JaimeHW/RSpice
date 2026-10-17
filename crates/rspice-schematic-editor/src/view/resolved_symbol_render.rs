@@ -226,8 +226,9 @@ fn draw_symbol_pins(
         let offset = symbol.effective_pin_offset(pin);
         let terminal = to_screen(origin, scale, component, offset);
         let inner = to_screen(origin, scale, component, symbol.pin_lead_inner(pin));
+        // No dot on the terminal: a filled dot means a junction of three or
+        // more, and an open pin takes the scene's open-pin mark instead.
         painter.line_segment([terminal, inner], stroke);
-        painter.circle_filled(terminal, 1.6 * scale, color);
         draw_direction_mark(painter, terminal, inner, pin.direction, scale, color);
 
         if let Some(font_size) = font_size {
@@ -426,13 +427,6 @@ fn write_symbol_pins_svg(
         writeln!(
             svg,
             r#"<line class="component" x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}"/>"#
-        )
-        .unwrap();
-        let radius = 1.6 * config.grid_size;
-        writeln!(
-            svg,
-            r#"<circle cx="{x1}" cy="{y1}" r="{radius}" fill="{fill}" stroke="none"/>"#,
-            fill = config.component_color
         )
         .unwrap();
         write_direction_mark_svg(svg, (x1, y1), (x2, y2), pin.direction, config);
@@ -962,6 +956,48 @@ mod tests {
             svg.contains(r#"text-anchor="end""#),
             "a right-edge pin name must read inward from the body edge: {svg}"
         );
+    }
+
+    /// A cell pin carries no solder dot, on the canvas or in the SVG: a
+    /// filled dot means a junction of three or more conductors, and an open
+    /// pin takes the scene's hollow open-pin mark instead.
+    #[test]
+    fn a_cell_pin_has_no_solder_dot() {
+        let symbol = symbol_with_shifted_origin();
+        let component = Component::new(1, ComponentType::CellInstance, Point::new(100, 50));
+        let mut svg = String::new();
+        write_resolved_symbol_svg(
+            &mut svg,
+            &component,
+            &symbol,
+            &SvgExportConfig {
+                grid_size: 1.0,
+                ..SvgExportConfig::default()
+            },
+        );
+        assert!(!svg.contains("<circle"), "the SVG pin has a dot: {svg}");
+
+        let painter = Painter::new(
+            egui::Context::default(),
+            egui::LayerId::background(),
+            egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 400.0)),
+        );
+        draw_symbol_pins(
+            &painter,
+            Pos2::new(100.0, 100.0),
+            2.0,
+            &component,
+            &symbol,
+            Stroke::new(1.0, egui::Color32::WHITE),
+            false,
+        );
+        let mut circles = 0;
+        painter.for_each_shape(|shape| {
+            if matches!(shape.shape, Shape::Circle(_)) {
+                circles += 1;
+            }
+        });
+        assert_eq!(circles, 0, "the canvas pin has a dot");
     }
 
     /// The reported defect: a generated block taller than it is wide sent

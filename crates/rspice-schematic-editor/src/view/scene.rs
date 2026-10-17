@@ -7,7 +7,8 @@ use super::{
     drawing::{
         ConductorInk, JunctionPaint, ProbeVisualStatus, bus_band_width_pt, bus_tap_width_pt,
         chain_conductors, draw_bus, draw_bus_tap, draw_component, draw_conductor,
-        draw_hover_halo, draw_hover_outline, draw_junction, draw_probe, probe_world_bounds,
+        draw_hover_halo, draw_hover_outline, draw_junction, draw_open_pin_marks, draw_probe,
+        probe_world_bounds,
     },
     net_labels::{NetLabelPaint, draw_net_label_attached, world_bounds as net_label_world_bounds},
     pointer_target::PointerTarget,
@@ -61,6 +62,9 @@ pub struct SceneOverlays<'a> {
     pub operating_point: Vec<OperatingPointCanvasAnnotation>,
     pub probe_status: &'a dyn Fn(&SchematicProbe) -> ProbeVisualStatus,
     pub selected_trace_expression: &'a dyn Fn() -> Option<&'a str>,
+    /// Each instance's open terminals (nothing meets them), which take the
+    /// open-pin mark.
+    pub open_pins: &'a HashMap<u64, Vec<Point>>,
 }
 
 pub struct SceneSymbols<'a> {
@@ -243,6 +247,19 @@ pub fn draw_content(
             symbol_context,
             view.parameter_labels,
         );
+        if let Some(open) = overlays.open_pins.get(&component.id) {
+            let palette = rspice_ui_kit::tokens::active_palette();
+            draw_open_pin_marks(
+                painter,
+                viewport,
+                open,
+                if is_selected {
+                    palette.canvas_select
+                } else {
+                    palette.symbol
+                },
+            );
+        }
         // The hover outline is the pick bounds the click tests.
         if !is_selected && view.hover == Some(PointerTarget::Component(component.id)) {
             draw_hover_outline(
@@ -618,6 +635,7 @@ mod band_tests {
                 operating_point: Vec::new(),
                 probe_status: &|_| ProbeVisualStatus::Materialized,
                 selected_trace_expression: &|| None,
+                open_pins: &HashMap::new(),
             },
             String::new,
         );
@@ -688,6 +706,15 @@ mod hover_tests {
         editor: &EditorSession,
         hover: Option<PointerTarget>,
     ) -> Vec<egui::Shape> {
+        paint_with_open_pins(document, editor, hover, &HashMap::new())
+    }
+
+    fn paint_with_open_pins(
+        document: &SchematicDocument,
+        editor: &EditorSession,
+        hover: Option<PointerTarget>,
+        open_pins: &HashMap<u64, Vec<Point>>,
+    ) -> Vec<egui::Shape> {
         let ctx = egui::Context::default();
         // Instance labels lay out text, which needs the fonts a first pass
         // loads.
@@ -731,6 +758,7 @@ mod hover_tests {
                 operating_point: Vec::new(),
                 probe_status: &|_| ProbeVisualStatus::Materialized,
                 selected_trace_expression: &|| None,
+                open_pins,
             },
             String::new,
         );
@@ -812,6 +840,51 @@ mod hover_tests {
             ))
             .is_empty(),
             "a selected instance draws nothing extra on hover"
+        );
+    }
+
+    /// An open terminal takes a hollow square centred on it, 5 pt a side at
+    /// zoom 1 (3 wu is under the 4-pt floor, and an odd pixel count keeps
+    /// the 1-pt outline crisp and square about the lead), outlined 1 pt in
+    /// the symbol colour, or the selection colour when the instance is
+    /// selected. A connected terminal takes nothing.
+    #[test]
+    fn an_open_pin_takes_a_hollow_square_in_the_instance_colour() {
+        let document = resistor();
+        let terminal =
+            SchematicSymbolContext::default().terminal_points(&document.components[0])[0];
+        let open = HashMap::from([(1, vec![terminal])]);
+        let squares = |shapes: &[egui::Shape]| -> Vec<(Rect, egui::Color32, f32)> {
+            shapes
+                .iter()
+                .filter_map(|shape| match shape {
+                    egui::Shape::Rect(mark)
+                        if mark.fill == egui::Color32::TRANSPARENT
+                            && mark.rect.size() == egui::Vec2::splat(5.0) =>
+                    {
+                        Some((mark.rect, mark.stroke.color, mark.stroke.width))
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        let palette = rspice_ui_kit::tokens::active_palette();
+        let editor = EditorSession::default();
+        let marks = squares(&paint_with_open_pins(&document, &editor, None, &open));
+        assert_eq!(marks.len(), 1, "one open terminal, one mark");
+        let (mark, colour, width) = marks[0];
+        assert_eq!((colour, width), (palette.symbol, 1.0));
+        let centre = egui::pos2(terminal.x as f32 + 50.0, terminal.y as f32 + 100.0);
+        assert_eq!(mark.center(), centre, "centred on the terminal");
+        assert!(
+            squares(&paint(&document, &editor, None)).is_empty(),
+            "a connected pin has no mark"
+        );
+        let mut selected = EditorSession::default();
+        selected.selection.components.insert(1);
+        assert_eq!(
+            squares(&paint_with_open_pins(&document, &selected, None, &open))[0].1,
+            palette.canvas_select
         );
     }
 
