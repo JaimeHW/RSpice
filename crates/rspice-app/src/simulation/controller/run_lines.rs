@@ -131,7 +131,8 @@ pub(super) fn announce_run_end(state: &mut AppState, run_sequence: u64) {
             LogSeverity::Info,
             format!("Run {id} completed in {elapsed:.2} s: {}", counts()),
         ),
-        _ if run.analyses.iter().any(|analysis| analysis.success) => (
+        // An interrupted run did not complete, whatever it finished first.
+        SimulationRunLifecycle::Failed if run.analyses.iter().any(|analysis| analysis.success) => (
             LogSeverity::Error,
             format!(
                 "Run {id} completed with errors in {elapsed:.2} s: {}",
@@ -278,6 +279,47 @@ mod tests {
         assert_eq!(grouped(999), "999");
         assert_eq!(grouped(1_204), "1,204");
         assert_eq!(grouped(1_000_000), "1,000,000");
+    }
+
+    #[test]
+    fn an_interrupted_run_failed_though_an_analysis_completed_first() {
+        let mut state = AppState::default();
+        let run_sequence = state.simulation.start_run().id;
+        let run = state
+            .simulation
+            .retained
+            .run_by_sequence_mut(run_sequence)
+            .expect("the run is retained");
+        run.mark_running().expect("the run starts");
+        run.analyses.push(crate::state::AnalysisResult::new(
+            1,
+            crate::state::AnalysisType::DcOp,
+            "DC Operating Point",
+        ));
+        run.finish_lifecycle(SimulationRunLifecycle::Interrupted)
+            .expect("the run is interrupted");
+        let interruption = "Interrupted: the design it was running was closed or replaced";
+        write_run_line(
+            &mut state,
+            Some(run_sequence),
+            LogSeverity::Error,
+            interruption,
+        );
+
+        announce_run_end(&mut state, run_sequence);
+
+        let summary = state
+            .log_buffer
+            .entries()
+            .last()
+            .expect("the session's end line")
+            .message
+            .clone();
+        assert!(
+            summary.starts_with(&format!("Run {run_sequence} failed after "))
+                && summary.ends_with(&format!(": {interruption}")),
+            "{summary}"
+        );
     }
 
     #[test]
