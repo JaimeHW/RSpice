@@ -78,6 +78,10 @@ pub(in crate::workbench) struct DiagnosticRow<'a> {
     pub(in crate::workbench) rule: &'a str,
     /// The other places this finding names.
     pub(in crate::workbench) related: &'a [DiagnosticRelatedLocation],
+    /// The other drawn objects this finding involves. Each one's route is
+    /// offered only through [`Self::place_route`], which withholds it from a
+    /// finding that is not current, as [`Self::route`] is withheld.
+    pub(in crate::workbench) related_places: &'a [super::RelatedPlace],
     /// The edits the producer offered, where it offered any.
     pub(in crate::workbench) quick_fixes: &'a [CanonicalQuickFix],
     /// The waiver that covers it, with the scope and justification the rule
@@ -97,6 +101,16 @@ impl DiagnosticRow<'_> {
 
     pub(in crate::workbench) const fn waived(&self) -> bool {
         self.suppression.is_some()
+    }
+
+    /// Where following one of its related places goes, where anywhere. A
+    /// place read off a stale finding may name an object the drawing has
+    /// since lost, so it is stated and not offered.
+    pub(in crate::workbench) fn place_route(
+        &self,
+        place: &super::RelatedPlace,
+    ) -> Option<DiagnosticRoute> {
+        self.current().then(|| place.route.clone()).flatten()
     }
 }
 
@@ -430,6 +444,7 @@ fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<DiagnosticRow<
                 details: record.details.as_str(),
                 rule: record.rule.as_str(),
                 related: record.canonical.related_locations.as_slice(),
+                related_places: record.related_places.as_slice(),
                 quick_fixes: record.canonical.quick_fixes.as_slice(),
                 suppression: record.canonical.suppression.as_ref(),
                 // A route captured when the finding was made addresses an
@@ -460,6 +475,7 @@ fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<DiagnosticRow<
                 details: diagnostic.details.as_str(),
                 rule: "",
                 related: diagnostic.canonical.related_locations.as_slice(),
+                related_places: &[],
                 quick_fixes: diagnostic.canonical.quick_fixes.as_slice(),
                 suppression: diagnostic.canonical.suppression.as_ref(),
                 route: current.then_some(DiagnosticRoute::NetlistDiagnostic(
@@ -493,6 +509,7 @@ fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<DiagnosticRow<
                 details: diagnostic.detail.as_ref(),
                 rule: "",
                 related: diagnostic.canonical.related_locations.as_slice(),
+                related_places: &[],
                 quick_fixes: diagnostic.canonical.quick_fixes.as_slice(),
                 suppression: diagnostic.canonical.suppression.as_ref(),
                 // A finding about source that has since moved names a line

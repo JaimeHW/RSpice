@@ -20,7 +20,7 @@ use rspice_design::drc::{CheckReach, DrcConfig, DrcLocation, DrcResult, DrcViola
 use super::AppState;
 use super::diagnostic_store::{
     DiagnosticInputs, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject, FindingKey,
-    mint_canonical,
+    RelatedPlace, mint_canonical,
 };
 use super::waivers;
 
@@ -704,12 +704,14 @@ impl AppState {
 
 /// One canonical record per rule finding.
 ///
-/// Each route is resolved in the subject's own drawing — the live editor when
-/// the subject is the view in front of the reader, the workspace's copy of it
-/// otherwise — and names that view, so following it opens the view before it
-/// selects anything. A finding about a view that is not open used to be
-/// published with no route at all, and one resolved against whichever view
-/// was open would have pointed into the wrong coordinate space.
+/// Each route is resolved in the drawing the object is drawn in — the live
+/// editor when that is the view in front of the reader, the workspace's copy
+/// of it otherwise — and names that view and the sheet the object is on, so
+/// following it opens the view and brings the sheet forward before it selects
+/// anything. A finding about a view that is not open used to be published with
+/// no route at all, and one resolved against whichever view was open would
+/// have pointed into the wrong coordinate space. Every other object a finding
+/// involves is published beside it, routed the same way.
 fn design_rule_records(
     state: &AppState,
     subject: &CellViewRef,
@@ -721,18 +723,35 @@ fn design_rule_records(
     let document_id = subject.key();
     let keys = finding_keys(subject, result);
     let canonicals = mint_canonical(&keys, revision, &format!("design-check:{document_id}"));
+    let route_to = |location: &DrcLocation| {
+        let (cell_view, location) = drawn_place(subject, location);
+        crate::schematic::view::violations::location_anchor_in(state, cell_view, location)
+            .map(DiagnosticRoute::Anchor)
+    };
     let mut records = result
         .violations()
         .iter()
         .zip(keys)
         .zip(canonicals)
         .map(|((violation, key), mut canonical)| {
-            let route = crate::schematic::view::violations::location_anchor_in(
-                state,
-                subject,
-                &violation.location,
-            )
-            .map(DiagnosticRoute::Anchor);
+            let route = route_to(&violation.location);
+            let related_places = violation
+                .related
+                .iter()
+                .map(|related| {
+                    let (cell_view, location) = drawn_place(subject, &related.location);
+                    RelatedPlace {
+                        label: format!(
+                            "{} \u{00b7} {}",
+                            violation.related_name(related),
+                            related.relation.describe()
+                        ),
+                        cell_view: cell_view.clone(),
+                        location: location.clone(),
+                        route: route_to(&related.location),
+                    }
+                })
+                .collect::<Vec<_>>();
             canonical.suppression = violation.waiver.as_ref().map(waivers::suppression_of);
             let (drawn_in, object) = rspice_design::drc::waiver_site(&violation.location);
             let drawn_in = drawn_in.unwrap_or(subject);
@@ -755,6 +774,7 @@ fn design_rule_records(
             .with_details(violation.violation_type.suggested_fix())
             .with_rule(violation.violation_type.rule().explanation)
             .with_route(route)
+            .with_related_places(related_places)
             .with_waiver_action(waivers::finding_waiver_action(subject, violation))
         })
         .collect::<Vec<_>>();
@@ -770,6 +790,18 @@ fn design_rule_records(
         );
     }
     records
+}
+
+/// The cellview a location in a check of `subject` is drawn in, and where it
+/// is there: one stated inside an instance is drawn in that instance's master.
+fn drawn_place<'a>(
+    subject: &'a CellViewRef,
+    location: &'a DrcLocation,
+) -> (&'a CellViewRef, &'a DrcLocation) {
+    match location {
+        DrcLocation::InsideInstance { view, inner, .. } => drawn_place(view, inner),
+        _ => (subject, location),
+    }
 }
 
 /// Whether a pass states the subject's own waivers that cover nothing.

@@ -306,6 +306,30 @@ pub(in crate::workbench) struct DiagnosticRecord {
     /// the same finding from another finding of the rule there. `None` for
     /// every other record.
     pub(in crate::workbench) drawn_object: Option<String>,
+    /// Every other object the finding involves, in the order its producer
+    /// stated them: each source in a loop, each instance carrying a
+    /// duplicated name. Empty where it involves only what it is about.
+    pub(in crate::workbench) related_places: Vec<RelatedPlace>,
+}
+
+/// One other object a finding involves, where it is drawn and how to get
+/// there.
+///
+/// What it is to the finding is presentation, like the message: neither the
+/// record's identity nor a waiver of it is keyed by these.
+#[derive(Debug, Clone)]
+pub(in crate::workbench) struct RelatedPlace {
+    /// What the object is called and what it is to the finding, as the
+    /// reader is told it: `V1 · source in the loop`.
+    pub(in crate::workbench) label: String,
+    /// The cellview the object is drawn in, which for a finding stated inside
+    /// an instance is that instance's master, not the checked subject.
+    pub(in crate::workbench) cell_view: CellViewRef,
+    /// Where the object is in that cellview.
+    pub(in crate::workbench) location: rspice_design::drc::DrcLocation,
+    /// Where following it goes, where the drawing can say: the same
+    /// resolution a record's own route is made by.
+    pub(in crate::workbench) route: Option<DiagnosticRoute>,
 }
 
 impl DiagnosticRecord {
@@ -335,6 +359,7 @@ impl DiagnosticRecord {
             waiver_action: None,
             drawn_in: None,
             drawn_object: None,
+            related_places: Vec::new(),
         }
     }
 
@@ -381,6 +406,12 @@ impl DiagnosticRecord {
 
     pub(in crate::workbench) fn with_route(mut self, route: Option<DiagnosticRoute>) -> Self {
         self.route = route;
+        self
+    }
+
+    /// State the other objects the finding involves.
+    pub(in crate::workbench) fn with_related_places(mut self, places: Vec<RelatedPlace>) -> Self {
+        self.related_places = places;
         self
     }
 

@@ -2128,9 +2128,9 @@ fn the_detail_region_states_where_the_batch_stands_only_when_it_is_not_current()
     );
 }
 
-/// A place a finding also names is listed, and is offered as a jump only
-/// where something can resolve it. A rule finding's related places are in the
-/// drawing, which no document route addresses, so they are stated.
+/// A document place a finding also names is listed, and is offered as a jump
+/// only where something can resolve it: a finding whose own route names no
+/// source bundle has no editor to open that document in, so it is stated.
 #[test]
 fn a_related_place_is_stated_even_where_it_cannot_be_followed() {
     let mut state = open_state();
@@ -2255,6 +2255,7 @@ fn bare_row(
         details: "",
         rule: "",
         related: &[],
+        related_places: &[],
         quick_fixes: &[],
         suppression,
         route: None,

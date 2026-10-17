@@ -466,6 +466,7 @@ mod tests {
             details: "",
             rule: "",
             related: &[],
+            related_places: &[],
             quick_fixes: &[],
             suppression: None,
             route,
