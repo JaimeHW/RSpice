@@ -252,6 +252,58 @@ fn a_wire_attached_to_a_turned_part_keeps_square_corners() {
     );
 }
 
+/// R1 and R2 touch pin to pin with no wire: one node. Turning R2 took its
+/// pin off R1's and parted the node silently (audit W-C2). The turn now
+/// runs a square wire from the pin that stayed to the one that turned, in
+/// the turn's one undo step.
+#[test]
+fn turning_a_part_off_a_pin_it_touched_wires_the_two_pins() {
+    use crate::state::{Component, ComponentType, Point};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    let probe = Component::new(0, ComponentType::Resistor, Point::origin());
+    let left = probe.terminal_positions()[0].1;
+    let shared = probe.terminal_positions()[1].1;
+    let document = app.state.schematic.document_mut_for_test();
+    document.wires.clear();
+    document.components = vec![
+        Component::new(1, ComponentType::Resistor, Point::origin()),
+        Component::new(2, ComponentType::Resistor, shared - left),
+    ];
+    app.state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(2);
+    app.state.schematic.init_undo_history();
+
+    Command::RotateSelection.execute(&mut app);
+
+    let symbols = crate::schematic::view::schematic_symbol_context(&app.state);
+    let document = app.state.schematic.document();
+    let turned = document
+        .components
+        .iter()
+        .find(|component| component.id == 2)
+        .expect("R2");
+    let turned_pins = symbols.terminal_points(turned);
+    assert!(!turned_pins.contains(&shared), "R2 turned off R1's pin");
+    assert!(
+        document.wires.iter().any(|wire| {
+            let ends = [wire.points[0], *wire.points.last().expect("end")];
+            wire.is_orthogonal()
+                && ends.contains(&shared)
+                && turned_pins.iter().any(|pin| ends.contains(pin))
+        }),
+        "no square wire joins the two pins: {:?}",
+        document.wires
+    );
+    assert!(app.state.schematic.undo());
+    assert!(app.state.schematic.document().wires.is_empty());
+}
+
 /// Ctrl+R turns the selection clockwise and Ctrl+Shift+R counter-clockwise;
 /// Ctrl+M mirrors it horizontally and Ctrl+Shift+M vertically. No key turned
 /// a placed selection before, and there was no counter-clockwise turn.
