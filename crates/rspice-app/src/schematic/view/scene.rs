@@ -5,13 +5,16 @@ use super::{
     SchematicSymbolContext,
     drawing::ProbeVisualStatus,
     drawing_sheet::ActiveDrawingSheet,
-    sheet_visibility::{active_junction_at, active_sheet_has_objects, object_is_on_active_sheet},
+    sheet_visibility::{
+        active_junction_at, active_sheet_has_objects, active_wire_at, object_is_on_active_sheet,
+        objects_on_active_sheet,
+    },
     viewport::Viewport,
 };
 use crate::schematic::bus_notations;
 use crate::state::{
     CellViewRef, CrossProbeIndex, Point, SchematicAnnotationVisibility,
-    SchematicBackAnnotationContent, SchematicHierarchyVisibility, SchematicNetHighlighting,
+    SchematicBackAnnotationContent, SchematicHierarchyVisibility, SchematicNetHighlighting, Tool,
 };
 use crate::workbench::app_state::AppState;
 use egui::{Painter, Rect};
@@ -19,10 +22,66 @@ use rspice_design::connectivity::summary::projection_nets;
 use rspice_schematic_editor::view::{
     cross_probe::wrapped_signal_name,
     design_view::DesignView,
+    pointer_target::{self, PointerTarget},
     scene::{
         self, OperatingPointCanvasAnnotation, named_net_class_color, normalized_probe_expression,
     },
+    tool_input::{ToolPointerAction, ToolPointerView},
 };
+
+/// What a click at the hovered point would take, for the hover
+/// pre-highlight: in the Select tool the pointer target a click resolves, in
+/// the Probe tool the wire or instance a probe click lands on. Nothing while
+/// a button is down (a drag or a band), a popup is open, or the canvas is
+/// driven by touch, which has no hover.
+fn canvas_hover(
+    ctx: &egui::Context,
+    available: Rect,
+    viewport: &Viewport,
+    state: &AppState,
+    symbol_context: &SchematicSymbolContext,
+) -> Option<PointerTarget> {
+    let editor = &state.schematic.session.editor;
+    if !matches!(editor.tool, Tool::Select | Tool::Probe)
+        || editor.selection_rect.is_active()
+        || egui::Popup::is_any_open(ctx)
+        || ctx.input(|input| input.pointer.any_down())
+        || pointer_target::canvas_touch_mode(ctx)
+    {
+        return None;
+    }
+    let position = ctx
+        .pointer_hover_pos()
+        .filter(|position| available.contains(*position))?;
+    let view = ToolPointerView {
+        design: super::schematic_design_view(state),
+        snap_engine: &editor.snap_engine,
+        can_edit: !state.schematic_edit_read_only(),
+    };
+    match view.action(editor.tool, viewport, symbol_context, position)? {
+        ToolPointerAction::Select(query) => pointer_target::pointer_target(
+            &view.design,
+            query,
+            state.ui.schematic_selection_filter,
+            symbol_context,
+            ctx,
+            viewport,
+            || state.workspace.content.active_view.display_path(),
+        ),
+        ToolPointerAction::Probe(grid) => active_wire_at(state, grid)
+            .map(PointerTarget::Wire)
+            .or_else(|| {
+                let components =
+                    objects_on_active_sheet(state, &state.schematic.document().components, |item| {
+                        item.id
+                    });
+                symbol_context
+                    .component_at_resolved_symbol(components.as_ref(), grid)
+                    .map(PointerTarget::Component)
+            }),
+        _ => None,
+    }
+}
 
 pub(super) fn draw_scene(
     painter: &Painter,
@@ -78,6 +137,7 @@ pub(super) fn draw_scene(
             parameter_labels: state.ui.schematic_visibility.parameter_labels,
             hover_wire_vertex: state.dialogs.interaction.hover_wire_vertex,
             selection_filter: state.ui.schematic_selection_filter,
+            hover: canvas_hover(painter.ctx(), available, viewport, state, symbol_context),
         },
         scene::SceneSymbols {
             library: symbol_library,

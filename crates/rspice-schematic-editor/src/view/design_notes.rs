@@ -106,7 +106,7 @@ pub fn draw_design_note(
             egui::StrokeKind::Inside,
         );
     } else if hovered {
-        painter.rect_filled(layout.bounds, 2.0, palette.bg_hover.gamma_multiply(0.72));
+        super::drawing::draw_hover_outline(painter, layout.bounds);
     }
 
     let marker_radius = (2.0 * viewport.zoom).clamp(1.75, 3.5);

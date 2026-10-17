@@ -1267,6 +1267,94 @@ pub fn draw_junction(
     painter.circle_filled(pos, radius, paint.fill(&palette));
 }
 
+/// How far a hover outline stands off what it outlines, in points.
+const HOVER_OUTSET: f32 = 3.0;
+const HOVER_DASH: f32 = 3.0;
+const HOVER_GAP: f32 = 2.0;
+const HOVER_ALPHA: f32 = 0.85;
+/// The hover halo under a conductor: this much wider than the stroke, in
+/// points, at this alpha.
+const HOVER_HALO_WIDEN: f32 = 4.0;
+const HOVER_HALO_ALPHA: f32 = 0.35;
+
+/// The hover pre-highlight of an object with an area (an instance's pick
+/// bounds, a label's decoration rect, a note or shape's bounds): a dashed
+/// 1-dpx outline in the selection colour, 3 pt outside `rect`, with square
+/// corners. Dashed, so it reads apart from both selection (a solid
+/// recolour) and a window band (a solid edge).
+pub fn draw_hover_outline(painter: &Painter, rect: Rect) {
+    let ppp = painter.pixels_per_point();
+    let rect = rect.expand(HOVER_OUTSET);
+    let crisp = |value: f32| ((value * ppp).floor() + 0.5) / ppp;
+    let rect = Rect::from_min_max(
+        Pos2::new(crisp(rect.min.x), crisp(rect.min.y)),
+        Pos2::new(crisp(rect.max.x), crisp(rect.max.y)),
+    );
+    let stroke = Stroke::new(
+        1.0 / ppp,
+        rspice_ui_kit::tokens::active_palette()
+            .canvas_select
+            .gamma_multiply(HOVER_ALPHA),
+    );
+    painter.extend(egui::Shape::dashed_line(
+        &[
+            rect.left_top(),
+            rect.right_top(),
+            rect.right_bottom(),
+            rect.left_bottom(),
+            rect.left_top(),
+        ],
+        stroke,
+        HOVER_DASH,
+        HOVER_GAP,
+    ));
+}
+
+/// The hover pre-highlight of a conductor: a halo beneath it along the same
+/// path, 4 pt wider than `width_pt`, in the selection colour at alpha 0.35.
+pub fn draw_hover_halo(painter: &Painter, viewport: &Viewport, points: &[Point], width_pt: f32) {
+    let points = points
+        .iter()
+        .map(|point| viewport.schematic_to_screen(*point))
+        .collect();
+    paint_conductor(
+        painter,
+        points,
+        Stroke::new(
+            width_pt + HOVER_HALO_WIDEN,
+            rspice_ui_kit::tokens::active_palette()
+                .canvas_select
+                .gamma_multiply(HOVER_HALO_ALPHA),
+        ),
+    );
+}
+
+/// The drawn width of a bus as one band, in points: its outer strands'
+/// span, or its collapsed stroke.
+pub fn bus_band_width_pt(zoom: f32, pixels_per_point: f32) -> f32 {
+    if lod::bus_collapses(zoom, pixels_per_point) {
+        lod::stroke_pt(
+            StrokeRole::BusCollapsed,
+            zoom,
+            pixels_per_point,
+            Emphasis::Plain,
+        )
+    } else {
+        2.0 * lod::BUS_STRAND_OFFSET_WU * zoom
+            + lod::stroke_pt(
+                StrokeRole::BusStrand,
+                zoom,
+                pixels_per_point,
+                Emphasis::Plain,
+            )
+    }
+}
+
+/// The drawn width of a bus tap, in points.
+pub fn bus_tap_width_pt(zoom: f32, pixels_per_point: f32) -> f32 {
+    lod::stroke_pt(StrokeRole::BusTap, zoom, pixels_per_point, Emphasis::Plain)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -7,6 +7,7 @@ use rspice_design::schematic::documentation_shape::{
 };
 use rspice_design_model::Point;
 
+use super::drawing::draw_hover_outline;
 use super::lod::{self, Emphasis, StrokeRole};
 use super::viewport::Viewport;
 
@@ -27,11 +28,19 @@ pub fn draw_documentation_shape(
     let palette = rspice_ui_kit::tokens::active_palette();
     let color = if selected {
         palette.canvas_select
-    } else if hovered {
-        palette.text
     } else {
         palette.text_faint
     };
+    if hovered && !selected {
+        let (min, max) = shape.bounds();
+        draw_hover_outline(
+            painter,
+            Rect::from_two_pos(
+                viewport.schematic_to_screen(min),
+                viewport.schematic_to_screen(max),
+            ),
+        );
+    }
     let stroke = Stroke::new(
         lod::stroke_pt(
             StrokeRole::Documentation,

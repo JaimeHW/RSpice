@@ -286,6 +286,110 @@ fn render_rubber_band_review() {
     }
 }
 
+/// The hover pre-highlight of each target family at zoom 2, through the
+/// scene painter: an instance, a wire, a junction, a net label, a probe, and
+/// last a hovered instance that is already selected (nothing extra).
+#[test]
+#[ignore = "writes review PNGs to RSPICE_RASTER_DIR"]
+fn render_hover_review() {
+    use crate::session::{
+        EditorSession,
+        selection::SchematicSelectionFilter,
+        visibility::{SchematicNetHighlighting, SchematicReviewMarkerVisibility},
+    };
+    use crate::view::{
+        design_view::DesignView,
+        pointer_target::PointerTarget,
+        scene::{SceneOverlays, SceneSymbols, SceneView, draw_content},
+    };
+    use rspice_design::schematic::{
+        document::SchematicDocument, net_label::Junction, wire::Wire,
+    };
+    let library = SymbolLibrary::load_embedded().expect("symbol library");
+    let context = SchematicSymbolContext::default();
+    let mut resistor = Component::new(1, ComponentType::Resistor, Point::new(0, 30));
+    resistor.name = "R1".to_owned();
+    resistor.value = "10k".to_owned();
+    let document = SchematicDocument {
+        components: vec![resistor],
+        wires: vec![
+            Wire::segment(2, Point::new(-40, 0), Point::new(40, 0)),
+            Wire::segment(3, Point::new(0, 0), Point::new(0, 10)),
+        ],
+        junctions: vec![Junction::new(4, Point::new(0, 0))],
+        net_labels: vec![NetLabel::new(5, Point::new(-30, 0), "VOUT")],
+        probes: vec![SchematicProbe::new(6, Point::new(30, 0), "V(OUT)", None).expect("probe")],
+        ..SchematicDocument::default()
+    };
+    let targets = [
+        PointerTarget::Component(1),
+        PointerTarget::Wire(2),
+        PointerTarget::Junction(Point::new(0, 0)),
+        PointerTarget::NetLabel(5),
+        PointerTarget::Probe(6),
+        PointerTarget::Component(1),
+    ];
+    let cell = Vec2::new(200.0, 200.0);
+    for (mode, theme) in themes() {
+        let canvas = rspice_ui_kit::raster::render_themed(
+            theme,
+            Vec2::new(cell.x * targets.len() as f32, cell.y),
+            |ui, _| {
+                let palette = rspice_ui_kit::tokens::active_palette();
+                for (index, target) in targets.into_iter().enumerate() {
+                    let bounds = Rect::from_min_size(Pos2::new(index as f32 * cell.x, 0.0), cell);
+                    let viewport = Viewport {
+                        offset: Pos2::new(cell.x * 0.5, cell.y * 0.3),
+                        zoom: 2.0,
+                        bounds,
+                    };
+                    let painter = ui.painter().with_clip_rect(bounds.shrink(1.0));
+                    painter.rect_filled(bounds.shrink(1.0), 0.0, palette.canvas_bg);
+                    let mut editor = EditorSession::default();
+                    if index == targets.len() - 1 {
+                        editor.selection.components.insert(1);
+                    }
+                    draw_content(
+                        &painter,
+                        bounds,
+                        &viewport,
+                        &SceneView {
+                            design: DesignView {
+                                document: &document,
+                                canvas_cache: None,
+                                sheet_catalog: None,
+                                review_markers: SchematicReviewMarkerVisibility::All,
+                            },
+                            editor: &editor,
+                            net_highlighting: SchematicNetHighlighting::Off,
+                            parameter_labels: SchematicParameterLabelVisibility::NamesAndValues,
+                            hover_wire_vertex: None,
+                            selection_filter: SchematicSelectionFilter::default(),
+                            hover: Some(target),
+                        },
+                        SceneSymbols {
+                            library: Some(&library),
+                            context: &context,
+                        },
+                        SceneOverlays {
+                            net_class_colors: std::collections::HashMap::new(),
+                            operating_point: Vec::new(),
+                            probe_status: &|_| ProbeVisualStatus::Materialized,
+                            selected_trace_expression: &|| None,
+                        },
+                        String::new,
+                    );
+                }
+            },
+        );
+        write_png(
+            &format!("hover-{mode}-{}", review_stage()),
+            &canvas,
+            cell.y as usize,
+        );
+    }
+}
+
 /// The canvas in its dark and its light palette.
 pub(crate) fn themes() -> [(&'static str, rspice_ui_kit::Theme); 2] {
     [

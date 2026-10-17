@@ -19,7 +19,7 @@ use rspice_design::schematic::net_label::NetLabel;
 use rspice_design_model::{Point, design_management::CrossSheetPortDirection};
 use rspice_ui_kit::theme::{self, FontWeight};
 
-use super::drawing::ConductorInk;
+use super::drawing::{ConductorInk, draw_hover_outline};
 use super::lod::{self, TextClass, TextLod};
 use super::viewport::Viewport;
 
@@ -291,11 +291,7 @@ pub fn draw_net_label_attached(
             egui::StrokeKind::Inside,
         );
     } else if hovered && !preview {
-        painter.rect_filled(
-            layout.decoration_rect,
-            2.0,
-            palette.bg_hover.gamma_multiply(0.72),
-        );
+        draw_hover_outline(painter, layout.decoration_rect.shrink(POINTER_SLOP));
     }
 
     let attachment_radius = layout.attachment_radius;
