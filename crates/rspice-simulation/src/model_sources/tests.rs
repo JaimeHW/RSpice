@@ -138,3 +138,30 @@ fn project_model_tamper_fails_before_any_external_read() {
         "{error}"
     );
 }
+
+#[test]
+fn materialized_cards_leave_their_veriloga_directives_to_the_sealed_runtimes() {
+    let cards = ".model fast_d D (IS=1e-14)\n\
+                 .va \"rules.vams\" CONNECTIONS\n\
+                 .veriloga \"devices.va\" cell\n\
+                 + module=device\n\
+                 .model slow_d D (IS=1e-15\n\
+                 + N=1.2)\n";
+
+    assert_eq!(
+        without_veriloga_source_directives(cards.to_owned()).as_deref(),
+        Some(".model fast_d D (IS=1e-14)\n.model slow_d D (IS=1e-15\n+ N=1.2)\n")
+    );
+    let plain = ".model d D\n".to_owned();
+    assert_eq!(
+        without_veriloga_source_directives(plain.clone()),
+        Some(plain)
+    );
+    // A connection library: its rules reach the deck as their runtime alone.
+    assert_eq!(
+        without_veriloga_source_directives(
+            "* rules\n.va \"rules.vams\" CONNECTIONS\n\n".to_owned()
+        ),
+        None
+    );
+}
