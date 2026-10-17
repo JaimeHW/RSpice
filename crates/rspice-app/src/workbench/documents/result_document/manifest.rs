@@ -94,13 +94,19 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
         {
             Ok(()) => {
                 state.synchronize_specialized_viewer_cache_authority();
-                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(
-                    "Deferred saved output materialized from retained source data".to_owned(),
-                ));
+                state.record(
+                    crate::diagnostics::LogSeverity::Info,
+                    crate::diagnostics::LogSource::Studio,
+                    "Materialized the deferred saved output from the retained run data.",
+                );
             }
-            Err(error) => state.push_sim_message(crate::diagnostics::ConsoleMessage::error(
-                format!("Saved output could not be materialized: {error}"),
-            )),
+            Err(error) => {
+                state.record(
+                    crate::diagnostics::LogSeverity::Error,
+                    crate::diagnostics::LogSource::Studio,
+                    format!("Saved output could not be materialized: {error}"),
+                );
+            }
         }
     }
     if response.open_plan {
@@ -117,10 +123,10 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
             0,
         )
     {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+        state.prompt(format!(
             "The source Run {run_sequence} executed cannot be opened: {}.",
             crate::state::absent_deck_reason()
-        )));
+        ));
     }
 }
 pub(crate) fn export_csv(run: &SimulationRun) -> super::ResultSheetCsv {

@@ -303,19 +303,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> egui::Response {
     // underneath it, so once it is spent the next older step is the
     // netlist's own: a replace-all or a rename.
     if let Some(step) = unanswered_history {
-        let (stepped, verb) = if step == StandardCommand::Undo {
-            (super::undo_netlist_edit(state), "Undo")
+        let stepped = if step == StandardCommand::Undo {
+            super::undo_netlist_edit(state)
         } else {
-            (super::redo_netlist_edit(state), "Redo")
+            super::redo_netlist_edit(state)
         };
-        match stepped {
-            Ok(Some(description)) => state.push_user_message(
-                crate::diagnostics::ConsoleMessage::info(format!("{verb}: {description}")),
-            ),
-            Ok(None) => {}
-            Err(error) => {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
-            }
+        if let Err(error) = stepped {
+            state.prompt(error);
         }
     }
     // A value the deck actually answers outranks the project symbol; a token

@@ -56,9 +56,7 @@ impl SheetBarHost for Host<'_> {
             }
             SpecificationAction::Apply => {
                 if !specs::apply_drafts(state) {
-                    state.push_sim_message(crate::diagnostics::ConsoleMessage::warning(
-                        "Specs not applied — fix the invalid bound first",
-                    ));
+                    state.prompt("Specs not applied: fix the invalid bound first.");
                 }
             }
             SpecificationAction::Edit => specs::open_editor(state),

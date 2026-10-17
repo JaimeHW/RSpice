@@ -8,7 +8,7 @@ use rspice_veriloga::{
 };
 use sha2::Digest as _;
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{
     ProjectSourceBundle, ProjectSourceFile, ProjectSourceId, ProjectSourceLanguage,
     ProjectSourceOwner, ProjectSourceRole, ViewType,
@@ -245,9 +245,11 @@ pub fn poll_veriloga_import(app: &mut RSpiceApp) {
             Err(error) => {
                 app.state.ui.code_workspace.veriloga.import_target = None;
                 app.state.ui.code_workspace.veriloga.replace_target = None;
-                app.state.push_user_message(ConsoleMessage::error(format!(
-                    "Verilog-A import failed: {error}"
-                )));
+                app.state.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    format!("Verilog-A import failed: {error}"),
+                );
             }
         }
     }
@@ -269,9 +271,8 @@ pub fn poll_veriloga_import(app: &mut RSpiceApp) {
             Err(error) => {
                 app.state.ui.code_workspace.veriloga.import_target = None;
                 app.state.ui.code_workspace.veriloga.replace_target = None;
-                app.state.push_user_message(ConsoleMessage::error(format!(
-                    "Verilog-A import failed: {error}"
-                )));
+                app.state
+                    .prompt(format!("Verilog-A import failed: {error}"));
                 return;
             }
         };
@@ -311,9 +312,11 @@ fn poll_browser_import_completion(app: &mut RSpiceApp) {
         Err(error) => {
             app.state.ui.code_workspace.veriloga.import_target = None;
             app.state.ui.code_workspace.veriloga.replace_target = None;
-            app.state.push_user_message(ConsoleMessage::error(format!(
-                "Verilog-A import failed: {error}"
-            )));
+            app.state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Verilog-A import failed: {error}"),
+            );
         }
     }
 }
@@ -339,9 +342,11 @@ fn apply_import(app: &mut RSpiceApp, file_name: String, contents: String) {
                         && bundle.contains_file(&target.importer_path)
                 });
         if !target_is_current {
-            app.state.push_user_message(ConsoleMessage::error(
+            app.state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
                 "Verilog-A dependency import was discarded because its project source changed while the picker was open.",
-            ));
+            );
             return;
         }
         let logical_path = suggested_import_path(&target.importer_path, &file_name);
@@ -352,14 +357,19 @@ fn apply_import(app: &mut RSpiceApp, file_name: String, contents: String) {
             logical_path.clone(),
             contents,
         );
-        match result {
-            Ok(true) => app.state.push_user_message(ConsoleMessage::info(format!(
-                "Imported project-owned Verilog-A dependency {logical_path}."
-            ))),
-            Ok(false) => {}
-            Err(error) => app.state.push_user_message(ConsoleMessage::error(format!(
-                "Verilog-A dependency import failed: {error}"
-            ))),
+        let outcome = match result {
+            Ok(true) => Some((
+                LogSeverity::Info,
+                format!("Imported Verilog-A dependency {logical_path}."),
+            )),
+            Ok(false) => None,
+            Err(error) => Some((
+                LogSeverity::Error,
+                format!("Verilog-A dependency import failed: {error}"),
+            )),
+        };
+        if let Some((severity, text)) = outcome {
+            app.state.record(severity, LogSource::Studio, text);
         }
         return;
     }
@@ -373,10 +383,14 @@ fn apply_import(app: &mut RSpiceApp, file_name: String, contents: String) {
     // "Replace source from file…" replaces nothing here either: the picked
     // file waits for the reader to confirm which file it replaces.
     let Some(bundle) = current_replace_bundle(app, &target) else {
-        app.state.push_user_message(ConsoleMessage::error(format!(
-            "Replacing {} from {file_name} was discarded because the source changed while the picker was open.",
-            target.logical_path
-        )));
+        app.state.record(
+            LogSeverity::Error,
+            LogSource::Studio,
+            format!(
+                "Replacing {} from {file_name} was discarded because the source changed while the picker was open.",
+                target.logical_path
+            ),
+        );
         return;
     };
     let restorable = replacement_keeps_previous_text(bundle, &target.logical_path, &contents);
@@ -513,18 +527,21 @@ pub(crate) fn commit_veriloga_source_replacement(app: &mut RSpiceApp) -> Result<
     if changed {
         invalidate_veriloga_evidence(app, review.target.bundle_id);
     }
-    app.state
-        .push_user_message(ConsoleMessage::info(if changed {
+    if changed {
+        app.state.record(
+            LogSeverity::Info,
+            LogSource::Studio,
             format!(
                 "Replaced {} with {}; compile is required.",
                 review.target.logical_path, review.file_name
-            )
-        } else {
-            format!(
-                "{} already holds the text of {}.",
-                review.target.logical_path, review.file_name
-            )
-        }));
+            ),
+        );
+    } else {
+        app.state.prompt(format!(
+            "{} already holds the text of {}.",
+            review.target.logical_path, review.file_name
+        ));
+    }
     Ok(())
 }
 
@@ -805,9 +822,11 @@ fn persist_legacy_build_profile(
     profile: &super::veriloga_profile::VerilogABuildProfile,
 ) -> Result<(), String> {
     let path = add_build_profile_document(app, selected, profile)?;
-    app.state.push_user_message(ConsoleMessage::info(format!(
-        "Persisted the legacy Verilog-A compiler defaults as project build profile '{path}'."
-    )));
+    app.state.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        format!("Saved the Verilog-A compiler defaults as project build profile {path}."),
+    );
     Ok(())
 }
 
@@ -955,9 +974,11 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                         CodeDiagnosticCollection::try_new(vec![diagnostic]).unwrap_or_default(),
                     );
                     app.state.ui.code_workspace.veriloga.last_failure_token = Some(pending.token);
-                    app.state.push_user_message(ConsoleMessage::error(
-                        "Verilog-A diagnostics exceeded the supported release-scale collection; no validation receipt was published.",
-                    ));
+                    app.state.record(
+                        LogSeverity::Error,
+                        LogSource::Studio,
+                        "Verilog-A compilation produced more diagnostics than can be kept; the source was not validated.",
+                    );
                     return;
                 }
             };
@@ -967,9 +988,13 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                 Some(&report),
                 receipt.diagnostics.as_slice(),
             ) {
-                app.state.push_user_message(ConsoleMessage::error(format!(
-                    "The compiler succeeded, but immutable qualification evidence could not be retained: {error}"
-                )));
+                app.state.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    format!(
+                        "The compiler succeeded, but its qualification record could not be saved: {error}"
+                    ),
+                );
                 app.state.ui.code_workspace.veriloga.receipt = None;
                 return;
             }
@@ -983,7 +1008,8 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
             match app
                 .state
                 .workspace
-                .content.project_sources
+                .content
+                .project_sources
                 .mark_bundle_validated(pending.token.bundle_id)
             {
                 Ok(_) => {
@@ -991,7 +1017,8 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                         != app
                             .state
                             .workspace
-                            .content.project_sources
+                            .content
+                            .project_sources
                             .get_bundle(pending.token.bundle_id)
                             .and_then(ProjectSourceBundle::validated_identity)
                     {
@@ -1012,9 +1039,13 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                                 reason,
                             ) = &applied.outcome
                             {
-                                app.state.push_user_message(ConsoleMessage::warning(format!(
-                                    "The module compiled, but its ports did not become the cell's interface: {reason}."
-                                )));
+                                app.state.record(
+                                    LogSeverity::Warning,
+                                    LogSource::Studio,
+                                    format!(
+                                        "The module compiled, but its ports did not become the cell's interface: {reason}."
+                                    ),
+                                );
                             }
                             let receipt = super::veriloga_interface::with_interface_outcome(
                                 receipt,
@@ -1033,23 +1064,37 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                     Arc::make_mut(&mut app.state.ui.code_workspace.veriloga.last_failure).clear();
                     app.state.ui.code_workspace.veriloga.last_failure_token = None;
                     app.state.ui.code_workspace.veriloga.receipt = Some(receipt);
-                    app.state.push_user_message(ConsoleMessage::info(format!(
-                        "Compiled Verilog-A module {} for every qualified runtime target.",
-                        report.abi.module_name
-                    )));
+                    app.state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        format!(
+                            "Compiled Verilog-A module {} for every qualified runtime target.",
+                            report.abi.module_name
+                        ),
+                    );
                 }
-                Err(error) => app.state.push_user_message(ConsoleMessage::error(format!(
-                    "The compiler succeeded, but its validation receipt could not be retained: {error}"
-                ))),
+                Err(error) => {
+                    app.state.record(
+                        LogSeverity::Error,
+                        LogSource::Studio,
+                        format!(
+                            "The compiler succeeded, but the source could not be marked validated: {error}"
+                        ),
+                    );
+                }
             }
         }
         Ok(VerilogACompileOutcome::Failure(diagnostics)) => {
             if let Err(error) =
                 record_veriloga_qualification(app, pending.token, None, &diagnostics)
             {
-                app.state.push_user_message(ConsoleMessage::error(format!(
-                    "Verilog-A qualification failure evidence could not be retained: {error}"
-                )));
+                app.state.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    format!(
+                        "The failed Verilog-A compile could not be added to the qualification record: {error}"
+                    ),
+                );
             }
             app.state.ui.code_workspace.veriloga.receipt = None;
             let diagnostics = diagnostics
@@ -1076,9 +1121,11 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                 }),
             );
             app.state.ui.code_workspace.veriloga.last_failure_token = Some(pending.token);
-            app.state.push_user_message(ConsoleMessage::error(
+            app.state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
                 "Verilog-A compilation failed. Review the source diagnostics.",
-            ));
+            );
         }
         Err(()) => {
             app.state.ui.code_workspace.veriloga.receipt = None;
@@ -1111,14 +1158,20 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                 None,
                 worker_diagnostics.as_slice(),
             ) {
-                app.state.push_user_message(ConsoleMessage::error(format!(
-                    "Verilog-A worker failure evidence could not be retained: {error}"
-                )));
+                app.state.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    format!(
+                        "The stopped compiler worker could not be added to the qualification record: {error}"
+                    ),
+                );
             }
             app.state.ui.code_workspace.veriloga.last_failure_token = Some(pending.token);
-            app.state.push_user_message(ConsoleMessage::error(
+            app.state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
                 "The Verilog-A compiler worker stopped before publishing a report.",
-            ));
+            );
         }
     }
 }

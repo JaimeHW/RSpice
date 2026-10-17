@@ -82,7 +82,7 @@ pub(crate) fn open_family(state: &mut AppState) {
         Ok(draft) => {
             state.workbench.result_document_dialog = Some(ResultDocumentDialog::Family(draft));
         }
-        Err(refusal) => state.push_user_message(ConsoleMessage::warning(refusal)),
+        Err(refusal) => state.prompt(refusal),
     }
 }
 

@@ -72,9 +72,8 @@ fn restored_maximum_marker_id_cannot_wrap_or_retarget_existing_annotations() {
     );
     assert!(
         state
-            .log_buffer
-            .entries()
-            .any(|entry| entry.message.contains("marker") && entry.message.contains("exhausted"))
+            .prompt_text()
+            .is_some_and(|text| text.contains("marker") && text.contains("exhausted"))
     );
     commit_marker_edit(
         &mut state,

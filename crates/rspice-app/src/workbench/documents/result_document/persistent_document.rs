@@ -1055,9 +1055,11 @@ fn capture_pane_presentation(state: &mut AppState, pane: &PaneProjection, viewer
             .content
             .transact_visualization_document(pane.document_id, revision, edits)
     {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-            "Could not retain Results pane presentation: {error}"
-        )));
+        // A prompt, not a record: this runs every frame, and a refused write
+        // is refused again until the reader's change is undone.
+        state.prompt(format!(
+            "Could not keep this pane's view and cursors: {error}"
+        ));
     }
 }
 

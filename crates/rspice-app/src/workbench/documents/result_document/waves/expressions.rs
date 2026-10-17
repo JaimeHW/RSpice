@@ -173,10 +173,11 @@ pub(super) fn resolve_strip_exprs(
                 expr.complex_policy,
             );
             if let Err(error) = &series {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                    "expression `{}`: {}",
-                    expr.text, error
-                )));
+                state.record(
+                    crate::diagnostics::LogSeverity::Warning,
+                    crate::diagnostics::LogSource::Studio,
+                    format!("Could not evaluate {}: {error}", expr.text),
+                );
             }
             state
                 .ui
@@ -209,11 +210,9 @@ pub(super) fn resolve_strip_exprs(
                         .and_then(SourceSampleSelection::family_render_plan)
                         .and_then(|plan| plan.groups().get(ordinal))
                         .filter(|group| group.ordinal == ordinal);
+                    // A member the reader has deselected is not drawn. This
+                    // runs every frame, so it is not reported.
                     if group.is_none() {
-                        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                            "expression `{}`: its evaluated family member is no longer selected",
-                            expr.text
-                        )));
                         continue;
                     }
                     group
@@ -336,9 +335,7 @@ pub(crate) fn toggle_visibility(
                     edits,
                 )
             {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                    "Could not retain trace visibility: {error}"
-                )));
+                state.prompt(format!("Could not change trace visibility: {error}"));
                 return;
             }
             if now_visible {

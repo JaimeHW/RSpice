@@ -34,7 +34,7 @@ use crate::automation_workflow::{
     CompletedEvidence, DiagnosticSet, compare_governed_waveforms, compile_automation_documents,
     compile_workflow, render_requested_artifacts,
 };
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::product::{ContentDigest, RunId, SimulationPlanId};
 use crate::state::{
     AnalysisResultSourceDomain, ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner,
@@ -193,9 +193,11 @@ pub fn cancel_automation_workflow(app: &mut RSpiceApp) {
             runtime.cancel_requested = false;
             runtime.artifacts.clear();
             runtime.last_error = None;
-            app.state.push_user_message(ConsoleMessage::info(
-                "Managed Python execution was cancelled and its isolated worker was terminated.",
-            ));
+            app.state.record(
+                LogSeverity::Info,
+                LogSource::Studio,
+                "Managed Python execution was cancelled and its worker was stopped.",
+            );
             return;
         }
     }
@@ -211,18 +213,18 @@ pub fn cancel_automation_workflow(app: &mut RSpiceApp) {
             runtime.cancel_requested = false;
             runtime.artifacts.clear();
             runtime.last_error = None;
-            app.state.push_user_message(ConsoleMessage::info(
+            app.state.record(
+                LogSeverity::Info,
+                LogSource::Studio,
                 "Automation dispatch was cancelled before execution started.",
-            ));
+            );
         }
         AutomationExecutionState::AwaitingDispatch { .. }
         | AutomationExecutionState::Running { .. } => {
             match app.state.simulation.request_abort_active_run() {
                 Ok(_) => {
                     app.state.ui.code_workspace.automation.cancel_requested = true;
-                    app.state.push_user_message(ConsoleMessage::info(
-                        "Cancellation requested for the exact active Automation run.",
-                    ));
+                    app.state.prompt("Cancelling the active Automation run.");
                 }
                 Err(error) => fail(
                     app,
@@ -384,10 +386,14 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
         let session_id = event.session_id;
         match event.event {
             RuntimeEvent::Hello { identity } => {
-                app.state.push_user_message(ConsoleMessage::info(format!(
-                    "Authenticated managed Python {} / RSpice API {}.",
-                    identity.python_version, identity.rspice_api_version
-                )));
+                app.state.record(
+                    LogSeverity::Info,
+                    LogSource::Studio,
+                    format!(
+                        "Connected to managed Python {} with RSpice API {}.",
+                        identity.python_version, identity.rspice_api_version
+                    ),
+                );
             }
             RuntimeEvent::State { state, detail } => match (state, validation, execution) {
                 (RuntimeState::Completed, Some(pending), _) => {
@@ -454,13 +460,15 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                         };
                     }
                     runtime.last_error = None;
-                    app.state.push_user_message(ConsoleMessage::info(
+                    app.state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
                         if pending.mode.is_dry_run() {
                             "Managed Python dry run completed without dispatching a simulation."
                         } else {
                             "Managed Python execution completed."
                         },
-                    ));
+                    );
                 }
                 (RuntimeState::Cancelled, _, Some(pending)) => {
                     let _ = app.automation_runtime.terminate();
@@ -673,9 +681,11 @@ fn complete_automation_validation(
     runtime.diagnostic_token = None;
     runtime.last_error = None;
     runtime.execution = AutomationExecutionState::Idle;
-    app.state.push_user_message(ConsoleMessage::info(
-        "Automation workspace validation passed for the exact current source closure.",
-    ));
+    app.state.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        "Automation workspace validation passed.",
+    );
     let deferred = app
         .state
         .ui
@@ -812,14 +822,17 @@ fn begin_managed_python_execution(
                 debug.pending_evaluation_requests.clear();
                 debug.last_error = None;
             }
-            app.state
-                .push_user_message(ConsoleMessage::info(if mode.is_debug() {
-                    "Managed Python debugger started against the exact validated source closure."
+            app.state.record(
+                LogSeverity::Info,
+                LogSource::Studio,
+                if mode.is_debug() {
+                    "Managed Python debugger started on the validated sources."
                 } else if mode.is_dry_run() {
-                    "Managed Python dry run started against the exact validated source closure."
+                    "Managed Python dry run started on the validated sources."
                 } else {
-                    "Managed Python workflow started against the exact validated source closure."
-                }));
+                    "Managed Python workflow started on the validated sources."
+                },
+            );
         }
         Err(error) => fail(
             app,
@@ -938,13 +951,17 @@ fn begin_managed_python_execution(
                 debug.pending_evaluation_requests.clear();
                 debug.last_error = None;
             }
-            app.state.push_user_message(ConsoleMessage::info(if mode.is_debug() {
-                "Managed Python/WASM debugger started against the exact validated source closure."
-            } else if mode.is_dry_run() {
-                "Managed Python/WASM dry run started against the exact validated source closure."
-            } else {
-                "Managed Python/WASM workflow started against the exact validated source closure."
-            }));
+            app.state.record(
+                LogSeverity::Info,
+                LogSource::Studio,
+                if mode.is_debug() {
+                    "Managed Python/WASM debugger started on the validated sources."
+                } else if mode.is_dry_run() {
+                    "Managed Python/WASM dry run started on the validated sources."
+                } else {
+                    "Managed Python/WASM workflow started on the validated sources."
+                },
+            );
         }
         Err(error) => fail(
             app,
@@ -1023,9 +1040,8 @@ fn begin_managed_python_validation(
                     bundle_id,
                     token,
                 });
-            app.state.push_user_message(ConsoleMessage::info(
-                "Managed CPython is validating the exact Automation source closure.",
-            ));
+            app.state
+                .prompt("Validating the Automation sources in managed CPython.");
         }
         Err(error) => fail(
             app,
@@ -1090,9 +1106,8 @@ fn begin_managed_python_validation(
                     bundle_id,
                     token,
                 });
-            app.state.push_user_message(ConsoleMessage::info(
-                "Managed Python/WASM is validating the exact Automation source closure.",
-            ));
+            app.state
+                .prompt("Validating the Automation sources in managed Python/WASM.");
         }
         Err(error) => fail(
             app,
@@ -1300,9 +1315,11 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
         } else {
             AutomationExecutionState::Idle
         };
-        app.state.push_user_message(ConsoleMessage::info(
+        app.state.record(
+            LogSeverity::Info,
+            LogSource::Studio,
             "Automation dry run passed source, permission, plan, corner, release-gate, and baseline preflight without dispatching a simulation.",
-        ));
+        );
         return;
     }
     // Automation owns a one-shot prepared permit for precisely this dispatch.
@@ -1354,9 +1371,11 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
         snapshot,
     };
     app.state.request_run_set_simulation();
-    app.state.push_user_message(ConsoleMessage::info(
-        "Automation workflow passed static validation and entered prepared-run preflight.",
-    ));
+    app.state.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        "Automation workflow passed static validation and entered run preflight.",
+    );
 }
 
 pub(crate) fn automation_task_count(app: &RSpiceApp) -> Result<usize, String> {
@@ -1697,9 +1716,11 @@ pub fn poll_automation_workflow(app: &mut RSpiceApp) {
                 runtime.cancel_requested = false;
                 runtime.artifacts.clear();
                 runtime.last_error = None;
-                app.state.push_user_message(ConsoleMessage::info(
-                    "Automation workflow cancellation completed; no release artifacts were published.",
-                ));
+                app.state.record(
+                    LogSeverity::Info,
+                    LogSource::Studio,
+                    "Automation workflow cancelled; no release artifacts were published.",
+                );
             } else {
                 finish_run(app, token, &plan, run_id, &snapshot);
             }
@@ -1843,10 +1864,13 @@ pub fn export_automation_artifact(app: &mut RSpiceApp, kind: ArtifactKind) {
         Ok::<_, String>(path)
     })();
     match result {
-        Ok(path) => app.state.push_user_message(ConsoleMessage::info(format!(
-            "Exported workflow artifact to {}.",
-            path.display()
-        ))),
+        Ok(path) => {
+            app.state.record(
+                LogSeverity::Info,
+                LogSource::Studio,
+                format!("Exported workflow artifact to {}.", path.display()),
+            );
+        }
         Err(error) if error == "export cancelled" => {}
         Err(error) => fail(app, &format!("Could not export workflow artifact: {error}")),
     }
@@ -1959,16 +1983,18 @@ fn finish_run(
     app.state.ui.code_workspace.automation.last_error = None;
     app.state.ui.code_workspace.automation.execution =
         AutomationExecutionState::Complete { passed, run_id };
-    let message = if passed {
-        "Automation workflow completed; every release gate passed."
+    let (severity, message) = if passed {
+        (
+            LogSeverity::Info,
+            "Automation workflow completed; every release gate passed.",
+        )
     } else {
-        "Automation workflow completed with failing release evidence."
+        (
+            LogSeverity::Warning,
+            "Automation workflow completed with failing release gates.",
+        )
     };
-    app.state.push_user_message(if passed {
-        ConsoleMessage::info(message)
-    } else {
-        ConsoleMessage::warning(message)
-    });
+    app.state.record(severity, LogSource::Studio, message);
 }
 
 fn active_plan_id(app: &RSpiceApp) -> Result<SimulationPlanId, String> {
@@ -2263,5 +2289,5 @@ fn fail(app: &mut RSpiceApp, message: &str) {
     app.state.ui.code_workspace.automation.artifacts.clear();
     app.state.ui.code_workspace.automation.last_error = Some(message.to_owned());
     app.state
-        .push_user_message(ConsoleMessage::error(message.to_owned()));
+        .record(LogSeverity::Error, LogSource::Studio, message);
 }

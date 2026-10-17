@@ -31,9 +31,7 @@ pub(in super::super) fn show(ctx: &egui::Context, state: &mut AppState) {
             if let Err(error) =
                 super::super::commit_marker_edit(state, draft.selector, &draft.note, draft.kind)
             {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                    "Could not retain marker edit: {error}"
-                )));
+                state.prompt(format!("Could not apply the marker edit: {error}"));
                 state.ui.results.session.marker_edit = Some(draft);
                 return;
             }

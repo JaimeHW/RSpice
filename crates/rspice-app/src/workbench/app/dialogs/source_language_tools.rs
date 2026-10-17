@@ -367,7 +367,7 @@ impl RSpiceApp {
             }
             return;
         };
-        // A completed action is already in the console and on the page; only
+        // A completed action is already on the status bar and the page; only
         // a refusal is the dialog's to state.
         tools.error = outcome.err();
     }
