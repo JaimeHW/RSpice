@@ -8,6 +8,11 @@
 //!
 //! `cargo test -p rspice-app --lib --release -- --ignored --exact
 //! schematic::view::frame_cost::canvas_frame_cost_at_scale --nocapture`
+//!
+//! The crate denies printing, because the desktop build detaches from its
+//! console and the browser build has no stderr. The probe's output *is* its
+//! printed tables, read through `--nocapture`, so each function that prints
+//! allows it alone, as the other measurement harnesses do.
 
 use std::collections::HashMap;
 
@@ -574,6 +579,7 @@ fn time_scenario(
 
 /// [`time_scenario`], over the sheet fitted to the screen or, given a zoom
 /// and a world point, at that zoom centred on that point.
+#[allow(clippy::print_stderr)]
 fn time_scenario_in(
     name: &'static str,
     budget_ms: f64,
@@ -766,6 +772,7 @@ fn site_ms(mut work: impl FnMut() -> usize) -> f64 {
 /// Each per-frame site the canvas audit named, timed alone over the fixture,
 /// so a site that costs nothing measurable at this scale is reported rather
 /// than optimized.
+#[allow(clippy::print_stdout)]
 fn print_site_costs() {
     let mut fixture = fixture_without_overlay();
     for id in fixture.components[0].iter().take(40) {
@@ -982,6 +989,7 @@ fn idle_frame_circles_and_tessellation() -> (usize, f64) {
 /// and the operating-point overlay under 8 ms. Every scenario is printed
 /// before any budget is asserted, so a failing run still reports them all.
 #[test]
+#[allow(clippy::print_stdout)]
 #[ignore = "frame-cost probe"]
 fn canvas_frame_cost_at_scale() {
     print_site_costs();

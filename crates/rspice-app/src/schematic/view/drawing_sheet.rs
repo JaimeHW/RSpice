@@ -450,7 +450,8 @@ mod tests {
         moved.geometry.content_area.max_x += 400.0;
         assert!(held(&state, &moved).is_none(), "sheet geometry");
 
-        let changes: [(&str, fn(&mut AppState)); 3] = [
+        type Change = (&'static str, fn(&mut AppState));
+        let changes: [Change; 3] = [
             ("topology", |state| state.schematic.bump_topology_version()),
             ("committed content", |state| {
                 state.schematic.init_undo_history();

@@ -329,7 +329,8 @@ mod tests {
                 (ConductorInk::Selected, vec![2]),
             ],
         );
-        let changes: [(&str, fn(&mut Inputs)); 6] = [
+        type Change = (&'static str, fn(&mut Inputs));
+        let changes: [Change; 6] = [
             ("ink", |inputs| inputs.1[1].0 = ConductorInk::Highlighted),
             ("wire added", |inputs| inputs.1[1].1.insert(0, 1)),
             ("wire dropped", |inputs| inputs.1[0].1.truncate(1)),

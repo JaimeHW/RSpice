@@ -286,7 +286,7 @@ pub(super) fn move_preview_diff(
     let key = TransformPreviewKey::Move {
         delta,
         mode,
-        selection: state.schematic.session.editor.selection.clone(),
+        selection: Box::new(state.schematic.session.editor.selection.clone()),
         drawing: drawing_inputs(state, symbol_context),
     };
     held_transform_preview(state, key, |state| {
@@ -651,7 +651,8 @@ mod tests {
         let after = held_diff(move_preview_diff(&mut state, &symbols, delta, other_mode));
         assert!(!Arc::ptr_eq(&before, &after), "mode");
 
-        let changes: [(&str, fn(&mut AppState)); 5] = [
+        type Change = (&'static str, fn(&mut AppState));
+        let changes: [Change; 5] = [
             ("selection", |state| {
                 state.schematic.session.editor.selection.select_component(2);
             }),

@@ -648,7 +648,8 @@ mod tests {
             1.0,
             VIEW,
         );
-        let changes: [(&str, fn(&mut Inputs)); 9] = [
+        type Change = (&'static str, fn(&mut Inputs));
+        let changes: [Change; 9] = [
             ("class", |inputs| inputs.0[1].class = 2),
             ("key", |inputs| inputs.0[0].key = "OUTP".to_owned()),
             ("candidate", |inputs| {

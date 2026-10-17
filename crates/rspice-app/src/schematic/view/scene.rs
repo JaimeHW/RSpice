@@ -1405,7 +1405,8 @@ mod tests {
                 .expect("fixture dc op");
             voltage_badge_fingerprint(state, dc_op)
         };
-        let changes: [(&str, fn(&mut AppState)); 9] = [
+        type Change = (&'static str, fn(&mut AppState));
+        let changes: [Change; 9] = [
             ("solved value", |state| {
                 state.simulation.retained.runs[0].analyses[0]
                     .dc_op

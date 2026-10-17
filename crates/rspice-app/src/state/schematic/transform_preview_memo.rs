@@ -34,7 +34,8 @@ pub(crate) enum TransformPreviewKey {
     Move {
         delta: Point,
         mode: MoveSelectionMode,
-        selection: Selection,
+        /// Boxed: a selection is many times the size of a stretch target.
+        selection: Box<Selection>,
         drawing: DrawingInputs,
     },
     Stretch {
