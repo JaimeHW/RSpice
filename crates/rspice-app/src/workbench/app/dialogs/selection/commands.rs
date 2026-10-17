@@ -283,11 +283,11 @@ impl AppState {
         if joined {
             self.sync_active_schematic_to_workspace();
         }
-        self.push_user_message(ConsoleMessage::info(if joined {
+        self.prompt(if joined {
             "Joined collinear wires."
         } else {
             "No collinear wires to join on this sheet."
-        }));
+        });
         joined
     }
 }

@@ -228,9 +228,9 @@ impl RSpiceApp {
         if !self.state.schematic.has_pending_operation() {
             return false;
         }
-        self.state.push_user_message(ConsoleMessage::info(format!(
+        self.state.prompt(format!(
             "Finish or cancel the edit in progress before {step}."
-        )));
+        ));
         true
     }
 

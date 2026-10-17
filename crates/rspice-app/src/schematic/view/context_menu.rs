@@ -1066,7 +1066,7 @@ fn execute_context_action(
                 Err(reason) => Some(reason),
             };
             if let Some(refusal) = refusal {
-                state.push_user_message(ConsoleMessage::warning(refusal));
+                state.prompt(refusal);
             }
         }
         ContextAction::Duplicate => {
