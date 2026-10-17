@@ -7,6 +7,7 @@ use rspice_design::schematic::documentation_shape::{
 };
 use rspice_design_model::Point;
 
+use super::lod::{self, Emphasis, StrokeRole};
 use super::viewport::Viewport;
 
 const HIT_TOLERANCE_POINTS: f32 = 6.0;
@@ -31,7 +32,15 @@ pub fn draw_documentation_shape(
     } else {
         palette.text_faint
     };
-    let stroke = Stroke::new(if selected { 1.7 } else { 1.2 }, color);
+    let stroke = Stroke::new(
+        lod::stroke_pt(
+            StrokeRole::Documentation,
+            viewport.zoom,
+            painter.pixels_per_point(),
+            Emphasis::raised_if(selected),
+        ),
+        color,
+    );
     draw_geometry(painter, viewport, &shape.geometry, stroke);
     if selected {
         for point in shape.geometry.points() {

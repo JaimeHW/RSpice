@@ -19,6 +19,7 @@ use rspice_design::schematic::net_label::NetLabel;
 use rspice_design_model::{Point, design_management::CrossSheetPortDirection};
 use rspice_ui_kit::theme::{self, FontWeight};
 
+use super::lod::{self, TextClass, TextLod};
 use super::viewport::Viewport;
 
 const LABEL_FONT_WORLD_SIZE: f32 = 11.0;
@@ -27,7 +28,6 @@ const LABEL_OFFSET_Y_WORLD: f32 = -5.0;
 const LABEL_LINE_HEIGHT_WORLD: f32 = 13.0;
 const LABEL_GLYPH_WIDTH_WORLD: f32 = 6.7;
 const POINTER_SLOP: f32 = 2.5;
-const MIN_VISIBLE_FONT_SIZE: f32 = 4.0;
 const PREVIEW_ALPHA: f32 = 0.55;
 const INVALID_LABEL_PLACEHOLDER: &str = "<unnamed>";
 /// Gap between the shaped name and the connector tab, in world units.
@@ -36,10 +36,23 @@ const CONNECTOR_TAB_GAP_WORLD: f32 = 3.0;
 /// the pair reads as one object at every zoom.
 const CONNECTOR_TAB_WIDTH_WORLD: f32 = 12.0;
 
+/// What stands where the name is drawn.
+#[derive(Clone)]
+enum LabelText {
+    /// The shaped name.
+    Shaped(Arc<Galley>),
+    /// The name is below the legibility floor: a bar of this rect stands in
+    /// for it, so the reader still sees that a name is attached here.
+    Greeked(Rect),
+}
+
 #[derive(Clone)]
 struct NetLabelScreenLayout {
-    galley: Arc<Galley>,
+    text: LabelText,
     attachment: Pos2,
+    /// Half the diagonal of the attachment diamond, in points.
+    attachment_radius: f32,
+    /// The text box: the shaped galley's rect, or where it would be.
     text_rect: Rect,
     /// Present only for an off-sheet connector, and always inside
     /// `decoration_rect`.
@@ -48,64 +61,103 @@ struct NetLabelScreenLayout {
     attachment_hit_rect: Rect,
 }
 
-fn quantized_font_size(zoom: f32) -> f32 {
-    (((LABEL_FONT_WORLD_SIZE * zoom) * 4.0).round() * 0.25).max(1.0)
+fn display_name(label: &NetLabel) -> &str {
+    if label.name.trim().is_empty() {
+        INVALID_LABEL_PLACEHOLDER
+    } else {
+        &label.name
+    }
 }
 
+/// The one layout paint and hit testing share. A name below the legibility
+/// floor greeks rather than disappearing, so a label is drawn, hoverable,
+/// selectable and draggable at every zoom.
 fn screen_layout(
     ctx: &Context,
     viewport: &Viewport,
     label: &NetLabel,
     color: Color32,
-) -> Option<NetLabelScreenLayout> {
-    let font_size = quantized_font_size(viewport.zoom);
-    if font_size < MIN_VISIBLE_FONT_SIZE {
-        return None;
-    }
-    let display_name = if label.name.trim().is_empty() {
-        INVALID_LABEL_PLACEHOLDER
-    } else {
-        &label.name
-    };
-    let galley = ctx.fonts_mut(|fonts| {
-        fonts.layout_no_wrap(
-            display_name.to_owned(),
-            theme::mono(font_size, FontWeight::Medium),
-            color,
-        )
-    });
+) -> NetLabelScreenLayout {
+    let ppp = ctx.pixels_per_point();
+    let zoom = viewport.zoom;
     let anchor = viewport.schematic_to_screen(label.pos);
-    let text_min = anchor
-        + vec2(
-            LABEL_OFFSET_X_WORLD * viewport.zoom,
-            LABEL_OFFSET_Y_WORLD * viewport.zoom - galley.size().y,
-        );
-    let text_rect = Rect::from_min_size(text_min, galley.size());
-    let attachment_radius = (2.25 * viewport.zoom).clamp(2.0, 4.0);
+    let name = display_name(label);
+    let (text, text_rect) =
+        match lod::text_lod(LABEL_FONT_WORLD_SIZE, zoom, ppp, TextClass::Electrical) {
+            TextLod::Draw(font_size) => {
+                let galley = ctx.fonts_mut(|fonts| {
+                    fonts.layout_no_wrap(
+                        name.to_owned(),
+                        theme::mono(font_size, FontWeight::Medium),
+                        color,
+                    )
+                });
+                let text_min = anchor
+                    + vec2(
+                        LABEL_OFFSET_X_WORLD * zoom,
+                        LABEL_OFFSET_Y_WORLD * zoom - galley.size().y,
+                    );
+                let rect = Rect::from_min_size(text_min, galley.size());
+                (LabelText::Shaped(galley), rect)
+            }
+            greek @ (TextLod::Greek(_) | TextLod::Hide) => {
+                // An electrical name greeks rather than hides; `Hide` cannot
+                // come back for it, and would take the thinnest bar if it did.
+                let bar_height = match greek {
+                    TextLod::Greek(bar) => bar.height_pt,
+                    TextLod::Draw(_) | TextLod::Hide => 1.0 / ppp.max(f32::EPSILON),
+                };
+                let box_height = LABEL_LINE_HEIGHT_WORLD * zoom;
+                let text_min = anchor
+                    + vec2(
+                        LABEL_OFFSET_X_WORLD * zoom,
+                        LABEL_OFFSET_Y_WORLD * zoom - box_height,
+                    );
+                let width = lod::greek_bar_width_pt(
+                    name.chars().count(),
+                    LABEL_GLYPH_WIDTH_WORLD,
+                    zoom,
+                    ppp,
+                );
+                let rect = Rect::from_min_size(text_min, vec2(width, box_height));
+                let bar = Rect::from_min_size(
+                    Pos2::new(rect.left(), rect.center().y - bar_height * 0.5),
+                    vec2(width, bar_height),
+                );
+                (LabelText::Greeked(bar), rect)
+            }
+        };
+    let attachment_radius = lod::diamond_half_pt(zoom);
     let attachment_rect =
         Rect::from_center_size(anchor, egui::Vec2::splat(attachment_radius * 2.0));
+    let greeked = matches!(text, LabelText::Greeked(_));
     let connector_tab = label.kind.off_sheet_direction().map(|direction| {
+        let width = if greeked {
+            lod::greek_tab_width_pt(CONNECTOR_TAB_WIDTH_WORLD, zoom, ppp)
+        } else {
+            (CONNECTOR_TAB_WIDTH_WORLD * zoom).max(1.0)
+        };
         let rect = Rect::from_min_size(
-            text_rect.right_top() + vec2(CONNECTOR_TAB_GAP_WORLD * viewport.zoom, 0.0),
-            egui::Vec2::new(
-                (CONNECTOR_TAB_WIDTH_WORLD * viewport.zoom).max(1.0),
-                text_rect.height(),
-            ),
+            text_rect.right_top() + vec2(CONNECTOR_TAB_GAP_WORLD * zoom, 0.0),
+            egui::Vec2::new(width, text_rect.height()),
         );
         (rect, direction)
     });
-    let painted = match connector_tab {
-        Some((tab, _)) => text_rect.union(tab),
-        None => text_rect,
+    let painted = match (&text, connector_tab) {
+        (LabelText::Greeked(bar), Some((tab, _))) => bar.union(tab),
+        (LabelText::Greeked(bar), None) => *bar,
+        (LabelText::Shaped(_), Some((tab, _))) => text_rect.union(tab),
+        (LabelText::Shaped(_), None) => text_rect,
     };
-    Some(NetLabelScreenLayout {
-        galley,
+    NetLabelScreenLayout {
+        text,
         attachment: anchor,
+        attachment_radius,
         text_rect,
         connector_tab,
         decoration_rect: painted.expand(POINTER_SLOP),
         attachment_hit_rect: attachment_rect.expand(POINTER_SLOP),
-    })
+    }
 }
 
 /// Paint the direction tab of an off-sheet connector.
@@ -182,9 +234,7 @@ pub fn draw_net_label(
     } else {
         palette.net_label
     };
-    let Some(layout) = screen_layout(painter.ctx(), viewport, label, text_color) else {
-        return;
-    };
+    let layout = screen_layout(painter.ctx(), viewport, label, text_color);
 
     if selected {
         painter.rect_filled(layout.decoration_rect, 2.0, palette.accent_dim);
@@ -202,7 +252,7 @@ pub fn draw_net_label(
         );
     }
 
-    let attachment_radius = (2.25 * viewport.zoom).clamp(2.0, 4.0);
+    let attachment_radius = layout.attachment_radius;
     painter.add(egui::Shape::convex_polygon(
         vec![
             layout.attachment + vec2(0.0, -attachment_radius),
@@ -213,9 +263,26 @@ pub fn draw_net_label(
         text_color,
         Stroke::NONE,
     ));
-    painter.galley(layout.text_rect.min, layout.galley, text_color);
-    if let Some((tab, direction)) = layout.connector_tab {
-        paint_connector_tab(painter, tab, direction, text_color);
+    match layout.text {
+        LabelText::Shaped(galley) => {
+            painter.galley(layout.text_rect.min, galley, text_color);
+            if let Some((tab, direction)) = layout.connector_tab {
+                paint_connector_tab(painter, tab, direction, text_color);
+            }
+        }
+        LabelText::Greeked(bar) => {
+            let ink = text_color.gamma_multiply(lod::GREEK_ALPHA);
+            painter.rect_filled(bar, 0.0, ink);
+            if let Some((tab, _)) = layout.connector_tab {
+                // The tab keeps its outline; its arrow is below legibility.
+                painter.rect_stroke(
+                    tab,
+                    0.0,
+                    Stroke::new(1.0 / painter.pixels_per_point(), ink),
+                    egui::StrokeKind::Inside,
+                );
+            }
+        }
     }
 }
 
@@ -229,35 +296,27 @@ pub fn net_label_at(
 ) -> Option<u64> {
     let color = rspice_ui_kit::tokens::active_palette().net_label;
     labels.iter().rev().find_map(|label| {
-        screen_layout(ctx, viewport, label, color)
-            .filter(|layout| {
-                layout.decoration_rect.contains(pointer)
-                    || layout.attachment_hit_rect.contains(pointer)
-            })
-            .map(|_| label.id)
+        let layout = screen_layout(ctx, viewport, label, color);
+        (layout.decoration_rect.contains(pointer) || layout.attachment_hit_rect.contains(pointer))
+            .then_some(label.id)
     })
 }
 
 #[cfg(any(test, feature = "test-support"))]
 pub fn hit_bounds(ctx: &Context, viewport: &Viewport, label: &NetLabel) -> Option<Rect> {
-    screen_layout(
+    let layout = screen_layout(
         ctx,
         viewport,
         label,
         rspice_ui_kit::tokens::active_palette().net_label,
-    )
-    .map(|layout| layout.decoration_rect.union(layout.attachment_hit_rect))
+    );
+    Some(layout.decoration_rect.union(layout.attachment_hit_rect))
 }
 
 /// Intrinsic world-space bounds used by fit-to-content and marquee selection.
 /// Pointer hit testing deliberately uses the exact shaped screen galley above.
 pub fn world_bounds(label: &NetLabel) -> (Point, Point) {
-    let display_name = if label.name.trim().is_empty() {
-        INVALID_LABEL_PLACEHOLDER
-    } else {
-        &label.name
-    };
-    let glyphs = display_name.chars().count() as f32;
+    let glyphs = display_name(label).chars().count() as f32;
     let text_min_x = label.pos.x as f32 + LABEL_OFFSET_X_WORLD;
     let min_x = label.pos.x as f32;
     let tab_width = if label.kind.off_sheet_direction().is_some() {
@@ -301,7 +360,7 @@ mod tests {
         let viewport = viewport();
         let label = NetLabel::new(41, Point::new(40, 30), "afe_out");
         let color = rspice_ui_kit::tokens::active_palette().net_label;
-        let layout = screen_layout(&ctx, &viewport, &label, color).expect("visible label");
+        let layout = screen_layout(&ctx, &viewport, &label, color);
         let hit_bounds = layout.decoration_rect.union(layout.attachment_hit_rect);
 
         assert_eq!(
@@ -322,6 +381,66 @@ mod tests {
             ),
             None
         );
+    }
+
+    /// Zoomed out to a quarter, a net name is below the legibility floor. It
+    /// greeks into a bar, keeps its attachment diamond at the floor size, and
+    /// stays under the pointer: bar, tab and diamond are all hit.
+    #[test]
+    fn a_greeked_label_keeps_its_diamond_and_stays_pickable() {
+        let viewport = Viewport {
+            offset: Pos2::new(40.0, 60.0),
+            zoom: 0.25,
+            bounds: Rect::from_min_size(Pos2::ZERO, Vec2::new(160.0, 100.0)),
+        };
+        let label = NetLabel::off_sheet(
+            11,
+            Point::new(0, 0),
+            "VOUT",
+            rspice_design_model::design_management::CrossSheetPortDirection::Output,
+        );
+        let mut layout = None;
+        let canvas = rspice_ui_kit::raster::render(Vec2::new(160.0, 100.0), |ui, background| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(background))
+                .show(ui, |ui| {
+                    let painter = ui.painter();
+                    let color = rspice_ui_kit::tokens::active_palette().net_label;
+                    layout = Some(screen_layout(painter.ctx(), &viewport, &label, color));
+                    draw_net_label(painter, &viewport, &label, false, false, false);
+                });
+        });
+        let layout = layout.expect("laid out");
+        let LabelText::Greeked(bar) = layout.text else {
+            panic!("a quarter-zoom net name greeks");
+        };
+        assert_eq!(layout.attachment_radius, 3.0, "the diamond is at its floor");
+        let (tab, _) = layout.connector_tab.expect("connector tab");
+        assert!(tab.width() >= 4.0, "the tab is at least 4 dpx wide");
+
+        let ink = |rect: Rect| {
+            canvas
+                .pixels_in(rect)
+                .filter(|pixel| *pixel != canvas.background())
+                .count()
+        };
+        let diamond = Rect::from_center_size(layout.attachment, Vec2::splat(4.0));
+        assert!(ink(diamond) >= 4, "the diamond is painted");
+        assert!(ink(bar.expand(0.5)) >= 3, "the bar is painted");
+
+        let ctx = initialized_context();
+        let labels = std::slice::from_ref(&label);
+        for (what, point) in [
+            ("bar", bar.center()),
+            ("tab", tab.center()),
+            ("diamond", layout.attachment),
+        ] {
+            assert_eq!(
+                net_label_at(&ctx, &viewport, labels, point),
+                Some(11),
+                "the greeked {what} is pickable"
+            );
+        }
     }
 
     #[test]
@@ -384,7 +503,7 @@ mod tests {
             rspice_design_model::design_management::CrossSheetPortDirection::Output,
         );
         let color = rspice_ui_kit::tokens::active_palette().net_label;
-        let layout = screen_layout(&ctx, &viewport, &connector, color).expect("visible connector");
+        let layout = screen_layout(&ctx, &viewport, &connector, color);
         let (tab, _) = layout
             .connector_tab
             .expect("an off-sheet connector has a tab");
@@ -413,7 +532,7 @@ mod tests {
         );
 
         let local = NetLabel::new(5, Point::new(50, 40), "BIAS");
-        let plain = screen_layout(&ctx, &viewport, &local, color).expect("visible label");
+        let plain = screen_layout(&ctx, &viewport, &local, color);
         assert!(plain.connector_tab.is_none());
         assert!(plain.decoration_rect.width() < layout.decoration_rect.width());
         assert_eq!(plain.text_rect, layout.text_rect);
@@ -453,7 +572,6 @@ mod tests {
                             let painter = ui.painter();
                             let color = rspice_ui_kit::tokens::active_palette().net_label;
                             tab = screen_layout(painter.ctx(), &viewport, &connector, color)
-                                .expect("visible connector")
                                 .connector_tab
                                 .expect("an off-sheet connector has a tab")
                                 .0;

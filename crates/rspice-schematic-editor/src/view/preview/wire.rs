@@ -2,7 +2,7 @@
 
 use super::super::{
     coordinates::screen_to_schematic,
-    drawing::paint_conductor,
+    drawing::{conductor_width_pt, paint_conductor},
     snap_resolution::{nearest_active_wire_screen_hit, resolve_target_pointer},
     symbol_context::SchematicSymbolContext,
     viewport::Viewport,
@@ -11,8 +11,6 @@ use super::PreviewView;
 use crate::session::snap::{SnapResult, SnapTarget, SnapTargetType};
 use egui::{Painter, Pos2, Rect, Stroke};
 use rspice_design_model::Point;
-
-const WIRE_PREVIEW_STROKE_WIDTH: f32 = 1.5;
 
 pub fn draw_wire_preview(
     painter: &Painter,
@@ -38,7 +36,9 @@ pub fn draw_wire_preview(
 
         if let Some(start) = committed.first().copied() {
             let wire_color = rspice_ui_kit::tokens::active_palette().accent;
-            let width = WIRE_PREVIEW_STROKE_WIDTH * viewport.zoom;
+            // The route being drawn is a raised wire: the width it would
+            // carry selected once committed.
+            let width = conductor_width_pt(viewport.zoom, painter.pixels_per_point(), true);
             paint_conductor(
                 painter,
                 route,

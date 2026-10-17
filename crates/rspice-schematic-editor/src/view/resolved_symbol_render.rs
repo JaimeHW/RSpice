@@ -13,6 +13,7 @@ use std::fmt::Write;
 
 use egui::{Align, Align2, Color32, Painter, Pos2, Shape, Stroke, vec2};
 
+use super::lod;
 use crate::export::SvgExportConfig;
 use rspice_design::{
     resolved_symbol::ResolvedCellSymbol,
@@ -51,15 +52,7 @@ pub fn draw_resolved_symbol_with_visibility(
     parameter_labels: SchematicParameterLabelVisibility,
 ) {
     draw_symbol_body(painter, origin, scale, component, symbol, stroke);
-    draw_symbol_pins(
-        painter,
-        origin,
-        scale,
-        component,
-        symbol,
-        stroke.color,
-        true,
-    );
+    draw_symbol_pins(painter, origin, scale, component, symbol, stroke, true);
     draw_symbol_labels(
         painter,
         origin,
@@ -83,15 +76,7 @@ pub fn draw_resolved_symbol_artwork(
     stroke: Stroke,
 ) {
     draw_symbol_body(painter, origin, scale, component, symbol, stroke);
-    draw_symbol_pins(
-        painter,
-        origin,
-        scale,
-        component,
-        symbol,
-        stroke.color,
-        false,
-    );
+    draw_symbol_pins(painter, origin, scale, component, symbol, stroke, false);
 }
 
 pub(crate) fn write_resolved_symbol_svg(
@@ -192,10 +177,11 @@ fn draw_symbol_body(
                 size,
                 align,
             } => {
-                let font_size = size.height() as f32 * scale;
-                if font_size < LEGIBLE_TYPE_PX {
+                let Some(font_size) =
+                    lod::annotation_size(size.height() as f32, scale, painter.pixels_per_point())
+                else {
                     continue;
-                }
+                };
                 painter.text(
                     to_screen_symbol(origin, scale, component, symbol, *anchor),
                     symbol_text_align(component, *align),
@@ -210,10 +196,6 @@ fn draw_symbol_body(
         }
     }
 }
-
-/// Below this the glyphs are noise rather than type, and the pass costs more
-/// than it shows. Pin names are held to the same floor.
-const LEGIBLE_TYPE_PX: f32 = 4.0;
 
 /// egui's spelling of where the instance's orientation put a text run.
 fn symbol_text_align(component: &Component, align: SymbolTextAlign) -> Align2 {
@@ -232,11 +214,14 @@ fn draw_symbol_pins(
     scale: f32,
     component: &Component,
     symbol: &ResolvedCellSymbol,
-    color: Color32,
+    stroke: Stroke,
     named: bool,
 ) {
-    let stroke = Stroke::new(1.1 * scale, color);
-    let font_size = GENERATED_PIN_LABEL_SIZE * scale;
+    // Leads are drawn in the body's stroke: one symbol weight.
+    let color = stroke.color;
+    let font_size =
+        lod::annotation_size(GENERATED_PIN_LABEL_SIZE, scale, painter.pixels_per_point())
+            .filter(|_| named);
     for pin in symbol.connectable_pins() {
         let offset = symbol.effective_pin_offset(pin);
         let terminal = to_screen(origin, scale, component, offset);
@@ -245,7 +230,7 @@ fn draw_symbol_pins(
         painter.circle_filled(terminal, 1.6 * scale, color);
         draw_direction_mark(painter, terminal, inner, pin.direction, scale, color);
 
-        if named && font_size >= LEGIBLE_TYPE_PX {
+        if let Some(font_size) = font_size {
             let anchor = to_screen(origin, scale, component, symbol.pin_label_anchor(pin));
             painter.text(
                 anchor,
@@ -284,10 +269,9 @@ fn draw_symbol_labels(
     color: Color32,
     visibility: SchematicParameterLabelVisibility,
 ) {
-    let font_size = (9.0 * scale).max(1.0);
-    if font_size < LEGIBLE_TYPE_PX {
+    let Some(font_size) = lod::annotation_size(9.0, scale, painter.pixels_per_point()) else {
         return;
-    }
+    };
     let font = rspice_ui_kit::theme::mono(font_size, rspice_ui_kit::theme::FontWeight::Medium);
     if component.display_mode.show_name(visibility) && !component.name.is_empty() {
         painter.text(

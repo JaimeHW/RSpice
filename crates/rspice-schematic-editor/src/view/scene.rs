@@ -13,6 +13,7 @@ use super::{
         ProbeVisualStatus, chain_conductors, draw_bus, draw_bus_tap, draw_component,
         draw_conductor, draw_junction, draw_probe, probe_at_screen, probe_world_bounds,
     },
+    lod::{self, Emphasis},
     net_labels::{draw_net_label, net_label_at, world_bounds as net_label_world_bounds},
     symbol_context::SchematicSymbolContext,
     viewport::Viewport,
@@ -29,7 +30,7 @@ use egui::{Painter, Rect, Stroke};
 use rspice_design::schematic::design_note::DesignNoteRenderContext;
 use rspice_design::schematic::probe::SchematicProbe;
 use rspice_design_model::Point;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 mod annotations;
 mod empty;
@@ -115,6 +116,9 @@ pub fn draw_content(
     type ConductorStyle = (bool, Option<[u8; 4]>);
     let mut conductor_groups: BTreeMap<ConductorStyle, (Option<egui::Color32>, Vec<&[Point]>)> =
         BTreeMap::new();
+    // Wires drawn raised (selected or highlighted), so a junction on one is
+    // sized from the raised width.
+    let mut raised_wires = HashSet::new();
     for index in visible_wire_indices {
         let Some(wire) = view.design.document.wires.get(index) else {
             continue;
@@ -150,6 +154,9 @@ pub fn draw_content(
             }
             SchematicNetHighlighting::Off => None,
         };
+        if is_selected || highlight_color.is_some() {
+            raised_wires.insert(index);
+        }
         conductor_groups
             .entry((is_selected, highlight_color.map(|color| color.to_array())))
             .or_insert_with(|| (highlight_color, Vec::new()))
@@ -230,12 +237,26 @@ pub fn draw_content(
         if jx < wx0 || jx > wx1 || jy < wy0 || jy > wy1 {
             continue;
         }
+        let incident_raised = !raised_wires.is_empty()
+            && cache
+                .map(|cache| cache.wire_indices_at_point(junction.pos))
+                .unwrap_or_else(|| raised_wires.iter().copied().collect())
+                .into_iter()
+                .filter(|index| raised_wires.contains(index))
+                .any(|index| {
+                    view.design
+                        .document
+                        .wires
+                        .get(index)
+                        .is_some_and(|wire| wire.contains_point(junction.pos))
+                });
         draw_junction(
             painter,
             viewport,
             junction.pos,
             view.editor.selection.has_junction(junction.pos),
             view.hover_wire_vertex == Some((junction.pos.x, junction.pos.y)),
+            Emphasis::raised_if(incident_raised),
         );
     }
 
@@ -434,7 +455,7 @@ pub fn draw_content(
                 pos,
                 radius,
                 Stroke::new(
-                    1.0 * viewport.zoom,
+                    lod::mark_outline_pt(painter.pixels_per_point()),
                     rspice_ui_kit::tokens::active_palette().accent,
                 ),
             );

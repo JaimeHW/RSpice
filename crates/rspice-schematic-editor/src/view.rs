@@ -8,6 +8,7 @@ pub mod documentation_shape_input;
 pub mod documentation_shapes;
 pub mod geometry;
 pub mod grid;
+pub mod lod;
 pub mod mobile_controls;
 pub mod navigation;
 pub mod net_labels;

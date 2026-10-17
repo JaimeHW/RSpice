@@ -23,26 +23,22 @@ use rspice_design_model::{
 };
 
 use super::super::symbols::{SymbolLibrary, draw_baked};
+use super::lod::{self, Emphasis, StrokeRole, TextClass, TextLod};
 use super::resolved_symbol_render::{
     draw_resolved_symbol_with_visibility, resolved_symbol_world_bounds,
 };
 use super::symbol_context::SchematicSymbolContext;
 use super::viewport::Viewport;
 
-const DEFAULT_WIRE_STROKE_WIDTH: f32 = 1.1;
-const SELECTED_WIRE_STROKE_WIDTH: f32 = 2.0;
-const HIGHLIGHTED_WIRE_STROKE_WIDTH: f32 = 2.0;
-const BUS_CONDUCTOR_OFFSET: f32 = 4.0;
-const DEFAULT_BUS_STROKE_WIDTH: f32 = 1.2;
-const SELECTED_BUS_STROKE_WIDTH: f32 = 1.6;
-const DEFAULT_BUS_TAP_STROKE_WIDTH: f32 = 2.0;
-const SELECTED_BUS_TAP_STROKE_WIDTH: f32 = 2.4;
 const PROBE_RADIUS: f32 = 9.0;
 const PROBE_CROSSHAIR_HALF_SPAN: f32 = 13.0;
-
-const _: [(); 1] = [(); (DEFAULT_WIRE_STROKE_WIDTH.to_bits() == 1.1f32.to_bits()) as usize];
-const _: [(); 1] = [(); (SELECTED_WIRE_STROKE_WIDTH.to_bits() == 2.0f32.to_bits()) as usize];
-const _: [(); 1] = [(); (HIGHLIGHTED_WIRE_STROKE_WIDTH.to_bits() == 2.0f32.to_bits()) as usize];
+/// World size of bus declarations, tap slices and probe labels.
+const SMALL_TEXT_WORLD: f32 = 9.0;
+/// Mono advance per glyph at [`SMALL_TEXT_WORLD`], for a greeked bar.
+const SMALL_TEXT_GLYPH_WORLD: f32 = 6.7 * SMALL_TEXT_WORLD / 11.0;
+/// Instance name and value, in world units.
+const INSTANCE_NAME_WORLD: f32 = 10.0;
+const INSTANCE_VALUE_WORLD: f32 = 9.0;
 
 /// Draw a wire on the canvas
 pub fn draw_wire(
@@ -66,19 +62,35 @@ pub fn draw_conductor(
 ) {
     // Priority: selected > highlighted > default
     let palette = rspice_ui_kit::tokens::active_palette();
-    let (color, width) = if selected {
-        (palette.accent, SELECTED_WIRE_STROKE_WIDTH) // Accent for selected
+    let color = if selected {
+        palette.accent
     } else if let Some(color) = highlight_color {
-        (color, HIGHLIGHTED_WIRE_STROKE_WIDTH)
+        color
     } else {
-        (palette.wire, DEFAULT_WIRE_STROKE_WIDTH)
+        palette.wire
     };
+    let width = conductor_width_pt(
+        viewport.zoom,
+        painter.pixels_per_point(),
+        selected || highlight_color.is_some(),
+    );
 
     let points = points
         .iter()
         .map(|point| viewport.schematic_to_screen(*point))
         .collect();
-    paint_conductor(painter, points, Stroke::new(width * viewport.zoom, color));
+    paint_conductor(painter, points, Stroke::new(width, color));
+}
+
+/// The drawn width of a wire, in points: raised when it is selected or its
+/// net is highlighted. A junction dot on it is sized from this.
+pub fn conductor_width_pt(zoom: f32, pixels_per_point: f32, raised: bool) -> f32 {
+    lod::stroke_pt(
+        StrokeRole::Wire,
+        zoom,
+        pixels_per_point,
+        Emphasis::raised_if(raised),
+    )
 }
 
 /// Screen-space paths for a conductor polyline: one mitered path, split
@@ -277,38 +289,90 @@ pub fn draw_bus(painter: &Painter, viewport: &Viewport, bus: &Bus, selected: boo
     } else {
         palette.wire
     };
-    let width = if selected {
-        SELECTED_BUS_STROKE_WIDTH
-    } else {
-        DEFAULT_BUS_STROKE_WIDTH
-    };
+    let ppp = painter.pixels_per_point();
+    let emphasis = Emphasis::raised_if(selected);
     let centerline: Vec<Pos2> = bus
         .points
         .iter()
         .map(|point| viewport.schematic_to_screen(*point))
         .collect();
-    for offset in [-BUS_CONDUCTOR_OFFSET, 0.0, BUS_CONDUCTOR_OFFSET] {
+    if lod::bus_collapses(viewport.zoom, ppp) {
+        // The strands would merge into a smear: one stroke says "bus".
         painter.add(egui::Shape::line(
-            offset_polyline(&centerline, offset * viewport.zoom),
-            Stroke::new(width * viewport.zoom, color),
+            centerline,
+            Stroke::new(
+                lod::stroke_pt(StrokeRole::BusCollapsed, viewport.zoom, ppp, emphasis),
+                color,
+            ),
         ));
+    } else {
+        let width = lod::stroke_pt(StrokeRole::BusStrand, viewport.zoom, ppp, emphasis);
+        for offset in [-lod::BUS_STRAND_OFFSET_WU, 0.0, lod::BUS_STRAND_OFFSET_WU] {
+            painter.add(egui::Shape::line(
+                offset_polyline(&centerline, offset * viewport.zoom),
+                Stroke::new(width, color),
+            ));
+        }
     }
 
     if let (Some(declaration), Some(anchor)) = (&bus.declaration, bus.points.last()) {
-        painter.text(
-            viewport.schematic_to_screen(*anchor) + Vec2::new(8.0, -8.0),
-            egui::Align2::LEFT_BOTTOM,
-            declaration.to_string(),
-            rspice_ui_kit::theme::mono(
-                rspice_ui_kit::tokens::FS_0,
-                rspice_ui_kit::theme::FontWeight::Medium,
-            ),
+        draw_small_electrical_text(
+            painter,
+            viewport,
+            *anchor,
+            Vec2::new(8.0, -8.0),
+            &declaration.to_string(),
             if selected {
                 palette.accent
             } else {
                 palette.net_label
             },
         );
+    }
+}
+
+/// A bus declaration or tap slice: 9-wu mono text whose bottom-left corner
+/// sits `offset_world` from `anchor`. Below the legibility floor it greeks
+/// into a bar in the same place, so the reader still sees a name there.
+fn draw_small_electrical_text(
+    painter: &Painter,
+    viewport: &Viewport,
+    anchor: Point,
+    offset_world: Vec2,
+    text: &str,
+    color: egui::Color32,
+) {
+    let ppp = painter.pixels_per_point();
+    let corner = viewport.schematic_to_screen(anchor) + offset_world * viewport.zoom;
+    match lod::text_lod(SMALL_TEXT_WORLD, viewport.zoom, ppp, TextClass::Electrical) {
+        TextLod::Draw(size) => {
+            painter.text(
+                corner,
+                egui::Align2::LEFT_BOTTOM,
+                text,
+                rspice_ui_kit::theme::mono(size, rspice_ui_kit::theme::FontWeight::Medium),
+                color,
+            );
+        }
+        TextLod::Greek(bar) => {
+            let line_height = SMALL_TEXT_WORLD * 13.0 / 11.0 * viewport.zoom;
+            let width = lod::greek_bar_width_pt(
+                text.chars().count(),
+                SMALL_TEXT_GLYPH_WORLD,
+                viewport.zoom,
+                ppp,
+            );
+            let middle = corner.y - line_height * 0.5;
+            painter.rect_filled(
+                Rect::from_min_size(
+                    Pos2::new(corner.x, middle - bar.height_pt * 0.5),
+                    Vec2::new(width, bar.height_pt),
+                ),
+                0.0,
+                color.gamma_multiply(lod::GREEK_ALPHA),
+            );
+        }
+        TextLod::Hide => {}
     }
 }
 
@@ -321,29 +385,24 @@ pub fn draw_bus_tap(painter: &Painter, viewport: &Viewport, tap: &BusTap, select
     } else {
         palette.wire
     };
-    let width = if selected {
-        SELECTED_BUS_TAP_STROKE_WIDTH
-    } else {
-        DEFAULT_BUS_TAP_STROKE_WIDTH
-    };
-    let connection = viewport.schematic_to_screen(tap.connection_point);
+    let width = lod::stroke_pt(
+        StrokeRole::BusTap,
+        viewport.zoom,
+        painter.pixels_per_point(),
+        Emphasis::raised_if(selected),
+    );
     let route: Vec<Pos2> = crate::bus_geometry::bus_tap_route_points(tap)
         .into_iter()
         .map(|point| viewport.schematic_to_screen(point))
         .collect();
-    painter.add(egui::Shape::line(
-        route,
-        Stroke::new(width * viewport.zoom, color),
-    ));
+    painter.add(egui::Shape::line(route, Stroke::new(width, color)));
 
-    painter.text(
-        connection + Vec2::new(5.0, -7.0),
-        egui::Align2::LEFT_BOTTOM,
-        tap.slice.to_string(),
-        rspice_ui_kit::theme::mono(
-            rspice_ui_kit::tokens::FS_0,
-            rspice_ui_kit::theme::FontWeight::Medium,
-        ),
+    draw_small_electrical_text(
+        painter,
+        viewport,
+        tap.connection_point,
+        Vec2::new(5.0, -7.0),
+        &tap.slice.to_string(),
         if selected {
             palette.accent
         } else {
@@ -392,51 +451,52 @@ pub fn draw_probe(
         ProbeVisualStatus::Unavailable => palette.err,
         ProbeVisualStatus::Disabled => palette.text_faint,
     };
+    let ppp = painter.pixels_per_point();
     let center = viewport.schematic_to_screen(probe.position);
     let radius = PROBE_RADIUS * viewport.zoom;
     let half_span = PROBE_CROSSHAIR_HALF_SPAN * viewport.zoom;
+    let ring = lod::stroke_pt(
+        StrokeRole::Probe,
+        viewport.zoom,
+        ppp,
+        Emphasis::raised_if(selected),
+    );
+    let crosshair = lod::stroke_pt(StrokeRole::Probe, viewport.zoom, ppp, Emphasis::Plain);
     if selected {
         painter.circle_filled(center, radius + 4.0 * viewport.zoom, palette.accent);
     } else if hovered {
         painter.circle_stroke(
             center,
             radius + 4.0 * viewport.zoom,
-            Stroke::new(1.5 * viewport.zoom, palette.accent),
+            Stroke::new(lod::mark_outline_pt(ppp), palette.accent),
         );
     }
     painter.circle_filled(center, radius, palette.canvas_bg);
-    painter.circle_stroke(
-        center,
-        radius,
-        Stroke::new(
-            if selected { 2.5 } else { 2.0 } * viewport.zoom,
-            status_color,
-        ),
-    );
+    painter.circle_stroke(center, radius, Stroke::new(ring, status_color));
     painter.line_segment(
         [
             center - Vec2::new(half_span, 0.0),
             center + Vec2::new(half_span, 0.0),
         ],
-        Stroke::new(2.0 * viewport.zoom, status_color),
+        Stroke::new(crosshair, status_color),
     );
     painter.line_segment(
         [
             center - Vec2::new(0.0, half_span),
             center + Vec2::new(0.0, half_span),
         ],
-        Stroke::new(2.0 * viewport.zoom, status_color),
+        Stroke::new(crosshair, status_color),
     );
-    painter.text(
-        center + Vec2::new(13.0, -9.0) * viewport.zoom,
-        egui::Align2::LEFT_BOTTOM,
-        format!("{}{}", probe.reference, status.suffix()),
-        rspice_ui_kit::theme::mono(
-            rspice_ui_kit::tokens::FS_0 * viewport.zoom,
-            rspice_ui_kit::theme::FontWeight::Medium,
-        ),
-        status_color,
-    );
+    // Below the floor the label hides and the marker stays.
+    if let Some(size) = lod::annotation_size(SMALL_TEXT_WORLD, viewport.zoom, ppp) {
+        painter.text(
+            center + Vec2::new(13.0, -9.0) * viewport.zoom,
+            egui::Align2::LEFT_BOTTOM,
+            format!("{}{}", probe.reference, status.suffix()),
+            rspice_ui_kit::theme::mono(size, rspice_ui_kit::theme::FontWeight::Medium),
+            status_color,
+        );
+    }
 }
 
 /// Conservative zoom-independent authored bounds for fitting and culling.
@@ -694,7 +754,16 @@ pub fn draw_component(
         palette.symbol
     };
 
-    let stroke = Stroke::new(if selected { 1.5 } else { 1.0 } * scale, outline_color);
+    let ppp = painter.pixels_per_point();
+    let stroke = Stroke::new(
+        lod::stroke_pt(
+            StrokeRole::Symbol,
+            scale,
+            ppp,
+            Emphasis::raised_if(selected),
+        ),
+        outline_color,
+    );
 
     let rotation_degrees = component.rotation.degrees();
     let resolved_cell_symbol = if component.kind == ComponentType::CellInstance {
@@ -754,7 +823,7 @@ pub fn draw_component(
             .map(|(symbol, rotation)| (library, symbol, rotation))
     }) {
         let symbol_stroke = if component.kind == ComponentType::Port {
-            port_symbol_stroke(stroke, scale, selected, component.port_spec().as_ref())
+            port_symbol_stroke(stroke, scale, ppp, selected, component.port_spec().as_ref())
         } else {
             stroke
         };
@@ -801,19 +870,23 @@ pub fn draw_component(
 
 pub fn port_symbol_stroke(
     symbol_stroke: Stroke,
-    scale: f32,
+    zoom: f32,
+    pixels_per_point: f32,
     selected: bool,
     spec: Option<&PortSpec>,
 ) -> Stroke {
     if spec.is_none_or(|port| port.vector().is_none()) {
         return symbol_stroke;
     }
-    let width = if selected {
-        SELECTED_BUS_STROKE_WIDTH
-    } else {
-        DEFAULT_BUS_STROKE_WIDTH
-    };
-    Stroke::new(width * scale, symbol_stroke.color)
+    Stroke::new(
+        lod::stroke_pt(
+            StrokeRole::VectorPort,
+            zoom,
+            pixels_per_point,
+            Emphasis::raised_if(selected),
+        ),
+        symbol_stroke.color,
+    )
 }
 
 #[expect(
@@ -853,7 +926,15 @@ pub fn draw_symbol_resolution_error(
     let color = egui::Color32::from_rgb(220, 70, 70);
     let half = 12.0 * scale.max(0.25);
     let rect = Rect::from_center_size(pos, Vec2::splat(half * 2.0));
-    let stroke = Stroke::new(1.5 * scale.max(0.5), color);
+    let stroke = Stroke::new(
+        lod::stroke_pt(
+            StrokeRole::Symbol,
+            scale,
+            painter.pixels_per_point(),
+            Emphasis::Raised,
+        ),
+        color,
+    );
     painter.rect_stroke(rect, 1.0, stroke, egui::StrokeKind::Inside);
     painter.line_segment([rect.left_top(), rect.right_bottom()], stroke);
     painter.line_segment([rect.right_top(), rect.left_bottom()], stroke);
@@ -1047,13 +1128,6 @@ fn compute_label_layout(pos: Pos2, scale: f32, component: &Component) -> LabelLa
     }
 }
 
-/// Quantize a zoom-scaled font size to quarter points: consecutive zoom
-/// frames then reuse egui's cached galleys instead of re-shaping every
-/// label on screen each frame (the dominant zoom-gesture cost).
-fn quantize_font_size(size: f32) -> f32 {
-    ((size * 4.0).round() * 0.25).max(1.0)
-}
-
 fn draw_component_labels(
     painter: &Painter,
     pos: Pos2,
@@ -1066,55 +1140,58 @@ fn draw_component_labels(
         return;
     }
 
-    // Below this size labels are unreadable smudge — commercial EDA tools
-    // hide them; so do we, and zoomed-out paint cost drops with them.
-    let name_size = quantize_font_size(10.0 * scale);
-    if name_size < 4.0 {
-        return;
-    }
-    let name_font = rspice_ui_kit::theme::sans(name_size, rspice_ui_kit::theme::FontWeight::Medium);
-    let value_font = rspice_ui_kit::theme::sans(
-        quantize_font_size(9.0 * scale),
-        rspice_ui_kit::theme::FontWeight::Regular,
-    );
-
+    // Below the legibility floor labels are unreadable smudge — commercial
+    // EDA tools hide them; so do we, and zoomed-out paint cost drops with them.
+    let ppp = painter.pixels_per_point();
     let layout = compute_label_layout(pos, scale, component);
     let palette = rspice_ui_kit::tokens::active_palette();
 
     // Draw component name (reference designator)
-    if component.display_mode.show_name(visibility) && !component.name.is_empty() {
+    if let Some(size) = lod::annotation_size(INSTANCE_NAME_WORLD, scale, ppp)
+        && component.display_mode.show_name(visibility)
+        && !component.name.is_empty()
+    {
         painter.text(
             layout.name_pos,
             layout.name_align,
             &component.name,
-            name_font,
+            rspice_ui_kit::theme::sans(size, rspice_ui_kit::theme::FontWeight::Medium),
             palette.text,
         );
     }
 
     // Draw component value
-    let value_text = super::super::source_labels::component_value_label_cached(component);
-    if component.display_mode.show_value(visibility) && !value_text.is_empty() {
-        painter.text(
-            layout.value_pos,
-            layout.value_align,
-            value_text.as_ref(),
-            value_font,
-            palette.text_dim,
-        );
+    if let Some(size) = lod::annotation_size(INSTANCE_VALUE_WORLD, scale, ppp)
+        && component.display_mode.show_value(visibility)
+    {
+        let value_text = super::super::source_labels::component_value_label_cached(component);
+        if !value_text.is_empty() {
+            painter.text(
+                layout.value_pos,
+                layout.value_align,
+                value_text.as_ref(),
+                rspice_ui_kit::theme::sans(size, rspice_ui_kit::theme::FontWeight::Regular),
+                palette.text_dim,
+            );
+        }
     }
 }
 
-/// Draw a junction (net connection point)
+/// Draw a junction (net connection point). `incident` is the state of the
+/// most emphasized conductor that meets it: the dot is sized from that
+/// conductor's drawn width, so a selected wire never swallows it.
 pub fn draw_junction(
     painter: &Painter,
     viewport: &Viewport,
     position: Point,
     is_selected: bool,
     is_hovered: bool,
+    incident: Emphasis,
 ) {
+    let ppp = painter.pixels_per_point();
     let pos = viewport.schematic_to_screen(position);
-    let radius = 1.5 * viewport.zoom; // Match wire/symbol stroke width
+    let incident_width = conductor_width_pt(viewport.zoom, ppp, incident == Emphasis::Raised);
+    let radius = lod::junction_radius_pt(viewport.zoom, incident_width);
 
     let palette = rspice_ui_kit::tokens::active_palette();
     if is_hovered || is_selected {
@@ -1123,7 +1200,7 @@ pub fn draw_junction(
         painter.circle_stroke(
             pos,
             highlight_radius,
-            Stroke::new(1.0 * viewport.zoom, palette.accent),
+            Stroke::new(lod::mark_outline_pt(ppp), palette.accent),
         );
     }
 
@@ -1178,41 +1255,52 @@ mod tests {
         widths[0]
     }
 
+    /// The painted wire is the level-of-detail width: whole device pixels
+    /// while thin, one point wider when selected or highlighted.
     #[test]
-    fn wire_strokes_use_design_default_width_without_changing_state_widths() {
-        let zoom = 2.0;
-
-        assert!((wire_stroke_width(false, false, zoom) - 2.2).abs() < f32::EPSILON);
-        assert!((wire_stroke_width(true, false, zoom) - 4.0).abs() < f32::EPSILON);
-        assert!((wire_stroke_width(false, true, zoom) - 4.0).abs() < f32::EPSILON);
+    fn painted_wires_take_the_level_of_detail_width() {
+        for (zoom, plain, raised) in [
+            (0.25, 1.0, 2.0),
+            (1.0, 1.0, 2.0),
+            (2.0, 2.0, 3.0),
+            (8.0, 3.0, 4.0),
+        ] {
+            assert_eq!(wire_stroke_width(false, false, zoom), plain, "zoom {zoom}");
+            assert_eq!(wire_stroke_width(true, false, zoom), raised, "zoom {zoom}");
+            assert_eq!(wire_stroke_width(false, true, zoom), raised, "zoom {zoom}");
+        }
     }
 
     #[test]
     fn canonical_vector_port_body_and_overlay_use_bus_weight() {
-        let scale = 1.5;
-        let symbol = Stroke::new(scale, rspice_ui_kit::tokens::active_palette().symbol);
+        // At 2x and zoom 2 the bus weight and the symbol weight land on
+        // different whole device pixels (5 against 4).
+        let (zoom, ppp) = (2.0, 2.0);
+        let width = lod::stroke_pt(StrokeRole::Symbol, zoom, ppp, Emphasis::Plain);
+        let symbol = Stroke::new(width, rspice_ui_kit::tokens::active_palette().symbol);
         let spec = |name: &str| PortSpec {
             name: name.to_owned(),
             direction: PortDirection::InOut,
         };
         let vector = spec("DATA[7:0]");
 
+        assert_eq!(width, 2.0);
         assert_eq!(
-            port_symbol_stroke(symbol, scale, false, Some(&vector)).width,
-            DEFAULT_BUS_STROKE_WIDTH * scale
+            port_symbol_stroke(symbol, zoom, ppp, false, Some(&vector)).width,
+            2.5
         );
         assert_eq!(
-            port_symbol_stroke(symbol, scale, true, Some(&vector)).width,
-            SELECTED_BUS_STROKE_WIDTH * scale
+            port_symbol_stroke(symbol, zoom, ppp, true, Some(&vector)).width,
+            lod::stroke_pt(StrokeRole::VectorPort, zoom, ppp, Emphasis::Raised)
         );
         for scalar in ["EN", "DATA[3]", "bias_1"] {
             assert_eq!(
-                port_symbol_stroke(symbol, scale, false, Some(&spec(scalar))),
+                port_symbol_stroke(symbol, zoom, ppp, false, Some(&spec(scalar))),
                 symbol,
                 "{scalar}"
             );
         }
-        assert_eq!(port_symbol_stroke(symbol, scale, false, None), symbol);
+        assert_eq!(port_symbol_stroke(symbol, zoom, ppp, false, None), symbol);
     }
 
     #[test]

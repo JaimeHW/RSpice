@@ -4,6 +4,7 @@ use super::super::{
     design_notes::draw_design_note,
     documentation_shapes::draw_documentation_shape,
     drawing::{draw_bus, draw_bus_tap, draw_component, draw_junction, draw_wire},
+    lod::Emphasis,
     net_labels::draw_net_label,
     symbol_context::SchematicSymbolContext,
     viewport::Viewport,
@@ -64,6 +65,8 @@ pub fn draw_move_candidate(
             junction.pos,
             view.editor.selection.has_junction(junction.pos),
             style.hover_wire_vertex == Some((junction.pos.x, junction.pos.y)),
+            // A preview draws its conductors selected.
+            Emphasis::Raised,
         );
     }
     for label in candidate.net_labels.iter().filter(|candidate_label| {
@@ -141,6 +144,7 @@ pub fn draw_array_candidate(
             junction.pos,
             view.editor.selection.has_junction(junction.pos),
             style.hover_wire_vertex == Some((junction.pos.x, junction.pos.y)),
+            Emphasis::Raised,
         );
     }
     for label in preview.net_labels() {

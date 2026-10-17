@@ -5,6 +5,7 @@ use super::super::{
         compatible_builtin_xspice_asset, draw_artwork_lead_extensions, draw_port_direction_overlay,
         draw_symbol_resolution_error, port_symbol_stroke,
     },
+    lod::{self, Emphasis, StrokeRole},
     resolved_symbol_render::{draw_resolved_symbol, resolved_symbol_world_bounds},
     snap_resolution::resolve_grid_pointer,
     symbol_context::SchematicSymbolContext,
@@ -26,6 +27,16 @@ use rspice_design::{
 use rspice_design_model::{Point, port::PortSpec};
 
 const COMPONENT_PREVIEW_GHOST_ALPHA: f32 = 0.55;
+
+/// A ghost is drawn at the symbol weight it will have once placed.
+fn ghost_width(painter: &Painter, viewport: &Viewport) -> f32 {
+    lod::stroke_pt(
+        StrokeRole::Symbol,
+        viewport.zoom,
+        painter.pixels_per_point(),
+        Emphasis::Plain,
+    )
+}
 
 pub struct ShelfPreview<'a> {
     pub component_type: ComponentType,
@@ -74,7 +85,7 @@ pub fn draw_component_preview(
 
         // Ghost the symbol in dimmed accent until it is placed.
         let preview_stroke = Stroke::new(
-            1.0 * viewport.zoom,
+            ghost_width(painter, viewport),
             rspice_ui_kit::tokens::active_palette()
                 .accent
                 .gamma_multiply(COMPONENT_PREVIEW_GHOST_ALPHA),
@@ -150,6 +161,7 @@ pub fn draw_component_preview(
                 port_symbol_stroke(
                     preview_stroke,
                     viewport.zoom,
+                    painter.pixels_per_point(),
                     false,
                     pending_port_spec.as_ref(),
                 )
@@ -220,7 +232,7 @@ pub fn draw_shelf_drag_preview(
     let rotation_degrees = rotation.degrees();
     let mirror_h = view.editor.preview_mirror_h;
     let preview_stroke = Stroke::new(
-        viewport.zoom,
+        ghost_width(painter, viewport),
         rspice_ui_kit::tokens::active_palette()
             .accent
             .gamma_multiply(COMPONENT_PREVIEW_GHOST_ALPHA),
