@@ -233,15 +233,7 @@ pub fn draw_transform_feedback(
     let color = if valid { palette.ok } else { palette.err };
     let clip = painter.clip_rect();
     let tooltip_width = (clip.width() * 0.7).clamp(80.0, 300.0);
-    let galley = painter.layout(
-        detail,
-        rspice_ui_kit::theme::mono(
-            rspice_ui_kit::tokens::FS_0,
-            rspice_ui_kit::theme::FontWeight::Medium,
-        ),
-        color,
-        tooltip_width,
-    );
+    let galley = painter.layout(detail, feedback_font(), color, tooltip_width);
     let requested = response
         .hover_pos()
         .or_else(|| response.interact_pointer_pos())
@@ -269,4 +261,60 @@ pub fn draw_transform_feedback(
         egui::StrokeKind::Inside,
     );
     painter.galley(position, galley, color);
+}
+
+/// The face [`draw_transform_feedback`] letters its readout in.
+fn feedback_font() -> egui::FontId {
+    rspice_ui_kit::theme::mono(
+        rspice_ui_kit::tokens::FS_0,
+        rspice_ui_kit::theme::FontWeight::Medium,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::feedback_font;
+
+    /// Every pixel a run of `text` paints in the readout face.
+    fn ink(text: &str) -> Vec<egui::Color32> {
+        let size = egui::vec2(260.0, 30.0);
+        let canvas = rspice_ui_kit::raster::render(size, |ui, background| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(background))
+                .show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new(text)
+                            .font(feedback_font())
+                            .color(egui::Color32::WHITE),
+                    );
+                });
+        });
+        canvas
+            .pixels_in(egui::Rect::from_min_size(egui::Pos2::ZERO, size))
+            .collect()
+    }
+
+    /// The move, stretch and array readouts are lettered in the mono face,
+    /// which has no Greek. Every character outside ASCII in them has to come
+    /// out as itself rather than as the replacement box: a missing glyph does
+    /// leave ink, so each one is compared with the last private-use code
+    /// point, which no face carries.
+    #[test]
+    fn the_transform_readouts_letter_every_glyph() {
+        let replacement = ink("\u{10fffd}");
+        for readout in [
+            "\u{0394} 20, 0 \u{b7} Orthogonal",
+            "\u{0394} -10, 30 \u{b7} Rubber band",
+            "4 replicas \u{00b7} pitch \u{0394} 20, 0",
+            "6 radial replicas \u{00b7} center 40, 40",
+        ] {
+            for glyph in readout.chars().filter(|glyph| !glyph.is_ascii()) {
+                let painted = ink(&glyph.to_string());
+                assert!(
+                    painted != replacement && painted != ink(" "),
+                    "{glyph:?} in {readout:?} letters as a replacement"
+                );
+            }
+        }
+    }
 }
