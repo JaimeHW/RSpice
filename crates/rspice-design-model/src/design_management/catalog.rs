@@ -1312,6 +1312,31 @@ impl DesignManagementCatalog {
         )
     }
 
+    /// What the catalog holds, without the count of how often each sheet
+    /// catalog was published.
+    ///
+    /// Sheet membership is published on every sync that adds or removes an
+    /// object, so a cell view that gained an object and lost it again holds
+    /// exactly what it held before, at a later sheet-catalog revision. A
+    /// comparison of what two catalogs hold, the one undo makes, reads this.
+    pub fn content_digest_across_revisions(&self) -> Result<ContentDigest, DesignManagementError> {
+        self.validate()?;
+        let mut sheet_catalogs = self.sheet_catalogs.clone();
+        for catalog in sheet_catalogs.values_mut() {
+            catalog.revision = 0;
+        }
+        digest(
+            "rspice-design-management-catalog-content/v1",
+            &DesignManagementSemanticMaterial {
+                sheet_catalogs: &sheet_catalogs,
+                variants: &self.variants,
+                annotation: &self.annotation,
+                hierarchy_settings: &self.hierarchy_settings,
+                hierarchy_audits: &self.hierarchy_audits,
+            },
+        )
+    }
+
     fn require_sheets_unreferenced(
         &self,
         sheet_ids: impl IntoIterator<Item = SheetId>,

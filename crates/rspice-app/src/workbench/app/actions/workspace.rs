@@ -671,6 +671,7 @@ impl AppState {
                         .unwrap_or_else(|| self.schematic.clone()),
                 )
             });
+        let revision_before = self.workspace.content.project.revision();
         let assigned = self
             .workspace
             .content
@@ -700,7 +701,13 @@ impl AppState {
             .map(|catalog| catalog.object_assignments().clone())
             .unwrap_or_default();
         self.schematic.set_live_sheet_assignments(assignments);
+        let published = receipt.is_some();
         let removed_ports = receipt.map_or(0, |receipt| receipt.removed_cross_sheet_ports);
+        // A dropped contract is a step of its own, recorded below; anything
+        // else membership published is bookkeeping the earlier steps survive.
+        if published && removed_ports == 0 {
+            self.carry_project_history_over_sheet_membership(revision_before, committed_revision);
+        }
         let Some((before, before_schematic)) = before.filter(|_| removed_ports > 0) else {
             return;
         };

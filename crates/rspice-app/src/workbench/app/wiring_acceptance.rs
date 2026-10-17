@@ -23,6 +23,7 @@ use crate::workbench::state::Workspace;
 use rspice_design::projection::ProjectionSource;
 use rspice_design::schematic::document::SchematicDocument;
 
+mod regressions;
 mod scenario;
 
 /// The library every bench cell lives in.

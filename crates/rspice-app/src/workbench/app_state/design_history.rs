@@ -754,6 +754,23 @@ impl AppState {
         );
     }
 
+    /// Carry the project steps recorded before a sheet-membership update over
+    /// the revision it published.
+    ///
+    /// Membership follows the drawing: a sync gives objects drawn since then
+    /// the active sheet, and one after an undo takes away the membership of
+    /// the objects the undo removed. Neither is a step of its own, so neither
+    /// may leave the steps before it unable to undo. Each still has to find
+    /// the catalog it restores, membership included, and the drawings it
+    /// names exactly as it left them.
+    pub(crate) fn carry_project_history_over_sheet_membership(
+        &mut self,
+        previous: ObjectRevision,
+        published: ObjectRevision,
+    ) {
+        self.reanchor_annotation_history_revision(previous, published);
+    }
+
     pub(crate) fn record_symbol_definition_transaction(
         &mut self,
         entry: SymbolDefinitionHistoryEntry,
@@ -2009,12 +2026,19 @@ fn apply_schematic_map(
     Ok(())
 }
 
+/// Whether two catalogs hold the same design. How many times a sheet catalog
+/// was published is not part of it: membership is republished as objects come
+/// and go, and an undo that takes an object away again leaves the catalog as
+/// it was.
 fn design_management_semantics_match(
     left: &DesignManagementCatalog,
     right: &DesignManagementCatalog,
 ) -> bool {
     matches!(
-        (left.semantic_digest(), right.semantic_digest()),
+        (
+            left.content_digest_across_revisions(),
+            right.content_digest_across_revisions(),
+        ),
         (Ok(left), Ok(right)) if left == right
     )
 }

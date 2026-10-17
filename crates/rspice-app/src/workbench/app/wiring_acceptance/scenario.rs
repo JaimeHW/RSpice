@@ -91,7 +91,6 @@ fn copy_from_parts_cell(bench: &mut Bench) {
 }
 
 #[test]
-#[ignore = "undo refuses to step back past a sheet switch once the new sheet has been edited"]
 fn a_wiring_session_keeps_the_deck_and_the_dots_right_through_undo_and_redo() {
     let mut bench = Bench::new(&starting_parts());
     // The group the session turns, already wired: R6 to R7, and R7 on to R8.
