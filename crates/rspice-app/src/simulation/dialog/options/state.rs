@@ -34,6 +34,8 @@ pub struct OptionsDialogState {
     pub gmin: String,
     /// Empty places no shunt.
     pub rshunt: String,
+    /// Empty names no connect-rule block.
+    pub connect_rules: String,
     pub pivrel: String,
     pub pivtol: String,
     pub gmin_stepping: bool,
@@ -87,6 +89,7 @@ impl OptionsDialogState {
                 .unwrap_or_default(),
             gmin: format_si_value(opts.gmin),
             rshunt: opts.rshunt.map(format_si_value).unwrap_or_default(),
+            connect_rules: opts.connect_rules.clone().unwrap_or_default(),
             pivrel: format_si_value(opts.pivrel),
             pivtol: format_si_value(opts.pivtol),
             gmin_stepping: opts.gmin_stepping,
@@ -142,6 +145,9 @@ impl OptionsDialogState {
         let transient_lte_abstol =
             parse_optional_field(&self.transient_lte_abstol, "lte_abstol", &mut errors);
         let rshunt = parse_optional_field(&self.rshunt, "rshunt", &mut errors);
+        let connect_rules = Some(self.connect_rules.trim())
+            .filter(|block| !block.is_empty())
+            .map(str::to_owned);
         let statistical_seed = if self.statistical_seed.trim().is_empty() {
             None
         } else {
@@ -182,6 +188,7 @@ impl OptionsDialogState {
             arc_length: self.arc_length,
             gmin,
             rshunt,
+            connect_rules,
             damping: DampingStrategy::all()[self.damping.min(DampingStrategy::all().len() - 1)],
             method: IntegrationMethod::all()[self.method.min(IntegrationMethod::all().len() - 1)],
             solver: MatrixSolver::all()[self.solver.min(MatrixSolver::all().len() - 1)],

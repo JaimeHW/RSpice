@@ -1113,6 +1113,10 @@ pub enum PreflightRemediation {
         /// the reader left it.
         analysis: Option<crate::product::AnalysisInstanceId>,
     },
+    /// The Solver & convergence page, where the plan's engine options are
+    /// set: a finding whose remedy is one of them and that no drawn object
+    /// owns, such as a design's connect rules with no block named.
+    SolverOptions,
     ProjectTechnology,
     /// One page of the Models workspace, and the object it opens on. A
     /// model-binding finding is repaired where the bindings live — Corners &

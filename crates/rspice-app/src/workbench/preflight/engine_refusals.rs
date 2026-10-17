@@ -20,6 +20,7 @@ use rspice_app_types::hierarchy_path::{InstancePath, ProbeTarget};
 use rspice_design::connectivity::summary::DesignNet;
 use rspice_simulation::execution::{EngineRefusal, EngineRefusalKind, RefusedTask};
 
+use crate::simulation::dialog::SimulationOptions;
 use crate::simulation::plan::NumericOverrideOption;
 use crate::state::{CellViewRef, Component, ViewType};
 use crate::workbench::app_state::AppState;
@@ -31,6 +32,7 @@ const NO_DC_PATH_CHECK: &str = "Nodes without a DC path";
 const LOOP_CHECK: &str = "Voltage-source loops";
 const BIN_CHECK: &str = "Model-bin coverage";
 const BUILD_CHECK: &str = "Engine elaboration";
+const CONNECT_CHECK: &str = "Connect rules";
 
 /// How many refused tasks a finding names before it counts the rest.
 const QUOTED_TASK_LIMIT: usize = 4;
@@ -146,6 +148,40 @@ fn issues_for(refusal: &EngineRefusal, drawing: &DrawnDesign) -> Vec<PreflightIs
                 ),
                 required: "Device geometry inside a bin of its model at every dispatched point"
                     .to_owned(),
+                remediation,
+            }]
+        }
+        // A boundary is shown on the instance whose port it is; a refusal
+        // about the rules themselves on the page where the block is named.
+        // Either way the setting is named, because naming a block is the
+        // remedy a design that ships several needs, and the only one a
+        // library the reader cannot edit leaves.
+        EngineRefusalKind::ConnectRules { message, instance } => {
+            let (required, remediation) = match instance.as_deref() {
+                Some(instance) => (
+                    format!(
+                        "A connect rule that converts across this boundary, in the block named \
+                         in {} on the Solver & convergence page",
+                        SimulationOptions::CONNECT_RULES_LABEL
+                    ),
+                    drawing.element(instance).1,
+                ),
+                None => (
+                    format!(
+                        "One connectrules block the design declares, named in {} on the Solver \
+                         & convergence page when it declares more than one",
+                        SimulationOptions::CONNECT_RULES_LABEL
+                    ),
+                    PreflightRemediation::SolverOptions,
+                ),
+            };
+            vec![PreflightIssue {
+                check: CONNECT_CHECK.to_owned(),
+                observed: format!(
+                    "{}. Refused by {refused_by}.",
+                    message.trim_end_matches('.')
+                ),
+                required,
                 remediation,
             }]
         }

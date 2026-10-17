@@ -184,6 +184,9 @@ pub(in crate::workbench) fn apply_remediation(
             }
             Command::SimulationPage(SimulationPage::Analyses).execute(app);
         }
+        PreflightRemediation::SolverOptions => {
+            Command::SimulationPage(SimulationPage::Solver).execute(app);
+        }
         PreflightRemediation::ProjectTechnology => {
             Command::ProjectPage(ProjectPage::Dependencies).execute(app);
         }

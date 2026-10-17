@@ -1,14 +1,14 @@
-//! The engine pass: what it costs, and what it refuses where.
+//! The engine pass: what it refuses, and where it is shown.
 
 use super::*;
 
 use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
-/// A model library whose five process sections each bin `families` NMOS and
-/// PMOS families over a 6 x 6 grid of lengths and widths from 0.15 µm and
-/// 0.2 µm. The section and family `short_gap` names bins nothing below
-/// 0.25 µm.
-fn binned_library(families: usize, level: u32, short_gap: Option<(&str, &str)>) -> Vec<u8> {
+/// A model library whose five process sections each bin an NMOS family `nch`
+/// and a PMOS family `pch` over a 6 x 6 grid of lengths and widths from
+/// 0.15 µm and 0.2 µm. The section and family `short_gap` names bins nothing
+/// below 0.25 µm.
+fn binned_library(short_gap: Option<(&str, &str)>) -> Vec<u8> {
     const LENGTHS: [f64; 7] = [0.15e-6, 0.25e-6, 0.5e-6, 1e-6, 2e-6, 5e-6, 20e-6];
     const WIDTHS: [f64; 7] = [0.2e-6, 0.5e-6, 1e-6, 2e-6, 5e-6, 10e-6, 100e-6];
     let mut text = String::new();
@@ -20,39 +20,18 @@ fn binned_library(families: usize, level: u32, short_gap: Option<(&str, &str)>) 
         ("FS", -0.02),
     ] {
         text.push_str(&format!(".lib {process}\n"));
-        for family in 0..families {
-            for (polarity, stem, threshold) in [("nmos", "nch", 0.42), ("pmos", "pch", -0.42)] {
-                let name = if family == 0 {
-                    stem.to_owned()
-                } else {
-                    format!("{stem}_{family}")
-                };
-                let threshold = threshold + shift;
-                let shortest = usize::from(short_gap == Some((process, name.as_str())));
-                let mut bin = 0;
-                for length in LENGTHS[shortest..].windows(2) {
-                    for width in WIDTHS.windows(2) {
-                        bin += 1;
-                        let parameters = if level == 54 {
-                            format!(
-                                "version=4.5 toxe=4.1e-9 toxp=3.5e-9 toxm=4.1e-9 epsrox=3.9 \
-                                 xj=1.5e-7 ndep=1.7e17 vth0={threshold} k1=0.5 k2=0.01 k3=0 \
-                                 dvt0=1 dvt1=2 dvt2=-0.032 u0=0.03 ua=-6e-10 ub=1.6e-18 \
-                                 uc=-4.6e-11 vsat=1e5 a0=1 ags=0.2 rdsw=150 prwg=0 prwb=0 \
-                                 wr=1 voff=-0.1 nfactor=1 cit=0 cdsc=2.4e-4 eta0=0.08 \
-                                 etab=-0.07 dsub=0.56 pclm=1.3 pdiblc1=0.39 pdiblc2=0.0086 \
-                                 drout=0.56 pvag=0 delta=0.01 cgso=2.5e-10 cgdo=2.5e-10 \
-                                 cj=1e-3 mj=0.5 cjsw=2e-10 mjsw=0.33 pb=1 pbsw=1"
-                            )
-                        } else {
-                            format!("vto={threshold} kp=1e-4 lambda=0.02")
-                        };
-                        text.push_str(&format!(
-                            ".model {name}.{bin} {polarity} level={level} lmin={} lmax={} \
-                             wmin={} wmax={} {parameters}\n",
-                            length[0], length[1], width[0], width[1]
-                        ));
-                    }
+        for (polarity, name, threshold) in [("nmos", "nch", 0.42), ("pmos", "pch", -0.42)] {
+            let threshold = threshold + shift;
+            let shortest = usize::from(short_gap == Some((process, name)));
+            let mut bin = 0;
+            for length in LENGTHS[shortest..].windows(2) {
+                for width in WIDTHS.windows(2) {
+                    bin += 1;
+                    text.push_str(&format!(
+                        ".model {name}.{bin} {polarity} level=1 lmin={} lmax={} wmin={} \
+                         wmax={} vto={threshold} kp=1e-4 lambda=0.02\n",
+                        length[0], length[1], width[0], width[1]
+                    ));
                 }
             }
         }
@@ -84,64 +63,14 @@ fn add_operating_point(state: &mut AppState) {
     .expect("an operating point has no prerequisites");
 }
 
-/// One example, run and then timed: the preparation that builds the decks and
-/// the engine pass over them, each the median of `repeats`.
-fn time_pass(label: &str, mut app: RSpiceApp, repeats: usize) {
-    run(&mut app);
-    app.settle_preflight();
-    let report = app.state.workbench.preflight.report.as_ref().unwrap();
-    let points = report.prepared.as_ref().map_or(0, |p| p.pvt_point_count);
-    let tasks = report.prepared.as_ref().map_or(0, |p| p.task_count);
-    if !report.blockers.is_empty() {
-        eprintln!("MEASURE {label}: blocked {:?}", report.blockers[0].observed);
-        return;
-    }
-    let deck_bytes = app
-        .simulation_controller
-        .retained_run_deck()
-        .map_or(0, |(deck, _)| deck.len());
-    let mut prepare = Vec::new();
-    let mut engine = Vec::new();
-    let mut refused = 0;
-    for _ in 0..repeats {
-        let started = std::time::Instant::now();
-        app.simulation_controller
-            .prepare_run_set_for_preflight(&app.state)
-            .expect("prepares again");
-        prepare.push(started.elapsed());
-        let started = std::time::Instant::now();
-        assert!(app.simulation_controller.start_engine_check());
-        refused = loop {
-            if let Some(outcome) = app.simulation_controller.poll_engine_check() {
-                break outcome.refusals.map_or(usize::MAX, |refusals| refusals.len());
-            }
-            std::thread::sleep(std::time::Duration::from_micros(100));
-        };
-        engine.push(started.elapsed());
-    }
-    prepare.sort();
-    engine.sort();
-    eprintln!(
-        "MEASURE {label}: points={points} tasks={tasks} deck={deck_bytes}B refusals={refused} \
-         prepare={:?} engine={:?} (min {:?} max {:?})",
-        prepare[repeats / 2],
-        engine[repeats / 2],
-        engine[0],
-        engine[repeats - 1],
-    );
-}
-
-fn example_app(name: &str) -> RSpiceApp {
+/// The CMOS inverter example, its transistors bound to `nch` and `pch` of a
+/// signed technology whose model library is `models`, run over the process
+/// sections alone, with an operating point.
+fn inverter_on_binned_pdk(models: Vec<u8>) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.project_lifecycle.authority.open_session();
-    enable_only(&mut app.state, &[]);
-    crate::workbench::examples::load_example(name, &mut app.state.schematic);
+    crate::workbench::examples::load_example("CMOS Inverter", &mut app.state.schematic);
     add_operating_point(&mut app.state);
-    app
-}
-
-fn inverter_on_binned_pdk(models: Vec<u8>) -> RSpiceApp {
-    let mut app = example_app("CMOS Inverter");
     app.state
         .provision_test_project_technology_with_models(models);
     for component in &mut app.state.schematic.document_mut_for_test().components {
@@ -151,52 +80,8 @@ fn inverter_on_binned_pdk(models: Vec<u8>) -> RSpiceApp {
             _ => {}
         }
     }
-    enable_only(
-        &mut app.state,
-        &[
-            RunSetDimensionKind::ProcessSection,
-            RunSetDimensionKind::Temperature,
-        ],
-    );
+    enable_only(&mut app.state, &[RunSetDimensionKind::ProcessSection]);
     app
-}
-
-#[test]
-#[ignore = "measurement"]
-fn measure_engine_pass() {
-    for name in [
-        "RC Lowpass Filter",
-        "Voltage Divider",
-        "Common Emitter Amplifier",
-        "CMOS Inverter",
-        "Differential Pair",
-        "Opamp Inverting Amplifier",
-    ] {
-        time_pass(name, example_app(name), 5);
-    }
-    {
-        let mut app = RSpiceApp::test_instance();
-        app.state = crate::workbench::examples::hierarchy_reference::build().state;
-        app.state.project_lifecycle.authority.open_session();
-        enable_only(&mut app.state, &[]);
-        add_operating_point(&mut app.state);
-        time_pass("hierarchy reference", app, 5);
-    }
-    time_pass(
-        "inverter, 3x3, 1 family L1",
-        inverter_on_binned_pdk(binned_library(1, 1, None)),
-        5,
-    );
-    time_pass(
-        "inverter, 3x3, 1 family BSIM4",
-        inverter_on_binned_pdk(binned_library(1, 54, None)),
-        5,
-    );
-    time_pass(
-        "inverter, 3x3, 14 families BSIM4",
-        inverter_on_binned_pdk(binned_library(14, 54, None)),
-        3,
-    );
 }
 
 /// The inverter on a PDK whose FF section bins its NMOS nothing shorter than
@@ -205,8 +90,7 @@ fn measure_engine_pass() {
 /// and the finding is shown on the transistor as drawn.
 #[test]
 fn a_transistor_outside_its_bins_at_one_corner_is_refused_there_on_the_drawn_device() {
-    let mut app = inverter_on_binned_pdk(binned_library(1, 1, Some(("FF", "nch"))));
-    enable_only(&mut app.state, &[RunSetDimensionKind::ProcessSection]);
+    let mut app = inverter_on_binned_pdk(binned_library(Some(("FF", "nch"))));
     let root = app.state.workspace.content.simulation_root_reference();
     let pull_down = app
         .state
@@ -227,7 +111,7 @@ fn a_transistor_outside_its_bins_at_one_corner_is_refused_there_on_the_drawn_dev
         .filter(|issue| issue.check == "Model-bin coverage")
         .collect();
     assert_eq!(uncovered.len(), 1, "{blockers:#?}");
-    let issue = uncovered[0];
+    let issue = uncovered[0].clone();
     assert!(
         issue.observed.contains("'MN'") && issue.observed.contains("L=0.18 µm"),
         "{issue:?}"
@@ -269,28 +153,27 @@ fn a_transistor_outside_its_bins_at_one_corner_is_refused_there_on_the_drawn_dev
     );
 }
 
-/// A Verilog-A device whose discrete input `mode` is driven by a voltage
-/// source, in a design whose one connect-rule block bridges only the other
-/// way. The crossing is the builder's to bridge, and it cannot: the finding is
-/// its refusal, shown on the device whose port the crossing is.
-#[test]
-fn a_crossing_the_connect_rules_cannot_bridge_is_shown_on_the_device() {
+/// A Verilog-A cell `moded` whose discrete input `mode` is driven by a voltage
+/// source, placed as `XS` in the configured root under a configuration that
+/// executes Verilog-A views. The design's connect rules are a model library
+/// bound to the plan: the shipped connect modules, and `rule_blocks`.
+/// Returns the app, the root and the device's id.
+fn app_with_a_moded_device(rule_blocks: &str) -> (RSpiceApp, crate::state::CellViewRef, u64) {
     use crate::state::{
-        Cell, CellViewRef, ComponentType, Library, LibraryCellInstance, Point,
-        ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner, View, ViewType,
+        Cell, CellViewRef, ComponentType, Library, LibraryCellInstance, Point, ProjectSourceBundle,
+        ProjectSourceLanguage, ProjectSourceOwner, View, ViewType,
     };
 
     let mut app = RSpiceApp::test_instance();
     app.state.project_lifecycle.authority.open_session();
     enable_only(&mut app.state, &[]);
 
-    // The design's connect rules: the shipped connect modules, and one block
-    // that converts discrete to analog and nothing else.
     let mut rules = rspice_veriloga::connect::library::BUILTIN_CONNECT_MODULES
         .iter()
         .map(|(_, source)| *source)
         .collect::<String>();
-    rules.push_str("\nconnectrules only_d2a; connect d2a; endconnectrules\n");
+    rules.push('\n');
+    rules.push_str(rule_blocks);
     let library = app
         .state
         .model_library_manager
@@ -425,6 +308,18 @@ fn a_crossing_the_connect_rules_cannot_bridge_is_shown_on_the_device() {
             owner: "Behavioral design".to_owned(),
         })
         .expect("the executable configuration");
+    (app, top, placed)
+}
+
+/// A Verilog-A device whose discrete input `mode` is driven by a voltage
+/// source, in a design whose one connect-rule block bridges only the other
+/// way. The crossing is the builder's to bridge, and it cannot: the finding is
+/// its refusal, shown on the device whose port the crossing is, and it names
+/// the setting that chooses the block.
+#[test]
+fn a_crossing_the_connect_rules_cannot_bridge_is_shown_on_the_device() {
+    let (mut app, top, placed) =
+        app_with_a_moded_device("connectrules only_d2a; connect d2a; endconnectrules\n");
 
     run(&mut app);
     app.settle_preflight();
@@ -432,10 +327,15 @@ fn a_crossing_the_connect_rules_cannot_bridge_is_shown_on_the_device() {
     let blockers = preflight_blockers(&app);
     let crossing = blockers
         .iter()
-        .find(|issue| issue.check == "Engine elaboration")
+        .find(|issue| issue.check == "Connect rules")
         .unwrap_or_else(|| panic!("the builder refuses the crossing: {blockers:#?}"));
     assert!(
         crossing.observed.contains("connect rules do not settle it"),
+        "{crossing:?}"
+    );
+    assert!(
+        crossing.required.contains("Connect rules · CONNECTRULES")
+            && crossing.required.contains("Solver & convergence"),
         "{crossing:?}"
     );
     let remediation = crossing.remediation.clone();
@@ -450,10 +350,103 @@ fn a_crossing_the_connect_rules_cannot_bridge_is_shown_on_the_device() {
 
     app.state.workbench.activate(Workspace::Verify);
     apply_remediation(&mut app, remediation);
-    assert_eq!(app.state.workspace.content.active_schematic_reference(), top);
+    assert_eq!(
+        app.state.workspace.content.active_schematic_reference(),
+        top
+    );
     assert!(
-        app.state.schematic.session.editor.selection.has_component(placed),
+        app.state
+            .schematic
+            .session
+            .editor
+            .selection
+            .has_component(placed),
         "following the finding selects the device"
+    );
+}
+
+/// Two blocks that each convert the crossing, at different supplies.
+const TWO_RULE_BLOCKS: &str = "connectrules Low; connect a2d #(.vsup(1.0)); endconnectrules\n\
+                               connectrules High; connect a2d #(.vsup(5.0)); endconnectrules\n";
+
+/// A design whose libraries declare two connect-rule blocks has no block until
+/// the run names one, so every crossing is refused. Nothing drawn owns that
+/// choice: the finding opens the Solver page, where the block is named.
+#[test]
+fn two_connect_rule_blocks_are_refused_until_the_plan_names_one() {
+    let (mut app, _, _) = app_with_a_moded_device(TWO_RULE_BLOCKS);
+
+    run(&mut app);
+    app.settle_preflight();
+
+    let blockers = preflight_blockers(&app);
+    let unnamed = blockers
+        .iter()
+        .find(|issue| issue.check == "Connect rules")
+        .unwrap_or_else(|| panic!("two blocks and no choice is refused: {blockers:#?}"))
+        .clone();
+    assert!(
+        unnamed
+            .observed
+            .contains("Multiple connectrules configurations")
+            && unnamed.observed.contains("'Low'")
+            && unnamed.observed.contains("'High'"),
+        "{unnamed:?}"
+    );
+    assert!(
+        unnamed.required.contains("Connect rules · CONNECTRULES"),
+        "{unnamed:?}"
+    );
+    assert_eq!(unnamed.remediation, PreflightRemediation::SolverOptions);
+
+    apply_remediation(&mut app, unnamed.remediation.clone());
+    assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
+    assert_eq!(
+        app.state.workbench.simulation_page,
+        crate::workbench::state::SimulationPage::Solver,
+        "the finding opens the page where the block is named"
+    );
+}
+
+/// Naming one of the two blocks where the solver options are set puts it on
+/// the deck's options card, and the same design is then authorized.
+#[test]
+fn a_connect_rule_block_named_in_the_plan_reaches_the_deck_and_clears_the_refusal() {
+    let (mut app, _, _) = app_with_a_moded_device(TWO_RULE_BLOCKS);
+    let unnamed_deck =
+        crate::simulation::SimulationController::prepare_design_netlist_for_inspection(&app.state)
+            .expect("the design netlists");
+    assert!(!unnamed_deck.contains("CONNECTRULES"), "{unnamed_deck}");
+
+    let options = crate::simulation::dialog::SimulationOptions {
+        connect_rules: Some("High".to_owned()),
+        ..app.state.sim_setup.options.clone()
+    };
+    app.state.sim_setup.commit_options(&options);
+    app.state
+        .sim_setup
+        .commit_active_plan_configuration_change("Updated simulation solver options.")
+        .expect("the plan takes the block");
+    let deck =
+        crate::simulation::SimulationController::prepare_design_netlist_for_inspection(&app.state)
+            .expect("the design netlists");
+    assert!(deck.contains("+ CONNECTRULES=\"High\""), "{deck}");
+
+    app.invalidate_simulation_preflight();
+    run(&mut app);
+    app.settle_preflight();
+
+    let report = app
+        .state
+        .workbench
+        .preflight
+        .report
+        .as_ref()
+        .expect("the pass retains its report");
+    assert!(report.blockers.is_empty(), "{:#?}", report.blockers);
+    assert!(
+        report.prepared.is_some(),
+        "the run with a named block is authorized"
     );
 }
 
@@ -566,7 +559,9 @@ fn a_forced_node_inside_an_instance_is_shown_in_the_cell_that_draws_it() {
             (Point::new(80, -10), Point::new(80, 30)),
             (Point::new(80, 30), Point::new(0, 30)),
         ] {
-            schematic.add_wire(vec![from, to]).expect("the wire commits");
+            schematic
+                .add_wire(vec![from, to])
+                .expect("the wire commits");
         }
         schematic.add_net_label(Point::new(0, -10), "isl".to_owned());
     });
@@ -593,7 +588,10 @@ fn a_forced_node_inside_an_instance_is_shown_in_the_cell_that_draws_it() {
 
     app.state.workbench.activate(Workspace::Verify);
     apply_remediation(&mut app, remediation);
-    assert_eq!(app.state.workspace.content.active_schematic_reference(), amp);
+    assert_eq!(
+        app.state.workspace.content.active_schematic_reference(),
+        amp
+    );
     assert!(
         app.state.schematic.session.editor.selection.has_wire(wire),
         "following the finding selects the wire that draws isl in amp"
@@ -615,7 +613,9 @@ fn a_winding_loop_inside_an_instance_is_shown_in_the_cell_that_draws_it() {
             (Point::new(80, -10), Point::new(80, 30)),
             (Point::new(80, 30), Point::new(0, 30)),
         ] {
-            schematic.add_wire(vec![from, to]).expect("the wire commits");
+            schematic
+                .add_wire(vec![from, to])
+                .expect("the wire commits");
         }
     });
 
@@ -640,7 +640,10 @@ fn a_winding_loop_inside_an_instance_is_shown_in_the_cell_that_draws_it() {
 
     app.state.workbench.activate(Workspace::Verify);
     apply_remediation(&mut app, remediation);
-    assert_eq!(app.state.workspace.content.active_schematic_reference(), amp);
+    assert_eq!(
+        app.state.workspace.content.active_schematic_reference(),
+        amp
+    );
     assert!(
         app.state
             .schematic

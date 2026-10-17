@@ -108,6 +108,7 @@ fn compatibility_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                 .label()
                 .to_owned();
             let mut picked = None;
+            let mut connect_rules_response = None;
             field_pair(
                 ui,
                 (
@@ -123,17 +124,33 @@ fn compatibility_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                         );
                     },
                 ),
-                None,
+                Some((
+                    SimulationOptions::CONNECT_RULES_LABEL,
+                    &mut |ui: &mut Ui, width: f32| {
+                        connect_rules_response = Some(mono_input(
+                            ui,
+                            SimulationOptions::CONNECT_RULES_LABEL,
+                            &mut app.state.sim_setup.session.options_draft.connect_rules,
+                            width,
+                        ));
+                    },
+                )),
             );
             if let Some(index) = picked {
                 app.state.sim_setup.session.options_draft.compatibility =
                     SimulationCompatibility::ALL[index];
                 commit_draft(app);
             }
+            if let Some(response) = connect_rules_response {
+                commit_on_release(app, &response);
+            }
         });
         card_note(
             ui,
-            "Xyce-specific Newton controls require Xyce compatibility. This policy also selects available device-model variants; source syntax is unchanged.",
+            "Xyce-specific Newton controls require Xyce compatibility. This policy also selects \
+                 available device-model variants; source syntax is unchanged. CONNECTRULES names \
+                 the connectrules block that converts at every analog/digital boundary; empty \
+                 takes the design's only block.",
         );
     });
 }
@@ -217,8 +234,11 @@ fn policy_strip(ui: &mut Ui, app: &mut RSpiceApp) {
         let mut options = build();
         options.compatibility = app.state.sim_setup.options.compatibility;
         // A resistor in the circuit, not a numerical setting: no preset
-        // places or removes it.
+        // places or removes it. Nor does one choose the connect rules.
         options.rshunt = app.state.sim_setup.options.rshunt;
+        options
+            .connect_rules
+            .clone_from(&app.state.sim_setup.options.connect_rules);
         app.state.sim_setup.session.options_draft = OptionsDialogState::from_options(&options);
         apply_options(app, &options);
     }

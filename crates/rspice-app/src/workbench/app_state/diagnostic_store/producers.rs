@@ -225,9 +225,9 @@ impl AppState {
         inputs_at_press: crate::product::ContentDigest,
     ) {
         let records = self.dispatch_records(report);
-        let published = self
-            .diagnostics
-            .insert(inputs_at_press, DiagnosticInputs::Dispatch, records);
+        let published =
+            self.diagnostics
+                .insert(inputs_at_press, DiagnosticInputs::Dispatch, records);
         self.state_refusal(published);
     }
 
@@ -337,6 +337,7 @@ fn remediation_key(remediation: &PreflightRemediation) -> String {
         PreflightRemediation::SimulationPlan {
             analysis: Some(analysis),
         } => format!("simulation-plan:{analysis}"),
+        PreflightRemediation::SolverOptions => "solver-options".to_owned(),
         PreflightRemediation::ProjectTechnology => "project-technology".to_owned(),
         PreflightRemediation::Models {
             page,
@@ -420,7 +421,10 @@ const fn remediation_producer(remediation: &PreflightRemediation) -> (&'static s
         PreflightRemediation::Models { .. } => (MODEL_BINDING_PRODUCER, "MODEL"),
         PreflightRemediation::ProjectTechnology => (MODEL_BINDING_PRODUCER, "TECH"),
         PreflightRemediation::NetlistSource { .. } => (NETLIST_PRODUCER, "NETLIST"),
-        PreflightRemediation::Drawing { .. } => (ENGINE_PRODUCER, "ENGINE"),
+        // The engine's refusal, whose remedy is one of the plan's options.
+        PreflightRemediation::Drawing { .. } | PreflightRemediation::SolverOptions => {
+            (ENGINE_PRODUCER, "ENGINE")
+        }
         PreflightRemediation::DesignChecks | PreflightRemediation::SimulationPlan { .. } => {
             (PREFLIGHT_PRODUCER, "RUN")
         }
@@ -433,6 +437,7 @@ fn remediation_subject(remediation: &PreflightRemediation) -> String {
     match remediation {
         PreflightRemediation::DesignChecks => "Design checks".to_owned(),
         PreflightRemediation::SimulationPlan { .. } => "Simulation plan".to_owned(),
+        PreflightRemediation::SolverOptions => "Solver & convergence".to_owned(),
         PreflightRemediation::ProjectTechnology => "Project technology".to_owned(),
         PreflightRemediation::Models {
             library: Some(library),
