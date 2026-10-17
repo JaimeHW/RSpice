@@ -1,84 +1,195 @@
-//! Touch controls over the canvas.
+//! The touch strip over the canvas.
 //!
-//! The on-canvas affordances a touch device needs and a mouse does not:
-//! pan/zoom handles and the tool switch, positioned so a thumb can reach
-//! them in landscape.
+//! Every button stands in for a key or a modifier a tablet has no way to
+//! press: Shift+click, Ctrl+R, Esc, Ctrl+Z, F. The strip sits inside the
+//! canvas against its right edge, where the right thumb rests in
+//! landscape, and shows whenever the canvas is driven by touch, at any
+//! width (audit G-12).
 
 use egui::{Color32, Context, Id, Order, Rect, Response, Sense, Stroke, Ui, Vec2};
 
 use crate::requests::EditorRequestSource;
 use rspice_ui_kit::panels::WorkbenchIcon;
-use rspice_ui_kit::theme::{self, FontWeight};
-use rspice_ui_kit::tokens::{self, Tokens};
+use rspice_ui_kit::tokens::{TOUCH_TARGET, Tokens};
 
-const MOBILE_CANVAS_CONTROLS_BREAKPOINT: f32 = 620.0;
-const MOBILE_CANVAS_CONTROLS_RIGHT_INSET: f32 = 9.0;
-const MOBILE_CANVAS_CONTROLS_BOTTOM_INSET: f32 = 10.0;
-const MOBILE_CANVAS_CONTROLS_PADDING: f32 = 4.0;
-const MOBILE_CANVAS_CONTROLS_BORDER: f32 = 1.0;
-const MOBILE_CANVAS_CONTROLS_GAP: f32 = 4.0;
-const MOBILE_CANVAS_CONTROL_SIZE: f32 = 44.0;
-// One gesture per line keeps the 11 px mono guidance inside the three-button
-// track without an orphaned word. Three 14.3 px Plex Mono rows plus the 3 px/4 px
-// block padding round to 50 points.
-const MOBILE_CANVAS_GUIDANCE: &str = "Drag to pan\nPinch to zoom\nTap to select";
-const MOBILE_CANVAS_GUIDANCE_HEIGHT: f32 = 50.0;
-const MOBILE_CANVAS_CONTROL_COUNT: usize = 3;
-const MOBILE_CANVAS_CONTROLS_INNER_WIDTH: f32 = MOBILE_CANVAS_CONTROL_SIZE
-    * MOBILE_CANVAS_CONTROL_COUNT as f32
-    + MOBILE_CANVAS_CONTROLS_GAP * (MOBILE_CANVAS_CONTROL_COUNT - 1) as f32;
-const MOBILE_CANVAS_CONTROLS_INNER_HEIGHT: f32 =
-    MOBILE_CANVAS_GUIDANCE_HEIGHT + MOBILE_CANVAS_CONTROLS_GAP + MOBILE_CANVAS_CONTROL_SIZE;
-const MOBILE_CANVAS_CONTROLS_WIDTH: f32 = MOBILE_CANVAS_CONTROLS_INNER_WIDTH
-    + (MOBILE_CANVAS_CONTROLS_PADDING + MOBILE_CANVAS_CONTROLS_BORDER) * 2.0;
-const MOBILE_CANVAS_CONTROLS_HEIGHT: f32 = MOBILE_CANVAS_CONTROLS_INNER_HEIGHT
-    + (MOBILE_CANVAS_CONTROLS_PADDING + MOBILE_CANVAS_CONTROLS_BORDER) * 2.0;
+const STRIP_RIGHT_INSET: f32 = 8.0;
+const STRIP_PADDING: f32 = 4.0;
+const STRIP_BORDER: f32 = 1.0;
+/// Between two buttons of one group.
+const STRIP_GAP: f32 = 4.0;
+/// Between two groups: a 1 pt rule with this much space either side.
+const STRIP_RULE: f32 = 1.0;
+const STRIP_RULE_SPACE: f32 = 4.0;
+const STRIP_BUTTON: f32 = TOUCH_TARGET;
+const STRIP_ICON: f32 = 20.0;
+const STRIP_WIDTH: f32 = STRIP_BUTTON + (STRIP_PADDING + STRIP_BORDER) * 2.0;
+/// A canvas at least this tall carries the tablet strip; a shorter one, a
+/// phone held in landscape, carries the five-button phone strip.
+pub const TABLET_STRIP_MIN_CANVAS_HEIGHT: f32 = 420.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MobileCanvasAction {
-    ZoomOut,
-    ZoomFit,
-    ZoomIn,
+    /// Latch: a one-finger drag on empty canvas draws a selection box
+    /// instead of panning.
+    SelectBox,
+    /// Latch: a tap adds to the selection or takes out of it, as
+    /// Shift+click does.
+    SelectAdd,
+    Rotate,
+    Mirror,
+    Cancel,
+    Undo,
+    Redo,
+    Fit,
 }
 
+impl MobileCanvasAction {
+    const fn icon(self) -> WorkbenchIcon {
+        match self {
+            Self::SelectBox => WorkbenchIcon::SelectBox,
+            Self::SelectAdd => WorkbenchIcon::SelectAdd,
+            Self::Rotate => WorkbenchIcon::Rotate,
+            Self::Mirror => WorkbenchIcon::Mirror,
+            Self::Cancel => WorkbenchIcon::Close,
+            Self::Undo => WorkbenchIcon::Undo,
+            Self::Redo => WorkbenchIcon::Redo,
+            Self::Fit => WorkbenchIcon::ZoomFit,
+        }
+    }
+
+    /// The button's accessible name and tooltip.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::SelectBox => "Select with a box",
+            Self::SelectAdd => "Add to selection",
+            Self::Rotate => "Rotate clockwise",
+            Self::Mirror => "Mirror",
+            Self::Cancel => "Cancel",
+            Self::Undo => "Undo",
+            Self::Redo => "Redo",
+            Self::Fit => "Fit drawing sheet",
+        }
+    }
+
+    const fn latch(self) -> bool {
+        matches!(self, Self::SelectBox | Self::SelectAdd)
+    }
+}
+
+/// Which strip a canvas carries, by its height.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct MobileCanvasControl {
-    action: MobileCanvasAction,
-    icon: WorkbenchIcon,
-    accessible_label: &'static str,
+pub enum StripLayout {
+    /// Eight buttons in four groups: selection, transform, operation, view.
+    Tablet,
+    /// Five buttons in one group; Mirror and Redo are on the long-press
+    /// menu, and the box latch gives way to Cancel while an operation is
+    /// live.
+    Phone,
 }
 
-const MOBILE_CANVAS_CONTROLS: [MobileCanvasControl; MOBILE_CANVAS_CONTROL_COUNT] = [
-    MobileCanvasControl {
-        action: MobileCanvasAction::ZoomOut,
-        icon: WorkbenchIcon::ZoomOut,
-        accessible_label: "Zoom schematic out",
-    },
-    MobileCanvasControl {
-        action: MobileCanvasAction::ZoomFit,
-        icon: WorkbenchIcon::ZoomFit,
-        accessible_label: "Fit complete schematic",
-    },
-    MobileCanvasControl {
-        action: MobileCanvasAction::ZoomIn,
-        icon: WorkbenchIcon::ZoomIn,
-        accessible_label: "Zoom schematic in",
-    },
+use MobileCanvasAction as A;
+const TABLET_GROUPS: &[&[MobileCanvasAction]] = &[
+    &[A::SelectBox, A::SelectAdd],
+    &[A::Rotate, A::Mirror],
+    &[A::Cancel, A::Undo, A::Redo],
+    &[A::Fit],
 ];
+const PHONE_GROUPS: &[&[MobileCanvasAction]] =
+    &[&[A::SelectBox, A::SelectAdd, A::Rotate, A::Undo, A::Fit]];
+const PHONE_LIVE_GROUPS: &[&[MobileCanvasAction]] =
+    &[&[A::Cancel, A::SelectAdd, A::Rotate, A::Undo, A::Fit]];
 
+impl StripLayout {
+    pub fn for_canvas(content_rect: Rect) -> Self {
+        if content_rect.height() >= TABLET_STRIP_MIN_CANVAS_HEIGHT {
+            Self::Tablet
+        } else {
+            Self::Phone
+        }
+    }
+
+    /// The groups, top to bottom. `operation_live` is whether Cancel has
+    /// something to cancel.
+    pub fn groups(self, operation_live: bool) -> &'static [&'static [MobileCanvasAction]] {
+        match (self, operation_live) {
+            (Self::Tablet, _) => TABLET_GROUPS,
+            (Self::Phone, false) => PHONE_GROUPS,
+            (Self::Phone, true) => PHONE_LIVE_GROUPS,
+        }
+    }
+
+    fn height(self) -> f32 {
+        let groups = self.groups(false);
+        let buttons: f32 = groups
+            .iter()
+            .map(|group| group.len() as f32 * STRIP_BUTTON + (group.len() - 1) as f32 * STRIP_GAP)
+            .sum();
+        let rules = (groups.len() - 1) as f32 * (STRIP_RULE + 2.0 * STRIP_RULE_SPACE);
+        buttons + rules + (STRIP_PADDING + STRIP_BORDER) * 2.0
+    }
+}
+
+/// The two strip latches. They belong to the input device, not to a
+/// document, so they live with the canvas's egui context and outlast a
+/// switch of document.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TouchLatches {
+    pub select_box: bool,
+    pub select_add: bool,
+}
+
+fn latches_id() -> Id {
+    Id::new("rspice.schematic.touch_latches")
+}
+
+pub fn touch_latches(ctx: &Context) -> TouchLatches {
+    ctx.data(|data| data.get_temp(latches_id()).unwrap_or_default())
+}
+
+pub fn set_touch_latches(ctx: &Context, latches: TouchLatches) {
+    ctx.data_mut(|data| data.insert_temp(latches_id(), latches));
+}
+
+impl TouchLatches {
+    fn holds(self, action: MobileCanvasAction) -> bool {
+        match action {
+            A::SelectBox => self.select_box,
+            A::SelectAdd => self.select_add,
+            _ => false,
+        }
+    }
+
+    fn toggle(&mut self, action: MobileCanvasAction) {
+        match action {
+            A::SelectBox => self.select_box = !self.select_box,
+            A::SelectAdd => self.select_add = !self.select_add,
+            _ => {}
+        }
+    }
+}
+
+/// What the strip may offer this frame. The latches are always offered.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MobileCanvasCapabilities {
-    pub zoom_out: bool,
-    pub zoom_fit: bool,
-    pub zoom_in: bool,
+    pub rotate: bool,
+    pub mirror: bool,
+    /// A route, move, placement or box is live.
+    pub cancel: bool,
+    pub undo: bool,
+    pub redo: bool,
+    pub fit: bool,
 }
 
 impl MobileCanvasCapabilities {
     fn allows(self, action: MobileCanvasAction) -> bool {
         match action {
-            MobileCanvasAction::ZoomOut => self.zoom_out,
-            MobileCanvasAction::ZoomFit => self.zoom_fit,
-            MobileCanvasAction::ZoomIn => self.zoom_in,
+            A::SelectBox | A::SelectAdd => true,
+            A::Rotate => self.rotate,
+            A::Mirror => self.mirror,
+            A::Cancel => self.cancel,
+            A::Undo => self.undo,
+            A::Redo => self.redo,
+            A::Fit => self.fit,
         }
     }
 }
@@ -89,67 +200,69 @@ pub struct MobileCanvasRequest {
     pub action: MobileCanvasAction,
 }
 
+/// The strip's rectangle in a canvas: against the right edge, inset 8 pt,
+/// vertically centred, and kept inside the canvas.
+pub fn strip_rect(content_rect: Rect) -> Rect {
+    let size = Vec2::new(STRIP_WIDTH, StripLayout::for_canvas(content_rect).height());
+    let top = (content_rect.center().y - size.y * 0.5).max(content_rect.top());
+    Rect::from_min_size(
+        egui::pos2(content_rect.right() - STRIP_RIGHT_INSET - size.x, top),
+        size,
+    )
+}
+
+/// Paint the strip and return the button pressed this frame. A latch
+/// button toggles its latch here and is reported too, so the host can say
+/// what a drag now does.
 pub fn show(
     ctx: &Context,
     content_rect: Rect,
     source: &EditorRequestSource,
     capabilities: MobileCanvasCapabilities,
 ) -> Option<MobileCanvasRequest> {
-    let viewport_width = ctx.content_rect().width();
-    let control_rect = mobile_canvas_controls_rect(content_rect, viewport_width)?;
+    let layout = StripLayout::for_canvas(content_rect);
+    let groups = layout.groups(capabilities.cancel);
+    let rect = strip_rect(content_rect);
     let t = Tokens::get(ctx);
+    let mut latches = touch_latches(ctx);
     let mut pending_request = None;
     let area = egui::Area::new(Id::new("workbench.design.mobile-canvas-controls"))
         .order(Order::Foreground)
-        .fixed_pos(control_rect.min)
-        .constrain_to(content_rect)
+        .fixed_pos(rect.min)
+        // `strip_rect` already keeps the strip inside the canvas. egui's own
+        // constraint would clamp the first frame against a guessed size and
+        // park the strip at the canvas's left edge for that frame.
+        .constrain(false)
         .show(ctx, |ui| {
             let frame = egui::Frame::new()
                 .fill(with_alpha(t.color.bg_panel, 245))
-                .stroke(Stroke::new(
-                    MOBILE_CANVAS_CONTROLS_BORDER,
-                    t.color.border_strong,
-                ))
+                .stroke(Stroke::new(STRIP_BORDER, t.color.border_strong))
                 .corner_radius(t.radius)
-                .inner_margin(egui::Margin::same(MOBILE_CANVAS_CONTROLS_PADDING as i8))
+                .inner_margin(egui::Margin::same(STRIP_PADDING as i8))
                 .shadow(t.shadow())
                 .show(ui, |ui| {
-                    ui.set_min_size(Vec2::new(
-                        MOBILE_CANVAS_CONTROLS_INNER_WIDTH,
-                        MOBILE_CANVAS_CONTROLS_INNER_HEIGHT,
-                    ));
-                    ui.set_max_size(Vec2::new(
-                        MOBILE_CANVAS_CONTROLS_INNER_WIDTH,
-                        MOBILE_CANVAS_CONTROLS_INNER_HEIGHT,
-                    ));
                     ui.spacing_mut().item_spacing = Vec2::ZERO;
-                    ui.allocate_ui_with_layout(
-                        Vec2::new(
-                            MOBILE_CANVAS_CONTROLS_INNER_WIDTH,
-                            MOBILE_CANVAS_GUIDANCE_HEIGHT,
-                        ),
-                        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-                        |ui| {
-                            ui.add_sized(
-                                Vec2::new(
-                                    MOBILE_CANVAS_CONTROLS_INNER_WIDTH - 10.0,
-                                    MOBILE_CANVAS_GUIDANCE_HEIGHT,
-                                ),
-                                egui::Label::new(guidance_text(&t))
-                                    .wrap()
-                                    .halign(egui::Align::Center),
+                    ui.set_width(STRIP_BUTTON);
+                    for (index, group) in groups.iter().enumerate() {
+                        if index > 0 {
+                            ui.add_space(STRIP_RULE_SPACE);
+                            let (rule, _) = ui.allocate_exact_size(
+                                Vec2::new(STRIP_BUTTON, STRIP_RULE),
+                                Sense::hover(),
                             );
-                        },
-                    );
-                    ui.add_space(MOBILE_CANVAS_CONTROLS_GAP);
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = MOBILE_CANVAS_CONTROLS_GAP;
-                        for control in MOBILE_CANVAS_CONTROLS {
-                            let enabled = capabilities.allows(control.action);
+                            ui.painter().rect_filled(rule, 0.0, t.color.border);
+                            ui.add_space(STRIP_RULE_SPACE);
+                        }
+                        for (slot, &action) in group.iter().enumerate() {
+                            if slot > 0 {
+                                ui.add_space(STRIP_GAP);
+                            }
+                            let enabled = capabilities.allows(action);
+                            let latched = latches.holds(action);
                             let response = ui
-                                .add_enabled_ui(enabled, |ui| mobile_canvas_button(ui, control))
+                                .add_enabled_ui(enabled, |ui| strip_button(ui, action, latched))
                                 .inner;
-                            // Keep a held pointer press tied to its original document.
+                            // Keep a held press tied to the document it began on.
                             let press_id = response.id.with("source");
                             if response.is_pointer_button_down_on()
                                 && ui.input(|input| input.pointer.primary_pressed())
@@ -165,100 +278,74 @@ pub fn show(
                                         pressed
                                     })
                                     .unwrap_or_else(|| source.clone());
-                                pending_request = Some(MobileCanvasRequest {
-                                    source,
-                                    action: control.action,
-                                });
+                                if action.latch() {
+                                    latches.toggle(action);
+                                }
+                                pending_request = Some(MobileCanvasRequest { source, action });
                             } else if !response.is_pointer_button_down_on() {
                                 ui.data_mut(|data| {
                                     data.remove::<EditorRequestSource>(press_id);
                                 });
                             }
                         }
-                    });
+                    }
                 });
             frame.response.widget_info(|| {
-                egui::WidgetInfo::labeled(
-                    egui::WidgetType::Other,
-                    true,
-                    "Touch schematic viewport controls",
-                )
+                egui::WidgetInfo::labeled(egui::WidgetType::Other, true, STRIP_LABEL)
             });
             ui.ctx().accesskit_node_builder(frame.response.id, |node| {
                 node.set_role(egui::accesskit::Role::Toolbar);
-                node.set_label("Touch schematic viewport controls");
+                node.set_label(STRIP_LABEL);
             });
         });
     area.response
         .widget_info(|| egui::WidgetInfo::new(egui::WidgetType::Other));
-
+    set_touch_latches(ctx, latches);
     pending_request
 }
 
-pub fn mobile_canvas_controls_rect(content_rect: Rect, viewport_width: f32) -> Option<Rect> {
-    if viewport_width > MOBILE_CANVAS_CONTROLS_BREAKPOINT {
-        return None;
-    }
-    let right_bottom = content_rect.right_bottom()
-        - egui::vec2(
-            MOBILE_CANVAS_CONTROLS_RIGHT_INSET,
-            MOBILE_CANVAS_CONTROLS_BOTTOM_INSET,
-        );
-    Some(Rect::from_min_size(
-        right_bottom - egui::vec2(MOBILE_CANVAS_CONTROLS_WIDTH, MOBILE_CANVAS_CONTROLS_HEIGHT),
-        egui::vec2(MOBILE_CANVAS_CONTROLS_WIDTH, MOBILE_CANVAS_CONTROLS_HEIGHT),
-    ))
-}
+const STRIP_LABEL: &str = "Touch editing controls";
 
-fn mobile_canvas_button(ui: &mut Ui, control: MobileCanvasControl) -> Response {
+fn strip_button(ui: &mut Ui, action: MobileCanvasAction, latched: bool) -> Response {
     let t = Tokens::get(ui.ctx());
-    let (rect, response) =
-        ui.allocate_exact_size(Vec2::splat(MOBILE_CANVAS_CONTROL_SIZE), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(STRIP_BUTTON), Sense::click());
+    let label = action.label();
     response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Button,
-            ui.is_enabled(),
-            control.accessible_label,
-        )
+        if action.latch() {
+            egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), latched, label)
+        } else {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+        }
     });
     if ui.is_rect_visible(rect) {
-        let pressed = ui.is_enabled() && response.is_pointer_button_down_on();
-        let hovered = ui.is_enabled() && response.hovered();
-        let fill = if pressed {
+        let enabled = ui.is_enabled();
+        let lit = enabled && (latched || response.is_pointer_button_down_on());
+        let fill = if lit {
             t.color.accent_dim
-        } else if hovered {
+        } else if enabled && response.hovered() {
             t.color.bg_hover
         } else {
             t.color.bg_inset
         };
-        let stroke = if pressed {
-            Stroke::new(1.0, t.color.accent)
-        } else {
-            Stroke::new(1.0, t.color.border)
-        };
+        let stroke = Stroke::new(1.0, if lit { t.color.accent } else { t.color.border });
         ui.painter()
             .rect(rect, 0.0, fill, stroke, egui::StrokeKind::Inside);
-        let color = if !ui.is_enabled() {
+        let color = if !enabled {
             t.color.text_faint
-        } else if pressed {
+        } else if lit {
             t.color.accent
         } else {
             t.color.text
         };
-        control.icon.paint(
+        // No focus ring: the strip is only ever pressed by a finger, and a
+        // press must not leave a ring behind (pointer-focus-no-ring).
+        action.icon().paint(
             ui.painter(),
-            Rect::from_center_size(rect.center(), Vec2::splat(16.0)),
+            Rect::from_center_size(rect.center(), Vec2::splat(STRIP_ICON)),
             color,
         );
-        theme::paint_focus_ring_outset(ui, &response, rect);
     }
-    response.on_hover_text(control.accessible_label)
-}
-
-fn guidance_text(t: &Tokens) -> egui::RichText {
-    egui::RichText::new(MOBILE_CANVAS_GUIDANCE)
-        .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-        .color(t.color.text_dim)
+    response.on_hover_text(label)
 }
 
 fn with_alpha(color: Color32, alpha: u8) -> Color32 {

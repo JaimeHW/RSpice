@@ -47,6 +47,12 @@ pub enum WorkbenchIcon {
     Project,
     Design,
     Simulate,
+    /// A dashed square: the touch latch that turns a one-finger drag into
+    /// a selection box.
+    SelectBox,
+    /// A dashed square with a plus: the touch latch that makes a tap add to
+    /// the selection, as Shift+click does.
+    SelectAdd,
     /// The independent-source mark — a circle around one cycle of a wave.
     /// It is the schematic symbol for a stimulus, so the rail entry, the
     /// library rows and the workspace's empty state all wear the same thing
@@ -181,7 +187,29 @@ impl WorkbenchIcon {
             ));
         };
 
+        // A dashed square from `lo` to `hi`: solid corners and one dash in
+        // the middle of each side, the marquee's mark.
+        let marquee = |lo: f32, hi: f32| {
+            let arm = (hi - lo) * 0.2;
+            let mid = (lo + hi) * 0.5;
+            let half = (hi - lo) * 0.125;
+            line(&[(lo, lo + arm), (lo, lo), (lo + arm, lo)]);
+            line(&[(hi - arm, lo), (hi, lo), (hi, lo + arm)]);
+            line(&[(hi, hi - arm), (hi, hi), (hi - arm, hi)]);
+            line(&[(lo + arm, hi), (lo, hi), (lo, hi - arm)]);
+            line(&[(mid - half, lo), (mid + half, lo)]);
+            line(&[(hi, mid - half), (hi, mid + half)]);
+            line(&[(mid - half, hi), (mid + half, hi)]);
+            line(&[(lo, mid - half), (lo, mid + half)]);
+        };
+
         match self {
+            Self::SelectBox => marquee(4.0, 20.0),
+            Self::SelectAdd => {
+                marquee(3.0, 15.0);
+                line(&[(18.5, 14.0), (18.5, 23.0)]);
+                line(&[(14.0, 18.5), (23.0, 18.5)]);
+            }
             Self::Brand => {
                 painter.rect_filled(rect, side * 21.0 / 96.0, color);
                 let ink = Tokens::get(painter.ctx()).color.accent_ink;

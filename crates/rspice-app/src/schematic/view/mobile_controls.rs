@@ -1,5 +1,10 @@
-//! App availability and command dispatch for source-bound touch viewport requests.
+//! App availability and command dispatch for the touch strip.
+//!
+//! The strip shows whenever the canvas is driven by touch, at any width
+//! (audit G-12). Every command button runs the same `Command` the menus and
+//! keys run; the two latches change what a one-finger gesture does.
 
+use crate::state::Tool;
 use crate::workbench::RSpiceApp;
 use crate::workbench::SurfaceId;
 use crate::workbench::commands::vocabulary::Command;
@@ -7,37 +12,61 @@ use egui::{Context, Rect};
 use rspice_schematic_editor::view::mobile_controls::{
     self, MobileCanvasAction, MobileCanvasCapabilities, MobileCanvasRequest,
 };
+use rspice_schematic_editor::view::pointer_target::canvas_touch_mode;
 
 pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp, content_rect: Rect) {
-    if mobile_controls::mobile_canvas_controls_rect(content_rect, ctx.content_rect().width())
-        .is_none()
-    {
+    if !canvas_touch_mode(ctx) {
         return;
     }
     let source = super::requests::editor_request_source(&app.state);
     let capabilities = MobileCanvasCapabilities {
-        zoom_out: action_enabled(app, MobileCanvasAction::ZoomOut),
-        zoom_fit: action_enabled(app, MobileCanvasAction::ZoomFit),
-        zoom_in: action_enabled(app, MobileCanvasAction::ZoomIn),
+        rotate: action_enabled(app, MobileCanvasAction::Rotate),
+        mirror: action_enabled(app, MobileCanvasAction::Mirror),
+        cancel: action_enabled(app, MobileCanvasAction::Cancel),
+        undo: action_enabled(app, MobileCanvasAction::Undo),
+        redo: action_enabled(app, MobileCanvasAction::Redo),
+        fit: action_enabled(app, MobileCanvasAction::Fit),
     };
     if let Some(request) = mobile_controls::show(ctx, content_rect, &source, capabilities) {
-        execute_action(app, request);
+        execute_action(ctx, app, request);
     }
 }
 
-const fn product_command(action: MobileCanvasAction) -> Command {
+const fn product_command(action: MobileCanvasAction) -> Option<Command> {
     match action {
-        MobileCanvasAction::ZoomOut => Command::ZoomOut,
-        MobileCanvasAction::ZoomFit => Command::ZoomFit,
-        MobileCanvasAction::ZoomIn => Command::ZoomIn,
+        MobileCanvasAction::SelectBox | MobileCanvasAction::SelectAdd => None,
+        MobileCanvasAction::Rotate => Some(Command::RotateSelection),
+        MobileCanvasAction::Mirror => Some(Command::MirrorSelectionHorizontal),
+        MobileCanvasAction::Cancel => Some(Command::Cancel),
+        MobileCanvasAction::Undo => Some(Command::Undo),
+        MobileCanvasAction::Redo => Some(Command::Redo),
+        MobileCanvasAction::Fit => Some(Command::ZoomFit),
     }
+}
+
+/// Whether a route, a move, a placement or a box is live: what Esc would
+/// cancel on the canvas.
+fn operation_live(app: &RSpiceApp) -> bool {
+    let state = &app.state;
+    let editor = &state.schematic.session.editor;
+    state.schematic.canvas_settings_change_blocked()
+        || editor.tool != Tool::Select
+        || editor.zoom_box.armed
+        || state.dialogs.move_selection.armed
+        || state.dialogs.stretch_selection.armed
+        || state.dialogs.array_selection.armed
+        || state.schematic_drag_in_progress()
 }
 
 fn action_enabled(app: &RSpiceApp, action: MobileCanvasAction) -> bool {
-    product_command(action).is_enabled(app)
+    match action {
+        MobileCanvasAction::SelectBox | MobileCanvasAction::SelectAdd => true,
+        MobileCanvasAction::Cancel => operation_live(app),
+        _ => product_command(action).is_some_and(|command| command.is_enabled(app)),
+    }
 }
 
-fn execute_action(app: &mut RSpiceApp, request: MobileCanvasRequest) {
+fn execute_action(ctx: &Context, app: &mut RSpiceApp, request: MobileCanvasRequest) {
     if request.source != super::requests::editor_request_source(&app.state)
         || app.state.workbench.current_route().surface_id() != SurfaceId::Design
         || !matches!(
@@ -49,91 +78,25 @@ fn execute_action(app: &mut RSpiceApp, request: MobileCanvasRequest) {
     {
         return;
     }
-    product_command(request.action).execute(app);
+    let latches = mobile_controls::touch_latches(ctx);
+    match request.action {
+        MobileCanvasAction::SelectBox => app.state.prompt(if latches.select_box {
+            "A drag on empty canvas draws a selection box."
+        } else {
+            "A drag on empty canvas pans."
+        }),
+        MobileCanvasAction::SelectAdd => app.state.prompt(if latches.select_add {
+            "A tap adds to the selection or takes out of it."
+        } else {
+            "A tap selects one object."
+        }),
+        action => {
+            if let Some(command) = product_command(action) {
+                command.execute(app);
+            }
+        }
+    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
-mod tests {
-    use super::*;
-    use crate::workbench::state::Workspace;
-    use rspice_schematic_editor::view::navigation::ZoomRequest;
-
-    fn execute_current(app: &mut RSpiceApp, action: MobileCanvasAction) {
-        let request = MobileCanvasRequest {
-            source: super::super::requests::editor_request_source(&app.state),
-            action,
-        };
-        execute_action(app, request);
-    }
-
-    #[test]
-    fn touch_requests_recheck_document_route_and_modal_state() {
-        for change in ["document", "route", "modal", "read-only", "none"] {
-            let mut app = RSpiceApp::test_instance();
-            app.state.workbench.activate(Workspace::Design);
-            app.state.schematic.session.editor.zoom = 1.0;
-            let request = MobileCanvasRequest {
-                source: super::super::requests::editor_request_source(&app.state),
-                action: MobileCanvasAction::ZoomIn,
-            };
-            match change {
-                "document" => app.state.bump_active_schematic_epoch(),
-                "route" => app.state.workbench.activate(Workspace::Results),
-                "modal" => app.state.dialogs.preferences_open = true,
-                "read-only" => app.state.schematic.session.read_only = true,
-                "none" => {}
-                _ => unreachable!(),
-            }
-            execute_action(&mut app, request);
-            // The canvas carries the zoom out on its next frame, about its
-            // middle (audit E-1); what the route decides is whether to ask.
-            let expected_request =
-                matches!(change, "none" | "read-only").then_some(ZoomRequest::By(1.2));
-            assert_eq!(
-                app.state.schematic.session.editor.zoom_request, expected_request,
-                "{change}"
-            );
-        }
-    }
-
-    #[test]
-    fn actions_execute_the_schematic_camera_commands() {
-        let mut app = RSpiceApp::test_instance();
-        app.state.workbench.activate(Workspace::Design);
-        assert!(matches!(
-            app.state.workspace.content.active_view_type(),
-            crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
-        ));
-        app.state.schematic.session.editor.zoom = 1.0;
-
-        // The touch route dispatches the same Command as every other surface,
-        // so it steps by COMMAND_ZOOM_FACTOR (1.2) rather than a rate of its
-        // own. Asserting the shared factor is the point: a mobile-only zoom
-        // step would mean the same command zoomed differently by input device.
-        // The canvas carries the step out on its next frame (audit E-1).
-        execute_current(&mut app, MobileCanvasAction::ZoomOut);
-        assert_eq!(
-            app.state.schematic.session.editor.zoom_request.take(),
-            Some(ZoomRequest::By(1.2_f64.recip()))
-        );
-        execute_current(&mut app, MobileCanvasAction::ZoomIn);
-        assert_eq!(
-            app.state.schematic.session.editor.zoom_request.take(),
-            Some(ZoomRequest::By(1.2))
-        );
-
-        // ZoomFit frames the drawing sheet; FitSchematicContent frames the
-        // content. The touch route must not collapse that distinction, so
-        // assert each sets its own flag and clears the other.
-        assert!(!app.state.schematic.session.editor.needs_drawing_sheet_fit);
-        execute_current(&mut app, MobileCanvasAction::ZoomFit);
-        assert!((app.state.schematic.session.editor.zoom - 1.0).abs() < f64::EPSILON);
-        assert_eq!(app.state.schematic.session.editor.pan, (0.0, 0.0));
-        assert!(app.state.schematic.session.editor.needs_drawing_sheet_fit);
-        assert!(!app.state.schematic.session.editor.needs_fit);
-
-        Command::FitSchematicContent.execute(&mut app);
-        assert!(app.state.schematic.session.editor.needs_fit);
-        assert!(!app.state.schematic.session.editor.needs_drawing_sheet_fit);
-    }
-}
+mod tests;
