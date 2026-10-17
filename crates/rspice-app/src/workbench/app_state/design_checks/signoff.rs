@@ -8,11 +8,11 @@
 //! is the run gate's: it fails on any Error or Critical finding no waiver
 //! covers, and on nothing else.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use super::{AppState, CellViewCheckReceipt, CheckScope};
-use crate::state::CellViewRef;
+use crate::state::{CanonicalCellViewOwnerKey, CellViewRef};
 use rspice_design::drc::{DrcLocation, DrcSeverity, DrcViolation, waiver_site};
 
 /// One sign-off report.
@@ -51,8 +51,12 @@ impl AppState {
             .receipt(&root)
             .filter(|receipt| receipt.scope == CheckScope::Design)
             .ok_or_else(|| format!("{} has no Check Design result", root.display_path()))?;
+        let reached = super::reached_cellviews(self, &root)?
+            .iter()
+            .map(super::owner_key)
+            .collect();
         Ok(SignoffReport {
-            summary: summary(self, &root, receipt, date),
+            summary: summary(self, &root, receipt, &reached, date),
             detail: detail(&root, receipt),
             passed: !receipt.result.has_errors(),
         })
@@ -69,10 +73,13 @@ struct RuleCounts {
     warnings_waived: usize,
 }
 
+/// The summary of `receipt`, Check Design's pass over `root`, which reached
+/// the cellviews `reached` holds.
 fn summary(
     state: &AppState,
     root: &CellViewRef,
     receipt: &CellViewCheckReceipt,
+    reached: &BTreeSet<CanonicalCellViewOwnerKey>,
     date: &str,
 ) -> String {
     let result = &receipt.result;
@@ -161,7 +168,11 @@ fn summary(
     let _ = writeln!(text);
     let _ = writeln!(text, "Unmatched waivers");
     let waivers = state.design_check_config(root).waivers;
-    let unmatched = waivers.unmatched_anywhere(result);
+    // Only where the check looked: a waiver stored with a schematic the
+    // design never reaches — another testbench, a cell nothing places — is
+    // about findings this check does not compute, and says nothing stale.
+    let mut unmatched = waivers.unmatched_anywhere(result);
+    unmatched.retain(|(stored_with, _)| stored_with.is_none_or(|key| reached.contains(key)));
     if unmatched.is_empty() {
         let _ = writeln!(text, "  none");
     }

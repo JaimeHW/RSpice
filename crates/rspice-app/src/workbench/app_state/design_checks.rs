@@ -875,6 +875,28 @@ fn check_coverage(
         }
         CheckScope::Hierarchy | CheckScope::Design => {}
     }
+    let walked = reached_cellviews(state, subject)?;
+    let reached = if scope == CheckScope::Design {
+        // Whether a cellview is used is decided for every schematic of the
+        // project's own: the ones the walk reached by being reached, and the
+        // rest by being reported.
+        for candidate in project_schematics(state) {
+            coverage.state(&candidate, RuleScope::Use);
+        }
+        RuleScope::Every
+    } else {
+        RuleScope::Contents
+    };
+    coverage.state(subject, reached);
+    for cell_view in &walked {
+        coverage.state(cell_view, reached);
+    }
+    Ok(coverage)
+}
+
+/// The cellviews a check of `subject` descends into, `subject` among them,
+/// read off the same projected design and walk the check takes.
+fn reached_cellviews(state: &AppState, subject: &CellViewRef) -> Result<Vec<CellViewRef>, String> {
     let projection = state
         .workspace
         .design_projection(
@@ -888,23 +910,7 @@ fn check_coverage(
         state.library_manager.catalog(),
         &projection,
     );
-    let reads = rspice_design::drc::check_reads(checked, subject, &hierarchy);
-    let reached = if scope == CheckScope::Design {
-        // Whether a cellview is used is decided for every schematic of the
-        // project's own: the ones the walk reached by being reached, and the
-        // rest by being reported.
-        for candidate in project_schematics(state) {
-            coverage.state(&candidate, RuleScope::Use);
-        }
-        RuleScope::Every
-    } else {
-        RuleScope::Contents
-    };
-    coverage.state(subject, reached);
-    for cell_view in &reads.reached {
-        coverage.state(cell_view, reached);
-    }
-    Ok(coverage)
+    Ok(rspice_design::drc::check_reads(checked, subject, &hierarchy).reached)
 }
 
 /// A stable key of the object a rule finding is located at: the design
