@@ -190,8 +190,7 @@ impl PreparedRunSnapshot {
         let mut built = 0;
         progress(DeckBuildProgress { built, total });
 
-        let mut verdicts: HashMap<(Cow<'_, str>, (u8, u64)), Option<DeckVerdict>> =
-            HashMap::new();
+        let mut verdicts: HashMap<(Cow<'_, str>, (u8, u64)), Option<DeckVerdict>> = HashMap::new();
         for (task, deck) in dispatched {
             if abort.is_aborted() {
                 return Vec::new();
@@ -343,7 +342,8 @@ impl PreparedRunSnapshot {
                     let instance = error.instance_name().map(str::to_owned);
                     refused.push(match &error {
                         rspice_core::SimulationError::Elaboration(elaboration)
-                            if elaboration.kind == rspice_core::ElaborationErrorKind::ConnectRule =>
+                            if elaboration.kind
+                                == rspice_core::ElaborationErrorKind::ConnectRule =>
                         {
                             EngineRefusalKind::ConnectRules { message, instance }
                         }

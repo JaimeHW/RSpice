@@ -196,7 +196,9 @@ fn a_named_connect_rule_block_is_on_the_deck_and_an_unnamed_one_is_nowhere() {
         connect_rules: Some("Low_vdd".to_owned()),
         ..SimulationOptions::default()
     };
-    options.validate().expect("a simple identifier names a block");
+    options
+        .validate()
+        .expect("a simple identifier names a block");
     let card = options.to_spice_options();
     assert!(card.contains("+ CONNECTRULES=\"Low_vdd\""), "{card}");
     let deck = format!("connect rules\nR1 a 0 1k\n{card}\n.end\n");

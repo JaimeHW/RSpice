@@ -171,8 +171,7 @@ pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) 
         }
         None => report.blockers.push(engine_refusals::no_verdict_issue()),
     }
-    let (topology_root, topology_revision, topology_closure) =
-        state.configured_topology_revision();
+    let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
     let unedited = report.is_current_for(
         state.workspace.content.project.revision().get(),
         &topology_root,
@@ -242,8 +241,7 @@ fn conclude(
         controller.clear_prepared_run();
     }
     let current_plan = state.active_plan_revision();
-    let (topology_root, topology_revision, topology_closure) =
-        state.configured_topology_revision();
+    let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
     let blocked = !report.is_runnable_for(
         state.workspace.content.project.revision().get(),
         &topology_root,
@@ -282,7 +280,9 @@ fn conclude(
     // digest is taken over.
     state.workbench.preflight.report = Some(report.clone());
     match inputs_at_press {
-        Some(inputs_at_press) => state.publish_dispatch_diagnostics_against(&report, inputs_at_press),
+        Some(inputs_at_press) => {
+            state.publish_dispatch_diagnostics_against(&report, inputs_at_press)
+        }
         None => state.publish_dispatch_diagnostics(&report),
     }
     // An event, at the severity of the pass rather than of its findings: the
@@ -351,8 +351,7 @@ pub(crate) fn run_awaits_check(state: &AppState) -> bool {
 /// still current.
 fn queue_retained_run(state: &mut AppState) -> bool {
     let project_revision = state.workspace.content.project.revision().get();
-    let (topology_root, topology_revision, topology_closure) =
-        state.configured_topology_revision();
+    let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
     let current_plan = state.active_plan_revision();
     let runnable = state
         .workbench
