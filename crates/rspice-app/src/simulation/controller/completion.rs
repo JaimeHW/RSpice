@@ -116,6 +116,7 @@ impl SimulationController {
                     });
 
                 self.apply_result_side_effects(state, &sim_result);
+                let testbench_verdict = testbench_errors(&sim_result);
                 if let Some(quality) = sim_result.transient_convergence()
                     && quality.has_lte_exceptions()
                 {
@@ -178,6 +179,14 @@ impl SimulationController {
                                 state
                                     .simulation
                                     .replace_yield_evidence(yield_results, provenance);
+                            }
+                            if let Some(verdict) = testbench_verdict.as_deref() {
+                                self.fail_testbench_verdict(
+                                    state,
+                                    target_run_id,
+                                    &current_label,
+                                    verdict,
+                                );
                             }
                         }
                         // The artifact failure has its own line above.
@@ -426,6 +435,53 @@ impl SimulationController {
             None => format!("Not supported in {label}: {reason} [{capability}]"),
         })
     }
+
+    /// A testbench that reported errors did not pass, though its analysis
+    /// completed: the run is sealed as not passing, its results stay
+    /// available, and the Problems page files the testbench's verdict against
+    /// the run, as the CLI fails the run on the same records.
+    fn fail_testbench_verdict(
+        &self,
+        state: &mut AppState,
+        target_run_id: Option<u64>,
+        analysis: &str,
+        verdict: &str,
+    ) {
+        let errors = self.seal_failed_run(state, target_run_id, None, None);
+        self.report_seal_errors(state, errors);
+        if let Some(run_sequence) = target_run_id {
+            state.publish_run_failure(analysis, verdict, None, run_sequence);
+        }
+    }
+}
+
+/// The verdict of a transient's testbench, from the records its `$error` and
+/// `$fatal` calls left in the result: `Testbench reported 2 errors: <the
+/// first one's message>`. `None` when it reported none.
+///
+/// Read off the result rather than the run's log, whose bound can withhold
+/// the very lines that failed the testbench.
+fn testbench_errors(result: &crate::simulation::SimulationResult) -> Option<String> {
+    use rspice_core::config::{HdlSeverity, HdlStream};
+
+    let crate::simulation::SimulationResult::Transient { hdl_output, .. } = result else {
+        return None;
+    };
+    let mut errors = hdl_output.iter().filter(|record| {
+        matches!(
+            record.stream,
+            HdlStream::Diagnostic {
+                severity: HdlSeverity::Error | HdlSeverity::Fatal
+            }
+        )
+    });
+    let first = errors.next()?;
+    let count = 1 + errors.count();
+    Some(format!(
+        "Testbench reported {count} {}: {}",
+        if count == 1 { "error" } else { "errors" },
+        first.text.trim_end()
+    ))
 }
 
 #[cfg(test)]
@@ -476,6 +532,113 @@ mod tests {
         assert!(
             published[0].1.contains("singular matrix"),
             "the finding states the engine's failure: {published:?}"
+        );
+    }
+
+    /// A transient whose testbench called `$error` and `$fatal` completes
+    /// with errors: its results are kept, the run does not pass, and the
+    /// Problems page files the testbench's verdict against the run.
+    #[test]
+    fn a_testbench_that_reported_errors_fails_its_run_and_keeps_its_results() {
+        use rspice_core::config::{HdlOrigin, HdlOutputRecord, HdlPoint, HdlSeverity, HdlStream};
+        let mut state = AppState::default();
+        let mut controller = SimulationController::new();
+        let export_io = super::super::tests::MockExportWorkflowIo::default();
+        let run_sequence = state.simulation.start_run().id;
+        let run = state
+            .simulation
+            .retained
+            .run_by_sequence_mut(run_sequence)
+            .expect("the test run is retained");
+        run.mark_running()
+            .expect("the test run enters running state");
+        state.simulation.execution.active_execution = run.execution_identity();
+        controller.current_run_id = Some(run_sequence);
+        controller.current_analysis_label = Some("Transient".to_owned());
+        controller.current_provenance = Some(
+            AnalysisResultProvenance::new(
+                crate::product::AnalysisInstanceId::new(),
+                crate::product::ObjectRevision::INITIAL,
+                crate::product::ContentDigest::from_bytes([0x3a; 32]),
+                Vec::new(),
+            )
+            .expect("synthetic prepared-task provenance is valid"),
+        );
+        controller.current_analysis_idx = 1;
+        controller.total_analyses = 1;
+        let record = |stream, text: &str| HdlOutputRecord {
+            point: HdlPoint::Transient { time: 1.0e-9 },
+            tick: 1,
+            seconds: 1.0e-9,
+            stream,
+            text: text.to_owned(),
+            origin: HdlOrigin {
+                scope: "tb".to_owned(),
+                file: "tb.v".to_owned(),
+                line: 9,
+            },
+        };
+        let mut waveforms = std::collections::HashMap::new();
+        waveforms.insert(
+            "V(out)".to_owned(),
+            rspice_simulation::results::WaveformData {
+                name: "V(out)".to_owned(),
+                x_values: Vec::new(),
+                y_values: vec![0.0, 1.0],
+                y_unit: "V".to_owned(),
+                is_complex: false,
+                y_imag: None,
+            },
+        );
+
+        controller.accept_completion(
+            &mut state,
+            &export_io,
+            Ok(crate::simulation::SimulationResult::Transient {
+                spectra: Vec::new(),
+                hdl_output: vec![
+                    record(HdlStream::Stdout, "edge 1\n"),
+                    record(
+                        HdlStream::Diagnostic {
+                            severity: HdlSeverity::Error,
+                        },
+                        "out stuck low\n",
+                    ),
+                    record(
+                        HdlStream::Diagnostic {
+                            severity: HdlSeverity::Fatal,
+                        },
+                        "giving up\n",
+                    ),
+                ],
+                time: vec![0.0, 1.0e-9],
+                waveforms,
+                measurements: Vec::new(),
+                periodic_state: None,
+                convergence: Default::default(),
+                events: Default::default(),
+            }),
+        );
+
+        let run = state
+            .simulation
+            .retained
+            .run_by_sequence(run_sequence)
+            .expect("the run is retained");
+        assert!(!run.success, "the run did not pass");
+        assert_eq!(run.analyses.len(), 1);
+        assert!(run.analyses[0].success, "its results stay available");
+        assert_eq!(
+            state.diagnostics.published_run_failures(run_sequence),
+            [(
+                format!("Transient · run {run_sequence}"),
+                "Testbench reported 2 errors: out stuck low".to_owned()
+            )]
+        );
+        let summary = &run.log.lines().last().expect("a closed log").message;
+        assert!(
+            summary.starts_with(&format!("Run {run_sequence} completed with errors in ")),
+            "{summary}"
         );
     }
 }
