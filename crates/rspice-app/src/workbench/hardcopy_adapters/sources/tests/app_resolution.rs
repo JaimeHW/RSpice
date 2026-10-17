@@ -237,6 +237,129 @@ fn enumeration_exposes_all_sheets_exact_members_and_available_named_sets() {
     );
 }
 
+/// One cell view split into two sheets whose only wires lie on exactly the
+/// same coordinates. A print path that ignores the sheet partition draws the
+/// two sheets on top of each other, and these wire ids show it.
+fn two_sheets_drawn_at_the_same_place() -> (AppState, String, [SheetId; 2]) {
+    let mut state = AppState::default();
+    for wire_id in [11, 22] {
+        state
+            .schematic
+            .document_mut_for_test()
+            .wires
+            .push(Wire::segment(wire_id, Point::new(0, 0), Point::new(20, 0)));
+    }
+    let reference = state.workspace.content.active_view.clone();
+    state
+        .workbench
+        .documents
+        .activate(WorkspaceDocumentId::CellView(reference));
+    let active_key = state.workspace.content.active_key();
+    let design_management = &mut state.workspace.content.design_management;
+    let first = design_management
+        .bootstrap_for_cell_view(&active_key, "First", [11])
+        .unwrap();
+    let catalog = design_management.sheet_catalog_mut(&active_key).unwrap();
+    let second = catalog
+        .create_sheet(sheet_definition("Second"), Some(first))
+        .unwrap();
+    catalog
+        .assign_objects(catalog.revision(), second, [22])
+        .unwrap();
+    let base_key = format!(
+        "project:{}:cell-view:{active_key}",
+        state.workspace.content.project.id().as_uuid()
+    );
+    (state, base_key, [first, second])
+}
+
+/// The wires on each printed page, in page order.
+fn printed_wire_ids(resolved: &ResolvedHardcopyDocument) -> Vec<Vec<u64>> {
+    let wires = |document: &HardcopySemanticDocument| match document {
+        HardcopySemanticDocument::Schematic(schematic) => {
+            schematic.wires.iter().map(|wire| wire.id).collect()
+        }
+        other => panic!("expected a schematic page, got {other:?}"),
+    };
+    match resolved.semantic_document() {
+        HardcopySemanticDocument::Aggregate(aggregate) => aggregate
+            .children
+            .iter()
+            .map(|child| wires(&child.document))
+            .collect(),
+        document => vec![wires(document)],
+    }
+}
+
+fn resolve_prepared(
+    state: &AppState,
+    source_key: &str,
+    scope: HardcopyScope,
+) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
+    prepare_retained_hardcopy_resolution(state, source_key, scope)?.resolve_owned()
+}
+
+#[test]
+fn a_multi_sheet_cell_view_prints_every_sheet_on_its_own_page() {
+    let (mut state, base_key, [first, second]) = two_sheets_drawn_at_the_same_place();
+    let base = enumerate_retained_hardcopy_sources(&state)
+        .into_iter()
+        .find(|descriptor| descriptor.source_key == base_key)
+        .unwrap();
+    // "Active document" would only repeat "All sheets" under a second name,
+    // and it printed every sheet overlaid on one page.
+    assert_eq!(
+        base.allowed_scopes,
+        [
+            HardcopyScope::Selection,
+            HardcopyScope::CurrentSheet,
+            HardcopyScope::AllSheetsOrPanes,
+        ]
+    );
+    assert!(matches!(
+        resolve_prepared(&state, &base_key, HardcopyScope::ActiveDocument),
+        Err(HardcopySourceError::UnsupportedScope(
+            HardcopyScope::ActiveDocument
+        ))
+    ));
+    assert_eq!(
+        printed_wire_ids(
+            &resolve_prepared(&state, &base_key, HardcopyScope::AllSheetsOrPanes).unwrap()
+        ),
+        [vec![11], vec![22]]
+    );
+    for (sheet, wire) in [(first, 11), (second, 22)] {
+        let sheet_key = format!("{base_key}:sheet:{sheet}");
+        assert_eq!(
+            printed_wire_ids(
+                &resolve_prepared(&state, &sheet_key, HardcopyScope::CurrentSheet).unwrap()
+            ),
+            [[wire]]
+        );
+    }
+    assert_eq!(
+        printed_wire_ids(
+            &resolve_prepared(&state, &base_key, HardcopyScope::CurrentSheet).unwrap()
+        ),
+        [[11]]
+    );
+    let active_key = state.workspace.content.active_key();
+    state
+        .workspace
+        .content
+        .design_management
+        .sheet_catalog_mut(&active_key)
+        .unwrap()
+        .set_active(second)
+        .unwrap();
+    assert_eq!(
+        printed_wire_ids(
+            &resolve_prepared(&state, &base_key, HardcopyScope::CurrentSheet).unwrap()
+        ),
+        [[22]]
+    );
+}
+
 #[test]
 fn global_app_resolver_rejects_stale_results_registry() {
     let mut state = AppState::default();

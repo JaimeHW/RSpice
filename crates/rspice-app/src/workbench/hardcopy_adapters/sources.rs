@@ -199,25 +199,32 @@ pub(crate) fn enumerate_retained_hardcopy_sources(
             view_type,
             ViewType::Schematic | ViewType::Testbench | ViewType::Symbol
         );
-        let mut allowed_scopes = if matches!(view_type, ViewType::Schematic | ViewType::Testbench) {
-            vec![
-                HardcopyScope::Selection,
-                HardcopyScope::CurrentSheet,
-                HardcopyScope::ActiveDocument,
-            ]
-        } else {
-            vec![HardcopyScope::ActiveDocument]
-        };
-        if matches!(view_type, ViewType::Schematic | ViewType::Testbench)
+        let schematic = matches!(view_type, ViewType::Schematic | ViewType::Testbench);
+        // Every sheet of a cell view shares one coordinate space, so a page
+        // that ignored the catalog would draw the sheets on top of each other.
+        // Where there are sheets to name, "All sheets" prints each on its own
+        // page, and an "Active document" scope would only repeat it under a
+        // second name.
+        let has_sheets = schematic
             && state
                 .workspace
                 .content
                 .design_management
                 .sheet_catalog(&active_key)
-                .is_some_and(|catalog| !catalog.sheets().is_empty())
-        {
-            allowed_scopes.push(HardcopyScope::AllSheetsOrPanes);
-        }
+                .is_some_and(|catalog| !catalog.sheets().is_empty());
+        let allowed_scopes = match (schematic, has_sheets) {
+            (true, true) => vec![
+                HardcopyScope::Selection,
+                HardcopyScope::CurrentSheet,
+                HardcopyScope::AllSheetsOrPanes,
+            ],
+            (true, false) => vec![
+                HardcopyScope::Selection,
+                HardcopyScope::CurrentSheet,
+                HardcopyScope::ActiveDocument,
+            ],
+            (false, _) => vec![HardcopyScope::ActiveDocument],
+        };
         descriptors.push(RetainedHardcopySourceDescriptor {
             source_key: design_source_key.clone(),
             display_name: state.workspace.content.active_display_path(),
