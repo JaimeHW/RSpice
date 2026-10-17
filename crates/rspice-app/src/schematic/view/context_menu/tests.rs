@@ -718,8 +718,9 @@ fn design_note_context_exposes_only_compatible_object_lifecycle_actions() {
     assert!(action_availability(ContextAction::Copy, &state).0);
     assert!(action_availability(ContextAction::Duplicate, &state).0);
     assert!(action_availability(ContextAction::Delete, &state).0);
-    assert!(!action_availability(ContextAction::Rotate, &state).0);
-    assert!(!action_availability(ContextAction::Mirror, &state).0);
+    // A note turns and flips with the rest of the drawing (audit E-2).
+    assert!(action_availability(ContextAction::Rotate, &state).0);
+    assert!(action_availability(ContextAction::Mirror, &state).0);
     let summary = selection_summary(&state, ContextTarget::Canvas);
     assert!(summary.contains("Review note"));
     assert!(summary.contains("Review bias path"));
@@ -766,8 +767,9 @@ fn documentation_shape_context_exposes_the_complete_non_electrical_lifecycle() {
     assert!(action_availability(ContextAction::Copy, &state).0);
     assert!(action_availability(ContextAction::Duplicate, &state).0);
     assert!(action_availability(ContextAction::Delete, &state).0);
-    assert!(!action_availability(ContextAction::Rotate, &state).0);
-    assert!(!action_availability(ContextAction::Mirror, &state).0);
+    // A shape turns and flips with the rest of the drawing (audit E-2).
+    assert!(action_availability(ContextAction::Rotate, &state).0);
+    assert!(action_availability(ContextAction::Mirror, &state).0);
     assert!(selection_summary(&state, ContextTarget::Canvas).contains("Callout"));
 
     let symbol_context = schematic_symbol_context(&state);

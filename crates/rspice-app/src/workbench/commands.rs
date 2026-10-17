@@ -5,6 +5,9 @@
 //! UI does not advertise speculative or placeholder capability.
 
 use crate::schematic::view::schematic_symbol_context;
+use crate::schematic::view::selection_transform::{
+    SelectionTransform, transform_selection_on_active_sheet,
+};
 use crate::state::{ComponentType, Tool};
 use crate::workbench::app::sheets as sheet_actions;
 use crate::workbench::commands::vocabulary::Command;
@@ -135,6 +138,7 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::CheckAndSave
             | Command::Place(_)
             | Command::RotateSelection
+            | Command::RotateSelectionCounterClockwise
             | Command::MirrorSelectionHorizontal
             | Command::MirrorSelectionVertical
             | Command::AlignSelectionLeft
@@ -578,17 +582,12 @@ impl Command {
                     && !state.ui.symbol.editor.effective_selection().is_empty()
             }
             Self::RotateSelection
+            | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical => {
                 active_schematic_editor(app)
                     && !state.schematic_edit_read_only()
-                    && state.schematic.session.editor.selection.components.iter().any(|id| {
-                        state
-                            .schematic
-                            .document().components
-                            .iter()
-                            .any(|component| component.id == *id)
-                    })
+                    && schematic_selection_has_live_object(&state.schematic)
             }
             Self::AlignSelectionLeft
             | Self::AlignSelectionCenter
@@ -1796,47 +1795,20 @@ impl Command {
             Self::MirrorSelectionVertical if active_symbol_editor(app) => {
                 app.transform_selected_symbol_item(SymbolTransform::MirrorVertical);
             }
-            Self::RotateSelection => {
+            Self::RotateSelection
+            | Self::RotateSelectionCounterClockwise
+            | Self::MirrorSelectionHorizontal
+            | Self::MirrorSelectionVertical => {
+                let transform = match self {
+                    Self::RotateSelectionCounterClockwise => {
+                        SelectionTransform::RotateCounterClockwise
+                    }
+                    Self::MirrorSelectionHorizontal => SelectionTransform::MirrorHorizontal,
+                    Self::MirrorSelectionVertical => SelectionTransform::MirrorVertical,
+                    _ => SelectionTransform::RotateClockwise,
+                };
                 let symbol_context = schematic_symbol_context(&app.state);
-                crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
-                    &mut app.state,
-                );
-                crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
-                    &mut app.state,
-                    |schematic| {
-                        schematic.rotate_selection_resolved(|component| {
-                            symbol_context.terminal_points(component)
-                        })
-                    },
-                );
-            }
-            Self::MirrorSelectionHorizontal => {
-                let symbol_context = schematic_symbol_context(&app.state);
-                crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
-                    &mut app.state,
-                );
-                crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
-                    &mut app.state,
-                    |schematic| {
-                        schematic.mirror_selection_h_resolved(|component| {
-                            symbol_context.terminal_points(component)
-                        })
-                    },
-                );
-            }
-            Self::MirrorSelectionVertical => {
-                let symbol_context = schematic_symbol_context(&app.state);
-                crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
-                    &mut app.state,
-                );
-                crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
-                    &mut app.state,
-                    |schematic| {
-                        schematic.mirror_selection_v_resolved(|component| {
-                            symbol_context.terminal_points(component)
-                        })
-                    },
-                );
+                transform_selection_on_active_sheet(&mut app.state, &symbol_context, transform);
             }
             Self::AlignSelectionLeft
             | Self::AlignSelectionCenter

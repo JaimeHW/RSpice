@@ -4,8 +4,11 @@ use super::{
     component::{Component, LibraryCellInstance},
     component_type::ComponentType,
     document::SchematicDocument,
+    documentation_shape::DocumentationShapeGeometry,
     identity::SchematicIdentity,
+    movement::orthogonal_route_for_corresponding_points,
     rotation::Rotation,
+    selection::Selection,
 };
 use rspice_design_model::Point;
 
@@ -24,11 +27,14 @@ pub struct ComponentModelOverride<'a> {
     pub symbol_variant: Option<&'a str>,
 }
 
-/// Committed orientation changes supported by component editing.
-#[derive(Debug, Clone, Copy)]
-pub enum ComponentTransform {
+/// A turn or flip of the whole selection about one pivot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectionTransform {
     RotateClockwise,
+    RotateCounterClockwise,
+    /// Flip left to right, about a vertical axis.
     MirrorHorizontal,
+    /// Flip top to bottom, about a horizontal axis.
     MirrorVertical,
 }
 
@@ -102,92 +108,257 @@ pub fn add_library_cell_component(
     id
 }
 
-/// Apply the requested edit and remap attached wire points once, in the supplied order.
-pub fn transform_components_resolved(
-    document: &mut SchematicDocument,
-    ids: &[u64],
-    terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
-    transform: ComponentTransform,
-) {
-    match transform {
-        ComponentTransform::RotateClockwise => {
-            transform_components_with(document, ids, terminal_points_for, |component| {
-                component.rotation = component.rotation.rotate_cw()
-            })
+impl SelectionTransform {
+    /// The undo-history name of this edit.
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::RotateClockwise => "rotate selection",
+            Self::RotateCounterClockwise => "rotate selection counter-clockwise",
+            Self::MirrorHorizontal => "mirror horizontally",
+            Self::MirrorVertical => "mirror vertically",
         }
-        ComponentTransform::MirrorHorizontal => {
-            transform_components_with(document, ids, terminal_points_for, |component| {
-                component.toggle_mirror_h()
-            })
-        }
-        ComponentTransform::MirrorVertical => {
-            transform_components_with(document, ids, terminal_points_for, |component| {
-                component.toggle_mirror_v()
-            })
+    }
+
+    /// Where `point` goes when the drawing turns or flips about `pivot`.
+    /// Screen y grows downward, so clockwise takes +x to +y, as a part's
+    /// `R90` does.
+    pub fn apply(self, point: Point, pivot: Point) -> Point {
+        let (dx, dy) = (point.x - pivot.x, point.y - pivot.y);
+        let (x, y) = match self {
+            Self::RotateClockwise => (-dy, dx),
+            Self::RotateCounterClockwise => (dy, -dx),
+            Self::MirrorHorizontal => (-dx, dy),
+            Self::MirrorVertical => (dx, -dy),
+        };
+        Point::new(pivot.x + x, pivot.y + y)
+    }
+
+    /// Turn or flip a part's orientation the same way in world terms. A
+    /// part's orientation is a rotation applied after its local mirror, and
+    /// a world flip reverses the sense of that rotation.
+    fn orient(self, component: &mut Component) {
+        let negated = |rotation: Rotation| match rotation {
+            Rotation::R90 => Rotation::R270,
+            Rotation::R270 => Rotation::R90,
+            other => other,
+        };
+        match self {
+            Self::RotateClockwise => component.rotation = component.rotation.rotate_cw(),
+            Self::RotateCounterClockwise => component.rotation = component.rotation.rotate_ccw(),
+            Self::MirrorHorizontal => {
+                component.rotation = negated(component.rotation);
+                component.toggle_mirror_h();
+            }
+            Self::MirrorVertical => {
+                component.rotation = negated(component.rotation);
+                component.toggle_mirror_v();
+            }
         }
     }
 }
 
-fn transform_components_with(
+/// Turn or flip everything `selection` holds about `pivot` as one rigid body:
+/// parts (position and orientation), wires, buses, junctions, bus taps, net
+/// labels, notes, shapes and probes. A wire left out of the selection that
+/// ends on something that moved follows it, rerouted with square corners
+/// where it was square; one that cannot be rerouted that way follows in a
+/// straight line. Returns whether anything moved.
+pub fn transform_selection(
     document: &mut SchematicDocument,
-    ids: &[u64],
+    selection: &Selection,
+    pivot: Point,
     mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
-    transform: impl Fn(&mut Component),
-) {
-    let before: Vec<(u64, Vec<Point>)> = ids
-        .iter()
-        .filter_map(|&id| {
-            let component = document
-                .components
-                .iter()
-                .find(|component| component.id == id)?;
-            Some((id, terminal_points_for(component)))
-        })
-        .collect();
-
-    for &id in ids {
-        let Some(index) = document
-            .components
-            .iter()
-            .position(|component| component.id == id)
-        else {
-            continue;
-        };
-        transform(&mut document.components[index]);
+    transform: SelectionTransform,
+) -> bool {
+    if !selection_has_content(document, selection) {
+        return false;
     }
-
-    // Terminal order is positional and stable across transforms.
-    // Build one old->new table for the whole selection, then apply it
-    // once to the original wire state so selected components cannot
-    // remap each other's freshly moved endpoints.
+    let map = |point: Point| transform.apply(point, pivot);
+    // Old position to new, for everything an unselected wire can end on.
     let mut remaps: Vec<(Point, Point)> = Vec::new();
-    for (id, before_points) in before {
-        let Some(component) = document
-            .components
+
+    for component in document
+        .components
+        .iter_mut()
+        .filter(|component| selection.has_component(component.id))
+    {
+        let before = terminal_points_for(component);
+        transform.orient(component);
+        component.pos = map(component.pos);
+        remaps.extend(before.into_iter().zip(terminal_points_for(component)));
+    }
+    let moved_wire_points: Vec<Point> = document
+        .wires
+        .iter()
+        .filter(|wire| selection.has_wire(wire.id))
+        .flat_map(|wire| wire.points.iter().copied())
+        .collect();
+    for junction in document.junctions.iter_mut().filter(|junction| {
+        selection.has_junction(junction.pos) || moved_wire_points.contains(&junction.pos)
+    }) {
+        junction.pos = map(junction.pos);
+    }
+    for wire in document
+        .wires
+        .iter_mut()
+        .filter(|wire| selection.has_wire(wire.id))
+    {
+        for point in &mut wire.points {
+            remaps.push((*point, map(*point)));
+            *point = map(*point);
+        }
+    }
+    for bus in document
+        .buses
+        .iter_mut()
+        .filter(|bus| selection.has_bus(bus.id))
+    {
+        for point in &mut bus.points {
+            *point = map(*point);
+        }
+    }
+    for tap in document
+        .bus_taps
+        .iter_mut()
+        .filter(|tap| selection.has_bus_tap(tap.id))
+    {
+        tap.bus_point = map(tap.bus_point);
+        tap.connection_point = map(tap.connection_point);
+    }
+    for label in document
+        .net_labels
+        .iter_mut()
+        .filter(|label| selection.has_net_label(label.id))
+    {
+        label.pos = map(label.pos);
+    }
+    for note in document
+        .design_notes
+        .iter_mut()
+        .filter(|note| selection.has_design_note(note.id))
+    {
+        let to = map(note.pos);
+        note.translate(to - note.pos);
+    }
+    for shape in document
+        .documentation_shapes
+        .iter_mut()
+        .filter(|shape| selection.has_documentation_shape(shape.id))
+    {
+        map_shape_points(&mut shape.geometry, map);
+    }
+    for probe in document
+        .probes
+        .iter_mut()
+        .filter(|probe| selection.has_probe(probe.id))
+    {
+        probe.position = map(probe.position);
+    }
+
+    remaps.retain(|(before, after)| before != after);
+    follow_with_unselected_wires(document, selection, &remaps);
+    true
+}
+
+fn selection_has_content(document: &SchematicDocument, selection: &Selection) -> bool {
+    document
+        .components
+        .iter()
+        .any(|component| selection.has_component(component.id))
+        || document
+            .wires
             .iter()
-            .find(|component| component.id == id)
-        else {
+            .any(|wire| selection.has_wire(wire.id))
+        || document
+            .bus_taps
+            .iter()
+            .any(|tap| selection.has_bus_tap(tap.id))
+        || document
+            .net_labels
+            .iter()
+            .any(|label| selection.has_net_label(label.id))
+        || document
+            .design_notes
+            .iter()
+            .any(|note| selection.has_design_note(note.id))
+        || document
+            .documentation_shapes
+            .iter()
+            .any(|shape| selection.has_documentation_shape(shape.id))
+        || document
+            .probes
+            .iter()
+            .any(|probe| selection.has_probe(probe.id))
+        || document.buses.iter().any(|bus| selection.has_bus(bus.id))
+}
+
+fn map_shape_points(geometry: &mut DocumentationShapeGeometry, map: impl Fn(Point) -> Point) {
+    let points: Vec<&mut Point> = match geometry {
+        DocumentationShapeGeometry::Rectangle { first, opposite } => vec![first, opposite],
+        DocumentationShapeGeometry::Line { start, end } => vec![start, end],
+        DocumentationShapeGeometry::Polygon { points } => points.iter_mut().collect(),
+        DocumentationShapeGeometry::Arc {
+            start,
+            through,
+            end,
+        } => vec![start, through, end],
+        DocumentationShapeGeometry::Callout {
+            tip,
+            elbow,
+            box_corner,
+        } => vec![tip, elbow, box_corner],
+    };
+    for point in points {
+        *point = map(*point);
+    }
+}
+
+/// Carry every unselected wire point that sat on a moved position to where
+/// that position went. A square wire is rerouted with square corners, as
+/// Move reroutes it, and the part connections that index its points follow.
+fn follow_with_unselected_wires(
+    document: &mut SchematicDocument,
+    selection: &Selection,
+    remaps: &[(Point, Point)],
+) {
+    let moved_to = |point: &Point| {
+        remaps
+            .iter()
+            .find(|(before, _)| before == point)
+            .map(|(_, after)| *after)
+    };
+    for index in 0..document.wires.len() {
+        let wire = &document.wires[index];
+        if selection.has_wire(wire.id) {
             continue;
-        };
-        let after_points = terminal_points_for(component);
-        for (old_pos, new_pos) in before_points.into_iter().zip(after_points) {
-            if old_pos != new_pos {
-                remaps.push((old_pos, new_pos));
-            }
         }
-    }
-
-    let mut updates: Vec<(usize, usize, Point)> = Vec::new();
-    for (wire_index, wire) in document.wires.iter().enumerate() {
-        for (point_index, point) in wire.points.iter().enumerate() {
-            if let Some((_, new_pos)) = remaps.iter().find(|(old_pos, _)| point == old_pos) {
-                updates.push((wire_index, point_index, *new_pos));
-            }
+        let followed: Vec<Point> = wire
+            .points
+            .iter()
+            .map(|point| moved_to(point).unwrap_or(*point))
+            .collect();
+        if followed == wire.points {
+            continue;
         }
-    }
-
-    for (wire_index, point_index, new_pos) in updates {
-        document.wires[wire_index].points[point_index] = new_pos;
+        let wire_id = wire.id;
+        let rerouted = wire
+            .is_orthogonal()
+            .then(|| orthogonal_route_for_corresponding_points(wire_id, &wire.points, &followed));
+        match rerouted {
+            Some(Ok((route, point_indices))) => {
+                for connection in document
+                    .connections
+                    .iter_mut()
+                    .filter(|connection| connection.wire_id == wire_id)
+                {
+                    if let Some(&moved) = point_indices.get(connection.point_index) {
+                        connection.point_index = moved;
+                    }
+                }
+                document.wires[index].points = route;
+            }
+            Some(Err(_)) | None => document.wires[index].points = followed,
+        }
     }
 }
 
@@ -260,4 +431,46 @@ pub fn legacy_terminal_points(component: &Component) -> Vec<Point> {
         .into_iter()
         .map(|(_, pos)| pos)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every pin of a part lands where the turn or flip takes that same pin,
+    /// whatever orientation the part had, so a wire on a pin stays on it and
+    /// a drain stays a drain.
+    #[test]
+    fn a_part_turns_and_flips_with_the_drawing() {
+        let pivot = Point::new(30, -20);
+        let transforms = [
+            SelectionTransform::RotateClockwise,
+            SelectionTransform::RotateCounterClockwise,
+            SelectionTransform::MirrorHorizontal,
+            SelectionTransform::MirrorVertical,
+        ];
+        for rotation in [Rotation::R0, Rotation::R90, Rotation::R180, Rotation::R270] {
+            for (mirror_h, mirror_v) in [(false, false), (true, false), (false, true)] {
+                for transform in transforms {
+                    let mut part = Component::new(1, ComponentType::Nmos, Point::new(100, 40));
+                    part.rotation = rotation;
+                    part.mirror_h = mirror_h;
+                    part.mirror_v = mirror_v;
+                    let expected: Vec<Point> = legacy_terminal_points(&part)
+                        .into_iter()
+                        .map(|pin| transform.apply(pin, pivot))
+                        .collect();
+
+                    transform.orient(&mut part);
+                    part.pos = transform.apply(part.pos, pivot);
+
+                    assert_eq!(
+                        legacy_terminal_points(&part),
+                        expected,
+                        "{transform:?} of a part at {rotation:?}, mirrored {mirror_h}/{mirror_v}"
+                    );
+                }
+            }
+        }
+    }
 }

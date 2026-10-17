@@ -75,6 +75,7 @@ mod tests {
         "move_component_with_wires_resolved",
         "stretch_target",
         "stretch_target_resolved",
+        "transform_selection",
     ];
 
     /// Where a production caller may open a scope: this module; the one

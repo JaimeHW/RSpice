@@ -26,6 +26,7 @@ use rspice_schematic_editor::view::symbol_context::SelectionWindow;
 mod scene;
 mod selection_drag;
 pub(crate) mod selection_layout;
+pub(crate) mod selection_transform;
 pub(crate) mod sheet_visibility;
 mod shelf_drag;
 mod snap_resolution;
