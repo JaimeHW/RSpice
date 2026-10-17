@@ -256,6 +256,85 @@ fn a_cellview_check_leaves_standing_what_only_the_design_check_computes() {
     assert!(gate.has_errors(), "the run gate refuses on the loop");
 }
 
+const GROUND_NOT_ZERO: &str = "DRC-GROUND-NOT-NODE-ZERO";
+
+/// A resistor drawn in the open `amp` whose leg is labelled `vx` and then
+/// `gnd` at the same point: the name that claimed the net first keeps it, so
+/// the deck writes `vx` where the drawing says ground.
+fn draw_lost_ground_label(state: &mut AppState) {
+    let schematic = &mut state.schematic;
+    let id = schematic.add_component(ComponentType::Resistor, Point::new(3000, 3600));
+    let leg = schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == id)
+        .expect("the resistor is placed")
+        .terminal_positions()[0]
+        .1;
+    let end = Point::new(leg.x - 40, leg.y);
+    schematic
+        .add_wire(vec![leg, end])
+        .expect("a two-point wire commits");
+    schematic.add_net_label(end, "vx".to_owned());
+    schematic.add_net_label(end, "gnd".to_owned());
+}
+
+/// A ground label the deck does not write as node 0 is a fact of the
+/// cellview that draws it, whoever checks it. Waived where Check Design
+/// found it inside `amp`, it is still found, and still waived, by a check of
+/// `amp` alone — which therefore never reports the waiver as covering
+/// nothing, or offers to delete it.
+#[test]
+fn a_cell_states_its_own_lost_ground_label_and_keeps_its_waiver() {
+    let mut fixture = fixture();
+    draw_lost_ground_label(&mut fixture.state);
+
+    fixture.state.check_design().expect("the design checks");
+    let target = {
+        let listed = listing::listing(&fixture.state);
+        (0..listed.len())
+            .filter_map(|index| listed.row(index))
+            .find(|row| row.code == GROUND_NOT_ZERO)
+            .and_then(|row| match row.waiver_action {
+                Some(crate::workbench::app_state::waivers::WaiverAction::Waive(target)) => {
+                    Some(target.clone())
+                }
+                _ => None,
+            })
+            .expect("Check Design finds the lost label inside amp, and it may be waived")
+    };
+    assert_eq!(target.cell_view, fixture.amp, "the waiver is amp's own");
+    fixture
+        .state
+        .waive_finding(&target, "vx is the local return on purpose")
+        .expect("the finding is waived");
+
+    fixture
+        .state
+        .check_active_cellview()
+        .expect("the open cellview checks");
+    let listed = listing::listing(&fixture.state);
+    let unmatched = (0..listed.len())
+        .filter_map(|index| listed.row(index))
+        .filter(|row| row.code == "WAIVER-UNMATCHED")
+        .map(|row| row.message.to_owned())
+        .collect::<Vec<_>>();
+    assert!(
+        unmatched.is_empty(),
+        "the waiver still covers its finding: {unmatched:?}"
+    );
+    let lost = (0..listed.len())
+        .filter_map(|index| listed.row(index))
+        .filter(|row| row.code == GROUND_NOT_ZERO)
+        .map(|row| row.waived())
+        .collect::<Vec<_>>();
+    assert!(
+        !lost.is_empty() && lost.iter().all(|waived| *waived),
+        "amp's own check states the lost label, waived: {lost:?}"
+    );
+}
+
 /// The objects of the rows naming `cell_view`.
 fn rows_in(state: &AppState, cell_view: &CellViewRef) -> Vec<String> {
     rows(state)

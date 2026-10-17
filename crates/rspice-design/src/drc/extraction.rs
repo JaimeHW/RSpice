@@ -505,15 +505,18 @@ fn check_subject(
                 check_one_view(view.document, &view_config, &components, &connectivity);
             // A ground mark the deck does not write as node 0 is a fact of the
             // cellview that draws it, unlike whether the design reaches node 0
-            // at all, so it is stated with that cellview's findings.
-            if config.check_missing_ground {
-                append_ground_not_node_zero(
-                    view.document,
-                    &connectivity,
-                    &mut report,
-                    &config.severity_overrides,
-                );
-            }
+            // at all, so it is stated with that cellview's findings — whoever
+            // checks it. A cell that takes its reference through its ports is
+            // not asked whether it reaches ground, and still states its own
+            // ground labels: otherwise its check would find nothing where the
+            // design's check found a waived error, and report the waiver as
+            // covering nothing.
+            append_ground_not_node_zero(
+                view.document,
+                &connectivity,
+                &mut report,
+                &config.severity_overrides,
+            );
             graph.append_recursive_findings(
                 index,
                 reach,
