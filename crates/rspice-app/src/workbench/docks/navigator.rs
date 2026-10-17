@@ -1748,7 +1748,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                 .map(|names| names.join("\n"));
                             match result {
                                 Ok(names) => ui.ctx().copy_text(names),
-                                Err(error) => result_browser_action_error(ui.ctx(), app, error),
+                                Err(error) => app.state.prompt(error),
                             }
                             ui.close();
                         }
@@ -1759,7 +1759,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         if !checked_ordered.is_empty() && !clipboard_exact_available {
                             copy_exact.clone().on_disabled_hover_text(
                                 exact_validation_error.clone().unwrap_or_else(|| format!(
-                                    "The waveform portion contains {clipboard_sample_count} samples. Clipboard copy is limited to {RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT}; use exact export instead."
+                                    "The waveform portion holds {clipboard_sample_count} samples; clipboard copy is limited to {RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT}. Export it instead."
                                 )),
                             );
                         }
@@ -1771,15 +1771,11 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                 Ok(exact) if exact.len() <= RESULT_BROWSER_CLIPBOARD_BYTE_LIMIT => {
                                     ui.ctx().copy_text(exact);
                                 }
-                                Ok(exact) => result_browser_action_error(
-                                    ui.ctx(),
-                                    app,
-                                    format!(
-                                        "The exact selection requires {} bytes. Clipboard copy is limited to {RESULT_BROWSER_CLIPBOARD_BYTE_LIMIT}; use exact export instead.",
-                                        exact.len()
-                                    ),
-                                ),
-                                Err(error) => result_browser_action_error(ui.ctx(), app, error),
+                                Ok(exact) => app.state.prompt(format!(
+                                    "The selection is {} bytes; clipboard copy is limited to {RESULT_BROWSER_CLIPBOARD_BYTE_LIMIT} bytes. Export it instead.",
+                                    exact.len()
+                                )),
+                                Err(error) => app.state.prompt(error),
                             }
                             ui.close();
                         }
@@ -1896,14 +1892,11 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                     }
                     if responses.overlay.is_some_and(|response| response.clicked()) {
                         let enabled = app.state.simulation.toggle_dataset_overlay(run.dataset_id);
-                        app.state
-                            .push_user_message(crate::diagnostics::ConsoleMessage::info(
-                                if enabled {
-                                    format!("Overlaying {} on the active result sheet.", run.label)
-                                } else {
-                                    format!("Removed {} from the active result sheet.", run.label)
-                                },
-                            ));
+                        app.state.prompt(if enabled {
+                            format!("Overlaying {} on the active result sheet.", run.label)
+                        } else {
+                            format!("Removed {} from the active result sheet.", run.label)
+                        });
                     }
                     if !run_active && query.is_empty() {
                         continue;
@@ -1968,9 +1961,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         Ok(()) => {
                             app.state.workspace.content.visualization_documents_dirty = true;
                         }
-                        Err(error) => app
-                            .state
-                            .push_user_message(crate::diagnostics::ConsoleMessage::warning(error)),
+                        Err(error) => app.state.prompt(error),
                     }
                 }
             }
@@ -5404,7 +5395,7 @@ fn result_artifact_context_menu(
                 &app.state.simulation.retained.runs,
             ) {
                 Ok(value) => ui.ctx().copy_text(value),
-                Err(error) => result_browser_action_error(ui.ctx(), app, error),
+                Err(error) => app.state.prompt(error),
             }
             ui.close();
         }
@@ -5437,7 +5428,7 @@ fn result_artifact_context_menu(
                 &app.state.simulation.retained.runs,
             ) {
                 Ok(path) => reveal_producer_log(app, path, artifact.identity.canonical_name()),
-                Err(error) => result_browser_action_error(ui.ctx(), app, error),
+                Err(error) => app.state.prompt(error),
             }
             ui.close();
         }
@@ -5565,7 +5556,7 @@ fn result_signal_context_menu(
         if copy_last.clicked() {
             match exact_result_signal_last_sample(&key, &app.state.simulation.retained.runs) {
                 Ok(value) => ui.ctx().copy_text(value),
-                Err(error) => result_browser_action_error(ui.ctx(), app, error),
+                Err(error) => app.state.prompt(error),
             }
             ui.close();
         }
@@ -5581,14 +5572,14 @@ fn result_signal_context_menu(
         if !may_copy_samples {
             copy_samples.clone().on_disabled_hover_text(
                 exact_error.clone().unwrap_or_else(|| format!(
-                    "This quantity retains {retained_samples} samples. Clipboard copy is limited to {RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT}; use CSV export for larger evidence."
+                    "This quantity holds {retained_samples} samples; clipboard copy is limited to {RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT}. Export it as CSV instead."
                 )),
             );
         }
         if copy_samples.clicked() {
             match exact_result_signal_tsv(&key, &app.state.simulation.retained.runs) {
                 Ok(tsv) => ui.ctx().copy_text(tsv),
-                Err(error) => result_browser_action_error(ui.ctx(), app, error),
+                Err(error) => app.state.prompt(error),
             }
             ui.close();
         }
@@ -5618,7 +5609,7 @@ fn result_signal_context_menu(
         }
         if cross_probe.clicked() {
             if let Some(signal) = signal_name {
-                show_signal_on_schematic(ui.ctx(), app, &signal);
+                show_signal_on_schematic(app, &signal);
             }
             ui.close();
         }
@@ -5631,7 +5622,7 @@ fn result_signal_context_menu(
                         .unwrap_or_default();
                     reveal_producer_log(app, path, &quantity);
                 }
-                Err(error) => result_browser_action_error(ui.ctx(), app, error),
+                Err(error) => app.state.prompt(error),
             }
             ui.close();
         }
@@ -5658,33 +5649,14 @@ fn open_signal_table(
     }
 }
 
-fn result_browser_action_error(ctx: &egui::Context, app: &mut RSpiceApp, error: String) {
-    app.state
-        .ui
-        .toasts
-        .warn_with_title(ctx, "Result action unavailable", error.clone());
-    app.state
-        .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
-}
-
-fn show_signal_on_schematic(ctx: &egui::Context, app: &mut RSpiceApp, signal: &str) {
+fn show_signal_on_schematic(app: &mut RSpiceApp, signal: &str) {
     match crate::schematic::view::select_signal_conductor(&mut app.state, signal) {
         Ok(net) => {
             Command::OpenWorkspace(Workspace::Design).execute(app);
             app.state
-                .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "Selected conductor {net} from {signal}."
-                )));
+                .prompt(format!("Selected conductor {net} from {signal}."));
         }
-        Err(error) => {
-            let message = error.message(signal);
-            app.state
-                .ui
-                .toasts
-                .warn_with_title(ctx, "Cannot cross-probe", message.clone());
-            app.state
-                .push_user_message(crate::diagnostics::ConsoleMessage::warning(message));
-        }
+        Err(error) => app.state.prompt(error.message(signal)),
     }
 }
 
@@ -5698,7 +5670,7 @@ fn locate_on_schematic_menu(response: &egui::Response, app: &mut RSpiceApp, sign
     let signal = signal.to_owned();
     response.context_menu(|ui| {
         if ui.button("Show on schematic").clicked() {
-            show_signal_on_schematic(ui.ctx(), app, &signal);
+            show_signal_on_schematic(app, &signal);
             ui.close();
         }
     });

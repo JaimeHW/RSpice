@@ -313,12 +313,7 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) {
         match crate::workbench::documents::netlist_document::language::apply_quick_fix_for_finding(
             state, finding,
         ) {
-            Ok(applied) => {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::info(applied));
-            }
-            Err(refused) => {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(refused));
-            }
+            Ok(text) | Err(text) => state.prompt(text),
         }
     }
 }

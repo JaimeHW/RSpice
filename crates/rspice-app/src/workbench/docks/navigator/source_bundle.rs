@@ -212,8 +212,7 @@ fn open_file_action(
     .and_then(|()| crate::workbench::app::open_source_document_dialog(&mut app.state));
     if let Err(error) = opened {
         app.state.ui.code_workspace.source_file_dialog = None;
-        app.state
-            .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+        app.state.prompt(error);
     }
 }
 

@@ -7,7 +7,6 @@
 //! rather than displayed as this component's state.
 
 use super::*;
-use crate::diagnostics::ConsoleMessage;
 
 pub(super) fn component_panel(
     ui: &mut Ui,
@@ -580,12 +579,7 @@ pub(super) fn parameters_section(
             editable,
         ) && let Err(error) = apply_bound_model_choice(app, component.id, &selected_model)
         {
-            app.state
-                .push_user_message(ConsoleMessage::error(error.clone()));
-            app.state
-                .ui
-                .toasts
-                .error_with_title(ui.ctx(), "Model binding rejected", error);
+            app.state.prompt(error);
         }
     } else if let Some(model) = evidence.model.as_deref() {
         property_row(ui, "Model", model);
@@ -736,10 +730,10 @@ pub(super) fn parameters_section(
         {
             Ok(true) => app.invalidate_simulation_preflight(),
             Ok(false) => {}
-            Err(error) => app.state.push_user_message(ConsoleMessage::warning(format!(
+            Err(error) => app.state.prompt(format!(
                 "{key} was not removed from {}: {error}",
                 component.name
-            ))),
+            )),
         }
     }
 }

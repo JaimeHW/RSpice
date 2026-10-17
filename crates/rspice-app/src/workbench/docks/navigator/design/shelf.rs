@@ -589,11 +589,10 @@ fn request_library_part(app: &mut RSpiceApp, part_id: String, pack_id: String, v
         &version,
         Some(part_id.clone()),
     ) else {
-        app.state
-            .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                "The model hub no longer describes {pack_id} {version}, so '{part_id}' cannot \
-                 be added."
-            )));
+        app.state.prompt(format!(
+            "The model hub no longer describes {pack_id} {version}, so '{part_id}' cannot be \
+             added."
+        ));
         return;
     };
     app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPack {
@@ -1530,18 +1529,11 @@ fn stimulus_library_rows(state: &AppState, query: &str) -> Vec<StimulusShelfRow>
         .collect()
 }
 
-/// Arm one definition from the shelf; a refusal is reported where the reader
-/// is looking.
+/// Arm one definition from the shelf; a refusal answers on the status bar.
 fn arm_stimulus_definition(state: &mut AppState, name: &str, ctx: &egui::Context) {
     match crate::workbench::app::arm_placement_from_definition(state, name) {
         Ok(()) => finish_shelf_placement(state, ctx),
-        Err(refusal) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(refusal.clone()));
-            state
-                .ui
-                .toasts
-                .warn_with_title(ctx, "Stimulus not armed", refusal);
-        }
+        Err(refusal) => state.prompt(refusal),
     }
 }
 

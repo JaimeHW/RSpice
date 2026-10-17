@@ -855,13 +855,9 @@ pub(super) fn edit_row_with_hint(
         match stage_component_tuning(app, component.id) {
             Ok(()) => tuning.execute(app),
             Err(error) => {
-                app.state.workbench.verification.action_problem =
-                    Some(format!("Could not tune {}: {error}", component.name));
-                app.state
-                    .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                        "Could not tune {}: {error}",
-                        component.name
-                    )));
+                let problem = format!("Could not tune {}: {error}", component.name);
+                app.state.workbench.verification.action_problem = Some(problem.clone());
+                app.state.prompt(problem);
             }
         }
     }

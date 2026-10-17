@@ -27,7 +27,6 @@ use rspice_ui_kit::panels::{
 
 use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::model_library::ModelConsumerScope;
 use crate::state::{CellViewRef, Component, ViewType, explicit_component_model};
 use crate::ui::theme::{self, FontWeight};
@@ -1169,25 +1168,10 @@ fn selected_result_trace(
             }
             if response.clicked() {
                 match cross_probe_trace_to_design(app, &signal) {
-                    Ok(net) => {
-                        app.state.ui.toasts.success(
-                            ui.ctx(),
-                            "Schematic net located",
-                            format!("{signal} cross-probed to {net}."),
-                        );
-                        app.state.push_user_message(ConsoleMessage::info(format!(
-                            "Selected conductor {net} from {signal}."
-                        )));
-                    }
-                    Err(message) => {
-                        app.state.ui.toasts.warn_with_title(
-                            ui.ctx(),
-                            "Cannot cross-probe",
-                            message.clone(),
-                        );
-                        app.state
-                            .push_user_message(ConsoleMessage::warning(message));
-                    }
+                    Ok(net) => app
+                        .state
+                        .prompt(format!("Selected conductor {net} from {signal}.")),
+                    Err(message) => app.state.prompt(message),
                 }
             }
         }

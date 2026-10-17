@@ -258,9 +258,11 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                             if engine_response.on_hover_text(detail).clicked()
                                 && let Err(error) = app.simulation_controller.retry_engine_startup()
                             {
-                                app.state.push_sim_message(crate::diagnostics::ConsoleMessage::error(
+                                app.state.record(
+                                    crate::diagnostics::LogSeverity::Error,
+                                    crate::diagnostics::LogSource::Studio,
                                     format!("Engine startup could not be retried: {error}"),
-                                ));
+                                );
                             }
                         } else if can_open {
                             if engine_response

@@ -16,7 +16,7 @@ use egui::{
     Sense, Stroke, Ui, UiKind, Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -153,9 +153,8 @@ fn handle_launcher_netlist_drop(ctx: &Context, app: &mut RSpiceApp) -> bool {
         return false;
     }
     if dropped.len() != 1 {
-        app.state.push_user_message(ConsoleMessage::warning(
-            "Drop one SPICE deck at a time so RSpice can review one exact netlist project.",
-        ));
+        app.state
+            .prompt("Drop one SPICE deck at a time; each opens as one netlist project.");
         return false;
     }
 
@@ -180,9 +179,8 @@ fn handle_launcher_netlist_drop(ctx: &Context, app: &mut RSpiceApp) -> bool {
             )
         });
     if !supported {
-        app.state.push_user_message(ConsoleMessage::warning(
-            "The project launcher accepts .cir, .sp, .spice, .net, and .ckt SPICE decks.",
-        ));
+        app.state
+            .prompt("The project launcher accepts .cir, .sp, .spice, .net, and .ckt SPICE decks.");
         return false;
     }
 
@@ -216,9 +214,11 @@ fn handle_launcher_netlist_drop(ctx: &Context, app: &mut RSpiceApp) -> bool {
             }
         }
         Err(error) => {
-            app.state.push_user_message(ConsoleMessage::error(format!(
-                "Dropped SPICE source could not be read: {error}"
-            )));
+            app.state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Dropped SPICE source could not be read: {error}"),
+            );
             false
         }
     }
@@ -494,13 +494,16 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
                     .pending_discard = Some(candidate);
             }
             LauncherAction::OpenDiagnosticsFolder => match open_diagnostics_folder(&app.state) {
-                Ok(path) => app.state.push_user_message(ConsoleMessage::info(format!(
-                    "Opened diagnostic folder: {}",
-                    path.display()
-                ))),
-                Err(error) => app.state.push_user_message(ConsoleMessage::error(format!(
-                    "Diagnostic folder could not be opened: {error}"
-                ))),
+                Ok(path) => app
+                    .state
+                    .prompt(format!("Opened diagnostic folder: {}", path.display())),
+                Err(error) => {
+                    app.state.record(
+                        LogSeverity::Error,
+                        LogSource::Studio,
+                        format!("Diagnostic folder could not be opened: {error}"),
+                    );
+                }
             },
             LauncherAction::StartSafeMode(options) => match start_local_safe_mode(app, options) {
                 Ok(()) => app.state.workbench.project_launcher_open = false,

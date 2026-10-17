@@ -1,6 +1,5 @@
 //! Symbol inspector app coordination: validate, record history, publish and route CDF actions.
 
-use crate::diagnostics::ConsoleMessage;
 use crate::workbench::AppState;
 use egui::Ui;
 use rspice_schematic_editor::symbol_editor::inspector::{self, SymbolInspectorRequest};
@@ -60,7 +59,7 @@ fn apply_request(state: &mut AppState, mut request: SymbolInspectorRequest) {
             Ok(()) => request
                 .session
                 .accept_source(state.symbol_editor_request_source()),
-            Err(error) => state.push_user_message(ConsoleMessage::warning(error)),
+            Err(error) => state.prompt(error),
         }
     }
     state.ui.symbol.editor.inspector = request.session;

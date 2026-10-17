@@ -1608,9 +1608,7 @@ fn reveal_probe_expression(state: &mut AppState, expression: &str) {
             let projection = match resolved {
                 Ok(projection) => projection,
                 Err(error) => {
-                    state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                        "The probed net cannot be revealed: {error}"
-                    )));
+                    state.prompt(format!("The probed net cannot be revealed: {error}"));
                     open_measurements(state);
                     return;
                 }
