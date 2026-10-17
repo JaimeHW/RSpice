@@ -53,7 +53,7 @@ pub(super) fn open_insert_result_document(app: &mut RSpiceApp) {
     editor.insert_result_document_index = 0;
     editor.insert_result_caption = first.label.clone();
     editor.insert_result_alternative_text = format!(
-        "Result figure {} at immutable visualization revision {}.",
+        "Result figure {} at revision {}.",
         first.label,
         source.revision().get()
     );
@@ -191,7 +191,7 @@ pub(super) fn commit_insert_result_document(app: &mut RSpiceApp) {
                 }],
                 timestamp_unix_ms(),
                 "rspice-local-session",
-                "Insert immutable result document into report page",
+                "Insert result document into report page",
             )
             .map_err(|error| error.to_string())
     });
@@ -236,9 +236,7 @@ pub(super) fn select_result_document(
         app.state
             .workbench
             .report_authoring
-            .insert_result_alternative_text = format!(
-            "Result figure {} at immutable visualization revision {revision}.",
-            option.label
-        );
+            .insert_result_alternative_text =
+            format!("Result figure {} at revision {revision}.", option.label);
     }
 }

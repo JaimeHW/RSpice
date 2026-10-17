@@ -302,7 +302,7 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
             })?;
         if component.name != binding.component_name || component.value != binding.source_value {
             return Err(format!(
-                "{} no longer matches the exact Value row that opened the sandbox",
+                "{} no longer matches the Value row that opened the tuning sandbox",
                 binding.component_name
             ));
         }
@@ -368,7 +368,7 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
         app.state.schematic = original_schematic;
         app.state.workbench.preflight = original_preflight;
         return Err(format!(
-            "the tuned revision was not committed because exact run preparation failed: {}",
+            "the tuned revision was not committed because the run could not be prepared: {}",
             error.message()
         ));
     }

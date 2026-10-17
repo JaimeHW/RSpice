@@ -584,7 +584,7 @@ fn failed_literal_value_run_preparation_rolls_back_plan_and_schematic() {
     let error = tuning::commit_tuning_and_run(&mut app)
         .expect_err("missing ground and open pins fail exact run preparation");
 
-    assert!(error.contains("exact run preparation failed"), "{error}");
+    assert!(error.contains("the run could not be prepared"), "{error}");
     assert_eq!(
         app.state
             .sim_setup
