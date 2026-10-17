@@ -185,8 +185,14 @@ use rspice_core::analysis::harmonic_balance::{
 // and why; `Netlist::unread_root_source`, the ones in the deck's own text;
 // `source_map_for_editor_as_read`, the editor map with them applied; and
 // `NetlistSourceMap::unread_definition_for`, where a name nothing read binds
-// is written. The census is 5,733, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5733;
+// is written. The census was 5,733, with no slack.
+// Two statements keep an execution's installed Verilog-A from eviction until
+// it is done with it: `hold_project_veriloga_sources_for_session` and the
+// `HeldVerilogASources` it returns, which the simulation service's prepared
+// runtime sets install through (`rspice-simulation` veriloga.rs, behind the
+// runner, preflight's deck builds and checkpoint routing).
+// The census is 5,735, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5735;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

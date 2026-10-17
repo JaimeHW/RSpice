@@ -2913,6 +2913,60 @@ pub fn register_project_veriloga_sources_for_session_with_limits(
     registrations: impl IntoIterator<Item = ProjectVerilogASourceRegistration>,
     limits: ResourceLimits,
 ) -> Result<(), String> {
+    install_project_veriloga_sources(registrations, limits, false).map(drop)
+}
+
+/// Sealed Verilog-A sources an execution installed, held in the shared cache
+/// until this is dropped.
+///
+/// The cache makes room for an install by evicting its oldest entries, and a
+/// sealed source is never compiled again from anywhere: a build that misses
+/// one fails. A held source is never evicted, so an execution that installs
+/// and then builds, as often as its analysis rebuilds, finds every source it
+/// installed for as long as it holds them. An install that could fit only by
+/// evicting a held source is refused instead.
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Default)]
+#[must_use = "dropping the hold lets the installed sources be evicted"]
+pub struct HeldVerilogASources {
+    keys: Vec<VerilogASourceKey>,
+}
+
+#[cfg(feature = "veriloga")]
+impl Drop for HeldVerilogASources {
+    fn drop(&mut self) {
+        if self.keys.is_empty() {
+            return;
+        }
+        let mut cache = veriloga_source_cache()
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for key in &self.keys {
+            cache.release(key);
+        }
+    }
+}
+
+/// [`register_project_veriloga_sources_for_session_with_limits`], holding
+/// every installed source until the returned value is dropped.
+#[cfg(feature = "veriloga")]
+pub fn hold_project_veriloga_sources_for_session(
+    registrations: impl IntoIterator<Item = ProjectVerilogASourceRegistration>,
+    limits: ResourceLimits,
+) -> Result<HeldVerilogASources, String> {
+    install_project_veriloga_sources(registrations, limits, true)
+        .map(|keys| HeldVerilogASources { keys })
+}
+
+/// Install the set in one transaction under the cache lock; with `hold`, each
+/// installed key is held before the lock is released, so no other install can
+/// evict it in between. Returns the held keys.
+#[cfg(feature = "veriloga")]
+fn install_project_veriloga_sources(
+    registrations: impl IntoIterator<Item = ProjectVerilogASourceRegistration>,
+    limits: ResourceLimits,
+    hold: bool,
+) -> Result<Vec<VerilogASourceKey>, String> {
     let max_shared_cache_bytes = limits.max_shared_cache_bytes;
     let mut prepared_by_key = BTreeMap::<PathBuf, PreparedProjectVerilogARegistration>::new();
     for registration in registrations {
@@ -2960,7 +3014,7 @@ pub fn register_project_veriloga_sources_for_session_with_limits(
 
     let prepared = prepared_by_key.into_values().collect::<Vec<_>>();
     if prepared.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let mut folded_keys = BTreeMap::<&str, [u8; 32]>::new();
     let mut scoped_aliases = BTreeMap::<(&str, &str), [u8; 32]>::new();
@@ -3050,7 +3104,7 @@ pub fn register_project_veriloga_sources_for_session_with_limits(
         };
         let retained_bytes =
             veriloga_source_cache_entry_bytes(&VerilogASourceKey::new(&runtime.key, None), &entry)?;
-        replacements.push((runtime.key.into(), entry, retained_bytes));
+        replacements.push((VerilogASourceKey::from(runtime.key), entry, retained_bytes));
     }
 
     let replacement_bytes = replacements
@@ -3063,7 +3117,18 @@ pub fn register_project_veriloga_sources_for_session_with_limits(
         max_shared_cache_bytes,
     )
     .map_err(|error| error.to_string())?;
-    cache.try_replace_batch(replacements, max_shared_cache_bytes)
+    let keys = replacements
+        .iter()
+        .map(|(key, _, _)| key.clone())
+        .collect::<Vec<VerilogASourceKey>>();
+    cache.try_replace_batch(replacements, max_shared_cache_bytes)?;
+    if !hold {
+        return Ok(Vec::new());
+    }
+    for key in &keys {
+        cache.hold(key);
+    }
+    Ok(keys)
 }
 
 /// Atomically register a set of exact in-memory project- or signed-PDK-owned
