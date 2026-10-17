@@ -102,7 +102,35 @@ pub(crate) fn run_corner_declaration(
     contract: crate::sweeps::CornerRunConfig,
     reference_temperature_celsius: f64,
 ) -> Result<SimulationRun, String> {
-    run_declaration(
+    run_prepared_declaration(
+        prepare_corner_declaration(
+            deck,
+            contract,
+            reference_temperature_celsius,
+            DeclarationVerilogA::default(),
+        )?,
+        SavePolicy::RetainEngineProducedResults,
+    )
+}
+
+/// The Verilog-A a declaration's decks name: the set the run's deck names,
+/// and the model-library runtimes a deck materialized for each process corner
+/// names in place of the reference sections'.
+#[derive(Default)]
+pub(crate) struct DeclarationVerilogA {
+    pub(crate) run: crate::veriloga::PreparedVerilogARuntimeSet,
+    pub(crate) corners: crate::execution::CornerVerilogARuntimes,
+}
+
+/// Prepare a corner declaration over `deck`, whose Verilog-A is `veriloga`,
+/// for a test to inspect before it runs it.
+pub(crate) fn prepare_corner_declaration(
+    deck: &str,
+    contract: crate::sweeps::CornerRunConfig,
+    reference_temperature_celsius: f64,
+    veriloga: DeclarationVerilogA,
+) -> Result<PreparedRunSnapshot, String> {
+    prepare_declaration(
         deck,
         "Corner",
         QueuedAnalysis {
@@ -118,6 +146,7 @@ pub(crate) fn run_corner_declaration(
         reference_temperature_celsius,
         SavePolicy::RetainEngineProducedResults,
         &[],
+        veriloga,
     )
 }
 
@@ -163,6 +192,27 @@ pub(crate) fn run_declaration(
     save_policy: SavePolicy,
     outputs: &[rspice_simulation_contract::saved_output::SavedOutput],
 ) -> Result<SimulationRun, String> {
+    let snapshot = prepare_declaration(
+        deck,
+        label,
+        declaration,
+        reference_temperature_celsius,
+        save_policy,
+        outputs,
+        DeclarationVerilogA::default(),
+    )?;
+    run_prepared_declaration(snapshot, save_policy)
+}
+
+fn prepare_declaration(
+    deck: &str,
+    label: &str,
+    declaration: QueuedAnalysis,
+    reference_temperature_celsius: f64,
+    save_policy: SavePolicy,
+    outputs: &[rspice_simulation_contract::saved_output::SavedOutput],
+    veriloga: DeclarationVerilogA,
+) -> Result<PreparedRunSnapshot, String> {
     let instance = rspice_app_types::product::AnalysisInstanceId::from_namespace(
         TEST_NAMESPACE,
         label.as_bytes(),
@@ -207,8 +257,8 @@ pub(crate) fn run_declaration(
         project_model_sources: Vec::new(),
         specifications: Vec::new(),
         specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
-        project_veriloga_runtimes: Default::default(),
-        corner_veriloga_runtimes: Default::default(),
+        project_veriloga_runtimes: veriloga.run,
+        corner_veriloga_runtimes: veriloga.corners,
         target: ExecutionTargetCapabilities::current(),
         receipt: RunSourceReceipt::SchematicDrc(ContentDigest::from_bytes([7; 32])),
         advisories: Vec::new(),
@@ -217,8 +267,14 @@ pub(crate) fn run_declaration(
         touchstone_export: TouchstoneExportPolicy::disabled(),
         sealed_source_dependencies: Vec::new(),
     };
+    PreparedRunSnapshot::new(parts).map_err(|error| error.to_string())
+}
 
-    let snapshot = PreparedRunSnapshot::new(parts).map_err(|error| error.to_string())?;
+/// Authorize and run a prepared declaration, the way `run_declaration` does.
+pub(crate) fn run_prepared_declaration(
+    snapshot: PreparedRunSnapshot,
+    save_policy: SavePolicy,
+) -> Result<SimulationRun, String> {
     let dispatch = PreparedRunAuthorization::default().authorize_campaign_member(snapshot)?;
 
     // Points are retained through the canonical runtime conversion. A hand-built
@@ -267,13 +323,20 @@ pub(crate) fn run_declaration(
         let resolved = task
             .resolve_dependency_artifacts(&HashMap::new())
             .map_err(|error| error.to_string())?;
-        let (queued, netlist, _runtimes, references, dependencies, environment, limits) =
+        let (queued, netlist, runtimes, references, dependencies, environment, limits) =
             resolved.into_runner_parts();
         let bridge = crate::engine_bridge::EngineBridge::new()
             .with_resource_limits(limits)
             .with_measurement_references(references);
 
-        let outcome = match queued.config {
+        // The task's deck names the Verilog-A it installs, held while it
+        // solves, as the runner holds it.
+        let installed = runtimes.install().map_err(|error| {
+            SimulationError::CircuitError(format!(
+                "Could not install prepared project Verilog-A runtimes: {error}"
+            ))
+        });
+        let outcome = installed.and_then(|_installed| match queued.config {
             Some(config) => bridge.run_with_abort_and_source_path_and_environment(
                 &config,
                 &netlist,
@@ -295,7 +358,7 @@ pub(crate) fn run_declaration(
                     transient_checkpoint_observer: None,
                 },
             ),
-        };
+        });
 
         let mut analysis = match outcome {
             Ok(result) => crate::result_conversion::convert(result, analysis_type, &label, || 0.0),

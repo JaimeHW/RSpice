@@ -101,3 +101,6 @@ impl CornerVerilogARuntimes {
         Ok(bound)
     }
 }
+
+#[cfg(test)]
+mod tests;
