@@ -881,7 +881,7 @@ pub(super) fn qualification_action_block_reason(
         }
         QualificationPageAction::RunSuite => None,
         QualificationPageAction::CompareRelease if !selected.comparison_available => {
-            Some("The selected model has no immutable approved release to compare".to_owned())
+            Some("The selected model has no approved release to compare".to_owned())
         }
         QualificationPageAction::CompareRelease => None,
     }
@@ -890,8 +890,8 @@ pub(super) fn qualification_action_block_reason(
 pub(super) fn execute_qualification_action(app: &mut RSpiceApp, action: QualificationPageAction) {
     let summaries = qualification_summaries(app);
     let selected = selected_qualification_summary(app, &summaries);
-    if let Some(reason) = qualification_action_block_reason(app, selected, action) {
-        app.state.push_user_message(ConsoleMessage::warning(reason));
+    // The page disables a blocked action and names the blocker on hover.
+    if qualification_action_block_reason(app, selected, action).is_some() {
         return;
     }
     if action == QualificationPageAction::OpenCorrelation {
@@ -899,37 +899,32 @@ pub(super) fn execute_qualification_action(app: &mut RSpiceApp, action: Qualific
             SurfaceRoute::surface(SurfaceId::ModelCorrelation),
             RouteTransitionSource::User,
         ) {
-            app.state.push_user_message(ConsoleMessage::warning(format!(
-                "Measurement correlation cannot be opened: {error}"
-            )));
+            app.state
+                .prompt(format!("Measurement correlation cannot be opened: {error}"));
         }
         return;
     }
     let Some(library) = app.state.model_library_manager.selected_library.clone() else {
-        app.state.push_user_message(ConsoleMessage::warning(
-            "Select a model family before opening qualification.",
-        ));
+        app.state
+            .prompt("Select a model family before opening qualification.");
         return;
     };
     let Some(model) = app.state.workbench.selected_model.clone() else {
-        app.state.push_user_message(ConsoleMessage::warning(
-            "Select a model family before opening qualification.",
-        ));
+        app.state
+            .prompt("Select a model family before opening qualification.");
         return;
     };
     if let Err(error) = model_editor::open_project_model(app, &library, &model) {
-        app.state.push_user_message(ConsoleMessage::warning(format!(
-            "Qualification cannot be opened: {error}"
-        )));
+        app.state
+            .prompt(format!("Qualification cannot be opened: {error}"));
         return;
     }
     if let Err(error) = app.state.workbench.navigate(
         SurfaceRoute::surface(SurfaceId::ModelEditor),
         RouteTransitionSource::User,
     ) {
-        app.state.push_user_message(ConsoleMessage::warning(format!(
-            "Qualification editor cannot be shown: {error}"
-        )));
+        app.state
+            .prompt(format!("Qualification editor cannot be shown: {error}"));
         return;
     }
 
@@ -948,9 +943,8 @@ pub(super) fn execute_qualification_action(app: &mut RSpiceApp, action: Qualific
             if command.is_enabled(app) {
                 command.execute(app);
             } else if let CommandAvailability::Disabled(reason) = command.availability(app) {
-                app.state.push_user_message(ConsoleMessage::warning(format!(
-                    "Qualification cannot run: {reason}."
-                )));
+                app.state
+                    .prompt(format!("Qualification cannot run: {reason}."));
             }
         }
         QualificationPageAction::CompareRelease => {
@@ -959,9 +953,9 @@ pub(super) fn execute_qualification_action(app: &mut RSpiceApp, action: Qualific
             if command.is_enabled(app) {
                 command.execute(app);
             } else if let CommandAvailability::Disabled(reason) = command.availability(app) {
-                app.state.push_user_message(ConsoleMessage::warning(format!(
+                app.state.prompt(format!(
                     "Approved-model comparison is unavailable: {reason}."
-                )));
+                ));
             }
         }
         QualificationPageAction::OpenCorrelation => {}

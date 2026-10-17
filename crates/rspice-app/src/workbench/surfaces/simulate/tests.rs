@@ -827,7 +827,7 @@ fn disabled_dependents_can_prepare_required_prerequisites_in_one_action() {
             .workbench
             .analysis_lifecycle_status
             .message()
-            .contains("Prerequisite repair completed atomically")
+            .contains("Prerequisites repaired")
     );
 }
 

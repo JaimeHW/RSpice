@@ -772,14 +772,27 @@ fn create_manual_checkpoint(_: &Context, state: &mut AppState) {
     ) {
         Ok(checkpoint) => {
             state.dialogs.project_checkpoint_recovery.initialized = false;
-            state.push_user_message(ConsoleMessage::info(format!(
-                "Created full-project checkpoint {} for revision {}",
-                short_identity(&checkpoint.checkpoint_id().to_string()),
-                checkpoint.project_revision()
-            )));
+            record_manual_checkpoint(state, &checkpoint);
         }
-        Err(error) => state.push_user_message(ConsoleMessage::error(error)),
+        Err(error) => {
+            state.record(LogSeverity::Error, LogSource::Studio, error);
+        }
     }
+}
+
+fn record_manual_checkpoint(
+    state: &mut AppState,
+    checkpoint: &crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
+) {
+    state.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        format!(
+            "Created project checkpoint {} at revision {}.",
+            short_identity(&checkpoint.checkpoint_id().to_string()),
+            checkpoint.project_revision()
+        ),
+    );
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -800,7 +813,7 @@ fn create_manual_checkpoint(ctx: &Context, state: &mut AppState) {
         },
     ) {
         BROWSER_MANUAL_CHECKPOINT_PENDING.with(|pending| pending.set(false));
-        state.push_user_message(ConsoleMessage::error(error));
+        state.record(LogSeverity::Error, LogSource::Studio, error);
     }
 }
 
@@ -820,13 +833,11 @@ fn poll_browser_manual_checkpoint(state: &mut AppState) {
         match completion.result {
             Ok(checkpoint) => {
                 state.dialogs.project_checkpoint_recovery.initialized = false;
-                state.push_user_message(ConsoleMessage::info(format!(
-                    "Created full-project checkpoint {} for revision {}",
-                    short_identity(&checkpoint.checkpoint_id().to_string()),
-                    checkpoint.project_revision()
-                )));
+                record_manual_checkpoint(state, &checkpoint);
             }
-            Err(error) => state.push_user_message(ConsoleMessage::error(error)),
+            Err(error) => {
+                state.record(LogSeverity::Error, LogSource::Studio, error);
+            }
         }
     }
 }
@@ -852,58 +863,59 @@ pub(super) fn recovery_copy_filename(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn export_project_checkpoint_copy(
+    _: &Context,
+    state: &mut AppState,
+    checkpoint: crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
+) {
+    let filename = recovery_copy_filename(&checkpoint);
+    let Some(destination) = rfd::FileDialog::new()
+        .add_filter("RSpice Project", &["rspiceproj"])
+        .set_file_name(&filename)
+        .save_file()
+    else {
+        return;
+    };
+    match crate::workbench::lifecycle::project_checkpoint::publish_recovery_copy(
+        &checkpoint,
+        &destination,
+    ) {
+        Ok(()) => {
+            state.record(
+                LogSeverity::Info,
+                LogSource::Studio,
+                format!("Saved a recovery copy to {}.", destination.display()),
+            );
+        }
+        Err(error) => {
+            state.record(LogSeverity::Error, LogSource::Studio, error);
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 pub(super) fn export_project_checkpoint_copy(
     ctx: &Context,
     state: &mut AppState,
     checkpoint: crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
 ) {
     let filename = recovery_copy_filename(&checkpoint);
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let Some(destination) = rfd::FileDialog::new()
-            .add_filter("RSpice Project", &["rspiceproj"])
-            .set_file_name(&filename)
-            .save_file()
-        else {
-            return;
-        };
-        match crate::workbench::lifecycle::project_checkpoint::publish_recovery_copy(
-            &checkpoint,
-            &destination,
-        ) {
-            Ok(()) => {
-                let receipt = format!("Saved independent recovery copy: {}", destination.display());
-                state.push_user_message(ConsoleMessage::info(receipt.clone()));
-                state.ui.toasts.success(ctx, "Recovery copy saved", receipt);
-            }
-            Err(error) => {
-                state.push_user_message(ConsoleMessage::error(error.clone()));
-                state
-                    .ui
-                    .toasts
-                    .error_with_title(ctx, "Recovery copy failed", error);
-            }
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        let project_id = state.workspace.content.project.id().to_string();
-        let queued_filename = filename.clone();
-        let repaint = ctx.clone();
-        crate::workbench::lifecycle::project_checkpoint::start_recovery_copy_bytes(
-            checkpoint,
-            std::path::PathBuf::from(&filename),
-            move |result| {
-                BROWSER_RECOVERY_COPY_COMPLETIONS.with(|queue| {
-                    queue.borrow_mut().push_back(BrowserRecoveryCopyCompletion {
-                        project_id,
-                        filename: queued_filename,
-                        result,
-                    });
+    let project_id = state.workspace.content.project.id().to_string();
+    let queued_filename = filename.clone();
+    let repaint = ctx.clone();
+    crate::workbench::lifecycle::project_checkpoint::start_recovery_copy_bytes(
+        checkpoint,
+        std::path::PathBuf::from(&filename),
+        move |result| {
+            BROWSER_RECOVERY_COPY_COMPLETIONS.with(|queue| {
+                queue.borrow_mut().push_back(BrowserRecoveryCopyCompletion {
+                    project_id,
+                    filename: queued_filename,
+                    result,
                 });
-                repaint.request_repaint();
-            },
-        );
-    }
+            });
+            repaint.request_repaint();
+        },
+    );
 }

@@ -19,7 +19,7 @@ use egui::{
     Sense, Stroke, Ui, WidgetInfo, WidgetType, pos2, vec2,
 };
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{ProjectTechnologyBinding, model_library::ModelLibraryManager};
 use crate::ui::accessibility::plural_suffix;
 use crate::ui::theme::{self, FontWeight};

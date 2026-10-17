@@ -664,10 +664,11 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         app.state.dialogs.technology_attachment.close();
         let saved = crate::workbench::workflows::project_workflow::save_project_as(&mut app.state);
         if saved {
-            app.state.push_user_message(ConsoleMessage::info(
-                "Created an independent migration copy with the current exact technology pin; the active project was not changed."
-                    .to_owned(),
-            ));
+            app.state.record(
+                LogSeverity::Info,
+                LogSource::Studio,
+                "Saved a migration copy that keeps the current technology; no technology was attached.",
+            );
         }
         return;
     }
@@ -695,16 +696,12 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
             match result {
                 Ok(receipt) => {
                     if technology_checkpoint_pending(&app.state.dialogs) {
-                        app.state.push_user_message(ConsoleMessage::info(receipt));
+                        app.state.prompt(receipt);
                         return;
                     }
                     app.state.dialogs.technology_attachment.close();
                     app.state
-                        .push_user_message(ConsoleMessage::info(receipt.clone()));
-                    app.state
-                        .ui
-                        .toasts
-                        .success(ctx, "Model technology attached", receipt);
+                        .record(LogSeverity::Info, LogSource::Studio, receipt);
                 }
                 Err(error) => {
                     app.state.dialogs.technology_attachment.validation_error = Some(error);
@@ -736,7 +733,7 @@ pub(super) fn attach_technology_binding(
         && app.state.workspace.content.project.technology.as_deref() == Some(label.as_str())
     {
         return Ok(format!(
-            "{} already matches project revision {}; no checkpoint or mutation was required.",
+            "{} is already attached at project revision {}; nothing was changed.",
             label,
             app.state.workspace.content.project.revision().get()
         ));
@@ -806,13 +803,13 @@ pub(super) fn commit_technology_after_checkpoint(
     }
     app.state.dialogs.project_checkpoint_recovery.invalidate();
     Ok(format!(
-        "{} committed at project revision {} as technology receipt #{} with {} exact source file{}; recovery checkpoint {} retains revision {}.",
+        "Attached {} at project revision {} (technology receipt #{}, {} source file{}); checkpoint {} keeps revision {}.",
         binding.display_label(),
         revision.get(),
         audit_receipt.sequence(),
         binding.source_closure().len(),
         plural_suffix(binding.source_closure().len()),
-        checkpoint.checkpoint_id(),
+        short_identity(&checkpoint.checkpoint_id().to_string()),
         checkpoint.project_revision(),
     ))
 }
@@ -870,7 +867,7 @@ pub(super) fn start_browser_technology_checkpoint(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) fn poll_browser_technology_checkpoint(ctx: &Context, app: &mut RSpiceApp) {
+pub(super) fn poll_browser_technology_checkpoint(_: &Context, app: &mut RSpiceApp) {
     let completions = BROWSER_TECHNOLOGY_CHECKPOINT_COMPLETIONS
         .with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
     for completion in completions {
@@ -899,11 +896,7 @@ pub(super) fn poll_browser_technology_checkpoint(ctx: &Context, app: &mut RSpice
             Ok(receipt) => {
                 app.state.dialogs.technology_attachment.close();
                 app.state
-                    .push_user_message(ConsoleMessage::info(receipt.clone()));
-                app.state
-                    .ui
-                    .toasts
-                    .success(ctx, "Model technology attached", receipt);
+                    .record(LogSeverity::Info, LogSource::Studio, receipt);
             }
             Err(error) => {
                 app.state.dialogs.technology_attachment.validation_error = Some(error);
@@ -913,7 +906,7 @@ pub(super) fn poll_browser_technology_checkpoint(ctx: &Context, app: &mut RSpice
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) fn poll_browser_recovery_completions(ctx: &Context, app: &mut RSpiceApp) {
+pub(super) fn poll_browser_recovery_completions(_: &Context, app: &mut RSpiceApp) {
     let project_id = app.state.workspace.content.project.id().to_string();
     let catalog = BROWSER_RECOVERY_CATALOG_COMPLETIONS
         .with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
@@ -949,24 +942,15 @@ pub(super) fn poll_browser_recovery_completions(ctx: &Context, app: &mut RSpiceA
         });
         match result {
             Ok(()) => {
-                let receipt = format!(
-                    "Handed independent recovery copy '{}' to the browser download manager",
-                    completion.filename
+                app.state.record(
+                    LogSeverity::Info,
+                    LogSource::Studio,
+                    format!("Downloaded a recovery copy as {}.", completion.filename),
                 );
-                app.state
-                    .push_user_message(ConsoleMessage::info(receipt.clone()));
-                app.state
-                    .ui
-                    .toasts
-                    .success(ctx, "Recovery copy ready", receipt);
             }
             Err(error) => {
                 app.state
-                    .push_user_message(ConsoleMessage::error(error.clone()));
-                app.state
-                    .ui
-                    .toasts
-                    .error_with_title(ctx, "Recovery copy failed", error);
+                    .record(LogSeverity::Error, LogSource::Studio, error);
             }
         }
     }

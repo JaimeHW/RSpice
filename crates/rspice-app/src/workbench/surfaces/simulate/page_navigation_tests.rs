@@ -363,7 +363,15 @@ fn a_point_is_carried_into_the_family_view_as_a_filter_over_its_own_axes() {
         super::page_runset::family_query_for_point(&mut app.state, 0, &absent),
         None
     );
-    assert!(app.state.log_buffer.revision() > before);
+    assert_eq!(
+        app.state.prompt_text(),
+        Some("The retained family holds no member at temperature = -40, so nothing was opened.")
+    );
+    assert_eq!(
+        app.state.log_buffer.revision(),
+        before,
+        "a refusal is a prompt, never a Console line"
+    );
 }
 
 /// The receipt is the authority on what a saved output stored, so each

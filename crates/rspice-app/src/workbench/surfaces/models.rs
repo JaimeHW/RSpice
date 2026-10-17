@@ -37,7 +37,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use egui::Ui;
 use sha2::{Digest as _, Sha256};
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::ModelBoundSymbolDefinition;
 use crate::state::model_library::{
     DeviceModel, ModelCorrelationState, ModelLibrary, ModelQualificationState,

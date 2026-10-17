@@ -33,6 +33,7 @@ use std::path::{Path, PathBuf};
 
 use egui::{Align, Color32, Layout, RichText, ScrollArea, Sense, Stroke, Ui, Vec2};
 
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::model_library::{
     ClosureFacts, CornerSectionBinding, CornerSectionDomain, DeviceModel, ModelConsumerScope,
     ModelLibrary, ModelLibraryManager, ModelSourceAuthority, PackModelHit, ProcessCorner,
@@ -1546,6 +1547,10 @@ fn detach_pack(app: &mut ManagerRenderContext<'_>, pack_id: &str) {
             revision.get()
         ))
     });
+    if let Ok(message) = &result {
+        app.state
+            .record(LogSeverity::Info, LogSource::Studio, message.clone());
+    }
     receipt(app, result);
 }
 
@@ -1652,16 +1657,19 @@ fn export_include_manifest(app: &mut ManagerRenderContext<'_>) {
         manifest.as_bytes(),
         "application/json;charset=utf-8",
     );
-    match result {
-        Ok(Some(message)) => receipt(app, Ok(message)),
-        Ok(None) => {}
-        Err(error) => receipt(
-            app,
-            Err(format!(
-                "Could not export the model closure manifest: {error}"
-            )),
-        ),
-    }
+    let result = match result {
+        Ok(Some(message)) => Ok(message),
+        Ok(None) => return,
+        Err(error) => Err(format!(
+            "Could not export the model closure manifest: {error}"
+        )),
+    };
+    let (severity, text) = match &result {
+        Ok(message) => (LogSeverity::Info, message.clone()),
+        Err(error) => (LogSeverity::Error, error.clone()),
+    };
+    app.state.record(severity, LogSource::Studio, text);
+    receipt(app, result);
 }
 
 fn build_include_manifest(app: &ManagerRenderContext<'_>) -> String {
@@ -1738,15 +1746,9 @@ fn receipt(app: &mut ManagerRenderContext<'_>, result: Result<String, String>) {
     apply_receipt(app.state, result);
 }
 
+/// Show an action's outcome on the page. A caller whose action changed the
+/// project or wrote a file records it as well; a refusal stays on the page.
 fn apply_receipt(state: &mut AppState, result: Result<String, String>) {
-    match &result {
-        Ok(message) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::info(message.clone()))
-        }
-        Err(message) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(message.clone()))
-        }
-    }
     state.workbench.models_view.operational_state = match &result {
         Ok(_) => ModelsOperationalState::Ready,
         Err(message) => ModelsOperationalState::from_failure(message),
