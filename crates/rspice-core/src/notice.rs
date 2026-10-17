@@ -15,7 +15,7 @@
 //! lines carry: `sample 12`.
 
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, hash_map};
 use std::sync::{Arc, Mutex};
 
 use crate::ContinuationAid;
@@ -82,25 +82,41 @@ pub struct TimestepFloor {
     pub time: f64,
 }
 
+/// What makes two notices the same notice: the kind, the object it is about
+/// and, for a replacement, the parameter. A model-card replacement is about
+/// the card, so the element that happened to bind it first does not split it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum NoticeKey {
+    ParameterReplaced {
+        family: String,
+        scope: ParameterScope,
+        parameter: String,
+        /// The card of a model-scope replacement, the element of an
+        /// instance-scope one.
+        subject: Option<String>,
+    },
+    ConvergenceAid(ContinuationAid),
+    TimestepFloor {
+        element: Option<String>,
+    },
+}
+
 impl EngineNotice {
-    /// What makes two notices the same notice: the kind, the object it is
-    /// about and, for a replacement, the parameter. A model-card replacement
-    /// is about the card, so the element that happened to bind it first does
-    /// not split it.
-    fn same_as(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::ParameterReplaced(a), Self::ParameterReplaced(b)) => {
-                a.family == b.family
-                    && a.scope == b.scope
-                    && a.parameter == b.parameter
-                    && match a.scope {
-                        ParameterScope::Model => a.model == b.model,
-                        ParameterScope::Instance => a.element == b.element,
-                    }
-            }
-            (Self::ConvergenceAid(a), Self::ConvergenceAid(b)) => a == b,
-            (Self::TimestepFloor(a), Self::TimestepFloor(b)) => a.element == b.element,
-            _ => false,
+    fn key(&self) -> NoticeKey {
+        match self {
+            Self::ParameterReplaced(replacement) => NoticeKey::ParameterReplaced {
+                family: replacement.family.clone(),
+                scope: replacement.scope,
+                parameter: replacement.parameter.clone(),
+                subject: match replacement.scope {
+                    ParameterScope::Model => replacement.model.clone(),
+                    ParameterScope::Instance => replacement.element.clone(),
+                },
+            },
+            Self::ConvergenceAid(aid) => NoticeKey::ConvergenceAid(*aid),
+            Self::TimestepFloor(floor) => NoticeKey::TimestepFloor {
+                element: floor.element.clone(),
+            },
         }
     }
 }
@@ -146,13 +162,23 @@ impl Entry {
     }
 }
 
+/// The notices one run has raised so far.
+#[derive(Debug, Default)]
+struct Ledger {
+    /// In the order first raised.
+    entries: Vec<Entry>,
+    /// Where each notice sits in `entries`, so raising it again costs a
+    /// lookup, not a scan of every notice a large design has raised.
+    index: HashMap<NoticeKey, usize>,
+}
+
 /// Where one run's notices are recorded.
 ///
 /// Shared, because a run may solve on more than one thread: a Monte Carlo run
 /// evaluates its samples on workers, and a parallel sweep its chunks, each
 /// inside the run's log scope.
 #[derive(Debug, Clone, Default)]
-pub struct NoticeCollector(Arc<Mutex<Vec<Entry>>>);
+pub struct NoticeCollector(Arc<Mutex<Ledger>>);
 
 impl NoticeCollector {
     pub fn new() -> Self {
@@ -175,12 +201,13 @@ impl NoticeCollector {
     /// collector empty.
     pub fn take(&self) -> Vec<RecordedNotice> {
         std::mem::take(&mut *self.lock())
+            .entries
             .into_iter()
             .map(|entry| entry.recorded)
             .collect()
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Entry>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Ledger> {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -188,24 +215,24 @@ impl NoticeCollector {
 
     fn record(&self, notice: EngineNotice, point: Option<&str>) {
         let mut ledger = self.lock();
-        if let Some(entry) = ledger
-            .iter_mut()
-            .find(|entry| entry.recorded.notice.same_as(&notice))
-        {
-            entry.count_at(point);
-            return;
+        let Ledger { entries, index } = &mut *ledger;
+        match index.entry(notice.key()) {
+            hash_map::Entry::Occupied(at) => entries[*at.get()].count_at(point),
+            hash_map::Entry::Vacant(slot) => {
+                slot.insert(entries.len());
+                let mut entry = Entry {
+                    recorded: RecordedNotice {
+                        notice,
+                        occurrences: 0,
+                        points: Vec::new(),
+                        unnamed_points: 0,
+                    },
+                    unnamed: HashSet::new(),
+                };
+                entry.count_at(point);
+                entries.push(entry);
+            }
         }
-        let mut entry = Entry {
-            recorded: RecordedNotice {
-                notice,
-                occurrences: 0,
-                points: Vec::new(),
-                unnamed_points: 0,
-            },
-            unnamed: HashSet::new(),
-        };
-        entry.count_at(point);
-        ledger.push(entry);
     }
 }
 
@@ -369,6 +396,44 @@ mod tests {
         assert_eq!(recorded[0].occurrences, 24);
         assert_eq!(recorded[0].points.len(), MAX_NAMED_POINTS);
         assert_eq!(recorded[0].unnamed_points, 12 - MAX_NAMED_POINTS);
+    }
+
+    /// A clamp on every element of a large design, raised again at a second
+    /// point, is one notice per element, in the order first raised, each
+    /// with both points, however many the collector already holds.
+    #[test]
+    fn many_notices_are_each_recorded_once_in_the_order_first_raised() {
+        const ELEMENTS: usize = 20_000;
+        let collector = NoticeCollector::new();
+        let _installed = collector.install();
+        for point in ["sample 1", "sample 2"] {
+            let _point = log_scope::enter_point(|| point.to_owned());
+            for element in 0..ELEMENTS {
+                let _binding = binding(&format!("M{element}"), Some("nch"));
+                parameter_replaced(
+                    "BSIM4",
+                    ParameterScope::Instance,
+                    "pseff",
+                    -1.0,
+                    0.0,
+                    Some(0.0),
+                );
+            }
+        }
+
+        let recorded = collector.take();
+        assert_eq!(recorded.len(), ELEMENTS);
+        for (element, notice) in recorded.iter().enumerate() {
+            let EngineNotice::ParameterReplaced(replacement) = &notice.notice else {
+                panic!("a replacement")
+            };
+            assert_eq!(
+                replacement.element.as_deref(),
+                Some(format!("M{element}").as_str())
+            );
+            assert_eq!(notice.occurrences, 2);
+            assert_eq!(notice.points, ["sample 1", "sample 2"]);
+        }
     }
 
     /// A worker the run hands work to records into the run's collector once
