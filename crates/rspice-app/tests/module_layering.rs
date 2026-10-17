@@ -1308,7 +1308,14 @@ fn source_files_have_no_byte_order_mark() {
 /// `helpers::infer_primary_{source_name,output_node}_with_abort` went too:
 /// both took a first-or-last element off a solved deck, and the offer needs a
 /// *sole* source or it has nothing to offer.
-const MAX_LINT_SUPPRESSIONS: usize = 15;
+///
+/// 15 -> 16 for `allow(clippy::print_stdout)` on
+/// `schematic::view::frame_cost::report`, the canvas frame-cost probe's one
+/// printer: the `report_idle_frame_work` case again, an `#[ignore]`d
+/// measurement harness whose whole output is the tables a human reads through
+/// `--nocapture`. Every table the probe prints goes through that function, so
+/// the probe costs one suppression rather than one per table.
+const MAX_LINT_SUPPRESSIONS: usize = 16;
 
 /// The crate does not accumulate lint suppressions.
 #[test]

@@ -8,11 +8,6 @@
 //!
 //! `cargo test -p rspice-app --lib --release -- --ignored --exact
 //! schematic::view::frame_cost::canvas_frame_cost_at_scale --nocapture`
-//!
-//! The crate denies printing, because the desktop build detaches from its
-//! console and the browser build has no stderr. The probe's output *is* its
-//! printed tables, read through `--nocapture`, so each function that prints
-//! allows it alone, as the other measurement harnesses do.
 
 use std::collections::HashMap;
 
@@ -579,7 +574,6 @@ fn time_scenario(
 
 /// [`time_scenario`], over the sheet fitted to the screen or, given a zoom
 /// and a world point, at that zoom centred on that point.
-#[allow(clippy::print_stderr)]
 fn time_scenario_in(
     name: &'static str,
     budget_ms: f64,
@@ -606,13 +600,12 @@ fn time_scenario_in(
     let mut painted = 0;
     for frame in 0..WARM_UP_FRAMES {
         let nudge = if frame % 2 == 0 { 0.0 } else { 1.0 };
-        let (elapsed, shapes) = run_frame(
+        let (_, shapes) = run_frame(
             &ctx,
             &mut state,
             symbols.as_ref(),
             centre + egui::vec2(nudge, 0.0),
         );
-        eprintln!("{name}: warm-up frame {frame} took {elapsed:.2} ms");
         painted += shapes;
     }
     let mut frames_ms = Vec::with_capacity(TIMED_FRAMES);
@@ -629,7 +622,6 @@ fn time_scenario_in(
     }
     assert!(painted > 0, "{name}: the frames painted nothing");
     verify(&state);
-    eprintln!("{name}: {frames_ms:.2?} ms");
     FrameTimes {
         name,
         budget_ms,
@@ -771,9 +763,10 @@ fn site_ms(mut work: impl FnMut() -> usize) -> f64 {
 
 /// Each per-frame site the canvas audit named, timed alone over the fixture,
 /// so a site that costs nothing measurable at this scale is reported rather
-/// than optimized.
-#[allow(clippy::print_stdout)]
-fn print_site_costs() {
+/// than optimized: the table of their median costs.
+fn site_cost_table() -> String {
+    use std::fmt::Write as _;
+
     let mut fixture = fixture_without_overlay();
     for id in fixture.components[0].iter().take(40) {
         fixture
@@ -945,11 +938,24 @@ fn print_site_costs() {
         ),
         ("tessellating the idle frame at fit (C-21)", tessellate_ms),
     ];
-    println!("site                                           median ms");
+    let mut table = String::from("site                                           median ms\n");
     for (site, milliseconds) in sites {
-        println!("{site:<46} {milliseconds:>10.3}");
+        let _ = writeln!(table, "{site:<46} {milliseconds:>10.3}");
     }
-    println!("circles painted in the idle frame at fit: {circles}");
+    let _ = writeln!(table, "circles painted in the idle frame at fit: {circles}");
+    table
+}
+
+/// Print one of the probe's tables.
+///
+/// The crate denies the print macros, because the desktop build detaches from
+/// its console and the browser build has no stderr. This `#[ignore]`d probe's
+/// whole output is its tables, read through `--nocapture`, the case the
+/// crate's other measurement harnesses argue; every table goes through this
+/// one function, so the probe holds one suppression.
+#[allow(clippy::print_stdout)]
+fn report(table: &str) {
+    println!("{table}");
 }
 
 /// One idle Select frame over the fitted sheet: how many circles it paints
@@ -989,10 +995,11 @@ fn idle_frame_circles_and_tessellation() -> (usize, f64) {
 /// and the operating-point overlay under 8 ms. Every scenario is printed
 /// before any budget is asserted, so a failing run still reports them all.
 #[test]
-#[allow(clippy::print_stdout)]
 #[ignore = "frame-cost probe"]
 fn canvas_frame_cost_at_scale() {
-    print_site_costs();
+    use std::fmt::Write as _;
+
+    report(&site_cost_table());
     let scenarios = [
         idle_hover(),
         move_preview(),
@@ -1001,9 +1008,11 @@ fn canvas_frame_cost_at_scale() {
         operating_point_overlay(),
         operating_point_overlay_legible(),
     ];
-    println!("scenario                            min ms  median ms     max ms   budget");
+    let mut table =
+        String::from("scenario                            min ms  median ms     max ms   budget\n");
     for scenario in &scenarios {
-        println!(
+        let _ = writeln!(
+            table,
             "{:<32} {:>9.2} {:>10.2} {:>10.2} {:>8.1}",
             scenario.name,
             scenario.min(),
@@ -1012,6 +1021,7 @@ fn canvas_frame_cost_at_scale() {
             scenario.budget_ms
         );
     }
+    report(&table);
     for scenario in &scenarios {
         assert!(
             scenario.median() < scenario.budget_ms,
