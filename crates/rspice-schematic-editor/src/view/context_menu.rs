@@ -1,5 +1,8 @@
 //! Schematic context-menu presentation and source-bound input requests.
 
+use super::pick_chooser::{ChooserRow, MAX_ROWS, kind_label};
+use super::pointer_target::PointerTarget;
+use super::selection_drag::target_is_selected;
 use crate::{requests::EditorRequestSource, session::tool::Tool};
 use egui::{
     Align2, Color32, Context, CornerRadius, Frame, Key, Modifiers, Popup, Rect, RectAlign,
@@ -80,6 +83,9 @@ pub enum ContextAction {
     ShowInNetlist,
     Probe,
     OperatingPoint,
+    /// Make this one of the objects under a long press the selection: the
+    /// overlapping-object chooser, on a finger (D1 section 9).
+    Choose(PointerTarget),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,6 +103,8 @@ pub enum ContextIcon {
     Probe,
     Waveform,
     VerilogA,
+    /// The chosen object among those under a long press.
+    Check,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,6 +151,23 @@ pub struct ContextMenuView {
     pub binding: ContextMenuBinding,
     pub summary: String,
     pub entries: Vec<ContextEntry>,
+    /// The objects a long press landed on, in pick order, when two or more
+    /// did. They head the menu, so a finger can take the one underneath.
+    pub choices: Vec<ChooserRow>,
+}
+
+impl ContextMenuView {
+    /// The rows and rules the menu shows, choices first.
+    fn shape(&self) -> Vec<ContextEntry<()>> {
+        let choices = self.choices.len().min(MAX_ROWS);
+        std::iter::repeat_n(ContextEntry::Command(()), choices)
+            .chain((choices > 0).then_some(ContextEntry::Separator))
+            .chain(self.entries.iter().map(|entry| match entry {
+                ContextEntry::Command(_) => ContextEntry::Command(()),
+                ContextEntry::Separator => ContextEntry::Separator,
+            }))
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -230,7 +255,7 @@ pub fn show(
     let invocation = ctx
         .data(|data| data.get_temp::<ContextInvocation>(invocation_id))
         .unwrap_or(ContextInvocation::Pointer);
-    let geometry = SurfaceGeometry::resolve(ctx, invocation, &view.entries);
+    let geometry = SurfaceGeometry::resolve(ctx, invocation, &view.shape());
     let t = Tokens::get(ctx);
     let frame = Frame::new()
         .fill(t.color.bg_elevated)
@@ -318,6 +343,25 @@ pub fn render_context_contents(
 
     let mut rows = Vec::with_capacity(16);
     let mut keyboard_or_pointer_action = None;
+    for (index, choice) in view.choices.iter().take(MAX_ROWS).enumerate() {
+        let selected = target_is_selected(&view.binding.selection, choice.target);
+        let response = ui
+            .push_id(("schematic-context-choice", index), |ui| {
+                choice_item(ui, choice, selected, row_height)
+            })
+            .inner;
+        let activated = menu_row_keyboard_activated(ui, &response) || response.clicked();
+        rows.push(ContextRow {
+            response,
+            enabled: true,
+        });
+        if activated && keyboard_or_pointer_action.is_none() {
+            keyboard_or_pointer_action = Some(ContextAction::Choose(choice.target));
+        }
+    }
+    if !view.choices.is_empty() {
+        menu_separator(ui);
+    }
     for entry in &view.entries {
         match entry {
             ContextEntry::Separator => menu_separator(ui),
@@ -433,7 +477,6 @@ fn menu_item(
     disabled_reason: &'static str,
     row_height: f32,
 ) -> Response {
-    let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(
         vec2(ui.available_width(), row_height),
         if enabled {
@@ -454,7 +497,59 @@ fn menu_item(
             node.set_keyboard_shortcut(shortcut);
         }
     });
+    paint_row(
+        ui,
+        rect,
+        &response,
+        enabled,
+        Some(command.icon),
+        command.label,
+        shortcut,
+    );
 
+    if enabled {
+        response
+    } else {
+        response.on_hover_text(disabled_reason)
+    }
+}
+
+/// One object under a long press: its name, its kind at the right end,
+/// and a check when it is the selection.
+fn choice_item(ui: &mut Ui, choice: &ChooserRow, selected: bool, row_height: f32) -> Response {
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(ui.available_width(), row_height), Sense::click());
+    let kind = kind_label(choice.target);
+    let name = format!("{kind} {}", choice.identity);
+    response.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, selected, &name));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::MenuItemRadio);
+        node.set_label(name.as_str());
+    });
+    paint_row(
+        ui,
+        rect,
+        &response,
+        true,
+        selected.then_some(ContextIcon::Check),
+        &choice.identity,
+        kind,
+    );
+    response
+}
+
+/// A row's face: the press and hover fill, the icon, the label, and the
+/// faint text at the right end (a shortcut, or a chosen object's kind).
+fn paint_row(
+    ui: &Ui,
+    rect: Rect,
+    response: &Response,
+    enabled: bool,
+    icon: Option<ContextIcon>,
+    label: &str,
+    shortcut: &str,
+) {
+    let t = Tokens::get(ui.ctx());
     let focused = enabled && response.has_focus();
     let hovered = enabled && response.hovered();
     if response.is_pointer_button_down_on() && enabled {
@@ -485,7 +580,9 @@ fn menu_item(
         ),
         vec2(ICON_SIDE, ICON_SIDE),
     );
-    command.icon.paint(ui.painter(), icon_rect, row_color);
+    if let Some(icon) = icon {
+        icon.paint(ui.painter(), icon_rect, row_color);
+    }
 
     let shortcut_font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let shortcut_width = if shortcut.is_empty() {
@@ -519,18 +616,12 @@ fn menu_item(
     ui.painter().with_clip_rect(label_clip).text(
         pos2(label_left, rect.center().y),
         Align2::LEFT_CENTER,
-        command.label,
+        label,
         theme::sans(tokens::FS_0, FontWeight::Regular),
         row_color,
     );
 
-    theme::paint_focus_ring(ui, &response, rect);
-
-    if enabled {
-        response
-    } else {
-        response.on_hover_text(disabled_reason)
-    }
+    theme::paint_focus_ring(ui, response, rect);
 }
 
 fn menu_separator(ui: &mut Ui) {
@@ -674,6 +765,7 @@ impl ContextIcon {
             Self::Probe => WorkbenchIcon::Probe.paint(painter, rect, color),
             Self::Waveform => WorkbenchIcon::Simulate.paint(painter, rect, color),
             Self::VerilogA => WorkbenchIcon::VerilogA.paint(painter, rect, color),
+            Self::Check => WorkbenchIcon::Check.paint(painter, rect, color),
         }
     }
 }

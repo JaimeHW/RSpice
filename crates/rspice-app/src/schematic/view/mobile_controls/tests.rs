@@ -169,7 +169,7 @@ impl Finger {
         self.frame(Vec::new());
     }
 
-    /// Tap the strip button named `name`.
+    /// Tap what the last frame named `name`: a strip button or a menu row.
     fn press(&mut self, name: &str) {
         let at = self
             .find(name)
@@ -192,6 +192,15 @@ impl Finger {
             self.slide(from + (to - from) * (step as f32 / 4.0));
         }
         self.up(to);
+        self.frame(Vec::new());
+    }
+
+    /// A finger held still past egui's long-press time, then lifted: the
+    /// canvas menu opens.
+    fn long_press(&mut self, pos: Pos2) {
+        self.down(pos);
+        self.frame_after(0.9, vec![Self::touch(TouchPhase::Move, pos)]);
+        self.up(pos);
         self.frame(Vec::new());
     }
 
@@ -432,5 +441,62 @@ fn the_add_latch_makes_a_tap_add_or_remove() {
     assert!(
         !finger.selection().has_component(second),
         "unlatched, a tap replaces"
+    );
+}
+
+/// G-9 on touch: a long press where two parts overlap lists both at the head
+/// of the menu. Choosing the one underneath selects it, and the next long
+/// press there opens the menu on it, so its commands act on it.
+#[test]
+fn a_long_press_on_overlapping_parts_offers_each_of_them() {
+    let mut finger = Finger::new(Vec2::new(1024.0, 768.0));
+    let first = finger.resistor(Point::new(200, 200));
+    let second = finger.resistor(Point::new(200, 200));
+    let name = |finger: &Finger, id: u64| {
+        let part = finger
+            .app
+            .state
+            .schematic
+            .document()
+            .components
+            .iter()
+            .find(|part| part.id == id)
+            .expect("part");
+        format!("Instance {}", part.name)
+    };
+    let at = finger.screen(Point::new(200, 200));
+    finger.long_press(at);
+    let taken = finger
+        .selection()
+        .single_component()
+        .expect("the long press takes the part on top");
+    let under = if taken == first { second } else { first };
+    assert!(
+        finger.find(&name(&finger, taken)).is_some(),
+        "the menu lists the part on top: {:?}",
+        finger.named
+    );
+    finger.press(&name(&finger, under));
+    assert_eq!(finger.selection().single_component(), Some(under));
+
+    finger.long_press(at);
+    assert_eq!(
+        finger.selection().single_component(),
+        Some(under),
+        "the second long press keeps the chosen part"
+    );
+    finger.press("Rotate 90°");
+    let turned: Vec<(u64, bool)> = finger
+        .app
+        .state
+        .schematic
+        .document()
+        .components
+        .iter()
+        .map(|part| (part.id, part.rotation != Default::default()))
+        .collect();
+    assert!(
+        turned.contains(&(under, true)) && turned.contains(&(taken, false)),
+        "the menu turned the chosen part and only it: {turned:?}"
     );
 }

@@ -32,6 +32,9 @@ use rspice_schematic_editor::view::context_menu::{
     self as context_surface, ContextAction, ContextIcon, ContextMenuBinding, ContextMenuRequest,
     ContextMenuView,
 };
+use rspice_schematic_editor::view::pick_chooser::ChooserRow;
+use rspice_schematic_editor::view::selection_drag::target_is_selected;
+use rspice_schematic_editor::view::tool_input::ToolPointerView;
 
 mod stimulus;
 
@@ -325,6 +328,7 @@ pub(super) fn handle_context_menu(
     let opening = context_surface::opening(response, browser_keyboard_open);
     if !opening.needs_contents() {
         context_surface::close(response);
+        forget_choices(&response.ctx);
         state.dialogs.interaction.context_target = None;
         return;
     }
@@ -332,6 +336,7 @@ pub(super) fn handle_context_menu(
         capture_pointer_target(response, state, viewport, symbol_context)
     } else {
         if opening.keyboard_open {
+            forget_choices(&response.ctx);
             let (target, click_pos) = keyboard_target(state, viewport, response.rect.center());
             state.dialogs.interaction.context_target = Some((target, (click_pos.x, click_pos.y)));
         }
@@ -342,12 +347,26 @@ pub(super) fn handle_context_menu(
         return;
     };
     let output = context_surface::show(response, opening, anchor, &view);
-    if let Some(request) = output.request {
-        apply_context_request(state, request, symbol_context);
+    match output.request {
+        Some(ContextMenuRequest {
+            binding,
+            action: ContextAction::Choose(target),
+        }) => choose_target(state, &view, &binding, target),
+        Some(request) => apply_context_request(state, request, symbol_context),
+        None => {}
     }
     if !output.open {
+        forget_choices(&response.ctx);
         state.dialogs.interaction.context_target = None;
     }
+}
+
+fn choices_id() -> egui::Id {
+    egui::Id::new("rspice.schematic.context_menu.choices")
+}
+
+fn forget_choices(ctx: &Context) {
+    ctx.data_mut(|data| data.remove::<Vec<ChooserRow>>(choices_id()));
 }
 
 fn capture_pointer_target(
@@ -360,17 +379,82 @@ fn capture_pointer_target(
     let grid_pos = screen_to_grid(viewport, state.schematic.document().grid_size, pos);
     let hit_pos = screen_to_schematic(viewport, pos);
     let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
-    let target = select_pointer_target(
-        state,
-        PointerHit::new(grid_pos, hit_pos),
-        hit_radius,
-        symbol_context,
-        &response.ctx,
-        viewport,
-        pos,
-    );
+    let target = if response.long_touched() {
+        let target = touch_target(&response.ctx, state, viewport, symbol_context, pos);
+        select_context_target(state, target)
+    } else {
+        forget_choices(&response.ctx);
+        select_pointer_target(
+            state,
+            PointerHit::new(grid_pos, hit_pos),
+            hit_radius,
+            symbol_context,
+            &response.ctx,
+            viewport,
+            pos,
+        )
+    };
     state.dialogs.interaction.context_target = Some((target, (grid_pos.x, grid_pos.y)));
     Some(pos)
+}
+
+/// What a long press opens the menu on: of the objects under the finger,
+/// the one already selected, else the topmost. When two or more are there
+/// the menu lists them first, so a finger can take the one underneath; a
+/// second long press on the same spot then opens on that one (D1 sections
+/// 9 and 10, audit G-9).
+fn touch_target(
+    ctx: &Context,
+    state: &AppState,
+    viewport: &Viewport,
+    symbol_context: &SchematicSymbolContext,
+    position: egui::Pos2,
+) -> Option<PointerTarget> {
+    let query = ToolPointerView {
+        design: super::schematic_design_view(state),
+        snap_engine: &state.schematic.session.editor.snap_engine,
+        can_edit: !state.schematic_edit_read_only(),
+    }
+    .selection_query(viewport, position);
+    let candidates =
+        super::pick_chooser::candidates_at(ctx, state, query, symbol_context, viewport);
+    let choices = if candidates.len() >= 2 {
+        super::pick_chooser::chooser_rows(state, &candidates)
+    } else {
+        Vec::new()
+    };
+    ctx.data_mut(|data| data.insert_temp(choices_id(), choices));
+    let selection = &state.schematic.session.editor.selection;
+    candidates
+        .iter()
+        .copied()
+        .find(|target| target_is_selected(selection, *target))
+        .or_else(|| candidates.first().copied())
+}
+
+/// Make one of the objects under the long press the selection.
+fn choose_target(
+    state: &mut AppState,
+    view: &ContextMenuView,
+    binding: &ContextMenuBinding,
+    target: PointerTarget,
+) {
+    if context_menu_binding(state).as_ref() != Some(binding)
+        || state.application_modal_open()
+        || !view.choices.iter().any(|choice| choice.target == target)
+    {
+        return;
+    }
+    let request = rspice_schematic_editor::requests::EditorRequest {
+        source: super::requests::editor_request_source(state),
+        selection: state.schematic.session.editor.selection.clone(),
+        action: rspice_schematic_editor::requests::EditorAction::SelectPointer {
+            target: Some(target),
+            additive: false,
+            alt_held: false,
+        },
+    };
+    super::requests::apply_editor_request(state, request);
 }
 
 fn select_pointer_target(
@@ -382,7 +466,7 @@ fn select_pointer_target(
     viewport: &Viewport,
     pointer_pos: egui::Pos2,
 ) -> ContextTarget {
-    let Some(target) = pointer_target(
+    let target = pointer_target(
         state,
         hit,
         hit_radius,
@@ -390,7 +474,14 @@ fn select_pointer_target(
         ctx,
         viewport,
         pointer_pos,
-    ) else {
+    );
+    select_context_target(state, target)
+}
+
+/// Select what the menu opens on, unless it is already in the selection,
+/// and name it as the menu's target.
+fn select_context_target(state: &mut AppState, target: Option<PointerTarget>) -> ContextTarget {
+    let Some(target) = target else {
         return ContextTarget::Canvas;
     };
     state.schematic.session.editor.net_highlight.clear();
@@ -1015,6 +1106,9 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             operating_point_available(state),
             "Run a DC operating-point analysis with device OP reporting first",
         ),
+        // A choice row is not a catalog command; `choose_target` checks it
+        // against the rows the menu showed.
+        ContextAction::Choose(_) => (false, "Long-press the objects to choose among them"),
     }
 }
 
@@ -1110,6 +1204,7 @@ fn execute_context_action(
         ContextAction::ShowInNetlist => state.show_selected_instance_in_netlist(),
         ContextAction::Probe => state.schematic.arm_tool(Tool::Probe),
         ContextAction::OperatingPoint => open_operating_point(state),
+        ContextAction::Choose(_) => {}
     }
 }
 
@@ -1264,6 +1359,9 @@ fn context_menu_view(state: &AppState, ctx: &Context) -> Option<ContextMenuView>
         summary: selection_summary(state, binding.target),
         binding,
         entries,
+        choices: ctx
+            .data(|data| data.get_temp::<Vec<ChooserRow>>(choices_id()))
+            .unwrap_or_default(),
     })
 }
 

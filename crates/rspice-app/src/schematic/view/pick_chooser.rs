@@ -50,7 +50,7 @@ fn chooser_id() -> Id {
 }
 
 /// Every object under `query`, in pick order.
-fn candidates_at(
+pub(super) fn candidates_at(
     ctx: &Context,
     state: &AppState,
     query: PointerQuery,
@@ -274,7 +274,7 @@ pub(super) fn show_chooser(ctx: &Context, state: &mut AppState) {
 }
 
 /// The chooser's rows: each candidate's kind and identity.
-fn chooser_rows(state: &AppState, candidates: &[PointerTarget]) -> Vec<ChooserRow> {
+pub(super) fn chooser_rows(state: &AppState, candidates: &[PointerTarget]) -> Vec<ChooserRow> {
     let document = state.schematic.document();
     let nets = candidates
         .iter()

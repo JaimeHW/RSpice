@@ -55,6 +55,7 @@ fn an_open_popup_cannot_retarget_its_action_when_the_source_or_selection_changes
                 enabled: true,
                 disabled_reason: "",
             })],
+            choices: Vec::new(),
         };
         view.binding.selection.select_only_component(7);
         let original = view.binding.clone();
