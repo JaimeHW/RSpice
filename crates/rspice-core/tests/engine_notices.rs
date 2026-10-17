@@ -79,6 +79,36 @@ fn a_clamp_is_recorded_against_the_card_and_the_element_that_bound_it() {
     assert_eq!(eu, ["M1", "M2"], "{replaced:#?}");
 }
 
+/// Recording is an account of the solve, not a part of it: the clamped deck
+/// solves to the same bits with a collector installed as without one.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn recording_notices_changes_no_solved_value() {
+    let netlist = Netlist::parse(DECK).expect("the deck parses");
+    let solve = || {
+        let solved = Engine::default()
+            .run_dc_op_with_abort(&netlist, &NoAbort)
+            .expect("a clamped card still solves");
+        solved
+            .node_voltages
+            .iter()
+            .chain(&solved.branch_currents)
+            .map(|value| value.to_bits())
+            .collect::<Vec<u64>>()
+    };
+    let unrecorded = solve();
+    let collector = NoticeCollector::new();
+    let recorded = {
+        let _installed = collector.install();
+        solve()
+    };
+    assert!(
+        !replacements(&collector).is_empty(),
+        "the recorded solve raised its clamps"
+    );
+    assert_eq!(recorded, unrecorded);
+}
+
 /// An element inside a subcircuit is reported by the name the engine solves
 /// it under, the written instance names above it joined by dots: the name a
 /// host maps back to the occurrence that draws it.
