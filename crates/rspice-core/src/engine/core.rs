@@ -1086,6 +1086,35 @@ mod convergence_quality_tests {
         assert!(summary.contains("force-accepted"), "{summary}");
         assert!(summary.contains("GMIN"), "{summary}");
     }
+
+    /// A step rejected on truncation error is an LTE rejection as well as a
+    /// timestep reduction, on the ngspice charge-truncation arm and on the
+    /// Xyce voltage-estimate arm alike.
+    #[test]
+    fn truncation_rejects_are_counted_as_lte_rejections() {
+        use crate::numerics::integration::TransientLteReference;
+
+        let netlist =
+            Netlist::parse("rc sine\nV1 in 0 SIN(0 1 100meg)\nR1 in out 1k\nC1 out 0 1p\n.end\n")
+                .expect("deck parses");
+        for reference in [None, Some(TransientLteReference::PointGlobal)] {
+            let config = SimulationConfig {
+                transient_lte_reference: reference,
+                ..SimulationConfig::default()
+            };
+            let engine = Engine::new(config);
+            engine
+                .run_tran(&netlist, 50.0e-9, 10.0e-9)
+                .expect("the RC solves");
+
+            let quality = engine.convergence_quality();
+            assert!(quality.lte_rejections > 0, "{reference:?}: {quality:?}");
+            assert!(
+                quality.lte_rejections <= quality.timestep_reductions,
+                "{reference:?}: every LTE rejection is a timestep reduction: {quality:?}"
+            );
+        }
+    }
 }
 
 #[cfg(test)]

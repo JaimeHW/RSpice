@@ -520,13 +520,10 @@ fn a_digital_divider_drives_the_analog_side_at_the_divided_frequency() {
 // ---------------------------------------------------------------------------
 
 /// One run of the divider deck, with the number of timepoints its step
-/// controller rejected on local truncation error.
+/// controller rejected.
 ///
-/// `ConvergenceQuality::timestep_reductions` is the count of LTE rejections:
-/// the transient's `if !accept` arm, which is entered when the estimated
-/// truncation error exceeds the budget, is its only writer. (`lte_rejections`
-/// beside it is never incremented by anything, so it is not the counter to read
-/// — see the report accompanying this lane.)
+/// `ConvergenceQuality::timestep_reductions` counts every rejected attempt,
+/// truncation-error rejects among them; `lte_rejections` counts those alone.
 fn run_divider_with_rejection_count(deck: &str, max_step: f64) -> (TransientResult, usize) {
     let netlist = Netlist::parse(deck).expect("the deck parses");
     let engine = Engine::new(SimulationConfig::default());
