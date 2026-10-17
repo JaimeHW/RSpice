@@ -528,27 +528,50 @@ pub fn normalized_probe_expression(expression: &str) -> String {
         .collect()
 }
 
-pub fn named_net_class_color(name: &str) -> egui::Color32 {
+/// The class colour of a named net: ground, supply or clock. Any other name
+/// declares no class and is painted as a wire: a net colour is an explicit
+/// assignment, and a hash of the name lands on the wire, selection and class
+/// hues as often as not.
+pub fn named_net_class_color(name: &str) -> Option<egui::Color32> {
     let palette = rspice_ui_kit::tokens::active_palette();
     let normalized = name.trim().to_ascii_lowercase();
     if matches!(
         normalized.as_str(),
         "0" | "gnd" | "ground" | "vss" | "vssa" | "vssd"
     ) {
-        return palette.net_class_ground;
+        return Some(palette.net_class_ground);
     }
     if normalized.starts_with("vdd")
         || normalized.starts_with("vcc")
         || normalized.starts_with("vee")
         || normalized.starts_with("supply")
     {
-        return palette.net_class_supply;
+        return Some(palette.net_class_supply);
     }
     if normalized.contains("clk") || normalized.contains("clock") {
-        return palette.net_class_clock;
+        return Some(palette.net_class_clock);
     }
-    let hash = normalized.bytes().fold(0_u64, |hash, byte| {
-        hash.wrapping_mul(109).wrapping_add(u64::from(byte))
-    });
-    palette.traces[hash as usize % palette.traces.len()]
+    None
+}
+
+#[cfg(test)]
+mod net_class_tests {
+    use super::named_net_class_color;
+
+    #[test]
+    fn only_ground_supply_and_clock_names_carry_a_class_colour() {
+        let palette = rspice_ui_kit::tokens::active_palette();
+        assert_eq!(named_net_class_color("GND"), Some(palette.net_class_ground));
+        assert_eq!(
+            named_net_class_color("vdd_core"),
+            Some(palette.net_class_supply)
+        );
+        assert_eq!(
+            named_net_class_color("sys_clk"),
+            Some(palette.net_class_clock)
+        );
+        for unclassified in ["VOUT", "afe_in", "bias_n", "D3"] {
+            assert_eq!(named_net_class_color(unclassified), None, "{unclassified}");
+        }
+    }
 }

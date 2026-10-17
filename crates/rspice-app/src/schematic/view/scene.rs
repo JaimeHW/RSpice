@@ -284,7 +284,10 @@ fn net_class_colors(state: &AppState) -> std::collections::HashMap<u64, egui::Co
         &state.workspace.content.active_view.key(),
     );
     for net in nets.iter().filter(|net| net.authored_name) {
-        let color = named_net_class_color(&net.name);
+        // A name that declares no class is painted as a wire.
+        let Some(color) = named_net_class_color(&net.name) else {
+            continue;
+        };
         for wire_id in &net.wire_ids {
             colors.entry(*wire_id).or_insert(color);
         }
@@ -734,6 +737,18 @@ mod tests {
                 net.spice_name()
             );
         }
+    }
+
+    /// A named net whose name declares no class (not ground, supply or
+    /// clock) is painted as a wire, not in a colour hashed from its name.
+    #[test]
+    fn an_unclassified_named_net_takes_no_class_colour() {
+        let mut state = separated_same_name_groups();
+        for label in &mut state.schematic.document_mut_for_test().net_labels {
+            label.name = "VOUT".to_owned();
+        }
+        state.sync_active_schematic_to_workspace();
+        assert!(net_class_colors(&state).is_empty());
     }
 
     /// An unnamed conductor declares no class, so it keeps the default stroke
