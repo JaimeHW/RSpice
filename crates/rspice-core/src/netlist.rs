@@ -2633,6 +2633,7 @@ impl Netlist {
                 event => output.items.push(event),
             }
         }
+        output.unread = expanded.unread;
 
         if let Some(origin) = opened_at {
             return Err(ParseError::Syntax {

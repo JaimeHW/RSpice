@@ -2497,6 +2497,65 @@ M1 d g s b nonly\n\
         );
     }
 
+    /// A library file's inline sections read only as the `.lib` card that
+    /// brings the file in selects them: the editor reading that file binds the
+    /// selected section's value and says the other one was not selected.
+    #[test]
+    fn only_the_selected_inline_library_section_defines_a_parameter() {
+        let root = std::env::temp_dir().join(format!(
+            "rspice_source_map_{}_{}",
+            std::process::id(),
+            "selected_library_section"
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("temp dir");
+        let library = "* corners\n\
+.lib tt\n\
+.param vth=0.5\n\
+.endl tt\n\
+.lib ss\n\
+.param vth=0.4\n\
+.endl ss\n";
+        let library_path = root.join("corners.lib");
+        std::fs::write(&library_path, library).expect("library file");
+        let deck = "deck\n.lib 'corners.lib' tt\nV1 a 0 {vth}\n.end\n";
+        let netlist = Netlist::parse_with_path(deck, &root.join("top.cir")).expect("deck parses");
+        let library_identity = library_path.canonicalize().expect("library path");
+        let unread = netlist
+            .unread_source
+            .iter()
+            .filter(|region| {
+                region
+                    .source
+                    .as_deref()
+                    .and_then(|source| source.canonicalize().ok())
+                    .is_some_and(|source| source == library_identity)
+            })
+            .collect::<Vec<_>>();
+        let map = source_map_for_editor_as_read(library, unread);
+
+        assert_eq!(netlist.params.get("vth"), Some(0.5));
+        assert_eq!(map.param_context_in(None).get("vth"), Some(0.5));
+        assert_eq!(
+            map.param_definition_for("vth", None)
+                .map(|definition| definition.line),
+            Some(3)
+        );
+        assert_eq!(
+            unread_on(&map, "vth", 6),
+            Some(UnreadSourceReason::LibrarySection {
+                name: "ss".to_owned()
+            })
+        );
+        assert_eq!(
+            netlist.unread_root_source().count(),
+            0,
+            "the deck's own text skips nothing"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn source_map_records_xspice_model_span() {
         let src = "deck\nA1 in out gain gain=2\n.model gain xspice\n.end\n";

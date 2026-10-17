@@ -16,9 +16,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use super::{
-    NetlistSourceLocation, ParseError, ParseWithAbortError, ensure_parse_not_aborted,
-    finish_non_aborting_parse, map_abort_parse_error, poll_parse_abort, poll_parse_text,
-    read_file_with_encoding_limited_with_abort,
+    NetlistSourceLocation, ParseError, ParseWithAbortError, UnreadSourceReason, UnreadSourceRegion,
+    ensure_parse_not_aborted, finish_non_aborting_parse, map_abort_parse_error, poll_parse_abort,
+    poll_parse_text, read_file_with_encoding_limited_with_abort,
 };
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
@@ -49,6 +49,9 @@ pub(crate) enum ExpandedSourceItem {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ExpandedSource {
     pub(crate) items: Vec<ExpandedSourceItem>,
+    /// Lines of the expanded sources left out because they sit in an inline
+    /// `.lib` section nothing selected.
+    pub(crate) unread: Vec<UnreadSourceRegion>,
     rendered_bytes: usize,
     implicit_title: Option<String>,
 }
@@ -78,6 +81,7 @@ impl ExpandedSource {
         ResourceLimitError::ensure(ResourceKind::ExpandedSourceBytes, requested, limit)?;
         self.rendered_bytes = requested;
         self.items.extend(other.items);
+        self.unread.extend(other.unread);
         Ok(())
     }
 
@@ -537,6 +541,90 @@ struct InlineLibFrame {
     name: String,
     opened_at_line: usize,
     selected: bool,
+}
+
+/// The inline `.lib name` ... `.endl` sections open at one point of a source.
+///
+/// A source reads a section only when the `.lib` card that brought the source
+/// in selects it by name and every section around it is read as well; a root
+/// selects none. Each outermost section left out is recorded as unread.
+#[derive(Debug, Default)]
+struct InlineLibrarySections {
+    frames: Vec<InlineLibFrame>,
+}
+
+impl InlineLibrarySections {
+    /// Whether a line at this point is read: no section is open, or the
+    /// innermost open one is selected.
+    fn reading(&self) -> bool {
+        self.frames.last().is_none_or(|frame| frame.selected)
+    }
+
+    /// Open the section `name` on `line`, answering whether it is selected.
+    fn open(&mut self, name: String, line: usize, selected_section: Option<&str>) -> bool {
+        let selected = self.reading()
+            && selected_section.is_some_and(|wanted| name.eq_ignore_ascii_case(wanted));
+        self.frames.push(InlineLibFrame {
+            name,
+            opened_at_line: line,
+            selected,
+        });
+        selected
+    }
+
+    /// Close the innermost section at the `.endl` on `line`, recording the
+    /// lines between the two cards when it is the outermost section left out.
+    fn close(
+        &mut self,
+        end_name: Option<&str>,
+        line: usize,
+        source: Option<&Path>,
+        unread: &mut Vec<UnreadSourceRegion>,
+    ) -> Result<(), ParseError> {
+        let Some(frame) = self.frames.pop() else {
+            return Err(ParseError::Syntax {
+                line,
+                message: ".ENDL encountered without an open .LIB section".to_string(),
+            });
+        };
+        // The label on `.ENDL` is documentation, not structure: every
+        // reference simulator closes the innermost open section and ignores
+        // the name. Enforcing a match here reads as stricter and safer, but it
+        // rejects real foundry PDKs over typos that change no semantics —
+        // GlobalFoundries' GF180MCU `sm141064.ngspice` closes its `.LIB dio`
+        // section with `.endl diode`, and no other simulator notices. Warn so
+        // the typo is still visible, then close the frame the way the deck's
+        // author observed it behaving.
+        if let Some(end_name) = end_name
+            && !end_name.eq_ignore_ascii_case(&frame.name)
+        {
+            log::warn!(
+                "line {line}: .ENDL section '{end_name}' does not match open .LIB section '{}'; closing '{}'",
+                frame.name,
+                frame.name
+            );
+        }
+        let first = frame.opened_at_line + 1;
+        if !frame.selected && self.reading() && first < line {
+            unread.push(UnreadSourceRegion {
+                source: source.map(Path::to_path_buf),
+                lines: first..=line - 1,
+                reason: UnreadSourceReason::LibrarySection { name: frame.name },
+            });
+        }
+        Ok(())
+    }
+
+    /// Fail on the innermost section the source opened and never closed.
+    fn finish(&self) -> Result<(), ParseError> {
+        match self.frames.last() {
+            Some(frame) => Err(ParseError::Syntax {
+                line: frame.opened_at_line,
+                message: format!("Library section '{}' missing .ENDL", frame.name),
+            }),
+            None => Ok(()),
+        }
+    }
 }
 
 impl IncludeKey {
@@ -1257,7 +1345,7 @@ impl IncludeProcessor {
         result.items.push(ExpandedSourceItem::EnterSource {
             path: current_path.to_path_buf(),
         });
-        let mut inline_sections: Vec<InlineLibFrame> = Vec::new();
+        let mut inline_sections = InlineLibrarySections::default();
         let mut selected_section_found = selected_section.is_none();
         let source_line_count = content.lines().count();
 
@@ -1282,22 +1370,11 @@ impl IncludeProcessor {
                     .into());
                 };
                 if section.is_none() {
-                    let parent_selected = inline_sections
-                        .last()
-                        .map(|frame| frame.selected)
-                        .unwrap_or(true);
-                    let selected = parent_selected
-                        && selected_section
-                            .is_some_and(|wanted| filename.eq_ignore_ascii_case(wanted));
-                    selected_section_found |= selected;
-                    inline_sections.push(InlineLibFrame {
-                        name: filename,
-                        opened_at_line: line_number,
-                        selected,
-                    });
+                    selected_section_found |=
+                        inline_sections.open(filename, line_number, selected_section);
                     continue;
                 }
-                if inline_sections.last().is_some_and(|frame| !frame.selected) {
+                if !inline_sections.reading() {
                     continue;
                 }
 
@@ -1319,36 +1396,16 @@ impl IncludeProcessor {
             }
 
             if let Some(end_name) = parse_endl_directive(trimmed, line_number)? {
-                let Some(open_frame) = inline_sections.last() else {
-                    return Err(ParseError::Syntax {
-                        line: line_number,
-                        message: ".ENDL encountered without an open .LIB section".to_string(),
-                    }
-                    .into());
-                };
-                // The label on `.ENDL` is documentation, not structure: every
-                // reference simulator closes the innermost open section and
-                // ignores the name. Enforcing a match here reads as stricter
-                // and safer, but it rejects real foundry PDKs over typos that
-                // change no semantics — GlobalFoundries' GF180MCU
-                // `sm141064.ngspice` closes its `.LIB dio` section with
-                // `.endl diode`, and no other simulator notices. Warn so the
-                // typo is still visible, then close the frame the way the
-                // deck's author observed it behaving.
-                if let Some(end_name) = end_name
-                    && !end_name.eq_ignore_ascii_case(&open_frame.name)
-                {
-                    log::warn!(
-                        "line {line_number}: .ENDL section '{end_name}' does not match open .LIB section '{}'; closing '{}'",
-                        open_frame.name,
-                        open_frame.name
-                    );
-                }
-                inline_sections.pop();
+                inline_sections.close(
+                    end_name.as_deref(),
+                    line_number,
+                    Some(current_path),
+                    &mut result.unread,
+                )?;
                 continue;
             }
 
-            if inline_sections.last().is_some_and(|frame| !frame.selected) {
+            if !inline_sections.reading() {
                 continue;
             }
 
@@ -1443,13 +1500,7 @@ impl IncludeProcessor {
             )?;
         }
 
-        if let Some(frame) = inline_sections.last() {
-            return Err(ParseError::Syntax {
-                line: frame.opened_at_line,
-                message: format!("Library section '{}' missing .ENDL", frame.name),
-            }
-            .into());
-        }
+        inline_sections.finish()?;
 
         if require_selected_section && !selected_section_found {
             return Err(ParseError::Syntax {

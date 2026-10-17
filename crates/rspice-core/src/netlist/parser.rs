@@ -616,7 +616,7 @@ pub(crate) fn parse_expanded_netlist_with_parameter_overrides_and_abort(
     abort: &dyn AbortSignal,
 ) -> Result<Netlist, ParseWithAbortError> {
     let rendered = expanded.render();
-    parse_with_consistent_random_seed(|seed| {
+    let mut netlist = parse_with_consistent_random_seed(|seed| {
         parse_with_consistent_temperatures(|temperatures| {
             parse_with_settled_root_redefinitions(|redefinitions| {
                 parse_netlist_impl(
@@ -634,7 +634,12 @@ pub(crate) fn parse_expanded_netlist_with_parameter_overrides_and_abort(
                 )
             })
         })
-    })
+    })?;
+    // The include processor left these out before the parser saw any line.
+    netlist
+        .unread_source
+        .extend(expanded.unread.iter().cloned());
+    Ok(netlist)
 }
 
 /// The lexical seed scan is a fast hint. Only the command parser knows whether
