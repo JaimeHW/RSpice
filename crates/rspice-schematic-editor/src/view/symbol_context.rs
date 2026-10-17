@@ -132,8 +132,11 @@ impl SchematicSymbolContext {
         components: &[Component],
         pos: Point,
     ) -> Option<u64> {
+        // Topmost first: instances paint in document order, so the last one
+        // is the one on top.
         components
             .iter()
+            .rev()
             .find(|component| self.terminal_points(component).contains(&pos))
             .map(|component| component.id)
     }
@@ -147,6 +150,7 @@ impl SchematicSymbolContext {
             .or_else(|| {
                 components
                     .iter()
+                    .rev()
                     .map(|component| (component.id, self.component_bounds(component)))
                     .find(|(_, (min, max))| {
                         pos.x >= min.x && pos.x <= max.x && pos.y >= min.y && pos.y <= max.y
