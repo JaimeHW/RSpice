@@ -376,6 +376,75 @@ fn a_net_with_anything_but_inputs_on_it_is_driven() {
     );
 }
 
+/// Two inputs wired together and tapped off bit 3 of a typed bus, with a
+/// source at `bit` when one is given, drawn by its label.
+fn inputs_tapped_off_a_bus(source: Option<&'static str>) -> SchematicDocument {
+    use crate::schematic::bus::{Bus, BusTap, BusTapOrientation};
+    use rspice_design_model::bus::{BusDeclaration, BusSlice};
+
+    let views = amp_views();
+    let beside = source
+        .map(|bit| vec![between(3, ComponentType::VoltageSource, "VD", bit, "0")])
+        .unwrap_or_default();
+    let mut drawing = labelled_over(&views, beside);
+    let libraries = LibraryCatalog::default();
+    let hierarchy = HierarchySource::from_workspace(&libraries, &views);
+    let inputs = [input_cell(1, "X1"), input_cell(2, "X2")];
+    let [first, second] = inputs.each_ref().map(|input| {
+        terminal_positions_with_hierarchy(input, Some(&hierarchy))
+            .into_iter()
+            .find_map(|(pin, point)| (pin == "A").then_some(point))
+            .expect("the input has its terminal")
+    });
+    drawing.components.extend(inputs);
+    drawing.wires.push(Wire::segment(500, first, second));
+    let bus_point = Point::new(first.x, first.y - 200);
+    let bus = Bus::new(
+        501,
+        vec![
+            Point::new(first.x - 400, bus_point.y),
+            Point::new(first.x + 400, bus_point.y),
+        ],
+        Some(BusDeclaration::parse("DATA[7:0]").expect("a declaration")),
+    )
+    .expect("a bus");
+    let tap = BusTap::new(
+        502,
+        &bus,
+        bus_point,
+        first,
+        BusSlice::parse("DATA[3]").expect("a slice"),
+        BusTapOrientation::Down,
+    )
+    .expect("a tap on the bus");
+    drawing.buses.push(bus);
+    drawing.bus_taps.push(tap);
+    drawing
+}
+
+/// A tap joins the scalar net it lands on to the bus bit it selects, so the
+/// inputs it feeds are on that bit: driven where anything drives the bit,
+/// here a source drawn by the bit's member name, and an undriven net only
+/// where nothing does.
+#[test]
+fn inputs_tapped_off_a_driven_bus_bit_are_driven() {
+    let undriven = |drawing: SchematicDocument| {
+        let result = checked(&drawing, &amp_views());
+        of_type(&result, DrcViolationType::UndrivenNet)
+            .into_iter()
+            .map(|finding| finding.message.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        undriven(inputs_tapped_off_a_bus(Some("DATA[3]"))),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        undriven(inputs_tapped_off_a_bus(None)),
+        ["Net 'DATA[3]' joins 2 declared inputs and nothing drives it: X1.A, X2.A"]
+    );
+}
+
 /// Inside a placed cell, the undriven net is stated at the occurrence.
 #[test]
 fn an_undriven_net_below_the_subject_is_stated_inside_its_occurrence() {
