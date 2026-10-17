@@ -2,7 +2,7 @@
 //! element and the card it was binding, beside the log line that says so.
 
 use rspice_core::notice::{EngineNotice, NoticeCollector, ParameterReplacement, ParameterScope};
-use rspice_core::{Engine, Netlist, NoAbort};
+use rspice_core::{Engine, Netlist, NoAbort, SimulationConfig};
 
 /// Two geometries of one card whose `pbs` is below BSIM4's floor and whose
 /// `eu` is negative.
@@ -132,4 +132,68 @@ fn a_clamp_inside_a_subcircuit_names_the_element_by_its_hierarchical_name() {
         .map(|element| element.to_ascii_uppercase())
         .collect();
     assert_eq!(elements, ["XAMP.M1"]);
+}
+
+/// A Monte Carlo run binds the card once per sample, on whichever thread
+/// solves it. The clamp reaches the run's collector from the workers as from
+/// the run's own thread: one notice, counted, naming the samples the way the
+/// run's log lines do.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_clamp_every_monte_carlo_sample_raises_is_one_notice_listing_the_samples() {
+    const SAMPLES: usize = 12;
+    let netlist = Netlist::parse(
+        "BSIM4 clamp under Monte Carlo\n.param wid=10u\nVD d 0 1\nVG g 0 1\n\
+         M1 d g 0 0 nch L=1u W={wid}\n\
+         .model nch nmos level=54 version=4.8 pbs=0.05\n.op\n.end\n",
+    )
+    .expect("the deck parses");
+    for workers in [1, 4] {
+        let mut config = SimulationConfig::default();
+        config.resource_limits.max_parallel_workers = workers;
+        let collector = NoticeCollector::new();
+        let result = {
+            let _installed = collector.install();
+            Engine::new(config)
+                .run_monte_carlo(&netlist, SAMPLES, 7)
+                .expect("a clamped card still solves")
+        };
+        assert_eq!(result.num_failures, 0, "{workers} workers");
+
+        let recorded = collector.take();
+        let pbs: Vec<_> = recorded
+            .iter()
+            .filter(|recorded| {
+                matches!(
+                    &recorded.notice,
+                    EngineNotice::ParameterReplaced(replacement) if replacement.parameter == "pbs"
+                )
+            })
+            .collect();
+        assert_eq!(pbs.len(), 1, "{workers} workers: {recorded:#?}");
+        let pbs = pbs[0];
+        assert!(pbs.occurrences >= SAMPLES, "{workers} workers: {pbs:#?}");
+        assert_eq!(
+            pbs.points.len() + pbs.unnamed_points,
+            SAMPLES,
+            "{workers} workers: every sample, each once: {pbs:#?}"
+        );
+        let mut samples: Vec<usize> = pbs
+            .points
+            .iter()
+            .map(|point| {
+                point
+                    .strip_prefix("sample ")
+                    .and_then(|number| number.parse().ok())
+                    .unwrap_or_else(|| panic!("a sample label: {point:?}"))
+            })
+            .collect();
+        samples.sort_unstable();
+        samples.dedup();
+        assert_eq!(samples.len(), pbs.points.len(), "{pbs:#?}");
+        assert!(
+            samples.iter().all(|sample| (1..=SAMPLES).contains(sample)),
+            "{pbs:#?}"
+        );
+    }
 }
