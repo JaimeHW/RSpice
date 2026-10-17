@@ -19,7 +19,7 @@ use crate::workbench::workflows::project_workflow::{
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::check_and_save_validation::{
-    CheckAndSaveValidationReport, finding_anchor,
+    CheckAndSaveValidationReport, finding_anchor, run_design_checks,
 };
 use crate::workbench::app::dialogs::operation_primitives::{
     CONTEXT_WIDTH, SURFACE_HEIGHT, TRANSACTION_HEIGHT, ellipsized_text, operation_steps,
@@ -80,7 +80,7 @@ pub(crate) fn open_check_and_save_dialog(state: &mut AppState) {
         return;
     }
     state.sync_active_schematic_to_workspace();
-    crate::workbench::menu_bar::check_cellview(state);
+    run_design_checks(state);
     match CheckAndSaveValidationReport::collect(state) {
         Ok(report) => {
             let blockers = report.blockers().len();
@@ -306,6 +306,7 @@ impl RSpiceApp {
             Ok(summary) => ConsoleMessage::info(summary),
             Err(error) => ConsoleMessage::warning(error.to_string()),
         });
+        run_design_checks(&mut self.state);
         match CheckAndSaveValidationReport::collect(&self.state) {
             Ok(report) => self.state.dialogs.check_and_save.report = Some(report),
             Err(error) => {
@@ -335,6 +336,9 @@ impl RSpiceApp {
                 Some("Validation evidence is unavailable; nothing was saved.".to_owned());
             return;
         };
+        // Checks nothing a check still describes, so an unchanged design is
+        // re-derived from the evidence the reader reviewed.
+        run_design_checks(&mut self.state);
         let fresh_report = match CheckAndSaveValidationReport::collect(&self.state) {
             Ok(report) => report,
             Err(error) => {

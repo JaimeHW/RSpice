@@ -984,7 +984,7 @@ mod tests {
                 }
                 let original = state.schematic.document().components.clone();
                 let draft = state.tabbed_property_dialog.draft.values.clone();
-                let report = CheckAndSaveValidationReport::collect(&state).unwrap();
+                let report = CheckAndSaveValidationReport::validate(&state).unwrap();
                 let errors = report
                     .blockers()
                     .iter()
@@ -1013,7 +1013,7 @@ mod tests {
             .unwrap()
             .metadata
             .insert(MODEL_BOUND_SYMBOL_METADATA_KEY.to_owned(), "{".to_owned());
-        let report = CheckAndSaveValidationReport::collect(&state).unwrap();
+        let report = CheckAndSaveValidationReport::validate(&state).unwrap();
         let errors = report
             .blockers()
             .iter()

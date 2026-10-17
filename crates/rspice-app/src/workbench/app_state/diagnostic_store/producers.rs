@@ -211,10 +211,12 @@ impl AppState {
     pub(in crate::workbench) fn publish_dispatch_diagnostics(&mut self, report: &PreflightReport) {
         let project = self.workspace.content.project.id();
         let revision = report.project_revision;
-        // Keyed by what each finding names as the thing to change, which is
-        // the nearest a dispatch check comes to an object. Two findings that
-        // name the same destination are told apart by the order the pass
-        // reported them in, and by nothing else about the pass.
+        // A blocker is keyed by what it names as the thing to change, which
+        // is the nearest a dispatch check comes to an object; two blockers
+        // that name the same destination are told apart by the order the pass
+        // reported them in. An advisory is keyed by what it says it is about,
+        // so one that names no destination is not told apart from the others
+        // by its place in the pass, which another pass need not keep.
         let blocker_keys = report.blockers.iter().map(|issue| {
             let (producer, family) = remediation_producer(&issue.remediation);
             FindingKey::new(
@@ -225,14 +227,17 @@ impl AppState {
             )
         });
         let advisory_keys = report.advisories.iter().map(|advisory| {
-            let remediation = advisory.remediation.as_ref();
+            let (kind, object) = &advisory.about;
             FindingKey::new(
-                remediation.map_or(PREFLIGHT_PRODUCER, |remediation| {
-                    remediation_producer(remediation).0
-                }),
+                advisory
+                    .remediation
+                    .as_ref()
+                    .map_or(PREFLIGHT_PRODUCER, |remediation| {
+                        remediation_producer(remediation).0
+                    }),
                 ADVISORY_CODE,
                 DISPATCH_DOCUMENT,
-                remediation.map_or_else(String::new, remediation_key),
+                format!("{kind}:{object}"),
             )
         });
         let keys: Vec<FindingKey> = blocker_keys.chain(advisory_keys).collect();
@@ -509,6 +514,61 @@ mod tests {
             advisory.route.is_none(),
             "this advisory names no destination"
         );
+    }
+
+    /// Advisories that name no destination keep their identities, and the
+    /// reader's selection, when the next pass reports them in another order.
+    #[test]
+    fn an_advisory_with_no_destination_is_named_by_what_it_is_about() {
+        let mut state = open_state();
+        let report = |advisories: Vec<PreflightAdvisory>| PreflightReport {
+            project_revision: 4,
+            topology_root: String::new(),
+            topology_revision: 0,
+            topology_closure: Vec::new(),
+            simulation_plan_id: None,
+            simulation_plan_revision: None,
+            blockers: Vec::new(),
+            advisories,
+            prepared: None,
+        };
+        let fallback = PreflightAdvisory::about(
+            "configuration-fallback",
+            "lib/amp/schematic",
+            "Configuration fallback reviewed for lib/amp/schematic at X1".to_owned(),
+        );
+        let warning = PreflightAdvisory::about(
+            "configuration-warning",
+            "lib/amp/schematic:stop view",
+            "Configuration warning for lib/amp/schematic: stop view".to_owned(),
+        );
+        let identities = |state: &AppState| {
+            let listed = listing::listing(state);
+            (0..listed.len())
+                .filter_map(|index| listed.row(index))
+                .map(|row| (row.message.to_owned(), row.id))
+                .collect::<std::collections::BTreeMap<_, _>>()
+        };
+
+        state.publish_dispatch_diagnostics(&report(vec![fallback.clone(), warning.clone()]));
+        let before = identities(&state);
+        assert_eq!(before.len(), 2);
+        let selected = before[&warning.message];
+        state.diagnostics.set_current_finding(Some(selected));
+
+        state.publish_dispatch_diagnostics(&report(vec![warning.clone(), fallback.clone()]));
+        assert_eq!(identities(&state), before);
+        assert_eq!(state.diagnostics.current_finding(), Some(selected));
+
+        // One of them gone: the other keeps its identity rather than taking
+        // over the place the first one held.
+        state.publish_dispatch_diagnostics(&report(vec![warning.clone()]));
+        assert_eq!(
+            identities(&state).get(&warning.message),
+            Some(&selected),
+            "the remaining advisory keeps its identity"
+        );
+        assert_eq!(state.diagnostics.current_finding(), Some(selected));
     }
 
     /// An attribution recorded for a solve that was later rescued must not be

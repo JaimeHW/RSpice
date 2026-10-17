@@ -223,6 +223,40 @@ impl AppState {
         self.run_design_check(root, CheckScope::Design)
     }
 
+    /// Check `subject` as far as `scope` reaches, unless a check of it that
+    /// reached exactly as far still describes the design.
+    ///
+    /// For a workflow that decides from the checks rather than being one:
+    /// Check and Save and the run's preflight read the receipt this leaves
+    /// current, and the page lists what that check published, so none of
+    /// them can say something else about the same design.
+    pub(in crate::workbench) fn ensure_design_check(
+        &mut self,
+        subject: CellViewRef,
+        scope: CheckScope,
+    ) -> Result<(), String> {
+        if self.current_design_check(&subject, scope).is_some() {
+            return Ok(());
+        }
+        self.run_design_check(subject, scope).map(|_| ())
+    }
+
+    /// The findings of the check of `subject` that reached as far as
+    /// `scope`, while they still describe the design.
+    pub(in crate::workbench) fn current_design_check(
+        &self,
+        subject: &CellViewRef,
+        scope: CheckScope,
+    ) -> Option<&DrcResult> {
+        match self.design_check_status(subject) {
+            DesignCheckStatus::Current(receipt) if receipt.scope == scope => Some(&receipt.result),
+            DesignCheckStatus::Current(_)
+            | DesignCheckStatus::NotRun
+            | DesignCheckStatus::Stale(_)
+            | DesignCheckStatus::Unavailable { .. } => None,
+        }
+    }
+
     /// The open cellview and every cellview its walk reaches.
     pub(crate) fn run_active_design_checks(&mut self) -> Result<DrcResult, String> {
         let subject = self.workspace.content.active_schematic_reference();
@@ -302,21 +336,16 @@ impl AppState {
         self.design_check_config(&self.workspace.content.simulation_root_reference())
     }
 
-    /// Publish the design-rule findings of the configured simulation root, as
-    /// the dispatch checks found them.
-    ///
-    /// Through the one producer the Check command publishes through, with the
-    /// root as the subject: the same records, the same identities, the same
-    /// digest and the same receipt. The dispatch checks used to re-file every
-    /// error as a blocker and every warning as an advisory beside the Check
-    /// command's own findings, so the page listed each one twice.
+    /// Publish `result` as Check Design's findings about the configured
+    /// simulation root, for a test that needs findings no drawing produces.
+    #[cfg(test)]
     pub(in crate::workbench) fn publish_configured_root_design_check_result(
         &mut self,
         result: DrcResult,
     ) -> Result<(), String> {
         let subject = self.workspace.content.simulation_root_reference();
         let config = self.design_check_config(&subject);
-        self.publish_design_check_result(subject, config, result, CheckScope::Hierarchy)
+        self.publish_design_check_result(subject, config, result, CheckScope::Design)
     }
 
     fn publish_design_check_result(
@@ -385,6 +414,10 @@ impl AppState {
     /// Empty where no check of `subject` is on record. A symbol view's
     /// findings are never among them: they are the pin checks', owned by
     /// [`DiagnosticInputs::SymbolPins`] and named there.
+    ///
+    /// The canvas names its markers by [`Self::canvas_finding_identities`],
+    /// since they may be two passes' findings; this names one pass's.
+    #[cfg(test)]
     pub(crate) fn design_rule_finding_identities(&self, subject: &CellViewRef) -> Vec<uuid::Uuid> {
         let Some(receipt) = self.design_checks.receipt(subject) else {
             return Vec::new();

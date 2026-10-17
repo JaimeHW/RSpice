@@ -18,6 +18,7 @@ mod topology;
 use crate::diagnostics::ConsoleMessage;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::design_checks::CheckScope;
 
 use super::state::{
     ConsolePage, ModelsPage, PreflightAdvisory, PreflightIssue, PreflightRemediation,
@@ -27,11 +28,11 @@ use super::state::{
 /// Run every local preflight check, retain the exact report for the current
 /// project revision, and publish what it found.
 ///
-/// The design rules are checked once, over the configured root, and their
-/// findings are published by the design-rule producer exactly as the Check
-/// command publishes them. The report carries one blocker that stands for
-/// them when any is an error. The open view is not checked: it is not what
-/// the run executes.
+/// The design rules are decided from Check Design's receipt for the
+/// configured design, which is run first only where none describes the
+/// design as it stands; its findings are the ones the page lists. The report
+/// carries one blocker that stands for them when any counts as an error. The
+/// open view is not checked: it is not what the run executes.
 ///
 /// A blocked pass leaves the reader on the Problems page with the blockers
 /// listed; a clean one leaves them where they were. Either way the outcome is
@@ -41,19 +42,12 @@ use super::state::{
 /// clean pass with the Console collapsed said nothing anywhere.
 pub(crate) fn run(app: &mut RSpiceApp) {
     app.state.sync_active_schematic_to_workspace();
-    let Collected {
-        mut report,
-        design_rules,
-    } = collect(&app.state);
-    if let Some(result) = design_rules
-        && let Err(error) = app
-            .state
-            .publish_configured_root_design_check_result(result)
-    {
+    if let Err(error) = ensure_configured_design_check(&mut app.state) {
         app.state.push_user_message(ConsoleMessage::warning(format!(
             "Design-rule findings could not be recorded: {error}"
         )));
     }
+    let mut report = collect(&app.state);
     if report.blockers.is_empty() {
         match app
             .simulation_controller
@@ -205,17 +199,23 @@ fn queue_retained_run(app: &mut RSpiceApp) -> bool {
     true
 }
 
-/// What one pass found: the report the run is queued against, and the
-/// design-rule result for the configured root, which is published by the
-/// design-rule producer rather than filed in the report.
-struct Collected {
-    report: PreflightReport,
-    design_rules: Option<rspice_design::drc::DrcResult>,
+/// Check Design over the configured design, unless a check of it still
+/// describes the design as it stands. Its receipt is what the pass decides
+/// the design rules from, and the page lists what it published, so the two
+/// cannot disagree; a design checked since its last edit is not checked
+/// again.
+fn ensure_configured_design_check(state: &mut AppState) -> Result<(), String> {
+    let root = state.workspace.content.simulation_root_reference();
+    state.ensure_design_check(root, CheckScope::Design)
 }
 
+/// The report a pass over `state` collects, the configured design checked
+/// first as the pass checks it.
 #[cfg(test)]
 fn collect_report(state: &AppState) -> PreflightReport {
-    collect(state).report
+    let mut state = state.clone();
+    let _ = ensure_configured_design_check(&mut state);
+    collect(&state)
 }
 
 /// The one blocker that stands for the configured root's design-rule errors.
@@ -243,10 +243,9 @@ fn design_rule_blocker(
     })
 }
 
-fn collect(state: &AppState) -> Collected {
+fn collect(state: &AppState) -> PreflightReport {
     let mut blockers = Vec::new();
     let mut advisories = Vec::new();
-    let mut design_rules = None;
     let root_reference = state.workspace.content.simulation_root_reference();
     let inspection = state.workspace.inspect_design_projection(
         &state.library_manager,
@@ -313,11 +312,15 @@ fn collect(state: &AppState) -> Collected {
         .iter()
         .filter(|binding| binding.used_review_fallback)
     {
-        advisories.push(PreflightAdvisory::from(format!(
-            "Configuration fallback reviewed for {} at {}",
-            binding.reference.display_path(),
-            binding.instance_paths.join(", ")
-        )));
+        advisories.push(PreflightAdvisory::about(
+            "configuration-fallback",
+            binding.reference.key(),
+            format!(
+                "Configuration fallback reviewed for {} at {}",
+                binding.reference.display_path(),
+                binding.instance_paths.join(", ")
+            ),
+        ));
     }
     // A warning is a resolved binding the configuration honours differently
     // than it reads. It blocks nothing — the run will proceed — but starting
@@ -325,10 +328,14 @@ fn collect(state: &AppState) -> Collected {
     // hierarchy does not follow.
     for binding in hierarchy_bindings {
         for warning in &binding.warnings {
-            advisories.push(PreflightAdvisory::from(format!(
-                "Configuration warning for {}: {warning}",
-                binding.reference.display_path()
-            )));
+            advisories.push(PreflightAdvisory::about(
+                "configuration-warning",
+                format!("{}:{warning}", binding.reference.key()),
+                format!(
+                    "Configuration warning for {}: {warning}",
+                    binding.reference.display_path()
+                ),
+            ));
         }
     }
 
@@ -340,17 +347,10 @@ fn collect(state: &AppState) -> Collected {
             state.library_manager.catalog(),
             execution_projection,
         );
-        // The profile the Check command uses for the same cell view, so the
-        // findings this publishes are the same evidence, with the same
-        // digest, as a pass run from the Check menu.
-        let result = rspice_design::drc::run_check_with_hierarchy(
-            root_schematic,
-            &hierarchy_source,
-            state.configured_root_design_check_config(),
-        );
-        if result.completed {
-            blockers.extend(design_rule_blocker(&root_reference, &result));
-            design_rules = Some(result);
+        // Check Design's own receipt for the configured design: the
+        // configuration and the waivers the page states its findings under.
+        if let Some(result) = state.current_design_check(&root_reference, CheckScope::Design) {
+            blockers.extend(design_rule_blocker(&root_reference, result));
         } else {
             blockers.push(PreflightIssue {
                 check: "Schematic validation".to_owned(),
@@ -523,19 +523,16 @@ fn collect(state: &AppState) -> Collected {
 
     let simulation_plan = state.active_plan_revision();
     let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
-    Collected {
-        report: PreflightReport {
-            project_revision: state.workspace.content.project.revision().get(),
-            topology_root,
-            topology_revision,
-            topology_closure,
-            simulation_plan_id: simulation_plan.map(|(id, _)| id),
-            simulation_plan_revision: simulation_plan.map(|(_, revision)| revision),
-            blockers,
-            advisories,
-            prepared: None,
-        },
-        design_rules,
+    PreflightReport {
+        project_revision: state.workspace.content.project.revision().get(),
+        topology_root,
+        topology_revision,
+        topology_closure,
+        simulation_plan_id: simulation_plan.map(|(id, _)| id),
+        simulation_plan_revision: simulation_plan.map(|(_, revision)| revision),
+        blockers,
+        advisories,
+        prepared: None,
     }
 }
 
@@ -578,6 +575,10 @@ fn temperature_validity_advisories(state: &AppState) -> Vec<PreflightAdvisory> {
                     library.name.clone(),
                     Some(corner.name.clone()),
                 )),
+                about: (
+                    "corner-qualification",
+                    format!("{}:{}", library.name, corner.name),
+                ),
             })
         })
         .collect()

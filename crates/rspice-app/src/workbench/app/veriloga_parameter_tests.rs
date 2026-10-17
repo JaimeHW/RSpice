@@ -443,7 +443,7 @@ fn a_parameter_the_module_dropped_is_found_refused_and_removable() {
         crate::workbench::app::undeclared_instance_parameters(&app.state, &placed(&app.state, id)),
         [("offset".to_owned(), "1m".to_owned())]
     );
-    let report = super::dialogs::check_and_save_validation::CheckAndSaveValidationReport::collect(
+    let report = super::dialogs::check_and_save_validation::CheckAndSaveValidationReport::validate(
         &app.state,
     )
     .expect("the design check runs");
