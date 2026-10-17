@@ -700,11 +700,13 @@ fn sheet_floating_net_findings(state: &AppState) -> Vec<&DrcViolation> {
 }
 
 /// The problem a set of findings amounts to: a failure when any of them is
-/// an error, else a warning.
+/// an error that counts, else a warning. A waived error is still listed, but
+/// it no longer counts against the design — the Checks header and the run
+/// gate do not count it — so it is not a failure here either.
 fn findings_problem(findings: &[&DrcViolation]) -> Problem {
     if findings
         .iter()
-        .any(|finding| finding.severity >= DrcSeverity::Error)
+        .any(|finding| finding.counts() && finding.severity >= DrcSeverity::Error)
     {
         Problem::Failure
     } else {

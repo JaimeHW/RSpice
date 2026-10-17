@@ -2410,3 +2410,28 @@ fn the_cmos_inverter_example_binds_models_the_library_resolves() {
         );
     }
 }
+
+/// A waived error is a decision, not a failure: the sheet's row marks the
+/// findings it counts as the Checks header and the run gate count them, so
+/// errors that are all waived read as findings to note rather than as a
+/// failure the header says is not there.
+#[test]
+fn a_sheet_row_of_waived_errors_is_not_a_failure() {
+    let mut error = DrcViolation::new(
+        0,
+        rspice_design::drc::DrcViolationType::UnconnectedPin,
+        "open",
+        DrcLocation::Global,
+    );
+    error.severity = DrcSeverity::Error;
+    assert_eq!(findings_problem(&[&error]), Problem::Failure);
+
+    error.waiver = Some(rspice_design::drc::DrcWaiver {
+        rule: "DRC-UNCONNECTED-PIN".to_owned(),
+        object: "global".to_owned(),
+        reason: "a spare pin".to_owned(),
+        author: "ana".to_owned(),
+        waived_at_ms: 1,
+    });
+    assert_eq!(findings_problem(&[&error]), Problem::Warning);
+}
