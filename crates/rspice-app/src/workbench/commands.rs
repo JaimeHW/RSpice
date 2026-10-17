@@ -1329,8 +1329,7 @@ impl Command {
             }
             Self::Duplicate => {
                 if active_symbol_editor(app) {
-                    app.copy_selected_symbol_shape();
-                    app.paste_symbol_shape();
+                    app.duplicate_selected_symbol_shape();
                 } else {
                     app.state.duplicate_schematic_selection();
                 }

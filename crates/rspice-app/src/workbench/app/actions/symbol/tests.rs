@@ -58,6 +58,30 @@ fn metadata_encoding(state: &AppState) -> Option<String> {
         .cloned()
 }
 
+/// Duplicate in the symbol editor copied the selection over the user's
+/// clipboard and pasted it from there, so a copy made before was lost. It
+/// leaves the clipboard alone, as the schematic's Duplicate does (audit E-15).
+#[test]
+fn duplicate_leaves_the_symbol_clipboard_alone() {
+    let mut app = open_symbol();
+    let mut circle = SymbolSelection::default();
+    circle.shapes.insert(0);
+    app.state.ui.symbol.editor.set_selection(circle);
+    Command::Copy.execute(&mut app);
+    let clipboard = app.state.ui.symbol.editor.clipboard.clone();
+    assert_eq!(clipboard.shapes.len(), 1);
+
+    let mut dot = SymbolSelection::default();
+    dot.shapes.insert(1);
+    app.state.ui.symbol.editor.set_selection(dot);
+    Command::Duplicate.execute(&mut app);
+
+    let document = app.state.load_active_symbol_document().unwrap();
+    assert_eq!(document.body.len(), 3, "the dot was duplicated");
+    assert!(matches!(document.body[2], SymbolShape::Dot { .. }));
+    assert_eq!(app.state.ui.symbol.editor.clipboard, clipboard);
+}
+
 #[test]
 fn cut_paste_commands_preserve_order_unique_pin_names_and_undo() {
     let mut app = open_symbol();

@@ -9,7 +9,9 @@ use rspice_schematic_editor::symbol_editor::commands::{
 use rspice_schematic_editor::symbol_editor::interaction::{
     SymbolEditCapabilities, bind_canvas_source,
 };
-use rspice_schematic_editor::symbol_editor::session::{SymbolSelection, SymbolTool};
+use rspice_schematic_editor::symbol_editor::session::{
+    SymbolClipboard, SymbolSelection, SymbolTool,
+};
 
 impl RSpiceApp {
     pub(crate) fn activate_symbol_tool(&mut self, tool: SymbolTool) {
@@ -35,25 +37,44 @@ impl RSpiceApp {
     }
 
     pub(crate) fn copy_selected_symbol_shape(&mut self) {
+        if let Some(clipboard) = self.selected_symbol_items() {
+            self.state.ui.symbol.editor.clipboard = clipboard;
+        }
+    }
+
+    pub(crate) fn paste_symbol_shape(&mut self) {
+        let clipboard = self.state.ui.symbol.editor.clipboard.clone();
+        if let Some(request) = self.symbol_paste_request(clipboard) {
+            apply_edit_request(&mut self.state, request);
+        }
+    }
+
+    /// Paste a copy of the selection; the user's clipboard is not touched.
+    pub(crate) fn duplicate_selected_symbol_shape(&mut self) {
+        if let Some(items) = self.selected_symbol_items()
+            && let Some(request) = self.symbol_paste_request(items)
+        {
+            apply_current_edit_request(&mut self.state, request);
+        }
+    }
+
+    /// The selected pins and shapes, as a clipboard would hold them.
+    fn selected_symbol_items(&mut self) -> Option<SymbolClipboard> {
         let document = match self.state.load_active_symbol_document() {
             Ok(document) => document,
             Err(error) => {
                 self.state.push_user_message(ConsoleMessage::warning(error));
-                return;
+                return None;
             }
         };
         let selection = self.state.ui.symbol.editor.effective_selection();
-        self.state.ui.symbol.editor.clipboard =
-            commands::clipboard_from_selection(&document, &selection);
+        Some(commands::clipboard_from_selection(&document, &selection))
     }
 
-    pub(crate) fn paste_symbol_shape(&mut self) {
-        if self.state.deny_read_only_edit() {
-            return;
-        }
-        let clipboard = self.state.ui.symbol.editor.clipboard.clone();
-        if clipboard.is_empty() {
-            return;
+    /// A paste of `items` at the pointer, or at the middle of the view.
+    fn symbol_paste_request(&mut self, items: SymbolClipboard) -> Option<SymbolEditRequest> {
+        if self.state.deny_read_only_edit() || items.is_empty() {
+            return None;
         }
         let target = self
             .state
@@ -62,8 +83,11 @@ impl RSpiceApp {
             .or(self.state.ui.canvas_view_center)
             .map(|(x, y)| Point::new(x.round() as i32, y.round() as i32))
             .unwrap_or_else(|| Point::new(10, 10));
-        let request = edit_request(&self.state, SymbolEditAction::Paste { clipboard, target });
-        apply_edit_request(&mut self.state, request);
+        let action = SymbolEditAction::Paste {
+            clipboard: items,
+            target,
+        };
+        Some(edit_request(&self.state, action))
     }
 
     pub(crate) fn delete_selected_symbol_item(&mut self, cut: bool) {
@@ -125,6 +149,18 @@ fn edit_request(state: &AppState, action: SymbolEditAction) -> SymbolEditRequest
 }
 
 fn apply_edit_request(state: &mut AppState, request: SymbolEditRequest) {
+    if let SymbolEditAction::Paste { clipboard, .. } = &request.action
+        && clipboard != &state.ui.symbol.editor.clipboard
+    {
+        return;
+    }
+    apply_current_edit_request(state, request);
+}
+
+/// Apply `request` while the source, selection and tool it was made against
+/// still hold. A duplicate pastes what the selection held when it was asked
+/// for rather than the clipboard, so the selection check alone guards it.
+fn apply_current_edit_request(state: &mut AppState, request: SymbolEditRequest) {
     if request.source != state.symbol_editor_request_source()
         || request.selection != state.ui.symbol.editor.effective_selection()
         || request.tool != state.ui.symbol.editor.tool
@@ -132,18 +168,10 @@ fn apply_edit_request(state: &mut AppState, request: SymbolEditRequest) {
     {
         return;
     }
-    match &request.action {
-        SymbolEditAction::Paste { clipboard, .. }
-            if clipboard != &state.ui.symbol.editor.clipboard =>
-        {
-            return;
-        }
-        SymbolEditAction::FinishPolyline { points }
-            if points != &state.ui.symbol.editor.pending_polyline =>
-        {
-            return;
-        }
-        _ => {}
+    if let SymbolEditAction::FinishPolyline { points } = &request.action
+        && points != &state.ui.symbol.editor.pending_polyline
+    {
+        return;
     }
     if state.deny_read_only_edit() {
         return;
