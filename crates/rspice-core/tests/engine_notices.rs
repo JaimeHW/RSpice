@@ -209,7 +209,7 @@ fn a_clamp_every_monte_carlo_sample_raises_is_one_notice_listing_the_samples() {
         let pbs = pbs[0];
         assert!(pbs.occurrences >= SAMPLES, "{workers} workers: {pbs:#?}");
         assert_eq!(
-            pbs.points.len() + pbs.unnamed_points,
+            pbs.point_identities.len(),
             SAMPLES,
             "{workers} workers: every sample, each once: {pbs:#?}"
         );

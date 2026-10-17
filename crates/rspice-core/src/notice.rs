@@ -130,18 +130,21 @@ pub struct RecordedNotice {
     /// The sweep points it was raised at, in the order first raised, where
     /// the run names its points. At most a handful are named.
     pub points: Vec<String>,
-    /// Further distinct points it was raised at, beyond those named.
-    pub unnamed_points: usize,
+    /// Every distinct point it was raised at, named or not, as a 64-bit
+    /// digest of its label, in ascending order. A point past the named ones
+    /// is kept as nothing else, and a reader merging several analyses'
+    /// records counts their points by these, so a point that two of them
+    /// raise it at is counted once whether either names it or not.
+    pub point_identities: Vec<u64>,
 }
 
 /// One notice as the collector keeps it while the run raises it.
 #[derive(Debug)]
 struct Entry {
     recorded: RecordedNotice,
-    /// The points past the named ones it was raised at, so a point that
-    /// raises it twice, as a sample solved in two analyses does, is counted
-    /// once.
-    unnamed: HashSet<String>,
+    /// Every point it was raised at, so a point that raises it twice, as a
+    /// sample solved in two analyses does, is counted once.
+    identities: HashSet<u64>,
 }
 
 impl Entry {
@@ -151,14 +154,18 @@ impl Entry {
         let Some(point) = point else {
             return;
         };
-        if recorded.points.iter().any(|named| named == point) {
-            return;
-        }
-        if recorded.points.len() < MAX_NAMED_POINTS {
+        if self.identities.insert(crate::numerics::fnv1a(point))
+            && recorded.points.len() < MAX_NAMED_POINTS
+        {
             recorded.points.push(point.to_owned());
-        } else if self.unnamed.insert(point.to_owned()) {
-            recorded.unnamed_points = self.unnamed.len();
         }
+    }
+
+    fn recorded(self) -> RecordedNotice {
+        let mut recorded = self.recorded;
+        recorded.point_identities = self.identities.into_iter().collect();
+        recorded.point_identities.sort_unstable();
+        recorded
     }
 }
 
@@ -203,7 +210,7 @@ impl NoticeCollector {
         std::mem::take(&mut *self.lock())
             .entries
             .into_iter()
-            .map(|entry| entry.recorded)
+            .map(Entry::recorded)
             .collect()
     }
 
@@ -225,9 +232,9 @@ impl NoticeCollector {
                         notice,
                         occurrences: 0,
                         points: Vec::new(),
-                        unnamed_points: 0,
+                        point_identities: Vec::new(),
                     },
-                    unnamed: HashSet::new(),
+                    identities: HashSet::new(),
                 };
                 entry.count_at(point);
                 entries.push(entry);
@@ -367,7 +374,17 @@ mod tests {
         assert_eq!(recorded[0].occurrences, 12);
         assert_eq!(recorded[0].points.len(), MAX_NAMED_POINTS);
         assert_eq!(recorded[0].points[0], "sample 1");
-        assert_eq!(recorded[0].unnamed_points, 12 - MAX_NAMED_POINTS);
+        assert_eq!(recorded[0].point_identities.len(), 12);
+        assert!(
+            recorded[0].points.iter().all(|point| {
+                recorded[0]
+                    .point_identities
+                    .binary_search(&crate::numerics::fnv1a(point))
+                    .is_ok()
+            }),
+            "a named point is among the identities: {:?}",
+            recorded[0]
+        );
         let EngineNotice::ParameterReplaced(first) = &recorded[0].notice else {
             panic!("a replacement")
         };
@@ -395,7 +412,7 @@ mod tests {
         assert_eq!(recorded.len(), 1, "{recorded:#?}");
         assert_eq!(recorded[0].occurrences, 24);
         assert_eq!(recorded[0].points.len(), MAX_NAMED_POINTS);
-        assert_eq!(recorded[0].unnamed_points, 12 - MAX_NAMED_POINTS);
+        assert_eq!(recorded[0].point_identities.len(), 12);
     }
 
     /// A clamp on every element of a large design, raised again at a second
