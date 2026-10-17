@@ -28,13 +28,13 @@ pub(super) const ARRANGE_GROUPS: [&[Command]; 3] = [
 ];
 pub(super) const ARRANGE_ROW_ID: &str = "workbench.title_menu.arrange";
 
-/// The Arrange row, and the submenu it opens.
+/// The Arrange row, and the submenu it opens, whose contents `rows` draws.
 ///
 /// The submenu's rows are recorded apart from the Design menu's, so the
 /// Design menu's arrow keys step over the row rather than into its
 /// children. Right arrow, Enter or Space opens it with its first available
 /// row focused; Left arrow or Escape closes it back onto the row.
-pub(super) fn arrange_submenu(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(super) fn arrange_submenu(ui: &mut Ui, rows: impl FnOnce(&mut Ui)) {
     let row_height = ui.spacing().interact_size.y.max(MENU_ROW_HEIGHT);
     let large_targets = row_height >= MENU_TOUCH_ROW_HEIGHT;
     let (_, rect) = ui.allocate_space(Vec2::new(ui.available_width(), row_height));
@@ -79,26 +79,14 @@ pub(super) fn arrange_submenu(ui: &mut Ui, app: &mut RSpiceApp) {
 
     let shown = SubMenu::new().show(ui, &response, |ui| {
         configure_menu_popup(ui, large_targets);
-        let width = arrange_submenu_width(ui, app);
-        ui.set_max_width(width);
-        ui.set_min_width(width);
         let focus_first = ui.data_mut(|data| data.remove_temp::<bool>(focus_first_id));
         let ctx = ui.ctx().clone();
-        let rows = render_nested_menu_rows(
+        let recorded = render_nested_menu_rows(
             &ctx,
             focus_first.is_some().then_some(InitialMenuFocus::First),
-            || {
-                for (index, group) in ARRANGE_GROUPS.iter().enumerate() {
-                    if index > 0 {
-                        menu_separator(ui);
-                    }
-                    for command in *group {
-                        command_item(ui, app, *command);
-                    }
-                }
-            },
+            || rows(ui),
         );
-        handle_submenu_keyboard(&ctx, parent_menu, submenu_id, &response, &rows.rows);
+        handle_submenu_keyboard(&ctx, parent_menu, submenu_id, &response, &recorded.rows);
     });
     if shown.is_none() {
         ui.data_mut(|data| data.remove_temp::<bool>(focus_first_id));
@@ -113,7 +101,7 @@ pub(super) fn arrange_submenu(ui: &mut Ui, app: &mut RSpiceApp) {
 
 /// The submenu's width: wide enough that no row's label is cut short by its
 /// key.
-fn arrange_submenu_width(ui: &Ui, app: &RSpiceApp) -> f32 {
+pub(super) fn arrange_submenu_width(ui: &Ui, app: &RSpiceApp) -> f32 {
     let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
     let shortcut_font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let measure = |text: &str, font: &egui::FontId| {

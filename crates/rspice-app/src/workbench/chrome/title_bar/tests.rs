@@ -733,13 +733,13 @@ fn design_edit_menu_matches_the_upgraded_authoring_group() {
     );
 }
 
-/// One frame of the full menu bar, returning the labels of the menu items
+/// One frame of what `draw` paints, returning the labels of the menu items
 /// the platform sees and the label of the one with the keyboard focus.
 #[cfg(not(target_arch = "wasm32"))]
 fn menu_items_after_frame(
     ctx: &Context,
-    app: &mut RSpiceApp,
     events: Vec<egui::Event>,
+    mut draw: impl FnMut(&mut Ui),
 ) -> (Vec<String>, Option<String>) {
     let output = ctx.run_ui(
         egui::RawInput {
@@ -751,9 +751,7 @@ fn menu_items_after_frame(
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                menus(ui, app, MenuProjection::All, false, 35.0);
-            });
+            egui::CentralPanel::default().show(ctx, |ui| draw(ui));
         },
     );
     let update = output
@@ -811,9 +809,15 @@ fn the_design_menu_arrange_submenu_reaches_every_arrange_command() {
         .map(|command| command.spec().label)
         .collect();
     assert_eq!(arrange_labels.len(), 12);
+    let before = app.state.schematic.document().components[1].pos;
+    let mut frame = |events| {
+        menu_items_after_frame(&ctx, events, |ui| {
+            menus(ui, &mut app, MenuProjection::All, false, 35.0);
+        })
+    };
 
     Popup::open_id(&ctx, design_menu);
-    let (items, _) = menu_items_after_frame(&ctx, &mut app, Vec::new());
+    let (items, _) = frame(Vec::new());
     assert!(items.iter().any(|label| label == "Arrange"), "{items:?}");
     assert!(
         !items.iter().any(|label| label == "Align left"),
@@ -821,9 +825,9 @@ fn the_design_menu_arrange_submenu_reaches_every_arrange_command() {
     );
 
     ctx.memory_mut(|memory| memory.request_focus(arrange));
-    let _ = menu_items_after_frame(&ctx, &mut app, Vec::new());
-    let _ = menu_items_after_frame(&ctx, &mut app, vec![title_key_event(Key::ArrowRight)]);
-    let (items, focused) = menu_items_after_frame(&ctx, &mut app, Vec::new());
+    let _ = frame(Vec::new());
+    let _ = frame(vec![title_key_event(Key::ArrowRight)]);
+    let (items, focused) = frame(Vec::new());
     for label in &arrange_labels {
         assert!(
             items.iter().any(|item| item == label),
@@ -832,12 +836,12 @@ fn the_design_menu_arrange_submenu_reaches_every_arrange_command() {
     }
     assert_eq!(focused.as_deref(), Some("Rotate clockwise"));
 
-    let _ = menu_items_after_frame(&ctx, &mut app, vec![title_key_event(Key::ArrowDown)]);
-    let (_, focused) = menu_items_after_frame(&ctx, &mut app, Vec::new());
+    let _ = frame(vec![title_key_event(Key::ArrowDown)]);
+    let (_, focused) = frame(Vec::new());
     assert_eq!(focused.as_deref(), Some("Rotate counter-clockwise"));
 
-    let _ = menu_items_after_frame(&ctx, &mut app, vec![title_key_event(Key::ArrowLeft)]);
-    let (items, focused) = menu_items_after_frame(&ctx, &mut app, Vec::new());
+    let _ = frame(vec![title_key_event(Key::ArrowLeft)]);
+    let (items, focused) = frame(Vec::new());
     assert_eq!(focused.as_deref(), Some("Arrange"));
     assert!(
         !items.iter().any(|label| label == "Align left"),
@@ -849,17 +853,16 @@ fn the_design_menu_arrange_submenu_reaches_every_arrange_command() {
     );
 
     // Enter on a submenu row runs its command and closes the menus.
-    let before = app.state.schematic.document().components[1].pos;
-    let _ = menu_items_after_frame(&ctx, &mut app, vec![title_key_event(Key::ArrowRight)]);
-    let _ = menu_items_after_frame(&ctx, &mut app, Vec::new());
-    let _ = menu_items_after_frame(&ctx, &mut app, vec![title_key_event(Key::Enter)]);
+    let _ = frame(vec![title_key_event(Key::ArrowRight)]);
+    let _ = frame(Vec::new());
+    let _ = frame(vec![title_key_event(Key::Enter)]);
+    let _ = frame(Vec::new());
+    assert!(!Popup::is_id_open(&ctx, design_menu));
     assert_ne!(
         app.state.schematic.document().components[1].pos,
         before,
         "Rotate clockwise turned the selection"
     );
-    let _ = menu_items_after_frame(&ctx, &mut app, Vec::new());
-    assert!(!Popup::is_id_open(&ctx, design_menu));
 }
 
 #[test]

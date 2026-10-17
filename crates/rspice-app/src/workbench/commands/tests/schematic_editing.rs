@@ -1497,9 +1497,8 @@ fn undo_and_redo_wait_for_the_edit_in_progress() {
     app.state.schematic.with_undo("place R2", |schematic| {
         schematic.add_component(ComponentType::Resistor, Point::new(200, 0));
     });
-    let carry = |app: &mut RSpiceApp, to: Point| {
-        app.state
-            .schematic
+    let carry = |schematic: &mut crate::state::SchematicState, to: Point| {
+        schematic
             .document_mut_for_test()
             .components
             .iter_mut()
@@ -1521,7 +1520,7 @@ fn undo_and_redo_wait_for_the_edit_in_progress() {
 
     // R1 is picked up and carried while the mouse is held.
     app.state.schematic.begin_operation("drag selection");
-    carry(&mut app, Point::new(0, 100));
+    carry(&mut app.state.schematic, Point::new(0, 100));
     assert_eq!(
         Command::Undo.availability(&app),
         CommandAvailability::Disabled(mid_drag)
@@ -1546,7 +1545,7 @@ fn undo_and_redo_wait_for_the_edit_in_progress() {
 
     // Redo waits the same way, and the redo stack survives the wait.
     app.state.schematic.begin_operation("drag selection");
-    carry(&mut app, Point::new(0, 50));
+    carry(&mut app.state.schematic, Point::new(0, 50));
     assert_eq!(
         Command::Redo.availability(&app),
         CommandAvailability::Disabled(mid_drag)

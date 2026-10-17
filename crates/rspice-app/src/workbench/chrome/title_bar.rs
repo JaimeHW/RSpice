@@ -16,9 +16,9 @@ use crate::workbench::commands::{CommandAvailability, vocabulary::Command};
 
 mod arrange;
 mod menu_row;
-use arrange::arrange_submenu;
 #[cfg(test)]
-use arrange::{ARRANGE_GROUPS, ARRANGE_ROW_ID};
+use arrange::ARRANGE_ROW_ID;
+use arrange::{ARRANGE_GROUPS, arrange_submenu, arrange_submenu_width};
 use menu_row::{MenuRowTrailing, paint_menu_row};
 
 #[cfg(test)]
@@ -1611,7 +1611,19 @@ fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     for command in DESIGN_EDIT_COMMANDS {
         command_item(ui, app, command);
     }
-    arrange_submenu(ui, app);
+    arrange_submenu(ui, |ui| {
+        let width = arrange_submenu_width(ui, app);
+        ui.set_max_width(width);
+        ui.set_min_width(width);
+        for (index, group) in ARRANGE_GROUPS.iter().enumerate() {
+            if index > 0 {
+                menu_separator(ui);
+            }
+            for &command in *group {
+                command_item(ui, app, command);
+            }
+        }
+    });
     menu_separator(ui);
     for command in DESIGN_SHEET_COMMANDS {
         command_item(ui, app, command);
