@@ -5,7 +5,6 @@
 //! workspace, page, and selection — before anything navigates, so a hop that
 //! cannot land says why instead of arriving somewhere with the object lost.
 
-use crate::diagnostics::ConsoleMessage;
 use crate::ui::widgets::NotificationAction;
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::plan_provenance::{self, ProducingPlanHop};
@@ -65,9 +64,10 @@ pub(crate) fn perform_notification_action(app: &mut RSpiceApp, action: Notificat
             if app.state.simulation.select_run_by_sequence(run_sequence) {
                 Command::OpenRunInResults.execute(app);
             } else {
-                app.state.push_user_message(ConsoleMessage::warning(
-                    crate::workbench::AppState::retired_run_message(run_sequence),
-                ));
+                app.state
+                    .prompt(crate::workbench::AppState::retired_run_message(
+                        run_sequence,
+                    ));
             }
         }
         NotificationAction::ShowInConsole => {
@@ -127,10 +127,10 @@ pub(crate) fn open_task_deck(state: &mut crate::workbench::AppState, sequence: u
     if crate::workbench::documents::netlist_document::reveal_executed_deck(state, sequence, 0) {
         return true;
     }
-    state.push_user_message(ConsoleMessage::warning(format!(
+    state.prompt(format!(
         "The source Run {sequence} executed cannot be opened: {}.",
         crate::state::absent_deck_reason()
-    )));
+    ));
     false
 }
 

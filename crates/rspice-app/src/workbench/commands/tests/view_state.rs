@@ -155,15 +155,7 @@ fn reset_active_view_command_resets_and_reports_in_the_same_frame() {
     Command::ResetActiveView.execute(&mut app);
 
     assert!(!app.state.dialogs.application_modal_open());
-    assert_eq!(
-        app.state
-            .log_buffer
-            .entries_by_source(crate::diagnostics::LogSource::Studio)
-            .last()
-            .expect("the command reports to the console")
-            .message,
-        "Design view reset."
-    );
+    assert_eq!(app.state.prompt_text(), Some("Design view reset."));
 }
 
 #[test]

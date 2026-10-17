@@ -172,6 +172,7 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
             "wrong closed-project reason for {command:?}"
         );
 
+        let before = app.state.log_buffer.revision();
         command.execute(&mut app);
 
         assert_eq!(
@@ -179,12 +180,15 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
             Workspace::Project,
             "closed-project command changed workspace: {command:?}"
         );
-        assert!(
-            app.state
-                .log_buffer
-                .entries()
-                .any(|entry| entry.message == "Open a project before using this command."),
-            "closed-project command did not explain its boundary: {command:?}"
+        assert_eq!(
+            app.state.log_buffer.revision(),
+            before,
+            "a disabled command is silent: {command:?}"
+        );
+        assert_eq!(
+            app.state.prompt_text(),
+            None,
+            "a disabled command is silent: {command:?}"
         );
     }
 }

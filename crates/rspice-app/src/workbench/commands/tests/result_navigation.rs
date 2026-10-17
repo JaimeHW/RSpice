@@ -163,9 +163,10 @@ fn a_notice_offer_selects_its_run_and_refuses_when_the_run_is_gone() {
         "a lost run must not move the reader somewhere it cannot honour"
     );
     assert!(
-        app.state.log_buffer.revision() > before,
+        app.state.prompt_text().is_some(),
         "and the refusal is stated rather than silently dropped"
     );
+    assert_eq!(app.state.log_buffer.revision(), before, "on the status bar");
 }
 
 /// The status bar's engine chip and the split toggle both mean "the newest
@@ -239,16 +240,11 @@ fn a_hop_to_a_plan_that_no_longer_owns_the_producer_clears_the_highlight() {
         app.state.workbench.active_analysis_instance.is_none(),
         "the hop selected nothing, so nothing may stay selected"
     );
+    assert_eq!(app.state.log_buffer.revision(), before);
     assert!(
-        app.state.log_buffer.revision() > before,
-        "and what the hop could not carry is stated"
-    );
-    assert!(
-        app.state.log_buffer.entries().any(|entry| {
-            entry
-                .message
-                .contains("has also been edited since this run")
-        }),
+        app.state
+            .prompt_text()
+            .is_some_and(|text| text.contains("has also been edited since this run")),
         "a plan that has moved on since the run says so"
     );
 }
@@ -296,13 +292,12 @@ fn each_reason_a_dataset_cannot_name_its_plan_is_stated_exactly() {
         )
     );
 
-    // A refused hop must not move anything: the console carries the reason.
+    // A refused hop must not move anything: the status bar carries the reason.
     let mut refused = foreign;
     refused.state.workbench.activate(Workspace::Results);
-    let before = refused.state.log_buffer.revision();
     Command::OpenProducingPlan.execute(&mut refused);
     assert_eq!(refused.state.workbench.workspace, Workspace::Results);
-    assert!(refused.state.log_buffer.revision() > before);
+    assert!(refused.state.prompt_text().is_some());
 }
 
 /// A retained notice keeps the offer its expired toast carried, so the
@@ -365,10 +360,9 @@ fn the_task_deck_hop_is_refused_by_the_reason_it_would_have_failed() {
 
     // Taking it anyway says so rather than doing nothing, because the palette
     // is not modal and the archive can be evicted under it.
-    let messages = app.state.log_buffer.len();
     Command::OpenTaskDeck.execute(&mut app);
     assert!(
-        app.state.log_buffer.len() > messages,
+        app.state.prompt_text().is_some(),
         "a refused hop has to report the refusal"
     );
     assert_ne!(app.state.workbench.workspace, Workspace::Netlist);
