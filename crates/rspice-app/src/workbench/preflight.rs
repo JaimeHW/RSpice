@@ -186,7 +186,7 @@ pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) 
             );
             let refused = engine_refusals::engine_refusal_issues(state, &refusals);
             if refused.is_empty() {
-                report.prepared = Some(contract_of(metadata));
+                report.prepared = Some(contract_of(*metadata));
             } else {
                 report.blockers.extend(refused);
             }

@@ -73,7 +73,7 @@ pub(crate) enum PreflightVerdict {
     /// The run was prepared, and retained when the outcome is current, and
     /// the engine refused what `refusals` lists.
     Checked {
-        metadata: PreparedRunMetadata,
+        metadata: Box<PreparedRunMetadata>,
         refusals: Vec<EngineRefusal>,
     },
     /// The worker ended without a verdict while the engine built the decks.
@@ -186,7 +186,7 @@ impl SimulationController {
             },
             Some(WorkerVerdict::NotPrepared(error)) => PreflightVerdict::NotPrepared(error),
             Some(WorkerVerdict::Checked { snapshot, refusals }) => {
-                let metadata = snapshot.metadata();
+                let metadata = Box::new(snapshot.metadata());
                 let retained = if current {
                     self.retain_prepared_run(*snapshot)
                 } else {
