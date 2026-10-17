@@ -547,7 +547,7 @@ fn request_analysis_run(
     // A run that waits on the engine's check of its decks is queued when the
     // check authorizes it.
     if app.state.simulation.execution.trigger_simulation
-        || crate::workbench::preflight::run_awaits_check(&app.state)
+        || app.state.workbench.preflight.run_awaits_check()
     {
         Ok(())
     } else {

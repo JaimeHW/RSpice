@@ -655,7 +655,6 @@ impl RSpiceApp {
         );
         self.simulation_controller
             .update(&mut self.state, self.export_workflow_io.as_ref());
-        crate::workbench::preflight::poll(&mut self.state, &mut self.simulation_controller);
         #[cfg(target_arch = "wasm32")]
         crate::workbench::browser::accessibility::publish_workspace_context(
             self.state.workbench.workspace.label(),

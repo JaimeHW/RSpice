@@ -1876,7 +1876,8 @@ impl Command {
             }
             Self::StopSimulation => {
                 if app.state.workbench.preflight.checking.is_some() {
-                    super::preflight::cancel(&mut app.state, &mut app.simulation_controller);
+                    // The frame loop stops it before it looks for a verdict.
+                    app.state.workbench.preflight.request_check_cancel();
                 } else if stop_simulation_enabled(&app.state.simulation) {
                     if let Err(error) = app.state.simulation.request_abort_active_run() {
                         app.state

@@ -29,6 +29,10 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     let ctx = &ctx;
     app.state.reconcile_schematic_drag(ctx, false);
     reconcile_platform_full_screen(app);
+    // Preflight's engine pass builds the run's decks off the UI thread, and
+    // is finished, or stopped, on whichever frame finds it so, whatever that
+    // frame shows.
+    preflight::poll(&mut app.state, &mut app.simulation_controller);
     // The announcement goes first so that it is the record that survives.
     // Both of these report a finished run, and the mirror drops a line whose
     // destination is already announced — so whichever runs first is the one

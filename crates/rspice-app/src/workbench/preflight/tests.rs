@@ -834,6 +834,34 @@ fn a_transient_only_plan_is_not_refused_for_a_forced_island() {
     );
 }
 
+/// Stop while the engine builds a Run press's decks ends the pass on the next
+/// frame, whether or not its verdict has landed: nothing it found is
+/// published, the run it checked is not authorized, and nothing is queued.
+#[test]
+fn stop_during_the_engine_pass_authorizes_and_queues_nothing() {
+    let (mut app, _) = app_with_a_forced_capacitor_island(false);
+
+    run_and_queue(&mut app);
+    assert!(
+        app.state.workbench.preflight.run_awaits_check(),
+        "the press waits on the engine's pass over its decks"
+    );
+    assert!(Command::StopSimulation.is_enabled(&app));
+    Command::StopSimulation.execute(&mut app);
+    app.settle_preflight();
+
+    assert!(app.state.workbench.preflight.checking.is_none());
+    assert!(app.state.workbench.preflight.report.is_none());
+    assert!(!app.state.simulation.execution.trigger_simulation);
+    assert!(
+        app.state
+            .log_buffer
+            .entries()
+            .any(|entry| entry.message.starts_with("Preflight cancelled")),
+        "the stop is stated"
+    );
+}
+
 /// A coupling capacitor's node has no DC path either, but nothing forces
 /// current into it and the engine solves it. The old drawing-level check
 /// refused it; the run is now authorized.

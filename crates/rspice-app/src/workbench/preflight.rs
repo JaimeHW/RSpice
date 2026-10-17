@@ -123,11 +123,18 @@ fn start(state: &mut AppState, controller: &mut SimulationController, queue: boo
 /// Finish the pass whose decks the engine was building, once it has a
 /// verdict. Called once per frame; does nothing while the build runs.
 ///
+/// A stop the reader asked for since the last frame is applied first, so a
+/// verdict that lands in between authorizes nothing.
+///
 /// A pass whose run is no longer the one retained — an edit since the press
 /// dropped it, or another preparation replaced it — authorizes nothing. Its
 /// findings are still published, against the inputs as they stood at the
 /// press, so they read as stale rather than as current.
 pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) {
+    if state.workbench.preflight.take_check_cancel_request() {
+        cancel(state, controller);
+        return;
+    }
     let Some(check) = state.workbench.preflight.checking.as_ref() else {
         // A pass whose state was dropped — a replaced session — has nothing
         // left to finish.
@@ -193,7 +200,7 @@ pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) 
 
 /// Stop the pass whose decks the engine is building. Nothing it found is
 /// published, and the run it was checking is not authorized.
-pub(crate) fn cancel(state: &mut AppState, controller: &mut SimulationController) {
+fn cancel(state: &mut AppState, controller: &mut SimulationController) {
     let Some(check) = state.workbench.preflight.checking.take() else {
         return;
     };
@@ -334,17 +341,6 @@ pub(crate) fn run_and_queue(app: &mut RSpiceApp) {
     }
 
     start(&mut app.state, &mut app.simulation_controller, true);
-}
-
-/// Whether a press asked for a run the engine pass in flight will queue once
-/// it authorizes one.
-pub(crate) fn run_awaits_check(state: &AppState) -> bool {
-    state
-        .workbench
-        .preflight
-        .checking
-        .as_ref()
-        .is_some_and(|check| check.queue)
 }
 
 /// Queue a retained authorized report only while every revision it names is

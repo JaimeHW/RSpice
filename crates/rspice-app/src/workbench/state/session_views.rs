@@ -1377,6 +1377,10 @@ pub struct PreflightDialogState {
     pub(in crate::workbench) run_and_queue_requested: bool,
     /// A pass whose decks the engine is still building, off the UI thread.
     pub(in crate::workbench) checking: Option<PreflightCheck>,
+    /// The reader stopped that pass. The frame loop cancels it before it
+    /// looks for the pass's verdict, so a verdict that lands in between
+    /// authorizes nothing.
+    pub(in crate::workbench) check_cancel_requested: bool,
 }
 
 /// What a pass decided before its engine build began, held until the build
@@ -1417,6 +1421,23 @@ impl PreflightDialogState {
     /// Consume a pending request. Returns whether one was outstanding.
     pub fn take_run_and_queue_request(&mut self) -> bool {
         std::mem::take(&mut self.run_and_queue_requested)
+    }
+
+    /// Ask the frame loop to stop the pass whose decks the engine is
+    /// building. Nothing when no pass is.
+    pub(in crate::workbench) fn request_check_cancel(&mut self) {
+        self.check_cancel_requested = self.checking.is_some();
+    }
+
+    /// Consume a pending stop. Returns whether one was outstanding.
+    pub(in crate::workbench) fn take_check_cancel_request(&mut self) -> bool {
+        std::mem::take(&mut self.check_cancel_requested)
+    }
+
+    /// Whether a press asked for a run that the pass in flight will queue
+    /// once it authorizes one.
+    pub(in crate::workbench) fn run_awaits_check(&self) -> bool {
+        self.checking.as_ref().is_some_and(|check| check.queue)
     }
 
     /// Where the retained report stands against the live design.
