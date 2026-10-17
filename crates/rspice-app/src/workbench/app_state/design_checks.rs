@@ -554,18 +554,29 @@ impl AppState {
             subject: subject.clone(),
         });
         self.withdraw_diagnostics(&DiagnosticInputs::DesignCheck { subject });
+        // What the cleared passes had taken over from the checks still
+        // standing is theirs again.
+        self.restate_design_checks();
     }
 
-    /// State every current design-rule finding again against the waivers as
-    /// they now stand: after a waiver is recorded or removed, and after an
-    /// undo or redo that may have done either.
+    /// State every current design-rule pass again, in the order the passes
+    /// were published: after a waiver is recorded or removed, after an undo
+    /// or redo that may have done either, and after a pass is withdrawn.
+    ///
+    /// Against the waivers as they now stand, each finding says whether it
+    /// counts. And each pass takes over again what it took over when it was
+    /// published, from the passes still standing: a withdrawn pass — a live
+    /// pass when live checking is turned off, a cellview's checks when they
+    /// are cleared — had taken findings over from older passes that still
+    /// describe the design, and those findings are listed again rather than
+    /// leaving the list while the run gate still counts them.
     ///
     /// Only a current pass is re-stated. Its findings still describe the
     /// design, and a waiver changes whether each counts, not what was found,
     /// so the pass keeps its digest and stays current. A stale pass is left
     /// as it is: re-stating it would publish findings about a design that has
     /// moved under the digest of the one in front of the reader.
-    pub(in crate::workbench) fn refresh_waived_findings(&mut self) {
+    pub(in crate::workbench) fn restate_design_checks(&mut self) {
         // In the order they were published, so each still takes over from the
         // checks before it what it took over then.
         let mut subjects = self
@@ -596,7 +607,7 @@ impl AppState {
                 self.record(
                     crate::diagnostics::LogSeverity::Warning,
                     crate::diagnostics::LogSource::Studio,
-                    format!("Findings could not be stated again against the waivers: {error}"),
+                    format!("Findings could not be stated again: {error}"),
                 );
             }
         }

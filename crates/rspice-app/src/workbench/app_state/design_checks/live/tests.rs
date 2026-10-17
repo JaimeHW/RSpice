@@ -323,13 +323,49 @@ fn a_waiver_applies_to_a_live_finding_as_to_any_other() {
     assert!(waived.4, "{waived:?}");
 }
 
+/// Turning live checking off withdraws what the live passes stated, and
+/// gives back what they had taken over: a check of the cellview that still
+/// describes the drawing states its findings again, so a finding the run
+/// gate still counts never leaves the list.
 #[test]
 fn turning_live_checking_off_withdraws_its_findings() {
     let mut state = open_state();
     let start = Instant::now();
     let name = place_open_resistor(&mut state, start, 400);
     assert!(!rows_about(&state, &name).is_empty());
+    let live_only = rows_about(&state, &name).len();
 
+    // An explicit check, then a live pass of the same unedited drawing — an
+    // edit and its undo — which takes the live rules' findings over.
+    state
+        .check_active_cellview()
+        .expect("the open cellview checks");
+    let subject = state.workspace.content.active_schematic_reference();
+    state
+        .run_live_check(subject)
+        .expect("the live rules check the drawing");
+    let explicit = rows_about(&state, &name).len();
+    assert!(explicit >= live_only);
+
+    state
+        .ui
+        .preferences
+        .set_toggle(TogglePreference::IncrementalConnectivityChecks, false);
+    assert_eq!(state.refresh_live_checks(start), None);
+    assert_eq!(
+        rows_about(&state, &name).len(),
+        explicit,
+        "the check of the cellview states its findings again: {:?}",
+        rows(&state)
+    );
+    assert!(
+        state.design_checks.live.is_empty(),
+        "no live pass is left standing"
+    );
+
+    // Without an explicit check, nothing is left.
+    let mut state = open_state();
+    place_open_resistor(&mut state, start, 400);
     state
         .ui
         .preferences

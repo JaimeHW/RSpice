@@ -178,6 +178,32 @@ fn the_newest_check_of_a_cellview_states_its_findings_once() {
     );
 }
 
+/// Clearing a cellview's checks withdraws what they stated and gives back
+/// what they had taken over: Check Design still describes the design, so its
+/// statements inside `amp` are listed again rather than leaving `amp`'s
+/// findings off the list while the run gate counts them.
+#[test]
+fn clearing_a_cellview_check_gives_back_what_it_took_over() {
+    let mut fixture = fixture();
+    fixture.state.check_design().expect("the design checks");
+    let below = occurrence_rows(&fixture.state);
+    assert!(below > 0);
+
+    fixture
+        .state
+        .check_active_cellview()
+        .expect("the open cellview checks");
+    assert_eq!(occurrence_rows(&fixture.state), 0);
+
+    fixture.state.clear_active_design_check();
+    assert_eq!(
+        occurrence_rows(&fixture.state),
+        below,
+        "Check Design's statements inside amp are listed again: {:?}",
+        rows(&fixture.state)
+    );
+}
+
 const SOURCE_LOOP: &str = "DRC-SOURCE-TO-SOURCE";
 
 /// A source drawn in the open `amp` from the global supply to ground. Each

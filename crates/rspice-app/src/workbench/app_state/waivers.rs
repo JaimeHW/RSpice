@@ -360,7 +360,7 @@ impl AppState {
         }
         let schematics = after.schematics != before.schematics;
         if schematics {
-            self.refresh_waived_findings();
+            self.restate_design_checks();
         }
         schematics
     }
@@ -446,7 +446,7 @@ impl AppState {
             }
         }
         self.workbench.preflight.invalidate();
-        self.refresh_waived_findings();
+        self.restate_design_checks();
         Ok(())
     }
 
