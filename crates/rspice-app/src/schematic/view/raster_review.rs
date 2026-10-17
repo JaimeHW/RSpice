@@ -1145,3 +1145,64 @@ fn a_selected_note_keeps_its_ink_inside_the_canvas_selection() {
         });
     assert!(framed, "the note stands in a canvas-selection rect");
 }
+
+/// A pin name stands clear of its lead, as a generated symbol letters it:
+/// inside the body, past the lead's inner end. A symbol that draws its leads
+/// as artwork (an imported LTspice or SVG symbol, and the hierarchy sheet's
+/// masters, whose IN, OUT and BIAS leads are 10-wu body lines from the
+/// terminal in) lettered each name from the terminal instead, on the lead,
+/// which struck through it.
+#[test]
+fn a_pin_name_stands_clear_of_an_artwork_lead() {
+    const MASTER_WIDTHS: [(&str, i32); 3] = [("amp", 40), ("buf", 50), ("bias", 60)];
+    let mut state = hierarchy_sheet();
+    let framing = at_zoom(2.0, HIERARCHY_CENTRE);
+    let render = render(&mut state, themes()[0].1, framing, 1.0);
+    let mut leads = Vec::new();
+    for instance in &state.schematic.document().components {
+        let Some(binding) = &instance.library_cell else {
+            continue;
+        };
+        let width = MASTER_WIDTHS
+            .iter()
+            .find(|(master, _)| *master == binding.cell)
+            .map(|(_, width)| *width)
+            .expect("a master of the hierarchy sheet");
+        let at = |(x, y): (i32, i32)| {
+            on_screen(
+                framing.centre,
+                render.zoom,
+                Point::new(instance.pos.x + x, instance.pos.y + y),
+            )
+        };
+        for (pin, terminal, inner) in [
+            ("IN", (-width, 0), (-width + 10, 0)),
+            ("OUT", (width, 0), (width - 10, 0)),
+            ("BIAS", (0, 40), (0, 30)),
+        ] {
+            leads.push((
+                instance.name.clone(),
+                pin,
+                Rect::from_two_pos(at(terminal), at(inner)).expand(1.0),
+            ));
+        }
+    }
+    let pin_size = rspice_schematic_editor::view::lod::quantize_font_size(
+        rspice_design::symbol_generation::GENERATED_PIN_LABEL_SIZE * render.zoom as f32,
+    );
+    let names = painted_text(&render.shapes)
+        .into_iter()
+        .filter(|text| text.size == pin_size && ["IN", "OUT", "BIAS"].contains(&text.text.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(names.len(), 9, "every instance letters its three pin names");
+    for name in &names {
+        for (instance, pin, lead) in &leads {
+            assert!(
+                !name.rect.intersects(*lead),
+                "the pin name {:?} at {:?} stands on {instance}'s {pin} lead at {lead:?}",
+                name.text,
+                name.rect
+            );
+        }
+    }
+}
