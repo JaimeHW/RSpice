@@ -205,7 +205,7 @@ fn a_wiring_session_keeps_the_deck_and_the_dots_right_through_undo_and_redo() {
         selection.select_component(r7);
         selection.select_wire(between);
     });
-    bench.transform_selection(SelectionTransform::RotateClockwise);
+    bench.turn_selection(SelectionTransform::RotateClockwise);
     done(
         &bench,
         "rotate a group",
