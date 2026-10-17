@@ -101,6 +101,10 @@ pub(super) fn handle_tool_interactions(
         finish_active_route(ui, state);
         return;
     }
+    if input.remove_route_point {
+        state.schematic.retract_wire();
+        return;
+    }
 
     if current_tool == Tool::DocumentationShape
         && let Some(transition) = documentation_shape_input::pointer_motion(

@@ -88,6 +88,12 @@ impl SchematicState {
         }
     }
 
+    /// Take back the draft's last placed vertex. The route ends, with nothing
+    /// drawn, when its first point goes.
+    pub fn retract_wire(&mut self) {
+        self.session.editor.wire_drawing.remove_last_point();
+    }
+
     /// Finish drawing the current wire
     ///
     /// Implements professional EDA behavior:

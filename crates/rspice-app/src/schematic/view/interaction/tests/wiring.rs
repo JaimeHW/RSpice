@@ -297,3 +297,42 @@ fn a_click_on_a_pin_ends_the_route() {
         state.schematic.document().wires
     );
 }
+
+/// Backspace takes back the last vertex the user placed, with the corner the
+/// router added to reach it. The route stays live until its first point goes,
+/// and nothing is drawn.
+#[test]
+fn backspace_takes_back_the_last_route_vertex() {
+    let ctx = egui::Context::default();
+    let mut state = AppState::default();
+    wire_tool(&ctx, &mut state);
+    let (first, second, third) = (
+        Point::new(100, 100),
+        Point::new(100, 200),
+        Point::new(200, 300),
+    );
+    click(&ctx, &mut state, 0.1, first);
+    click(&ctx, &mut state, 1.0, second);
+    click(&ctx, &mut state, 2.0, third);
+    assert_eq!(
+        state.schematic.session.editor.wire_drawing.points.len(),
+        4,
+        "two clicks in line and one that turns a corner"
+    );
+
+    backspace(&ctx, &mut state, 3.0);
+    assert_eq!(
+        state.schematic.session.editor.wire_drawing.points,
+        vec![first, second]
+    );
+    backspace(&ctx, &mut state, 3.1);
+    assert_eq!(
+        state.schematic.session.editor.wire_drawing.points,
+        vec![first]
+    );
+    assert!(state.schematic.session.editor.wire_drawing.active);
+
+    backspace(&ctx, &mut state, 3.2);
+    assert!(!state.schematic.session.editor.wire_drawing.active);
+    assert!(state.schematic.document().wires.is_empty());
+}

@@ -26,6 +26,8 @@ use crate::session::{
 /// Events captured before any tool action changes the editor in this frame.
 pub struct ToolInput {
     pub finish_route: bool,
+    /// Backspace on a live wire route: take back its last vertex.
+    pub remove_route_point: bool,
     pub shape_double_click: Option<Pos2>,
     pub primary_click: Option<Pos2>,
     pub select_double_click: Option<Pos2>,
@@ -44,8 +46,13 @@ impl ToolInput {
         let route_enter = response.has_focus()
             && route_active
             && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+        let remove_route_point = tool == Tool::Wire
+            && response.has_focus()
+            && route_active
+            && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace));
         Self {
             finish_route: route_double_click || route_enter,
+            remove_route_point,
             shape_double_click: shape_double_click
                 .then(|| response.interact_pointer_pos())
                 .flatten(),
