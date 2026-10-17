@@ -123,6 +123,7 @@ impl SchematicState {
     ) {
         self.remove_degenerate_segments(scope);
         self.optimize_all_wires(scope);
+        self.join_collinear_wires(scope);
         if automatic_junctions {
             self.update_wire_junctions(scope);
         } else {

@@ -628,6 +628,32 @@ mod tests {
         assert_eq!(state.schematic.document().wires, vec![hidden]);
     }
 
+    /// Joining collinear wires reaches only the active sheet. Sheet 2's wire
+    /// carries on from Sheet 1's on the same line, but it is on another
+    /// page: Sheet 1's two wires become one and Sheet 2's stays as drawn.
+    #[test]
+    fn joining_collinear_wires_leaves_another_sheets_wire_whole() {
+        let mut state = two_sheet_state(&[1, 2], &[3]);
+        let hidden = Wire::segment(3, Point::new(100, 0), Point::new(160, 0));
+        state.schematic.document_mut_for_test().wires = vec![
+            Wire::segment(1, Point::new(0, 0), Point::new(40, 0)),
+            Wire::segment(2, Point::new(40, 0), Point::new(100, 0)),
+            hidden.clone(),
+        ];
+
+        assert!(with_active_wire_topology(&mut state, |schematic, scope| {
+            schematic.join_collinear_wires(scope)
+        }));
+
+        let wires = &state.schematic.document().wires;
+        assert_eq!(wires.len(), 2, "{wires:?}");
+        assert_eq!(wires.iter().find(|wire| wire.id == 3), Some(&hidden));
+        assert_eq!(
+            wires.iter().find(|wire| wire.id == 1).map(|wire| &wire.points),
+            Some(&vec![Point::new(0, 0), Point::new(100, 0)])
+        );
+    }
+
     /// Two wires meeting at a pin get a dot, but only a pin on the same
     /// sheet: Sheet 2's resistor under Sheet 1's route corner joins nothing.
     #[test]

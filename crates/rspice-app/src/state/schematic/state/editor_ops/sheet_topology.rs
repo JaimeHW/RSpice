@@ -60,6 +60,7 @@ mod tests {
         "split_wires_under_pins",
         "connect_moved_pins",
         "merge_overlapping_wires",
+        "join_collinear_wires",
         "update_wire_junctions",
         "auto_place_junctions",
         "remove_orphan_junctions",
