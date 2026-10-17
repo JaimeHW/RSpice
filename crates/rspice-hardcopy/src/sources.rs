@@ -19,7 +19,9 @@ mod semantic;
 mod visualization;
 
 pub(crate) use geometry::authored_sheet_bounds;
-pub(crate) use schematic_text::{SchematicText, SchematicTextClass, instance_texts};
+pub(crate) use schematic_text::{
+    SchematicText, SchematicTextClass, bus_declaration_text, instance_texts, tap_slice_text,
+};
 
 pub use aggregation::resolve_hardcopy_source_set_with;
 use artifacts::validate_frozen_report_png;

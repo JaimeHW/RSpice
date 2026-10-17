@@ -1,6 +1,6 @@
 //! Lettering a printed schematic where the canvas letters it.
 //!
-//! The positions are the shared layout's (`crate::sources::instance_texts`);
+//! The positions are the shared layout's (`crate::sources::schematic_text`);
 //! this sets them in the type and ink the SVG export uses (D1 section 11),
 //! hung off their anchors by Plex's metrics, so a printed page and an
 //! exported one read the same.
@@ -13,6 +13,8 @@ use rspice_design::schematic::label_layout::{self, LayoutPoint, TextEdge};
 /// letters a sheet in, whatever the theme.
 pub(in crate::render) const NAME_INK: Rgb8 = Rgb8::new(0x1F, 0x25, 0x28);
 pub(in crate::render) const VALUE_INK: Rgb8 = Rgb8::new(0x53, 0x59, 0x5D);
+/// Net names, bus declarations and tap slices.
+pub(in crate::render) const NET_INK: Rgb8 = Rgb8::new(0x7D, 0x52, 0x00);
 
 /// A world-unit coordinate in exact micrometres.
 fn world_um(value: f32) -> i64 {
@@ -24,6 +26,7 @@ impl SchematicTextClass {
         match self {
             Self::Name => SceneFont::SansSemibold,
             Self::Value => SceneFont::Sans,
+            Self::Slice => SceneFont::MonospaceMedium,
         }
     }
 
@@ -31,6 +34,7 @@ impl SchematicTextClass {
         match self {
             Self::Name => NAME_INK,
             Self::Value => VALUE_INK,
+            Self::Slice => NET_INK,
         }
     }
 }

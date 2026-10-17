@@ -9,7 +9,12 @@
 
 use rspice_design_model::{Point, design_management::CrossSheetPortDirection};
 
-use super::{component::Component, component_type::ComponentType, net_label::NetLabel};
+use super::{
+    bus::{Bus, BusTap},
+    component::Component,
+    component_type::ComponentType,
+    net_label::NetLabel,
+};
 use crate::symbol::SymbolDocument;
 
 /// An instance name's type size, in world units.
@@ -336,6 +341,34 @@ pub fn text_box(placed: PlacedText, text: &str, size: f32) -> LayoutRect {
         min: LayoutPoint::new(left, top),
         max: LayoutPoint::new(left + width, top + height),
     }
+}
+
+/// Where a bus's declaration (`DATA[7:0]`) stands: its bottom-left corner
+/// off the bus's last point. A bus with no declaration letters nothing.
+pub fn bus_declaration_placement(bus: &Bus) -> Option<PlacedText> {
+    bus.declaration.as_ref()?;
+    let end = bus.points.last()?;
+    Some(PlacedText::new(
+        LayoutPoint::new(
+            end.x as f32 + BUS_DECLARATION_OFFSET.x,
+            end.y as f32 + BUS_DECLARATION_OFFSET.y,
+        ),
+        TextEdge::Start,
+        TextEdge::End,
+    ))
+}
+
+/// Where a tap's bit slice (`DATA[3]`) stands: its bottom-left corner off
+/// the tap's connection point.
+pub fn tap_slice_placement(tap: &BusTap) -> PlacedText {
+    PlacedText::new(
+        LayoutPoint::new(
+            tap.connection_point.x as f32 + TAP_SLICE_OFFSET.x,
+            tap.connection_point.y as f32 + TAP_SLICE_OFFSET.y,
+        ),
+        TextEdge::Start,
+        TextEdge::End,
+    )
 }
 
 /// What a net label reads: its name, or a placeholder for a blank one.

@@ -7,6 +7,7 @@
 //! truncated value on a printed page is indistinguishable from a real one.
 
 use super::*;
+use rspice_design::schematic::bus_route;
 
 pub(super) struct SemanticSceneCompiler<'a> {
     pub(super) bounds: SemanticBounds,
@@ -382,8 +383,18 @@ impl<'a> SemanticSceneCompiler<'a> {
             PrintObjectKind::Layer,
             "layer:schematic-buses",
             StrokeStyle::try_new(
-                SemanticColor::Foreground,
-                Length::from_micrometres(600),
+                SemanticColor::Exact(schematic_marks::WIRE_INK),
+                schematic_marks::width_um(bus_route::BUS_STRAND_WIDTH_WORLD),
+                StrokePattern::Solid,
+                None,
+            )?,
+        );
+        let tap_stroke = self.mapped_stroke(
+            PrintObjectKind::Layer,
+            "layer:schematic-buses",
+            StrokeStyle::try_new(
+                SemanticColor::Exact(schematic_marks::WIRE_INK),
+                schematic_marks::width_um(bus_route::BUS_TAP_WIDTH_WORLD),
                 StrokePattern::Solid,
                 None,
             )?,
@@ -399,19 +410,10 @@ impl<'a> SemanticSceneCompiler<'a> {
             }
         }
         for bus in &schematic.buses {
-            self.primitives.push(ScenePrimitive::Polyline {
-                points: self.schematic_polyline(&bus.points)?,
-                closed: false,
-                stroke: bus_stroke,
-                fill: None,
-            });
+            self.schematic_bus(bus, bus_stroke)?;
         }
         for tap in &schematic.bus_taps {
-            self.primitives.push(ScenePrimitive::Line {
-                from: self.schematic_point(tap.bus_point)?,
-                to: self.schematic_point(tap.connection_point)?,
-                stroke: bus_stroke,
-            });
+            self.schematic_bus_tap(tap, tap_stroke)?;
         }
         for junction in &schematic.junctions {
             self.primitives.push(ScenePrimitive::Circle {
@@ -2298,5 +2300,6 @@ impl<'a> SemanticSceneCompiler<'a> {
 mod plot_grid;
 mod title_block;
 pub(super) use title_block::*;
+mod schematic_marks;
 mod schematic_text;
 mod symbol_document;

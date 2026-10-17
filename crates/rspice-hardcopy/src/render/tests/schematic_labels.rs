@@ -5,6 +5,7 @@ use super::*;
 use crate::sources::{SemanticComponent, SemanticSymbolSource, schematic_bounds};
 use rspice_design::schematic::{
     bus::{Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation},
+    bus_route,
     component_type::ComponentType,
     net_label::{Junction, NetLabel},
     rotation::Rotation,
@@ -319,6 +320,64 @@ fn a_printed_label_hangs_off_the_canvas_anchor_in_the_canvas_type() {
     // (30, 40) and the run, which grew rightward, now ends there.
     let (x, y) = compiled.at(480.0 + 30.0, 40.0 - 6.5 + 10.25);
     assert_eq!(compiled.text("X1"), (x, y, TextAnchor::End, 2_500));
+}
+
+/// Every polyline drawn at `width`, as world-unit points relative to the
+/// scene.
+fn polylines_at(compiled: &Compiled, width: u64) -> Vec<Vec<(i64, i64)>> {
+    compiled
+        .primitives
+        .iter()
+        .filter_map(|primitive| match primitive {
+            ScenePrimitive::Polyline { points, stroke, .. }
+                if stroke.width.micrometres() == width =>
+            {
+                Some(
+                    points
+                        .iter()
+                        .map(|point| (point.x.micrometres() as i64, point.y.micrometres() as i64))
+                        .collect(),
+                )
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_printed_bus_reads_as_the_canvas_draws_it() {
+    let sheet = review_sheet();
+    let compiled = compile(&sheet);
+
+    // Three 1.2-wu strands, 4 wu apart, along the bus.
+    let mut strands = polylines_at(&compiled, 300);
+    strands.sort();
+    let strand = |y: f64| vec![compiled.at(120.0, y), compiled.at(400.0, y)];
+    assert_eq!(strands, [strand(156.0), strand(160.0), strand(164.0)]);
+
+    // The declaration stands 8 wu right of and 8 wu above the bus's end,
+    // its bottom-left corner there: a 9-wu line box up, Plex's ascent down.
+    let (x, y) = compiled.at(408.0, 152.0 - 11.7 + 9.225);
+    assert_eq!(compiled.text("DATA[7:0]"), (x, y, TextAnchor::Start, 2_250));
+
+    // Each tap takes the canvas's route at 2 wu, breakout and all, and
+    // letters its bit 5 wu right of and 7 wu above its connection point.
+    let taps = polylines_at(&compiled, 500);
+    assert_eq!(taps.len(), 2);
+    for (tap, bit) in sheet.bus_taps.iter().zip(["DATA[3]", "DATA[4]"]) {
+        let route = bus_route::bus_tap_route_points(tap)
+            .into_iter()
+            .map(|point| compiled.at(f64::from(point.x), f64::from(point.y)))
+            .collect::<Vec<_>>();
+        assert!(route.len() >= 3, "{bit}: the route breaks out of the bus");
+        assert!(taps.contains(&route), "{bit}: {route:?} in {taps:?}");
+        let corner = tap.connection_point;
+        let (x, y) = compiled.at(
+            f64::from(corner.x) + 5.0,
+            f64::from(corner.y) - 7.0 - 11.7 + 9.225,
+        );
+        assert_eq!(compiled.text(bit), (x, y, TextAnchor::Start, 2_250));
+    }
 }
 
 /// The review sheet as a PNG, for a person to look at.

@@ -7,6 +7,7 @@
 //! off at the page's edge.
 
 use rspice_design::schematic::{
+    bus::{Bus, BusTap},
     component_display::SchematicParameterLabelVisibility,
     component_type::ComponentType,
     label_layout::{self, LayoutPoint, LayoutRect, PlacedText},
@@ -22,6 +23,8 @@ pub enum SchematicTextClass {
     Name,
     /// An instance value: Plex Sans, 9 wu.
     Value,
+    /// A bus declaration or a tap's bit slice: Plex Mono Medium, 9 wu.
+    Slice,
 }
 
 impl SchematicTextClass {
@@ -30,6 +33,7 @@ impl SchematicTextClass {
         match self {
             Self::Name => label_layout::INSTANCE_NAME_WORLD,
             Self::Value => label_layout::INSTANCE_VALUE_WORLD,
+            Self::Slice => label_layout::SMALL_TEXT_WORLD,
         }
     }
 }
@@ -95,4 +99,24 @@ pub fn instance_texts(semantic: &SemanticComponent) -> Vec<SchematicText> {
         });
     }
     texts
+}
+
+/// A bus's declaration beside its last point, as the canvas letters it, so
+/// the page says which signals the bus carries.
+pub fn bus_declaration_text(bus: &Bus) -> Option<SchematicText> {
+    Some(SchematicText {
+        class: SchematicTextClass::Slice,
+        placed: label_layout::bus_declaration_placement(bus)?,
+        text: bus.declaration.as_ref()?.to_string(),
+    })
+}
+
+/// A tap's bit slice beside its connection point, so the page says which
+/// bit the tap carries.
+pub fn tap_slice_text(tap: &BusTap) -> SchematicText {
+    SchematicText {
+        class: SchematicTextClass::Slice,
+        placed: label_layout::tap_slice_placement(tap),
+        text: tap.slice.to_string(),
+    }
 }
