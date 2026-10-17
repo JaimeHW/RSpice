@@ -22,6 +22,8 @@ const COLUMN_GAP_UM: u64 = 2_000;
 const FIRST_ROW_UM: u64 = 3_500;
 /// A label's baseline lies this far below its swatch line.
 const BASELINE_DROP_UM: u64 = 900;
+/// Joins the source path, sheet and object of a mapped object's name.
+const SEPARATOR: &str = " · ";
 const ELLIPSIS: &str = "…";
 
 pub(super) struct LegendSlot<'a> {
@@ -119,10 +121,8 @@ pub(super) fn legend_layout<'a>(
             })
             .collect()
     };
-    let labels = scene
-        .legend
-        .iter()
-        .map(|entry| entry.label.as_str())
+    let labels = page_labels(scene)
+        .into_iter()
         .take(shown)
         .map(|text| {
             Ok(MeasuredLabel {
@@ -231,9 +231,157 @@ fn share_width(natural: &[u64], available: u64) -> Vec<u64> {
     natural.iter().map(|width| (*width).min(level)).collect()
 }
 
+/// The legend's labels without the source path every one of them begins
+/// with: a page of one cell view's sheets prints "First · Wires", not the
+/// cell view on every row. A label names its source by the aggregate
+/// section it begins with; when any label names none, all print whole.
+/// Taking the same prefix off every label keeps distinct labels distinct.
+fn page_labels(scene: &HardcopyScene) -> Vec<&str> {
+    let labels: Vec<&str> = scene
+        .legend
+        .iter()
+        .map(|entry| entry.label.as_str())
+        .collect();
+    let mut shared: Option<Vec<&str>> = None;
+    for label in &labels {
+        let Some(source) = scene
+            .aggregate_sections
+            .iter()
+            .map(|section| section.display_name.as_str())
+            .filter(|source| {
+                label
+                    .strip_prefix(source)
+                    .and_then(|rest| rest.strip_prefix(SEPARATOR))
+                    .is_some_and(|own_name| !own_name.is_empty())
+            })
+            .max_by_key(|source| source.len())
+        else {
+            return labels;
+        };
+        let segments: Vec<&str> = source.split(SEPARATOR).collect();
+        shared = Some(match shared {
+            None => segments,
+            Some(shared) => shared
+                .into_iter()
+                .zip(segments)
+                .take_while(|(left, right)| left == right)
+                .map(|(segment, _)| segment)
+                .collect(),
+        });
+    }
+    let Some(shared) = shared.filter(|shared| !shared.is_empty()) else {
+        return labels;
+    };
+    let prefix =
+        shared.iter().map(|segment| segment.len()).sum::<usize>() + shared.len() * SEPARATOR.len();
+    labels.into_iter().map(|label| &label[prefix..]).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scene_of(sources: &[&str], labels: &[&str]) -> HardcopyScene {
+        let extent = ContentExtent::try_new(
+            Length::from_micrometres(10_000),
+            Length::from_micrometres(10_000),
+        )
+        .unwrap();
+        let stroke = StrokeStyle::try_new(
+            SemanticColor::Foreground,
+            Length::from_micrometres(250),
+            StrokePattern::Solid,
+            None,
+        )
+        .unwrap();
+        HardcopyScene {
+            extent,
+            metadata: HardcopySceneMetadata::try_new("Sheets", "RSpice tests").unwrap(),
+            primitives: Vec::new(),
+            legend: labels
+                .iter()
+                .map(|label| LegendEntry::try_new(*label, stroke).unwrap())
+                .collect(),
+            aggregate_sections: sources
+                .iter()
+                .enumerate()
+                .map(|(ordinal, source)| AggregateSection {
+                    ordinal: ordinal as u32,
+                    source_key: format!("child:{ordinal}"),
+                    display_name: (*source).to_owned(),
+                    content_digest: ContentDigest::from_bytes([0; 32]),
+                    origin: ScenePoint::new(Length::ZERO, Length::ZERO),
+                    extent,
+                    page_break_before: ordinal > 0,
+                    primitive_start: 0,
+                    primitive_end: 0,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_page_of_one_cell_views_sheets_does_not_repeat_the_cell_view() {
+        let sheets = ["user/top/schematic · First", "user/top/schematic · Second"];
+        let scene = scene_of(
+            &sheets,
+            &[
+                "user/top/schematic · First · Drawing sheet title block",
+                "user/top/schematic · Second · Drawing sheet title block",
+                "user/top/schematic · Second · Wires and junctions",
+            ],
+        );
+        assert_eq!(
+            page_labels(&scene),
+            [
+                "First · Drawing sheet title block",
+                "Second · Drawing sheet title block",
+                "Second · Wires and junctions",
+            ]
+        );
+        // Every entry from one sheet: the sheet is shared too.
+        let scene = scene_of(
+            &sheets,
+            &[
+                "user/top/schematic · Second · Drawing sheet paper",
+                "user/top/schematic · Second · Wires and junctions",
+            ],
+        );
+        assert_eq!(
+            page_labels(&scene),
+            ["Drawing sheet paper", "Wires and junctions"]
+        );
+    }
+
+    #[test]
+    fn labels_print_whole_unless_every_one_shares_a_source() {
+        // Different cell views share no source path.
+        let scene = scene_of(
+            &["lib/amp/schematic · Main", "lib/bias/schematic · Main"],
+            &[
+                "lib/amp/schematic · Main · Wires and junctions",
+                "lib/bias/schematic · Main · Wires and junctions",
+            ],
+        );
+        assert_eq!(
+            page_labels(&scene),
+            [
+                "lib/amp/schematic · Main · Wires and junctions",
+                "lib/bias/schematic · Main · Wires and junctions",
+            ]
+        );
+        // A name with a separator of its own is not a source path.
+        let scene = scene_of(&[], &["report review note · leader"]);
+        assert_eq!(page_labels(&scene), ["report review note · leader"]);
+        let scene = scene_of(
+            &["user/top/schematic · First"],
+            &["user/top/schematic · First · Wires and junctions", "V(out)"],
+        );
+        assert_eq!(
+            page_labels(&scene),
+            ["user/top/schematic · First · Wires and junctions", "V(out)"]
+        );
+    }
 
     #[test]
     fn a_shortened_label_keeps_its_end_and_where_it_differs() {
