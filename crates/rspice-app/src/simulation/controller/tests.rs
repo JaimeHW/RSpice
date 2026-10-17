@@ -487,8 +487,7 @@ fn plan_owned_runtime_retention_enforces_authenticated_storage_ceiling() {
         .retain_completed_analysis(&mut state, Some(run_sequence), analysis, provenance)
         .expect_err("oversized evidence must not enter the retained run");
 
-    assert!(error.contains("authenticated"));
-    assert!(error.contains("storage ceiling"));
+    assert!(error.contains("storage limit"));
     assert!(
         state
             .simulation
@@ -532,7 +531,7 @@ fn provisional_live_result_obeys_the_authenticated_storage_ceiling() {
         )
         .expect_err("live evidence must obey the same immutable storage ceiling");
 
-    assert!(error.contains("storage ceiling"));
+    assert!(error.contains("storage limit"));
     assert!(
         state
             .simulation

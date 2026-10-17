@@ -1078,7 +1078,7 @@ impl SimulationController {
         let target_run_id = self.target_run_id(state);
         let assembled = target_run_id
             .and_then(|run_id| state.simulation.retained.run_by_sequence(run_id))
-            .ok_or_else(|| "PVT family has no target simulation run".to_owned())
+            .ok_or_else(|| "the analysis belongs to no run".to_owned())
             .and_then(|run| self.point_families.family_for(declaration, run));
         let mut analysis = match assembled {
             Ok(result) => self.convert_to_analysis_result_with_metadata_owned(
@@ -1150,8 +1150,7 @@ impl SimulationController {
         analysis: AnalysisResult,
         provenance: AnalysisResultProvenance,
     ) -> Result<bool, String> {
-        let run_id = target_run_id
-            .ok_or_else(|| "completed analysis has no target simulation run".to_owned())?;
+        let run_id = target_run_id.ok_or_else(|| "the analysis belongs to no run".to_owned())?;
         let completed_instance = provenance.source_instance_id();
         let succeeded = analysis.success;
         let analysis = analysis.with_provenance(provenance);
@@ -1159,7 +1158,7 @@ impl SimulationController {
             .simulation
             .retained
             .run_by_sequence_mut(run_id)
-            .ok_or_else(|| format!("completed analysis target run {run_id} does not exist"))?;
+            .ok_or_else(|| format!("run {run_id} is no longer in the result history"))?;
         self.retain_analysis_under_current_policy(run, analysis)?;
         if succeeded {
             self.successful_analysis_instances
@@ -1353,8 +1352,7 @@ impl SimulationController {
             let requested = already_retained.saturating_add(analysis.retained_storage_bytes());
             if requested > maximum {
                 return Err(format!(
-                    "Run {} retention requires {}, exceeding the authenticated {} storage ceiling",
-                    run.id,
+                    "the run's results would take {}, more than its {} storage limit",
                     rspice_simulation_contract::run_set::format_bytes(requested),
                     rspice_simulation_contract::run_set::format_bytes(maximum),
                 ));
@@ -1416,6 +1414,19 @@ impl SimulationController {
         if !self.current_save_policy.live_streaming_enabled() {
             return;
         }
+        self.publish_live_preview(state);
+    }
+
+    /// Show the samples accepted so far as the running analysis's live
+    /// result.
+    ///
+    /// A preview that cannot be shown stops for the rest of the task, and its
+    /// reason is written once: this runs every frame, and the solve goes on
+    /// regardless, its result replacing the preview when it completes.
+    fn publish_live_preview(&mut self, state: &mut AppState) {
+        if self.live_transient.preview_stopped() {
+            return;
+        }
         if self.live_transient.take_event_loss_notice() {
             self.run_line(
                 state,
@@ -1424,7 +1435,7 @@ impl SimulationController {
             );
         }
         let Some(provenance) = self.current_provenance.clone() else {
-            log::error!("Accepted transient samples have no prepared-task provenance");
+            self.stop_live_preview(state, "the running analysis could not be identified");
             return;
         };
         let analysis_type = self
@@ -1462,12 +1473,23 @@ impl SimulationController {
             None => partial,
         };
         let Some(run_id) = self.target_run_id(state) else {
-            log::error!("Accepted transient samples have no target simulation run");
+            self.stop_live_preview(state, "the running analysis belongs to no run");
             return;
         };
         if let Err(error) = self.retain_live_transient_analysis(state, run_id, partial) {
-            log::error!("Could not publish live transient samples: {error}");
+            self.stop_live_preview(state, &error);
         }
+    }
+
+    /// Stop the live preview for the rest of the task, saying why in the
+    /// run's log, or in the session's when there is no run to say it in.
+    fn stop_live_preview(&mut self, state: &mut AppState, reason: &str) {
+        self.live_transient.stop_preview();
+        self.run_line(
+            state,
+            LogSeverity::Warning,
+            format!("Live preview stopped: {reason}"),
+        );
     }
 
     fn retain_live_transient_analysis(
@@ -1480,7 +1502,7 @@ impl SimulationController {
             .simulation
             .retained
             .run_by_sequence_mut(run_id)
-            .ok_or_else(|| format!("live transient target run {run_id} does not exist"))
+            .ok_or_else(|| format!("run {run_id} is no longer in the result history"))
             .and_then(|run| {
                 self.preserve_live_checkpoints(run, &mut partial);
                 self.validate_analysis_retention(run, &partial)?;

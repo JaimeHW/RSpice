@@ -14,6 +14,9 @@ pub(super) struct LiveTransientAccumulator {
     retained_event_points: usize,
     events_lost: bool,
     event_loss_notice: bool,
+    /// The preview could not be shown and is not tried again for this task.
+    /// The samples are still kept, for a partial result.
+    preview_stopped: bool,
 }
 
 #[derive(Debug)]
@@ -46,6 +49,15 @@ impl LiveTransientAccumulator {
         self.retained_event_points = 0;
         self.events_lost = false;
         self.event_loss_notice = false;
+        self.preview_stopped = false;
+    }
+
+    pub(super) fn stop_preview(&mut self) {
+        self.preview_stopped = true;
+    }
+
+    pub(super) fn preview_stopped(&self) -> bool {
+        self.preview_stopped
     }
 
     fn mark_event_loss(&mut self) {

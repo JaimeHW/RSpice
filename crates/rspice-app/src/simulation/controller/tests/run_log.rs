@@ -137,3 +137,45 @@ fn a_run_writes_its_start_and_end_in_the_session_and_its_account_in_its_own_log(
     assert_eq!(session[1].message, summary.message);
     assert_eq!(session[1].severity, summary.severity);
 }
+
+/// A live preview that cannot be shown says why in the run's log, once,
+/// though the preview is tried every frame.
+#[test]
+fn a_live_preview_that_cannot_be_shown_says_why_once_in_its_runs_log() {
+    let mut state = AppState::default();
+    let run_sequence = state.simulation.start_run().id;
+    let mut controller = SimulationController::new();
+    controller.current_run_id = Some(run_sequence);
+
+    controller.publish_live_preview(&mut state);
+    controller.publish_live_preview(&mut state);
+
+    let run = state
+        .simulation
+        .retained
+        .run_by_sequence(run_sequence)
+        .expect("the run is retained");
+    let lines: Vec<_> = run
+        .log
+        .lines()
+        .iter()
+        .map(|line| (line.severity, line.message.as_str()))
+        .collect();
+    assert_eq!(
+        lines,
+        [(
+            crate::diagnostics::LogSeverity::Warning,
+            "Live preview stopped: the running analysis could not be identified"
+        )]
+    );
+    assert!(state.log_buffer.is_empty());
+
+    controller.live_transient.clear();
+    controller.publish_live_preview(&mut state);
+    let run = state
+        .simulation
+        .retained
+        .run_by_sequence(run_sequence)
+        .expect("the run is retained");
+    assert_eq!(run.log.lines().len(), 2, "the next task tries again");
+}
