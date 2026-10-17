@@ -1361,6 +1361,9 @@ impl Command {
                     activate_workspace(app, Workspace::Design);
                     app.state.workbench.navigator_visible = true;
                     app.state.workbench.drawer = Some(super::state::Drawer::Navigator);
+                    // The search box is the Navigator tab's; the Component
+                    // shelf that Place instance brings forward has none.
+                    app.state.workbench.design_panel = super::state::DesignPanel::Navigator;
                     app.state.workbench.focus_navigator_search = true;
                 }
             }
