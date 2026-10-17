@@ -2394,6 +2394,14 @@ pub struct NetlistDocumentState {
     project_indexes: HashMap<crate::state::NetlistDocumentId, language::CachedProjectIndex>,
     /// Buffer-revision-keyed value spans behind the editor's value hover.
     value_index: Option<language::CachedValueIndex>,
+    /// What the parse of one buffer revision left unread in the buffer: the
+    /// lines of an untaken `.if` branch or an unselected inline `.lib`
+    /// section. Absent when that parse failed, or read a deck other than the
+    /// buffer as its own root.
+    unread_source: Option<(
+        u64,
+        std::sync::Arc<[rspice_core::netlist::UnreadSourceRegion]>,
+    )>,
     /// Outline and line offsets of the visible buffer. Read through
     /// [`visible_source_index`], which is what keeps it current.
     source_index: std::sync::Arc<crate::state::NetlistSourceIndex>,
@@ -2416,6 +2424,18 @@ impl NetlistDocumentState {
     #[cfg(test)]
     pub(crate) fn mark_validated_for_test(&mut self, revision: u64) {
         self.diag_revision = Some(revision);
+    }
+
+    /// What the parse of `revision` left unread in the buffer, when that
+    /// parse has run and read the buffer as its own root.
+    pub(crate) fn unread_source_at(
+        &self,
+        revision: u64,
+    ) -> Option<std::sync::Arc<[rspice_core::netlist::UnreadSourceRegion]>> {
+        self.unread_source
+            .as_ref()
+            .filter(|(parsed, _)| *parsed == revision)
+            .map(|(_, unread)| std::sync::Arc::clone(unread))
     }
 
     /// Whether a retained Code-workspace transaction owns exclusive input.

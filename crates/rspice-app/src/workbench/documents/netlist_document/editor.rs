@@ -312,9 +312,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> egui::Response {
             state.prompt(error);
         }
     }
-    // A value the deck actually answers outranks the project symbol; a token
+    // A value the deck actually answers outranks the project symbol, and so
+    // does the parser's word that a line is not read: the project symbol
+    // would name that line's definition as if it bound something. A token
     // that resolves to neither still says so, so a hover never goes silent.
-    if let Some(hover) = hover_value.as_ref().filter(|hover| hover.value.is_some()) {
+    if let Some(hover) = hover_value
+        .as_ref()
+        .filter(|hover| hover.value.is_some() || hover.not_read)
+    {
         show_value_hover(&editor_response, hover);
     } else if let Some(symbol) = hover_symbol
         && let Some(hover) = super::language::symbol_hover(state, &symbol)
@@ -628,12 +633,18 @@ fn validate_visible_source(state: &mut AppState, revision: u64) {
         state.workspace.content.project.include_search_paths(),
         state.workspace.content.project.data_root(),
     );
-    let (mut diagnostics, symbols) = if buffer.trim().is_empty() {
-        (Vec::new(), Some(Vec::new()))
+    // Only a parse of the buffer itself, as its own root, says which of its
+    // lines a run reads. A composed override's parse reads the lines of the
+    // composed deck, and a dependency's sections are selected, and its
+    // conditions decided, by the deck that includes it.
+    let reads_buffer_as_root =
+        composed.is_none() && state.ui.netlist.active_dependency_identity.is_none();
+    let (mut diagnostics, symbols, unread) = if buffer.trim().is_empty() {
+        (Vec::new(), Some(Vec::new()), Some(Vec::new()))
     } else {
         match &materialized {
             Ok(source) => {
-                let (diagnostics, symbols) = parse_buffer_with_context(
+                let (diagnostics, symbols, unread) = parse_buffer_with_context(
                     source,
                     source_path,
                     &include_search,
@@ -641,9 +652,13 @@ fn validate_visible_source(state: &mut AppState, revision: u64) {
                     sealed_sources.as_ref(),
                     &NoAbort,
                 );
-                (in_buffer(diagnostics), symbols)
+                (
+                    in_buffer(diagnostics),
+                    symbols,
+                    unread.filter(|_| reads_buffer_as_root),
+                )
             }
-            Err(error) => (vec![Diagnostic::error(error.clone())], None),
+            Err(error) => (vec![Diagnostic::error(error.clone())], None, None),
         }
     };
     diagnostics.extend(shadowed_include_diagnostics(state, &buffer));
@@ -673,6 +688,7 @@ fn validate_visible_source(state: &mut AppState, revision: u64) {
         );
         netlist.symbols = symbols;
     }
+    netlist.unread_source = unread.map(|unread| (revision, unread.into()));
     netlist.diag_revision = Some(revision);
 }
 
@@ -702,15 +718,25 @@ fn bounded_netlist_diagnostics(
 /// receives the exact active-document origin used by execution.
 #[cfg(test)]
 fn parse_buffer(buffer: &str) -> (Vec<Diagnostic>, Option<Vec<completion::SymbolEntry>>) {
-    parse_buffer_with_context(
+    let (diagnostics, symbols, _) = parse_buffer_with_context(
         buffer,
         None,
         &rspice_simulation::netlist_preparation::IncludeSearchChain::default(),
         platform_include_access(),
         None,
         &NoAbort,
-    )
+    );
+    (diagnostics, symbols)
 }
+
+/// One parse of the visible source: its findings, the symbols it defines,
+/// and the lines of the source itself the parse did not read. The last two
+/// are absent when the parse did not complete.
+type BufferParse = (
+    Vec<Diagnostic>,
+    Option<Vec<completion::SymbolEntry>>,
+    Option<Vec<rspice_core::netlist::UnreadSourceRegion>>,
+);
 
 fn parse_buffer_with_context(
     buffer: &str,
@@ -719,7 +745,7 @@ fn parse_buffer_with_context(
     include_access: IncludeAccess,
     sealed_sources: Option<&crate::state::model_library::SealedModelExecutionSources>,
     abort: &dyn AbortSignal,
-) -> (Vec<Diagnostic>, Option<Vec<completion::SymbolEntry>>) {
+) -> BufferParse {
     let external_line = first_external_dependency_line(buffer);
     if source_path.is_none()
         && let Some(line) = external_line
@@ -730,12 +756,13 @@ fn parse_buffer_with_context(
             )
             .with_line(Some(line))],
             None,
+            None,
         );
     }
 
     let parse_source = match editor_parse_source(source_path) {
         Ok(path) => path,
-        Err(error) => return (vec![Diagnostic::error(error)], None),
+        Err(error) => return (vec![Diagnostic::error(error)], None, None),
     };
     let options = rspice_core::netlist::NetlistParseOptions {
         resource_limits: rspice_core::ResourceLimits::default(),
@@ -763,6 +790,7 @@ fn parse_buffer_with_context(
                         )
                         .with_line(external_line)],
                         None,
+                        None,
                     );
                 };
                 let bundle = match sealed_sources.bundle_for_root(&parse_source, buffer) {
@@ -770,6 +798,7 @@ fn parse_buffer_with_context(
                     Err(error) => {
                         return (
                             vec![Diagnostic::error(error).with_line(external_line)],
+                            None,
                             None,
                         );
                     }
@@ -786,16 +815,19 @@ fn parse_buffer_with_context(
     };
     match parsed {
         Ok(netlist) => {
+            let unread = netlist.unread_root_source().cloned().collect::<Vec<_>>();
             let mut diagnostics = parser_diagnostics(&netlist, Some(&parse_source));
             if let Err(error) = rspice_core::netlist::validate_output_requests(&netlist) {
                 diagnostics.extend(parse_error_diagnostics_at(error, Some(&parse_source)));
             }
-            diagnostics.extend(unknown_reference_diagnostics(buffer));
-            (diagnostics, Some(harvest_symbols(&netlist)))
+            diagnostics.extend(unknown_reference_diagnostics(buffer, &unread));
+            (diagnostics, Some(harvest_symbols(&netlist)), Some(unread))
         }
-        Err(rspice_core::netlist::ParseWithAbortError::Parse(error)) => {
-            (parse_error_diagnostics_at(error, Some(&parse_source)), None)
-        }
+        Err(rspice_core::netlist::ParseWithAbortError::Parse(error)) => (
+            parse_error_diagnostics_at(error, Some(&parse_source)),
+            None,
+            None,
+        ),
         Err(rspice_core::netlist::ParseWithAbortError::Aborted) => (
             vec![
                 Diagnostic::current(
@@ -806,6 +838,7 @@ fn parse_buffer_with_context(
                 )
                 .with_source_path(source_path.map(Path::to_path_buf)),
             ],
+            None,
             None,
         ),
     }
@@ -1343,14 +1376,15 @@ M1 d g s b nch W={w} L={l*2}\n\
         source: &str,
         root: &Path,
     ) -> (Vec<Diagnostic>, Option<Vec<completion::SymbolEntry>>) {
-        parse_buffer_with_context(
+        let (diagnostics, symbols, _) = parse_buffer_with_context(
             source,
             Some(root),
             &rspice_simulation::netlist_preparation::IncludeSearchChain::default(),
             IncludeAccess::NativeFilesystem,
             None,
             &NoAbort,
-        )
+        );
+        (diagnostics, symbols)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1500,7 +1534,7 @@ M1 d g s b nch W={w} L={l*2}\n\
     #[test]
     fn live_lint_fails_closed_when_browser_cannot_resolve_include() {
         let source = "browser include lint\n.include \"models/device.lib\"\n.end\n";
-        let (diagnostics, symbols) = parse_buffer_with_context(
+        let (diagnostics, symbols, _) = parse_buffer_with_context(
             source,
             Some(Path::new("project/root.cir")),
             &rspice_simulation::netlist_preparation::IncludeSearchChain::default(),
@@ -1522,7 +1556,7 @@ M1 d g s b nch W={w} L={l*2}\n\
     #[test]
     fn live_lint_parses_dependency_free_browser_deck_without_a_bundle() {
         let source = "browser in-memory lint\nV1 input 0 5\nR1 input 0 1k\n.op\n.end\n";
-        let (diagnostics, symbols) = parse_buffer_with_context(
+        let (diagnostics, symbols, _) = parse_buffer_with_context(
             source,
             Some(Path::new("project/root.cir")),
             &rspice_simulation::netlist_preparation::IncludeSearchChain::default(),
@@ -1556,7 +1590,7 @@ M1 d g s b nch W={w} L={l*2}\n\
             .expect("seal authenticated model library");
         let source = "authenticated browser lint\n.lib \"device.lib\" TT\nD1 out 0 DSEALED\n.end\n";
 
-        let (diagnostics, symbols) = parse_buffer_with_context(
+        let (diagnostics, symbols, _) = parse_buffer_with_context(
             source,
             Some(&root),
             &rspice_simulation::netlist_preparation::IncludeSearchChain::default(),
@@ -1577,7 +1611,7 @@ M1 d g s b nch W={w} L={l*2}\n\
     #[test]
     fn live_lint_uses_abort_aware_parser_contract() {
         let source = "cancelled lint\nR1 out 0 1k\n.end\n";
-        let (diagnostics, symbols) = parse_buffer_with_context(
+        let (diagnostics, symbols, _) = parse_buffer_with_context(
             source,
             None,
             &rspice_simulation::netlist_preparation::IncludeSearchChain::default(),
@@ -1682,6 +1716,190 @@ M1 d g s b nch W={w} L={l*2}\n\
             "the override's second line, not the composed deck's sixth: {error:?}",
         );
         assert!(error.is_current());
+    }
+
+    /// A deck in the editor, validated the way the editor validates it.
+    fn validated(deck: &str) -> AppState {
+        let mut state = AppState::default();
+        state.simulation.source.netlist_content = deck.to_owned();
+        let revision = state.ui.netlist.revision;
+        validate_visible_source(&mut state, revision);
+        state
+    }
+
+    /// The value hover at the `offset`th byte of the first `needle` in `deck`.
+    fn hover_on(
+        state: &mut AppState,
+        deck: &str,
+        needle: &str,
+        offset: usize,
+    ) -> Option<super::super::language::NetlistValueHover> {
+        let byte = deck.find(needle).expect("deck contains the token") + offset;
+        let index = deck[..byte].chars().count();
+        super::super::language::value_hover_at(state, deck, index)
+    }
+
+    /// The parser reads only the branch it takes, so the hover binds that
+    /// branch's value everywhere and says the other definition is not read,
+    /// and why, without a value.
+    #[test]
+    fn value_hover_reads_only_the_if_branch_the_parser_takes() {
+        for (mode, taken, skipped, value, holds) in [
+            (1, "vth=0.5", "vth=0.4", "500m", "true"),
+            (0, "vth=0.4", "vth=0.5", "400m", "false"),
+        ] {
+            let deck = format!(
+                "hover\n.param mode={mode}\n.if (mode==1)\n.param vth=0.5\n.else\n\
+                 .param vth=0.4\n.endif\nV1 a 0 {{vth}}\n.end\n"
+            );
+            let mut state = validated(&deck);
+
+            let reader = hover_on(&mut state, &deck, "{vth}", 1).expect("reader hover");
+            assert_eq!(reader.value.as_deref(), Some(value), "mode={mode}");
+
+            let binding = hover_on(&mut state, &deck, taken, 0).expect("binding hover");
+            assert_eq!(binding.value.as_deref(), Some(value), "mode={mode}");
+            assert!(!binding.not_read);
+
+            let unread = hover_on(&mut state, &deck, skipped, 0).expect("unread hover");
+            assert_eq!(unread.token, "vth");
+            assert_eq!(
+                unread.value, None,
+                "mode={mode}: an unread line binds nothing"
+            );
+            assert_eq!(
+                unread.detail.as_deref(),
+                Some(format!("not read: in an .if branch not taken (mode==1 is {holds})").as_str()),
+                "mode={mode}"
+            );
+            assert!(
+                unread.not_read,
+                "the parser's answer outranks the project symbol"
+            );
+        }
+    }
+
+    #[test]
+    fn value_hover_reads_only_the_branch_a_nested_if_takes() {
+        let deck = "hover\n.param mode=1 corner=2\n.if (mode==1)\n.if (corner==1)\n\
+                    .param vth=0.1\n.elseif (corner==2)\n.param vth=0.2\n.else\n\
+                    .param vth=0.3\n.endif\n.else\n.param vth=0.9\n.endif\n\
+                    V1 a 0 {vth}\n.end\n";
+        let mut state = validated(deck);
+
+        assert_eq!(
+            hover_on(&mut state, deck, "{vth}", 1).and_then(|hover| hover.value),
+            Some("200m".to_owned())
+        );
+        for (needle, reason) in [
+            ("vth=0.1", "corner==1 is false"),
+            ("vth=0.3", "corner==2 is true"),
+            ("vth=0.9", "mode==1 is true"),
+        ] {
+            let hover = hover_on(&mut state, deck, needle, 0).expect("hover");
+            assert_eq!(hover.value, None, "{needle}");
+            assert_eq!(
+                hover.detail,
+                Some(format!("not read: in an .if branch not taken ({reason})")),
+                "{needle}"
+            );
+        }
+    }
+
+    /// A definition after the block is read wherever it is, so the last read
+    /// one still binds the reader above the block.
+    #[test]
+    fn value_hover_binds_a_redefinition_after_the_endif_everywhere() {
+        let deck = "hover\n.param mode=1\nV2 b 0 {vth}\n.if (mode==1)\n.param vth=0.5\n\
+                    .else\n.param vth=0.4\n.endif\n.param vth=0.7\n.end\n";
+        let mut state = validated(deck);
+
+        let reader = hover_on(&mut state, deck, "{vth}", 1).expect("hover");
+        assert_eq!(reader.value.as_deref(), Some("700m"));
+        assert_eq!(reader.detail.as_deref(), Some("defined line 9"));
+        assert_eq!(
+            hover_on(&mut state, deck, "vth=0.4", 0).and_then(|hover| hover.detail),
+            Some("not read: in an .if branch not taken (mode==1 is true)".to_owned())
+        );
+    }
+
+    /// A subcircuit body binds its parameters when it is instantiated, so a
+    /// deck that never instantiates it parses with the name unbound.
+    #[test]
+    fn value_hover_names_where_a_parameter_only_unread_lines_define_is_written() {
+        let deck = "hover\n.param mode=0\n.if (mode==1)\n.param vth=0.5\n.endif\n\
+                    .subckt cell a b\nR1 a b {vth}\n.ends\n.end\n";
+        let mut state = validated(deck);
+
+        let reader = hover_on(&mut state, deck, "{vth}", 1).expect("hover");
+        assert_eq!(reader.value, None);
+        assert_eq!(
+            reader.detail.as_deref(),
+            Some("vth is defined only on line 4, in an .if branch not taken (mode==1 is false)")
+        );
+        assert!(reader.not_read);
+    }
+
+    /// A deck's own inline sections are definitions no card selects.
+    #[test]
+    fn value_hover_reads_none_of_a_decks_own_inline_library_sections() {
+        let deck = "hover\n.param vth=0.9\n.lib tt\n.param vth=0.5\n.endl tt\n\
+                    .lib ss\n.param vth=0.4\n.endl ss\nV1 a 0 {vth}\n.end\n";
+        let mut state = validated(deck);
+
+        assert_eq!(
+            hover_on(&mut state, deck, "{vth}", 1).and_then(|hover| hover.value),
+            Some("900m".to_owned())
+        );
+        for (needle, section) in [("vth=0.5", "tt"), ("vth=0.4", "ss")] {
+            assert_eq!(
+                hover_on(&mut state, deck, needle, 0).and_then(|hover| hover.detail),
+                Some(format!("not read: in .lib section {section}, not selected")),
+            );
+        }
+    }
+
+    /// Until a parse of this revision decides the branches, the hover vouches
+    /// for no value in a deck that has them; once it has, it answers.
+    #[test]
+    fn value_hover_waits_for_the_parse_that_decides_the_branches() {
+        let deck = "hover\n.param mode=1\n.if (mode==1)\n.param vth=0.5\n.else\n\
+                    .param vth=0.4\n.endif\nV1 a 0 {vth}\n.end\n";
+        let mut state = AppState::default();
+        state.simulation.source.netlist_content = deck.to_owned();
+
+        assert_eq!(hover_on(&mut state, deck, "{vth}", 1), None);
+
+        let revision = state.ui.netlist.revision;
+        validate_visible_source(&mut state, revision);
+        assert_eq!(
+            hover_on(&mut state, deck, "{vth}", 1).and_then(|hover| hover.value),
+            Some("500m".to_owned()),
+            "the arriving parse rebuilds the index the earlier hover built"
+        );
+    }
+
+    /// The reference lint counts what the parser reads: a model written only
+    /// in a skipped branch defines nothing, and a card there references
+    /// nothing.
+    #[test]
+    fn the_reference_lint_counts_only_the_branch_the_parser_takes() {
+        let deck = "lint\n.param mode=0\n.if (mode==1)\n.model dsel d\nDOFF a 0 dmissing\n\
+                    .endif\nD1 a 0 dsel\n.end\n";
+        let state = validated(deck);
+
+        let unknown = state
+            .ui
+            .netlist
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.canonical.code.as_ref() == "SPICE-UNKNOWN-MODEL")
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            unknown,
+            vec!["Unknown model `dsel` in this deck.".to_owned()]
+        );
     }
 
     #[test]
