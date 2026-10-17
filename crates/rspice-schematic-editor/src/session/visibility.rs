@@ -81,8 +81,21 @@ pub enum SchematicNetHighlighting {
     // a preference saved under it still reads.
     #[serde(alias = "selected-across-hierarchy")]
     SelectedNet,
+    /// The selected net, carried through the instance terminal it reaches:
+    /// descending into an instance lights the child's port net it drives,
+    /// and ascending lights the parent net the port reaches. Each occurrence
+    /// holds its own highlight, so two instances of one master never share
+    /// one.
+    SelectedNetAcrossHierarchy,
     NetClassColors,
     Off,
+}
+
+impl SchematicNetHighlighting {
+    /// Whether the selected net's conductors are lit.
+    pub const fn lights_selected_net(self) -> bool {
+        matches!(self, Self::SelectedNet | Self::SelectedNetAcrossHierarchy)
+    }
 }
 
 /// Governed design-review records rendered on the canvas.

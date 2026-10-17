@@ -1324,6 +1324,11 @@ pub struct WorkbenchState {
     /// data, and the retained undo snapshot belongs to this process.
     #[serde(skip)]
     pub inline_edit: InlineEdit,
+    /// The net each hierarchy occurrence lights under "Selected net across
+    /// hierarchy", keyed by root cell view and instance path. One master
+    /// placed twice has one editor session, so the session cannot hold it.
+    #[serde(skip)]
+    pub occurrence_net_highlights: std::collections::BTreeMap<String, String>,
     #[serde(skip)]
     pub drawer: Option<Drawer>,
     /// One-frame request to focus the workspace navigator filter.
@@ -1499,6 +1504,7 @@ impl Default for WorkbenchState {
             netlist_outline_collapsed: std::collections::BTreeSet::new(),
             command_query: String::new(),
             inline_edit: InlineEdit::default(),
+            occurrence_net_highlights: std::collections::BTreeMap::new(),
             drawer: None,
             focus_navigator_search: false,
             placement_query: String::new(),

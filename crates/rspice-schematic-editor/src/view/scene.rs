@@ -156,8 +156,9 @@ pub fn draw_content(
             || band_wires.is_some_and(|band| band.takes_polyline(&wire.points));
 
         let net_ink = match view.net_highlighting {
-            SchematicNetHighlighting::SelectedNet
-                if view.editor.net_highlight.is_wire_highlighted(wire.id) =>
+            policy
+                if policy.lights_selected_net()
+                    && view.editor.net_highlight.is_wire_highlighted(wire.id) =>
             {
                 ConductorInk::Highlighted
             }
@@ -165,9 +166,9 @@ pub fn draw_content(
                 .net_class_colors
                 .get(&wire.id)
                 .map_or(ConductorInk::Plain, |colour| ConductorInk::Class(*colour)),
-            SchematicNetHighlighting::SelectedNet | SchematicNetHighlighting::Off => {
-                ConductorInk::Plain
-            }
+            SchematicNetHighlighting::SelectedNet
+            | SchematicNetHighlighting::SelectedNetAcrossHierarchy
+            | SchematicNetHighlighting::Off => ConductorInk::Plain,
         };
         let ink = if is_selected {
             ConductorInk::Selected
