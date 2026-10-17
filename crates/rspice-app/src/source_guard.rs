@@ -1015,11 +1015,17 @@ mod tests {
     /// Debug formatting prints a type's internal spelling — `Some("amp")`,
     /// `ProjectRevision(7)` — where the reader needs a sentence, and every
     /// one of these sites is product text. The scan covers every shipped
-    /// call of the three verbs; the run's own lines under `simulation/` are
-    /// another owner's and are left to it.
+    /// call of the verbs that write the session's log, a run's own log or the
+    /// status bar.
     #[test]
     fn no_console_line_or_prompt_is_formatted_with_debug() {
-        const VERBS: [&str; 3] = [".record(", ".record_anchored(", ".prompt("];
+        const VERBS: [&str; 5] = [
+            ".record(",
+            ".record_anchored(",
+            ".prompt(",
+            ".run_line(",
+            "write_run_line(",
+        ];
         let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut paths = Vec::new();
         rust_sources(&source_root, &mut paths);
@@ -1036,12 +1042,11 @@ mod tests {
             .iter()
             .flat_map(|(path, source)| test_only_roots(path, source))
             .collect::<Vec<_>>();
-        let simulation = source_root.join("simulation");
 
         let mut calls = 0_usize;
         let mut found = Vec::new();
         for (path, source) in &sources {
-            if path.starts_with(&simulation) || !ships(path, &roots) {
+            if !ships(path, &roots) {
                 continue;
             }
             let shipped = without_test_items(source);

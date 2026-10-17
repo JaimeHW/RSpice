@@ -31,7 +31,6 @@ mod stack_budget;
 mod technology_demand_tests;
 pub(in crate::workbench) mod viewer_capabilities;
 
-use crate::diagnostics::{ConsoleLevel, ConsoleMessage};
 use crate::product::{AnalysisInstanceId, DatasetId};
 use crate::state::{SchematicState, SimulationState};
 use crate::workbench::app::DialogState;
@@ -1079,14 +1078,6 @@ impl AppState {
             .log_anchored(severity, source, text, Some(anchor))
     }
 
-    fn log_severity_for_console(level: ConsoleLevel) -> crate::diagnostics::LogSeverity {
-        match level {
-            ConsoleLevel::Info => crate::diagnostics::LogSeverity::Info,
-            ConsoleLevel::Warning => crate::diagnostics::LogSeverity::Warning,
-            ConsoleLevel::Error => crate::diagnostics::LogSeverity::Error,
-        }
-    }
-
     /// Announce a committed plan command on the lifecycle status line and
     /// record it in the Console.
     ///
@@ -1158,17 +1149,6 @@ impl AppState {
                 false
             }
         }
-    }
-
-    /// A run's own line, for the simulation controller only: every other site
-    /// records through [`Self::record`] or answers through [`Self::prompt`].
-    pub fn push_sim_message(&mut self, message: ConsoleMessage) {
-        let severity = Self::log_severity_for_console(message.level);
-        self.record(
-            severity,
-            crate::diagnostics::LogSource::Run,
-            message.message,
-        );
     }
 
     pub fn clear_primary_log(&mut self) {
