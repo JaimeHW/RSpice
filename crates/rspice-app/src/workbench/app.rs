@@ -2015,14 +2015,16 @@ mod tests {
     #[test]
     fn run_readiness_uses_the_configured_root_not_the_active_editor() {
         let mut state = runnable_state();
-        let root = CellViewRef::new("user", "configured", "schematic");
-        let mut configured = SchematicState::default();
-        configured.add_component(ComponentType::Resistor, Point::new(40, 20));
-        configure_alternate_simulation_root(&mut state, root, configured);
+        // The editor's check is published while its design projects, as a
+        // check that ran was; the root is configured elsewhere after it.
         publish_drc_result(
             &mut state,
             drc_result(DrcViolationType::MissingGround, None),
         );
+        let root = CellViewRef::new("user", "configured", "schematic");
+        let mut configured = SchematicState::default();
+        configured.add_component(ComponentType::Resistor, Point::new(40, 20));
+        configure_alternate_simulation_root(&mut state, root, configured);
 
         assert!(
             schematic_readiness(&state).is_none(),
