@@ -234,6 +234,194 @@ fn following_a_rule_finding_opens_its_cell_view_before_selecting() {
     );
 }
 
+/// A loop is every source in it. Its record names each source as the drawing
+/// does and says what it is to the loop, and following each one from another
+/// view opens the loop's view and selects that source there.
+#[test]
+fn every_source_in_a_loop_is_named_and_followed_into_its_view() {
+    use crate::schematic::view::violations::tests::draw_source_loop;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.authority.open_session();
+    let (top, aux, sources) = draw_source_loop(&mut app.state);
+    let code = rspice_design::drc::DrcViolationType::SourceToSource.rule_code();
+    let places = app
+        .state
+        .diagnostics
+        .batches()
+        .flat_map(|batch| batch.records.iter())
+        .find(|record| record.canonical.code.as_ref() == code)
+        .map(|record| record.related_places.clone())
+        .expect("the loop is published");
+
+    let mut labels: Vec<&str> = places.iter().map(|place| place.label.as_str()).collect();
+    labels.sort_unstable();
+    let mut expected: Vec<String> = sources
+        .iter()
+        .map(|source| format!("{} \u{00b7} source in the loop", source.name))
+        .collect();
+    expected.sort_unstable();
+    assert_eq!(
+        labels, expected,
+        "each source, by the name it is drawn with"
+    );
+
+    for source in &sources {
+        let place = places
+            .iter()
+            .find(|place| place.label.starts_with(&format!("{} ", source.name)))
+            .expect("every source is a place");
+        assert_eq!(place.cell_view, top, "drawn in the loop's own view");
+        let route = place
+            .route
+            .clone()
+            .expect("a drawn source has somewhere to go");
+
+        app.state.open_workspace_view(aux.clone());
+        app.state.diagnostics.request_route(route);
+        apply_pending(&context(), &mut app);
+
+        assert_eq!(
+            app.state.workspace.content.active_schematic_reference(),
+            top,
+            "{}: the loop's view opens",
+            source.name
+        );
+        assert_eq!(
+            app.state
+                .schematic
+                .session
+                .editor
+                .selection
+                .components
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            [source.id],
+            "{}: that source alone is selected",
+            source.name
+        );
+    }
+}
+
+/// Two instances carrying one name on two sheets of one cellview: the finding
+/// is stated at one and names the other. Each is drawn on its own sheet, and
+/// following either brings that sheet forward before selecting it, which is
+/// what neither the finding's own route nor a related place did while either
+/// stopped at the sheet in view.
+#[test]
+fn a_duplicate_name_on_another_sheet_is_named_and_followed_onto_its_sheet() {
+    use crate::state::{ComponentType, Point, SheetDefinition, SheetPortPolicy, SheetTemplate};
+    use rspice_design::drc::DrcViolationType;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.authority.open_session();
+    let subject = app.state.workspace.content.active_schematic_reference();
+    let ids = [Point::new(0, 0), Point::new(400, 0)].map(|at| {
+        app.state
+            .schematic
+            .add_component(ComponentType::Resistor, at)
+    });
+    for component in app
+        .state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .iter_mut()
+        .filter(|component| ids.contains(&component.id))
+    {
+        component.name = "R1".to_owned();
+    }
+    app.state.sync_active_schematic_to_workspace();
+    let key = subject.key();
+    let first = app
+        .state
+        .workspace
+        .content
+        .design_management
+        .bootstrap_for_cell_view(&key, "Page 1", [ids[0]])
+        .expect("a fresh cell view accepts its first governed sheet");
+    let catalog = app
+        .state
+        .workspace
+        .content
+        .design_management
+        .sheet_catalog_mut(&key)
+        .expect("the sheet catalog was just created");
+    let second = catalog
+        .create_sheet(
+            SheetDefinition {
+                name: "Page 2".to_owned(),
+                template: SheetTemplate::AnalogSchematic,
+                port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                explicit_page_number: Some(2),
+            },
+            Some(first),
+        )
+        .expect("a second governed sheet inserts after the first");
+    catalog
+        .assign_objects(catalog.revision(), second, [ids[1]])
+        .expect("the second instance belongs to the second page");
+    catalog
+        .set_active(first)
+        .expect("the first page is in view");
+
+    app.state
+        .check_active_cellview()
+        .expect("the checks run on the drawing");
+    let code = DrcViolationType::DuplicateName.rule_code();
+    let record = app
+        .state
+        .diagnostics
+        .batches()
+        .flat_map(|batch| batch.records.iter())
+        .find(|record| record.canonical.code.as_ref() == code)
+        .cloned()
+        .expect("the duplicated name is published");
+    let [place] = record.related_places.as_slice() else {
+        panic!(
+            "the finding names the other instance: {:?}",
+            record.related_places
+        );
+    };
+    assert_eq!(place.label, "R1 \u{00b7} also named R1");
+    let (stated, other) = match place.location {
+        rspice_design::drc::DrcLocation::Component { id, .. } if id == ids[0] => (ids[1], ids[0]),
+        rspice_design::drc::DrcLocation::Component { id, .. } if id == ids[1] => (ids[0], ids[1]),
+        ref location => panic!("the other instance, by where it is: {location:?}"),
+    };
+    let sheet_of = |id: u64| if id == ids[0] { first } else { second };
+
+    for (route, id) in [
+        (place.route.clone(), other),
+        (record.route.clone(), stated),
+        (place.route.clone(), other),
+    ] {
+        let route = route.expect("each instance has somewhere to go, on whichever sheet");
+        app.state.diagnostics.request_route(route);
+        apply_pending(&context(), &mut app);
+
+        assert_eq!(
+            crate::workbench::app::sheets::active_sheet_id(&app.state),
+            Some(sheet_of(id)),
+            "the sheet that draws #{id} is brought forward"
+        );
+        assert_eq!(
+            app.state
+                .schematic
+                .session
+                .editor
+                .selection
+                .components
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            [id],
+            "and #{id} is selected on it"
+        );
+    }
+}
+
 /// A rule finding about a view that is not open still says where it is: the
 /// route is resolved in that view's own drawing rather than left out.
 #[test]

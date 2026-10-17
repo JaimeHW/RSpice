@@ -14,6 +14,9 @@ use rspice_design::drc::{DrcLocation, DrcSeverity, DrcViolation};
 use super::viewport::Viewport;
 use rspice_schematic_editor::view::violations as markers;
 
+#[cfg(test)]
+pub(crate) mod tests;
+
 /// Jump the view to the next (`step` = 1) or previous (−1) finding,
 /// ordered worst severity first. Selects the offending object where one
 /// exists and centers the canvas on the anchor; node/global findings have

@@ -1753,4 +1753,52 @@ mod tests {
             "a refused check publishes no evidence"
         );
     }
+
+    /// What else a finding involves is how it is shown, not what it is: a
+    /// loop that gains, loses or reorders a source is the same finding, so a
+    /// selection, a waiver's match and the page's current row all stay on it.
+    #[test]
+    fn a_findings_identity_is_unmoved_by_the_objects_it_involves() {
+        use rspice_design::drc::{DrcRelated, DrcRelation, DrcViolation};
+
+        let subject = CellViewRef::new("work", "top", "schematic");
+        let source = |id: u64| {
+            DrcRelated::new(
+                DrcLocation::Component {
+                    id,
+                    name: format!("V{id}"),
+                },
+                DrcRelation::LoopSource,
+            )
+        };
+        let pass = |related: Vec<DrcRelated>| {
+            let mut result = completed_result();
+            result.add_violation(
+                DrcViolation::new(
+                    1,
+                    DrcViolationType::SourceToSource,
+                    "a loop of voltage sources",
+                    DrcLocation::Node {
+                        net_name: "a".to_owned(),
+                        terminals: Vec::new(),
+                    },
+                )
+                .with_related(related),
+            );
+            result
+        };
+
+        let alone = pass(Vec::new());
+        let identity = finding_identities(&subject, &alone);
+        let key = finding_keys(&subject, &alone);
+        for related in [
+            vec![source(1)],
+            vec![source(1), source(2), source(3)],
+            vec![source(3), source(1), source(2)],
+        ] {
+            let involved = pass(related);
+            assert_eq!(finding_identities(&subject, &involved), identity);
+            assert_eq!(finding_keys(&subject, &involved), key);
+        }
+    }
 }
