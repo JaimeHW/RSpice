@@ -105,6 +105,19 @@ fn a_followed_wire_never_doubles_back_over_a_wire_beside_it() {
     ]);
 }
 
+/// R4 flipped left to right put a pin on the crossing wire where the T's
+/// stem crosses it, a crossing no dot is added to. Deleting the stem left
+/// the pin on the wire with nothing crossing there, which earns a dot, and
+/// the deletion placed none: it only takes dots away.
+#[test]
+fn deleting_a_wire_places_the_dot_it_makes_due() {
+    holds(&[
+        Draw(vec![p(220, 100), p(180, 100)]),
+        Transform(vec![Pick::Part(4), Pick::Wire(25)], Turn::MirrorHorizontal),
+        Delete(Pick::Wire(6)),
+    ]);
+}
+
 /// Undoing the switch to Sheet 2 and then moving a part on Sheet 1 is a
 /// new edit after the undo: the switch can no longer be redone. Redo
 /// replayed it anyway.

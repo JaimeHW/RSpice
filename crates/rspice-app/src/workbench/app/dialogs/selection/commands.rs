@@ -300,9 +300,27 @@ fn refuse_empty(state: &mut AppState) {
 /// present, so undo puts every sheet back; the cell view's other sheets,
 /// which share these coordinates, are out of reach while the objects go, so
 /// the dots the deletion tidies are judged by this sheet's wires alone.
+///
+/// Taking a wire or a part away can also make a dot due: a wire that ran
+/// through a crossing leaves a T behind, or a pin on a wire with nothing
+/// else crossing there. Under automatic junctions those dots are placed in
+/// the same step.
 fn delete_on_active_sheet(state: &mut AppState) -> bool {
+    let selection = &state.schematic.session.editor.selection;
+    let removes_conductors = !selection.wires.is_empty() || !selection.components.is_empty();
     state.schematic.begin_operation("delete selection");
-    with_active_wire_topology(state, |schematic, _| schematic.delete_selection());
+    with_active_wire_topology(state, |schematic, scope| {
+        schematic.delete_selection();
+        if removes_conductors
+            && schematic
+                .document()
+                .document_policy
+                .wire_junctions
+                .automatic_junctions()
+        {
+            schematic.update_wire_junctions(scope);
+        }
+    });
     state.schematic.end_operation()
 }
 
