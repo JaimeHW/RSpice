@@ -98,6 +98,13 @@ impl EditHistory {
         Some((pending.id, pending.before_snapshot))
     }
 
+    /// The document as the pending operation found it.
+    pub(super) fn pending_baseline(&self) -> Option<&SchematicSnapshot> {
+        self.pending
+            .as_ref()
+            .map(|pending| &pending.before_snapshot)
+    }
+
     pub(super) fn pending_operation_id(&self) -> Option<u64> {
         self.pending.as_ref().map(|pending| pending.id)
     }

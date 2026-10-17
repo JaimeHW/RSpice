@@ -18,17 +18,23 @@ use std::collections::HashMap;
 impl SchematicState {
     fn rubber_band_on_one_sheet(&mut self, delta: Point) {
         self.with_single_sheet_topology(|state, scope| {
-            state.move_selection_with_rubber_band(delta, scope);
+            state.move_selection_with_rubber_band(delta, DragRubberBand::default(), scope);
         });
     }
 
     fn rubber_band_resolved_on_one_sheet(
         &mut self,
         delta: Point,
+        rubber_band: DragRubberBand,
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
     ) {
         self.with_single_sheet_topology(|state, scope| {
-            state.move_selection_with_rubber_band_resolved(delta, terminal_points_for, scope);
+            state.move_selection_with_rubber_band_resolved(
+                delta,
+                rubber_band,
+                terminal_points_for,
+                scope,
+            );
         });
     }
 
@@ -178,26 +184,51 @@ fn bus_tap_and_scalar_target() -> SchematicState {
     state
 }
 
+/// The wire follows the cell's resolved pin, not a primitive's, and stays
+/// square on the way: it leaves the moved pin, turns back onto where the
+/// pin was and runs on as drawn.
 #[test]
 fn moving_selected_cell_uses_resolved_symbol_terminals_for_wire_updates() {
     let resolved = resolved_amp_symbol();
     let mut schematic = selected_amp_with_wire(Point::new(60, 40));
 
-    schematic.rubber_band_resolved_on_one_sheet(Point::new(10, 5), |component| {
-        resolved_terminal_points(component, &resolved)
-    });
+    schematic.rubber_band_resolved_on_one_sheet(
+        Point::new(10, 5),
+        DragRubberBand::Orthogonal,
+        |component| resolved_terminal_points(component, &resolved),
+    );
 
     assert_eq!(
         schematic.design.document().components[0].pos,
         Point::new(110, 55)
     );
     assert_eq!(
-        schematic.design.document().wires[0].points[0],
-        Point::new(70, 45)
+        schematic.design.document().wires[0].points,
+        vec![
+            Point::new(70, 45),
+            Point::new(70, 40),
+            Point::new(60, 40),
+            Point::new(60, 0),
+        ]
     );
+}
+
+/// Under angled routing the wire stretches straight from the cell's
+/// resolved pin.
+#[test]
+fn an_angled_drag_stretches_the_wire_straight_from_the_resolved_pin() {
+    let resolved = resolved_amp_symbol();
+    let mut schematic = selected_amp_with_wire(Point::new(60, 40));
+
+    schematic.rubber_band_resolved_on_one_sheet(
+        Point::new(10, 5),
+        DragRubberBand::Direct,
+        |component| resolved_terminal_points(component, &resolved),
+    );
+
     assert_eq!(
-        schematic.design.document().wires[0].points[1],
-        Point::new(60, 0)
+        schematic.design.document().wires[0].points,
+        vec![Point::new(70, 45), Point::new(60, 0)]
     );
 }
 

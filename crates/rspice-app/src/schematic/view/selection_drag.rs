@@ -7,6 +7,7 @@ use super::{
     sheet_visibility::{select_in_rect_on_active_sheet, with_active_wire_topology},
     viewport::Viewport,
 };
+use crate::state::DragRubberBand;
 use crate::workbench::app_state::{AppState, DragType};
 use rspice_schematic_editor::view::selection_drag::{
     self, SelectionDragAction, SelectionDragRequest, SelectionDragView, select_drag_can_start,
@@ -155,9 +156,24 @@ fn apply(
             {
                 return;
             }
+            // The rubber band follows the routing style: square unless the
+            // user draws at 45° or free angles.
+            let rubber_band = if state
+                .schematic
+                .session
+                .editor
+                .wire_drawing
+                .routing_mode
+                .is_orthogonal()
+            {
+                DragRubberBand::Orthogonal
+            } else {
+                DragRubberBand::Direct
+            };
             with_active_wire_topology(state, |schematic, scope| {
                 schematic.move_selection_with_rubber_band_resolved(
                     delta,
+                    rubber_band,
                     |component| symbols.terminal_points(component),
                     scope,
                 )
@@ -325,6 +341,238 @@ mod tests {
             ctx,
             symbols,
             SelectionDragAction::Finish { operation_id },
+        );
+    }
+
+    /// Drag the selected part through `steps`, each an offset from `from`,
+    /// one frame per step, as one whole gesture.
+    fn drag_through(
+        state: &mut AppState,
+        ctx: &egui::Context,
+        symbols: &crate::schematic::view::SchematicSymbolContext,
+        target: PointerTarget,
+        from: Point,
+        steps: &[Point],
+    ) {
+        dispatch(
+            state,
+            ctx,
+            symbols,
+            SelectionDragAction::BeginSelection {
+                target,
+                position: from,
+            },
+        );
+        let operation_id = state.schematic.pending_operation_id().expect("a gesture");
+        let mut last = from;
+        for step in steps {
+            let position = Point::new(from.x + step.x, from.y + step.y);
+            dispatch(
+                state,
+                ctx,
+                symbols,
+                SelectionDragAction::MoveSelection {
+                    operation_id,
+                    from: last,
+                    delta: Point::new(position.x - last.x, position.y - last.y),
+                    position,
+                },
+            );
+            last = position;
+        }
+        dispatch(
+            state,
+            ctx,
+            symbols,
+            SelectionDragAction::Finish { operation_id },
+        );
+    }
+
+    /// A resistor at the origin whose right pin is wired 100 units to the
+    /// right, ready to drag.
+    fn resistor_wired_right(state: &mut AppState) -> (PointerTarget, Point, Point) {
+        let id = state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::origin());
+        let pin = state.schematic.document().components[0].terminal_positions()[1].1;
+        let far = Point::new(pin.x + 100, pin.y);
+        state
+            .schematic
+            .document_mut_for_test()
+            .wires
+            .push(crate::state::Wire::segment(9, pin, far));
+        state.schematic.init_undo_history();
+        (PointerTarget::Component(id), pin, far)
+    }
+
+    /// A part dragged with the mouse keeps its wires square, the way the
+    /// Move command does: the wire leaves the moved pin, turns once onto
+    /// its old line and runs on to where it was drawn to.
+    #[test]
+    fn a_dragged_part_keeps_its_wires_square() {
+        let ctx = egui::Context::default();
+        let mut state = AppState::default();
+        let (target, pin, far) = resistor_wired_right(&mut state);
+        let symbols = super::super::schematic_symbol_context(&state);
+
+        drag_through(
+            &mut state,
+            &ctx,
+            &symbols,
+            target,
+            Point::origin(),
+            &[Point::new(0, 10), Point::new(0, 20)],
+        );
+
+        let moved = Point::new(pin.x, pin.y + 20);
+        assert_eq!(
+            state.schematic.document().wires.len(),
+            1,
+            "{:?}",
+            state.schematic.document().wires
+        );
+        assert_eq!(
+            state.schematic.document().wires[0].points,
+            vec![moved, pin, far]
+        );
+    }
+
+    /// Each frame is laid from where the drag began, not from the frame
+    /// before: a pointer that wanders and comes home leaves the wire exactly
+    /// as it was drawn, with no jog from the trip.
+    #[test]
+    fn a_drag_that_wanders_and_comes_home_leaves_the_wire_as_drawn() {
+        let ctx = egui::Context::default();
+        let mut state = AppState::default();
+        let (target, _, _) = resistor_wired_right(&mut state);
+        let drawn = state.schematic.document().wires.clone();
+        let symbols = super::super::schematic_symbol_context(&state);
+
+        drag_through(
+            &mut state,
+            &ctx,
+            &symbols,
+            target,
+            Point::origin(),
+            &[
+                Point::new(0, 20),
+                Point::new(30, 20),
+                Point::new(30, -10),
+                Point::origin(),
+            ],
+        );
+
+        assert_eq!(state.schematic.document().wires, drawn);
+    }
+
+    /// The part passes over the end of a wire it is not connected to. That
+    /// wire stays where it was drawn; it is not picked up and carried along.
+    #[test]
+    fn a_drag_passing_over_a_loose_wire_end_leaves_it_behind() {
+        let ctx = egui::Context::default();
+        let mut state = AppState::default();
+        let (target, pin, _) = resistor_wired_right(&mut state);
+        let loose = crate::state::Wire::segment(
+            11,
+            Point::new(pin.x, pin.y + 20),
+            Point::new(pin.x + 60, pin.y + 20),
+        );
+        state
+            .schematic
+            .document_mut_for_test()
+            .wires
+            .push(loose.clone());
+        state.schematic.init_undo_history();
+        let symbols = super::super::schematic_symbol_context(&state);
+
+        drag_through(
+            &mut state,
+            &ctx,
+            &symbols,
+            target,
+            Point::origin(),
+            &[Point::new(0, 20), Point::new(0, 40)],
+        );
+
+        assert!(
+            state.schematic.document().wires.contains(&loose),
+            "{:?}",
+            state.schematic.document().wires
+        );
+    }
+
+    /// Under 45° or free routing the user has asked for angled wires, so the
+    /// drag stretches the wire straight from the moved pin.
+    #[test]
+    fn an_angled_routing_style_stretches_the_dragged_wire_straight() {
+        let ctx = egui::Context::default();
+        let mut state = AppState::default();
+        let (target, pin, far) = resistor_wired_right(&mut state);
+        state
+            .schematic
+            .session
+            .editor
+            .wire_drawing
+            .set_routing_mode(crate::state::WireRoutingMode::Diagonal);
+        let symbols = super::super::schematic_symbol_context(&state);
+
+        drag_through(
+            &mut state,
+            &ctx,
+            &symbols,
+            target,
+            Point::origin(),
+            &[Point::new(0, 20)],
+        );
+
+        assert_eq!(
+            state.schematic.document().wires[0].points,
+            vec![Point::new(pin.x, pin.y + 20), far]
+        );
+    }
+
+    /// Sheet 2's wire ends where the dragged part's pin sits on Sheet 1. The
+    /// drag lays its own wiring from where it began; the other sheet's wire
+    /// is neither squared nor carried.
+    #[test]
+    fn a_drag_leaves_another_sheets_wire_end_in_place() {
+        let ctx = egui::Context::default();
+        let mut state = super::super::sheet_visibility::two_sheet_state(&[1, 9], &[20]);
+        state
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(crate::state::Component::new(
+                1,
+                ComponentType::Resistor,
+                Point::origin(),
+            ));
+        let pin = state.schematic.document().components[0].terminal_positions()[1].1;
+        let hidden = crate::state::Wire::segment(20, pin, Point::new(pin.x, pin.y - 100));
+        state.schematic.document_mut_for_test().wires = vec![
+            crate::state::Wire::segment(9, pin, Point::new(pin.x + 100, pin.y)),
+            hidden.clone(),
+        ];
+        state.schematic.init_undo_history();
+        let symbols = super::super::schematic_symbol_context(&state);
+
+        drag_through(
+            &mut state,
+            &ctx,
+            &symbols,
+            PointerTarget::Component(1),
+            Point::origin(),
+            &[Point::new(0, 10), Point::new(0, 20)],
+        );
+
+        let wires = &state.schematic.document().wires;
+        assert_eq!(wires.iter().find(|wire| wire.id == 20), Some(&hidden));
+        assert!(
+            wires
+                .iter()
+                .find(|wire| wire.id == 9)
+                .is_some_and(|wire| wire.is_orthogonal()
+                    && wire.points.first() == Some(&Point::new(pin.x, pin.y + 20)))
         );
     }
 
