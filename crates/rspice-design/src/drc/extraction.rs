@@ -196,6 +196,92 @@ pub fn run_check_of_cellview(
     )
 }
 
+/// Everything a check of one cellview reads besides the rule deck, the
+/// connectivity contract and the library catalog.
+///
+/// A check's findings describe the design for as long as these stand: the
+/// cellviews its walk reaches; every cellview an instance in them names,
+/// whether the walk descends into it or reads a placed symbol's pins from it;
+/// how the plan bound each of those instances, where the walk follows the
+/// plan; and the deck's global nodes, which every cellview's nets are named
+/// by. An edit to anything else does not change what the check found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckReads {
+    /// Every cellview read, folded, sorted and once each, whether or not the
+    /// design holds it: a master that appears is as much a change as one
+    /// that is edited.
+    pub cellviews: Vec<String>,
+    /// How the plan bound each instance at the occurrence the walk asked it
+    /// about, sorted.
+    pub bindings: Vec<String>,
+    /// The deck's global node names, folded and sorted.
+    pub globals: Vec<String>,
+}
+
+/// What a check of `reference` reads, by the walk the check itself takes.
+pub fn check_reads(
+    schematic: &impl AsRef<SchematicDocument>,
+    reference: &CellViewRef,
+    hierarchy: &HierarchySource<'_>,
+) -> CheckReads {
+    let graph = InstanceGraph::walk(schematic.as_ref(), Some(reference.clone()), hierarchy);
+    let mut cellviews = std::collections::BTreeSet::new();
+    let mut bindings = std::collections::BTreeSet::new();
+    for view in &graph.views {
+        if let Some(reached) = &view.reference {
+            cellviews.insert(reached.key().to_ascii_lowercase());
+        }
+        let instances = view
+            .document
+            .components
+            .iter()
+            .filter(|component| component.kind == ComponentType::CellInstance);
+        for instance in instances {
+            if let Some(binding) = instance.library_cell.as_ref() {
+                let named = CellViewRef::new(&binding.library, &binding.cell, &binding.view);
+                cellviews.insert(named.key().to_ascii_lowercase());
+                cellviews.insert(
+                    HierarchySource::placed_master(binding)
+                        .key()
+                        .to_ascii_lowercase(),
+                );
+            }
+            let Some(path) = view
+                .plan_path
+                .as_ref()
+                .and_then(|parent| parent.child(&instance.name).ok())
+            else {
+                continue;
+            };
+            let bound = match hierarchy.execution_binding(&path) {
+                None => "unbound".to_owned(),
+                Some(execution) => {
+                    let resolved = execution.resolved_reference().key().to_ascii_lowercase();
+                    let materialized = execution.materialized_binding();
+                    let bound = format!(
+                        "{resolved}|{:?}|stop={}|materialized={}|own-text={}|{:?}",
+                        execution.resolved_view_type(),
+                        execution.stop_boundary(),
+                        materialized.is_some(),
+                        materialized.is_some_and(writes_its_own_text),
+                        execution.binding_closure_digest(),
+                    );
+                    cellviews.insert(resolved);
+                    bound
+                }
+            };
+            bindings.insert(format!("{path}={bound}"));
+        }
+    }
+    let mut globals = global_nodes(hierarchy).into_iter().collect::<Vec<_>>();
+    globals.sort();
+    CheckReads {
+        cellviews: cellviews.into_iter().collect(),
+        bindings: bindings.into_iter().collect(),
+        globals,
+    }
+}
+
 fn check_subject(
     subject: &SchematicDocument,
     reference: Option<CellViewRef>,

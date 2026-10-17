@@ -993,7 +993,7 @@ fn reviewed_fallback_is_resolved_and_retained_in_the_hierarchy_receipt() {
 fn configuration_catalog_replacement_advances_project_revision_atomically() {
     let mut workspace = ProjectWorkspace::default();
     let original_revision = workspace.content.project.revision();
-    let mut candidate = workspace.content.configuration_sets.clone();
+    let mut candidate = (*workspace.content.configuration_sets).clone();
     candidate
         .create(crate::state::ConfigurationSetDefinition {
             name: "Release".to_owned(),
@@ -1016,7 +1016,7 @@ fn configuration_catalog_replacement_advances_project_revision_atomically() {
         .expect("publish configuration catalog");
     assert_eq!(workspace.content.project.revision(), committed_revision);
     assert_ne!(workspace.content.project.revision(), original_revision);
-    assert_eq!(workspace.content.configuration_sets, candidate);
+    assert_eq!(*workspace.content.configuration_sets, candidate);
     assert!(workspace.content.project_metadata_dirty);
 
     let committed = workspace.clone();

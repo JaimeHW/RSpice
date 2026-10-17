@@ -589,7 +589,7 @@ fn state_with_design_management_record()
     let mut state = AppState::default();
     state.project_lifecycle.authority.open_session();
     let owner = state.workspace.content.active_schematic_reference();
-    let before = state.workspace.content.design_management.clone();
+    let before = (*state.workspace.content.design_management).clone();
     let mut candidate = before.clone();
     candidate
         .bootstrap_for_cell_view(&owner.key(), "Main", [1])
@@ -599,7 +599,7 @@ fn state_with_design_management_record()
         .content
         .replace_design_management(candidate)
         .expect("publish reviewed catalog");
-    let after = state.workspace.content.design_management.clone();
+    let after = (*state.workspace.content.design_management).clone();
     state.record_design_management_transaction(DesignManagementHistoryEntry {
         description: "apply reviewed design-management changes".to_owned(),
         owner,

@@ -88,7 +88,7 @@ impl DocumentCompensation {
         else {
             return Ok(());
         };
-        let mut candidate = state.workspace.content.design_management.clone();
+        let mut candidate = (*state.workspace.content.design_management).clone();
         let catalog = candidate
             .sheet_catalog_mut(&key)
             .expect("the cloned catalog retains the key just found on the live one");

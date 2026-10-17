@@ -554,7 +554,7 @@ impl RSpiceApp {
         message: String,
     ) -> Result<(), String> {
         let mut projected = self.state.workspace.clone();
-        projected.content.configuration_sets = candidate.clone();
+        *projected.content.configuration_sets = candidate.clone();
         let projection = projected
             .configuration_execution_projection(
                 &self.state.library_manager,
@@ -599,7 +599,7 @@ impl RSpiceApp {
         .map_err(|error| {
             format!("Configuration cannot be published because source sealing failed: {error}")
         })?;
-        if candidate == self.state.workspace.content.configuration_sets {
+        if candidate == *self.state.workspace.content.configuration_sets {
             let dialog = &mut self.state.dialogs.configuration_sets;
             dialog.page = ConfigurationDialogPage::Manager;
             dialog.selected_id = Some(selected);
@@ -633,7 +633,7 @@ impl RSpiceApp {
             .draft
             .clone()
             .ok_or_else(|| "The selected configuration draft is unavailable.".to_owned())?;
-        let mut candidate = self.state.workspace.content.configuration_sets.clone();
+        let mut candidate = (*self.state.workspace.content.configuration_sets).clone();
         let committed = if candidate
             .find(id)
             .is_some_and(|configuration| configuration.definition() == &definition)
@@ -667,7 +667,7 @@ impl RSpiceApp {
             &self.state.workspace,
             &self.state.schematic,
         )?;
-        let mut candidate = self.state.workspace.content.configuration_sets.clone();
+        let mut candidate = (*self.state.workspace.content.configuration_sets).clone();
         let id = candidate
             .create(definition)
             .map_err(|error| error.to_string())?;
@@ -698,7 +698,7 @@ impl RSpiceApp {
             &self.state.workspace,
             &self.state.schematic,
         )?;
-        let mut candidate = self.state.workspace.content.configuration_sets.clone();
+        let mut candidate = (*self.state.workspace.content.configuration_sets).clone();
         let id = candidate
             .clone_configuration_scoped(
                 source_id,

@@ -8,6 +8,7 @@ use rspice_app_types::product::{
 use rspice_design::library::ViewType;
 use rspice_design::owned_netlist::*;
 use rspice_design::project_sources::*;
+use rspice_design::stamped::Stamped;
 use rspice_design_model::cell_view::{CellViewRef, DEFAULT_SCHEMATIC_VIEW};
 use rspice_project_contract::*;
 use rspice_results::specification::*;
@@ -47,18 +48,22 @@ pub struct ProjectWorkspace {
     /// Project-owned hierarchy/view-resolution authority. Empty catalogs
     /// preserve legacy deterministic resolution; once populated, the active
     /// configuration is the exact authority used by preflight and netlisting.
+    ///
+    /// This and the three authorities below are stamped: the design checks
+    /// and the design projection reuse what they derived from each until a
+    /// mutable access to it issues a new stamp.
     #[serde(default)]
-    pub configuration_sets: rspice_design::configuration_set::ConfigurationSetCatalog,
+    pub configuration_sets: Stamped<rspice_design::configuration_set::ConfigurationSetCatalog>,
     /// Project-owned schematic sheet, assembly variant, annotation, and
     /// hierarchy-audit authority. The catalog is deliberately separate from
     /// simulation configuration sets: it describes design identity, while a
     /// configuration set describes how that identity is executed.
     #[serde(default)]
-    pub design_management: rspice_design_model::design_management::DesignManagementCatalog,
+    pub design_management: Stamped<rspice_design_model::design_management::DesignManagementCatalog>,
     /// Project-owned bus-width and global-net policy. Older projects migrate
     /// to strict fail-closed defaults instead of inheriting UI state.
     #[serde(default)]
-    pub connectivity: rspice_design::connectivity_contract::ConnectivityContract,
+    pub connectivity: Stamped<rspice_design::connectivity_contract::ConnectivityContract>,
     /// Project-owned design-rule severities. Which findings block a sign-off
     /// is a decision the team shares, so it is versioned with the project
     /// rather than kept per install; a project that has decided nothing stores
@@ -67,7 +72,7 @@ pub struct ProjectWorkspace {
         default,
         skip_serializing_if = "rspice_design::drc::DesignRuleDeck::is_empty"
     )]
-    pub design_rules: rspice_design::drc::DesignRuleDeck,
+    pub design_rules: Stamped<rspice_design::drc::DesignRuleDeck>,
     pub active_view: CellViewRef,
     pub open_views: Vec<OpenCellView>,
     /// Masters on the active document's occurrence, outermost first — a
@@ -225,12 +230,10 @@ impl Default for ProjectWorkspace {
 
         Self {
             project: ProjectDescriptor::default(),
-            configuration_sets: rspice_design::configuration_set::ConfigurationSetCatalog::default(
-            ),
-            design_management:
-                rspice_design_model::design_management::DesignManagementCatalog::default(),
-            connectivity: rspice_design::connectivity_contract::ConnectivityContract::default(),
-            design_rules: rspice_design::drc::DesignRuleDeck::default(),
+            configuration_sets: Stamped::default(),
+            design_management: Stamped::default(),
+            connectivity: Stamped::default(),
+            design_rules: Stamped::default(),
             active_view: active_view.clone(),
             open_views: vec![OpenCellView::new(active_view.clone(), ViewType::Schematic)],
             hierarchy_stack: vec![active_view],

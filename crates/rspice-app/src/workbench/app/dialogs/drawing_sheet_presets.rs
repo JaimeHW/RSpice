@@ -523,7 +523,7 @@ impl RSpiceApp {
         match key.scope {
             DrawingSheetPresetScope::Project => {
                 validate_project_authority(&self.state, &self.state.dialogs.drawing_sheet_presets)?;
-                let before = self.state.workspace.content.design_management.clone();
+                let before = (*self.state.workspace.content.design_management).clone();
                 let mut candidate = before.clone();
                 candidate
                     .remove_drawing_sheet_preset(candidate.revision(), &key.id)
@@ -746,7 +746,7 @@ impl RSpiceApp {
             .drawing_sheet_personal_preferences();
         let mut visible =
             all_visible_presets(&self.state.workspace.content.design_management, &personal);
-        let before = self.state.workspace.content.design_management.clone();
+        let before = (*self.state.workspace.content.design_management).clone();
         let mut candidate = before.clone();
         let mut created = 0_usize;
         let mut mapped = 0_usize;
@@ -1025,7 +1025,7 @@ impl RSpiceApp {
     ) -> Result<(), String> {
         validate_project_authority(&self.state, &self.state.dialogs.drawing_sheet_presets)?;
         preset.format = preset.format.as_reusable_drawing_sheet_preset();
-        let before = self.state.workspace.content.design_management.clone();
+        let before = (*self.state.workspace.content.design_management).clone();
         let mut candidate = before.clone();
         candidate
             .publish_drawing_sheet_preset(candidate.revision(), preset)
@@ -1042,7 +1042,7 @@ impl RSpiceApp {
 
     fn rename_project_preset(&mut self, preset_id: &str, name: String) -> Result<(), String> {
         validate_project_authority(&self.state, &self.state.dialogs.drawing_sheet_presets)?;
-        let before = self.state.workspace.content.design_management.clone();
+        let before = (*self.state.workspace.content.design_management).clone();
         let mut candidate = before.clone();
         candidate
             .rename_drawing_sheet_preset(candidate.revision(), preset_id, name)
@@ -1385,7 +1385,7 @@ mod tests {
                         )
                         .unwrap(),
                     };
-                    let mut seeded = app.state.workspace.content.design_management.clone();
+                    let mut seeded = (*app.state.workspace.content.design_management).clone();
                     seeded
                         .publish_drawing_sheet_preset(seeded.revision(), preset)
                         .unwrap();
@@ -1559,7 +1559,7 @@ mod tests {
             )
             .unwrap(),
         };
-        let mut seeded = app.state.workspace.content.design_management.clone();
+        let mut seeded = (*app.state.workspace.content.design_management).clone();
         seeded
             .publish_drawing_sheet_preset(seeded.revision(), existing.clone())
             .unwrap();

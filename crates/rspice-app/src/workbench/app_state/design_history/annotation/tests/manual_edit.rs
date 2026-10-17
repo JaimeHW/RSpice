@@ -9,8 +9,9 @@ fn executable_fixture() -> Fixture {
     let mut definition = configuration.definition().clone();
     // The voltage source is a primitive; the executable DUT is the root.
     definition.dut_path = "/".to_owned();
+    let revision = configuration.revision();
     catalog
-        .update(fixture.configuration, configuration.revision(), definition)
+        .update(fixture.configuration, revision, definition)
         .unwrap();
     publish(&mut fixture);
     fixture

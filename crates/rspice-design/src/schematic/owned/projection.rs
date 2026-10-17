@@ -24,7 +24,7 @@ impl Schematic {
         cell_view_key: &str,
     ) -> Result<(SchematicDocument, DocumentRepair), DesignManagementError> {
         design_management.validate()?;
-        let source = &self.document;
+        let source: &SchematicDocument = &self.document;
         let mut projected = source.clone();
         let mut identity = self.identity.clone();
 

@@ -295,7 +295,7 @@ impl ComponentRenameRecord {
         self.annotation
             .as_ref()
             .map(|change| {
-                let current = &state.workspace.content.design_management;
+                let current: &DesignManagementCatalog = &state.workspace.content.design_management;
                 let mut candidate = current.clone();
                 *candidate.annotation_mut() = if forward {
                     &change.after

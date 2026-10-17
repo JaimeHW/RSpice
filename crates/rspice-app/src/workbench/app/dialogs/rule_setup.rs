@@ -46,7 +46,7 @@ pub(crate) fn open_rule_setup(state: &mut AppState) {
     }
     state.dialogs.rule_setup = RuleSetupDialogState {
         open: true,
-        draft: state.workspace.content.design_rules.clone(),
+        draft: (*state.workspace.content.design_rules).clone(),
         refusal: None,
     };
 }
@@ -70,7 +70,7 @@ pub(in crate::workbench) fn render_rule_setup_dialog(ctx: &Context, state: &mut 
     let read_only = state.workbench.safe_mode.project_read_only();
     let unread = unread_issue(&state.dialogs.rule_setup.draft);
     let editable = !read_only && unread.is_none();
-    let changed = state.dialogs.rule_setup.draft != state.workspace.content.design_rules;
+    let changed = state.dialogs.rule_setup.draft != *state.workspace.content.design_rules;
     let mut dialog = Dialog::new(TITLE, PRIMARY)
         .description(DESCRIPTION)
         .size(DialogSize::Manager)
@@ -111,7 +111,7 @@ pub(in crate::workbench) fn render_rule_setup_dialog(ctx: &Context, state: &mut 
 /// because what blocks a run has changed.
 fn apply_rule_setup(state: &mut AppState) {
     let draft = state.dialogs.rule_setup.draft.clone();
-    state.workspace.content.design_rules = draft;
+    *state.workspace.content.design_rules = draft;
     state.workspace.content.project_metadata_dirty = true;
     state.workbench.preflight.invalidate();
     state.publish_rule_deck_issues();
@@ -256,7 +256,7 @@ mod tests {
         assert!(app.state.dialogs.rule_setup.open);
         assert_eq!(
             app.state.dialogs.rule_setup.draft,
-            app.state.workspace.content.design_rules
+            *app.state.workspace.content.design_rules
         );
 
         app.state

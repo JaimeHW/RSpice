@@ -156,7 +156,7 @@ impl ReferenceChanges {
 impl PreparedReferences {
     pub fn publish(self, workspace: &mut ProjectWorkspace) {
         workspace.replace_document_occurrences(self.occurrences);
-        workspace.configuration_sets = self.configurations;
+        *workspace.configuration_sets = self.configurations;
         for (plan, replacement) in self.outputs {
             let target = workspace
                 .plan_data_mut(plan)
