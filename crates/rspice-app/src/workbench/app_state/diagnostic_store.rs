@@ -1486,6 +1486,7 @@ mod tests {
             .filter_map(|batch| match batch.inputs {
                 DiagnosticInputs::Run { run_sequence } => Some(run_sequence),
                 DiagnosticInputs::DesignCheck { .. }
+                | DiagnosticInputs::LiveCheck { .. }
                 | DiagnosticInputs::SymbolPins { .. }
                 | DiagnosticInputs::Dispatch
                 | DiagnosticInputs::CampaignMember { .. }

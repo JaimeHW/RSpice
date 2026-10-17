@@ -389,11 +389,17 @@ impl AppState {
         let Some(receipt) = self.design_checks.receipt(subject) else {
             return Vec::new();
         };
-        let keys = finding_keys(&receipt.subject, &receipt.result);
-        mint_canonical(&keys, 0, "")
-            .into_iter()
-            .map(|canonical| canonical.diagnostic_id)
-            .collect()
+        finding_identities(&receipt.subject, &receipt.result)
+    }
+
+    /// What the findings the canvas marks are called, in the order the
+    /// canvas holds them. They may be two passes' findings composed, so they
+    /// are named from that set rather than from either pass's receipt.
+    pub(crate) fn canvas_finding_identities(&self) -> Vec<uuid::Uuid> {
+        let Some(result) = &self.dialogs.drc_results else {
+            return Vec::new();
+        };
+        finding_identities(&self.workspace.content.active_schematic_reference(), result)
     }
 
     /// The worst rule finding published for `subject`, first among equals in
@@ -519,22 +525,19 @@ impl AppState {
     }
 
     pub(crate) fn clear_all_design_checks(&mut self) {
-        let published: Vec<DiagnosticInputs> = self
-            .design_checks
-            .receipts
-            .values()
-            .map(|receipt| DiagnosticInputs::DesignCheck {
-                subject: receipt.subject.clone(),
-            })
-            .chain(
-                self.design_checks
-                    .live
-                    .values()
-                    .map(|receipt| DiagnosticInputs::LiveCheck {
+        let published: Vec<DiagnosticInputs> =
+            self.design_checks
+                .receipts
+                .values()
+                .map(|receipt| DiagnosticInputs::DesignCheck {
+                    subject: receipt.subject.clone(),
+                })
+                .chain(self.design_checks.live.values().map(|receipt| {
+                    DiagnosticInputs::LiveCheck {
                         subject: receipt.subject.clone(),
-                    }),
-            )
-            .collect();
+                    }
+                }))
+                .collect();
         self.design_checks.clear();
         for inputs in &published {
             self.withdraw_diagnostics(inputs);
@@ -553,16 +556,54 @@ impl AppState {
             self.dialogs.drc_results = None;
             return;
         }
-        let current = match self.active_design_check_status() {
-            DesignCheckStatus::Current(receipt) => Some(receipt.result.clone()),
-            DesignCheckStatus::NotRun
-            | DesignCheckStatus::Stale(_)
-            | DesignCheckStatus::Unavailable { .. } => None,
-        };
+        let current =
+            self.current_drawing_findings(&self.workspace.content.active_schematic_reference());
         self.dialogs.drc_checked_version = current
             .as_ref()
             .map_or(0, |_| self.schematic.topology_version());
         self.dialogs.drc_results = current;
+    }
+
+    /// The findings that stand in `subject`'s drawing: those of every pass of
+    /// it that still describes it, the newer pass stating whatever both
+    /// cover — the set the page lists as current for the drawing.
+    ///
+    /// A finding fixed while drawing therefore leaves the canvas with its
+    /// row, and one a live pass restated is marked once, where the live pass
+    /// found it. A pass the drawing has moved away from marks nothing.
+    fn current_drawing_findings(&self, subject: &CellViewRef) -> Option<DrcResult> {
+        let explicit = match self.design_check_status(subject) {
+            DesignCheckStatus::Current(receipt) => Some(receipt),
+            DesignCheckStatus::NotRun
+            | DesignCheckStatus::Stale(_)
+            | DesignCheckStatus::Unavailable { .. } => None,
+        };
+        let (explicit, live) = match (explicit, self.current_live_receipt(subject)) {
+            (None, None) => return None,
+            (Some(only), None) | (None, Some(only)) => return Some(only.result.clone()),
+            // A check of the cellview states every rule a live pass does.
+            (Some(explicit), Some(live)) if explicit.sequence > live.sequence => {
+                return Some(explicit.result.clone());
+            }
+            (Some(explicit), Some(live)) => (explicit, live),
+        };
+        let subject = owner_key(subject);
+        let mut composed = DrcResult::new();
+        for violation in explicit.result.violations() {
+            let taken_over = rspice_design::drc::waiver_site(&violation.location)
+                .0
+                .is_none_or(|drawn_in| owner_key(drawn_in) == subject)
+                && RuleScope::Live.covers(violation.violation_type.rule_code());
+            if !taken_over {
+                composed.add_violation(violation.clone());
+            }
+        }
+        for violation in live.result.violations() {
+            composed.add_violation(violation.clone());
+        }
+        composed.completed = true;
+        composed.duration_ms = live.result.duration_ms;
+        Some(composed)
     }
 }
 
@@ -663,6 +704,15 @@ fn finding_keys(subject: &CellViewRef, result: &DrcResult) -> Vec<FindingKey> {
                 location_key(&violation.location),
             )
         })
+        .collect()
+}
+
+/// What each finding in `result`, a pass of `subject`, is called, in its
+/// order: the identity its record was minted with.
+fn finding_identities(subject: &CellViewRef, result: &DrcResult) -> Vec<uuid::Uuid> {
+    mint_canonical(&finding_keys(subject, result), 0, "")
+        .into_iter()
+        .map(|canonical| canonical.diagnostic_id)
         .collect()
 }
 

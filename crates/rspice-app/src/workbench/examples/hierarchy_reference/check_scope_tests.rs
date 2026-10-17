@@ -178,37 +178,6 @@ fn the_newest_check_of_a_cellview_states_its_findings_once() {
     );
 }
 
-#[test]
-fn zz_measure_live_check() {
-    let reference = hierarchy_reference::build();
-    let mut state = reference.state;
-    state.project_lifecycle.authority.open_session();
-    for subject in [
-        reference.top.clone(),
-        reference.amp_schematic.clone(),
-        reference.user_filter.clone(),
-    ] {
-        let _ = state.run_live_check(subject.clone());
-        let mut best = std::time::Duration::MAX;
-        for _ in 0..20 {
-            let start = std::time::Instant::now();
-            let _ = state.run_live_check(subject.clone()).expect("live");
-            best = best.min(start.elapsed());
-        }
-        let start = std::time::Instant::now();
-        let _ = state.check_design().expect("design");
-        let design = start.elapsed();
-        let components = state.workspace.content.schematic_buffers[&subject.key()]
-            .document()
-            .components
-            .len();
-        eprintln!(
-            "LIVE-MEASURE {} components={components} live_best={best:?} check_design={design:?}",
-            subject.display_path()
-        );
-    }
-}
-
 /// The objects of the rows naming `cell_view`.
 fn rows_in(state: &AppState, cell_view: &CellViewRef) -> Vec<String> {
     rows(state)

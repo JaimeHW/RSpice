@@ -13,8 +13,7 @@ use sha2::{Digest, Sha256};
 
 use super::{
     AppState, CellViewCheckReceipt, CheckScope, DESIGN_CHECK_DIGEST_DOMAIN, DiagnosticInputs,
-    RuleCoverage, StoredWaivers, check_coverage, design_rule_records, owner_key,
-    projected_buffer,
+    RuleCoverage, StoredWaivers, check_coverage, design_rule_records, owner_key, projected_buffer,
 };
 use crate::diagnostics::ConsoleMessage;
 use crate::product::ContentDigest;
@@ -64,7 +63,9 @@ impl AppState {
             (owner_key(&subject), self.schematic.content_stamp(), subject)
         });
         let state = &mut self.design_checks.drawing;
-        let seen = drawing.as_ref().map(|(key, stamp, _)| (key.clone(), *stamp));
+        let seen = drawing
+            .as_ref()
+            .map(|(key, stamp, _)| (key.clone(), *stamp));
         let previous = std::mem::replace(&mut state.seen, seen);
         if let Some((key, stamp, subject)) = &drawing
             && previous
@@ -140,6 +141,8 @@ impl AppState {
         let records = design_rule_records(self, &subject, &result, StoredWaivers::Left);
         let coverage: RuleCoverage = check_coverage(self, &subject, CheckScope::Live)?;
         self.publish_superseding(inputs, records, &coverage)?;
+        let is_active_subject =
+            owner_key(&subject) == owner_key(&self.workspace.content.active_schematic_reference());
         self.design_checks.insert_live(CellViewCheckReceipt {
             project_id: self.workspace.content.project.id(),
             subject,
@@ -148,23 +151,33 @@ impl AppState {
             scope: CheckScope::Live,
             sequence: 0,
         });
+        if is_active_subject {
+            self.refresh_active_design_check_projection();
+        }
         Ok(())
+    }
+
+    /// The live pass of `subject`, while it still describes the drawing.
+    pub(super) fn current_live_receipt(
+        &self,
+        subject: &CellViewRef,
+    ) -> Option<&CellViewCheckReceipt> {
+        let receipt = self.design_checks.live.get(&owner_key(subject))?;
+        let current = receipt.project_id == self.workspace.content.project.id()
+            && self
+                .diagnostic_live_digest(&DiagnosticInputs::LiveCheck {
+                    subject: subject.clone(),
+                })
+                .is_ok_and(|digest| digest == receipt.input_digest);
+        current.then_some(receipt)
     }
 
     /// State a live pass again against the waivers as they now stand, where
     /// it still describes the drawing.
     pub(super) fn restate_live_check(&mut self, subject: CellViewRef) {
-        let Some(receipt) = self.design_checks.live.get(&owner_key(&subject)) else {
+        let Some(receipt) = self.current_live_receipt(&subject) else {
             return;
         };
-        let current = self
-            .diagnostic_live_digest(&DiagnosticInputs::LiveCheck {
-                subject: subject.clone(),
-            })
-            .is_ok_and(|digest| digest == receipt.input_digest);
-        if !current {
-            return;
-        }
         let result = receipt.result.clone();
         let config = self.live_check_config(&subject);
         if let Err(error) = self.publish_live_check_result(subject, &config, result) {
@@ -188,6 +201,7 @@ impl AppState {
         for subject in subjects {
             self.withdraw_diagnostics(&DiagnosticInputs::LiveCheck { subject });
         }
+        self.refresh_active_design_check_projection();
     }
 }
 

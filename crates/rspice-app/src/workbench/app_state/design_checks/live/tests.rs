@@ -159,6 +159,132 @@ fn a_live_finding_and_the_cellview_check_of_it_are_one_row() {
     assert!(again.iter().all(|(_, _, _, current, _)| *current));
 }
 
+/// What the canvas marks, as (rule, object, location), or `None` while it
+/// marks nothing because the drawing has moved since its findings were found.
+type Marker = (String, String, String);
+
+fn marked(state: &AppState) -> Option<Vec<Marker>> {
+    let result = state.dialogs.drc_results.as_ref()?;
+    (state.dialogs.drc_checked_version == state.schematic.topology_version()).then(|| {
+        result
+            .violations()
+            .iter()
+            .map(|violation| {
+                (
+                    violation.violation_type.rule_code().to_owned(),
+                    violation.location.display(),
+                    format!("{:?}", violation.location),
+                )
+            })
+            .collect()
+    })
+}
+
+/// The markers about the component named `name`.
+fn marked_about(state: &AppState, name: &str) -> Option<Vec<Marker>> {
+    marked(state).map(|markers| {
+        markers
+            .into_iter()
+            .filter(|(_, object, _)| object.contains(&format!(" {name}.")))
+            .collect()
+    })
+}
+
+fn select_component_named(state: &mut AppState, name: &str) {
+    let id = state
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.name == name)
+        .map(|component| component.id)
+        .expect("the component is placed");
+    state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(id);
+}
+
+/// The canvas marks what the page lists: a finding fixed while drawing loses
+/// its marker with its row, though the check of the cellview that found it
+/// had marked it.
+#[test]
+fn a_finding_fixed_while_drawing_loses_its_marker_at_once() {
+    let mut state = open_state();
+    let start = Instant::now();
+    let name = place_open_resistor(&mut state, start, 400);
+    let sorted = |mut markers: Vec<Marker>| {
+        markers.sort();
+        markers
+    };
+    let live = sorted(marked_about(&state, &name).expect("the live pass is marked"));
+    assert!(!live.is_empty());
+    state
+        .check_active_cellview()
+        .expect("the open cellview checks");
+    assert_eq!(marked_about(&state, &name).map(sorted), Some(live));
+
+    select_component_named(&mut state, &name);
+    assert!(state.schematic.delete_selection());
+    assert_eq!(marked(&state), None, "a drawing that moved marks nothing");
+    settle(&mut state, start);
+    assert_eq!(marked_about(&state, &name), Some(Vec::new()));
+    assert!(rows_about(&state, &name).is_empty());
+}
+
+/// A finding both passes state is marked once, by the newer; and once the
+/// drawing moves, the older pass's marker is not left where the finding was.
+#[test]
+fn a_finding_a_live_pass_restated_is_marked_once_where_it_now_is() {
+    let mut state = open_state();
+    let start = Instant::now();
+    let name = place_open_resistor(&mut state, start, 400);
+    state
+        .check_active_cellview()
+        .expect("the open cellview checks");
+    let subject = state.workspace.content.active_schematic_reference();
+    // Both passes describe the drawing; the live one is the newer.
+    state
+        .run_live_check(subject.clone())
+        .expect("the drawing checks live");
+    let both = marked_about(&state, &name).expect("both passes are current");
+    let distinct = both
+        .iter()
+        .map(|(code, object, _)| (code.clone(), object.clone()))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(distinct.len(), both.len(), "marked twice: {both:?}");
+    assert!(!both.is_empty());
+
+    // Turned, its pins are open where they now are.
+    select_component_named(&mut state, &name);
+    state.schematic.rotate_selection();
+    settle(&mut state, start);
+    let turned = marked_about(&state, &name).expect("the live pass is current");
+    let live_now = state
+        .current_live_receipt(&subject)
+        .expect("the live pass describes the drawing")
+        .result
+        .violations()
+        .iter()
+        .filter(|violation| violation.location.display().contains(&format!(" {name}.")))
+        .map(|violation| format!("{:?}", violation.location))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        turned
+            .iter()
+            .map(|(_, _, location)| location.clone())
+            .collect::<Vec<_>>(),
+        live_now,
+        "every marker is the live pass's"
+    );
+    assert!(
+        both.iter().any(|old| !turned.contains(old)),
+        "turning it moved a finding: {both:?} {turned:?}"
+    );
+}
+
 #[test]
 fn a_waiver_applies_to_a_live_finding_as_to_any_other() {
     let mut state = open_state();
