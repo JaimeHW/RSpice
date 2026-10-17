@@ -858,14 +858,22 @@ fn handle_select_click(
     let additive = ui.input(|i| i.modifiers.ctrl || i.modifiers.shift || i.modifiers.command);
     let alt_held = ui.input(|i| i.modifiers.alt);
 
-    let target = pointer_target(
-        state,
-        hit,
-        hit_radius,
-        symbol_context,
+    // The click that opens or closes the overlap chooser selects nothing; a
+    // plain click again on the same spot takes the next object under it.
+    if super::pick_chooser::chooser_takes_click(ui.ctx()) {
+        return;
+    }
+    let target = super::pick_chooser::click_target(
         ui.ctx(),
+        state,
+        rspice_schematic_editor::view::pointer_target::PointerQuery {
+            hit,
+            radius: hit_radius,
+            position: pointer_pos,
+        },
+        symbol_context,
         viewport,
-        pointer_pos,
+        additive,
     );
     let request = rspice_schematic_editor::requests::EditorRequest {
         source: super::requests::editor_request_source(state),

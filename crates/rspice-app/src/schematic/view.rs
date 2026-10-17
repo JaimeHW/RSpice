@@ -19,6 +19,7 @@ mod interaction;
 mod keyboard_navigation;
 mod mobile_controls;
 mod move_interaction;
+mod pick_chooser;
 mod preview;
 mod requests;
 pub(crate) use rspice_schematic_editor::view::symbol_context::SchematicSymbolContext;
@@ -357,6 +358,15 @@ pub fn render_schematic_view(
             }
         }
     } else {
+        // A long click over overlapping objects opens the chooser. The
+        // chooser takes its keys before the tools see them, and the click
+        // that opens or closes it selects nothing on the canvas.
+        if state.schematic.session.editor.tool == crate::state::Tool::Select
+            && let Some(position) = pick_chooser::observe_long_click(&response)
+        {
+            pick_chooser::open_chooser_at(ui.ctx(), state, position, &symbol_context, &viewport);
+        }
+        pick_chooser::show_chooser(ui.ctx(), state);
         handle_tool_interactions(ui, &response, state, &viewport, &symbol_context);
     }
     refresh_symbol_context_after_interactions(

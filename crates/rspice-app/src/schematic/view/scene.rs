@@ -30,8 +30,10 @@ use rspice_schematic_editor::view::{
 };
 
 /// What a click at the hovered point would take, for the hover
-/// pre-highlight: in the Select tool the pointer target a click resolves, in
-/// the Probe tool the wire or instance a probe click lands on. Nothing while
+/// pre-highlight: in the Select tool the pointer target a click resolves (or
+/// the next one a repeat click cycles to), in the Probe tool the wire or
+/// instance a probe click lands on, and the chooser's focused row while the
+/// overlap chooser is open. Nothing while
 /// a button is down (a drag or a band), a popup is open, or the canvas is
 /// driven by touch, which has no hover.
 fn canvas_hover(
@@ -41,6 +43,12 @@ fn canvas_hover(
     state: &AppState,
     symbol_context: &SchematicSymbolContext,
 ) -> Option<PointerTarget> {
+    // The chooser's focused row, while it is open; then the object a repeat
+    // click would cycle to.
+    if let Some(chooser) = super::pick_chooser::open_chooser(ctx) {
+        return chooser.focused_target();
+    }
+    let cycled = super::pick_chooser::cycle_hover(ctx);
     let editor = &state.schematic.session.editor;
     if !matches!(editor.tool, Tool::Select | Tool::Probe)
         || editor.selection_rect.is_active()
@@ -59,6 +67,7 @@ fn canvas_hover(
         can_edit: !state.schematic_edit_read_only(),
     };
     match view.action(editor.tool, viewport, symbol_context, position)? {
+        ToolPointerAction::Select(_) if cycled.is_some() => cycled,
         ToolPointerAction::Select(query) => pointer_target::pointer_target(
             &view.design,
             query,

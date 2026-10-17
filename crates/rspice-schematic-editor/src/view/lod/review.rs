@@ -390,6 +390,68 @@ fn render_hover_review() {
     }
 }
 
+/// The overlap chooser over the review circuit, its second row focused,
+/// dark and light; then the same chooser with fourteen candidates, which
+/// lists nine and counts the rest.
+#[test]
+#[ignore = "writes review PNGs to RSPICE_RASTER_DIR"]
+fn render_pick_chooser_review() {
+    use crate::view::pick_chooser::{ChooserRow, PickChooser};
+    use crate::view::pointer_target::PointerTarget;
+    let rows = vec![
+        ChooserRow {
+            target: PointerTarget::NetLabel(2),
+            identity: "VOUT".to_owned(),
+        },
+        ChooserRow {
+            target: PointerTarget::Component(1),
+            identity: "R1".to_owned(),
+        },
+        ChooserRow {
+            target: PointerTarget::Junction(Point::new(0, 0)),
+            identity: "(0, 0)".to_owned(),
+        },
+        ChooserRow {
+            target: PointerTarget::Wire(412),
+            identity: "wire 412 · VOUT".to_owned(),
+        },
+    ];
+    let many: Vec<ChooserRow> = (1..=14)
+        .map(|id| ChooserRow {
+            target: PointerTarget::Component(id),
+            identity: format!("U{id}"),
+        })
+        .collect();
+    let cell = Vec2::new(420.0, 340.0);
+    for (mode, theme) in themes() {
+        for (name, rows) in [("chooser", rows.clone()), ("chooser-many", many.clone())] {
+            let canvas = rspice_ui_kit::raster::render_themed(theme, cell, |ui, _| {
+                let palette = rspice_ui_kit::tokens::active_palette();
+                let bounds = Rect::from_min_size(Pos2::ZERO, cell);
+                let viewport = Viewport {
+                    offset: Pos2::new(cell.x * 0.35, cell.y * 0.25),
+                    zoom: 1.0,
+                    bounds,
+                };
+                ui.painter().rect_filled(bounds, 0.0, palette.canvas_bg);
+                paint_circuit(ui.painter(), &viewport);
+                // A headless pass has no clock for the popup's fade-in.
+                ui.ctx()
+                    .all_styles_mut(|style| style.animation_time = 0.0);
+                let anchor = viewport.schematic_to_screen(Point::new(0, 0));
+                let mut chooser = PickChooser::open(anchor, rows.clone(), false).expect("rows");
+                chooser.focused = 1;
+                let _ = chooser.show(ui.ctx());
+            });
+            write_png(
+                &format!("{name}-{mode}-{}", review_stage()),
+                &canvas,
+                cell.y as usize,
+            );
+        }
+    }
+}
+
 /// The canvas in its dark and its light palette.
 pub(crate) fn themes() -> [(&'static str, rspice_ui_kit::Theme); 2] {
     [
