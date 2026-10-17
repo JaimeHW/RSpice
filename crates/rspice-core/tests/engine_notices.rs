@@ -78,3 +78,28 @@ fn a_clamp_is_recorded_against_the_card_and_the_element_that_bound_it() {
     eu.sort();
     assert_eq!(eu, ["M1", "M2"], "{replaced:#?}");
 }
+
+/// An element inside a subcircuit is reported by the name the engine solves
+/// it under, the written instance names above it joined by dots: the name a
+/// host maps back to the occurrence that draws it.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_clamp_inside_a_subcircuit_names_the_element_by_its_hierarchical_name() {
+    let deck = "BSIM4 clamp in a subcircuit\nVD d 0 1\nVG g 0 1\n\
+                .subckt amp d g\nM1 d g 0 0 nch L=1u W=10u\n.ends amp\n\
+                XAMP d g amp\n\
+                .model nch nmos level=54 version=4.8 eu=-1\n.op\n.end\n";
+    let collector = NoticeCollector::new();
+    let _installed = collector.install();
+    let netlist = Netlist::parse(deck).expect("the deck parses");
+    Engine::default()
+        .run_dc_op_with_abort(&netlist, &NoAbort)
+        .expect("a clamped card still solves");
+    let elements: Vec<String> = replacements(&collector)
+        .into_iter()
+        .filter(|(replacement, _)| replacement.parameter == "eu")
+        .filter_map(|(replacement, _)| replacement.element)
+        .map(|element| element.to_ascii_uppercase())
+        .collect();
+    assert_eq!(elements, ["XAMP.M1"]);
+}
