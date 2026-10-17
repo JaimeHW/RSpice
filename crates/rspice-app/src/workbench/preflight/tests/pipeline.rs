@@ -658,13 +658,12 @@ fn an_automation_evidence_check_on_an_unedited_design_prepares_nothing() {
 
 /// Edit the plan's transient as `edit` does.
 fn edit_the_transient(
-    app: &mut RSpiceApp,
+    state: &mut AppState,
     edit: impl FnOnce(&mut rspice_simulation_contract::drafts::TranSetup),
 ) {
     use crate::simulation::plan::AnalysisDraft;
 
-    let plan = app
-        .state
+    let plan = state
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("a default state owns a stable plan");
@@ -682,44 +681,46 @@ fn edit_the_transient(
     .expect("the transient takes the edit");
 }
 
-/// Run the RC lowpass's transient to 20 µs, capturing a checkpoint every
-/// 10 µs, as Automation runs it. Returns the inputs Automation kept and the
-/// digest of the last checkpoint the run captured.
-fn a_run_capturing_checkpoints(
-    app: &mut RSpiceApp,
-) -> (
-    crate::simulation::controller::PreparedRunSetInputs,
-    crate::product::ContentDigest,
-) {
-    edit_the_transient(app, |draft| {
-        draft.stop = "20u".to_owned();
-        draft.step = "100n".to_owned();
-        draft.max_step = "100n".to_owned();
-        draft.checkpoint = Some(
-            rspice_simulation_contract::tran_checkpoint::TranCheckpointDraft {
-                interval: Some("10u".to_owned()),
-                resume: Vec::new(),
-            },
-        );
-    });
-    let (_, inputs) = app.queued_as_automation_queues();
-    assert!(app.dispatch_frame().is_empty());
-    app.finish_the_run();
-    let run = app
-        .state
-        .simulation
-        .retained
-        .runs
-        .first()
-        .expect("the run is retained");
-    assert!(run.success, "{:?}", run.analyses);
-    let image = run
-        .analyses
-        .iter()
-        .find_map(|analysis| analysis.transient_checkpoint.as_ref())
-        .expect("the run captured a checkpoint")
-        .digest();
-    (inputs, image)
+impl RSpiceApp {
+    /// Run the RC lowpass's transient to 20 µs, capturing a checkpoint every
+    /// 10 µs, as Automation runs it. Returns the inputs Automation kept and
+    /// the digest of the last checkpoint the run captured.
+    fn ran_capturing_checkpoints(
+        &mut self,
+    ) -> (
+        crate::simulation::controller::PreparedRunSetInputs,
+        crate::product::ContentDigest,
+    ) {
+        edit_the_transient(&mut self.state, |draft| {
+            draft.stop = "20u".to_owned();
+            draft.step = "100n".to_owned();
+            draft.max_step = "100n".to_owned();
+            draft.checkpoint = Some(
+                rspice_simulation_contract::tran_checkpoint::TranCheckpointDraft {
+                    interval: Some("10u".to_owned()),
+                    resume: Vec::new(),
+                },
+            );
+        });
+        let (_, inputs) = self.queued_as_automation_queues();
+        assert!(self.dispatch_frame().is_empty());
+        self.finish_the_run();
+        let run = self
+            .state
+            .simulation
+            .retained
+            .runs
+            .first()
+            .expect("the run is retained");
+        assert!(run.success, "{:?}", run.analyses);
+        let image = run
+            .analyses
+            .iter()
+            .find_map(|analysis| analysis.transient_checkpoint.as_ref())
+            .expect("the run captured a checkpoint")
+            .digest();
+        (inputs, image)
+    }
 }
 
 /// A transient that captures checkpoints and resumes from none reads no
@@ -729,7 +730,7 @@ fn a_run_capturing_checkpoints(
 #[test]
 fn a_transient_capturing_checkpoints_does_not_expire_its_own_evidence() {
     let mut app = rc_lowpass();
-    let (inputs, _) = a_run_capturing_checkpoints(&mut app);
+    let (inputs, _) = app.ran_capturing_checkpoints();
 
     let (at_publication, prepared) = app.evidence_check(&inputs);
     assert_eq!(at_publication, Ok(()));
@@ -742,8 +743,8 @@ fn a_transient_capturing_checkpoints_does_not_expire_its_own_evidence() {
 #[test]
 fn removing_the_run_a_checkpoint_resumes_from_expires_the_evidence() {
     let mut app = rc_lowpass();
-    let (_, image) = a_run_capturing_checkpoints(&mut app);
-    edit_the_transient(&mut app, |draft| {
+    let (_, image) = app.ran_capturing_checkpoints();
+    edit_the_transient(&mut app.state, |draft| {
         draft.stop = "40u".to_owned();
         if let Some(checkpoint) = draft.checkpoint.as_mut() {
             checkpoint.resume = vec![image];
@@ -795,22 +796,24 @@ fn an_edit_after_automation_prepared_its_run_is_named_by_its_evidence_check() {
 /// dispatch's own question, not a second judgement of the design.
 #[test]
 fn the_evidence_check_and_the_dispatch_agree_for_the_same_edit() {
-    let edits: [(&str, fn(&mut RSpiceApp)); 3] = [
-        ("the design", |app| {
-            app.state.schematic.document_mut_for_test().components[0]
+    /// An edit, beside the input a refusal names it by.
+    type Edit = (&'static str, fn(&mut AppState));
+    let edits: [Edit; 3] = [
+        ("the design", |state| {
+            state.schematic.document_mut_for_test().components[0]
                 .value
                 .push('0');
         }),
-        ("the model library", |app| {
-            app.state
+        ("the model library", |state| {
+            state
                 .model_library_manager
                 .add_library(rspice_model_library::ModelLibrary {
                     name: "scratch".to_owned(),
                     ..Default::default()
                 });
         }),
-        ("the simulation setup", |app| {
-            app.state
+        ("the simulation setup", |state| {
+            state
                 .sim_setup
                 .set_reference_pvt(crate::product::ProcessCorner::TT, 125.0)
                 .expect("a physical temperature");
@@ -819,7 +822,7 @@ fn the_evidence_check_and_the_dispatch_agree_for_the_same_edit() {
     for (moved, edit) in edits {
         let mut app = inverter_over_a_run_set();
         let (_, inputs) = app.queued_as_automation_queues();
-        edit(&mut app);
+        edit(&mut app.state);
 
         let (verdict, prepared) = app.evidence_check(&inputs);
         assert!(prepared.is_empty(), "{moved}: {prepared:?}");
