@@ -1732,7 +1732,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         if ui
                             .add_enabled(
                                 !checked_ordered.is_empty(),
-                                egui::Button::new("Copy canonical names"),
+                                egui::Button::new("Copy names"),
                             )
                             .clicked()
                         {
@@ -1800,7 +1800,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         if !checked_ordered.is_empty() && !compare_selection_compatible {
                             compare.clone().on_disabled_hover_text(
                                 exact_validation_error.as_deref().unwrap_or(
-                                    "Select the same canonical quantity in at least two immutable datasets.",
+                                    "Select the same signal in at least two runs.",
                                 ),
                             );
                         }
@@ -2194,7 +2194,7 @@ const fn result_analysis_data_state(
         ),
         (_, ResultCompletenessClass::Failed) => state(
             "failed",
-            "The producing analysis stopped before it finished. Retained scope is exact and never extrapolated.",
+            "The analysis stopped before it finished. Only the points it computed are kept; nothing is extrapolated.",
         ),
         (_, ResultCompletenessClass::Cancelled) => state(
             "cancelled",
@@ -2210,7 +2210,7 @@ const fn result_analysis_data_state(
         ),
         (ResultCurrentness::Stale, _) => state(
             "stale",
-            "Source inputs changed after this immutable dataset was created. Review stays open; current-evidence actions stay blocked.",
+            "The design changed after this run. These results stay open for review; actions that need current results are unavailable.",
         ),
         (ResultCurrentness::Superseded, _) => state(
             "superseded",
@@ -3087,11 +3087,11 @@ fn retained_result_artifacts(
                         .map(|t| t.values.len())
                         .sum::<usize>(),
                 Some(format!(
-                    "{} output frequencies · {} sources × {} input tuples · output {:?}",
+                    "{} output frequencies · {} sources × {} input tuples · output {}",
                     response.solutions.len(),
                     response.metadata.input_sources.len(),
                     response.metadata.input_lattices.len(),
-                    response.metadata.request.output_lattice
+                    harmonic_tuple(&response.metadata.request.output_lattice)
                 )),
                 ResultViewer::Table,
             ),
@@ -3106,11 +3106,11 @@ fn retained_result_artifacts(
                     .map(Vec::len)
                     .sum(),
                 Some(format!(
-                    "{} offsets · {} signed tuples · input {:?} → output {:?}",
+                    "{} offsets · {} signed tuples · input {} → output {}",
                     response.unit_solutions.len(),
                     response.metadata.tuples.len(),
-                    response.metadata.request.input_lattice,
-                    response.metadata.request.output_lattice
+                    harmonic_tuple(&response.metadata.request.input_lattice),
+                    harmonic_tuple(&response.metadata.request.output_lattice)
                 )),
                 ResultViewer::Table,
             ),
@@ -3142,7 +3142,7 @@ fn retained_result_artifacts(
             ),
             AnalysisResultPayload::OperatingPoint { mna_solution, .. } => (
                 "payload/operating-point",
-                "Operating-point execution evidence",
+                "Operating-point solution",
                 ResultArtifactKind::Array,
                 mna_solution.len(),
                 None,
@@ -3267,7 +3267,7 @@ fn retained_result_artifacts(
                 violations,
             } => (
                 "payload/safe-operating-area",
-                "Safe-operating-area evidence",
+                "Safe-operating-area checks",
                 ResultArtifactKind::Contribution,
                 evaluations.len() + violations.len(),
                 None,
@@ -3407,6 +3407,12 @@ fn retained_result_artifacts(
     }
     artifacts.retain(|artifact| counts.get(&artifact.identity) == Some(&1));
     artifacts
+}
+
+/// A mixing-product index as the reader writes it: `(1, -1)`.
+fn harmonic_tuple(indices: &[i32]) -> String {
+    let indices: Vec<String> = indices.iter().map(i32::to_string).collect();
+    format!("({})", indices.join(", "))
 }
 
 /// Which orbit the multipliers were taken about, when the run recorded it.
@@ -5393,7 +5399,7 @@ fn result_artifact_context_menu(
             ui.close();
         }
         ui.separator();
-        if ui.button("Copy canonical name").clicked() {
+        if ui.button("Copy name").clicked() {
             ui.ctx()
                 .copy_text(artifact.identity.canonical_name().to_owned());
             ui.close();
@@ -5552,7 +5558,7 @@ fn result_signal_context_menu(
             ui.close();
         }
         ui.separator();
-        if ui.button("Copy canonical name").clicked() {
+        if ui.button("Copy name").clicked() {
             if let Some((.., waveform)) = key.resolve(&app.state.simulation.retained.runs) {
                 ui.ctx().copy_text(waveform.name.clone());
             }
@@ -5617,7 +5623,7 @@ fn result_signal_context_menu(
         if signal_name.is_none() {
             cross_probe
                 .clone()
-                .on_disabled_hover_text("The immutable source quantity is no longer available.");
+                .on_disabled_hover_text("This signal is no longer in its run.");
         }
         if cross_probe.clicked() {
             if let Some(signal) = signal_name {
@@ -5910,9 +5916,9 @@ fn verification_flow_presentation(
             VerificationFlowPresentation {
                 label: verification_flow_label(page).to_owned(),
                 detail: if has_evidence {
-                    "Execution receipt retained · dataset-owned payload unavailable".to_owned()
+                    "The SOA check ran, but its results are unavailable".to_owned()
                 } else {
-                    "No source-attributed SOA evidence".to_owned()
+                    "No SOA check in this run".to_owned()
                 },
                 status: if has_evidence {
                     "verdict unavailable".to_owned()
