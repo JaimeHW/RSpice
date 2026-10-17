@@ -1361,24 +1361,43 @@ fn endpoint_rubber_band_route(
     let old_endpoint = original[0];
     let old_neighbor = original[1];
     let new_endpoint = moved[0];
-    let bend = if old_endpoint.y == old_neighbor.y {
-        Point::new(old_endpoint.x, new_endpoint.y)
+    // Along the old first segment: which way the end moved and which way
+    // the segment runs. `under_new_end` is the point of that segment's line
+    // level with the moved end; `bend` turns from the moved end onto the
+    // old end.
+    let (moved_along, runs_along, under_new_end, bend) = if old_endpoint.y == old_neighbor.y {
+        (
+            new_endpoint.x.cmp(&old_endpoint.x),
+            old_neighbor.x.cmp(&old_endpoint.x),
+            Point::new(new_endpoint.x, old_endpoint.y),
+            Point::new(old_endpoint.x, new_endpoint.y),
+        )
     } else if old_endpoint.x == old_neighbor.x {
-        Point::new(new_endpoint.x, old_endpoint.y)
+        (
+            new_endpoint.y.cmp(&old_endpoint.y),
+            old_neighbor.y.cmp(&old_endpoint.y),
+            Point::new(old_endpoint.x, new_endpoint.y),
+            Point::new(new_endpoint.x, old_endpoint.y),
+        )
     } else {
         return Err(MoveSelectionError::NonOrthogonalWire { wire_id });
     };
+    let toward_neighbor = moved_along != std::cmp::Ordering::Equal && moved_along == runs_along;
 
     let mut route = vec![new_endpoint];
-    push_distinct_point(&mut route, bend);
-    push_distinct_point(&mut route, old_endpoint);
-    if route.len() >= 2
-        && positive_length_overlap(
-            WireSegment::new(route[route.len() - 2], route[route.len() - 1]),
-            WireSegment::new(old_endpoint, old_neighbor),
-        )
-    {
-        route.pop();
+    if toward_neighbor || under_new_end == new_endpoint {
+        // The end moved along the wire's old line, or out over it: the wire
+        // runs on that line to the point level with the end and turns there
+        // once. Reaching back to where the end was would double the wire
+        // over itself in a hook, and a vertex left on a straight run marks
+        // nothing.
+        push_distinct_point(&mut route, under_new_end);
+    } else {
+        // The end moved off the line, level with where it was or behind it:
+        // the wire leaves the end along the old line's direction and turns
+        // at the old end, a corner the route needs.
+        push_distinct_point(&mut route, bend);
+        push_distinct_point(&mut route, old_endpoint);
     }
 
     let mut point_indices = vec![0; original.len()];

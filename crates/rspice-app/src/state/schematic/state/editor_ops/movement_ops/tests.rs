@@ -636,6 +636,39 @@ fn connected_mode_builds_a_deterministic_orthogonal_rubber_band() {
     assert!(schematic.design.document().wires[0].is_orthogonal());
 }
 
+/// Moving a part diagonally toward its wire's far end turns the wire once
+/// under the moved pin; the old pin position is not kept as a corner that
+/// makes the wire double back on itself.
+#[test]
+fn connected_mode_toward_the_far_end_turns_once_without_a_hook() {
+    let mut schematic = SchematicState::default();
+    schematic
+        .design
+        .document_mut_for_test()
+        .components
+        .push(Component::new(1, ComponentType::Resistor, Point::origin()));
+    schematic
+        .design
+        .document_mut_for_test()
+        .wires
+        .push(Wire::segment(2, Point::origin(), Point::new(10, 0)));
+    schematic.session.editor.selection.select_only_component(1);
+
+    assert_eq!(
+        schematic.move_with_mode_resolved_on_one_sheet(
+            Point::new(4, 5),
+            MoveSelectionMode::Connected,
+            |_| vec![Point::origin()],
+        ),
+        Ok(true)
+    );
+
+    assert_eq!(
+        schematic.design.document().wires[0].points,
+        vec![Point::new(4, 5), Point::new(4, 0), Point::new(10, 0)]
+    );
+}
+
 #[test]
 fn connected_mode_rejects_an_attached_non_orthogonal_wire_atomically() {
     let mut schematic = SchematicState::default();

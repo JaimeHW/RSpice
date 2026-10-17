@@ -437,6 +437,32 @@ mod tests {
         );
     }
 
+    /// A diagonal drag toward the wire's far end turns the wire once, under
+    /// the moved pin, and runs on along its old line. It does not reach back
+    /// to where the pin was and double over itself in a hook.
+    #[test]
+    fn a_diagonal_drag_toward_the_far_end_leaves_no_hook() {
+        let ctx = egui::Context::default();
+        let mut state = AppState::default();
+        let (target, pin, far) = resistor_wired_right(&mut state);
+        let symbols = super::super::schematic_symbol_context(&state);
+
+        drag_through(
+            &mut state,
+            &ctx,
+            &symbols,
+            target,
+            Point::origin(),
+            &[Point::new(10, 10), Point::new(30, 20)],
+        );
+
+        let moved = Point::new(pin.x + 30, pin.y + 20);
+        assert_eq!(
+            state.schematic.document().wires[0].points,
+            vec![moved, Point::new(moved.x, pin.y), far]
+        );
+    }
+
     /// Each frame is laid from where the drag began, not from the frame
     /// before: a pointer that wanders and comes home leaves the wire exactly
     /// as it was drawn, with no jog from the trip.
