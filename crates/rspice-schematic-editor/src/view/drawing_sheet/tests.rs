@@ -418,6 +418,90 @@ fn overflow_report_retains_exact_item_identity_severity_coordinates_and_zone() {
     assert!(title_wire.zone.is_some());
 }
 
+/// The halo meshes one canvas frame paints over `summary` in `viewport`.
+fn painted_halos(
+    ctx: &egui::Context,
+    viewport: &Viewport,
+    summary: &Arc<DrawingSheetOverflowSummary>,
+) -> Vec<Arc<Mesh>> {
+    let input = egui::RawInput {
+        screen_rect: Some(viewport.bounds),
+        ..Default::default()
+    };
+    ctx.run_ui(input, |ui| {
+        let painter = ui.ctx().layer_painter(egui::LayerId::background());
+        draw_overflow_advisories(&painter, viewport.bounds, viewport, summary);
+    })
+    .shapes
+    .into_iter()
+    .filter_map(|clipped| match clipped.shape {
+        Shape::Mesh(mesh) => Some(mesh),
+        _ => None,
+    })
+    .collect()
+}
+
+#[test]
+fn overflow_halos_are_tessellated_once_while_the_advisories_and_view_stand_still() {
+    let mut document = SchematicDocument::default();
+    document.components.push(
+        Component::new(11, ComponentType::Resistor, Point::new(1_100, 100))
+            .with_name_value("R_OUT", "1k"),
+    );
+    document.wires.push(Wire::new(
+        21,
+        vec![Point::new(-100, 100), Point::new(-80, 100)],
+    ));
+    let summary = Arc::new(drawing_sheet_overflow_summary(
+        &test_view(&document),
+        &SchematicSymbolContext::default(),
+        &test_sheet(),
+    ));
+    assert_eq!(summary.items.len(), 2);
+    let ctx = egui::Context::default();
+    let mut viewport = Viewport {
+        offset: pos2(300.0, 200.0),
+        zoom: 0.5,
+        bounds: Rect::from_min_size(Pos2::ZERO, vec2(1_200.0, 900.0)),
+    };
+
+    let first = painted_halos(&ctx, &viewport, &summary);
+    assert_eq!(first.len(), 1, "every halo is painted as one mesh");
+    assert!(
+        !first[0].indices.is_empty(),
+        "the halos are tessellated into the mesh"
+    );
+    assert!(
+        viewport.bounds.contains_rect(first[0].calc_bounds()),
+        "every halo stays on the canvas"
+    );
+
+    let steady = painted_halos(&ctx, &viewport, &summary);
+    assert!(
+        Arc::ptr_eq(&first[0], &steady[0]),
+        "a steady frame paints the mesh it painted last"
+    );
+
+    let found_again = Arc::new(summary.as_ref().clone());
+    let refound = painted_halos(&ctx, &viewport, &found_again);
+    assert!(
+        !Arc::ptr_eq(&steady[0], &refound[0]),
+        "advisories found afresh are dashed afresh"
+    );
+
+    viewport.offset.x += 40.0;
+    let panned = painted_halos(&ctx, &viewport, &found_again);
+    assert!(
+        !Arc::ptr_eq(&refound[0], &panned[0]),
+        "a moved view dashes the halos where they now stand"
+    );
+    let shift = panned[0].calc_bounds().min.x - refound[0].calc_bounds().min.x;
+    assert!(
+        (shift - 40.0).abs() < 1.0,
+        "the halos move with the view, by {shift}"
+    );
+}
+
 #[test]
 fn every_durable_printable_object_class_participates_in_off_paper_review() {
     let mut document = SchematicDocument::default();

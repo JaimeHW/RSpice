@@ -6,9 +6,12 @@
 //! unbounded desk.
 
 use std::borrow::Cow;
+use std::cell::RefCell;
+use std::sync::Arc;
 
 use egui::{
-    Align2, Color32, FontId, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, epaint::TextShape,
+    Align2, Color32, FontId, Mesh, Painter, Pos2, Rect, Shape, Stroke, StrokeKind,
+    epaint::{TessellationOptions, Tessellator, TextShape},
     pos2, vec2,
 };
 
@@ -527,18 +530,88 @@ pub fn overflow_advisories_shown(painter: &Painter, viewport: &Viewport) -> bool
     overflow_advisories_visible(lod.tier)
 }
 
+/// Everything the advisory halos are painted from besides the advisories
+/// themselves: where the sheet sits on screen, the canvas, the display
+/// scale, the halo ink and how a stroke is tessellated.
+#[derive(Clone, Copy, PartialEq)]
+struct OverflowHaloPaint {
+    offset: Pos2,
+    zoom: f32,
+    bounds: Rect,
+    available: Rect,
+    pixels_per_point: f32,
+    ink: Color32,
+    tessellation: TessellationOptions,
+}
+
+/// The halos last painted, tessellated, with what they were painted from.
+struct HeldOverflowHalos {
+    /// Held, not just compared by address, so the address is never reused
+    /// by other advisories while these halos stand for it.
+    summary: Arc<DrawingSheetOverflowSummary>,
+    paint: OverflowHaloPaint,
+    mesh: Arc<Mesh>,
+}
+
+thread_local! {
+    /// Painting is single-threaded; one canvas is live at a time.
+    static HELD_OVERFLOW_HALOS: RefCell<Option<HeldOverflowHalos>> = const { RefCell::new(None) };
+}
+
 /// Paint advisory halos above authored objects. These never block saves,
 /// checks, netlisting, or simulation.
+///
+/// A sheet whose content runs off it can carry thousands of advisories, each
+/// a dashed outline of several dashes. They are tessellated once and the
+/// mesh is painted again while the advisories and the view stand still, so
+/// a hover frame neither re-dashes them nor hands the host thousands of
+/// strokes to tessellate.
 pub fn draw_overflow_advisories(
     painter: &Painter,
     available: Rect,
     viewport: &Viewport,
-    summary: &DrawingSheetOverflowSummary,
+    summary: &Arc<DrawingSheetOverflowSummary>,
 ) {
     if summary.is_clear() || !overflow_advisories_shown(painter, viewport) {
         return;
     }
-    let palette = DrawingSheetPalette::resolve(&Tokens::get(painter.ctx()));
+    let ctx = painter.ctx();
+    let paint = OverflowHaloPaint {
+        offset: viewport.offset,
+        zoom: viewport.zoom,
+        bounds: viewport.bounds,
+        available,
+        pixels_per_point: ctx.pixels_per_point(),
+        ink: DrawingSheetPalette::resolve(&Tokens::get(ctx)).overflow,
+        tessellation: ctx.tessellation_options(|options| *options),
+    };
+    let mesh = HELD_OVERFLOW_HALOS.with(|held| {
+        let mut held = held.borrow_mut();
+        if let Some(halos) = held
+            .as_ref()
+            .filter(|halos| Arc::ptr_eq(&halos.summary, summary) && halos.paint == paint)
+        {
+            return Arc::clone(&halos.mesh);
+        }
+        let mesh = Arc::new(overflow_halo_mesh(&paint, viewport, summary));
+        *held = Some(HeldOverflowHalos {
+            summary: Arc::clone(summary),
+            paint,
+            mesh: Arc::clone(&mesh),
+        });
+        mesh
+    });
+    painter.add(Shape::Mesh(mesh));
+}
+
+/// Every advisory's dashed halo, tessellated as egui would tessellate the
+/// dashes painted one by one.
+fn overflow_halo_mesh(
+    paint: &OverflowHaloPaint,
+    viewport: &Viewport,
+    summary: &DrawingSheetOverflowSummary,
+) -> Mesh {
+    let mut dashes = Vec::new();
     for item in &summary.items {
         let mut screen = item.bounds.screen_rect(viewport).expand(3.0);
         if screen.width() < 8.0 {
@@ -547,7 +620,7 @@ pub fn draw_overflow_advisories(
         if screen.height() < 8.0 {
             screen = Rect::from_center_size(screen.center(), vec2(screen.width().max(8.0), 8.0));
         }
-        screen = screen.intersect(available);
+        screen = screen.intersect(paint.available);
         if !screen.is_positive() {
             continue;
         }
@@ -556,14 +629,27 @@ pub fn draw_overflow_advisories(
             DrawingSheetOverflowSeverity::OffPaper => (7.0, 3.0, 1.6),
             DrawingSheetOverflowSeverity::TitleBlockCollision => (2.0, 3.0, 1.4),
         };
-        dashed_rect_pattern(
-            painter,
-            screen,
-            Stroke::new(width, palette.overflow),
+        Shape::dashed_line_many(
+            &rect_outline(screen),
+            Stroke::new(width, paint.ink),
             dash,
             gap,
+            &mut dashes,
         );
     }
+    // Dashes are strokes, which read neither the font texture's size nor
+    // the prepared discs; epaint documents both as safe to leave unset.
+    let mut tessellator = Tessellator::new(
+        paint.pixels_per_point,
+        paint.tessellation,
+        [1, 1],
+        Vec::new(),
+    );
+    let mut mesh = Mesh::default();
+    for dash in dashes {
+        tessellator.tessellate_shape(dash, &mut mesh);
+    }
+    mesh
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -1049,14 +1135,23 @@ fn dashed_rect_pattern(
     dash_length: f32,
     gap_length: f32,
 ) {
-    let points = [
+    painter.extend(Shape::dashed_line(
+        &rect_outline(rect),
+        stroke,
+        dash_length,
+        gap_length,
+    ));
+}
+
+/// A rectangle's outline as a closed polyline from its top-left corner.
+fn rect_outline(rect: Rect) -> [Pos2; 5] {
+    [
         rect.left_top(),
         rect.right_top(),
         rect.right_bottom(),
         rect.left_bottom(),
         rect.left_top(),
-    ];
-    painter.extend(Shape::dashed_line(&points, stroke, dash_length, gap_length));
+    ]
 }
 
 fn draw_zone_band(

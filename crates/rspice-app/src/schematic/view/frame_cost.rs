@@ -844,7 +844,9 @@ fn site_cost_table() -> String {
         snap_engine: &state.schematic.session.editor.snap_engine,
         can_edit: true,
     };
-    let overflow = super::drawing_sheet::drawing_sheet_overflow_summary(state, &symbols, &sheet);
+    let overflow = std::sync::Arc::new(super::drawing_sheet::drawing_sheet_overflow_summary(
+        state, &symbols, &sheet,
+    ));
     let overflow_painter = egui::Painter::new(
         pick_ctx.clone(),
         egui::LayerId::background(),
