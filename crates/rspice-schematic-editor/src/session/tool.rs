@@ -159,21 +159,66 @@ impl Tool {
         }
     }
 
-    /// Get CSS cursor style for this tool
-    pub fn cursor(&self) -> &'static str {
+    /// The tool's own canvas cursor. Select keeps the arrow, since the hover
+    /// pre-highlight already says what a click takes; Move and Stretch show
+    /// the move cross; every tool that places or draws at a point, labels and
+    /// notes included, shows the crosshair, whose centre is where the click
+    /// lands (a placement ghost hangs from it).
+    pub const fn cursor(&self) -> egui::CursorIcon {
         match self {
-            Tool::Select => "default",
-            Tool::MoveSelection => "move",
-            Tool::StretchSelection => "move",
-            Tool::ArraySelection => "crosshair",
-            Tool::Wire => "crosshair",
-            Tool::Bus | Tool::BusTap => "crosshair",
-            Tool::Junction => "crosshair",
-            Tool::DesignNote => "text",
-            Tool::DocumentationShape => "crosshair",
-            Tool::Place(_) => "copy",
-            Tool::Probe => "crosshair",
-            Tool::Label | Tool::OffSheetConnector => "text",
+            Tool::Select => egui::CursorIcon::Default,
+            Tool::MoveSelection | Tool::StretchSelection => egui::CursorIcon::Move,
+            Tool::ArraySelection
+            | Tool::Wire
+            | Tool::Bus
+            | Tool::BusTap
+            | Tool::Junction
+            | Tool::DesignNote
+            | Tool::DocumentationShape
+            | Tool::Place(_)
+            | Tool::Probe
+            | Tool::Label
+            | Tool::OffSheetConnector => egui::CursorIcon::Crosshair,
+        }
+    }
+}
+
+/// What the canvas is doing this frame, for its cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CanvasCursorContext {
+    /// A middle drag, or a Space or Alt drag, is panning.
+    pub panning: bool,
+    /// Space or Alt is held with no button down: a drag would pan.
+    pub pan_armed: bool,
+    /// The zoom box is armed or being dragged.
+    pub zoom_box: bool,
+    /// A shelf drag is over the canvas: whether its drop would be accepted.
+    pub shelf_drop: Option<bool>,
+    /// The selection is being dragged.
+    pub moving_selection: bool,
+    pub tool: Tool,
+}
+
+impl CanvasCursorContext {
+    /// The canvas cursor: the first that applies of panning, pan armed, zoom
+    /// box, shelf drop, moving the selection, and the tool's own cursor.
+    pub const fn cursor(&self) -> egui::CursorIcon {
+        if self.panning {
+            egui::CursorIcon::Grabbing
+        } else if self.pan_armed {
+            egui::CursorIcon::Grab
+        } else if self.zoom_box {
+            egui::CursorIcon::ZoomIn
+        } else if let Some(accepted) = self.shelf_drop {
+            if accepted {
+                egui::CursorIcon::Crosshair
+            } else {
+                egui::CursorIcon::NoDrop
+            }
+        } else if self.moving_selection {
+            egui::CursorIcon::Move
+        } else {
+            self.tool.cursor()
         }
     }
 }
@@ -184,14 +229,85 @@ impl Tool {
 
 #[cfg(test)]
 mod tests {
-    use super::Tool;
+    use super::{CanvasCursorContext, Tool};
+    use egui::CursorIcon;
 
     #[test]
     fn array_selection_tool_has_exact_identity_and_no_shortcut() {
         assert_eq!(Tool::ArraySelection.display_name(), "Create array");
         assert_eq!(Tool::ArraySelection.shortcut(), None);
-        assert_eq!(Tool::ArraySelection.cursor(), "crosshair");
+        assert_eq!(Tool::ArraySelection.cursor(), CursorIcon::Crosshair);
         assert!(!Tool::ArraySelection.is_place_tool());
+    }
+
+    /// Select keeps the arrow, Move and Stretch the move cross, and every
+    /// point tool the crosshair: a placement is not a copy and a label is a
+    /// point, not a text caret.
+    #[test]
+    fn each_tool_has_its_canvas_cursor() {
+        use rspice_design::schematic::component_type::ComponentType;
+        assert_eq!(Tool::Select.cursor(), CursorIcon::Default);
+        assert_eq!(Tool::MoveSelection.cursor(), CursorIcon::Move);
+        assert_eq!(Tool::StretchSelection.cursor(), CursorIcon::Move);
+        for tool in [
+            Tool::Wire,
+            Tool::Bus,
+            Tool::BusTap,
+            Tool::Junction,
+            Tool::Probe,
+            Tool::Label,
+            Tool::OffSheetConnector,
+            Tool::DesignNote,
+            Tool::DocumentationShape,
+            Tool::Place(ComponentType::Resistor),
+        ] {
+            assert_eq!(tool.cursor(), CursorIcon::Crosshair, "{tool:?}");
+        }
+    }
+
+    /// Panning beats an armed pan, which beats the zoom box, a shelf drop,
+    /// moving the selection, and the tool, in that order.
+    #[test]
+    fn the_canvas_cursor_takes_the_first_rule_that_applies() {
+        let idle = CanvasCursorContext {
+            panning: false,
+            pan_armed: false,
+            zoom_box: false,
+            shelf_drop: None,
+            moving_selection: false,
+            tool: Tool::Wire,
+        };
+        assert_eq!(idle.cursor(), CursorIcon::Crosshair);
+        let moving = CanvasCursorContext {
+            moving_selection: true,
+            ..idle
+        };
+        assert_eq!(moving.cursor(), CursorIcon::Move);
+        let refused = CanvasCursorContext {
+            shelf_drop: Some(false),
+            ..moving
+        };
+        assert_eq!(refused.cursor(), CursorIcon::NoDrop);
+        let accepted = CanvasCursorContext {
+            shelf_drop: Some(true),
+            ..moving
+        };
+        assert_eq!(accepted.cursor(), CursorIcon::Crosshair);
+        let zoom = CanvasCursorContext {
+            zoom_box: true,
+            ..refused
+        };
+        assert_eq!(zoom.cursor(), CursorIcon::ZoomIn);
+        let armed = CanvasCursorContext {
+            pan_armed: true,
+            ..zoom
+        };
+        assert_eq!(armed.cursor(), CursorIcon::Grab);
+        let panning = CanvasCursorContext {
+            panning: true,
+            ..armed
+        };
+        assert_eq!(panning.cursor(), CursorIcon::Grabbing);
     }
 
     #[test]

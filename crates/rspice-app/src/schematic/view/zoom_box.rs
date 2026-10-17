@@ -31,9 +31,6 @@ pub(super) fn handle_zoom_box(
     state: &mut AppState,
     viewport: &Viewport,
 ) {
-    if response.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
-    }
     let zoom_box = &mut state.schematic.session.editor.zoom_box;
     if response.drag_started_by(PointerButton::Primary)
         && let Some(origin) = ui.input(|input| input.pointer.press_origin())

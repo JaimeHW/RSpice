@@ -223,6 +223,34 @@ pub(crate) fn select_failure_sites(
 }
 
 /// Render the schematic view (central canvas)
+/// Set the canvas cursor once per frame, after every tool has acted, while
+/// the pointer is over the canvas, a canvas drag is live, or a shelf drag is
+/// over it (design D1 section 5).
+fn set_canvas_cursor(
+    ui: &Ui,
+    response: &egui::Response,
+    state: &AppState,
+    shelf_drop: Option<bool>,
+) {
+    if !(response.hovered() || response.dragged() || shelf_drop.is_some()) {
+        return;
+    }
+    let editor = &state.schematic.session.editor;
+    let (any_down, middle_down) =
+        ui.input(|input| (input.pointer.any_down(), input.pointer.middle_down()));
+    let pan_modifier = navigation::primary_pan_modifier_down(ui);
+    let context = rspice_schematic_editor::session::tool::CanvasCursorContext {
+        panning: response.is_pointer_button_down_on() && (middle_down || pan_modifier),
+        pan_armed: pan_modifier && !any_down,
+        zoom_box: editor.zoom_box.armed || editor.zoom_box.drag.is_some(),
+        shelf_drop,
+        moving_selection: state.dialogs.interaction.drag.drag_type
+            == rspice_schematic_editor::session::drag::DragType::MoveSelection,
+        tool: editor.tool,
+    };
+    ui.ctx().set_cursor_icon(context.cursor());
+}
+
 pub fn render_schematic_view(
     ui: &mut Ui,
     state: &mut AppState,
@@ -304,14 +332,9 @@ pub fn render_schematic_view(
         .and_then(|_| ui.ctx().pointer_hover_pos());
     let shelf_drag_over_canvas = shelf_drag.is_some() && shelf_drag_position.is_some();
     handle_placement_transform_keys(&response, state, shelf_drag_over_canvas);
-    if let Some(payload) = shelf_drag.as_deref() {
-        ui.ctx()
-            .set_cursor_icon(if can_accept_shelf_drop(state, payload) {
-                egui::CursorIcon::Copy
-            } else {
-                egui::CursorIcon::NoDrop
-            });
-    }
+    let shelf_drop = shelf_drag
+        .as_deref()
+        .map(|payload| can_accept_shelf_drop(state, payload));
     let dropped_payload = response.dnd_release_payload::<SchematicShelfDragPayload>();
     let before_interactions_topology = state.schematic.topology_version();
     // Keep the pre-interaction route state available to the context-menu
@@ -383,6 +406,7 @@ pub fn render_schematic_view(
         &symbol_context,
     );
     handle_keyboard_object_navigation(&response, state, &symbol_context);
+    set_canvas_cursor(ui, &response, state, shelf_drop);
     refresh_symbol_context_after_interactions(
         state,
         &mut symbol_context,
