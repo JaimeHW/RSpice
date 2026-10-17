@@ -1265,7 +1265,7 @@ pub(super) fn append_ground_not_node_zero(
                     let spec = component.port_spec()?;
                     spec.name
                         .eq_ignore_ascii_case(&node)
-                        .then(|| DrcLocation::Component {
+                        .then_some(DrcLocation::Component {
                             id: component.id,
                             name: spec.name,
                         })
