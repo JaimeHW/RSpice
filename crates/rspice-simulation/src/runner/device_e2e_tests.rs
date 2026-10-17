@@ -9,9 +9,10 @@ use super::spec::run_spec_request;
 use crate::engine_bridge::EngineBridge;
 use crate::execution_artifact::ResolvedExecutionDependencies;
 use crate::execution_options::SpecExecutionOptions;
-use crate::netlist_gen::generate_netlist;
+use crate::netlist_gen::{FixtureSourceFiles, NetlistGenerator, NetlistSourceData};
 use rspice_design::schematic::component::Component;
 use rspice_design::schematic::component_type::ComponentType;
+use rspice_design::schematic::net_label::NetLabel;
 use rspice_design::schematic::owned::Schematic;
 use rspice_design::schematic::wire::Wire;
 use rspice_design_model::Point;
@@ -80,8 +81,27 @@ impl Bench {
             ));
     }
 
+    /// Name the net a terminal stands on, with a label on the terminal.
+    fn label(&mut self, at: (usize, usize), name: &str) {
+        let point = self.terminal(at.0, at.1);
+        let id = self.next_id;
+        self.next_id += 1;
+        self.state
+            .document_mut_for_test()
+            .net_labels
+            .push(NetLabel::new(id, point, name));
+    }
+
     fn netlist(&self) -> String {
-        let result = generate_netlist(&self.state);
+        self.netlist_with_parameters(&[])
+    }
+
+    /// The deck with `parameter_lines` where a run writes its design
+    /// variables.
+    fn netlist_with_parameters(&self, parameter_lines: &[String]) -> String {
+        let result =
+            NetlistGenerator::new(&self.state, NetlistSourceData::new(&FixtureSourceFiles))
+                .finish(&[], parameter_lines);
         assert!(
             result.errors.is_empty(),
             "netlist generation errors: {:?}\n{}",
@@ -983,4 +1003,101 @@ fn noise_current_source_bench_solves_tran() {
     bench.ground((i, 1));
     bench.ground((r, 1));
     solve_tran(&bench.netlist(), 1e-5, 1e-7);
+}
+
+/// A drawing returned through a `GND!` label is written with that net as node
+/// 0: the deck has no node named `GND!`, and the ngspice dialect it runs
+/// under does not fold that name onto ground itself. An objective a form
+/// measures against the drawn ground by that name is measured against node
+/// 0, and one measured against a node the deck lacks is refused rather than
+/// read as 0 V.
+#[test]
+fn an_output_reference_naming_the_drawn_ground_is_measured_against_node_zero() {
+    use crate::analysis_preparation::{AnalysisInputs, analysis_draft_spec};
+    use rspice_results::analysis_result::AnalysisResult;
+    use rspice_results::run::SimulationRun;
+    use rspice_simulation_contract::analysis_draft::AnalysisDraft;
+    use rspice_simulation_contract::optimization_draft::{
+        OptimizationConfig, OptimizationDialogState, OptimizationVariableConfig,
+    };
+
+    let mut bench = Bench::new();
+    let v1 = bench.place(ComponentType::VoltageSource, 0, 0, "V1", "2", "");
+    let r1 = bench.place(ComponentType::Resistor, 200, 0, "R1", "1k", "");
+    let r2 = bench.place(ComponentType::Resistor, 400, 0, "R2", "{RLOAD}", "");
+    bench.connect((v1, 0), (r1, 0));
+    bench.connect((r1, 1), (r2, 0));
+    bench.label((r1, 1), "out");
+    bench.label((v1, 1), "GND!");
+    bench.label((r2, 1), "GND!");
+    let netlist = bench.netlist_with_parameters(&[".param RLOAD=1k".to_owned()]);
+    assert!(!netlist.to_ascii_uppercase().contains("GND!"), "{netlist}");
+
+    let optimized_against = |reference: &str| {
+        let draft = OptimizationDialogState::from_config(&OptimizationConfig {
+            variables: vec![OptimizationVariableConfig {
+                name: "RLOAD".to_owned(),
+                min: 500.0,
+                max: 5_000.0,
+                initial: 1_000.0,
+            }],
+            objective_unit: "V".to_owned(),
+            objective_node: "out".to_owned(),
+            objective_ref: reference.to_owned(),
+            target_value: Some(1.2),
+            ..OptimizationConfig::default()
+        });
+        let inputs: AnalysisInputs<'_, SimulationRun, AnalysisResult> = AnalysisInputs {
+            sim_setup: &Default::default(),
+            schematic: &Default::default(),
+            selected_components: &Default::default(),
+            selection_occurrence: None,
+            runs: &[],
+            active_run: None,
+            project_revision: rspice_app_types::product::ObjectRevision::INITIAL,
+            plan_payloads: &[],
+        };
+        let spec = analysis_draft_spec(&inputs, &AnalysisDraft::Optimization(draft))
+            .expect("the form builds a request");
+        run_spec_request(
+            &EngineBridge::new(),
+            spec,
+            SpecExecutionOptions::default(),
+            &netlist,
+            None,
+            &ResolvedExecutionDependencies::default(),
+            &rspice_core::abort_signal::NoAbort,
+        )
+    };
+
+    // V(out) = 2 V * RLOAD / (1k + RLOAD) is 1.2 V at RLOAD = 1.5k.
+    for ground in ["GND!", "ground", "0"] {
+        let result = optimized_against(ground);
+        let Ok(crate::results::SimulationResult::Optimization {
+            best_variables,
+            best_objectives,
+            ..
+        }) = &result
+        else {
+            panic!("{ground}: {result:?}");
+        };
+        let [objective] = best_objectives.as_slice() else {
+            panic!("{ground}: one objective: {best_objectives:?}");
+        };
+        assert!(
+            (objective.value - 1.2).abs() < 1e-3,
+            "{ground}: V(out) = {}",
+            objective.value
+        );
+        let rload = best_variables["RLOAD"];
+        assert!((rload - 1500.0).abs() < 5.0, "{ground}: RLOAD = {rload}");
+    }
+
+    let refused = optimized_against("nowhere").expect_err("a node the deck lacks is refused");
+    assert!(
+        refused
+            .to_string()
+            .contains("reference node 'nowhere' not found"),
+        "{refused}"
+    );
 }

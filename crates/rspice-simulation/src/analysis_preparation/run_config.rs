@@ -6,7 +6,7 @@
 
 use super::helpers::{
     expand_temperature_points, map_frequency_sweep, parse_optional_spice_value,
-    parse_positive_points,
+    parse_positive_points, spell_as_the_deck,
 };
 use rspice_simulation_contract::analysis_draft::AnalysisDraft;
 use rspice_simulation_contract::config::FrequencySweep;
@@ -120,7 +120,7 @@ pub fn pac_run_config_from_dialog(
         rspice_simulation_contract::pac_draft::PacSweepType::Linear => PacFrequencySweep::Linear,
     };
 
-    let output_ref = (!pac_cfg.output_ref.trim().is_empty()).then(|| pac_cfg.output_ref.clone());
+    let output_ref = deck_reference(&pac_cfg.output_ref);
     let (reltol, abstol) = authored_or_plan_tolerances(state, pac_cfg.reltol, pac_cfg.abstol);
     let (sideband_min, sideband_max) = pac_cfg.resolved_sidebands();
 
@@ -184,12 +184,19 @@ pub fn pnoise_run_config_from_dialog(
         }
     };
 
-    let output_ref =
-        (!pnoise_cfg.output_ref.trim().is_empty()).then(|| pnoise_cfg.output_ref.clone());
+    let output_ref = deck_reference(&pnoise_cfg.output_ref);
+    let mut sampling = pnoise_cfg.sampling;
+    if let Some(rspice_core::analysis::pnoise::PeriodicNoiseSampling::Delay {
+        reference_ref: Some(reference_ref),
+        ..
+    }) = &mut sampling
+    {
+        spell_as_the_deck(reference_ref);
+    }
     let (reltol, abstol) = periodic_solver_tolerances(state);
 
     Ok(PnoiseRunConfig {
-        sampling: pnoise_cfg.sampling,
+        sampling,
         input_sideband: pnoise_cfg.input_sideband,
         output_sideband: pnoise_cfg.output_sideband,
         pss_fundamental_freq: basis.fundamental_freq,
@@ -233,7 +240,7 @@ pub fn pxf_run_config_from_dialog(
         rspice_simulation_contract::pxf_draft::PxfSweepType::Linear => PxfFrequencySweep::Linear,
     };
 
-    let output_ref = (!pxf_cfg.output_ref.trim().is_empty()).then(|| pxf_cfg.output_ref.clone());
+    let output_ref = deck_reference(&pxf_cfg.output_ref);
     let (reltol, abstol) = authored_or_plan_tolerances(state, pxf_cfg.reltol, pxf_cfg.abstol);
 
     Ok(PxfRunConfig {
@@ -253,6 +260,16 @@ pub fn pxf_run_config_from_dialog(
         reltol,
         abstol,
         carrier: pxf_cfg.carrier,
+    })
+}
+
+/// A periodic analysis's output reference: none where the form leaves it
+/// empty, and the drawn ground spelled as the deck spells it.
+fn deck_reference(authored: &str) -> Option<String> {
+    (!authored.trim().is_empty()).then(|| {
+        let mut reference = authored.to_owned();
+        spell_as_the_deck(&mut reference);
+        reference
     })
 }
 

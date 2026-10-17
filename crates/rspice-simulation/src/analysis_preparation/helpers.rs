@@ -139,6 +139,22 @@ pub(super) fn map_ac_sweep(sweep: FrequencySweep) -> AcSweepType {
     }
 }
 
+/// Spell a reference node an analysis form names as the schematic's deck
+/// spells it.
+///
+/// The netlister writes a net named by any ground name (`0`, `GND`, `GND!`,
+/// `GROUND`, any case) as node `0`, so the deck has no node under the other
+/// spellings, and the dialect it runs under need not fold them back: ngspice
+/// folds only `GND`, Xyce without `REPLACEGROUND` folds none. A form that names
+/// the drawn ground by any of them names node `0`. Every other name is left
+/// as written, and one the deck lacks is refused by the analysis that reads
+/// it.
+pub(super) fn spell_as_the_deck(node: &mut String) {
+    if rspice_design::schematic::ground_names::is_ground_reference(node) {
+        "0".clone_into(node);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::expand_temperature_points;
