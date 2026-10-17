@@ -9,6 +9,7 @@
 //! circuit — or the build's own error — says what the engine will refuse.
 //! Nothing is solved.
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use rspice_core::circuit::DcBranchVoltageLoop;
@@ -191,7 +192,7 @@ impl PreparedRunSnapshot {
                 return Vec::new();
             }
             let key = (deck.source, deck.temperature.key());
-            if !verdicts.contains_key(&key) {
+            if let Entry::Vacant(unbuilt) = verdicts.entry(key) {
                 let runtimes = task
                     .veriloga_runtimes
                     .as_ref()
@@ -205,7 +206,7 @@ impl PreparedRunSnapshot {
                         instance: None,
                     }])),
                 };
-                verdicts.insert(key, verdict);
+                unbuilt.insert(verdict);
                 built += 1;
                 progress(DeckBuildProgress { built, total });
             }
