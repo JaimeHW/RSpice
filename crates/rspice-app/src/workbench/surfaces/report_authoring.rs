@@ -254,7 +254,7 @@ fn commit_page_setting(app: &mut RSpiceApp, page_id: ReportPageId, setting: Page
                         expected_page_revision,
                         evidence_binding,
                     },
-                    "Update report page evidence binding",
+                    "Update report page run",
                 )
             }
             PageSettingEdit::BlockedGateText(policy)
@@ -410,7 +410,7 @@ fn set_report_block_enabled(
 
 fn evidence_binding_label(state: &AppState, evidence_binding: ReportPageEvidenceBinding) -> String {
     match evidence_binding {
-        ReportPageEvidenceBinding::Unbound => "Unbound — select evidence".to_owned(),
+        ReportPageEvidenceBinding::Unbound => "Unbound · select a run".to_owned(),
         ReportPageEvidenceBinding::LatestAcceptedRun => {
             "Latest accepted run — resolve on draft build".to_owned()
         }
@@ -426,12 +426,9 @@ fn evidence_binding_label(state: &AppState, evidence_binding: ReportPageEvidence
             .map_or_else(
                 || {
                     let dataset_id = binding.dataset_id.to_string();
-                    format!(
-                        "Dataset {}… · immutable",
-                        dataset_id.get(..8).unwrap_or(&dataset_id)
-                    )
+                    format!("Dataset {}…", dataset_id.get(..8).unwrap_or(&dataset_id))
                 },
-                |run| format!("Run {} · immutable", run.id),
+                |run| format!("Run {}", run.id),
             ),
     }
 }
@@ -450,7 +447,7 @@ fn evidence_binding_options(
             let binding =
                 crate::product::DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
             (
-                format!("Run {} · immutable", run.id),
+                format!("Run {}", run.id),
                 ReportPageEvidenceBinding::ExactDataset { binding },
             )
         })
@@ -465,7 +462,7 @@ fn evidence_binding_options(
         ReportPageEvidenceBinding::LatestAcceptedRun,
     ));
     options.push((
-        "Unbound — select evidence".to_owned(),
+        "Unbound · select a run".to_owned(),
         ReportPageEvidenceBinding::Unbound,
     ));
     options
@@ -630,12 +627,12 @@ fn report_bound_result_label(state: &AppState, document: &ReportDocument) -> (St
             binding: page_binding,
         } = page.evidence_binding()
         else {
-            return ("Exact immutable result required".to_owned(), false);
+            return ("Every page needs a specific run".to_owned(), false);
         };
         match binding {
             None => binding = Some(page_binding),
             Some(existing) if existing == page_binding => {}
-            Some(_) => return ("Multiple immutable result bindings".to_owned(), false),
+            Some(_) => return ("Pages use different runs".to_owned(), false),
         }
     }
     let Some(binding) = binding else {
@@ -653,12 +650,9 @@ fn report_bound_result_label(state: &AppState, document: &ReportDocument) -> (St
         .map_or_else(
             || {
                 let dataset_id = binding.dataset_id.to_string();
-                format!(
-                    "Dataset {}… · immutable",
-                    dataset_id.get(..8).unwrap_or(&dataset_id)
-                )
+                format!("Dataset {}…", dataset_id.get(..8).unwrap_or(&dataset_id))
             },
-            |run| format!("Run {} · immutable", run.id),
+            |run| format!("Run {}", run.id),
         );
     (label, true)
 }
@@ -820,7 +814,7 @@ fn open_add_report_element(app: &mut RSpiceApp) {
     editor.add_report_element_kind = 0;
     editor.add_report_element_title = "Engineering summary".to_owned();
     editor.add_report_element_primary =
-        "Describe the conclusion and its supporting evidence.".to_owned();
+        "Describe the conclusion and the results that support it.".to_owned();
     editor.add_report_element_secondary.clear();
     editor.add_report_element_tertiary.clear();
     editor.add_report_element_style = 0;
@@ -841,7 +835,7 @@ fn report_dataset_snapshot(
         .iter()
         .filter(|run| !run.analyses.is_empty())
         .nth(filtered_run_index)
-        .ok_or_else(|| "The selected immutable dataset is no longer retained.".to_owned())?;
+        .ok_or_else(|| "The selected run is no longer in the run history.".to_owned())?;
     let binding = crate::product::DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
     let snapshot = ReportReferenceSnapshot::new(
         ReportSourceId::Dataset {

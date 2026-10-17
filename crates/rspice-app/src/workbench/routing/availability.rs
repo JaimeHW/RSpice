@@ -87,23 +87,23 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
         },
         SurfaceId::ReportAuthoring => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui project-owned report and datasheet document composer",
-            evidence_boundary: "Versioned project-owned report documents, template-seeded outlines, page creation/reordering/paper settings, typed prose and result blocks, live result references that re-resolve against current project evidence, frozen references that capture deterministic authenticated raster artifacts, publication settings, and hardcopy export are executable. Unresolved, stale, or unbound evidence references are disclosed and fail closed rather than rendering fabricated content. The composer discloses release-handoff readiness and routes to Release Closure; it never freezes, approves, promotes, or signs off a release candidate, and it exposes no external publication or distribution service.",
+            evidence_boundary: "Versioned report documents in the project, outlines from templates, adding and reordering pages, paper settings, text and result blocks, live result references that follow the project's latest results, frozen references that keep a fixed image, publication settings, and hardcopy export all work. A reference to missing, stale, or unlinked results is shown as such and is never drawn with made-up content. The composer shows whether a release can be handed off and links to Release Closure; it never freezes, approves, promotes, or signs off a release candidate, and offers no external publishing or distribution service.",
         },
         SurfaceId::ModelEditor => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui governed project-owned device-model definition editor",
-            evidence_boundary: "A selected coherent project-owned single-card model can be opened, edited through typed parameter, section, statistical, temperature, and executable qualification contracts, parser-validated, compared with retained releases, and committed as guarded source or evidence-only revisions. Qualification runs execute on the current real Desktop or WebAssembly runtime and assemble parity evidence only from an exact retained pair. Promotion remains fail-closed behind complete source-bound evidence, declarations, compatibility, and independent approvals. Built-in and external sources remain read-only.",
+            evidence_boundary: "A selected single-card model owned by the project can be opened, edited through its parameter, section, statistical, temperature, and qualification forms, checked by the parser, compared with saved releases, and saved as a source revision or a results-only revision. Qualification runs on this desktop or browser build and compares only a matching saved pair of results. Promotion stays blocked until the source's results, declarations, compatibility checks, and independent approvals are complete. Built-in and external sources stay read-only.",
         },
         SurfaceId::ModelCorrelation => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui project-owned measurement-correlation workspace",
-            evidence_boundary: "Immutable CSV datasets, exact source and simulation provenance, unit-aware alignment and metrics, retained residuals, append-only outlier dispositions, independent review evidence, and qualification handoff are executable against project history. Correlation evidence never promotes a model or converts a failed qualification vector into a pass.",
+            evidence_boundary: "Read-only CSV measurement sets, the source and simulation each comparison came from, unit-aware alignment and metrics, saved residuals, outlier decisions that can only be added to, independent review records, and handoff to qualification all work against the project history. Correlation results never promote a model or turn a failed qualification vector into a pass.",
         },
         SurfaceId::PdkTechnologyAdmin => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui signed PDK technology-package administrator",
-            evidence_boundary: "Exact Ed25519 manifest signatures, artifact digests and sizes, layer-purpose and stream-map completeness, connectivity, callback capabilities, platform contracts, typed recognition and extraction contract completeness, deterministic comparison of currently trusted signed revisions, immutable package-bound personal-device display profiles, immutable installed revisions, current publisher trust, exact active bindings, durable configuration, local administrator-recorded trust-key provisioning and irreversible revocation, and hash-chained trust/install/activation/rollback receipts are executable. Typed SPICE model artifacts are decoded, dependency-closed, process-section-selected, and merged into the simulator's content-addressed sealed model resolver only when an exact project pin resolves to that currently trusted archive; administrative activation alone cannot change a project's executable model authority. Schema-3 signed callback modules are ABI-validated at installation and execute for an exact project pin through a deterministic, fuel-metered, memory-bounded interpreter with no WASI or network surface; canonical active-plan inputs and exact package, artifact, output, target, fuel, operator, plan, project-revision, and receipt-chain identity are retained as verifiable project evidence. No qualified product engine consumes callback-derived metadata, and rule decks are not executed. Display profiles are governed administration data and are not consumed by a production layout renderer; project and organization display-profile repositories are unavailable. The local trust file is not an operating-system or organization trust service, packages cannot mutate pinned projects implicitly, and package validation does not execute or qualify layout recognition, parasitic extraction, PCells, migration, or sign-off.",
+            evidence_boundary: "Checking Ed25519 manifest signatures, artifact digests and sizes, layer-purpose and stream-map completeness, connectivity, callback capabilities, platform requirements, and recognition and extraction definitions; comparing trusted signed revisions; the read-only display profiles a package ships; installed revisions; publisher trust; active bindings; saved configuration; trust keys an administrator adds or revokes on this computer (a revocation cannot be undone); and a tamper-evident log of trust, install, activation, and rollback steps all work. A package's SPICE model files are decoded, resolved with their includes, narrowed to the selected process section, and given to the simulator only when a project is pinned to that trusted archive; activating a package does not change which models a project uses. Signed callback modules (schema 3) are checked when installed and run for a pinned project in a sandboxed interpreter with fixed fuel and memory limits and no file or network access; each run's inputs, outputs, and identities are recorded with the project. No product engine uses callback output yet, and rule decks are not run. Display profiles are stored but not used by a layout renderer; project and organization display-profile repositories are not available. The local trust file is not an operating-system or organization trust service, packages never change pinned projects on their own, and package checks do not run or qualify layout recognition, parasitic extraction, PCells, migration, or sign-off.",
         },
         SurfaceId::LibraryCellviewManager => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui project-owned library, cellview, symbol, and component-form authoring workspace",
-            evidence_boundary: "The canonical three-column project library browser, guarded cell/view mutations, exact shared selection, authored symbol preview, typed terminal and parameter-form inspection, symbol editor handoff, model-bound symbol creation/import, form editing, edit-lock inspection, audit history, and versioned project-library publication evidence are executable. Legacy or invalid symbol metadata is disclosed and fails closed; the workspace does not claim PCell, layout, extraction, characterization, protected-IP, remote collaboration, or sign-off authority.",
+            evidence_boundary: "The three-column project library browser, checked cell and view edits, a selection shared with the rest of RSpice, symbol preview, terminal and parameter-form inspection, opening the symbol editor, creating or importing model-bound symbols, form editing, edit-lock inspection, audit history, and versioned project-library publication records all work. Old or invalid symbol metadata is reported and blocks use; the workspace does not provide PCells, layout, extraction, characterization, protected IP, remote collaboration, or sign-off.",
         },
         SurfaceId::NotificationCenter => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui session notification panel",
@@ -135,13 +135,13 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
             reason: "Qualified-target handoff is not implemented in this build, so no navigation action or deep link is offered.",
         },
         SurfaceId::SurfaceContextMenu => SurfaceExecutionAvailability::Unavailable {
-            reason: "Selection context menus are opened only for an exact active selection and document owner; the generic catalog identity is not a standalone destination.",
+            reason: "Selection context menus open from a current selection in a document; they are not a page you can go to on their own.",
         },
         SurfaceId::DockedTool => SurfaceExecutionAvailability::Unavailable {
             reason: "Docked tools are opened by their owning document with a concrete tool identity; the generic catalog identity is not a standalone destination.",
         },
         _ => SurfaceExecutionAvailability::Unavailable {
-            reason: "A canonical GUI design exists, but no complete Rust route executor is registered for this surface.",
+            reason: "A design for this workspace exists, but this build cannot open it yet.",
         },
     }
 }
@@ -225,7 +225,7 @@ mod tests {
             (SurfaceId::WorkflowDialog, "required draft context"),
             (SurfaceId::MobileNavigation, "responsive workbench"),
             (SurfaceId::MobileTaskHandoff, "not implemented"),
-            (SurfaceId::SurfaceContextMenu, "exact active selection"),
+            (SurfaceId::SurfaceContextMenu, "current selection"),
             (SurfaceId::DockedTool, "concrete tool identity"),
         ];
         for (surface, expected) in cases {
@@ -244,7 +244,7 @@ mod tests {
         let route = SurfaceRoute::surface(SurfaceId::RfWorkbench);
         let error = require_available(route).expect_err("RF route is not implemented");
         assert_eq!(error.surface, SurfaceId::RfWorkbench);
-        assert!(error.reason.contains("no complete Rust route executor"));
+        assert!(error.reason.contains("this build cannot open it yet"));
     }
 
     #[test]
@@ -254,7 +254,7 @@ mod tests {
             availability,
             SurfaceExecutionAvailability::Available {
                 executor: "rspice-ui governed project-owned device-model definition editor",
-                evidence_boundary: "A selected coherent project-owned single-card model can be opened, edited through typed parameter, section, statistical, temperature, and executable qualification contracts, parser-validated, compared with retained releases, and committed as guarded source or evidence-only revisions. Qualification runs execute on the current real Desktop or WebAssembly runtime and assemble parity evidence only from an exact retained pair. Promotion remains fail-closed behind complete source-bound evidence, declarations, compatibility, and independent approvals. Built-in and external sources remain read-only.",
+                evidence_boundary: "A selected single-card model owned by the project can be opened, edited through its parameter, section, statistical, temperature, and qualification forms, checked by the parser, compared with saved releases, and saved as a source revision or a results-only revision. Qualification runs on this desktop or browser build and compares only a matching saved pair of results. Promotion stays blocked until the source's results, declarations, compatibility checks, and independent approvals are complete. Built-in and external sources stay read-only.",
             }
         );
         assert!(route_availability(SurfaceRoute::surface(SurfaceId::ModelEditor)).can_open());
@@ -318,7 +318,7 @@ mod tests {
             assert!(
                 availability
                     .reason()
-                    .is_some_and(|reason| reason.contains("no complete Rust route executor")),
+                    .is_some_and(|reason| reason.contains("this build cannot open it yet")),
                 "{surface} does not expose the expected implementation boundary"
             );
         }

@@ -977,16 +977,16 @@ fn format_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fie
                             });
                     });
                     ui.weak(match state.draft.custom_preset_scope {
-                DrawingSheetPresetScope::Project => {
-                    "Travels with this project and is available to collaborators."
-                }
-                DrawingSheetPresetScope::User => {
-                    "Saved in personal preferences; using it captures an exact project copy."
-                }
-                DrawingSheetPresetScope::Organization => {
-                    "Organization presets are managed and cannot be created here."
-                }
-            });
+                        DrawingSheetPresetScope::Project => {
+                            "Travels with this project and is available to collaborators."
+                        }
+                        DrawingSheetPresetScope::User => {
+                            "Saved in personal preferences; using it saves a copy in the project."
+                        }
+                        DrawingSheetPresetScope::Organization => {
+                            "Organization presets are managed and cannot be created here."
+                        }
+                    });
                 }
             });
     }

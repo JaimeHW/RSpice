@@ -31,12 +31,10 @@ use std::collections::{BTreeMap, HashMap};
 mod annotations;
 mod empty;
 mod focus;
-mod parent;
 use annotations::draw_operating_point_annotations;
 pub use annotations::{BadgeSubject, OperatingPointCanvasAnnotation};
 pub use empty::draw_empty_hint;
 pub use focus::{draw_keyboard_focus, keyboard_focus_matches_selection};
-pub use parent::draw_parent_context;
 
 const CULL_MARGIN: f32 = 160.0;
 

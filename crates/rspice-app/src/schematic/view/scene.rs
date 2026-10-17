@@ -13,8 +13,8 @@ use super::{
 };
 use crate::schematic::bus_notations;
 use crate::state::{
-    CellViewRef, CrossProbeIndex, Point, SchematicAnnotationVisibility,
-    SchematicBackAnnotationContent, SchematicHierarchyVisibility, SchematicNetHighlighting, Tool,
+    CrossProbeIndex, Point, SchematicAnnotationVisibility, SchematicBackAnnotationContent,
+    SchematicNetHighlighting, Tool,
 };
 use crate::workbench::app_state::AppState;
 use egui::{Painter, Rect};
@@ -22,7 +22,6 @@ use rspice_design::connectivity::{extract_with_hierarchy, summary::projection_ne
 use rspice_design::hierarchy::HierarchySource;
 use rspice_schematic_editor::view::{
     cross_probe::wrapped_signal_name,
-    design_view::DesignView,
     pointer_target::{self, PointerTarget},
     scene::{
         self, BadgeSubject, OperatingPointCanvasAnnotation, named_net_class_color,
@@ -105,10 +104,6 @@ pub(super) fn draw_scene(
     drawing_sheet: &ActiveDrawingSheet,
 ) {
     super::drawing_sheet::draw_base(painter, available, viewport, state, drawing_sheet);
-
-    // Context before content: whatever the open sheet is instantiated by is
-    // painted under everything the open sheet owns, never over it.
-    draw_parent_context(painter, viewport, state);
 
     // First-run guidance: an empty sheet says what to do next instead of
     // presenting a silent dot field.
@@ -193,53 +188,6 @@ pub(super) fn draw_scene(
         state.dialogs.interaction.schematic_keyboard_focus,
         symbol_context,
     );
-}
-
-/// The ancestor sheets drawn dimmed beneath the open one, outermost first,
-/// each with the buffer key its multi-sheet membership is recorded under.
-///
-/// `schematic_visibility.hierarchy` is the descend transaction's own record of
-/// how much context the author asked for, and this is what honours it: one
-/// level is the immediate parent, the full hierarchy is every ancestor on the
-/// occurrence, and active-only — which is also what an isolated or read-only
-/// open leaves behind — is none. A document opened at its own root has no
-/// ancestor to draw under it either way.
-fn parent_context_sheets(
-    state: &AppState,
-) -> Vec<(String, &rspice_design::schematic::owned::Schematic)> {
-    let levels = match state.ui.schematic_visibility.hierarchy {
-        SchematicHierarchyVisibility::ActiveOnly => return Vec::new(),
-        SchematicHierarchyVisibility::ActiveAndParent => 1,
-        SchematicHierarchyVisibility::FullVisibleHierarchy => usize::MAX,
-    };
-    let Some(occurrence) = state.workspace.content.active_occurrence() else {
-        return Vec::new();
-    };
-    let masters: Vec<&CellViewRef> = occurrence.masters().collect();
-    // The deepest master is the open document itself; every master before it is
-    // an ancestor the occurrence was reached through.
-    let ancestors = &masters[..masters.len().saturating_sub(1)];
-    ancestors[ancestors.len() - levels.min(ancestors.len())..]
-        .iter()
-        .filter_map(|master| {
-            let key = parent_context_buffer_key(state, master)?;
-            let schematic = state.workspace.content.schematic_buffers.get(&key)?;
-            Some((key, schematic))
-        })
-        .collect()
-}
-
-/// The spelling `schematic_buffers` holds one master under, which need not be
-/// the spelling the occurrence carries.
-fn parent_context_buffer_key(state: &AppState, reference: &CellViewRef) -> Option<String> {
-    let key = reference.key();
-    state
-        .workspace
-        .content
-        .schematic_buffers
-        .keys()
-        .find(|candidate| candidate.eq_ignore_ascii_case(&key))
-        .cloned()
 }
 
 fn probe_visual_status(
@@ -727,64 +675,15 @@ fn device_power<'a>(
     })
 }
 
-fn draw_parent_context(painter: &Painter, viewport: &Viewport, state: &AppState) {
-    scene::draw_parent_context(
-        painter,
-        viewport,
-        parent_context_sheets(state)
-            .into_iter()
-            .map(|(key, sheet)| DesignView {
-                document: sheet.document(),
-                canvas_cache: None,
-                sheet_catalog: state
-                    .workspace
-                    .content
-                    .design_management
-                    .sheet_catalog(&key),
-                review_markers: Default::default(),
-            }),
-    );
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::SchematicState;
     use crate::state::{
-        AnalysisResult, AnalysisType, Component, ComponentType, DcOpResult, Junction,
+        AnalysisResult, AnalysisType, CellViewRef, Component, ComponentType, DcOpResult, Junction,
         OperatingPointValue, SimulationRun, ViewType, Wire,
     };
     use crate::workbench::app_state::AppState;
     use std::collections::HashMap;
-
-    /// The canvas every parent-context render in this module uses.
-    const PARENT_CONTEXT_VIEWPORT: egui::Vec2 = egui::vec2(220.0, 140.0);
-
-    /// One conductor on a sheet, so an ancestor has something to contribute.
-    fn sheet_with_one_wire() -> SchematicState {
-        let mut sheet = SchematicState::default();
-        sheet.document_mut_for_test().wires.push(Wire::segment(
-            1,
-            Point::new(20, 40),
-            Point::new(180, 40),
-        ));
-        sheet
-    }
-
-    /// A session descended one level, with the design root carrying a wire.
-    fn descended_one_level() -> AppState {
-        let mut state = AppState::default();
-        let root = state.workspace.content.active_view.clone();
-        state
-            .workspace
-            .insert_schematic_editor(root.key(), sheet_with_one_wire());
-        state.workspace.descend_into(
-            "X1".to_owned(),
-            CellViewRef::new("user", "amp", "schematic"),
-            ViewType::Schematic,
-        );
-        state
-    }
 
     /// Two conductor groups with no wire between them, each carrying the same
     /// authored name. The netlister joins them into one node; a canvas that
@@ -876,91 +775,6 @@ mod tests {
             .push(Wire::segment(31, Point::new(0, 0), Point::new(40, 0)));
         state.sync_active_schematic_to_workspace();
         assert!(net_class_colors(&state).is_empty());
-    }
-
-    fn parent_context_canvas(state: &AppState) -> crate::ui::raster::Canvas {
-        crate::ui::raster::render(PARENT_CONTEXT_VIEWPORT, |ui, background| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE.fill(background))
-                .show(ui, |ui| {
-                    let viewport = Viewport {
-                        offset: egui::Pos2::ZERO,
-                        zoom: 1.0,
-                        bounds: Rect::from_min_size(egui::Pos2::ZERO, PARENT_CONTEXT_VIEWPORT),
-                    };
-                    draw_parent_context(ui.painter(), &viewport, state);
-                });
-        })
-    }
-
-    /// The descend transaction records how much context was asked for, and the
-    /// painter honours exactly that: nothing at the design root, nothing when
-    /// the descent hid the parent, the immediate parent for one level, and every
-    /// ancestor for the full hierarchy.
-    #[test]
-    fn the_parent_context_painter_draws_only_what_the_descent_asked_for() {
-        let root = AppState::default();
-        assert!(
-            parent_context_sheets(&root).is_empty(),
-            "a document opened at its own root has no ancestor"
-        );
-
-        let mut state = descended_one_level();
-        state.ui.schematic_visibility.hierarchy = SchematicHierarchyVisibility::ActiveOnly;
-        assert!(parent_context_sheets(&state).is_empty());
-
-        state.ui.schematic_visibility.hierarchy = SchematicHierarchyVisibility::ActiveAndParent;
-        let one_level = parent_context_sheets(&state);
-        assert_eq!(one_level.len(), 1);
-        assert_eq!(one_level[0].1.document().wires.len(), 1);
-
-        state.workspace.insert_schematic_editor(
-            CellViewRef::new("user", "amp", "schematic").key(),
-            sheet_with_one_wire(),
-        );
-        state.workspace.descend_into(
-            "X2".to_owned(),
-            CellViewRef::new("user", "bias", "schematic"),
-            ViewType::Schematic,
-        );
-        assert_eq!(
-            parent_context_sheets(&state).len(),
-            1,
-            "one level is the immediate parent however deep the occurrence is"
-        );
-
-        state.ui.schematic_visibility.hierarchy =
-            SchematicHierarchyVisibility::FullVisibleHierarchy;
-        assert_eq!(
-            parent_context_sheets(&state).len(),
-            2,
-            "the full hierarchy is every ancestor on the occurrence"
-        );
-    }
-
-    /// The selection above decides what is drawn, and this is the drawing: a
-    /// canvas with an ancestor is not the canvas without one.
-    #[test]
-    fn the_parent_context_painter_marks_the_canvas_only_beneath_a_descent() {
-        let mut state = descended_one_level();
-        state.ui.schematic_visibility.hierarchy = SchematicHierarchyVisibility::ActiveAndParent;
-        let with_parent = parent_context_canvas(&state);
-        let band = Rect::from_min_size(egui::Pos2::ZERO, PARENT_CONTEXT_VIEWPORT);
-        assert!(
-            with_parent
-                .pixels_in(band)
-                .any(|pixel| pixel != with_parent.background()),
-            "the descended canvas painted no parent context at all"
-        );
-
-        state.ui.schematic_visibility.hierarchy = SchematicHierarchyVisibility::ActiveOnly;
-        let hidden = parent_context_canvas(&state);
-        assert!(
-            hidden
-                .pixels_in(band)
-                .all(|pixel| pixel == hidden.background()),
-            "hiding parent context still painted an ancestor"
-        );
     }
 
     #[test]

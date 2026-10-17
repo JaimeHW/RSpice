@@ -85,7 +85,7 @@ pub fn serialize_shortcut_reference_pdf(
         Metadata::new()
             .title("RSpice keyboard shortcuts".to_owned())
             .description(
-                "Portable keyboard shortcut reference generated from an immutable RSpice shortcut artifact."
+                "Portable keyboard shortcut reference exported from an RSpice shortcut profile."
                     .to_owned(),
             )
             .creator("RSpice".to_owned())

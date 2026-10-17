@@ -1192,7 +1192,7 @@ impl AppState {
                 == requested_identity
         }) {
             return Err(format!(
-                "Cell '{new_name}' conflicts with an existing canonical cell identity in library '{dst_library}'"
+                "Cell '{new_name}' conflicts with an existing cell in library '{dst_library}' whose name differs only in case or normalization"
             ));
         }
 
@@ -1294,7 +1294,7 @@ impl AppState {
                     == requested_identity
         }) {
             return Err(format!(
-                "Cell '{new_name}' conflicts with an existing canonical cell identity in library '{library}'"
+                "Cell '{new_name}' conflicts with an existing cell in library '{library}' whose name differs only in case or normalization"
             ));
         }
 
@@ -1429,7 +1429,7 @@ impl AppState {
     pub(crate) fn create_library(&mut self, name: &str) -> Result<(), String> {
         if let Some(conflict) = conflicting_library_name(&self.library_manager, name, None) {
             return Err(format!(
-                "Library '{name}' conflicts with the existing canonical library identity '{conflict}'"
+                "Library '{name}' conflicts with the existing library '{conflict}', whose name differs only in case or normalization"
             ));
         }
         let project_mutation = self.preflight_project_library_mutation(
@@ -1473,7 +1473,7 @@ impl AppState {
             conflicting_library_name(&self.library_manager, new_name, Some(library))
         {
             return Err(format!(
-                "Library '{new_name}' conflicts with the existing canonical library identity '{conflict}'"
+                "Library '{new_name}' conflicts with the existing library '{conflict}', whose name differs only in case or normalization"
             ));
         }
         let candidate_layouts = self
@@ -1724,7 +1724,7 @@ impl AppState {
                     == requested_identity
         }) {
             return Err(format!(
-                "View '{new_name}' conflicts with an existing canonical view identity in cell '{library}/{cell}'"
+                "View '{new_name}' conflicts with an existing view in cell '{library}/{cell}' whose name differs only in case or normalization"
             ));
         }
         let candidate_layouts = self

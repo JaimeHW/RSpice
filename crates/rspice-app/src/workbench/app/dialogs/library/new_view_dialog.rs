@@ -251,7 +251,7 @@ impl RSpiceApp {
                 == requested_identity
         }) {
             self.state.dialogs.new_view_error = Some(format!(
-                "View '{}' conflicts with an existing canonical view identity in cell '{}'",
+                "View '{}' clashes with an existing view in cell '{}' (view names ignore letter case)",
                 view_name, cell
             ));
             return outcome;
@@ -352,7 +352,7 @@ impl RSpiceApp {
             Ok(technology) => technology,
             Err(error) => {
                 self.state.dialogs.new_view_error = Some(format!(
-                    "A Layout view requires the project's exact validated signed PDK: {error}"
+                    "A Layout view requires the project's validated, signed PDK: {error}"
                 ));
                 return outcome;
             }
@@ -403,7 +403,7 @@ impl RSpiceApp {
                 == requested_identity
         }) {
             self.state.dialogs.new_view_error = Some(format!(
-                "View '{view_name}' conflicts with an existing canonical view identity in cell '{cell}'"
+                "View '{view_name}' clashes with an existing view in cell '{cell}' (view names ignore letter case)"
             ));
             return outcome;
         }
@@ -562,7 +562,7 @@ impl RSpiceApp {
                 == requested_identity
         }) {
             self.state.dialogs.new_view_error = Some(format!(
-                "View '{view_name}' conflicts with an existing canonical view identity in cell '{cell}'"
+                "View '{view_name}' clashes with an existing view in cell '{cell}' (view names ignore letter case)"
             ));
             return outcome;
         }
@@ -1235,7 +1235,7 @@ mod tests {
                 .dialogs
                 .new_view_error
                 .as_deref()
-                .is_some_and(|error| error.contains("exact validated signed PDK"))
+                .is_some_and(|error| error.contains("validated, signed PDK"))
         );
     }
 
@@ -1274,7 +1274,7 @@ mod tests {
                 .dialogs
                 .new_view_error
                 .as_deref()
-                .is_some_and(|error| error.contains("canonical view identity"))
+                .is_some_and(|error| error.contains("clashes with an existing view"))
         );
     }
 

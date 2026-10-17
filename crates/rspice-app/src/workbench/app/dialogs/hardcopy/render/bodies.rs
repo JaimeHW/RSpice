@@ -171,7 +171,7 @@ pub(super) fn printer_properties_body(ui: &mut Ui, draft: &mut HardcopyDialogSta
                 note_block(
                     ui,
                     "Capabilities unavailable",
-                    "Select an authenticated system printer to inspect its exact driver boundary.",
+                    "Select a system printer to see what its driver supports.",
                 );
             }
             #[cfg(target_os = "windows")]
@@ -334,7 +334,7 @@ pub(super) fn custom_paper_body(ui: &mut Ui, draft: &mut HardcopyDialogState) {
                     if native_target {
                         "Adjust the page or margins to a mode supported by the current printer."
                     } else {
-                        "Adjust the page or margins until the exact setup validates."
+                        "Adjust the page or margins until the setup is valid."
                     }
                 },
             );
@@ -456,7 +456,7 @@ const fn mapping_scope_destination(scope: &PrintMappingSaveScope) -> &'static st
             "Travels inside this document's hardcopy setup; no name needed."
         }
         PrintMappingSaveScope::ProjectPrintSet(_) => {
-            "Stored in the project print-set catalog under this exact name."
+            "Stored in the project print-set catalog under this name."
         }
         PrintMappingSaveScope::PortablePersonalPreset(_) => {
             "Stored in your portable preset catalog, available in every project."

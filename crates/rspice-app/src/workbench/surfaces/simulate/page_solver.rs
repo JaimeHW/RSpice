@@ -1002,8 +1002,8 @@ fn matrix_policy(ui: &mut Ui, app: &mut RSpiceApp) {
             ui,
             "The factorization backend and the pivot thresholds decide whether two runs of the \
                  same plan produce bit-identical results. A change here is recorded as a \
-                 configuration change and invalidates any parity evidence taken under the previous \
-                 setting. RSHUNT, in ohms, places a resistor from every node to ground in every \
+                 configuration change, and comparisons made under the previous setting no longer \
+                 apply. RSHUNT, in ohms, places a resistor from every node to ground in every \
                  analysis; empty places none.",
         );
     });

@@ -1526,7 +1526,7 @@ fn schema_two_multifile_source_migrates_without_inventing_resolution_edges() {
     let (_, restored, warnings) = crate::io::restore_execution_context(context, project_id())
         .expect("schema-two catalog remains repairable");
     assert_eq!(warnings.len(), 1);
-    assert!(warnings[0].contains("no authenticated dependency-resolution graph"));
+    assert!(warnings[0].contains("does not record how its files include each other"));
     let blocked = restored
         .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect_err("missing legacy graph must block a multifile source");

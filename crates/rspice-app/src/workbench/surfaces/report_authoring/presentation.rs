@@ -185,7 +185,7 @@ impl rspice_results_ui::report::dialogs::DialogHost for ReportHost<'_> {
             .runs
             .iter()
             .filter(|run| !run.analyses.is_empty())
-            .map(|run| format!("Run {} · immutable dataset", run.id))
+            .map(|run| format!("Run {}", run.id))
             .collect()
     }
     fn removal_target(&self) -> (String, bool) {

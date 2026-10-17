@@ -804,7 +804,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     let view_trace = std::cell::Cell::new(false);
     let dataset = super::output_evidence::selected_plan_dataset(app).is_some();
     let dataset_rule = if app.state.simulation.active_run().is_some() {
-        "The active dataset does not belong to this simulation plan, so it cannot supply measurement or unit evidence here."
+        "The active dataset was not produced by this simulation plan, so its measurements and units cannot be used here."
     } else {
         EditorHandoff::DATASET_RULE
     };

@@ -28,10 +28,7 @@ pub fn build_generated_bundle(
     use crate::state::DependencyResolution;
 
     if include_source_map && format != crate::io::NetlistFormat::Spice {
-        return Err(
-            "source-map coordinates are valid only for the exact SPICE generated artifact"
-                .to_owned(),
-        );
+        return Err("a source map can only be included with the generated SPICE deck".to_owned());
     }
     let dependencies = artifact.dependencies();
     let mut ordered_dependencies = dependencies.iter().enumerate().collect::<Vec<_>>();
@@ -146,7 +143,7 @@ pub fn build_generated_bundle(
                 .to_owned();
             let include_index = child.parent_include_index().ok_or_else(|| {
                 format!(
-                    "transitive dependency '{}' has no authenticated parent include index",
+                    "transitive dependency '{}' has no recorded include line in its parent",
                     child.requested_locator()
                 )
             })?;
@@ -331,7 +328,7 @@ fn rewrite_include_locators(
         let actual = &line[locator_span.clone()];
         if actual != requested {
             return Err(format!(
-                "dependency directive {include_index} names '{actual}', not its authenticated locator '{requested}'"
+                "dependency directive {include_index} names '{actual}', not its recorded path '{requested}'"
             ));
         }
         output.push_str(&line[..locator_span.start]);
@@ -791,7 +788,7 @@ mod tests {
             str::to_owned,
         )
         .expect_err("translated coordinates are not exact");
-        assert!(error.contains("exact SPICE"));
+        assert!(error.contains("generated SPICE deck"));
     }
 
     #[test]

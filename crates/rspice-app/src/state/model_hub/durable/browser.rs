@@ -662,5 +662,5 @@ fn js_error(value: JsValue) -> String {
         .ok()
         .and_then(|message| message.as_string())
         .or_else(|| value.as_string())
-        .unwrap_or_else(|| format!("browser error: {value:?}"))
+        .unwrap_or_else(|| "the browser reported an error without a message".to_owned())
 }

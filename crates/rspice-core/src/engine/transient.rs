@@ -10409,7 +10409,7 @@ impl Engine {
                         step_trap_order
                     );
                     retry_count += 1;
-                    self.record_convergence(|quality| quality.record_timestep_reduction());
+                    self.record_convergence(|quality| quality.record_lte_rejection());
                     // Match ngspice truncation retries: keep the current integration
                     // order and only reduce the timestep.
                     trap_order =
@@ -10601,7 +10601,17 @@ impl Engine {
                 if lte_estimator.uses_accepted_solution_reference() {
                     xyce_step_failure_count = xyce_step_failure_count.saturating_add(1);
                 }
-                self.record_convergence(|quality| quality.record_timestep_reduction());
+                // A locked replay's hidden attempt and an ERROPTION=1
+                // iteration-count reject are not truncation-error rejects.
+                let lte_rejected =
+                    !lte_accept && !locked_replay_hidden_attempt && !xyce_iteration_error_control;
+                self.record_convergence(|quality| {
+                    if lte_rejected {
+                        quality.record_lte_rejection();
+                    } else {
+                        quality.record_timestep_reduction();
+                    }
+                });
                 let recovery_order = if lte_estimator.uses_accepted_solution_reference() {
                     xyce_rejected_order
                 } else {

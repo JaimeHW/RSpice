@@ -76,10 +76,7 @@ pub(super) fn handle_runtime_host_call(
         .clone()
         .filter(|snapshot| runtime_snapshot_matches_token(snapshot, pending.token))
     else {
-        runtime_protocol_failure(
-            app,
-            "The authenticated Python source snapshot is no longer retained.",
-        );
+        runtime_protocol_failure(app, "The validated Python source is no longer available.");
         return;
     };
     let Some(grant) = snapshot
@@ -92,7 +89,7 @@ pub(super) fn handle_runtime_host_call(
             session_id,
             call.call_id,
             "CAPABILITY-DENIED",
-            "The host call did not present a capability token from this exact source snapshot.",
+            "The host call did not present a capability token issued for this source snapshot.",
             true,
         );
         return;
@@ -227,7 +224,7 @@ pub(super) fn handle_runtime_host_call(
                         .last_error
                         .clone()
                         .unwrap_or_else(|| {
-                            "Run-plan preflight did not produce an exact receipt.".to_owned()
+                            "Run-plan preflight did not pass and gave no reason.".to_owned()
                         });
                     response = Some(host_failure("PREFLIGHT-FAILED", message));
                 }
@@ -297,16 +294,16 @@ pub(super) fn handle_runtime_host_call(
             } else if !pending.mode.is_dry_run() && !completed_run_matches_pending(app, &pending) {
                 response = Some(host_failure(
                     "RUN-NOT-COMPLETE",
-                    "Requirement evidence is unavailable until the exact authenticated simulation completes.",
+                    "Requirement results are unavailable until this workflow's simulation completes.",
                 ));
             } else {
                 pending.requirements_evaluated = true;
                 response = Some(host_success(
                     None,
                     if pending.mode.is_dry_run() {
-                        "requirement evaluation call validated; no evidence was fabricated"
+                        "requirement evaluation call validated; a dry run evaluates nothing"
                     } else {
-                        "requirement evidence evaluated"
+                        "requirements evaluated"
                     },
                 ));
             }
@@ -332,14 +329,14 @@ pub(super) fn handle_runtime_host_call(
             } else if !pending.mode.is_dry_run() && !completed_run_matches_pending(app, &pending) {
                 response = Some(host_failure(
                     "RUN-NOT-COMPLETE",
-                    "Comparison evidence is unavailable until the exact authenticated simulation completes.",
+                    "Comparison results are unavailable until this workflow's simulation completes.",
                 ));
             } else {
                 pending.comparison_completed = true;
                 response = Some(host_success(
                     None,
                     if pending.mode.is_dry_run() {
-                        "comparison call validated; no evidence was fabricated"
+                        "comparison call validated; a dry run compares nothing"
                     } else {
                         "governed baseline comparison completed"
                     },
@@ -376,7 +373,7 @@ pub(super) fn handle_runtime_host_call(
             } else if !pending.mode.is_dry_run() && !completed_run_matches_pending(app, &pending) {
                 response = Some(host_failure(
                     "RUN-NOT-COMPLETE",
-                    "Artifacts cannot be published until the exact authenticated simulation completes.",
+                    "Artifacts cannot be published until this workflow's simulation completes.",
                 ));
             } else if !pending.mode.is_dry_run()
                 && requested.as_ref().is_some_and(|requested| {

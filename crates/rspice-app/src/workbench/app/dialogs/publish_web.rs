@@ -219,15 +219,15 @@ impl RSpiceApp {
             (publish_label, compose_ready)
         };
         let hint = if let Some((_, circuit)) = &binding {
-            format!("immutable versions · circuit {circuit}")
+            format!("published versions never change · circuit {circuit}")
         } else {
-            "immutable snapshot · earlier versions keep their URLs".to_owned()
+            "published versions never change · earlier versions keep their URLs".to_owned()
         };
 
         let mut dialog = Dialog::new("Publish to web", &primary)
             .description(
-                "Review the exact snapshot that leaves this machine, then publish it as an \
-                 immutable page version.",
+                "Review the snapshot that leaves this machine, then publish it as a new page \
+                 version.",
             )
             .size(DialogSize::Transaction)
             .ghost(if submitted { "Close" } else { "Cancel" })
@@ -305,7 +305,7 @@ impl RSpiceApp {
                     note(
                         ui,
                         "Everything listed becomes publicly retrievable at the page URL. \
-                         Publishing is immutable: a new version never rewrites an earlier one.",
+                         Each publish adds a new version and never rewrites an earlier one.",
                         c.text_faint,
                     );
                 }

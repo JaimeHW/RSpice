@@ -392,7 +392,7 @@ fn validate_manifest(manifest: &ProjectCheckpointManifest) -> Result<(), String>
         manifest.created_unix_ms, manifest.checkpoint_id, SNAPSHOT_SUFFIX
     );
     if manifest.snapshot_name != expected_name {
-        return Err("project checkpoint snapshot name is not canonical".to_owned());
+        return Err("project checkpoint snapshot name does not match its manifest".to_owned());
     }
     Ok(())
 }
@@ -497,7 +497,7 @@ fn publish_native(
     if observed.len() as u64 != manifest.snapshot_byte_len
         || digest(&observed) != manifest.snapshot_digest
     {
-        return Err("published project checkpoint failed exact-byte verification".to_owned());
+        return Err("the written project checkpoint did not match when read back".to_owned());
     }
     let mut manifest_bytes = serde_json::to_vec_pretty(manifest)
         .map_err(|error| format!("project checkpoint manifest serialization failed: {error}"))?;
@@ -743,7 +743,7 @@ fn visit_browser_checkpoint_record(
     if manifest_key != expected_manifest_key || snapshot_key != expected_snapshot_key {
         accumulator.quarantined.push(ProjectCheckpointQuarantine {
             label: manifest.checkpoint_id.to_string(),
-            reason: "checkpoint manifest is not bound to its canonical IndexedDB keys".to_owned(),
+            reason: "checkpoint manifest is stored under the wrong browser storage keys".to_owned(),
             artifact_keys: vec![manifest_key, snapshot_key],
         });
         return;

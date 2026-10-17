@@ -159,7 +159,14 @@ pub fn compile_automation_documents(
                         "AUTWS007",
                         binding.path,
                         1,
-                        format!("the configured {role:?} document is missing"),
+                        format!(
+                            "the configured {} document is missing",
+                            match role {
+                                AutomationSourceRole::RunPlan => "run plan",
+                                AutomationSourceRole::EnvironmentLock => "environment lock",
+                                AutomationSourceRole::PermissionManifest => "permission manifest",
+                            }
+                        ),
                     ));
                     None
                 })
@@ -1066,7 +1073,7 @@ fn parse_environment_lock_v3(
                 ENVIRONMENT_LOCK_PATH,
                 1,
                 format!(
-                    "environment_digest does not authenticate the canonical resolved environment; expected {actual}"
+                    "environment_digest does not match the resolved environment; expected {actual}"
                 ),
             ));
         }
@@ -1103,7 +1110,7 @@ fn validate_locked_artifacts(
                 ENVIRONMENT_LOCK_PATH,
                 1,
                 format!(
-                    "package name {:?} is not a normalized PEP 503 name",
+                    "package name '{}' is not a normalized PEP 503 name",
                     artifact.package
                 ),
             ));
@@ -1114,7 +1121,7 @@ fn validate_locked_artifacts(
                 ENVIRONMENT_LOCK_PATH,
                 1,
                 format!(
-                    "package {} has an invalid exact version {:?}",
+                    "package {} has an invalid version '{}'",
                     artifact.package, artifact.version
                 ),
             ));
@@ -1207,7 +1214,7 @@ fn validate_locked_artifacts(
                         ENVIRONMENT_LOCK_PATH,
                         1,
                         format!(
-                            "package {} requires {dependency}, but that exact artifact is not locked for target {target}",
+                            "package {} requires {dependency}, but that version is not locked for target {target}",
                             artifact.package
                         ),
                     ));

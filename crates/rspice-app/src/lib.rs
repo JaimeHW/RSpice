@@ -434,7 +434,7 @@ impl RSpiceApp {
                 != receipt.previous_receipt_digest()
         {
             return Err(
-                "project library rollback artifact does not retain the exact publication lineage prefix"
+                "project library rollback artifact is missing publications recorded before it"
                     .to_owned(),
             );
         }
@@ -442,7 +442,7 @@ impl RSpiceApp {
             != self.state.workspace.content.project.technology_binding()
         {
             return Err(
-                "project library rollback cannot cross an exact technology-binding change"
+                "project library rollback cannot undo a change to the project's technology binding"
                     .to_owned(),
             );
         }

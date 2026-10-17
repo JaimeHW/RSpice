@@ -122,7 +122,7 @@ pub(crate) enum FinalizationFailure {
         error: HardcopyPrintError,
         pages_completed: u32,
     },
-    #[error("the selected printer {printer_id:?} is no longer available")]
+    #[error("the selected printer '{printer_id}' is no longer available")]
     DeviceUnavailable {
         printer_id: String,
         pages_completed: u32,
@@ -154,7 +154,7 @@ impl FinalizationFailure {
                 pages_completed,
             } => Some(HardcopyOutcome::Failed {
                 code: HardcopyFailureCode::DeviceUnavailable,
-                message: format!("The selected printer {printer_id:?} is no longer available."),
+                message: format!("The selected printer '{printer_id}' is no longer available."),
                 pages_completed: *pages_completed,
                 retryable: true,
             }),
@@ -546,7 +546,7 @@ fn validate_desktop_handoff_metadata(
             .is_none_or(|part| part.media_type() != "text/html")
     {
         return Err(
-            "The rendered desktop print document does not match the immutable handoff plan."
+            "The rendered desktop print document does not match the prepared print plan."
                 .to_owned(),
         );
     }
@@ -657,7 +657,7 @@ fn validate_print_metadata(
     if page_count == 0 || page_count != plan.pagination().pages().len() {
         return Err(FinalizationFailure::Print {
             error: HardcopyPrintError::PrinterPublicationMismatch(
-                "rendered page count does not match the immutable print plan".to_owned(),
+                "rendered page count does not match the prepared print plan".to_owned(),
             ),
             pages_completed: 0,
         });
@@ -692,7 +692,7 @@ fn validate_media_type(
     };
     if media_type != expected {
         return Err(format!(
-            "Hardcopy export media type {media_type:?} does not match the required {expected:?}."
+            "Hardcopy export media type '{media_type}' does not match the required '{expected}'."
         ));
     }
     Ok(())
@@ -1335,7 +1335,7 @@ mod tests {
         assert_eq!(
             validate_media_type("image/png", OutputFormat::PdfVector, false),
             Err(
-                "Hardcopy export media type \"image/png\" does not match the required \"application/pdf\"."
+                "Hardcopy export media type 'image/png' does not match the required 'application/pdf'."
                     .to_owned()
             )
         );

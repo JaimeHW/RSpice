@@ -42,108 +42,106 @@ pub(super) fn qualification_plan_dialog(
         || plan.delete_target != QualificationDeleteTarget::None
         || plan.disposition_open;
     let choice = Dialog::new("Qualification plan", "Close")
-    .description(
-        "Inspect exact persisted suite, vector, source, tolerance, and runtime evidence bindings.",
-    )
-    .size(DialogSize::Transaction)
-    .fixed_height(700.0)
-    .interaction_enabled(!child_transaction_open)
-    .show(ctx, |ui| {
-        let execution_active = app
-            .state
-            .workbench
-            .model_editor
-            .qualification_execution
-            .is_some();
-        let definition_dirty = app
-            .state
-            .workbench
-            .model_editor
-            .draft
-            .as_ref()
-            .is_none_or(|draft| draft.definition_is_dirty());
-        let authoring_blocker = if app.state.workbench.safe_mode.project_read_only() {
-            Some("The project is open read-only; qualification contracts cannot be changed.")
-        } else if execution_active {
-            Some("Cancel or finish the active qualification run before changing its plan.")
-        } else if definition_dirty {
-            Some("Save the model definition before binding a qualification vector to it.")
-        } else {
-            None
-        };
-        let (action_rect, _) = ui.allocate_exact_size(
-            Vec2::new(ui.available_width().max(1.0), 38.0),
-            Sense::hover(),
-        );
-        let mut action_ui = ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(action_rect.shrink2(Vec2::new(0.0, 4.0)))
-                .layout(Layout::left_to_right(Align::Center)),
-        );
-        let new_suite = Button::new("New qualification suite…")
-            .accent()
-            .enabled(authoring_blocker.is_none())
-            .min_width(176.0)
-            .accessible_label("Create a new qualification suite and executable vector")
-            .show(&mut action_ui);
-        let new_suite = if let Some(blocker) = authoring_blocker {
-            new_suite.on_hover_text(blocker)
-        } else {
-            new_suite
-        };
-        if new_suite.clicked() {
-            app.state.workbench.model_editor.begin_qualification_suite();
-        }
+        .description("Inspect the saved suites, vectors, sources, tolerances, and runtime results.")
+        .size(DialogSize::Transaction)
+        .fixed_height(700.0)
+        .interaction_enabled(!child_transaction_open)
+        .show(ctx, |ui| {
+            let execution_active = app
+                .state
+                .workbench
+                .model_editor
+                .qualification_execution
+                .is_some();
+            let definition_dirty = app
+                .state
+                .workbench
+                .model_editor
+                .draft
+                .as_ref()
+                .is_none_or(|draft| draft.definition_is_dirty());
+            let authoring_blocker = if app.state.workbench.safe_mode.project_read_only() {
+                Some("The project is open read-only; qualification contracts cannot be changed.")
+            } else if execution_active {
+                Some("Cancel or finish the active qualification run before changing its plan.")
+            } else if definition_dirty {
+                Some("Save the model definition before binding a qualification vector to it.")
+            } else {
+                None
+            };
+            let (action_rect, _) = ui.allocate_exact_size(
+                Vec2::new(ui.available_width().max(1.0), 38.0),
+                Sense::hover(),
+            );
+            let mut action_ui = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(action_rect.shrink2(Vec2::new(0.0, 4.0)))
+                    .layout(Layout::left_to_right(Align::Center)),
+            );
+            let new_suite = Button::new("New qualification suite…")
+                .accent()
+                .enabled(authoring_blocker.is_none())
+                .min_width(176.0)
+                .accessible_label("Create a new qualification suite and executable vector")
+                .show(&mut action_ui);
+            let new_suite = if let Some(blocker) = authoring_blocker {
+                new_suite.on_hover_text(blocker)
+            } else {
+                new_suite
+            };
+            if new_suite.clicked() {
+                app.state.workbench.model_editor.begin_qualification_suite();
+            }
 
-        qualification_execution_status(ui, app);
+            qualification_execution_status(ui, app);
 
-        qualification_plan_selector(ui, &qualification, &mut plan);
-        qualification_plan_actions(
-            ui,
-            app,
-            &qualification,
-            selected_suite.as_ref(),
-            selected_vector.as_ref(),
-            &mut plan,
-        );
-        qualification_plan_inspector(
-            ui,
-            app,
-            &qualification,
-            selected_suite.as_ref(),
-            selected_vector.as_ref(),
-            &plan,
-        );
+            qualification_plan_selector(ui, &qualification, &mut plan);
+            qualification_plan_actions(
+                ui,
+                app,
+                &qualification,
+                selected_suite.as_ref(),
+                selected_vector.as_ref(),
+                &mut plan,
+            );
+            qualification_plan_inspector(
+                ui,
+                app,
+                &qualification,
+                selected_suite.as_ref(),
+                selected_vector.as_ref(),
+                &plan,
+            );
 
-        const COLUMNS: [(&str, f32); 6] = [
-            ("Suite", 0.18),
-            ("Vectors", 0.12),
-            ("Desktop", 0.17),
-            ("WASM", 0.17),
-            ("Reference error", 0.18),
-            ("Status", 0.18),
-        ];
-        let display = rows
-            .iter()
-            .map(|row| {
-                vec![
-                    DisplayCell::plain(&row.suite),
-                    DisplayCell::mono(&row.vectors),
-                    DisplayCell::plain(&row.desktop),
-                    DisplayCell::plain(&row.wasm),
-                    DisplayCell::mono(&row.reference_error),
-                    row.status.clone(),
-                ]
-            })
-            .collect::<Vec<_>>();
-        render_table(
-            ui,
-            "model-editor-qualification-dialog",
-            &COLUMNS,
-            &display,
-            "No persisted qualification plan is available.",
-        );
-    });
+            const COLUMNS: [(&str, f32); 6] = [
+                ("Suite", 0.18),
+                ("Vectors", 0.12),
+                ("Desktop", 0.17),
+                ("WASM", 0.17),
+                ("Reference error", 0.18),
+                ("Status", 0.18),
+            ];
+            let display = rows
+                .iter()
+                .map(|row| {
+                    vec![
+                        DisplayCell::plain(&row.suite),
+                        DisplayCell::mono(&row.vectors),
+                        DisplayCell::plain(&row.desktop),
+                        DisplayCell::plain(&row.wasm),
+                        DisplayCell::mono(&row.reference_error),
+                        row.status.clone(),
+                    ]
+                })
+                .collect::<Vec<_>>();
+            render_table(
+                ui,
+                "model-editor-qualification-dialog",
+                &COLUMNS,
+                &display,
+                "No persisted qualification plan is available.",
+            );
+        });
     qualification_store_plan_ui_state(ctx, plan.clone());
     if !child_transaction_open && matches!(choice, DialogChoice::Primary | DialogChoice::Cancelled)
     {
@@ -438,7 +436,7 @@ fn qualification_plan_actions(
     } else if immutable {
         workflow_purpose_note(
             ui,
-            "This suite revision is bound by evidence or a release candidate and is immutable. Run and disposition review remain available; editing requires a new suite identity.",
+            "This suite revision has recorded runs or a release candidate and cannot be edited. Running and disposition review remain available; to edit, create a suite with a new ID.",
         );
     }
 }
@@ -532,7 +530,7 @@ fn qualification_plan_inspector(
     vector: Option<&QualificationVector>,
     plan: &QualificationPlanUiState,
 ) {
-    dialog_subheading(ui, "Exact source and execution binding");
+    dialog_subheading(ui, "Source and execution");
     let Some(vector) = vector else {
         table_empty(
             ui,
@@ -611,7 +609,7 @@ fn qualification_plan_inspector(
         ui,
         "Current source",
         if qualification_vector_is_current(app, vector) {
-            "exact"
+            "current"
         } else {
             "stale"
         },
@@ -699,7 +697,7 @@ fn qualification_vector_edit_dialog(
             .is_none()
         && !plan.edit_name.trim().is_empty();
     let choice = Dialog::new("Edit qualification vector", "Replace vector")
-    .description("Replace the editable vector as one suite-revision transaction. Exact source, executable input, analysis, outputs, and tolerances remain retained unless authored through a new contract.")
+    .description("Replace the editable vector in one new suite revision. Its source, SPICE input, analysis, outputs, and tolerances are kept unless you author new ones.")
     .size(DialogSize::Transaction)
     .fixed_height(330.0)
     .secondary("Cancel")
@@ -763,7 +761,7 @@ fn qualification_delete_dialog(
     };
     let choice = Dialog::new(title, "Delete")
     .description(if deleting_suite {
-        "Delete this editable suite and its uncommitted runtime runs. Evidence and release lineage are never cascaded or rewritten."
+        "Delete this editable suite and its unsaved runs. Recorded runs and releases are not changed."
     } else {
         "Delete this vector by advancing the editable suite revision. The final vector requires explicit suite deletion."
     })
@@ -907,7 +905,7 @@ fn qualification_disposition_dialog(
         },
     );
     let choice = Dialog::new("Qualification disposition", primary)
-    .description("A disposition preserves failure or staleness and its required corrective action. It never converts a failed observation into passing evidence.")
+    .description("A disposition keeps a failure or staleness on record with its required corrective action. It never turns a failed observation into a pass.")
     .size(DialogSize::Transaction)
     .fixed_height(510.0)
     .secondary("Cancel")
@@ -946,7 +944,7 @@ fn qualification_disposition_dialog(
             );
             qualification_detail_row(
                 ui,
-                "Exact Desktop + WASM rerun",
+                "Desktop + WASM rerun",
                 if parity_passed { "passing" } else { "not yet passing" },
             );
             if disposition.required_action != QualificationVectorRequiredAction::Rerun {
@@ -980,7 +978,7 @@ fn qualification_disposition_dialog(
                     ]
                 } else {
                     &[
-                        (QualificationVectorRequiredAction::Rerun, "Rerun exact vector"),
+                        (QualificationVectorRequiredAction::Rerun, "Rerun vector"),
                         (QualificationVectorRequiredAction::Replace, "Replace vector"),
                         (QualificationVectorRequiredAction::Retire, "Retire vector"),
                     ]
@@ -1189,7 +1187,7 @@ fn qualification_execution_status(ui: &mut Ui, app: &mut RSpiceApp) {
             || format!("{} vector(s) complete", progress.completed_vectors),
             |id| {
                 format!(
-                    "Vector {} / {} · {id} · {evidence_count} cross-platform evidence record(s)",
+                    "Vector {} / {} · {id} · {evidence_count} cross-platform result record(s)",
                     progress.completed_vectors + 1,
                     progress.total_vectors
                 )
@@ -1302,7 +1300,7 @@ fn qualification_authoring_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
     }
     let write_allowed = !app.state.workbench.safe_mode.project_read_only();
     let choice = Dialog::new("New qualification suite", "Add suite")
-    .description("Author one source-bound suite and exact executable vector. The candidate changes only after the complete contract validates.")
+    .description("Author one suite and its vector for this source. The candidate changes only after the whole suite validates.")
     .size(DialogSize::Transaction)
     .fixed_height(740.0)
     .primary_on_enter(false)
@@ -1390,12 +1388,12 @@ fn qualification_authoring_form(ui: &mut Ui, app: &mut RSpiceApp, write_allowed:
         true,
     );
 
-    dialog_subheading(ui, "Exact executable SPICE input");
+    dialog_subheading(ui, "Executable SPICE input");
     qualification_multiline_field(
         ui,
         "SPICE input",
         &mut fields.executable_input,
-        "Exact SPICE input for the qualification vector",
+        "SPICE input for the qualification vector",
     );
 
     dialog_subheading(ui, "Analysis and observation contract");
@@ -1466,7 +1464,7 @@ fn qualification_authoring_form(ui: &mut Ui, app: &mut RSpiceApp, write_allowed:
     qualification_text_field(
         ui,
         frequencies,
-        "Exact frequency axis (Hz)",
+        "Frequency list (Hz)",
         &mut fields.frequencies,
         true,
         frequency_enabled,

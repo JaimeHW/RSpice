@@ -852,7 +852,7 @@ fn contract_rail(
         page_empty_state(
             ui,
             "Select a qualification suite",
-            "Choose a model family to inspect its dispositions, tolerance policy, and retained evidence.",
+            "Choose a model family to inspect its dispositions, tolerance policy, and saved results.",
         );
         return;
     };
@@ -987,7 +987,7 @@ fn contract_pane(ui: &mut Ui, selected: &QualificationModelSummary, height: f32)
                 ui,
                 "Model revision",
                 &selected.source_revision,
-                "exact source",
+                "source revision",
             );
             property(
                 ui,
@@ -1003,7 +1003,7 @@ fn contract_pane(ui: &mut Ui, selected: &QualificationModelSummary, height: f32)
             );
             property(
                 ui,
-                "Evidence set",
+                "Result set",
                 selected.evidence_digest.as_deref().unwrap_or("none"),
                 &format!("{} references", selected.references),
             );
@@ -1014,7 +1014,7 @@ fn contract_pane(ui: &mut Ui, selected: &QualificationModelSummary, height: f32)
                 selected
                     .correlation_evidence_digest
                     .as_deref()
-                    .unwrap_or("no evidence"),
+                    .unwrap_or("no results"),
             );
             property(
                 ui,

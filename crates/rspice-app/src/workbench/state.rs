@@ -107,7 +107,7 @@ impl Workspace {
             // would give one thing two names in one shell.
             Self::Stimulus => "Stimulus Library",
             Self::Results => "Result document",
-            Self::Verify => "Verification evidence",
+            Self::Verify => "Verification results",
             Self::Models => "Model binding",
             Self::Netlist => "Netlist & Script Editor",
         }
@@ -974,8 +974,8 @@ impl SpecificationEvidenceFilter {
         match self {
             Self::All => "All requirements",
             Self::Failing => "Failing only",
-            Self::WithoutEvidence => "Without evidence",
-            Self::Partial => "Partial evidence",
+            Self::WithoutEvidence => "Without results",
+            Self::Partial => "Measured at several points",
         }
     }
 }

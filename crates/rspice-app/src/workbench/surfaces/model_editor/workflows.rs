@@ -62,13 +62,13 @@ pub(super) fn save_revision_workflow(
         .as_ref()
         .is_some_and(|draft| draft.is_dirty());
     let choice = Dialog::new("Save model revision", "Save reviewed revision")
-    .description("Review the exact candidate delta and source binding before publishing one guarded project/model revision.")
+    .description("Review the changes and the source before saving one undoable project and model revision.")
     .size(DialogSize::Transaction)
     .fixed_height(430.0)
     .primary_enabled(writable && dirty)
     .secondary("Cancel")
     .show(ctx, |ui| {
-        workflow_purpose_note(ui, "Saving creates one versioned engineering revision. Existing immutable releases and qualification evidence are never rewritten.");
+        workflow_purpose_note(ui, "Saving creates one new model revision. Existing releases and qualification results are never changed.");
         dialog_subheading(ui, "Candidate revision contract");
         render_table(
             ui,
@@ -174,7 +174,7 @@ pub(super) fn validation_review_workflow(
         "Validate model candidate",
         if prepared { "Close report" } else { "Run validation" },
     )
-    .description("Review source identity, typed schema, physical bounds, qualification structure, and retained platform evidence without changing the model definition.")
+    .description("Check the source, parameter schema, physical bounds, qualification structure, and saved platform results without changing the model definition.")
     .size(DialogSize::Transaction)
     .fixed_height(470.0)
     ;
@@ -208,7 +208,7 @@ pub(super) fn validation_review_body(
 ) {
     workflow_purpose_note(
         ui,
-        "Validation is bound to the exact candidate source and current project revision. A failed check cannot be accepted as release evidence.",
+        "Validation applies to this candidate source and the current project revision. A failed check cannot be accepted for release.",
     );
     dialog_subheading(ui, "Validation report");
     render_table(
@@ -219,7 +219,7 @@ pub(super) fn validation_review_body(
         if prepared {
             "No model validation report is available."
         } else {
-            "Run validation to produce an exact candidate report."
+            "Run validation to produce a report for this candidate."
         },
     );
     if let Some(error) = request.error.as_deref() {
@@ -274,7 +274,7 @@ pub(super) fn validation_review_rows(
         validation_row(
             "Source identity and digest",
             if valid {
-                "exact source and project revisions bound"
+                "source and project revisions match"
             } else {
                 "binding rejected"
             },
@@ -335,13 +335,13 @@ pub(super) fn qualification_run_workflow(
 ) {
     let runnable = Command::ModelRunQualificationTests.is_enabled(app);
     let choice = Dialog::new("Run model qualification tests", "Queue qualification tests")
-    .description("Confirm the exact clean source, executable suites, current runtime target, and evidence-retention contract before dispatch.")
+    .description("Confirm the saved source, the suites to run, the runtime target, and how results are kept before starting.")
     .size(DialogSize::Transaction)
     .fixed_height(430.0)
     .primary_enabled(runnable)
     .secondary("Cancel")
     .show(ctx, |ui| {
-        workflow_purpose_note(ui, "Qualification publishes only complete suite runs. Cross-platform evidence is assembled only from exact matching Desktop and WebAssembly source bindings.");
+        workflow_purpose_note(ui, "Qualification keeps only complete suite runs. Cross-platform results come only from Desktop and WebAssembly runs of the same source.");
         dialog_subheading(ui, "Execution contract");
         render_table(
             ui,
@@ -441,9 +441,9 @@ pub(super) fn qualification_run_rows(
             }),
         ],
         vec![
-            DisplayCell::plain("Retained evidence"),
+            DisplayCell::plain("Saved results"),
             DisplayCell::plain(format!(
-                "{} existing cross-platform record(s) · immutable completed suites",
+                "{} existing cross-platform record(s) · completed suites are locked",
                 exact_evidence
             )),
         ],

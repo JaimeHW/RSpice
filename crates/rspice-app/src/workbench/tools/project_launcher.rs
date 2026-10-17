@@ -196,7 +196,7 @@ fn handle_launcher_netlist_drop(ctx: &Context, app: &mut RSpiceApp) -> bool {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            Err("Browser drop did not provide immutable file bytes.".to_owned())
+            Err("The browser did not provide the dropped file's contents.".to_owned())
         }
     };
     match bytes {

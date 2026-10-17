@@ -78,7 +78,7 @@ impl SimulationRun {
         let id = self.id;
         self.data.finish_lifecycle(terminal, || {
             started
-                .ok_or_else(|| format!("simulation run {id} has no live timing evidence"))
+                .ok_or_else(|| format!("simulation run {id} has no recorded start time"))
                 .map(|started| started.elapsed())
         })?;
         if !was_terminal {

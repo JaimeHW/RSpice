@@ -281,7 +281,7 @@ fn execute_qualification_vector(
                     platform,
                     QualificationFailureStage::Measurement,
                     "non-finite-output",
-                    format!("output {:?} produced a non-finite value", output.quantity),
+                    format!("output '{}' produced a non-finite value", output.quantity),
                 );
             }
             Err(message) => {
@@ -389,13 +389,13 @@ fn measure_qualification_output(
     match &output.probe {
         QualificationProbe::NodeVoltage { node } => result
             .try_voltage_named(node)
-            .ok_or_else(|| format!("node voltage {:?} is unavailable", node)),
+            .ok_or_else(|| format!("node voltage '{}' is unavailable", node)),
         QualificationProbe::BranchCurrent { branch } => result
             .branch_current_named(branch)
-            .ok_or_else(|| format!("branch current {:?} is unavailable", branch)),
+            .ok_or_else(|| format!("branch current '{}' is unavailable", branch)),
         QualificationProbe::DcObservable { expression } => result
             .try_dc_observable_named(expression)
-            .ok_or_else(|| format!("DC observable {:?} is unavailable", expression)),
+            .ok_or_else(|| format!("DC observable '{}' is unavailable", expression)),
         QualificationProbe::SweepValue => sweep_value
             .ok_or_else(|| "sweep value is unavailable for an operating-point result".to_owned()),
         _ => Err("output probe is incompatible with a DC result".to_owned()),
@@ -453,24 +453,24 @@ fn measure_ac_output(
             .node_names
             .iter()
             .position(|candidate| candidate.eq_ignore_ascii_case(node))
-            .ok_or_else(|| format!("AC node voltage {node:?} is unavailable"))?;
+            .ok_or_else(|| format!("AC node voltage '{node}' is unavailable"))?;
         point
             .voltages
             .get(index)
             .copied()
-            .ok_or_else(|| format!("AC node voltage {node:?} is unavailable"))
+            .ok_or_else(|| format!("AC node voltage '{node}' is unavailable"))
     };
     let branch_current = |branch: &str| -> Result<num_complex::Complex64, String> {
         let index = point
             .branch_names
             .iter()
             .position(|candidate| candidate.eq_ignore_ascii_case(branch))
-            .ok_or_else(|| format!("AC branch current {branch:?} is unavailable"))?;
+            .ok_or_else(|| format!("AC branch current '{branch}' is unavailable"))?;
         point
             .currents
             .get(index)
             .copied()
-            .ok_or_else(|| format!("AC branch current {branch:?} is unavailable"))
+            .ok_or_else(|| format!("AC branch current '{branch}' is unavailable"))
     };
 
     match probe {
@@ -528,7 +528,7 @@ fn measure_transient_output(
     match probe {
         QualificationProbe::TransientNodeVoltage { node } => {
             result.try_voltage_at_named(node, index).ok_or_else(|| {
-                format!("transient node voltage {node:?} is unavailable at point {index}")
+                format!("transient node voltage '{node}' is unavailable at point {index}")
             })
         }
         QualificationProbe::TransientBranchCurrent { branch } => result
@@ -536,7 +536,7 @@ fn measure_transient_output(
             .and_then(|waveform| waveform.get(index))
             .copied()
             .ok_or_else(|| {
-                format!("transient branch current {branch:?} is unavailable at point {index}")
+                format!("transient branch current '{branch}' is unavailable at point {index}")
             }),
         QualificationProbe::TimeValue => result
             .time

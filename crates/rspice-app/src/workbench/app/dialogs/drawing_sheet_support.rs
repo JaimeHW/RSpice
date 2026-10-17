@@ -943,7 +943,7 @@ fn title_block_field_notes(ui: &mut Ui, error: Option<&str>) {
     let notes = [
         (
             "Overflow",
-            "Long values keep their full saved text. The printed cell truncates with an ellipsis and Page Setup reports the exact field; RSpice never shrinks one field below the template's type size.",
+            "Long values keep their full saved text. The printed cell truncates with an ellipsis and Page Setup names the field; RSpice never shrinks one field below the template's type size.",
         ),
         (
             "Localization",

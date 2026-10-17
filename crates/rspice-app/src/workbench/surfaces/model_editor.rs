@@ -1225,7 +1225,7 @@ fn section_qualification(value: &ModelSectionQualification) -> DisplayCell {
             if evidence_digest.is_some() {
                 DisplayCell::plain("qualified")
             } else {
-                DisplayCell::problem("evidence missing", Problem::Failure)
+                DisplayCell::problem("record missing", Problem::Failure)
             }
         }
         ModelSectionQualification::Failed { summary } => {
@@ -1401,7 +1401,7 @@ fn qualification_table(ui: &mut Ui, app: &RSpiceApp, records: &PersistedModelRec
         "model-editor-qualification-table",
         &COLUMNS,
         &rows,
-        "No persisted golden-vector suites or platform evidence are available for this model.",
+        "No golden-vector suites or platform results are saved for this model.",
     );
 }
 
@@ -1628,7 +1628,7 @@ fn release_panel(
     }
 
     let note_clip = note_rect.shrink2(Vec2::new(12.0, 10.0));
-    let note = "Promotion creates a new immutable model revision. Existing projects remain pinned until an explicit dependency update and qualification review.";
+    let note = "Promotion creates a new read-only model revision. Existing projects stay pinned until their dependency is updated and qualification is reviewed.";
     let galley = ui.painter().layout(
         note.to_owned(),
         theme::sans(tokens::FS_0, FontWeight::Regular),
@@ -1910,7 +1910,7 @@ fn release_comparison_dialog(
         |draft| draft.compare_release(&selected_release),
     );
     let choice = Dialog::new("Compare model with approved release", "Close")
-    .description("Compare the open candidate with an immutable release using retained source bytes and exact qualification evidence.")
+    .description("Compare the open candidate with a released revision, using the saved source and qualification results.")
     .size(DialogSize::Transaction)
     .fixed_height(680.0)
     .show(ctx, |ui| {
@@ -1992,7 +1992,7 @@ fn release_comparison_dialog(
             &COLUMNS,
             &rows,
             comparison.as_ref().err().map_or(
-                "No immutable model release is persisted for comparison.",
+                "No released model revision is saved for comparison.",
                 String::as_str,
             ),
         );

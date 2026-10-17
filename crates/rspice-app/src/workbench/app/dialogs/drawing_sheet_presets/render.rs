@@ -793,7 +793,7 @@ fn preset_editor_form(
                     "Saved with this project and available to collaborators."
                 }
                 DrawingSheetPresetScope::User => {
-                    "Saved in personal Preferences. A project captures an exact copy before use."
+                    "Saved in personal Preferences. A project saves its own copy before using it."
                 }
                 DrawingSheetPresetScope::Organization => {
                     "Organization definitions are managed and read-only."
@@ -859,7 +859,7 @@ fn preset_editor_form(
         editor_section(ui, "Stored definition", |form| {
             key_value(
                 form,
-                "Exact portrait size",
+                "Portrait size",
                 &portrait_dimensions_from_format(&draft.last_valid_preview),
             );
             key_value(
@@ -868,7 +868,7 @@ fn preset_editor_form(
                 draft.source_id.as_deref().unwrap_or("\u{2014}"),
             );
             form.weak(
-                "Rename preserves the stable identity, exact physical dimensions, border, zones, title block, and every authored snapshot.",
+                "Renaming keeps the identity, physical dimensions, border, zones, title block, and every copy saved in sheets.",
             );
         });
     }
@@ -966,7 +966,7 @@ fn import_body(ui: &mut Ui, transfer: &mut PresetTransferState) -> Option<Transf
         .filter(|candidate| candidate.selected && candidate.existing_id.is_some())
         .count();
     let banner_body = if transfer.import_candidates.is_empty() {
-        "RSpice validates schema, digest, identities, exact dimensions, and template dependencies before any project-owned candidate can be selected."
+        "RSpice checks the file format, digest, identities, dimensions, and template dependencies before any candidate can be selected for the project."
             .to_owned()
     } else {
         format!(
@@ -1463,7 +1463,7 @@ fn frame_label(frame: StartingFrame) -> &'static str {
 fn resolution_label(resolution: ImportResolution) -> &'static str {
     match resolution {
         ImportResolution::NewIdentity => "Import as project preset",
-        ImportResolution::MatchesByDigest => "Map exact existing definition",
+        ImportResolution::MatchesByDigest => "Map to identical existing definition",
         ImportResolution::KeepBothRename => "Keep both and rename import",
         ImportResolution::MapExisting => "Map to existing definition",
         ImportResolution::ReplaceManagedDependencies => "Replace managed dependencies",

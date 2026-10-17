@@ -228,8 +228,10 @@ pub trait HdlOutputSink: Send + Sync + std::fmt::Debug {
 /// the run (design P2 section 4.3).
 ///
 /// Bounded by text bytes. The record that would cross the bound is replaced
-/// by one explicit truncation warning, and everything after it is dropped, so
-/// an overflow is never silent and never unbounded.
+/// by one explicit truncation warning, and the output after it is dropped, so
+/// an overflow is never silent and never unbounded. `$error` and `$fatal`
+/// records outlast the bound, because they are the testbench's verdict: the
+/// first 64 past it are kept whole and the rest are counted in one warning.
 #[derive(Debug)]
 pub struct HdlOutputCollector {
     limit: usize,
@@ -241,6 +243,10 @@ struct HdlCollectorState {
     records: Vec<HdlOutputRecord>,
     bytes: usize,
     truncated: bool,
+    /// `$error` and `$fatal` records kept past the byte bound.
+    errors_kept_past_bound: usize,
+    /// The first error dropped past those, and how many were.
+    dropped_errors: Option<(HdlOutputRecord, u64)>,
 }
 
 impl Default for HdlOutputCollector {
@@ -252,6 +258,9 @@ impl Default for HdlOutputCollector {
 impl HdlOutputCollector {
     /// The default bound: 64 MiB of text.
     pub(crate) const DEFAULT_MAX_BYTES: usize = 64 << 20;
+    /// How many `$error` and `$fatal` records past the byte bound are kept
+    /// whole; later ones are only counted.
+    const ERRORS_KEPT_PAST_BOUND: usize = 64;
 
     pub fn new() -> Self {
         Self::default()
@@ -272,35 +281,67 @@ impl HdlOutputCollector {
     }
 
     /// Take the records delivered so far, in delivery order. The byte bound
-    /// covers the whole run; an overflow ends in one truncation record.
+    /// covers the whole run; an overflow is marked by one truncation record,
+    /// and errors dropped past it are counted in one record at the end.
     pub fn take(&self) -> Vec<HdlOutputRecord> {
-        std::mem::take(&mut self.state().records)
+        let mut state = self.state();
+        if let Some((first, count)) = state.dropped_errors.take() {
+            state.records.push(HdlOutputRecord {
+                stream: HdlStream::Diagnostic {
+                    severity: HdlSeverity::Warning,
+                },
+                text: if count == 1 {
+                    "1 further error past the HDL output bound was dropped".to_owned()
+                } else {
+                    format!("{count} further errors past the HDL output bound were dropped")
+                },
+                ..first
+            });
+        }
+        std::mem::take(&mut state.records)
     }
 }
 
 impl HdlOutputSink for HdlOutputCollector {
     fn emit(&self, record: &HdlOutputRecord) {
         let mut state = self.state();
-        if state.truncated {
-            return;
-        }
-        let bytes = state.bytes.saturating_add(record.text.len());
-        if bytes > self.limit {
+        if !state.truncated {
+            let bytes = state.bytes.saturating_add(record.text.len());
+            if bytes <= self.limit {
+                state.bytes = bytes;
+                state.records.push(record.clone());
+                return;
+            }
             state.truncated = true;
             state.records.push(HdlOutputRecord {
                 stream: HdlStream::Diagnostic {
                     severity: HdlSeverity::Warning,
                 },
                 text: format!(
-                    "HDL output exceeded its {} byte bound here; later output was dropped",
+                    "HDL output exceeded its {} byte bound here; later output other than errors was dropped",
                     self.limit
                 ),
                 ..record.clone()
             });
+        }
+        // A testbench whose transcript ran away still fails on its errors.
+        if !matches!(
+            record.stream,
+            HdlStream::Diagnostic {
+                severity: HdlSeverity::Error | HdlSeverity::Fatal
+            }
+        ) {
             return;
         }
-        state.bytes = bytes;
-        state.records.push(record.clone());
+        if state.errors_kept_past_bound < Self::ERRORS_KEPT_PAST_BOUND {
+            state.errors_kept_past_bound += 1;
+            state.records.push(record.clone());
+        } else {
+            state
+                .dropped_errors
+                .get_or_insert_with(|| (record.clone(), 0))
+                .1 += 1;
+        }
     }
 }
 
@@ -1441,6 +1482,63 @@ mod timeint_config_tests {
         assert_eq!(
             HdlOutputCollector::new().limit,
             HdlOutputCollector::DEFAULT_MAX_BYTES
+        );
+    }
+
+    /// A testbench that reports an error after a runaway transcript still
+    /// fails: its `$error` records outlast the text bound, the first ones
+    /// whole and the rest counted.
+    #[test]
+    fn the_hdl_collector_keeps_errors_past_its_bound() {
+        let error = |text: &str| HdlOutputRecord {
+            stream: HdlStream::Diagnostic {
+                severity: HdlSeverity::Error,
+            },
+            ..hdl_record(text)
+        };
+        let is_error = |record: &HdlOutputRecord| {
+            record.stream
+                == HdlStream::Diagnostic {
+                    severity: HdlSeverity::Error,
+                }
+        };
+        let collector = HdlOutputCollector::bounded(9);
+        collector.emit(&hdl_record("abcdefgh\n"));
+        // The record that crosses the bound is itself an error.
+        collector.emit(&error("first\n"));
+        collector.emit(&hdl_record("runaway\n"));
+        for _ in 0..HdlOutputCollector::ERRORS_KEPT_PAST_BOUND + 2 {
+            collector.emit(&error("again\n"));
+        }
+
+        let records = collector.take();
+        assert_eq!(records[0].text, "abcdefgh\n");
+        assert!(records[1].text.contains("9 byte bound"), "{:?}", records[1]);
+        assert_eq!(records[2].text, "first\n");
+        assert!(records.iter().all(|record| record.text != "runaway\n"));
+        assert_eq!(
+            records.iter().filter(|record| is_error(record)).count(),
+            HdlOutputCollector::ERRORS_KEPT_PAST_BOUND
+        );
+        let count = records.last().expect("the dropped errors are counted");
+        assert_eq!(
+            count.stream,
+            HdlStream::Diagnostic {
+                severity: HdlSeverity::Warning
+            }
+        );
+        assert_eq!(
+            count.text,
+            "3 further errors past the HDL output bound were dropped"
+        );
+
+        // A later take counts only what was dropped since.
+        collector.emit(&error("late\n"));
+        let records = collector.take();
+        assert_eq!(records.len(), 1, "{records:?}");
+        assert_eq!(
+            records[0].text,
+            "1 further error past the HDL output bound was dropped"
         );
     }
 

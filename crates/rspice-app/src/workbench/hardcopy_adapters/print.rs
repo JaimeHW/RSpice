@@ -32,6 +32,9 @@ use rspice_hardcopy_contract::{
     RenderTarget, ResolvedOrientation,
 };
 
+mod messages;
+use messages::{duplex_mode_text, platform_unavailable_text};
+
 const CAPABILITY_SCHEMA_VERSION: u32 = 1;
 const MAX_PLATFORM_PRINTERS: usize = 4_096;
 const MAX_CAPABILITIES_PER_DEVICE: usize = 4_096;
@@ -589,7 +592,7 @@ impl HardcopyCancellationToken {
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub enum HardcopyPrintError {
-    #[error("hardcopy platform unavailable: {0:?}")]
+    #[error("printing is not available: {}", platform_unavailable_text(.0))]
     #[cfg_attr(target_os = "windows", allow(dead_code))]
     PlatformUnavailable(HardcopyPlatformUnavailableReason),
     #[error("invalid printer capability snapshot: {0}")]
@@ -601,7 +604,7 @@ pub enum HardcopyPrintError {
     BrowserPrintPlanRequired,
     #[error("printer capability snapshot belongs to {observed}, expected {expected}")]
     PrinterIdentityMismatch { expected: String, observed: String },
-    #[error("printer capabilities changed after the immutable plan was compiled")]
+    #[error("printer capabilities changed after the print plan was prepared")]
     PrinterCapabilitiesChanged,
     #[error("printer does not support the planned paper dimensions")]
     UnsupportedPaper,
@@ -609,7 +612,7 @@ pub enum HardcopyPrintError {
         "the selected native printer cannot switch physical media or orientation between authored sheets in one job"
     )]
     MixedAuthoredMediaUnsupported,
-    #[error("selected printer paper identity {0:?} is invalid or unavailable")]
+    #[error("selected printer paper '{0}' is invalid or unavailable")]
     UnsupportedPaperIdentity(String),
     #[error("planned printable ink lies outside the selected driver printable rectangle")]
     PlannedInkOutsidePrintableArea,
@@ -617,15 +620,15 @@ pub enum HardcopyPrintError {
     UnsupportedMediaSource(String),
     #[error("printer does not support the planned {0} DPI resolution")]
     UnsupportedResolution(u16),
-    #[error("printer does not support the planned {0:?} duplex mode")]
+    #[error("printer does not support the planned {} printing", duplex_mode_text(.0))]
     UnsupportedDuplex(DuplexMode),
     #[error("printer supports at most {supported} copies, but the plan requires {requested}")]
     UnsupportedCopyCount { requested: u16, supported: u16 },
     #[error("printer does not support collation")]
     UnsupportedCollation,
-    #[error("rendered printer publication does not match the immutable plan: {0}")]
+    #[error("rendered printer output does not match the print plan: {0}")]
     PrinterPublicationMismatch(String),
-    #[error("browser print document does not match the immutable plan: {0}")]
+    #[error("browser print document does not match the print plan: {0}")]
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     BrowserPublicationMismatch(String),
     #[error("{operation} failed with Windows error {code}")]
@@ -647,7 +650,7 @@ pub enum HardcopyPrintError {
         operation: &'static str,
         message: String,
     },
-    #[error("could not authenticate capability snapshot: {0}")]
+    #[error("could not verify the printer capabilities: {0}")]
     Digest(String),
 }
 
@@ -1257,8 +1260,7 @@ fn validate_print_document_publication<'a>(
         || html.to_ascii_lowercase().contains("<script")
     {
         return Err(HardcopyPrintError::BrowserPublicationMismatch(
-            "desktop print handoff is not the expected self-contained authenticated document"
-                .to_owned(),
+            "desktop print handoff is not the expected self-contained document".to_owned(),
         ));
     }
     Ok(html)
@@ -1567,8 +1569,7 @@ mod browser_backend {
             || html.contains("<script")
         {
             return Err(HardcopyPrintError::BrowserPublicationMismatch(
-                "browser print HTML is not the expected self-contained authenticated document"
-                    .to_owned(),
+                "browser print HTML is not the expected self-contained document".to_owned(),
             ));
         }
 

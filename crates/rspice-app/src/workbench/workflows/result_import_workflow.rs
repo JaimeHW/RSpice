@@ -539,7 +539,7 @@ pub(crate) fn show_result_import_dialog(ctx: &egui::Context, state: &mut AppStat
                     );
                     ui.add_space(4.0);
                     ui.label(
-                        "Review the detected structure and mapping before RSpice creates immutable external result history.",
+                        "Review the detected structure and mapping before RSpice adds these results to the project history.",
                     );
                     ui.add_space(10.0);
                     result_import_stage_header(ui, draft.stage);
@@ -791,11 +791,7 @@ fn result_import_validate_page(ui: &mut egui::Ui, draft: &ResultImportDialogStat
             );
             result_import_summary_row(ui, "Included signals", &selected.to_string());
             result_import_summary_row(ui, "Samples per signal", &draft.sample_count.to_string());
-            result_import_summary_row(
-                ui,
-                "Retained evidence",
-                "Immutable · external legacy-unattributed",
-            );
+            result_import_summary_row(ui, "Saved as", "Read-only · imported, not from a run");
         });
     ui.add_space(12.0);
     for note in &draft.notes {

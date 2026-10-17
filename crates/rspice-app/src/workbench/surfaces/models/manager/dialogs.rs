@@ -26,8 +26,7 @@ pub(super) fn render_dialog(
         } => {
             let mut selection = selected.min(candidates.len().saturating_sub(1));
             const NOTICE: &str = "Choose the one SPICE or Spectre source that owns this import. \
-                                  Only its reachable include closure will be authenticated and \
-                                  retained.";
+                                  Only that file and the files it includes are read and saved.";
             let choice = Dialog::new("Choose model-library entry", "Import")
                 .description(NOTICE)
                 .size(DialogSize::Transaction)
@@ -216,7 +215,7 @@ pub(super) fn render_dialog(
                     return;
                 }
                 ui.label(if attach {
-                    "RSpice will authenticate the pack entry and publish its retained include closure as one undoable project revision."
+                    "RSpice will verify the pack entry and add it, with the files it includes, as one undoable project revision."
                 } else {
                     "RSpice will remove the attached source as one undoable project revision. Existing instance references may become unresolved."
                 });
@@ -256,7 +255,7 @@ pub(super) fn render_dialog(
             }
             let choice = dialog.show(ui.ctx(), |ui| {
                 ui.label(
-                    "The exact installed source file will be parsed, license-checked, pinned by digest, and published as one undoable project revision.",
+                    "The installed source file will be parsed, license-checked, pinned by digest, and added as one undoable project revision.",
                 );
                 ui.label(
                     RichText::new(format!("{part_name} · {pack_id}"))
@@ -302,7 +301,7 @@ pub(super) fn render_dialog(
             .ghost("Cancel")
             .show_with_initial_body_focus(ui.ctx(), |ui| {
                 ui.label(
-                    "RSpice will copy the signed pin, netlist, and typed form contract into one writable project cell. The signed implementation binding remains exact and read-only.",
+                    "RSpice will copy the signed pin, netlist, and form definitions into one writable project cell. The signed implementation binding stays read-only.",
                 );
                 property(ui, "Source", &format!("{package_id}/{source_cell}"), "signed PDK");
                 ui.add_space(6.0);
@@ -379,8 +378,8 @@ pub(super) fn render_dialog(
                 if has_record {
                     "The current decision is retained until you publish a replacement or clear it."
                 } else {
-                    "It cannot execute until one is published as the authenticated \r
-                     provider: choose a provider and enter an audit reason."
+                    "It cannot simulate until one provider is published: choose a provider \
+                     and enter an audit reason."
                 }
             );
             let mut dialog = Dialog::new(
@@ -515,7 +514,7 @@ pub(super) fn render_dialog(
                 .ghost("Cancel")
                 .show_with_initial_body_focus(ui.ctx(), |ui| {
                     ui.label(
-                        "The corner is retained as an unbound authoring draft in one guarded project revision. Bind an explicit authenticated section before execution.",
+                        "The corner is saved as an unbound draft in one undoable project revision. Bind a source section before simulating.",
                     );
                     ui.label(RichText::new(&library).monospace().strong());
                     ui.add_space(6.0);
@@ -749,19 +748,16 @@ pub(super) fn render_dialog(
             // dialog with the file should be comparing the same string.
             let section_labels = sections.clone();
             let mut dialog = Dialog::new("Bind corner section", "Bind section")
-                .description(format!(
-                    "Bind one authenticated source section to {library} / {corner}."
-                ))
+                .description(format!("Bind one source section to {library} / {corner}."))
                 .size(DialogSize::Transaction)
                 .primary_enabled(!section.is_empty() && !sections.is_empty())
                 .ghost("Cancel");
             if sections.is_empty() {
-                dialog =
-                    dialog.hint("The authenticated source catalog defines no non-empty sections.");
+                dialog = dialog.hint("The library's source defines no non-empty sections.");
             }
             let choice = dialog.show(ui.ctx(), |ui| {
                 ui.label(
-                    "Choose an explicit functional domain and one section from the authenticated source catalog. No name inference is used.",
+                    "Choose a functional domain and one section from the library's source. Section names are not guessed.",
                 );
                 ui.label(
                     RichText::new(format!("{library} / {corner}"))
@@ -784,7 +780,7 @@ pub(super) fn render_dialog(
                     }
                 });
                 ui.horizontal(|ui| {
-                    ui.label("Authenticated section");
+                    ui.label("Source section");
                     let selected = if section.is_empty() {
                         "Select section".to_owned()
                     } else {
@@ -793,7 +789,7 @@ pub(super) fn render_dialog(
                     if let Some(index) = widgets::select(
                         ui,
                         "models-corner-section-name",
-                        "Authenticated section",
+                        "Source section",
                         &selected,
                         &section_labels,
                         260.0,

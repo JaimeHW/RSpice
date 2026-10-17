@@ -205,7 +205,7 @@ pub(super) fn validate_import_candidate(
         }
         Err(error) => issues.push(NetlistImportIssue {
             severity: NetlistImportIssueSeverity::Blocking,
-            message: format!("Canonical parse/include validation failed: {error}"),
+            message: format!("Parsing the deck and its includes failed: {error}"),
         }),
     }
     issues
@@ -305,7 +305,7 @@ pub(super) fn stage_netlist_import(
     }
     if detected_dialect == crate::state::NetlistSourceDialect::Pspice {
         transformations.push(
-            "The pspice-declarative/2 profile requires at least one pre-.END .PROBE, .PROBE64, or .PROBE/CSDF source marker. Ordinary analyses plus qualified .TF, .STEP, .FOUR, model DEV/LOT, .DISTRIBUTION, selected-analysis .MC collation, and E/G CHEBYSHEV LP/HP/BP/BR sources retain their source form. CHEBYSHEV uses an exact minimum-order analog Type-I realization; typed .MC LIST/OUTPUT selection is retained as bounded immutable result data without automatic file writes. Missing evidence, unsupported .STIMULUS or FREQ sources, and unknown output-format commands fail closed."
+            "The pspice-declarative/2 profile requires at least one .PROBE, .PROBE64, or .PROBE/CSDF line before .END. Ordinary analyses plus .TF, .STEP, .FOUR, model DEV/LOT, .DISTRIBUTION, .MC on a selected analysis, and E/G CHEBYSHEV LP/HP/BP/BR sources keep their source form. CHEBYSHEV sources become minimum-order analog Type-I filters; .MC LIST/OUTPUT selections are kept with the run's results and never written to files automatically. A missing .PROBE line, unsupported .STIMULUS or FREQ sources, and unknown output-format commands are refused."
                 .to_owned(),
         );
     }
@@ -331,7 +331,7 @@ pub(super) fn stage_netlist_import(
         Ok(dependencies) => {
             if !dependencies.is_empty() {
                 transformations.push(format!(
-                    "Resolved and retained {} native include member(s) as an authenticated project closure.",
+                    "Resolved {} include file(s) and stored them with the project.",
                     dependencies.len()
                 ));
             }
@@ -387,7 +387,7 @@ fn resolve_plain_import_dependencies(
         return Ok(Vec::new());
     }
     let root_path = root_path.ok_or_else(|| {
-        "This deck has include directives but no reopenable native source origin. Select the source through Open, or import an authenticated .rspice-netlist.zip bundle."
+        "This deck has include directives but no file location to resolve them from. Select the source through Open, or import a .rspice-netlist.zip bundle."
             .to_owned()
     })?;
     let root_path = std::fs::canonicalize(root_path).map_err(|error| {
@@ -425,7 +425,7 @@ fn resolve_plain_import_dependencies(
         Ok(Vec::new())
     } else {
         Err(
-            "Browser import cannot acquire neighboring include files from one file grant. Import an authenticated .rspice-netlist.zip bundle containing the complete dependency closure."
+            "The browser cannot read the include files next to a selected file. Import a .rspice-netlist.zip bundle that contains every included file."
                 .to_owned(),
         )
     }
@@ -474,7 +474,7 @@ impl NativeDependencyResolver {
             };
             let canonical = std::fs::canonicalize(&candidate).map_err(|error| {
                 format!(
-                    "Could not resolve include {requested:?} from '{}': {error}",
+                    "Could not resolve include '{requested}' from '{}': {error}",
                     source_directory.display()
                 )
             })?;
@@ -486,7 +486,7 @@ impl NativeDependencyResolver {
             }
             if !self.retained_paths.insert(canonical.clone()) {
                 return Err(format!(
-                    "The physical include '{}' is referenced more than once. Use a single canonical include edge so the retained dependency graph is unambiguous.",
+                    "The include file '{}' is referenced more than once. Include it from one place only so each dependency has a single parent.",
                     canonical.display()
                 ));
             }
@@ -681,7 +681,7 @@ pub(super) fn stage_netlist_bundle_import(
     if bundle.dependencies.is_empty() {
         issues.push(NetlistImportIssue {
             severity: NetlistImportIssueSeverity::Advisory,
-            message: "The authenticated bundle contains no retained dependency members.".to_owned(),
+            message: "The bundle contains no dependency files.".to_owned(),
         });
     }
     let artifact_stem = std::path::Path::new(&archive_display_name)
@@ -695,7 +695,7 @@ pub(super) fn stage_netlist_bundle_import(
     let transformations = vec![
         "Verified the RSpice bundle schema, ZIP structure, member declarations, CRC-32 values, and SHA-256 content identities before review.".to_owned(),
         format!(
-            "Reconstructed and authenticated the retained dependency closure ({dependency_count} member{}).",
+            "Rebuilt the deck's dependencies from the bundle ({dependency_count} file{}).",
             if dependency_count == 1 { "" } else { "s" }
         ),
         "Validated the fully expanded retained deck without consulting the host filesystem or network.".to_owned(),
@@ -721,7 +721,7 @@ pub(super) fn stage_netlist_bundle_import(
         detected_dialect: crate::state::NetlistSourceDialect::RSpice,
         selected_dialect: crate::state::NetlistSourceDialect::RSpice,
         detection_evidence: vec![
-            "Authenticated retained/generated.spice from rspice-generated-netlist-bundle/v1."
+            "Found retained/generated.spice in an rspice-generated-netlist-bundle/v1 archive."
                 .to_owned(),
         ],
         transformations,
@@ -759,14 +759,14 @@ pub(crate) fn begin_owned_netlist_profile_review(state: &mut AppState) -> bool {
             .as_ref()
             .ok_or_else(|| "No owned netlist descriptor is available.".to_owned())?;
         if !descriptor.execution_profile_review_required() {
-            return Err("The owned source already has an exact execution profile.".to_owned());
+            return Err("The owned source already has an accepted execution profile.".to_owned());
         }
         let document = state
             .workspace
             .content
             .netlist_document
             .as_ref()
-            .ok_or_else(|| "No canonical owned netlist document is available.".to_owned())?;
+            .ok_or_else(|| "No owned netlist document is available.".to_owned())?;
         let source = state
             .workspace
             .content
@@ -774,9 +774,7 @@ pub(crate) fn begin_owned_netlist_profile_review(state: &mut AppState) -> bool {
             .as_ref()
             .filter(|source| source.as_str() == document.source())
             .cloned()
-            .ok_or_else(|| {
-                "Owned netlist bytes do not match their canonical document projection.".to_owned()
-            })?;
+            .ok_or_else(|| "The owned netlist text does not match its document.".to_owned())?;
         let dependencies = document.dependencies().to_vec();
         let validation_source = if dependencies.is_empty() {
             source.clone()
@@ -801,7 +799,7 @@ pub(crate) fn begin_owned_netlist_profile_review(state: &mut AppState) -> bool {
             issues.push(NetlistImportIssue {
                 severity: NetlistImportIssueSeverity::Advisory,
                 message: format!(
-                    "{} is quarantined until the exact versioned execution profile is accepted.",
+                    "{} cannot run until its execution profile is accepted.",
                     selected_dialect.label()
                 ),
             });
@@ -863,8 +861,7 @@ pub(crate) fn begin_owned_netlist_profile_review(state: &mut AppState) -> bool {
         selected_dialect,
         detection_evidence,
         transformations: vec![
-            "Retained the exact project-owned root source and authenticated dependency bytes."
-                .to_owned(),
+            "Kept the project's root source and dependency files unchanged.".to_owned(),
             "Any qualified foreign presentation directive is adapted only in the sealed executable copy; project source, models, units, and analysis statements remain unchanged."
                 .to_owned(),
             "The commit updates only versioned execution-profile authority and leaves source history intact."
@@ -970,7 +967,7 @@ pub(crate) fn commit_staged_netlist_import(state: &mut AppState) -> bool {
     }) {
         if let Some(current) = state.ui.netlist.import_review.as_mut() {
             current.error = Some(format!(
-                "The candidate no longer passes canonical validation: {}",
+                "The source no longer passes validation: {}",
                 blocking.message
             ));
         }

@@ -180,8 +180,8 @@ pub(crate) use dialogs::state::{
     EngineeringTableDialogPage, EngineeringTableDialogState, EngineeringTableExportFormat,
     EngineeringTableExportScope, GridSnapRoutingDialogState, GridSnapRoutingDraft,
     GridSnapRoutingFocusTarget, GridSnapSpacingChoice, HelpCenterPage, HierarchyDescendEditMode,
-    HierarchyParentContext, NewWindowInitialContent, PlanRemovalConsequence, PlanRemovalTarget,
-    PlanRemovalTone, RenameSelectionTarget, ReplaceInstanceOpen, RunDetailsDialogState,
+    NewWindowInitialContent, PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone,
+    RenameSelectionTarget, ReplaceInstanceOpen, RunDetailsDialogState,
     TechnologyAttachmentDialogState, WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
 };
 pub use dialogs::state::{DialogState, LicensePhase};
@@ -377,7 +377,7 @@ impl RSpiceApp {
             .has_retained_manual_authorization(receipt.prepared_snapshot_digest)
         {
             return Some(
-                "Validate the exact current netlist before running; its one-shot authorization is no longer retained"
+                "Validate the current netlist again before running; the earlier validation can no longer be used"
                     .to_owned(),
             );
         }

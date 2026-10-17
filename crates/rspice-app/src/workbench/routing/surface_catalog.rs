@@ -360,7 +360,7 @@ impl TryFrom<SurfaceId> for Workspace {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SurfaceIdParseError {
-    #[error("unknown canonical surface ID `{0}`")]
+    #[error("unknown surface ID `{0}`")]
     Unknown(String),
 }
 

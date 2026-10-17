@@ -492,7 +492,7 @@ pub(super) fn commit_simulation_campaign(
         app.simulation_controller
             .prepare_and_start_campaign(&mut app.state, name, member_ids)?;
     Ok(format!(
-        "Campaign {} queued {} plans as {} authenticated tasks.",
+        "Campaign {} queued {} plans as {} tasks.",
         receipt.campaign_id, receipt.member_count, receipt.task_count
     ))
 }

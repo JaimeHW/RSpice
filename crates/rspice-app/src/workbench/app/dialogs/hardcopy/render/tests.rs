@@ -545,11 +545,11 @@ fn the_narrow_strip_asks_one_question_per_control() {
     let controls = dialog_controls(&settled_studio(&ctx, &mut app, viewport));
     assert!(control_rect(&controls, "01  Source and scope").is_some());
     assert!(control_rect(&controls, "Setup").is_some());
-    assert!(control_rect(&controls, "Exact preview").is_some());
+    assert!(control_rect(&controls, "Preview").is_some());
     assert!(
         !controls
             .iter()
-            .any(|(label, _)| label.starts_with("0") && label.contains("Exact preview")),
+            .any(|(label, _)| label.starts_with("0") && label.contains("Preview")),
         "the preview must not be offered as a sixth section chip"
     );
 
@@ -559,7 +559,7 @@ fn the_narrow_strip_asks_one_question_per_control() {
     let controls = dialog_controls(&settled_studio(&ctx, &mut app, viewport));
     assert!(control_rect(&controls, "01  Source and scope").is_none());
     assert!(control_rect(&controls, "Setup").is_some());
-    assert!(control_rect(&controls, "Exact preview").is_some());
+    assert!(control_rect(&controls, "Preview").is_some());
 }
 
 /// The studio ships to tablet and phone, so every row and chip it navigates
@@ -586,7 +586,7 @@ fn navigation_targets_meet_the_touch_minimum() {
     }
 
     let strip = dialog_controls(&settled_studio(&ctx, &mut app, vec2(390.0, 844.0)));
-    for label in ["01  Source and scope", "Setup", "Exact preview"] {
+    for label in ["01  Source and scope", "Setup", "Preview"] {
         let rect = control_rect(&strip, label).unwrap_or_else(|| panic!("{label} is drawn"));
         assert!(
             rect.height() >= tokens::TOUCH_TARGET,

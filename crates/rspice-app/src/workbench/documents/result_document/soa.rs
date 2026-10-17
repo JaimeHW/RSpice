@@ -114,7 +114,7 @@ fn soa_plan(
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let Some(dataset_id) = state.simulation.active_run().map(|run| run.dataset_id) else {
-        well_hint(ui, "Select a dataset with retained SOA evidence");
+        well_hint(ui, "Select a dataset with SOA results");
         return;
     };
     let evidence_is_valid = active_evidence_is_valid(state);

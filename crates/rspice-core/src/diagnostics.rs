@@ -312,6 +312,13 @@ impl ConvergenceQuality {
         self.timestep_reductions += 1;
     }
 
+    /// Record a step rejected on local truncation error. It is a timestep
+    /// reduction too, so it counts in both.
+    pub(crate) fn record_lte_rejection(&mut self) {
+        self.timestep_reductions += 1;
+        self.lte_rejections += 1;
+    }
+
     /// Record the circuit objects a solve gave up on.
     ///
     /// Last writer wins: the attribution that matters is the one belonging to

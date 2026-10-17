@@ -501,11 +501,9 @@ impl Command {
                 "Drawing-sheet layers\u{2026}",
                 "View",
             ),
-            Self::VisibilityOptions => spec(
-                "visibility-options",
-                "Hierarchy and annotation visibility\u{2026}",
-                "View",
-            ),
+            Self::VisibilityOptions => {
+                spec("visibility-options", "Schematic visibility\u{2026}", "View")
+            }
             Self::ToggleFullScreen => spec("full-screen", "Enter full screen", "View"),
             Self::ResetActiveView => spec("reset-active-view", "Reset active view", "View"),
             Self::EngineeringTableView => spec(

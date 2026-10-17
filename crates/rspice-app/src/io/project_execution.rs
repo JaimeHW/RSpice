@@ -83,7 +83,7 @@ fn model_source_warnings(libraries: &[ProjectModelLibrary]) -> Vec<String> {
         }
         if library.source_closure.len() > 1 && library.source_edges.is_empty() {
             warnings.push(format!(
-                "Model library '{}' was restored with schema-2 content pins but no authenticated dependency-resolution graph; refresh or re-import '{}' before simulation",
+                "Model library '{}' was saved in an older format that does not record how its files include each other; refresh or re-import '{}' before simulation",
                 library.name,
                 path.display()
             ));
@@ -94,7 +94,7 @@ fn model_source_warnings(libraries: &[ProjectModelLibrary]) -> Vec<String> {
                 first_unreachable_source(path, &library.source_closure, &library.source_edges)
         {
             warnings.push(format!(
-                "Model library '{}' retains source '{}' that is not reachable from its authenticated root; simulations remain blocked until the library is refreshed or re-imported",
+                "Model library '{}' has source '{}' that is not included from its root file; simulations remain blocked until the library is refreshed or re-imported",
                 library.name,
                 unreachable.display()
             ));
@@ -103,7 +103,7 @@ fn model_source_warnings(libraries: &[ProjectModelLibrary]) -> Vec<String> {
         for source in &library.source_closure {
             if !source.path.is_file() {
                 warnings.push(format!(
-                    "Model library '{}' was restored with its exact persisted source closure, but dependency '{}' is unavailable; simulations that require it remain blocked",
+                    "Model library '{}' was restored with its saved source files, but dependency '{}' is unavailable; simulations that require it remain blocked",
                     library.name,
                     source.path.display()
                 ));

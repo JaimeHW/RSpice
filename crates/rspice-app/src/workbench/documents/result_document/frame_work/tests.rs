@@ -813,7 +813,7 @@ fn corrupted_evidence_closes_the_gates_that_read_the_memo() {
     );
     let purpose = super::super::sheet_purpose(&state);
     assert!(
-        purpose.contains("the retained evidence failed validation"),
+        purpose.contains("the saved results failed validation"),
         "the sheet bar kept the old verdict: {purpose}"
     );
 }

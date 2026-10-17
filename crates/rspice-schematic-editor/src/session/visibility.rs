@@ -1,6 +1,6 @@
 //! Device-local schematic display policy.
 //!
-//! These are the seven canvas display controls plus the grid style. They are
+//! These are the six canvas display controls plus the grid style. They are
 //! persisted presentation choices about a design, with no dependency on the
 //! chrome that renders the controls, so the schematic model can consult them
 //! directly when deciding what a component's labels say.
@@ -35,19 +35,6 @@ impl Default for DrawingSheetLayerVisibility {
             dimensions_at_detail_zoom: true,
         }
     }
-}
-
-/// Device-local hierarchy context shown around the active schematic.
-///
-/// This is presentation state only. It never changes the cell/view binding
-/// or serializes into project-owned design data.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum SchematicHierarchyVisibility {
-    #[default]
-    ActiveAndParent,
-    ActiveOnly,
-    FullVisibleHierarchy,
 }
 
 /// Mutually exclusive canvas annotation layer selected by the user.
@@ -110,12 +97,17 @@ pub enum SchematicReviewMarkerVisibility {
 
 /// Complete device-local schematic display policy.
 ///
-/// Keeping all seven mockup controls in one value gives Apply/Cancel true
+/// Keeping all six controls in one value gives Apply/Cancel true
 /// transactional semantics and prevents partial frame-by-frame publication.
+///
+/// Earlier builds also saved a `hierarchy` choice for a dimmed parent drawn
+/// under an edit-in-place child. That overlay is gone (a child sheet's
+/// coordinates have no defined map onto its instance footprint), and so is the
+/// choice; a policy saved with it still loads, because unknown fields are
+/// ignored here rather than refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SchematicVisibilityPolicy {
-    pub hierarchy: SchematicHierarchyVisibility,
     pub annotations: SchematicAnnotationVisibility,
     pub back_annotation: SchematicBackAnnotationContent,
     pub parameter_labels: SchematicParameterLabelVisibility,

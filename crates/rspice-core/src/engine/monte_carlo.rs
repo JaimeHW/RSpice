@@ -653,7 +653,17 @@ impl Engine {
                 for _ in 0..workers {
                     scope.spawn(|| {
                         let _log_scope = crate::log_scope::enter(log_scope.clone());
-                        let engine = Self::new(worker_config.clone());
+                        #[cfg_attr(not(feature = "veriloga"), allow(unused_mut))]
+                        let mut engine = Self::new(worker_config.clone());
+                        // A sample's compiler findings are the run's, reported
+                        // once across every worker.
+                        #[cfg(feature = "veriloga")]
+                        {
+                            engine.compiler_diagnostics =
+                                std::sync::Arc::clone(&self.compiler_diagnostics);
+                            engine.compiler_diagnostic_handler =
+                                self.compiler_diagnostic_handler.clone();
+                        }
                         loop {
                             if stopped.load(Ordering::Acquire) || abort.is_aborted() {
                                 break;
@@ -1050,6 +1060,61 @@ mod tests {
                 crate::log_scope::capture().and_then(|scope| scope.point().map(str::to_owned)),
                 None,
                 "a sample's label does not outlive the sample"
+            );
+        }
+    }
+
+    /// A compiler finding a sample reports reaches the run's handler once,
+    /// whether a worker thread solves the sample or the run's own thread does.
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn every_sample_reports_compiler_findings_to_the_run() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let deck = Netlist::parse("findings divider\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.end\n")
+            .expect("divider parses");
+        let finding = rspice_veriloga::SourceCompileDiagnostic {
+            severity: rspice_veriloga::CompileDiagnosticSeverity::Warning,
+            phase: rspice_veriloga::CompileDiagnosticPhase::Semantic,
+            code: "VA-SEM-NO-EFFECT-SYSTEM-TASK".into(),
+            message: "task is discarded".into(),
+            path: Some("model.va".into()),
+            byte_start: Some(0),
+            byte_end: Some(1),
+            line: Some(1),
+            column: Some(1),
+        };
+        for workers in [1, 4] {
+            let mut config = SimulationConfig::default();
+            config.resource_limits.max_parallel_workers = workers;
+            let notified = Arc::new(AtomicUsize::new(0));
+            let engine = Engine::new(config).with_compiler_diagnostic_handler({
+                let notified = Arc::clone(&notified);
+                move |_| {
+                    notified.fetch_add(1, Ordering::Relaxed);
+                }
+            });
+            let options = MonteCarloRunConfig {
+                first_trial: 0,
+                num_runs: 6,
+                seed: 7,
+                distribution: Distribution::Gaussian { sigma: 0.01 },
+                variation_source: MonteCarloVariationSource::ParameterTolerance,
+                parameter_filter: None,
+                environment: None,
+            };
+            engine
+                .run_monte_carlo_trials_with_abort(&deck, &options, &NoAbort, |engine, _, _, _| {
+                    engine.record_compiler_diagnostics(std::slice::from_ref(&finding));
+                    Ok(())
+                })
+                .expect("the trials run");
+            assert_eq!(notified.load(Ordering::Relaxed), 1, "{workers} workers");
+            assert_eq!(
+                engine.compiler_diagnostics(),
+                vec![finding.clone()],
+                "{workers} workers"
             );
         }
     }

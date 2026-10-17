@@ -164,12 +164,12 @@ impl EnvelopeSourceCatalog {
     fn dependency_repair_context(&self) -> AnalysisDependencyRepairContext {
         if let Some(diagnostic) = &self.diagnostic {
             return AnalysisDependencyRepairContext::periodic_sources_unavailable(format!(
-                "the exact elaborated periodic-source catalog is unavailable: {diagnostic}"
+                "the netlist's periodic sources could not be listed: {diagnostic}"
             ));
         }
         let Some(source) = &self.netlist_source else {
             return AnalysisDependencyRepairContext::periodic_sources_unavailable(
-                "the exact elaborated periodic-source source is unavailable",
+                "the netlist is not available, so its periodic sources cannot be listed",
             );
         };
         AnalysisDependencyRepairContext::exact_periodic_sources(source.clone())
@@ -1121,7 +1121,7 @@ impl PriorPlanRun {
         if self.executing {
             format!("Run {} in progress", self.sequence)
         } else {
-            format!("Run {} retained · immutable", self.sequence)
+            format!("Run {} finished", self.sequence)
         }
     }
 }
@@ -1676,7 +1676,7 @@ fn analysis_editor(
             record_failure(
                 &mut app.state,
                 "Analysis edit",
-                &format!("the draft could not be serialized exactly: {error}"),
+                &format!("the draft could not be serialized: {error}"),
             );
             app.state.workbench.simulation_surface_editor_anchor_y = Some(form_anchor_content_y);
             return;
@@ -2114,7 +2114,7 @@ fn analysis_contract(
                     open_dataset |= Button::new(&label)
                         .show(ui)
                         .on_hover_text(
-                            "Activate this immutable dataset in Results without changing the plan",
+                            "Open this run in Results without changing the plan",
                         )
                         .clicked();
                 }

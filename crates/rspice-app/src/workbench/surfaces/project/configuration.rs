@@ -320,7 +320,7 @@ fn validate_candidate_configuration(
         .validate()
         .map_err(|error| format!("Configuration connectivity is invalid: {error}"))?;
     let root = projection.root_schematic().ok_or_else(|| {
-        "Configuration cannot be activated without its exact root schematic.".to_owned()
+        "Configuration cannot be activated without its root schematic.".to_owned()
     })?;
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
         app.state.library_manager.catalog(),
@@ -336,7 +336,7 @@ fn validate_candidate_configuration(
     );
     if !generated.errors.is_empty() {
         return Err(format!(
-            "Configuration cannot be activated because exact netlist generation failed: {}",
+            "Configuration cannot be activated because netlist generation failed: {}",
             generated.errors.join("; ")
         ));
     }
@@ -687,7 +687,7 @@ fn overrides_panel(
             );
             if visible.is_empty() {
                 let message = if overrides.is_empty() {
-                    "No exact-path instance overrides are defined; global precedence is authoritative."
+                    "No instance overrides are defined; the global precedence applies."
                 } else {
                     "No instance override matches the current filter."
                 };
@@ -941,7 +941,7 @@ fn validation_panel(
     match projection {
         ProjectionState::Executable(facts) => {
             dense_property_row(ui, "Execution root", &facts.root, true);
-            dense_property_row(ui, "Exact bindings", &facts.binding_count.to_string(), true);
+            dense_property_row(ui, "Bindings", &facts.binding_count.to_string(), true);
             dense_property_row(
                 ui,
                 "Behavioral bindings",

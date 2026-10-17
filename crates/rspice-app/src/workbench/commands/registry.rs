@@ -1341,9 +1341,7 @@ impl Command {
             Self::CompareResultDatasets if app.state.workbench.workspace != Workspace::Results => {
                 "open an active result document"
             }
-            Self::CompareResultDatasets => {
-                "a second compatible immutable result dataset is required"
-            }
+            Self::CompareResultDatasets => "a second compatible run is required",
             Self::DatasetManifestBrowser | Self::CreateResultDocument => {
                 "no retained result dataset is available"
             }
@@ -1431,7 +1429,7 @@ impl Command {
             Self::ModelRunQualificationTests => {
                 "validate a clean candidate with at least one qualification suite first"
             }
-            Self::ModelCompareRelease => "a clean candidate and an immutable release are required",
+            Self::ModelCompareRelease => "a clean candidate and a released model are required",
             Self::StimulusNewDefinition | Self::StimulusValidateLibrary => {
                 "open the Stimulus Library"
             }

@@ -207,8 +207,19 @@ fn builtin_xspice_property_sheet(
         let mut definition = PropertyDefinition::new(&parameter.name)
             .with_description(if parameter.description.trim().is_empty() {
                 format!(
-                    "{} model parameter ({:?}).",
-                    descriptor.display_name, parameter.param_type
+                    "{} model parameter ({}).",
+                    descriptor.display_name,
+                    match parameter.param_type {
+                        ParamType::Real => "real",
+                        ParamType::Integer => "integer",
+                        ParamType::Boolean => "boolean",
+                        ParamType::Complex => "complex",
+                        ParamType::String => "string",
+                        ParamType::StringVector => "string vector",
+                        ParamType::RealVector => "real vector",
+                        ParamType::IntegerVector => "integer vector",
+                        ParamType::ComplexVector => "complex vector",
+                    }
                 )
             } else {
                 parameter.description.clone()

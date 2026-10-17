@@ -221,7 +221,7 @@ pub(super) fn clone_plan_dialog(
         );
     let choice = Dialog::new("Clone simulation plan", "Create cloned plan")
     .description(
-        "Create a separately owned simulation plan while preserving source lineage and immutable result manifests.",
+        "Create a separate simulation plan from this one. The clone records its source, and existing results are not changed.",
     )
     .size(DialogSize::SimulationWorkflow)
     .flush_body()

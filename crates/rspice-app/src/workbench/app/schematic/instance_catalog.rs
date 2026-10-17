@@ -498,7 +498,7 @@ fn ambiguous_message(authored: &str, entries: &[&InstanceCatalogEntry]) -> Strin
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        "Replacement `{}` is ambiguous; enter one exact identity: {candidates}.",
+        "Replacement `{}` is ambiguous; enter one of these in full: {candidates}.",
         authored.trim()
     )
 }

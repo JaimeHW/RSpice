@@ -608,7 +608,7 @@ fn validate_visible_source(state: &mut AppState, revision: u64) {
                 let netlist = &mut state.ui.netlist;
                 let mut diagnostics = in_buffer(vec![
                     Diagnostic::error(format!(
-                        "Authenticated browser source bundle is invalid: {error}"
+                        "The imported browser source bundle is invalid: {error}"
                     ))
                     .with_line(materialized_external_line),
                 ]);
@@ -786,7 +786,7 @@ fn parse_buffer_with_context(
                 let Some(sealed_sources) = sealed_sources else {
                     return (
                         vec![Diagnostic::error(
-                            "External .include/.inc/.lib sources require an authenticated imported source bundle in this browser session.",
+                            "In the browser, external .include/.inc/.lib sources must come from an imported source bundle.",
                         )
                         .with_line(external_line)],
                         None,
@@ -986,7 +986,7 @@ fn parse_error_diagnostic_at(
                 .with_source_location(&error.opened_at, editor_source_path)
         }
         ParseError::DuplicateSubcircuitPortBinding(error) => Diagnostic::error(format!(
-            "{}\nSubcircuit: {} (canonical {}) · instance: {} · formal {} · positions {} and {} · effective nodes {} and {}",
+            "{}\nSubcircuit: {} (read as {}) · instance: {} · formal {} · positions {} and {} · effective nodes {} and {}",
             error,
             error.subcircuit_name,
             error.canonical_subcircuit_name,
@@ -998,7 +998,7 @@ fn parse_error_diagnostic_at(
             error.conflicting_actual_node,
         )),
         ParseError::GlobalSubcircuitPortBinding(error) => Diagnostic::error(format!(
-            "{}\nSubcircuit: {} (canonical {}) · instance: {} · formal {} · position {} · effective node {}",
+            "{}\nSubcircuit: {} (read as {}) · instance: {} · formal {} · position {} · effective node {}",
             error,
             error.subcircuit_name,
             error.canonical_subcircuit_name,
@@ -1008,7 +1008,7 @@ fn parse_error_diagnostic_at(
             error.actual_node,
         )),
         ParseError::UndefinedSubcircuit(error) => Diagnostic::error(format!(
-            "{}\nSubcircuit: {} (canonical {}) · instance: {} (canonical {})",
+            "{}\nSubcircuit: {} (read as {}) · instance: {} (read as {})",
             error,
             error.subcircuit_name,
             error.canonical_subcircuit_name,
@@ -1016,11 +1016,11 @@ fn parse_error_diagnostic_at(
             error.canonical_instance_name,
         )),
         ParseError::MissingDeviceModel(error) => Diagnostic::error(format!(
-            "{}\nDevice: {} (canonical {}) · type: {}",
+            "{}\nDevice: {} (read as {}) · type: {}",
             error, error.device_name, error.canonical_device_name, error.device_type,
         )),
         ParseError::UndefinedMutualInductorReference(error) => Diagnostic::error(format!(
-            "{}\nCoupling: {} (canonical {}) · missing inductor: {} (canonical {}) · scope: {} · reference position {}",
+            "{}\nCoupling: {} (read as {}) · missing inductor: {} (read as {}) · scope: {} · reference position {}",
             error,
             error.qualified_coupling_name,
             error.canonical_coupling_name,
@@ -1549,7 +1549,7 @@ M1 d g s b nch W={w} L={l*2}\n\
         assert!(
             diagnostics[0]
                 .message
-                .contains("authenticated imported source bundle")
+                .contains("must come from an imported source bundle")
         );
     }
 
@@ -1569,7 +1569,7 @@ M1 d g s b nch W={w} L={l*2}\n\
         assert!(diagnostics.iter().all(|diagnostic| {
             !diagnostic
                 .message
-                .contains("authenticated imported source bundle")
+                .contains("must come from an imported source bundle")
         }));
     }
 
@@ -2061,7 +2061,7 @@ M1 d g s b nch W={w} L={l*2}\n\
         assert!(
             diagnostic
                 .message
-                .contains("Subcircuit: inv1 (canonical INV1)")
+                .contains("Subcircuit: inv1 (read as INV1)")
         );
         assert!(diagnostic.message.contains("TOP.Xinv1"));
         assert!(diagnostic.message.contains("positions 4 and 8"));
@@ -2089,7 +2089,7 @@ M1 d g s b nch W={w} L={l*2}\n\
         assert!(
             diagnostic
                 .message
-                .contains("Subcircuit: cell (canonical CELL)")
+                .contains("Subcircuit: cell (read as CELL)")
         );
         assert!(diagnostic.message.contains("TOP.X1"));
         assert!(diagnostic.message.contains("effective node LOCAL"));
@@ -2112,9 +2112,9 @@ M1 d g s b nch W={w} L={l*2}\n\
         assert!(
             diagnostic
                 .message
-                .contains("Subcircuit: missing (canonical MISSING)")
+                .contains("Subcircuit: missing (read as MISSING)")
         );
-        assert!(diagnostic.message.contains("TOP.X1 (canonical X1)"));
+        assert!(diagnostic.message.contains("TOP.X1 (read as X1)"));
     }
 
     #[test]
@@ -2130,7 +2130,7 @@ M1 d g s b nch W={w} L={l*2}\n\
             ));
 
         assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
-        assert!(diagnostic.message.contains("Device: d1 (canonical D1)"));
+        assert!(diagnostic.message.contains("Device: d1 (read as D1)"));
         assert!(diagnostic.message.contains("type: DIODE"));
     }
 
@@ -2160,7 +2160,7 @@ M1 d g s b nch W={w} L={l*2}\n\
             Some(Path::new("bug75.cir"))
         );
         assert!(diagnostic.message.contains("Undefined inductor L2"));
-        assert!(diagnostic.message.contains("Coupling: K3 (canonical K3)"));
+        assert!(diagnostic.message.contains("Coupling: K3 (read as K3)"));
         assert!(diagnostic.message.contains("scope: top level"));
         assert!(diagnostic.message.contains("reference position 2"));
     }

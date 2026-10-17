@@ -283,12 +283,7 @@ fn technology_binding_panel(ui: &mut Ui, app: &mut RSpiceApp) {
             "No executable model set",
             t.color.text_faint,
         );
-        property_row_toned(
-            ui,
-            "Root source",
-            "No authenticated root source",
-            t.color.text_faint,
-        );
+        property_row_toned(ui, "Root source", "No root source", t.color.text_faint);
         property_row_toned(
             ui,
             "Source closure",

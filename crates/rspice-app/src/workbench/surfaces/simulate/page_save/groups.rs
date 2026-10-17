@@ -131,19 +131,16 @@ pub(super) fn capture_groups(
                             width,
                         );
                     }),
-                    Some((
-                        "Retained-evidence ceiling",
-                        &mut |ui: &mut Ui, width: f32| {
-                            picked_budget = select(
-                                ui,
-                                "simulation.save.storage-budget",
-                                "Plan retained-evidence storage ceiling",
-                                &selected_budget,
-                                &budget_choices,
-                                width,
-                            );
-                        },
-                    )),
+                    Some(("Results storage ceiling", &mut |ui: &mut Ui, width: f32| {
+                        picked_budget = select(
+                            ui,
+                            "simulation.save.storage-budget",
+                            "Plan results storage ceiling",
+                            &selected_budget,
+                            &budget_choices,
+                            width,
+                        );
+                    })),
                 );
                 rule_row(ui, "Selection behavior", selection_mode.description());
             });
@@ -227,8 +224,8 @@ pub(super) fn capture_groups(
                     "Save All reserves the engine's complete bounded result-value allowance for \
                      every enabled analysis and Run Set point. Authored outputs and probes still \
                      control initial plotting, and a capture group's overrides still decide how \
-                     its own members are sampled and stored. The authenticated ceiling is \
-                     rechecked before each terminal analysis is adopted."
+                     its own members are sampled and stored. The storage ceiling is checked \
+                     again before each finished analysis is saved."
                 } else {
                     GROUP_NOTE
                 },

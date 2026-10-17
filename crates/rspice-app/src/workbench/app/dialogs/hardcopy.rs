@@ -1158,7 +1158,7 @@ fn parse_percent_hundredths(value: &str) -> Result<u32, HardcopyError> {
         || fraction.len() > 9
     {
         return Err(HardcopyError::InvalidLength(format!(
-            "custom scale percentage {value:?}"
+            "custom scale percentage '{value}'"
         )));
     }
     let denominator = 10_u128.pow(fraction.len() as u32);

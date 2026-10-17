@@ -452,7 +452,7 @@ pub(super) fn apply_analysis_action(
             if let Some(pss_id) = existing {
                 app.state.workbench.active_analysis_instance = Some(pss_id);
                 app.state.record_plan_receipt(format!(
-                    "Existing autonomous PSS prerequisite {pss_id} was selected for phase-noise analysis {id}. Complete its oscillator node and remaining controls, enable it, then run dependency repair to bind the exact prerequisite without creating a duplicate instance."
+                    "Selected the existing autonomous PSS {pss_id} for phase-noise analysis {id}. Complete its oscillator node and remaining settings, enable it, then run dependency repair to link it without creating a duplicate."
                 ));
                 return;
             }
@@ -480,7 +480,7 @@ pub(super) fn apply_analysis_action(
                     refresh_analysis_projections(app);
                     app.state.workbench.active_analysis_instance = Some(pss_id);
                     app.state.record_plan_receipt(format!(
-                        "Receipt #{} committed. Autonomous PSS prerequisite {pss_id} and its inferable dependency chain are prepared before phase-noise analysis {id}. Enter the exact oscillator node, review the remaining PSS controls, then enable it; dependency repair will reuse and bind it while preflight remains fail-closed until configuration is complete.",
+                        "Receipt #{} committed. Added autonomous PSS {pss_id} and its own prerequisites ahead of phase-noise analysis {id}. Enter the oscillator node, review the remaining PSS settings, then enable it; dependency repair will reuse it, and runs stay blocked until it is complete.",
                         receipt.sequence(),
                     ));
                 }

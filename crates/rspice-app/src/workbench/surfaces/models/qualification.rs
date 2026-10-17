@@ -599,7 +599,7 @@ pub(super) fn apply_correlation_qualification_contract(
         .collect::<Vec<_>>();
     if suites.is_empty() {
         summary.correlation_status =
-            "configured evidence is stale for this model revision".to_owned();
+            "configured correlation is stale for this model revision".to_owned();
         if summary.gate != QualificationGate::Blocked {
             summary.gate = QualificationGate::Review;
         }
@@ -679,7 +679,7 @@ pub(super) fn qualification_domain_summaries(
                 format!("{} open", accumulated.open_dispositions)
             } else if accumulated.evidenced_vectors < accumulated.vectors {
                 format!(
-                    "{} without evidence",
+                    "{} without results",
                     accumulated.vectors - accumulated.evidenced_vectors
                 )
             } else if accumulated.passing_vectors == accumulated.vectors {
@@ -833,7 +833,7 @@ pub(super) fn qualification_action_block_reason(
         );
     }
     if selected.source_error.is_some() {
-        return Some("Select an exact project-owned model revision".to_owned());
+        return Some("Select a project-owned model revision".to_owned());
     }
     if app
         .state

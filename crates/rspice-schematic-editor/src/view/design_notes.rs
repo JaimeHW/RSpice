@@ -10,10 +10,13 @@ use rspice_ui_kit::theme::{self, FontWeight};
 
 use super::viewport::Viewport;
 
-const FONT_WORLD_SIZE: f32 = 12.0;
-const LINE_ADVANCE_WORLD: f32 = 15.0;
-const OFFSET_X_WORLD: f32 = 6.0;
-const OFFSET_Y_WORLD: f32 = 3.0;
+pub(crate) const FONT_WORLD_SIZE: f32 = 12.0;
+pub(crate) const LINE_ADVANCE_WORLD: f32 = 15.0;
+/// The top-left corner of a note's first line, from its anchor.
+pub(crate) const OFFSET_X_WORLD: f32 = 6.0;
+pub(crate) const OFFSET_Y_WORLD: f32 = 3.0;
+/// The anchor marker's radius, in world units.
+pub(crate) const MARKER_RADIUS_WORLD: f32 = 2.0;
 const GLYPH_WIDTH_WORLD: f32 = 7.2;
 const POINTER_SLOP: f32 = 3.0;
 const MIN_VISIBLE_FONT_SIZE: f32 = 4.0;
@@ -109,7 +112,7 @@ pub fn draw_design_note(
         super::drawing::draw_hover_outline(painter, layout.bounds);
     }
 
-    let marker_radius = (2.0 * viewport.zoom).clamp(1.75, 3.5);
+    let marker_radius = (MARKER_RADIUS_WORLD * viewport.zoom).clamp(1.75, 3.5);
     match note.kind {
         DesignNoteKind::PlainText => {
             painter.circle_filled(layout.anchor, marker_radius, color);

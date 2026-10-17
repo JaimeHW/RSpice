@@ -446,8 +446,7 @@ impl AppState {
                     && package.archive_digest() == signed_pin.archive_digest()
             })
             .ok_or_else(|| {
-                "Exact signed project PDK package disappeared while resolving project authority"
-                    .to_owned()
+                "The signed PDK package the project is pinned to is no longer available".to_owned()
             })
     }
 
@@ -617,7 +616,7 @@ impl AppState {
                 .contains(&(layer.to_ascii_lowercase(), purpose.to_ascii_lowercase()))
             {
                 return Err(format!(
-                    "Physical-layout transaction failed: {kind} {id} uses layer/purpose '{layer}/{purpose}' outside the exact signed project PDK"
+                    "Physical-layout edit failed: {kind} {id} uses layer/purpose '{layer}/{purpose}', which the project's signed PDK does not define"
                 ));
             }
         }
@@ -748,7 +747,7 @@ impl AppState {
                 input,
                 execution,
             )
-            .map_err(|error| format!("Signed PDK callback evidence was not committed: {error}"))?;
+            .map_err(|error| format!("Signed PDK callback result was not recorded: {error}"))?;
 
         self.workspace.content.project_metadata_dirty = true;
         self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
@@ -974,7 +973,7 @@ impl AppState {
             );
         if !publication.validated {
             return Some(
-                "Validate the exact current source and project revision before running".to_owned(),
+                "Validate the current source and project revision before running".to_owned(),
             );
         }
         debug_assert!(publication.run_eligible);
@@ -1582,7 +1581,7 @@ mod tests {
             )
             .expect_err("layer outside exact signed PDK must fail closed");
         assert!(
-            error.contains("outside the exact signed project PDK"),
+            error.contains("which the project's signed PDK does not define"),
             "{error}"
         );
         let unchanged = state

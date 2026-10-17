@@ -107,7 +107,7 @@ pub(super) fn parse_generated_netlist_bundle(
                 != Some(manifest.generated_content_digest.as_str())
         {
             return Err(
-                "Generated source map does not authenticate the retained generated deck."
+                "The generated source map does not match the generated deck in the bundle."
                     .to_owned(),
             );
         }
@@ -260,7 +260,7 @@ pub(super) fn validate_digest_literal(value: &str, label: &str) -> Result<(), St
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
     {
         return Err(format!(
-            "Netlist bundle {label} is not a canonical SHA-256 digest."
+            "Netlist bundle {label} is not a valid lowercase SHA-256 digest."
         ));
     }
     Ok(())
@@ -330,9 +330,7 @@ pub(super) fn read_stored_zip_entries(
     let central_offset = usize::try_from(zip_u32(bytes, eocd + 16)?)
         .map_err(|_| "ZIP central directory offset is invalid.".to_owned())?;
     if central_offset.checked_add(central_size) != Some(eocd) {
-        return Err(
-            "ZIP central directory does not end at the authenticated end record.".to_owned(),
-        );
+        return Err("ZIP central directory does not end at the archive's end record.".to_owned());
     }
     let mut cursor = central_offset;
     let mut entries = std::collections::BTreeMap::new();

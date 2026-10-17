@@ -1743,7 +1743,7 @@ fn confirmation(row: &HubPackRow, replaces: Option<String>) -> ModelsWorkbenchDi
 pub(super) fn release_confirmation(ui: &mut Ui, pack_id: &str, release: &PackReleaseConfirmation) {
     ui.label(if release.replaces.is_some() {
         "RSpice will download and prove the newer release, then remove the older copy. A project \
-         that already added a part keeps the exact bytes it was built against."
+         that already added a part keeps the copy it was built against."
     } else if release.part.is_some() {
         "RSpice will download and prove this release, retain the chosen part's source into the \
          project, and arm it for placement."
@@ -1763,7 +1763,7 @@ pub(super) fn release_confirmation(ui: &mut Ui, pack_id: &str, release: &PackRel
             ui,
             "Download",
             &byte_size(release.archive_length),
-            "exact signed length",
+            "signed length",
         );
         property(
             ui,

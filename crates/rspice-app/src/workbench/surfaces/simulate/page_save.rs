@@ -175,7 +175,8 @@ const RETENTION_NOTE: &str = "A dataset is sealed against the manifest that prod
                               retained result can still be trusted after the plan has moved on. \
                               Lowering the limit discards the oldest unpinned datasets \
                               immediately, and raising it never recovers one already discarded. \
-                              A discarded dataset takes the exact deck its engine read with it.";
+                              Discarding a dataset also discards the netlist the simulator read \
+                              for it.";
 
 /// The rules that mean nothing until there is a dataset to act on.
 const RETENTION_LIST_NOTE: &str = "The highlighted row is the active dataset. Selecting a row \

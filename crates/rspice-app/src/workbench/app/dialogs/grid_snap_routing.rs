@@ -330,11 +330,7 @@ fn snap_targets_row(ui: &mut Ui, draft: &mut GridSnapRoutingDraft) -> (egui::Id,
         .inner_margin(Margin::symmetric(12, 9))
         .show(ui, |ui| {
             ui.set_min_width((width - 24.0).max(1.0));
-            setting_copy(
-                ui,
-                "Snap targets",
-                "Exact geometry classes considered by the snap engine.",
-            );
+            setting_copy(ui, "Snap targets", "Geometry the cursor snaps to.");
             ui.add_space(7.0);
             ui.add_enabled_ui(draft.snap_spacing != GridSnapSpacingChoice::Free, |ui| {
                 ui.horizontal_wrapped(|ui| {

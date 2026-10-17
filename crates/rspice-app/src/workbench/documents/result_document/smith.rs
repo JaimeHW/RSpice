@@ -60,7 +60,7 @@ pub(super) fn availability(state: &AppState) -> super::ViewerAvailability {
         )
     } else {
         super::ViewerAvailability::unavailable(
-            "Requires SP, PSP, or HBSP with exact complex traces and retained port impedances",
+            "Requires SP, PSP, or HBSP with complex traces and saved port impedances",
         )
     }
 }

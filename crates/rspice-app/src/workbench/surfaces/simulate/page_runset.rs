@@ -1270,13 +1270,13 @@ fn budgets_from(drafts: &RunSetBudgetDrafts) -> Result<RunSetBudgets, String> {
             .trim()
             .replace([',', '_'], "")
             .parse()
-            .map_err(|_| format!("{:?} is not a task count", drafts.maximum_tasks))?,
+            .map_err(|_| format!("'{}' is not a task count", drafts.maximum_tasks))?,
         maximum_storage_bytes: run_set::parse_bytes(&drafts.maximum_storage)?,
         cost_per_point_ms: drafts
             .cost_per_point_ms
             .trim()
             .parse()
-            .map_err(|_| format!("{:?} is not a duration in ms", drafts.cost_per_point_ms))?,
+            .map_err(|_| format!("'{}' is not a duration in ms", drafts.cost_per_point_ms))?,
         bytes_per_point: run_set::parse_bytes(&drafts.bytes_per_point)?,
     })
 }
@@ -1294,7 +1294,7 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
             |ui| {
                 card_note(
                     ui,
-                    "The declared space does not expand exactly, so no point list is shown. The \
+                    "The run set does not expand into a fixed list of points, so none is shown. The \
                      refusals above name what has to change; a partial table would read as a \
                      shorter run than the one that would execute.",
                 );

@@ -134,22 +134,22 @@ impl NativeModelCatalogOperation {
     fn progress_label(&self) -> String {
         match self {
             Self::ImportFile { path } => format!(
-                "Authenticating and parsing '{}' in the background…",
+                "Reading and parsing '{}' in the background…",
                 path.file_name()
                     .and_then(|name| name.to_str())
                     .unwrap_or("model source")
             ),
             Self::RefreshLibrary { library, .. } => {
-                format!("Refreshing and authenticating model library '{library}'…")
+                format!("Refreshing model library '{library}'…")
             }
             Self::AttachPack { pack_id } => {
-                format!("Authenticating and attaching model pack '{pack_id}'…")
+                format!("Verifying and attaching model pack '{pack_id}'…")
             }
             Self::AddPart { part_name, .. } => {
-                format!("Authenticating and adding model part '{part_name}'…")
+                format!("Verifying and adding model part '{part_name}'…")
             }
             Self::ApplyConfiguration(_) => {
-                "Discovering and authenticating configured PDK model sources…".to_owned()
+                "Finding and reading configured PDK model sources…".to_owned()
             }
             Self::ModelHub(request) => request.progress_label(),
         }
@@ -472,9 +472,8 @@ impl RSpiceApp {
         }
         self.state.workbench.models_view.dialog = None;
         self.state.workbench.models_view.model_import_in_progress = true;
-        self.state.workbench.models_view.model_import_label = Some(format!(
-            "Authenticating model source tree from '{root_name}'..."
-        ));
+        self.state.workbench.models_view.model_import_label =
+            Some(format!("Reading model source tree from '{root_name}'..."));
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -1061,9 +1060,7 @@ fn publish_native_model_catalog_library(
     let message = match operation {
         NativeModelCatalogOperation::ImportFile { path } => {
             emit_pdk_file_load_success_message(state, path.as_path(), library_name, library_stats);
-            format!(
-                "Imported model library '{library_name}' from a background-authenticated source closure {location}."
-            )
+            format!("Imported model library '{library_name}' and its included files {location}.")
         }
         NativeModelCatalogOperation::RefreshLibrary { .. } => {
             format!("Refreshed and pinned model library '{library_name}' {location}.")

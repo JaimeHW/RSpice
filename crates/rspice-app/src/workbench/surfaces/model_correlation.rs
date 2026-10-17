@@ -79,7 +79,7 @@ const SIMULATION_SOURCE_DISPLAY_LIMIT: usize = 4;
 /// beside it differ by exactly the advance.
 use crate::ui::widgets::{PROBLEM_MARK_ADVANCE as MARK_ADVANCE, PROBLEM_MARK_SIDE as MARK_SIDE};
 
-const LEDGER_TITLE: &str = "Correlation evidence";
+const LEDGER_TITLE: &str = "Correlation summary";
 
 fn correlation_dialog_error_id() -> egui::Id {
     egui::Id::new("model-correlation-submit-error")
@@ -249,7 +249,7 @@ struct Measure {
     detail: String,
     /// Set when the value itself is outside the gate it is measured against.
     ///
-    /// Not set for a measure that has nothing to report: "No evidence" is a
+    /// Not set for a measure that has nothing to report: "No data" is a
     /// phrase a reader cannot misread as a number, and a mark in front of it
     /// would say the same thing a second time.
     problem: Option<Problem>,
@@ -513,7 +513,7 @@ impl CorrelationProjection {
         } else if self.open_dispositions > 0 {
             ("metric dispositions open", Tone::Warning)
         } else if self.current_evidence.is_empty() {
-            ("review evidence not retained", Tone::Warning)
+            ("no review recorded", Tone::Warning)
         } else if !self
             .current_evidence
             .last()
@@ -521,7 +521,7 @@ impl CorrelationProjection {
         {
             ("review approval not retained", Tone::Error)
         } else {
-            ("correlation evidence current", Tone::Neutral)
+            ("correlation results current", Tone::Neutral)
         }
     }
 
@@ -551,7 +551,7 @@ impl CorrelationProjection {
                 value: self
                     .coverage_percent
                     .map(|value| format!("{value:.1}%"))
-                    .unwrap_or_else(|| "No evidence".to_owned()),
+                    .unwrap_or_else(|| "No data".to_owned()),
                 detail: "declared operating domain".to_owned(),
                 // Coverage is reported, not gated: there is no percentage
                 // this page refuses, so no percentage it can mark.
@@ -563,7 +563,7 @@ impl CorrelationProjection {
                 value: self
                     .worst_normalized_error
                     .map(|value| format!("{value:.3}×"))
-                    .unwrap_or_else(|| "No evidence".to_owned()),
+                    .unwrap_or_else(|| "No data".to_owned()),
                 detail: "retained evaluated comparisons".to_owned(),
                 // The gate is 1.0×, and a comparison outside it is the one
                 // number on this band the reader has to act on.
@@ -688,7 +688,7 @@ fn outer_header(ui: &mut Ui, app: &mut RSpiceApp, projection: &CorrelationProjec
         .enabled(validate_blocker.is_none())
         .min_width(118.0)
         .max_width(118.0)
-        .accessible_label("Validate the current correlation suite and record review evidence")
+        .accessible_label("Validate the current correlation suite and record a review")
         .show(&mut actions);
     if let Some(blocker) = validate_blocker.as_deref() {
         validate.on_disabled_hover_text(blocker);
@@ -716,7 +716,7 @@ fn outer_header(ui: &mut Ui, app: &mut RSpiceApp, projection: &CorrelationProjec
             projection
                 .evaluation_error
                 .as_deref()
-                .unwrap_or("Evaluate a complete metric suite before opening comparison evidence"),
+                .unwrap_or("Evaluate a complete metric suite before opening the comparison"),
         );
     }
 
@@ -758,7 +758,7 @@ fn outer_header(ui: &mut Ui, app: &mut RSpiceApp, projection: &CorrelationProjec
         ui,
         &response,
         "Measurement correlation",
-        "Models, bench data, and reference evidence workspace",
+        "Models, bench data, and reference data workspace",
     );
 }
 
@@ -788,7 +788,7 @@ fn summary_header(ui: &mut Ui, projection: &CorrelationProjection) {
     describe_region(
         ui,
         &response,
-        &format!("{} correlation evidence", projection.model_label()),
+        &format!("{} correlation", projection.model_label()),
         &projection.suite_name,
     );
 }
@@ -1568,6 +1568,6 @@ const fn outlier_decision_label(value: CorrelationOutlierDecision) -> &'static s
     match value {
         CorrelationOutlierDecision::Retain => "Retain in gate",
         CorrelationOutlierDecision::ExcludeFixtureFault => "Exclude: fixture fault",
-        CorrelationOutlierDecision::LimitOnlyEvidence => "Limit-only evidence",
+        CorrelationOutlierDecision::LimitOnlyEvidence => "Limit check only",
     }
 }

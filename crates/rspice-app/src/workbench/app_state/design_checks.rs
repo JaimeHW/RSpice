@@ -362,7 +362,7 @@ impl AppState {
             ViewType::Schematic | ViewType::Testbench
         ) {
             return Err(
-                "schematic design-check evidence can only be published from a schematic or testbench"
+                "schematic design-check results can only be published from a schematic or testbench"
                     .to_owned(),
             );
         }
@@ -400,7 +400,7 @@ impl AppState {
     ) -> Result<(), String> {
         if !result.completed {
             return Err(
-                "an incomplete design-check result cannot become current evidence".to_owned(),
+                "an incomplete design-check result cannot replace the current results".to_owned(),
             );
         }
         // The waivers as the documents store them now, whoever produced the
@@ -1457,7 +1457,7 @@ mod tests {
             .publish_active_design_check_result(result)
             .expect_err("the store refuses a second holder of one identity");
 
-        assert!(error.contains("duplicate canonical ID"), "{error}");
+        assert!(error.contains("duplicate diagnostic ID"), "{error}");
         assert!(
             matches!(
                 state.active_design_check_status(),

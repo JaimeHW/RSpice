@@ -244,8 +244,9 @@ fn decode_store_bytes(bytes: &[u8]) -> ShortcutProfileLibraryRestore {
             bytes,
             generation,
             format!(
-                "unsupported shortcut library store format {:?}, schema {:?}",
-                format, schema_version
+                "unsupported shortcut library store format '{}', schema {}",
+                format.unwrap_or("none"),
+                schema_version.map_or_else(|| "none".to_owned(), |schema| schema.to_string())
             ),
         ));
     }
@@ -299,7 +300,7 @@ fn decode_store_bytes(bytes: &[u8]) -> ShortcutProfileLibraryRestore {
         return ShortcutProfileLibraryRestore::Corrupt(retained(
             bytes,
             Some(generation),
-            "library payload digest does not match the canonical payload",
+            "library payload digest does not match the saved payload",
         ));
     }
     let canonical_envelope = match canonical_json_bytes(raw.clone()) {
@@ -316,7 +317,7 @@ fn decode_store_bytes(bytes: &[u8]) -> ShortcutProfileLibraryRestore {
         return ShortcutProfileLibraryRestore::Corrupt(retained(
             bytes,
             Some(generation),
-            "store bytes are not in the canonical encoding",
+            "the saved shortcut library is not in RSpice's standard JSON form",
         ));
     }
     let library: ShortcutProfileLibrary = match serde_json::from_value(library_value) {
@@ -492,10 +493,10 @@ fn encode_store_bytes(
     match decode_store_bytes(&bytes) {
         ShortcutProfileLibraryRestore::Compatible(decoded)
             if decoded.library == *library && decoded.token.generation == generation => {}
-        other => {
+        _ => {
             return Err(ShortcutLibraryPersistenceError::new(
                 "shortcut-library.self-validation",
-                format!("serialized shortcut library failed strict self-validation: {other:?}"),
+                "the shortcut library failed its own check after it was written",
             ));
         }
     }
@@ -601,9 +602,9 @@ fn compatible_after_publication(
 ) -> Result<PersistedShortcutProfileLibrary, ShortcutLibraryPersistenceError> {
     match decode_store_bytes(bytes) {
         ShortcutProfileLibraryRestore::Compatible(persisted) => Ok(*persisted),
-        other => Err(ShortcutLibraryPersistenceError::new(
+        _ => Err(ShortcutLibraryPersistenceError::new(
             "shortcut-library.self-validation",
-            format!("published shortcut library is not restorable: {other:?}"),
+            "the saved shortcut library could not be read back",
         )),
     }
 }
@@ -1100,9 +1101,7 @@ async fn browser_compare_exchange(
         if !matches {
             return Err(ShortcutLibraryPersistenceError::new(
                 "shortcut-library.compare-exchange",
-                format!(
-                    "browser shortcut library changed before publication (expected {expected:?}, found {current_digest:?})"
-                ),
+                "the saved shortcut library changed before this save could finish",
             ));
         }
         // No await is permitted from this generation check through setItem:
@@ -1116,7 +1115,7 @@ async fn browser_compare_exchange(
         let text = std::str::from_utf8(bytes).map_err(|error| {
             ShortcutLibraryPersistenceError::new(
                 "shortcut-library.serialize",
-                format!("canonical shortcut library bytes are not UTF-8: {error}"),
+                format!("the shortcut library being saved is not valid UTF-8: {error}"),
             )
         })?;
         storage
@@ -1143,7 +1142,7 @@ async fn browser_compare_exchange(
             ShortcutLibraryPersistenceError::new(
                 "shortcut-library.browser-commit-in-doubt",
                 format!(
-                    "shortcut library bytes were stored, but exact verification could not be read: {}",
+                    "the shortcut library was stored, but reading it back to verify failed: {}",
                     js_error(error)
                 ),
             )
@@ -1151,7 +1150,7 @@ async fn browser_compare_exchange(
         if verified.as_deref().map(str::as_bytes) != Some(bytes) {
             return Err(ShortcutLibraryPersistenceError::new(
                 "shortcut-library.browser-commit-in-doubt",
-                "shortcut library bytes were stored, but the exact verification read did not match",
+                "the shortcut library was stored, but reading it back did not match what was written",
             ));
         }
         Ok(())
@@ -1393,7 +1392,7 @@ fn js_error(value: wasm_bindgen::JsValue) -> String {
         .ok()
         .and_then(|message| message.as_string())
         .or_else(|| value.as_string())
-        .unwrap_or_else(|| format!("browser error: {value:?}"))
+        .unwrap_or_else(|| "the browser reported an error without a message".to_owned())
 }
 
 #[cfg(test)]

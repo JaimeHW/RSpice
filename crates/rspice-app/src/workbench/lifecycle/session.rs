@@ -555,9 +555,8 @@ impl From<UiSessionStateSer> for UiSessionState {
 mod symbol_selection_tests {
     use super::*;
     use crate::state::{
-        SchematicAnnotationVisibility, SchematicBackAnnotationContent,
-        SchematicHierarchyVisibility, SchematicNetHighlighting, SchematicParameterLabelVisibility,
-        SchematicReviewMarkerVisibility,
+        SchematicAnnotationVisibility, SchematicBackAnnotationContent, SchematicNetHighlighting,
+        SchematicParameterLabelVisibility, SchematicReviewMarkerVisibility,
     };
 
     #[test]
@@ -701,7 +700,6 @@ mod symbol_selection_tests {
     fn schematic_visibility_policy_round_trips_with_the_ui_session() {
         let mut session = UiSessionState::new();
         session.schematic_visibility = SchematicVisibilityPolicy {
-            hierarchy: SchematicHierarchyVisibility::ActiveOnly,
             annotations: SchematicAnnotationVisibility::ViolationsOnly,
             back_annotation: SchematicBackAnnotationContent::VoltagesCurrentsAndPower,
             parameter_labels: SchematicParameterLabelVisibility::Hidden,
@@ -717,6 +715,40 @@ mod symbol_selection_tests {
         );
 
         assert_eq!(restored.schematic_visibility, session.schematic_visibility);
+    }
+
+    /// Earlier builds saved a hierarchy-context choice with the policy (C-13,
+    /// J-3: the dimmed-parent overlay it governed is gone). A session written
+    /// then still loads, and every choice saved beside it survives.
+    #[test]
+    fn a_session_saved_with_the_retired_hierarchy_choice_still_loads() {
+        let legacy = serde_json::json!({
+            "schematic_visibility": {
+                "hierarchy": "full-visible-hierarchy",
+                "annotations": "violations-only",
+                "back_annotation": "voltages-only",
+                "parameter_labels": "hidden",
+                "wire_routing": "forty-five-degree",
+                "net_highlighting": "off",
+                "review_markers": "all"
+            }
+        });
+        let restored = UiSessionState::from(
+            serde_json::from_value::<UiSessionStateSer>(legacy)
+                .expect("a session carrying the retired hierarchy choice loads"),
+        );
+
+        assert_eq!(
+            restored.schematic_visibility,
+            SchematicVisibilityPolicy {
+                annotations: SchematicAnnotationVisibility::ViolationsOnly,
+                back_annotation: SchematicBackAnnotationContent::VoltagesOnly,
+                parameter_labels: SchematicParameterLabelVisibility::Hidden,
+                wire_routing: SchematicWireRoutingStyle::FortyFiveDegree,
+                net_highlighting: SchematicNetHighlighting::Off,
+                review_markers: SchematicReviewMarkerVisibility::All,
+            }
+        );
     }
 
     #[test]

@@ -30,10 +30,17 @@ use super::resolved_symbol_render::{
 use super::symbol_context::SchematicSymbolContext;
 use super::viewport::Viewport;
 
-const PROBE_RADIUS: f32 = 9.0;
-const PROBE_CROSSHAIR_HALF_SPAN: f32 = 13.0;
+pub(crate) const PROBE_RADIUS: f32 = 9.0;
+pub(crate) const PROBE_CROSSHAIR_HALF_SPAN: f32 = 13.0;
+/// Where a probe's label stands from its centre, in world units: the
+/// bottom-left corner of the text.
+pub(crate) const PROBE_LABEL_OFFSET_WU: Vec2 = Vec2::new(13.0, -9.0);
+/// Where a bus declaration's bottom-left corner stands from the bus's last
+/// point, and a tap slice's from its connection point, in world units.
+pub(crate) const BUS_DECLARATION_OFFSET_WU: Vec2 = Vec2::new(8.0, -8.0);
+pub(crate) const TAP_SLICE_OFFSET_WU: Vec2 = Vec2::new(5.0, -7.0);
 /// World size of bus declarations, tap slices and probe labels.
-const SMALL_TEXT_WORLD: f32 = 9.0;
+pub(crate) const SMALL_TEXT_WORLD: f32 = 9.0;
 /// Mono advance per glyph at [`SMALL_TEXT_WORLD`], for a greeked bar.
 const SMALL_TEXT_GLYPH_WORLD: f32 = 6.7 * SMALL_TEXT_WORLD / 11.0;
 /// Instance name and value, in world units: one type for primitives and
@@ -356,7 +363,7 @@ pub fn draw_bus(painter: &Painter, viewport: &Viewport, bus: &Bus, selected: boo
             painter,
             viewport,
             *anchor,
-            Vec2::new(8.0, -8.0),
+            BUS_DECLARATION_OFFSET_WU,
             &declaration.to_string(),
             // Text never takes the selection colour.
             palette.net_label,
@@ -434,7 +441,7 @@ pub fn draw_bus_tap(painter: &Painter, viewport: &Viewport, tap: &BusTap, select
         painter,
         viewport,
         tap.connection_point,
-        Vec2::new(5.0, -7.0),
+        TAP_SLICE_OFFSET_WU,
         &tap.slice.to_string(),
         palette.net_label,
     );
@@ -519,7 +526,7 @@ pub fn draw_probe(
     // Below the floor the label hides and the marker stays.
     if let Some(size) = lod::annotation_size(SMALL_TEXT_WORLD, viewport.zoom, ppp) {
         painter.text(
-            center + Vec2::new(13.0, -9.0) * viewport.zoom,
+            center + PROBE_LABEL_OFFSET_WU * viewport.zoom,
             egui::Align2::LEFT_BOTTOM,
             format!("{}{}", probe.reference, status.suffix()),
             rspice_ui_kit::theme::mono(size, rspice_ui_kit::theme::FontWeight::Medium),

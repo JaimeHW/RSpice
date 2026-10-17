@@ -408,8 +408,8 @@ fn refresh_latest_binding(state: &mut AppState, document_id: ResultDocumentId) -
         (tracking.simulation_plan_id, tracking.authored_analysis_id)
     else {
         return LatestBinding::Degraded(degraded_tracking_reason(
-            "This document tracks the latest run but retains no exact simulation-plan and \
-             authored-analysis identity to follow.",
+            "This document follows the latest run but does not record which simulation plan \
+             and analysis to follow.",
         ));
     };
     let Some(previous) = document
@@ -667,7 +667,7 @@ fn render_page(
         unavailable_surface(
             ui,
             &page.page.title,
-            "A single-pane page must resolve to exactly one retained pane.",
+            "A single-pane page must contain exactly one pane.",
         );
         return None;
     }
@@ -803,7 +803,7 @@ fn render_pane_viewer(
             ui,
             &pane.title,
             &format!(
-                "The pane references unregistered viewer identity {:?}. The retained dataset remains unchanged.",
+                "The pane uses an unknown viewer '{}'. The run's results are unchanged.",
                 pane.viewer_id
             ),
         );
@@ -813,7 +813,7 @@ fn render_pane_viewer(
         unavailable_surface(
             ui,
             &pane.title,
-            "The pane's viewer identity is absent from the canonical Results contract.",
+            "The pane's viewer is not one of the Results viewers.",
         );
         return;
     };
@@ -1099,7 +1099,7 @@ fn bound_viewer_projection(state: &AppState, viewer: ResultViewer) -> ResultView
 fn select_pane_binding(state: &mut AppState, pane: &Pane) -> Result<(), String> {
     let binding = pane
         .binding
-        .ok_or_else(|| "This result pane has no immutable dataset binding.".to_owned())?;
+        .ok_or_else(|| "This result pane is not bound to a run.".to_owned())?;
     let (run_index, analysis_index) = resolve_binding(state, binding)?;
     if state.simulation.view.active_run_idx == Some(run_index)
         && state.simulation.view.active_analysis_idx == Some(analysis_index)
@@ -1125,11 +1125,11 @@ pub(super) fn resolve_binding(
         .runs
         .iter()
         .position(|run| run.dataset_id == binding.dataset.dataset_id)
-        .ok_or_else(|| "The pane's immutable result dataset is no longer retained.".to_owned())?;
+        .ok_or_else(|| "The pane's run is no longer in the run history.".to_owned())?;
     let run = &state.simulation.retained.runs[run_index];
     if run.dataset_content_digest() != binding.dataset.content_digest {
         return Err(
-            "The retained dataset content does not match the pane's immutable binding.".to_owned(),
+            "The run's results no longer match the ones this pane was bound to.".to_owned(),
         );
     }
     let analysis_index = run

@@ -742,7 +742,7 @@ fn identity_pane(ui: &mut Ui, row: &ShelfRow, height: f32) {
             if let Some(description) = row.description.as_deref() {
                 property(ui, "Summary", description, "as the publisher signed it");
             }
-            property(ui, "Device class", &hit.device, "canonical");
+            property(ui, "Device class", &hit.device, "standard class");
             property(ui, "Pack", &hit.pack_name, &hit.pack);
             // Every specification the manifest publishes, not only the ones
             // this class declares a column for: the columns are what a table

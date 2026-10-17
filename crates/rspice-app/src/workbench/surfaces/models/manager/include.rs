@@ -76,7 +76,7 @@ pub(super) fn include_page(
         page_empty_state(
             ui,
             "No model-source closure is loaded",
-            "Add a library or attach a pack to build an authenticated include graph.",
+            "Add a library or attach a pack to see its include graph.",
         );
         return;
     }
@@ -183,7 +183,7 @@ fn include_closure_graph(
         Some(if direct_only {
             "root plus direct dependencies"
         } else {
-            "root plus authenticated dependencies"
+            "root plus all dependencies"
         }),
         |ui| {
             let graph_height = (ui.available_height() * 0.42).clamp(150.0, 230.0);
@@ -214,7 +214,7 @@ fn include_closure_graph(
                 ui.painter().text(
                     egui::pos2(rect.center().x, rect.center().y + 14.0),
                     egui::Align2::CENTER_CENTER,
-                    "Loaded definitions are built-in or have no authenticated source graph.",
+                    "Loaded definitions are built-in or have no include graph.",
                     theme::sans(tokens::FS_0, FontWeight::Regular),
                     t.color.text_faint,
                 );

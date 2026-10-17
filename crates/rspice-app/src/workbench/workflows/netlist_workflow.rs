@@ -185,7 +185,7 @@ fn acknowledge_canonical_dependencies(
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
         | crate::workbench::documents::netlist_document::ActiveNetlistDocument::RunSnapshot => None,
     }
-    .ok_or_else(|| "The active source has no canonical document identity.".to_owned())?;
+    .ok_or_else(|| "The active source has no netlist document.".to_owned())?;
 
     use std::collections::HashSet;
 
@@ -234,18 +234,18 @@ fn acknowledge_canonical_dependencies(
         let source = dependency.source().as_bytes().to_vec();
         if root.as_deref() == Some(owner) {
             let index = root_directives
-                    .iter()
-                    .enumerate()
-                    .skip(direct_cursor)
-                    .find_map(|(index, requested)| {
-                        (requested == dependency.requested_path()).then_some(index)
-                    })
-                    .ok_or_else(|| {
-                        format!(
-                            "Resolved root dependency '{}' has no canonical directive in the retained source.",
-                            dependency.requested_path()
-                        )
-                    })?;
+                .iter()
+                .enumerate()
+                .skip(direct_cursor)
+                .find_map(|(index, requested)| {
+                    (requested == dependency.requested_path()).then_some(index)
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "Resolved root dependency '{}' has no matching include line in the source.",
+                        dependency.requested_path()
+                    )
+                })?;
             direct_cursor = index + 1;
             if !edges.insert((None, index)) {
                 continue;
@@ -315,7 +315,7 @@ fn acknowledge_canonical_dependencies(
             .acknowledge_dependencies(document.content_digest(), dependencies)
             .map_err(|error| error.to_string())?;
         if !document.dependency_graph_is_sealed() {
-            return Err("The canonical dependency graph is not fully sealed.".to_owned());
+            return Err("Not every dependency of the deck is resolved.".to_owned());
         }
     }
 
@@ -405,7 +405,7 @@ fn external_dependency_index_at_line(source: &str, line: usize) -> Result<usize,
         }
     }
     Err(format!(
-        "Resolved transitive dependency at line {line} has no canonical directive."
+        "Resolved transitive dependency at line {line} has no matching include line."
     ))
 }
 
@@ -530,7 +530,7 @@ fn acknowledge_canonical_validation(state: &mut AppState) -> Result<(), String> 
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
         | crate::workbench::documents::netlist_document::ActiveNetlistDocument::RunSnapshot => None,
     }
-    .ok_or_else(|| "The active source has no canonical document identity.".to_owned())?;
+    .ok_or_else(|| "The active source has no netlist document.".to_owned())?;
     document
         .acknowledge_validation(document.content_digest(), diagnostics)
         .map_err(|error| error.to_string())?;

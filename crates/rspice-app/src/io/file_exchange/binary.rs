@@ -62,7 +62,7 @@ async fn read_browser_file(
     // rejection instead of leaving a picker mailbox pending indefinitely.
     let buffer = wasm_bindgen_futures::JsFuture::from(file.inner().array_buffer())
         .await
-        .map_err(|error| format!("{} could not be read: {error:?}", kind.subject))?;
+        .map_err(|_| format!("{} could not be read by the browser.", kind.subject))?;
     let bytes = js_sys::Uint8Array::new(&buffer);
     if bytes.length() as usize > max_bytes {
         return Err(format!(

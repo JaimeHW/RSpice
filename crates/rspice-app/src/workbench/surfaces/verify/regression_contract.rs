@@ -208,12 +208,12 @@ pub(super) fn regression_coverage_issues(
             (Some(baseline), Some(current)) => baseline
                 .validation_error
                 .as_ref()
-                .map(|error| format!("baseline evidence is invalid: {error}"))
+                .map(|error| format!("baseline results are invalid: {error}"))
                 .or_else(|| {
                     current
                         .validation_error
                         .as_ref()
-                        .map(|error| format!("candidate evidence is invalid: {error}"))
+                        .map(|error| format!("candidate results are invalid: {error}"))
                 }),
         };
         if let Some(detail) = detail {
@@ -336,10 +336,10 @@ pub(super) fn derive_regression_checks(
                 },
                 name,
                 source_identity: format!(
-                    "{} · {:?} → {:?}",
+                    "{} · revision {} → {}",
                     baseline_provenance.source_instance_id(),
-                    baseline_provenance.source_revision(),
-                    current_provenance.source_revision()
+                    baseline_provenance.source_revision().get(),
+                    current_provenance.source_revision().get()
                 ),
                 baseline: baseline_value,
                 current: current_value,
@@ -516,7 +516,7 @@ pub(super) fn validate_regression_run(
     run.validate_provenance()?;
     if run.analyses.len() != receipt.tasks().len() {
         return Err(format!(
-            "dataset is incomplete: {} of {} authenticated tasks produced results",
+            "dataset is incomplete: {} of {} tasks produced results",
             run.analyses.len(),
             receipt.tasks().len()
         ));
@@ -1383,7 +1383,7 @@ pub(super) fn regression_ci_documents(
 ) -> Result<(String, String), String> {
     if cases.is_empty() {
         return Err(
-            "CI evidence requires at least one passing, failing, or blocked case".to_owned(),
+            "The CI export needs at least one passing, failing, or blocked case".to_owned(),
         );
     }
     let failures = cases
@@ -1494,7 +1494,7 @@ pub(super) fn export_regression_ci(app: &mut RSpiceApp, junit: &str, tap: &str) 
         let Some(path) = app.export_workflow_io.show_save_dialog(SaveDialogConfig {
             title: "Export Golden Regression JUnit and TAP",
             default_name: "rspice-golden-regression-ci.zip",
-            filter_name: "ZIP evidence package",
+            filter_name: "ZIP archive",
             filter_extensions: &["zip"],
         })?
         else {

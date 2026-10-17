@@ -6,6 +6,7 @@
 //! sources is reported with the sources it would break instead of being
 //! offered as a plain choice.
 
+use super::super::pdk_technology_admin::{diff_area_label, diff_impact_label};
 use super::*;
 
 #[derive(Debug, Clone)]
@@ -62,7 +63,7 @@ pub(super) fn technology_candidates(app: &RSpiceApp) -> TechnologyCandidateCatal
         match ProjectTechnologyBinding::from_model_library(library) {
             Ok(binding) => {
                 let option_label = format!(
-                    "{} · {} model{} · {} authenticated source{}",
+                    "{} · {} model{} · {} source file{}",
                     binding.display_label(),
                     binding.model_count(),
                     plural_suffix(binding.model_count()),
@@ -83,7 +84,7 @@ pub(super) fn technology_candidates(app: &RSpiceApp) -> TechnologyCandidateCatal
                 };
                 catalog.diagnostics.push(TechnologyCandidateDiagnostic {
                     reason: format!(
-                        "{error}. Configure, refresh, or re-import this library so it retains a canonical root, authenticated source bytes and dependency edges, and at least one parsed device model."
+                        "{error}. Configure, refresh, or re-import this library so it has a root source file, the files it includes, and at least one parsed device model."
                     ),
                     library_name,
                 });
@@ -264,7 +265,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
     let selected_label = selected_index
         .and_then(|index| options.get(index))
         .map(String::as_str)
-        .unwrap_or("No attachable authenticated model library");
+        .unwrap_or("No model library can be attached");
     let selected_package_key = app
         .state
         .dialogs
@@ -397,7 +398,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
     let mut create_migration_copy = false;
     let choice = Dialog::new(TECHNOLOGY_DIALOG_TITLE, primary.label)
     .description(
-        "Choose an authenticated model library and one trusted signed PDK revision. Commit verifies both exact identities, writes and read-back verifies a whole-project checkpoint, then records one immutable project-owned binding revision.",
+        "Choose a model library and one trusted signed PDK revision. Attaching verifies both, writes a whole-project checkpoint and reads it back, then records the binding as a new project revision.",
     )
     .size(DialogSize::Transaction)
     .ghost("Cancel")
@@ -408,7 +409,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         if let Some(index) = select(
             ui,
             "project-model-technology-library",
-            "Authenticated model library",
+            "Model library",
             selected_label,
             &options,
             ui.available_width(),
@@ -466,13 +467,13 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         );
         muted(
             ui,
-            "Actor, authority, reason, exact before/after contract digests, and checkpoint evidence are retained in the project’s immutable hash-linked technology history.",
+            "Actor, authority, reason, before and after digests, and the checkpoint are recorded in the project’s technology history, which cannot be edited.",
         );
 
         ui.add_space(10.0);
         technology_dialog_label(ui, "Technology mapping");
         if let Some(candidate) = selected_index.and_then(|index| candidates.get(index)) {
-            property_card(ui, "Resolved authenticated model contract", |ui| {
+            property_card(ui, "Resolved model library", |ui| {
                 property_row(
                     ui,
                     "Devices",
@@ -540,7 +541,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
                 property_row(
                     ui,
                     "Mode",
-                    "Exact revision replacement · checkpointed · editable views unchanged",
+                    "Revision replacement · checkpointed · editable views unchanged",
                 );
                 property_row(
                     ui,
@@ -557,9 +558,9 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
                 if let Ok(Some(evidence)) = migration_evidence.as_ref() {
                     property_row(
                         ui,
-                        "Evidence",
+                        "Reviewed diff",
                         &format!(
-                            "diff {} · {} exact entries",
+                            "diff {} · {} entries",
                             short_identity(&evidence.diff_digest().to_string()),
                             evidence.entry_count()
                         ),
@@ -571,8 +572,10 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
                     .show(ui, |ui| {
                         for entry in &diff.entries {
                             ui.monospace(format!(
-                                "{:?} · {:?} · {}",
-                                entry.impact, entry.area, entry.identity
+                                "{} · {} · {}",
+                                diff_impact_label(entry.impact),
+                                diff_area_label(entry.area),
+                                entry.identity
                             ));
                         }
                     });
@@ -590,19 +593,19 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
                     }
                     muted(
                         ui,
-                        "The copy retains the current exact PDK pin and starts a fresh project audit chain. Open that copy, remap affected objects explicitly, validate it, then review the replacement again. The current project remains unchanged.",
+                        "The copy keeps the current PDK pin and starts a new project audit history. Open that copy, remap affected objects explicitly, validate it, then review the replacement again. The current project remains unchanged.",
                     );
                 } else {
                     ui.add_enabled(
                         !checkpoint_pending,
                         egui::Checkbox::new(
                             &mut app.state.dialogs.technology_attachment.migration_reviewed,
-                            "I reviewed the exact signed revision diff and approve this non-breaking replacement",
+                            "I reviewed the signed revision diff and approve this non-breaking replacement",
                         ),
                     );
                     muted(
                         ui,
-                        "The immutable project receipt retains the exact baseline, candidate, archive identities, diff digest, impact counts, and recovery checkpoint.",
+                        "The project's audit record keeps the baseline and candidate revisions, archive identities, diff digest, impact counts, and recovery checkpoint.",
                     );
                 }
             }
@@ -615,7 +618,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
             }
             Err(error) => technology_error(
                 ui,
-                &format!("Exact migration preview failed closed: {error}"),
+                &format!("Migration preview failed: {error}"),
             ),
         }
 
@@ -678,12 +681,12 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
             let result = selected_binding
                 .clone()
                 .ok_or_else(|| {
-                    "Select an attachable authenticated model library and trusted signed PDK package"
+                    "Select a model library that can be attached and a trusted signed PDK package"
                         .to_owned()
                 })
                 .and_then(|binding| {
-                    technology_change_authority(&app.state.dialogs.technology_attachment)
-                        .and_then(|authority| {
+                    technology_change_authority(&app.state.dialogs.technology_attachment).and_then(
+                        |authority| {
                             attach_technology_binding(
                                 ctx,
                                 app,
@@ -691,7 +694,8 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
                                 authority,
                                 migration_evidence.clone().ok().flatten(),
                             )
-                        })
+                        },
+                    )
                 });
             match result {
                 Ok(receipt) => {
@@ -790,7 +794,7 @@ pub(super) fn commit_technology_after_checkpoint(
     if let Some(evidence) = migration_evidence {
         change_context = change_context
             .with_migration_evidence(evidence)
-            .map_err(|error| format!("Technology migration evidence is invalid: {error}"))?;
+            .map_err(|error| format!("The reviewed technology migration is invalid: {error}"))?;
     }
     let (revision, audit_receipt) = app
         .state
@@ -1015,14 +1019,11 @@ fn validate_migration_evidence_for_binding(
                 && package.manifest_digest() == candidate_pin.manifest_digest()
                 && package.archive_digest() == candidate_pin.archive_digest()
         })
-        .ok_or_else(|| {
-            "Candidate signed PDK no longer resolves to the exact trusted archive.".to_owned()
-        })?;
+        .ok_or_else(|| "Candidate signed PDK no longer matches the trusted archive.".to_owned())?;
     let Some(baseline) = baseline else {
         if evidence.is_some() {
             return Err(
-                "An initial technology attachment must not claim revision-migration evidence."
-                    .to_owned(),
+                "A first technology attachment cannot include a migration review.".to_owned(),
             );
         }
         return Ok(());
@@ -1032,7 +1033,7 @@ fn validate_migration_evidence_for_binding(
     {
         if evidence.is_some() {
             return Err(
-                "The project already uses this exact signed package; migration evidence is not applicable."
+                "The project already uses this signed package; there is no migration to review."
                     .to_owned(),
             );
         }
@@ -1042,7 +1043,7 @@ fn validate_migration_evidence_for_binding(
         baseline.metadata(),
         candidate.metadata(),
     )
-    .map_err(|error| format!("Exact signed revision comparison failed: {error}"))?;
+    .map_err(|error| format!("Signed revision comparison failed: {error}"))?;
     if !diff.same_package_lineage {
         return Err(
             "Cross-technology replacement requires an independent migration copy; direct replacement is prohibited."
@@ -1056,12 +1057,11 @@ fn validate_migration_evidence_for_binding(
         ));
     }
     let evidence = evidence.ok_or_else(|| {
-        "Replacing a signed PDK revision requires the exact reviewed comparison evidence."
-            .to_owned()
+        "Replacing a signed PDK revision requires a reviewed comparison.".to_owned()
     })?;
     if !evidence.matches_diff(&diff) {
         return Err(
-            "Migration evidence no longer matches the exact trusted baseline and candidate packages."
+            "The reviewed comparison no longer matches the trusted baseline and candidate packages."
                 .to_owned(),
         );
     }
@@ -1097,7 +1097,7 @@ pub(super) fn technology_unavailable_message(ui: &mut Ui) {
     property_card(ui, "No attachable model technology", |ui| {
         muted(
             ui,
-            "Configure and parse at least one external model library with a canonical source closure and one device model.",
+            "Configure and parse at least one external model library with a root source file and one device model.",
         );
     });
 }

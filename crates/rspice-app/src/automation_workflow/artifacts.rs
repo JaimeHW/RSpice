@@ -347,24 +347,24 @@ impl fmt::Display for EvidenceError {
                 )
             }
             Self::MissingFailureDetail { check_id } => {
-                write!(formatter, "failed check {check_id:?} requires detail")
+                write!(formatter, "failed check '{check_id}' requires detail")
             }
-            Self::NoChecks => formatter.write_str("completed evidence contains no checks"),
+            Self::NoChecks => formatter.write_str("the completed results contain no checks"),
             Self::TooManyChecks { count, maximum } => {
                 write!(
                     formatter,
-                    "evidence contains {count} checks; maximum is {maximum}"
+                    "the results contain {count} checks; maximum is {maximum}"
                 )
             }
             Self::EvidenceTooLarge { maximum } => write!(
                 formatter,
-                "completed evidence text exceeds the {maximum}-byte aggregate limit"
+                "the completed results' text exceeds the {maximum}-byte total limit"
             ),
             Self::DurationOverflow => formatter.write_str(
                 "the aggregate check duration exceeds the supported 64-bit millisecond range",
             ),
             Self::DuplicateCheckId { check_id } => {
-                write!(formatter, "duplicate check ID {check_id:?}")
+                write!(formatter, "duplicate check ID '{check_id}'")
             }
             Self::InvalidComparisonCounts {
                 waveform_count,
@@ -453,11 +453,11 @@ impl fmt::Display for ArtifactRenderError {
         match self {
             Self::PlanDigestMismatch { expected, actual } => write!(
                 formatter,
-                "evidence plan digest {actual} does not match compiled plan {expected}"
+                "the results' plan digest {actual} does not match compiled plan {expected}"
             ),
             Self::BaselineMismatch { expected, actual } => write!(
                 formatter,
-                "evidence baseline {actual:?} does not match plan baseline {expected:?}"
+                "the results' baseline '{actual}' does not match plan baseline '{expected}'"
             ),
             Self::Json(message) => write!(formatter, "could not render summary JSON: {message}"),
             Self::DocumentTooLarge => {

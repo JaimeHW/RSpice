@@ -419,7 +419,7 @@ fn periodic_repair_requires_exact_sources_and_rolls_back_without_them() {
     assert!(matches!(
         plan.repair_dependencies_with_context(pac, &AnalysisDependencyRepairContext::default()),
         Err(AnalysisPlanError::DependencyConfigurationInvalid { detail, .. })
-            if detail.contains("catalog is unavailable")
+            if detail.contains("periodic sources in the elaborated circuit is unavailable")
     ));
     assert_eq!(snapshot(&plan), before, "failed repair must be atomic");
 

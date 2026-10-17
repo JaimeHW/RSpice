@@ -303,7 +303,7 @@ fn existing_schematic_source_is_identity_locked_and_preserves_the_master() {
     assert!(
         validate_create_symbol_draft(&state)
             .expect_err("cross-cell identity must fail")
-            .contains("exact target cell")
+            .contains("Use that cell as the target")
     );
 }
 

@@ -16,7 +16,7 @@ pub(super) fn active_quick_result(
     let run = active_terminal_run(state)?;
     let analysis_index = quick_result_analysis_index(state, run, viewer).ok_or_else(|| {
         HardcopySourceError::UnretainedResult(format!(
-            "no retained analysis can provide exact evidence for {}",
+            "no saved analysis has results for {}",
             viewer.label()
         ))
     })?;

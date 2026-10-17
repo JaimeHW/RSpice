@@ -73,16 +73,17 @@ pub(crate) fn open_source_location(
             .and_then(|document| {
                 document.dependencies().iter().find(|dependency| {
                     let locator = dependency.locator();
-                    locator.native_origin().is_some_and(|origin| {
-                        std::path::Path::new(origin) == source_path
-                    }) || std::path::Path::new(locator.logical_identity()) == source_path
+                    locator
+                        .native_origin()
+                        .is_some_and(|origin| std::path::Path::new(origin) == source_path)
+                        || std::path::Path::new(locator.logical_identity()) == source_path
                         || std::path::Path::new(locator.locator()) == source_path
                 })
             })
             .map(|dependency| dependency.locator().logical_identity().to_owned())
             .ok_or_else(|| {
                 format!(
-                    "Diagnostic source {} is no longer present in the authenticated include closure.",
+                    "Diagnostic source {} is no longer among the deck's included files.",
                     source_path.display()
                 )
             })?;

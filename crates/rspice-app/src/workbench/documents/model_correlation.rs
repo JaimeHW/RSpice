@@ -40,7 +40,7 @@ impl ModelCorrelationSection {
             Self::Metrics => "Metrics",
             Self::Comparison => "Comparison",
             Self::Outliers => "Outliers",
-            Self::Evidence => "Evidence",
+            Self::Evidence => "Review",
             Self::Gate => "Gate",
         }
     }
@@ -316,7 +316,7 @@ impl CorrelationOutlierDecisionDraft {
         match self {
             Self::Retain => "Retain in gate",
             Self::ExcludeFixtureFault => "Exclude: fixture fault",
-            Self::LimitOnlyEvidence => "Limit-only evidence",
+            Self::LimitOnlyEvidence => "Limit check only",
         }
     }
 }
@@ -441,7 +441,7 @@ mod tests {
                 "Metrics",
                 "Comparison",
                 "Outliers",
-                "Evidence",
+                "Review",
                 "Gate",
             ]
         );

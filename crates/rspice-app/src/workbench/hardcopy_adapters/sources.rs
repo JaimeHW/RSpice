@@ -228,7 +228,8 @@ pub(crate) fn enumerate_retained_hardcopy_sources(
             } else {
                 RetainedHardcopySourceAvailability::Unavailable {
                     reason: format!(
-                        "active design view type {view_type:?} has no semantic hardcopy adapter"
+                        "the active {} view cannot be printed",
+                        view_type.display_name()
                     ),
                 }
             },
@@ -528,7 +529,8 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
                 )
             }
             view_type => Err(HardcopySourceError::UnsupportedDocument(format!(
-                "active design view type {view_type:?} has no semantic hardcopy adapter"
+                "the active {} view cannot be printed",
+                view_type.display_name()
             ))),
         };
     }
@@ -600,7 +602,7 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
             } else {
                 let analysis_index = displayed.primary_analysis_index.ok_or_else(|| {
                     HardcopySourceError::UnretainedResult(format!(
-                        "no retained analysis can provide exact evidence for {}",
+                        "no saved analysis has results for {}",
                         viewer.label()
                     ))
                 })?;
@@ -803,7 +805,7 @@ fn quick_result_availability(
     }
     let Some(index) = quick_result_analysis_index(state, run, viewer) else {
         return unavailable(format!(
-            "no retained analysis can provide exact evidence for {}",
+            "no saved analysis has results for {}",
             viewer.label()
         ));
     };
@@ -957,7 +959,7 @@ fn quick_result_availability(
         RetainedHardcopySourceAvailability::Available
     } else {
         unavailable(format!(
-            "active analysis {} has no exact evidence for {}",
+            "active analysis {} has no results for {}",
             analysis.id,
             viewer.label()
         ))
@@ -1123,7 +1125,7 @@ fn visualization_document_pane_availability(
         reason: reason.to_owned(),
     };
     if pane.binding.is_none() {
-        return unavailable("the selected result pane has no immutable dataset binding");
+        return unavailable("the selected result pane is not bound to a run");
     }
     if pane.kind != crate::results::visualization_document::PaneKind::Cartesian
         || pane.viewer_id != "viewer-waveform"
@@ -1175,9 +1177,9 @@ pub(crate) fn resolve_active_app_hardcopy_source(
             match active {
                 WorkspaceDocumentId::CellView(reference)
                     if reference == &state.workspace.content.active_view => {}
-                other => {
+                _ => {
                     return Err(HardcopySourceError::StaleActiveDocumentAuthority(format!(
-                        "design registry points at {other:?}, but the active view is {}",
+                        "the Design workspace's active document is not the active view {}",
                         state.workspace.content.active_display_path()
                     )));
                 }
@@ -1228,7 +1230,8 @@ pub(crate) fn resolve_active_app_hardcopy_source(
                     })
                 }
                 view_type => Err(HardcopySourceError::UnsupportedDocument(format!(
-                    "active design view type {view_type:?} has no semantic hardcopy adapter"
+                    "the active {} view cannot be printed",
+                    view_type.display_name()
                 ))),
             }
         }
@@ -1262,9 +1265,9 @@ pub(crate) fn resolve_active_app_hardcopy_source(
                     HardcopyScope::ActivePlotDocument,
                 )
             }
-            other => Err(HardcopySourceError::StaleActiveDocumentAuthority(format!(
-                "results registry points at {other:?}"
-            ))),
+            _ => Err(HardcopySourceError::StaleActiveDocumentAuthority(
+                "the Results workspace has no printable document open".to_owned(),
+            )),
         },
         SurfaceId::ReportAuthoring => {
             let document_id = state.workbench.report_authoring.selected_document.ok_or(
@@ -1334,8 +1337,8 @@ fn require_active_result_document(
 ) -> Result<(), HardcopySourceError> {
     match state.workbench.documents.active(Workspace::Results) {
         Some(WorkspaceDocumentId::ResultDataset(dataset)) if *dataset == expected_dataset => Ok(()),
-        Some(other) => Err(HardcopySourceError::StaleActiveDocumentAuthority(format!(
-            "results registry points at {other:?}, expected dataset {expected_dataset}"
+        Some(_) => Err(HardcopySourceError::StaleActiveDocumentAuthority(format!(
+            "the Results workspace shows a different document than dataset {expected_dataset}"
         ))),
         None => Err(HardcopySourceError::NoActiveDocumentAuthority(
             "result dataset",

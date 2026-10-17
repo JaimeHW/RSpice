@@ -68,8 +68,8 @@ use crate::ui::widgets::{
 use crate::workbench::design_system::property_row as inspector_property_row;
 use rspice_simulation::runner::TfRunConfig;
 
-const NOISE_OUTPUT_CUSTOM_CHOICE: &str = "Exact expression\u{2026}";
-const NOISE_INPUT_CUSTOM_CHOICE: &str = "Exact source name\u{2026}";
+const NOISE_OUTPUT_CUSTOM_CHOICE: &str = "Custom expression\u{2026}";
+const NOISE_INPUT_CUSTOM_CHOICE: &str = "Custom source name\u{2026}";
 /// How many elaborated names one noise row offers as presets.
 ///
 /// The select paints one row per option with no scroll of its own, so a design

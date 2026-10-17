@@ -177,7 +177,10 @@ fn retained_memo_immutable_pane_binding_rejects_changed_source_content() {
     Arc::make_mut(&mut app.state.simulation.retained.runs[0].analyses[0].waveforms[0].y).fill(2.0);
     let error = view_context::resolve_displayed_result_view(&app.state)
         .expect_err("the immutable pane must reject changed content even before the next frame");
-    assert!(error.contains("immutable binding"), "{error}");
+    assert!(
+        error.contains("no longer match the ones this pane was bound to"),
+        "{error}"
+    );
     assert!(bound.run(&app.state).is_none());
     assert_eq!(app.state.simulation.view.data_version, version);
 }

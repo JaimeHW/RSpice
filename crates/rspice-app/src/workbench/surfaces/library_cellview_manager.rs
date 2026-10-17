@@ -42,7 +42,7 @@ const PIN_TABLE_MIN_WIDTH: f32 = 690.0;
 const FORM_TABLE_MIN_WIDTH: f32 = 900.0;
 
 const SURFACE_TITLE: &str = "Library, cellview, symbol and form authoring";
-const SURFACE_SUMMARY: &str = "Author project libraries, cells, views, terminal contracts, component forms, locks, revisions, and publication evidence from one project-owned identity.";
+const SURFACE_SUMMARY: &str = "Author this project's libraries, cells, views, terminal contracts, component forms, locks, revisions, and publication records in one place.";
 
 #[derive(Clone)]
 struct SymbolProjection {
@@ -699,7 +699,7 @@ fn symbol_preview_card(
     section_card(
         ui,
         "Authored symbol preview",
-        "The exact authored symbol document rendered by the Design editor.",
+        "The saved symbol document, as the Design editor draws it.",
         |ui| {
             let height = if ui.available_width() <= COMPACT_BREAKPOINT {
                 210.0
@@ -888,7 +888,7 @@ fn parameter_form_table(ui: &mut Ui, definition: &ModelBoundSymbolDefinition) {
         ui,
         "Component form and inheritance",
         &format!(
-            "Form revision r{} · {} section{} · {} field{} · exact emitted order: {}",
+            "Form revision r{} · {} section{} · {} field{} · netlist order: {}",
             definition.parameter_form.revision,
             definition.parameter_form.sections.len(),
             plural_suffix(definition.parameter_form.sections.len()),

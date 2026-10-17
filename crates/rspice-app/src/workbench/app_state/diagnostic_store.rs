@@ -1241,7 +1241,7 @@ impl DiagnosticStore {
                 .is_some_and(|owner| *owner != key && !superseded.contains(&id));
             if held_elsewhere || !claimed.insert(id) {
                 return Err(format!(
-                    "Diagnostic collection contains duplicate canonical ID {id}."
+                    "Diagnostic collection contains duplicate diagnostic ID {id}."
                 ));
             }
         }
@@ -1991,7 +1991,7 @@ mod tests {
             )
             .expect_err("two records with one identity must be refused");
 
-        assert!(error.contains("duplicate canonical ID"), "{error}");
+        assert!(error.contains("duplicate diagnostic ID"), "{error}");
         let batch = state
             .diagnostics
             .batches()

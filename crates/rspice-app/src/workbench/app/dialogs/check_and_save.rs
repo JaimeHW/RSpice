@@ -114,7 +114,7 @@ impl RSpiceApp {
         }
         let Some(report) = self.state.dialogs.check_and_save.report.clone() else {
             self.state.dialogs.check_and_save.validation_error = Some(
-                "Validation evidence is unavailable; close and reopen Check and save.".to_owned(),
+                "Validation results are unavailable; close and reopen Check and save.".to_owned(),
             );
             return;
         };
@@ -314,7 +314,7 @@ impl RSpiceApp {
         }
         let Some(opened_report) = self.state.dialogs.check_and_save.report.clone() else {
             self.state.dialogs.check_and_save.validation_error =
-                Some("Validation evidence is unavailable; nothing was saved.".to_owned());
+                Some("Validation results are unavailable; nothing was saved.".to_owned());
             return;
         };
         // Checks nothing a check still describes, so an unchanged design is
@@ -785,7 +785,7 @@ fn check_and_save_form(
                     ui,
                     "Documents",
                     report.document_scope_label(),
-                    "The exact canonical publication scope",
+                    "The documents this save covers",
                 );
             });
             ui.add_space(9.0);

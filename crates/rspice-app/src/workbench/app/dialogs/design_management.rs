@@ -32,7 +32,8 @@ use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry};
 
 const MANAGER_TITLE: &str = "Sheets, variants, annotation and hierarchy";
 const MANAGER_PRIMARY: &str = "Apply reviewed design changes";
-const MANAGER_DESCRIPTION: &str = "Manage stable sheet identity, governed assembly variants, reference-designator ownership, and exact hierarchy resolution.";
+const MANAGER_DESCRIPTION: &str =
+    "Manage sheets, assembly variants, reference designators, and how the hierarchy resolves.";
 const MANAGER_INITIAL_HEIGHT: f32 = 590.0;
 const SUBFLOW_INITIAL_HEIGHT: f32 = 610.0;
 const TAB_HEIGHT: f32 = 34.0;

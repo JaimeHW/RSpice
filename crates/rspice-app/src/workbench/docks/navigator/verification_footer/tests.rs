@@ -1534,7 +1534,7 @@ fn the_artifact_menu_opens_from_the_keyboard_on_the_focused_row() {
     let runs = painted_runs(&output);
     let copy = runs
         .iter()
-        .find(|(run, _)| run == "Copy canonical name")
+        .find(|(run, _)| run == "Copy name")
         .map(|(_, rect)| *rect)
         .unwrap_or_else(|| {
             panic!(

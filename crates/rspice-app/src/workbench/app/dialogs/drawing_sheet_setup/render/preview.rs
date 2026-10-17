@@ -64,7 +64,7 @@ pub(super) fn preview_column(
                     ),
                     (
                         "Not affected",
-                        "input revision · generated netlist · schematic checks · result datasets · release evidence",
+                        "input revision · generated netlist · schematic checks · result datasets · release records",
                     ),
                 ];
                 let summary_height = effect_summary_height(ui, ui.available_width(), &facts);

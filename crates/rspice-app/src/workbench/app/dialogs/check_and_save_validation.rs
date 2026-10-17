@@ -642,9 +642,7 @@ impl CheckAndSaveValidationReport {
             SaveScope::ActiveDocument => {
                 format!("{} \u{00b7} {}", active_view.cell, active_view.view)
             }
-            SaveScope::AllDocuments => {
-                "All project documents \u{00b7} first canonical save".to_owned()
-            }
+            SaveScope::AllDocuments => "All project documents \u{00b7} first save".to_owned(),
         };
 
         #[derive(Serialize)]
@@ -831,8 +829,9 @@ fn validate_component_contracts<S: AsRef<rspice_design::schematic::document::Sch
                             issue.kind, issue.pin_name, issue.point
                         ),
                         format!(
-                            "{document_key}: cell symbol pin '{}' has {:?} metadata.",
-                            issue.pin_name, issue.kind
+                            "{document_key}: cell symbol pin '{}' {}.",
+                            issue.pin_name,
+                            pin_issue_text(issue.kind)
                         ),
                         Some(DrcLocation::SymbolPin {
                             reference: reference.clone(),
@@ -938,8 +937,10 @@ fn validate_component_contracts<S: AsRef<rspice_design::schematic::document::Sch
                     issue.kind, issue.pin_name, issue.point
                 ),
                 format!(
-                    "{document_key}: {} pin '{}' has {:?} symbol metadata.",
-                    component.name, issue.pin_name, issue.kind
+                    "{document_key}: {} pin '{}' {}.",
+                    component.name,
+                    issue.pin_name,
+                    pin_issue_text(issue.kind)
                 ),
                 at(component),
             );
@@ -1209,7 +1210,20 @@ fn digest_serializable(value: &impl Serialize) -> Result<ContentDigest, String> 
     serde_json::to_value(value)
         .and_then(|value| serde_json::to_vec(&sorted(value)))
         .map(|bytes| digest_bytes(&bytes))
-        .map_err(|error| format!("validation evidence could not be serialized: {error}"))
+        .map_err(|error| format!("validation results could not be serialized: {error}"))
+}
+
+/// What a symbol-pin issue says about its pin, in a finding's words.
+const fn pin_issue_text(
+    kind: rspice_design::resolved_symbol::ResolvedSymbolIssueKind,
+) -> &'static str {
+    use rspice_design::resolved_symbol::ResolvedSymbolIssueKind;
+    match kind {
+        ResolvedSymbolIssueKind::UnplacedPin => "is not placed on its symbol",
+        ResolvedSymbolIssueKind::OrphanedPin => "is on the symbol but matches no port",
+        ResolvedSymbolIssueKind::PinOffGrid => "is off the grid on its symbol",
+        ResolvedSymbolIssueKind::InvalidMetadata => "has invalid symbol metadata",
+    }
 }
 
 fn digest_bytes(bytes: &[u8]) -> ContentDigest {

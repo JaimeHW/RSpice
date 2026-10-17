@@ -118,7 +118,7 @@ impl RSpiceApp {
         };
         let mut action = None;
         let choice = Dialog::new(title, primary)
-            .description("Manage exact table columns, sort, typed filters, rendering policy, named views, clipboard data, and exported artifacts.")
+            .description("Manage table columns, sorting, filters, display, named views, clipboard data, and exports.")
             .size(DialogSize::WideWorkflow)
             .ghost(if page == EngineeringTableDialogPage::Manager {
                 "Cancel"
@@ -1207,8 +1207,10 @@ fn manager_body(
             action = Some(BodyAction::Manage);
         }
         ui.label(
-            RichText::new("Resize and reorder columns here; the exact projection is used for copy and export.")
-                .color(tokens.color.text_dim),
+            RichText::new(
+                "Resize and reorder columns here; copy and export use the same columns and order.",
+            )
+            .color(tokens.color.text_dim),
         );
     });
     select_saved.or(action)
@@ -1643,7 +1645,7 @@ fn row_details_body(
             }
         });
     ui.small(format!(
-        "Source revision {} · cross-probe selects the exact authored schematic object without modifying it.",
+        "Source revision {} · cross-probe selects the matching schematic object without changing it.",
         dataset.source_revision
     ));
     if let Some(error) = &state.error {

@@ -18,7 +18,7 @@ pub(super) fn parameter_schema_dialog(
     }
     let writable = !app.state.workbench.safe_mode.project_read_only();
     let choice = Dialog::new("Parameter schema", "Close")
-    .description("Edit typed declarations and exact process-section overrides. Changes remain transactional until Save model revision succeeds.")
+    .description("Edit parameter declarations and process-section overrides. Nothing is saved until Save model revision succeeds.")
     .size(DialogSize::Transaction)
     .fixed_height(680.0)
     .show(ctx, |ui| {

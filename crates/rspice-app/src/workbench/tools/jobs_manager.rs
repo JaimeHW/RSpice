@@ -29,7 +29,7 @@ use crate::workbench::{
     RouteTransitionSource, SurfaceId, SurfaceRoute, commands::vocabulary::Command,
 };
 
-const DESCRIPTION: &str = "Review active execution, retained run history, immutable run authority, qualified targets, and exact run-manifest exports.";
+const DESCRIPTION: &str = "Review running and saved runs, how each run was prepared, qualified targets, and run-manifest exports.";
 const TABLE_MIN_WIDTH: f32 = 800.0;
 const QUEUE_COLUMN_FRACTIONS: [f32; 6] = [0.08, 0.24, 0.18, 0.18, 0.14, 0.18];
 
@@ -642,7 +642,7 @@ fn render_queue_and_graph(
                 empty_row(
                     ui,
                     width,
-                    "No retained runs. Run the active plan to create immutable execution history.",
+                    "No saved runs yet. Run the active plan to create one.",
                 );
             }
             for row in &snapshot.rows {
@@ -813,7 +813,7 @@ fn render_inspector(
                     if deck_held {
                         if deck
                             .on_hover_text(format!(
-                                "Opens the exact source Run {} handed its first task, as a \
+                                "Opens the deck Run {} gave its first task, as a \
                                  read-only document kept with the run. This run holds {} of \
                                  them.",
                                 row.sequence, row.executed_deck_points
@@ -1490,7 +1490,7 @@ fn serialize_manifest(run: &SimulationRun) -> Result<String, String> {
         }),
         None => json!({
             "mode": "unsealed-runtime",
-            "warning": "The run has no authoritative prepared receipt and is not sign-off evidence."
+            "warning": "The run has no preparation record and cannot be used for sign-off."
         }),
     };
     let analyses = run

@@ -352,7 +352,7 @@ pub(super) fn append_review_evidence(
     };
     let conclusion = required_text("Review conclusion", &draft.conclusion)?;
     let evaluation = CorrelationEvaluation::evaluate(&suite)
-        .map_err(|error| format!("Correlation evidence cannot be evaluated: {error}"))?;
+        .map_err(|error| format!("Correlation cannot be evaluated: {error}"))?;
     let latest_timestamp = context
         .correlation
         .evidence
@@ -386,14 +386,14 @@ pub(super) fn append_review_evidence(
         conclusion,
         timestamp,
     )
-    .map_err(|error| format!("Correlation evidence cannot be created: {error}"))?;
+    .map_err(|error| format!("Correlation review cannot be created: {error}"))?;
 
     let suite_id = suite.id.clone();
     let suite_revision = suite.revision;
     let mut correlation = context.correlation.clone();
     correlation
         .add_evidence(evidence)
-        .map_err(|error| format!("Correlation evidence cannot be appended: {error}"))?;
+        .map_err(|error| format!("Correlation review cannot be added: {error}"))?;
     publish_correlation(
         app,
         context,
@@ -403,11 +403,11 @@ pub(super) fn append_review_evidence(
             dataset_id: None,
             metric_id: None,
             notice: format!(
-                "Review evidence '{evidence_id}' was retained for suite revision {}.",
+                "Review '{evidence_id}' was recorded for suite revision {}.",
                 suite_revision.get()
             ),
         },
-        format!("append correlation review evidence {evidence_id}"),
+        format!("record correlation review {evidence_id}"),
     )
 }
 
@@ -519,7 +519,7 @@ fn select_current_suite<'a>(
     match current.as_slice() {
         [] if allow_create => Ok(None),
         [] => Err(
-            "Create a dataset-backed correlation suite for the exact current model source first"
+            "Create a correlation suite with a dataset for the current model source first"
                 .to_owned(),
         ),
         [suite] => Ok(Some(*suite)),
@@ -535,7 +535,7 @@ fn require_exact_suite_source(
         Ok(())
     } else {
         Err(format!(
-            "Correlation suite '{}@{}' is bound to a different model source revision; select or create a suite for the exact current source",
+            "Correlation suite '{}@{}' is bound to a different model source revision; select or create a suite for the current source",
             suite.id,
             suite.revision.get()
         ))
@@ -547,8 +547,7 @@ fn required_current_suite<'a>(
     selected_suite_id: Option<&str>,
 ) -> Result<&'a CorrelationSuite, String> {
     select_current_suite(context, selected_suite_id, false)?.ok_or_else(|| {
-        "Create a dataset-backed correlation suite for the exact current model source first"
-            .to_owned()
+        "Create a correlation suite with a dataset for the current model source first".to_owned()
     })
 }
 
@@ -629,22 +628,20 @@ fn retained_simulation_dataset(
         .run_by_stable_id(run_id)
         .ok_or_else(|| "The selected retained simulation run no longer exists".to_owned())?;
     if run.lifecycle != SimulationRunLifecycle::Completed || !run.success {
-        return Err(
-            "Model-correlation evidence requires a successfully completed retained run".to_owned(),
-        );
+        return Err("Model correlation needs a run that completed successfully".to_owned());
     }
     run.validate_provenance()
         .map_err(|error| format!("Retained run provenance is invalid: {error}"))?;
     let receipt = run.prepared_receipt().ok_or_else(|| {
-        "The selected run predates authenticated prepared-run receipts and cannot authorize new correlation evidence"
+        "The selected run has no record of how it was prepared, so it cannot be used for correlation"
             .to_owned()
     })?;
-    let plan_id = receipt.simulation_plan_id().ok_or_else(|| {
-        "Model-correlation evidence must come from a retained simulation-plan run".to_owned()
-    })?;
-    let source_id = current_source.source_id.ok_or_else(|| {
-        "The current model is not bound to an exact project-owned source identity".to_owned()
-    })?;
+    let plan_id = receipt
+        .simulation_plan_id()
+        .ok_or_else(|| "Model correlation data must come from a simulation-plan run".to_owned())?;
+    let source_id = current_source
+        .source_id
+        .ok_or_else(|| "The current model is not bound to a project-owned source".to_owned())?;
     let source_is_authenticated = receipt.project_model_sources().iter().any(|source| {
         source.source_id() == source_id
             && source
@@ -655,7 +652,7 @@ fn retained_simulation_dataset(
     });
     if !source_is_authenticated {
         return Err(
-            "The selected run was not prepared against this exact project model revision; run the current simulation plan again before retaining correlation evidence"
+            "The selected run did not use this project model revision; run the current simulation plan again before adding correlation data"
                 .to_owned(),
         );
     }
@@ -668,18 +665,17 @@ fn retained_simulation_dataset(
         .find(|analysis| analysis.id == analysis_id)
         .ok_or_else(|| "The selected retained analysis no longer exists in this run".to_owned())?;
     if !analysis.success {
-        return Err("A failed analysis cannot produce correlation evidence".to_owned());
+        return Err("A failed analysis cannot provide correlation data".to_owned());
     }
     let analysis_provenance = analysis.provenance().ok_or_else(|| {
-        "The selected analysis predates authenticated prepared-task provenance".to_owned()
+        "The selected analysis has no record of the task that produced it".to_owned()
     })?;
     let task = receipt
         .tasks()
         .iter()
         .find(|task| task.instance_id() == analysis_provenance.source_instance_id())
         .ok_or_else(|| {
-            "The selected analysis does not match any task in its authenticated run receipt"
-                .to_owned()
+            "The selected analysis does not match any task recorded for its run".to_owned()
         })?;
     let trace_name = required_text("Retained waveform", &draft.retained_trace_name)?;
     let trace = analysis
@@ -694,7 +690,7 @@ fn retained_simulation_dataset(
     let execution_target = run
         .execution_target
         .ok_or_else(|| {
-            "The selected run predates retained execution-target identity and cannot authorize new correlation evidence"
+            "The selected run does not record where it ran, so it cannot be used for correlation"
                 .to_owned()
         })?
         .label()

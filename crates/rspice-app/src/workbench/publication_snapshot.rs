@@ -141,7 +141,7 @@ impl std::fmt::Display for PublicationBuildError {
             Self::MeasurementEvidence { name, reason } => {
                 write!(
                     f,
-                    "measurement {name} has inconsistent FAILVALUE evidence: {reason}"
+                    "measurement {name} has inconsistent FAILVALUE data: {reason}"
                 )
             }
             Self::Contract(error) => write!(f, "snapshot rejected by the contract: {error}"),
@@ -1261,7 +1261,7 @@ fn publication_fail_value_evidence(
     if measure.value.is_some() != measure.raw_value.is_some() {
         return Err(PublicationBuildError::MeasurementEvidence {
             name: measure.name.clone(),
-            reason: "published and raw numeric evidence must be present together",
+            reason: "the published and raw values must be present together",
         });
     }
     if measure.value.is_some_and(|value| !value.is_finite())
@@ -1269,7 +1269,7 @@ fn publication_fail_value_evidence(
     {
         return Err(PublicationBuildError::MeasurementEvidence {
             name: measure.name.clone(),
-            reason: "published and raw numeric evidence must be finite",
+            reason: "the published and raw values must be finite",
         });
     }
     let computed_exceeded = measure
@@ -1284,7 +1284,7 @@ fn publication_fail_value_evidence(
     if (measure.failure_limit_exceeded || measure.raw_value.is_none()) && measure.passed {
         return Err(PublicationBuildError::MeasurementEvidence {
             name: measure.name.clone(),
-            reason: "the measurement pass verdict contradicts its FAILVALUE evidence",
+            reason: "the measurement pass verdict contradicts its FAILVALUE result",
         });
     }
 

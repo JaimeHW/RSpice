@@ -32,7 +32,7 @@ impl RSpiceApp {
         let description = if page == DesignManagementPage::Manager {
             MANAGER_DESCRIPTION
         } else {
-            "Review the exact source, proposed transaction, resulting revision, and invariant before applying this operation to the manager draft."
+            "Review the source, the proposed change, the resulting revision, and the rule it must keep before applying this operation to the draft."
         };
         let initial_height = if page == DesignManagementPage::Manager {
             MANAGER_INITIAL_HEIGHT

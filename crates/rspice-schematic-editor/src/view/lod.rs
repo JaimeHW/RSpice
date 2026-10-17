@@ -77,6 +77,12 @@ const fn limits(role: StrokeRole) -> StrokeLimits {
     }
 }
 
+/// A stroke's nominal width in world units: what it draws at with no floor
+/// or ceiling, which is exactly what a vector export draws.
+pub const fn nominal_wu(role: StrokeRole) -> f32 {
+    limits(role).nominal_wu
+}
+
 fn ppp_or_one(ppp: f32) -> f32 {
     if ppp.is_finite() && ppp > 0.0 {
         ppp
@@ -123,17 +129,22 @@ fn mark_pt(size_wu: f32, floor_pt: f32, ceiling_pt: f32, zoom: f32) -> f32 {
     (size_wu * zoom.max(0.0)).clamp(floor_pt, ceiling_pt)
 }
 
+/// A junction dot's nominal radius, in world units.
+pub const JUNCTION_RADIUS_WU: f32 = 1.5;
+/// Half the diagonal of a net label's attachment diamond, in world units.
+pub const DIAMOND_HALF_WU: f32 = 2.25;
+
 /// A junction dot's radius in points. Never less than 1.25 times the drawn
 /// width of the thickest conductor it sits on, so its diameter is always at
 /// least two and a half wires: a junction reads apart from a crossing at
 /// every zoom.
 pub fn junction_radius_pt(zoom: f32, incident_width_pt: f32) -> f32 {
-    mark_pt(1.5, 2.5, 5.0, zoom).max(1.25 * incident_width_pt.max(0.0))
+    mark_pt(JUNCTION_RADIUS_WU, 2.5, 5.0, zoom).max(1.25 * incident_width_pt.max(0.0))
 }
 
 /// Half the diagonal of a net label's attachment diamond, in points.
 pub fn diamond_half_pt(zoom: f32) -> f32 {
-    mark_pt(2.25, 3.0, 5.0, zoom)
+    mark_pt(DIAMOND_HALF_WU, 3.0, 5.0, zoom)
 }
 
 /// The side of an open pin's square mark, in points.

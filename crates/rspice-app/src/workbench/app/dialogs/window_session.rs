@@ -95,38 +95,35 @@ impl RSpiceApp {
         let mut page = self.state.dialogs.window_session.page;
         let mut action = None;
 
-        let choice = Dialog::new(
-            "Windows, documents and session",
-            "Close",
-        )
-        .description(
-            "Manage application windows, exclusive document presentation, and exact session restoration.",
-        )
-        .size(DialogSize::Manager)
-        .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                for candidate in WindowSessionPage::ALL {
-                    if ui
-                        .selectable_label(page == candidate, candidate.label())
-                        .clicked()
-                    {
-                        page = candidate;
+        let choice = Dialog::new("Windows, documents and session", "Close")
+            .description(
+                "Manage application windows, exclusive document views, and session restore.",
+            )
+            .size(DialogSize::Manager)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    for candidate in WindowSessionPage::ALL {
+                        if ui
+                            .selectable_label(page == candidate, candidate.label())
+                            .clicked()
+                        {
+                            page = candidate;
+                        }
+                    }
+                });
+                ui.separator();
+                match page {
+                    WindowSessionPage::Windows => {
+                        render_windows_page(ui, self, &documents, &mut action)
+                    }
+                    WindowSessionPage::Documents => {
+                        render_documents_page(ui, &documents, &mut action)
+                    }
+                    WindowSessionPage::SessionRestore => {
+                        render_session_page(ui, self, open_count, dirty_count, &mut action)
                     }
                 }
             });
-            ui.separator();
-            match page {
-                WindowSessionPage::Windows => {
-                    render_windows_page(ui, self, &documents, &mut action)
-                }
-                WindowSessionPage::Documents => {
-                    render_documents_page(ui, &documents, &mut action)
-                }
-                WindowSessionPage::SessionRestore => {
-                    render_session_page(ui, self, open_count, dirty_count, &mut action)
-                }
-            }
-        });
 
         self.state.dialogs.window_session.page = page;
         if choice != DialogChoice::None {
@@ -782,7 +779,7 @@ fn render_reattach_workflow(ui: &mut egui::Ui, active_name: &str, at_end: &mut b
 
 fn render_consolidate_workflow(ui: &mut egui::Ui, app: &RSpiceApp) {
     ui.label(
-        "All detached documents return to their owning workspaces in the main window. Active jobs, selections, and immutable results are unchanged.",
+        "All detached documents return to their owning workspaces in the main window. Active jobs, selections, and saved results are unchanged.",
     );
     Grid::new("window-session.consolidate")
         .num_columns(4)

@@ -657,7 +657,7 @@ pub(super) fn subflow_subject(
         DesignManagementPage::NewSheet => dialog.inputs.sheet_name.clone(),
         DesignManagementPage::MoveSelection => dialog.selection_summary.clone(),
         DesignManagementPage::NewVariant => dialog.inputs.variant_name.clone(),
-        DesignManagementPage::CompareVariants => "exact variant delta".to_owned(),
+        DesignManagementPage::CompareVariants => "differences between variants".to_owned(),
         DesignManagementPage::VariantMatrix => "governed override matrix".to_owned(),
         DesignManagementPage::RenumberPreview => "stable old-to-new mapping".to_owned(),
         DesignManagementPage::AnnotationPolicy => dialog.inputs.reserved_ranges.clone(),

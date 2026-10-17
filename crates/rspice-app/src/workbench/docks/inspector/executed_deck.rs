@@ -49,10 +49,7 @@ pub(super) fn record(ui: &mut Ui, run_id: u64, executed: Option<&[String]>) -> O
     }
     Button::new("Open executed deck")
         .show(ui)
-        .on_hover_text(
-            "Opens the exact source this run's engine read, as a read-only document sealed with \
-             the run.",
-        )
+        .on_hover_text("Opens the netlist exactly as this run simulated it, read-only.")
         .clicked()
         .then_some(run_id)
 }

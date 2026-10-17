@@ -203,7 +203,7 @@ impl RSpiceApp {
         let plan_valid = self.state.dialogs.hardcopy.preview_plan.is_some();
         let description = match page {
             HardcopyDialogPage::Main => {
-                "Configure the exact hardcopy source, physical page, semantic styling, and publication target before previewing or publishing."
+                "Choose the source document, page, styling, and output target before previewing or publishing."
             }
             HardcopyDialogPage::PrinterProperties => {
                 "Review and apply the capabilities reported by the selected physical printer."
@@ -395,7 +395,7 @@ impl RSpiceApp {
 fn refused_preview(error: HardcopyRenderError) -> BlockedSetup {
     let BlockedSetup { message, section } = BlockedSetup::from(error);
     BlockedSetup {
-        message: format!("The exact preview could not be rendered: {message}"),
+        message: format!("The preview could not be rendered: {message}"),
         section,
     }
 }
@@ -1520,7 +1520,7 @@ fn region_switch(ui: &mut Ui, draft: &mut HardcopyDialogState) {
         ui.spacing_mut().item_spacing.x = 0.0;
         for (region, label) in [
             (HardcopyRegion::Setup, "Setup"),
-            (HardcopyRegion::Preview, "Exact preview"),
+            (HardcopyRegion::Preview, "Preview"),
         ] {
             let selected = draft.region == region;
             if ui

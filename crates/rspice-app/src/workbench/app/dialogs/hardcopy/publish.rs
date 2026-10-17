@@ -446,10 +446,8 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
             if expected.as_ref() != Some(&resolved) {
                 app.state.dialogs.hardcopy.busy = false;
                 clear_pending_authentication(purpose);
-                app.state.dialogs.hardcopy.error = Some(
-                    "The retained hardcopy source changed while it was being authenticated."
-                        .to_owned(),
-                );
+                app.state.dialogs.hardcopy.error =
+                    Some("The source document changed while it was being checked.".to_owned());
                 return;
             }
             match purpose {
@@ -575,10 +573,8 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
             if expected.as_ref() != Some(&resolved) {
                 app.state.dialogs.hardcopy.busy = false;
                 clear_pending_authentication(purpose);
-                app.state.dialogs.hardcopy.error = Some(
-                    "The retained hardcopy source changed while it was being authenticated."
-                        .to_owned(),
-                );
+                app.state.dialogs.hardcopy.error =
+                    Some("The source document changed while it was being checked.".to_owned());
                 return;
             }
             match purpose {
@@ -1129,7 +1125,7 @@ pub(super) fn poll_printer_catalog(app: &mut RSpiceApp) {
                     app.state.dialogs.hardcopy.clear_printer();
                     app.state.dialogs.hardcopy.printer_capabilities = None;
                     app.state.dialogs.hardcopy.error = Some(
-                        "Windows did not report an available printer with an authenticated capability snapshot."
+                        "Windows did not report an available printer whose capabilities could be read."
                             .to_owned(),
                     );
                 }
@@ -1521,7 +1517,7 @@ fn begin_publication_authentication(
     pending: PendingBrowserPublication,
 ) -> Result<(), String> {
     if PENDING_PUBLICATION.with(|slot| slot.borrow().is_some()) {
-        return Err("A browser hardcopy publication is already being authenticated.".to_owned());
+        return Err("A browser print is already being prepared.".to_owned());
     }
     let prepared =
         crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
@@ -1553,7 +1549,7 @@ fn begin_publication_authentication(
     pending: PendingNativePublication,
 ) -> Result<(), String> {
     if PENDING_PUBLICATION.with(|slot| slot.borrow().is_some()) {
-        return Err("A native hardcopy publication is already being authenticated.".to_owned());
+        return Err("A print or export is already being prepared.".to_owned());
     }
     let prepared =
         crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
@@ -1586,18 +1582,13 @@ fn finish_publication_authentication(
 ) -> Result<(), String> {
     let pending = PENDING_PUBLICATION
         .with(|slot| slot.borrow_mut().take())
-        .ok_or_else(|| "The browser publication authentication owner was lost.".to_owned())?;
+        .ok_or_else(|| "The pending browser print was lost.".to_owned())?;
     if resolved != *pending.opened_source {
-        return Err(
-            "The retained hardcopy source changed while publication was being authenticated."
-                .to_owned(),
-        );
+        return Err("The source document changed while the output was being prepared.".to_owned());
     }
     let plan = current_plan(app, &resolved)?;
     if plan != pending.plan {
-        return Err(
-            "The hardcopy plan changed while publication was being authenticated.".to_owned(),
-        );
+        return Err("The print settings changed while the output was being prepared.".to_owned());
     }
     start_browser_publication(
         app,
@@ -1616,18 +1607,13 @@ fn finish_publication_authentication(
 ) -> Result<(), String> {
     let pending = PENDING_PUBLICATION
         .with(|slot| slot.borrow_mut().take())
-        .ok_or_else(|| "The native publication authentication owner was lost.".to_owned())?;
+        .ok_or_else(|| "The pending print or export was lost.".to_owned())?;
     if resolved != *pending.opened_source {
-        return Err(
-            "The retained hardcopy source changed while publication was being authenticated."
-                .to_owned(),
-        );
+        return Err("The source document changed while the output was being prepared.".to_owned());
     }
     let plan = current_plan(app, &resolved)?;
     if plan != pending.plan {
-        return Err(
-            "The hardcopy plan changed while publication was being authenticated.".to_owned(),
-        );
+        return Err("The print settings changed while the output was being prepared.".to_owned());
     }
     start_native_publication(
         app,
@@ -1660,7 +1646,7 @@ fn clear_pending_authentication(purpose: SourceResolutionPurpose) {
 
 fn save_page_setup(app: &mut RSpiceApp) -> Result<PublicationCompletion, String> {
     if PENDING_PAGE_SETUP.with(|slot| slot.borrow().is_some()) {
-        return Err("A page setup is already being authenticated.".to_owned());
+        return Err("Page setup is already being saved.".to_owned());
     }
     let source = app
         .state
@@ -1668,7 +1654,7 @@ fn save_page_setup(app: &mut RSpiceApp) -> Result<PublicationCompletion, String>
         .hardcopy
         .resolved_document
         .clone()
-        .ok_or_else(|| "The dialog has no authenticated semantic source.".to_owned())?;
+        .ok_or_else(|| "The dialog has no source document.".to_owned())?;
     let setup = app
         .state
         .dialogs
@@ -1717,12 +1703,9 @@ fn finish_page_setup_authentication(
 ) -> Result<String, String> {
     let pending = PENDING_PAGE_SETUP
         .with(|slot| slot.borrow_mut().take())
-        .ok_or_else(|| "The page-setup authentication owner was lost.".to_owned())?;
+        .ok_or_else(|| "The pending page setup save was lost.".to_owned())?;
     if source != *pending.opened_source {
-        return Err(
-            "The retained hardcopy source changed while page setup was being authenticated."
-                .to_owned(),
-        );
+        return Err("The source document changed while page setup was being saved.".to_owned());
     }
     commit_authenticated_page_setup(app, source, pending)
 }
@@ -1773,7 +1756,7 @@ fn publish_print(
         .hardcopy
         .resolved_document
         .clone()
-        .ok_or_else(|| "The dialog has no authenticated semantic source.".to_owned())?;
+        .ok_or_else(|| "The dialog has no source document.".to_owned())?;
     let plan = current_plan(app, &source)?;
     let metadata = current_metadata(app)?;
     let staged_mapping = stage_print_mapping_persistence(app, plan.setup().print_mapping())?;
@@ -1822,8 +1805,7 @@ fn publish_print(
             .ok_or_else(|| "The selected printer has no capability snapshot.".to_owned())?;
         if capabilities.device_id() != app.state.dialogs.hardcopy.printer_id {
             return Err(
-                "The selected printer identity does not match its authenticated capabilities."
-                    .to_owned(),
+                "The selected printer does not match the capabilities read for it.".to_owned(),
             );
         }
         let dpi = app
@@ -1861,7 +1843,7 @@ fn publish_export(app: &mut RSpiceApp) -> Result<PublicationCompletion, String> 
         .hardcopy
         .resolved_document
         .clone()
-        .ok_or_else(|| "The dialog has no authenticated semantic source.".to_owned())?;
+        .ok_or_else(|| "The dialog has no source document.".to_owned())?;
     let draft_plan = current_plan(app, &initial_source)?;
     let format = draft_plan.setup().render().format();
     let multi_part = matches!(format, OutputFormat::SvgVector | OutputFormat::Png { .. })

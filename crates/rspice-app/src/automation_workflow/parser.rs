@@ -410,7 +410,7 @@ pub fn compile_workflow(source: &str) -> Result<AutomationPlan, DiagnosticSet> {
         let Some(kind) = ArtifactKind::from_request_name(&artifact.value) else {
             diagnostics.push(DiagnosticPart::new(
                 DiagnosticCode::UnsupportedValue,
-                format!("unsupported export artifact {:?}", artifact.value),
+                format!("unsupported export artifact '{}'", artifact.value),
                 artifact.span,
             ));
             continue;
@@ -418,7 +418,7 @@ pub fn compile_workflow(source: &str) -> Result<AutomationPlan, DiagnosticSet> {
         if !artifacts.insert(kind) {
             diagnostics.push(DiagnosticPart::new(
                 DiagnosticCode::DuplicateArtifact,
-                format!("artifact {:?} is requested more than once", artifact.value),
+                format!("artifact '{}' is requested more than once", artifact.value),
                 artifact.span,
             ));
         }
@@ -850,7 +850,7 @@ impl<'source> Parser<'source> {
         ) else {
             return Err(vec![DiagnosticPart::new(
                 DiagnosticCode::InternalInvariant,
-                "workflow stage validation did not produce a complete immutable plan",
+                "workflow stage validation did not produce a complete plan",
                 SourceSpan::new(0, self.source.len().min(1)),
             )]);
         };
@@ -1015,7 +1015,7 @@ impl<'source> Parser<'source> {
             if !allowed.contains(&name.as_str()) {
                 self.diagnostics.push(DiagnosticPart::new(
                     DiagnosticCode::UnknownArgument,
-                    format!("unknown argument {name:?}"),
+                    format!("unknown argument '{name}'"),
                     name_span,
                 ));
             } else if arguments
@@ -1025,7 +1025,7 @@ impl<'source> Parser<'source> {
             {
                 self.diagnostics.push(DiagnosticPart::new(
                     DiagnosticCode::DuplicateArgument,
-                    format!("argument {name:?} is specified more than once"),
+                    format!("argument '{name}' is specified more than once"),
                     name_span,
                 ));
             } else {
@@ -1104,7 +1104,7 @@ impl<'source> Parser<'source> {
                 Some(span)
             }
             _ => {
-                self.unexpected(&format!("{expected:?}"));
+                self.unexpected(&format!("'{expected}'"));
                 None
             }
         }
@@ -1175,7 +1175,7 @@ impl<'source> Parser<'source> {
 
     fn current_label(&self) -> String {
         match &self.current().kind {
-            TokenKind::Identifier(value) => format!("identifier {value:?}"),
+            TokenKind::Identifier(value) => format!("identifier '{value}'"),
             TokenKind::String(_) => "a string literal".to_owned(),
             TokenKind::Equals => "'='".to_owned(),
             TokenKind::Dot => "'.'".to_owned(),
@@ -1277,7 +1277,7 @@ impl NamedArguments {
             Some(NamedValue::Boolean(_, span)) => {
                 diagnostics.push(DiagnosticPart::new(
                     DiagnosticCode::UnexpectedToken,
-                    format!("argument {name:?} must be a string literal"),
+                    format!("argument '{name}' must be a string literal"),
                     *span,
                 ));
                 None
@@ -1285,7 +1285,7 @@ impl NamedArguments {
             None => {
                 diagnostics.push(DiagnosticPart::new(
                     DiagnosticCode::MissingArgument,
-                    format!("missing required argument {name:?}"),
+                    format!("missing required argument '{name}'"),
                     fallback_span,
                 ));
                 None
@@ -1304,7 +1304,7 @@ impl NamedArguments {
             Some(NamedValue::String(value)) => {
                 diagnostics.push(DiagnosticPart::new(
                     DiagnosticCode::UnexpectedToken,
-                    format!("argument {name:?} must be True or False"),
+                    format!("argument '{name}' must be True or False"),
                     value.span,
                 ));
                 None
@@ -1312,7 +1312,7 @@ impl NamedArguments {
             None => {
                 diagnostics.push(DiagnosticPart::new(
                     DiagnosticCode::MissingArgument,
-                    format!("missing required argument {name:?}"),
+                    format!("missing required argument '{name}'"),
                     fallback_span,
                 ));
                 None

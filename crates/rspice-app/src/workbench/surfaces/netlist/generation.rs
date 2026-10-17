@@ -283,7 +283,7 @@ pub(super) fn generated_project_source_dependencies(
             .position(|directive| directive.locator() == binding.source_key())
             .ok_or_else(|| {
                 format!(
-                    "Generated source is missing the authenticated Verilog-A binding for {}",
+                    "Generated source is missing the Verilog-A binding for {}",
                     execution.instance_path()
                 )
             })?;
@@ -298,7 +298,7 @@ pub(super) fn generated_project_source_dependencies(
         )
             .map_err(|failure| {
                 format!(
-                    "Could not authenticate generated Verilog-A provenance for {}: {failure}",
+                    "Could not compile the Verilog-A source used by {}: {failure}",
                     execution.instance_path()
                 )
             })?;
@@ -312,7 +312,7 @@ pub(super) fn generated_project_source_dependencies(
             })
             .ok_or_else(|| {
                 format!(
-                    "Compiler dependency closure for {} has no authenticated root",
+                    "The compiled Verilog-A files for {} do not include the source's root file",
                     execution.instance_path()
                 )
             })?;
@@ -337,7 +337,7 @@ pub(super) fn generated_project_source_dependencies(
                 })
                 .ok_or_else(|| {
                     format!(
-                        "Compiler include parent '{}' is absent from the authenticated closure",
+                        "Verilog-A include parent '{}' is missing from the compiled files",
                         edge.including_path
                     )
                 })?;
@@ -351,7 +351,7 @@ pub(super) fn generated_project_source_dependencies(
                 })
                 .ok_or_else(|| {
                     format!(
-                        "Compiler include target '{}' is absent from the authenticated closure",
+                        "Verilog-A include target '{}' is missing from the compiled files",
                         edge.included_path
                     )
                 })?;

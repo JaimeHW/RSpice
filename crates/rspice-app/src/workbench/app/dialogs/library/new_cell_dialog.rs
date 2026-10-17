@@ -173,7 +173,7 @@ impl RSpiceApp {
                 == requested_identity
         }) {
             self.state.dialogs.new_cell_error = Some(format!(
-                "Cell '{}' conflicts with an existing canonical cell identity in library '{}'",
+                "Cell '{}' clashes with an existing cell in library '{}' (cell names ignore letter case)",
                 name, library
             ));
             return outcome;
@@ -556,7 +556,7 @@ mod tests {
                 .dialogs
                 .new_cell_error
                 .as_deref()
-                .is_some_and(|error| error.contains("canonical cell identity"))
+                .is_some_and(|error| error.contains("clashes with an existing cell"))
         );
     }
 

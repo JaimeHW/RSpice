@@ -83,7 +83,7 @@ pub(super) fn write_artwork_lead_extensions(
         let terminal = local(terminal);
         writeln!(
             svg,
-            r#"<line class="component" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
+            r#"<line class="symbol" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
             edge.0, edge.1, terminal.0, terminal.1
         )
         .unwrap();
@@ -95,13 +95,13 @@ fn instance_projection<'a>(
     component: &'a Component,
     config: &'a SvgExportConfig,
 ) -> impl Fn(rspice_design_model::Point) -> (f64, f64) + 'a {
-    let cx = component.pos.x as f64 * config.grid_size;
-    let cy = component.pos.y as f64 * config.grid_size;
+    let cx = component.pos.x as f64 * config.units_per_world;
+    let cy = component.pos.y as f64 * config.units_per_world;
     move |point| {
         let transformed = component.transform_point(point);
         (
-            cx + f64::from(transformed.x) * config.grid_size,
-            cy + f64::from(transformed.y) * config.grid_size,
+            cx + f64::from(transformed.x) * config.units_per_world,
+            cy + f64::from(transformed.y) * config.units_per_world,
         )
     }
 }
@@ -120,8 +120,8 @@ pub(super) fn write_catalog_asset_symbol(
     stroke_width: Option<f64>,
     config: &SvgExportConfig,
 ) {
-    let cx = component.pos.x as f64 * config.grid_size;
-    let cy = component.pos.y as f64 * config.grid_size;
+    let cx = component.pos.x as f64 * config.units_per_world;
+    let cy = component.pos.y as f64 * config.units_per_world;
     let point = |x: f32, y: f32| {
         let (x, y) = catalog_asset_local_point(
             component,
@@ -132,7 +132,10 @@ pub(super) fn write_catalog_asset_symbol(
             x,
             y,
         );
-        (cx + x * config.grid_size, cy + y * config.grid_size)
+        (
+            cx + x * config.units_per_world,
+            cy + y * config.units_per_world,
+        )
     };
     for path in &symbol.paths {
         let mut data = String::new();
@@ -160,10 +163,10 @@ pub(super) fn write_catalog_asset_symbol(
         });
         writeln!(
             svg,
-            r#"<path class="component" d="{}" fill="{}"{style}/>"#,
+            r#"<path class="symbol" d="{}" fill="{}"{style}/>"#,
             data.trim(),
             if path.filled {
-                config.component_color.to_string()
+                config.symbol_color.to_string()
             } else {
                 "none".to_owned()
             },

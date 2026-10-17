@@ -176,7 +176,7 @@ fn what_changed(ui: &mut Ui, diff: &ReleaseDiff) {
 fn schema_limit(diff: &ReleaseDiff) -> String {
     format!(
         "{} part{} re-listed. The catalog publishes one digest per release and none per part, so \
-         a re-listed part is not evidence that its model source is unchanged.{}",
+         a re-listed part does not show that its model source is unchanged.{}",
         diff.relisted,
         if diff.relisted == 1 { "" } else { "s" },
         if diff.archive_differs {

@@ -419,7 +419,7 @@ pub(super) fn variants_manager_body(
             &[
                 (
                     crate::state::VariantResultCompatibility::ExactVariantIdentityRequired,
-                    "Exact variant identity required",
+                    "Same variant only",
                 ),
                 (
                     crate::state::VariantResultCompatibility::AllowReviewedOverlay,
@@ -714,23 +714,6 @@ pub(super) fn hierarchy_manager_body(
 
         let mut settings = draft.hierarchy_settings().clone();
         let mut changed = false;
-        changed |= setting_combo(
-            right,
-            "Edit-in-place depth",
-            &[
-                (
-                    crate::state::EditInPlaceDepth::CurrentAndParentContext,
-                    "Current + parent context",
-                ),
-                (crate::state::EditInPlaceDepth::CurrentOnly, "Current only"),
-                (
-                    crate::state::EditInPlaceDepth::TwoParentLevels,
-                    "Two parent levels",
-                ),
-            ],
-            &mut settings.edit_in_place_depth,
-            write_allowed,
-        );
         changed |= setting_combo(
             right,
             "Missing view",

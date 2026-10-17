@@ -877,7 +877,7 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
             .workbench
             .analysis_lifecycle_status
             .message()
-            .contains("Enter the exact oscillator node")
+            .contains("Enter the oscillator node")
     );
 
     app.state.workbench.active_analysis_instance = Some(pnoise);
@@ -904,7 +904,7 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
             .workbench
             .analysis_lifecycle_status
             .message()
-            .contains("without creating a duplicate instance")
+            .contains("without creating a duplicate")
     );
 }
 

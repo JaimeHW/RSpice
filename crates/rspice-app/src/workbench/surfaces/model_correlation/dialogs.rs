@@ -63,7 +63,7 @@ pub(super) fn show_correlation_dialog(ctx: &egui::Context, app: &mut RSpiceApp) 
         ModelCorrelationDialog::AddDataset(_) => (
             "Add correlation dataset",
             "Retain dataset",
-            "Import immutable, source-identified correlation evidence.",
+            "Import a correlation dataset and record where it came from.",
             true,
         ),
         ModelCorrelationDialog::AddMetric(_) => (
@@ -75,7 +75,7 @@ pub(super) fn show_correlation_dialog(ctx: &egui::Context, app: &mut RSpiceApp) 
         ModelCorrelationDialog::Review(_) => (
             "Validate correlation suite",
             "Record review",
-            "Retain an independent review of the exact selected suite revision.",
+            "Record an independent review of the selected suite revision.",
             false,
         ),
         ModelCorrelationDialog::Disposition(_) => (
@@ -299,7 +299,7 @@ pub(super) fn dataset_dialog_body(
             .into_iter()
             .find(|suite| suite.source == *source)
     });
-    ui.label("Import immutable UTF-8 CSV evidence and retain its source identity and checksum.");
+    ui.label("Import a UTF-8 CSV file and record its source and checksum.");
     egui::Grid::new("correlation-dataset-form")
         .num_columns(2)
         .min_col_width(136.0)
@@ -314,7 +314,7 @@ pub(super) fn dataset_dialog_body(
             } else {
                 form_text_row(ui, "Suite owner identity", &mut draft.suite_owner_id);
             }
-            ui.label("Evidence class");
+            ui.label("Dataset class");
             egui::ComboBox::from_id_salt("correlation-dataset-class")
                 .selected_text(draft.class.label())
                 .width(dialog_field_width(ui))
@@ -356,9 +356,9 @@ pub(super) fn retained_simulation_picker(
     draft: &mut CorrelationDatasetDraft,
 ) {
     let runs = retained_run_options(app);
-    section_panel(ui, "Authenticated retained simulation", |ui| {
+    section_panel(ui, "Saved simulation run", |ui| {
         ui.label(
-            "Select a completed run prepared against this exact project model revision. RSpice generates and hashes the canonical CSV from the retained waveform.",
+            "Select a completed run of this project model revision. RSpice writes the CSV from the saved waveform and records its checksum.",
         );
         ui.add_space(6.0);
         egui::Grid::new("correlation-retained-simulation-form")
@@ -467,8 +467,8 @@ pub(super) fn retained_simulation_picker(
                 ui,
                 Problem::Warning,
                 egui::RichText::new(
-                    "No successfully completed retained run authenticates this exact model \
-                     revision. Run the current simulation plan, then reopen this dialog.",
+                    "No completed run used this model revision. Run the current simulation \
+                     plan, then reopen this dialog.",
                 ),
             );
         }
@@ -562,7 +562,7 @@ pub(super) fn metric_dialog_body(ui: &mut Ui, draft: &mut CorrelationMetricDraft
     section_panel(ui, "Alignment and extrapolation", |ui| {
         ui.label(
             if draft.alignment == CorrelationAlignmentDraft::MonotoneInterpolation {
-                "Declare the interpolation axis and the exact extrapolation boundary."
+                "Declare the interpolation axis and the extrapolation boundary."
             } else {
                 "Exact alignment never interpolates or extrapolates."
             },
@@ -814,7 +814,7 @@ mod tests {
             projection
                 .measures()
                 .iter()
-                .all(|measure| { measure.value == "0 / 0" || measure.value == "No evidence" })
+                .all(|measure| { measure.value == "0 / 0" || measure.value == "No data" })
         );
     }
 
@@ -823,12 +823,12 @@ mod tests {
     /// The ledger's middle segments are the only place a reader learns whether
     /// a measure exists at all, so an unevaluated suite may not print a
     /// number. It carries no mark either: a mark means a value outside its
-    /// gate, and "No evidence" is a phrase nobody reads as a number.
+    /// gate, and "No data" is a phrase nobody reads as a number.
     #[test]
     fn ledger_measures_without_evidence_print_no_number_and_no_mark() {
         let measures = empty_projection().measures();
-        assert_eq!(measures[1].value, "No evidence");
-        assert_eq!(measures[2].value, "No evidence");
+        assert_eq!(measures[1].value, "No data");
+        assert_eq!(measures[2].value, "No data");
         assert_eq!(measures[0].value, "0 / 0");
         assert_eq!(measures[0].detail, "0 open dispositions");
         assert!(

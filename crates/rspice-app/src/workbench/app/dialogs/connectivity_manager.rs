@@ -797,7 +797,7 @@ fn build_global_repairs(
                     .map(|alias| format!("{} ({})", alias.name, alias.view_key))
                     .collect::<Vec<_>>()
                     .join(", "),
-                proposed: "Open each exact source view and review its local identity".to_owned(),
+                proposed: "Open each source view and review its local name".to_owned(),
                 identity_effect: "No cross-document rewrite is inferred".to_owned(),
                 validation: "Requires the source view's own undo transaction".to_owned(),
                 action: None,
@@ -891,7 +891,7 @@ fn build_manual_repairs(
                 .tap_id
                 .map_or_else(|| "Bus".to_owned(), |id| format!("Bus tap #{id}")),
             before: diagnostic.message.clone(),
-            proposed: "Review the exact bus declaration, selector, and destination".to_owned(),
+            proposed: "Review the bus declaration, selector, and destination".to_owned(),
             identity_effect: "Preserve typed member identities".to_owned(),
             validation: "Manual endpoint choice required".to_owned(),
             action: None,
@@ -1472,7 +1472,7 @@ impl RSpiceApp {
             .endpoint_choices
             .get(repair_id)
             .copied()
-            .ok_or_else(|| "Choose one exact destination endpoint first.".to_owned())?;
+            .ok_or_else(|| "Choose one destination endpoint first.".to_owned())?;
         let choice = repair
             .endpoint_choices
             .get(choice_index)
@@ -1526,7 +1526,7 @@ fn validate_policy_authority(
     }
     if policy.alias_comparison == GlobalAliasComparisonPolicy::DialectCompatibility {
         let catalog = contract.dialect_aliases.as_ref().ok_or_else(|| {
-            "Dialect-compatible alias comparison requires an exact project-owned simulator dialect alias table."
+            "Dialect-compatible alias comparison requires the project's own simulator dialect alias table."
                 .to_owned()
         })?;
         catalog.validate()?;
@@ -1834,7 +1834,7 @@ fn buses_tab(
     write_allowed: bool,
     current: bool,
 ) -> ConnectivityBodyAction {
-    section_header(ui, "Typed buses", Some("exact declarations"));
+    section_header(ui, "Typed buses", Some("as declared"));
     let old_policy = dialog.policy.clone();
     let mut action = ConnectivityBodyAction::None;
     ScrollArea::horizontal()

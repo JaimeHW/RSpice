@@ -389,7 +389,7 @@ pub struct DialogState {
     /// Snapped, typed net-label placement transaction.
     pub(crate) net_label_placement: NetLabelPlacementDialogState,
 
-    /// Device-local hierarchy and annotation visibility transaction.
+    /// Device-local schematic visibility transaction.
     pub(crate) schematic_visibility: SchematicVisibilityDialogState,
 
     /// Device-local construction-layer visibility around the permanent paper

@@ -144,7 +144,7 @@ pub(crate) fn export_csv(analysis: &crate::state::AnalysisResult) -> Option<supe
 
     Some(super::ResultSheetCsv {
         default_name: "rspice-operating-point.csv",
-        detail: format!("{rows} operating-point evidence rows"),
+        detail: format!("{rows} operating-point rows"),
         contents: csv.into_string(),
     })
 }

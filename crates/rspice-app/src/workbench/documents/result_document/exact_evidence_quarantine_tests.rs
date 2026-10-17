@@ -19,16 +19,16 @@ fn corrupted_waveform_keeps_identity_but_quarantines_every_exact_value_route() {
     assert!(
         validate_result_browser_selection_evidence(&selection, &[run.clone()])
             .expect_err("corrupted values must be quarantined")
-            .contains("quarantined")
+            .contains("cannot be copied or exported")
     );
     assert!(
         exact_result_signal_last_sample(&waveform, &[run.clone()])
             .expect_err("last-sample copy must fail closed")
-            .contains("quarantined")
+            .contains("cannot be copied or exported")
     );
     assert!(
         exact_result_browser_selection_bundle(&[selection], &[run])
             .expect_err("batch export must fail closed")
-            .contains("quarantined")
+            .contains("cannot be copied or exported")
     );
 }

@@ -630,7 +630,7 @@ fn results_view_summary(
             // what interval am I reading — and has to say so in its own
             // words, or the bar prints the same sentence twice.
             || "No plotted interval".to_owned(),
-            |run| format!("{} · immutable dataset", run.label),
+            |run| run.label.clone(),
         )
 }
 

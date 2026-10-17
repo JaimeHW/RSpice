@@ -18,12 +18,10 @@ pub(super) fn build_spec_evidence(
     }
     let mut checks = Vec::with_capacity(required);
     for (task_index, analysis) in run.analyses.iter().enumerate() {
-        let provenance = analysis.provenance.as_ref().ok_or_else(|| {
-            format!(
-                "analysis {:?} has no authenticated source identity",
-                analysis.label
-            )
-        })?;
+        let provenance = analysis
+            .provenance
+            .as_ref()
+            .ok_or_else(|| format!("analysis '{}' has no recorded source", analysis.label))?;
         for (spec_index, spec) in specs.iter().enumerate() {
             let matches = analysis
                 .measurements
@@ -34,7 +32,7 @@ pub(super) fn build_spec_evidence(
                 [] => (
                     false,
                     format!(
-                        "Task {} ({}) retained no measurement named {:?}; required {}.",
+                        "Task {} ({}) retained no measurement named '{}'; required {}.",
                         task_index + 1,
                         provenance.source_instance_id(),
                         spec.measurement,
@@ -56,7 +54,7 @@ pub(super) fn build_spec_evidence(
                     let detail = value.map_or_else(
                         || {
                             format!(
-                                "Task {} ({}) retained no verified finite value for {:?}: {}",
+                                "Task {} ({}) retained no verified finite value for '{}': {}",
                                 task_index + 1,
                                 provenance.source_instance_id(),
                                 spec.measurement,
@@ -92,7 +90,7 @@ pub(super) fn build_spec_evidence(
                 duplicates => (
                     false,
                     format!(
-                        "Task {} ({}) retained {} ambiguous measurements named {:?}.",
+                        "Task {} ({}) retained {} ambiguous measurements named '{}'.",
                         task_index + 1,
                         provenance.source_instance_id(),
                         duplicates.len(),
@@ -116,7 +114,7 @@ pub(super) fn build_spec_evidence(
                     0,
                     detail,
                 )
-                .map_err(|error| format!("invalid task/spec evidence: {error}"))?,
+                .map_err(|error| format!("invalid task/spec check: {error}"))?,
             );
         }
     }
@@ -136,7 +134,7 @@ pub(super) fn simulation_run_digest(run: &SimulationRun) -> Result<ContentDigest
     validate_run_shape(run)?;
     let receipt = run
         .prepared_receipt()
-        .ok_or_else(|| "run lost its prepared-run authority before evidence sealing".to_owned())?;
+        .ok_or_else(|| "the run no longer has its preparation record".to_owned())?;
     let mut digest = Sha256::new();
     digest.update(b"rspice-automation-run-evidence-v1\0");
     digest.update(run.run_id.as_uuid().as_bytes());
@@ -182,7 +180,7 @@ pub(super) fn simulation_run_digest(run: &SimulationRun) -> Result<ContentDigest
         let provenance = analysis
             .provenance
             .as_ref()
-            .ok_or_else(|| format!("analysis {:?} has no provenance", analysis.label))?;
+            .ok_or_else(|| format!("analysis '{}' has no recorded source", analysis.label))?;
         digest.update(provenance.source_instance_id().as_uuid().as_bytes());
         hash_u64(&mut digest, provenance.source_revision().get());
         digest.update(provenance.prepared_snapshot_digest().as_bytes());

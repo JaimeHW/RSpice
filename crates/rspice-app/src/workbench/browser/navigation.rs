@@ -377,7 +377,7 @@ pub enum BrowserNavigationError {
     MalformedParameter(String),
     #[error("malformed percent encoding in query key `{0}`")]
     MalformedPercentEncoding(String),
-    #[error("non-canonical route key `{received}`; expected `{expected}`")]
+    #[error("route key `{received}` must be written `{expected}`")]
     NonCanonicalReservedKey {
         received: String,
         expected: &'static str,
@@ -386,7 +386,7 @@ pub enum BrowserNavigationError {
     DuplicateParameter(&'static str),
     #[error("browser location cannot contain both `view` and `surface`")]
     ConflictingSelectors,
-    #[error("object route parameters require one canonical `view` or `surface` selector")]
+    #[error("object route parameters require one `view` or `surface` selector")]
     OrphanedObjectReference,
     #[error("object routes require both `object-kind` and `object-id`")]
     PartialObjectReference,
@@ -456,13 +456,11 @@ impl HistoryEntry {
             return Err(BrowserNavigationError::ForeignHistoryEntry);
         }
         let parsed_session = uuid::Uuid::parse_str(&wire.session_id).map_err(|_| {
-            BrowserNavigationError::InvalidHistoryState(
-                "sessionId is not a canonical UUID".to_owned(),
-            )
+            BrowserNavigationError::InvalidHistoryState("sessionId is not a UUID".to_owned())
         })?;
         if parsed_session.hyphenated().to_string() != wire.session_id {
             return Err(BrowserNavigationError::InvalidHistoryState(
-                "sessionId is not canonical".to_owned(),
+                "sessionId is not a lowercase hyphenated UUID".to_owned(),
             ));
         }
         if wire.entry_id == 0 || wire.index < 0 {
@@ -473,7 +471,7 @@ impl HistoryEntry {
         let route = wire.route.parse::<SurfaceRoute>()?;
         if route.to_string() != wire.route {
             return Err(BrowserNavigationError::InvalidHistoryState(
-                "route is not canonical".to_owned(),
+                "route is not written in its standard form".to_owned(),
             ));
         }
         Ok(Self {
@@ -508,7 +506,7 @@ impl HistorySession {
         })?;
         if parsed_session.hyphenated().to_string() != session_id {
             return Err(BrowserNavigationError::InvalidHistoryState(
-                "generated session ID is not canonical".to_owned(),
+                "generated session ID is not a lowercase hyphenated UUID".to_owned(),
             ));
         }
         let current = HistoryEntry {
@@ -1003,7 +1001,7 @@ mod browser {
             } else {
                 queue.clear();
                 queue.push_back(Err(BrowserNavigationError::InvalidHistoryState(
-                    "browser history event queue overflowed; a canonical restart is required"
+                    "browser history event queue overflowed; the history session must restart"
                         .to_owned(),
                 )));
                 true
@@ -1150,7 +1148,9 @@ mod browser {
     }
 
     fn browser_error(operation: &str, error: JsValue) -> BrowserNavigationError {
-        let detail = error.as_string().unwrap_or_else(|| format!("{error:?}"));
+        let detail = error
+            .as_string()
+            .unwrap_or_else(|| "the browser reported an error without a message".to_owned());
         BrowserNavigationError::BrowserApi(format!("{operation}: {detail}"))
     }
 }
