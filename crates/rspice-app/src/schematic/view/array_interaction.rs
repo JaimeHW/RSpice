@@ -360,7 +360,11 @@ mod tests {
             ));
             let wire_points = |state: &AppState| -> Vec<Vec<Point>> {
                 let document = state.schematic.document();
-                document.wires.iter().map(|wire| wire.points.clone()).collect()
+                document
+                    .wires
+                    .iter()
+                    .map(|wire| wire.points.clone())
+                    .collect()
             };
             let before = wire_points(&state);
 
