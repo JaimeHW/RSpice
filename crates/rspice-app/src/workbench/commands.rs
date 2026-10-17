@@ -119,6 +119,7 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::Duplicate
             | Command::Delete
             | Command::RenameSelection
+            | Command::FindReplace
             | Command::PlaceInstance
             | Command::PlaceWire
             | Command::PlaceBus
@@ -152,6 +153,7 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::AlignSelectionBottom
             | Command::DistributeSelectionHorizontal
             | Command::DistributeSelectionVertical
+            | Command::SnapSelectionToGrid
             | Command::JoinCollinearWires
     )
 }
@@ -493,7 +495,7 @@ impl Command {
             }
             Self::Undo => {
                 if state.workbench.safe_mode.project_read_only()
-                    || state.schematic.has_pending_operation()
+                    || state.schematic_edit_in_progress()
                 {
                     false
                 } else if (netlist_page_is_visible(state)
@@ -511,7 +513,7 @@ impl Command {
             }
             Self::Redo => {
                 if state.workbench.safe_mode.project_read_only()
-                    || state.schematic.has_pending_operation()
+                    || state.schematic_edit_in_progress()
                 {
                     false
                 } else if (netlist_page_is_visible(state)
@@ -595,7 +597,8 @@ impl Command {
             | Self::MirrorSelectionVertical => {
                 active_schematic_editor(app)
                     && !state.schematic_edit_read_only()
-                    && schematic_selection_has_live_object(&state.schematic)
+                    && (schematic_selection_has_live_object(&state.schematic)
+                        || state.dialogs.floating_paste.is_some())
             }
             Self::AlignSelectionLeft
             | Self::AlignSelectionCenter
@@ -615,6 +618,11 @@ impl Command {
             }
             Self::JoinCollinearWires => {
                 active_schematic_editor(app) && !state.schematic_edit_read_only()
+            }
+            Self::SnapSelectionToGrid => {
+                active_schematic_editor(app)
+                    && !state.schematic_edit_read_only()
+                    && !state.schematic.session.editor.selection.is_empty()
             }
             Self::MoveSelection => {
                 active_schematic_editor(app)
@@ -664,6 +672,11 @@ impl Command {
             Self::SelectionBulkEdit => {
                 active_schematic_editor(app) && state.project_lifecycle.is_open()
             }
+            Self::FindReplace => active_schematic_editor(app) && !state.schematic_edit_read_only(),
+            Self::RepeatLastCommand => {
+                active_schematic_editor(app)
+                    && Self::last_repeatable(app).is_some_and(|command| command.is_enabled(app))
+            }
             Self::ConfigurationSets | Self::RuleSetup => state.project_lifecycle.is_open(),
             Self::ReviewComments => {
                 active_schematic_editor(app) && state.project_lifecycle.is_open()
@@ -675,7 +688,8 @@ impl Command {
                     selection.pins.len() + selection.shapes.len() == 1
                 } else {
                     active_schematic_editor(app)
-                        && crate::workbench::app::selected_object_properties_available(state)
+                        && (crate::workbench::app::selected_object_properties_available(state)
+                            || crate::workbench::app::shared_properties_available(state))
                 }
             }
             Self::ZoomFit => {
@@ -1148,6 +1162,54 @@ impl Command {
         }
     }
 
+    /// The placement and editing commands Repeat last command runs again,
+    /// each with what it carries (a placed kind, a rotation's sense). An
+    /// undo, a delete or a form is not repeated: Repeat on those would be a
+    /// surprise rather than a shortcut.
+    pub(crate) const fn repeatable(self) -> bool {
+        matches!(
+            self,
+            Self::Place(_)
+                | Self::PlaceInstance
+                | Self::PlaceWire
+                | Self::PlaceBus
+                | Self::PlaceBusTap
+                | Self::PlaceJunction
+                | Self::PlaceLabel
+                | Self::PlaceOffSheetConnector
+                | Self::PlacePin
+                | Self::PlaceText
+                | Self::PlaceShape
+                | Self::Duplicate
+                | Self::Paste
+                | Self::MoveSelection
+                | Self::StretchSelection
+                | Self::RotateSelection
+                | Self::RotateSelectionCounterClockwise
+                | Self::MirrorSelectionHorizontal
+                | Self::MirrorSelectionVertical
+                | Self::AlignSelectionLeft
+                | Self::AlignSelectionCenter
+                | Self::AlignSelectionRight
+                | Self::AlignSelectionTop
+                | Self::AlignSelectionMiddle
+                | Self::AlignSelectionBottom
+                | Self::DistributeSelectionHorizontal
+                | Self::DistributeSelectionVertical
+                | Self::SnapSelectionToGrid
+                | Self::JoinCollinearWires
+        )
+    }
+
+    /// The command Repeat last command would run.
+    pub(crate) fn last_repeatable(app: &RSpiceApp) -> Option<Self> {
+        app.state
+            .workbench
+            .last_repeatable_command
+            .as_deref()
+            .and_then(Self::from_stable_id)
+    }
+
     /// Shared by menu/palette dispatch and the keyboard dispatcher.
     pub(crate) fn commits_inspector_edit(self) -> bool {
         command_edits_schematic(self)
@@ -1215,6 +1277,9 @@ impl Command {
         }
         if self.commits_inspector_edit() && !app.state.commit_pending_inspector_edit() {
             return;
+        }
+        if self.repeatable() && self.is_enabled(app) {
+            app.state.workbench.last_repeatable_command = Some(self.stable_id().to_owned());
         }
         match self {
             Self::OpenWorkspace(workspace) => {
@@ -1361,6 +1426,9 @@ impl Command {
                 if active_symbol_editor(app) {
                     app.state.workbench.inspector_visible = true;
                     app.state.workbench.drawer = Some(super::state::Drawer::Inspector);
+                } else if crate::workbench::app::shared_properties_available(&app.state) {
+                    // Several instances: one form for what they share.
+                    crate::workbench::app::open_shared_properties(&mut app.state);
                 } else {
                     crate::workbench::app::open_selected_object_properties(&mut app.state);
                 }
@@ -1736,6 +1804,15 @@ impl Command {
             Self::SelectionBulkEdit => {
                 crate::workbench::app::open_selection_bulk_edit_dialog(&mut app.state);
             }
+            Self::FindReplace => crate::workbench::app::open_find_replace(&mut app.state),
+            Self::RepeatLastCommand => match Self::last_repeatable(app) {
+                Some(command) if command.is_enabled(app) => command.execute(app),
+                Some(command) => app.state.prompt(format!(
+                    "{} cannot run here, so it was not repeated.",
+                    command.spec().label
+                )),
+                None => app.state.prompt("No placement or edit has run yet."),
+            },
             Self::ConfigurationSets => {
                 crate::workbench::app::open_configuration_sets_dialog(&mut app.state);
             }
@@ -1799,11 +1876,29 @@ impl Command {
                     Self::MirrorSelectionVertical => SelectionTransform::MirrorVertical,
                     _ => SelectionTransform::RotateClockwise,
                 };
-                let symbol_context = schematic_symbol_context(&app.state);
-                transform_selection_on_active_sheet(&mut app.state, &symbol_context, transform);
+                // A copy floating under the pointer is what these act on.
+                if !crate::workbench::app::turn_floating_paste(&mut app.state, transform) {
+                    let symbol_context = schematic_symbol_context(&app.state);
+                    transform_selection_on_active_sheet(&mut app.state, &symbol_context, transform);
+                }
             }
             Self::JoinCollinearWires => {
                 app.state.join_collinear_wires_on_active_sheet();
+            }
+            Self::SnapSelectionToGrid => {
+                let symbol_context = schematic_symbol_context(&app.state);
+                let result = crate::schematic::view::grid_snap_selection::snap_selection_to_grid(
+                    &mut app.state,
+                    &symbol_context,
+                );
+                match result {
+                    Ok(0) => app.state.prompt("The selection is on the grid already."),
+                    Ok(moved) => app.state.prompt(format!(
+                        "Snapped {moved} {} to the grid.",
+                        if moved == 1 { "object" } else { "objects" }
+                    )),
+                    Err(error) => app.state.prompt(error),
+                }
             }
             Self::AlignSelectionLeft
             | Self::AlignSelectionCenter
@@ -1849,6 +1944,8 @@ impl Command {
                     app.state.schematic.session.editor.zoom_box.disarm();
                 } else if app.state.dialogs.descend_hierarchy.open {
                     app.state.dialogs.descend_hierarchy.close();
+                } else if crate::workbench::app::cancel_floating_paste(&mut app.state) {
+                    // The floating copy is let go; the drawing never changed.
                 } else if app.state.dialogs.move_selection.armed {
                     crate::workbench::app::cancel_armed_move_selection(&mut app.state);
                 } else if app.state.dialogs.stretch_selection.armed {

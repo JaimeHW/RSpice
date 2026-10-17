@@ -7,6 +7,7 @@
 //! truncated value on a printed page is indistinguishable from a real one.
 
 use super::*;
+use rspice_design::schematic::{component_type::ComponentType, drawing_metrics};
 
 pub(super) struct SemanticSceneCompiler<'a> {
     pub(super) bounds: SemanticBounds,
@@ -358,10 +359,23 @@ impl<'a> SemanticSceneCompiler<'a> {
                 )?;
             }
         }
+        // The SVG export's inks and nominal weights (D1 sections 1 and 11);
+        // a print mapping entry for the layer still overrides them.
+        let print_stroke = |ink: Rgb8, world: f32| {
+            StrokeStyle::try_new(
+                SemanticColor::Exact(ink),
+                schematic_marks::width_um(world),
+                StrokePattern::Solid,
+                None,
+            )
+        };
         let component_stroke = self.mapped_stroke(
             PrintObjectKind::Layer,
             "layer:schematic-components",
-            StrokeStyle::default(),
+            print_stroke(
+                schematic_marks::SYMBOL_INK,
+                drawing_metrics::SYMBOL_WIDTH_WORLD,
+            )?,
         );
         let component_fill = self.mapped_fill(
             PrintObjectKind::Layer,
@@ -371,21 +385,22 @@ impl<'a> SemanticSceneCompiler<'a> {
         let wire_stroke = self.mapped_stroke(
             PrintObjectKind::Layer,
             "layer:schematic-wiring",
-            StrokeStyle::try_new(
-                SemanticColor::Foreground,
-                Length::from_micrometres(250),
-                StrokePattern::Solid,
-                None,
-            )?,
+            print_stroke(schematic_marks::WIRE_INK, drawing_metrics::WIRE_WIDTH_WORLD)?,
         );
         let bus_stroke = self.mapped_stroke(
             PrintObjectKind::Layer,
             "layer:schematic-buses",
-            StrokeStyle::try_new(
-                SemanticColor::Foreground,
-                Length::from_micrometres(600),
-                StrokePattern::Solid,
-                None,
+            print_stroke(
+                schematic_marks::WIRE_INK,
+                drawing_metrics::BUS_STRAND_WIDTH_WORLD,
+            )?,
+        );
+        let tap_stroke = self.mapped_stroke(
+            PrintObjectKind::Layer,
+            "layer:schematic-buses",
+            print_stroke(
+                schematic_marks::WIRE_INK,
+                drawing_metrics::BUS_TAP_WIDTH_WORLD,
             )?,
         );
         for wire in &schematic.wires {
@@ -399,24 +414,15 @@ impl<'a> SemanticSceneCompiler<'a> {
             }
         }
         for bus in &schematic.buses {
-            self.primitives.push(ScenePrimitive::Polyline {
-                points: self.schematic_polyline(&bus.points)?,
-                closed: false,
-                stroke: bus_stroke,
-                fill: None,
-            });
+            self.schematic_bus(bus, bus_stroke)?;
         }
         for tap in &schematic.bus_taps {
-            self.primitives.push(ScenePrimitive::Line {
-                from: self.schematic_point(tap.bus_point)?,
-                to: self.schematic_point(tap.connection_point)?,
-                stroke: bus_stroke,
-            });
+            self.schematic_bus_tap(tap, tap_stroke)?;
         }
         for junction in &schematic.junctions {
             self.primitives.push(ScenePrimitive::Circle {
                 center: self.schematic_point(junction.pos)?,
-                radius: Length::from_micrometres(900),
+                radius: schematic_marks::width_um(drawing_metrics::JUNCTION_RADIUS_WORLD),
                 stroke: None,
                 fill: self.mapped_fill(
                     PrintObjectKind::Layer,
@@ -426,13 +432,7 @@ impl<'a> SemanticSceneCompiler<'a> {
             });
         }
         for label in &schematic.net_labels {
-            self.add_text(
-                self.schematic_point(label.pos)?,
-                &label.name,
-                SceneFont::SansSemibold,
-                2_800,
-                wire_stroke.color,
-            )?;
+            self.schematic_net_label(label)?;
         }
 
         let library = SymbolLibrary::load_embedded()
@@ -447,25 +447,11 @@ impl<'a> SemanticSceneCompiler<'a> {
                     component_stroke,
                     component_fill,
                 )?;
+                if semantic.component.kind == ComponentType::Port {
+                    self.port_direction_marks(&library, &semantic.component, component_stroke)?;
+                }
             }
-            let anchor = self.schematic_point(semantic.component.pos)?;
-            self.add_text(
-                anchor,
-                &semantic.component.name,
-                SceneFont::SansSemibold,
-                2_700,
-                component_stroke.color,
-            )?;
-            if !semantic.component.value.is_empty() {
-                let value_anchor = self.offset_scene_point(anchor, 0, 3_500)?;
-                self.add_text(
-                    value_anchor,
-                    &semantic.component.value,
-                    SceneFont::Sans,
-                    2_500,
-                    component_stroke.color,
-                )?;
-            }
+            self.instance_labels(semantic)?;
         }
 
         let annotation_stroke = self.mapped_stroke(
@@ -2315,4 +2301,6 @@ impl<'a> SemanticSceneCompiler<'a> {
 mod plot_grid;
 mod title_block;
 pub(super) use title_block::*;
+mod schematic_marks;
+mod schematic_text;
 mod symbol_document;

@@ -3,6 +3,9 @@
 //! The main schematic canvas using egui's painter for vectorized rendering.
 //! This will be optimized for 60fps with direct GPU rendering.
 
+use std::sync::Arc;
+
+use crate::state::symbol_context_cache::SymbolContextInputs;
 use crate::workbench::app::symbol_context_revision;
 
 use egui::Ui;
@@ -15,6 +18,11 @@ mod array_interaction;
 mod bus_interaction;
 mod context_menu;
 pub(crate) mod drawing_sheet;
+mod edge_pan;
+mod floating_paste;
+#[cfg(test)]
+mod frame_cost;
+pub(crate) mod grid_snap_selection;
 mod interaction;
 mod keyboard_navigation;
 mod mobile_controls;
@@ -110,16 +118,56 @@ pub(crate) fn schematic_symbol_context(state: &AppState) -> SchematicSymbolConte
     )
 }
 
-fn refresh_symbol_context_after_interactions(
-    state: &AppState,
-    symbol_context: &mut SchematicSymbolContext,
-    before_topology_version: u64,
-) -> bool {
-    if state.schematic.topology_version() == before_topology_version {
-        return false;
+/// The resolved symbols a frame paints and hit-tests with.
+///
+/// Resolution is kept in the open document's session and handed back while
+/// everything it was resolved from stands still: the library and buffer
+/// revision, the topology, the pending placement, and every instance binding.
+/// The canvas and the Sheet inspector therefore share one context, and a
+/// steady frame resolves nothing.
+pub(crate) fn frame_symbol_context(state: &mut AppState) -> Arc<SchematicSymbolContext> {
+    let revision = symbol_context_revision(state);
+    let topology_version = state.schematic.topology_version();
+    let pending = state
+        .schematic
+        .session
+        .editor
+        .pending_library_cell
+        .as_ref()
+        .map(|pending| &pending.binding);
+    if let Some(context) = state.schematic.session.symbol_context.current(
+        revision,
+        topology_version,
+        pending,
+        state.schematic.document(),
+    ) {
+        return context;
     }
-    *symbol_context = schematic_symbol_context(state);
-    true
+    let inputs = SymbolContextInputs::capture(
+        revision,
+        topology_version,
+        pending,
+        state.schematic.document(),
+    );
+    let context = Arc::new(schematic_symbol_context(state));
+    state
+        .schematic
+        .session
+        .symbol_context
+        .store(inputs, Arc::clone(&context));
+    context
+}
+
+/// Pick up whatever an interaction changed under the frame's symbols.
+/// Returns whether the context was resolved afresh.
+fn refresh_symbol_context_after_interactions(
+    state: &mut AppState,
+    symbol_context: &mut Arc<SchematicSymbolContext>,
+) -> bool {
+    let current = frame_symbol_context(state);
+    let refreshed = !Arc::ptr_eq(&current, symbol_context);
+    *symbol_context = current;
+    refreshed
 }
 
 fn canvas_accessibility_view(state: &AppState) -> canvas::CanvasAccessibilityView<'_> {
@@ -171,11 +219,25 @@ pub(crate) fn select_signal_conductor(
 ) -> Result<String, LocateSignalError> {
     let current = result_mapping_is_current(state);
     let occurrence = state.workspace.content.occurrence_path();
+    let sheet = sheet_visibility::active_sheet_id(state);
+    let key = state.workspace.content.active_schematic_reference().key();
     let (document, editor) = state.schematic.document_and_editor();
     let view = cross_probe::CrossProbeView {
         document,
+        sheet_catalog: state
+            .workspace
+            .content
+            .design_management
+            .sheet_catalog(&key),
         occurrence: &occurrence,
-        net_to_points: current.then_some(&state.simulation.source.cross_probe.net_to_points),
+        net_to_points: current.then_some(
+            &state
+                .simulation
+                .source
+                .cross_probe
+                .on_sheet(sheet)
+                .net_to_points,
+        ),
     };
     cross_probe::select_signal_conductor(&view, editor, signal)
 }
@@ -189,9 +251,10 @@ pub(crate) fn drawn_failure_site_count(
     let occurrence = state.workspace.content.occurrence_path();
     let view = cross_probe::CrossProbeView {
         document: state.schematic.document(),
+        sheet_catalog: sheet_visibility::active_sheet_catalog(state),
         occurrence: &occurrence,
         net_to_points: result_mapping_is_current(state)
-            .then_some(&state.simulation.source.cross_probe.net_to_points),
+            .then_some(&sheet_visibility::active_sheet_net_geometry(state).net_to_points),
     };
     cross_probe::drawn_failure_site_count(&view, nets, devices)
 }
@@ -213,11 +276,25 @@ pub(crate) fn select_failure_sites(
 ) -> Result<FailureSiteSelection, LocateSignalError> {
     let current = result_mapping_is_current(state);
     let occurrence = state.workspace.content.occurrence_path();
+    let sheet = sheet_visibility::active_sheet_id(state);
+    let key = state.workspace.content.active_schematic_reference().key();
     let (document, editor) = state.schematic.document_and_editor();
     let view = cross_probe::CrossProbeView {
         document,
+        sheet_catalog: state
+            .workspace
+            .content
+            .design_management
+            .sheet_catalog(&key),
         occurrence: &occurrence,
-        net_to_points: current.then_some(&state.simulation.source.cross_probe.net_to_points),
+        net_to_points: current.then_some(
+            &state
+                .simulation
+                .source
+                .cross_probe
+                .on_sheet(sheet)
+                .net_to_points,
+        ),
     };
     cross_probe::select_failure_sites(&view, editor, nets, devices)
 }
@@ -257,7 +334,7 @@ pub fn render_schematic_view(
     symbol_library: Option<&SymbolLibrary>,
 ) {
     let available = ui.available_rect_before_wrap();
-    let mut symbol_context = schematic_symbol_context(state);
+    let mut symbol_context = frame_symbol_context(state);
     let drawing_sheet = resolve_active_drawing_sheet(state);
     let (canvas_width, canvas_height) = (available.width() as f64, available.height() as f64);
     let min_zoom = crate::state::SchematicState::zoom_floor_for_sheet(
@@ -320,6 +397,7 @@ pub fn render_schematic_view(
         &mut state.schematic.session.editor.pan,
         min_zoom,
     );
+    edge_pan::edge_pan(ui, &response, available, state);
     let viewport = viewport_from_camera(
         state.schematic.session.editor.pan,
         state.schematic.session.editor.zoom,
@@ -336,7 +414,6 @@ pub fn render_schematic_view(
         .as_deref()
         .map(|payload| can_accept_shelf_drop(state, payload));
     let dropped_payload = response.dnd_release_payload::<SchematicShelfDragPayload>();
-    let before_interactions_topology = state.schematic.topology_version();
     // Keep the pre-interaction route state available to the context-menu
     // layer for diagnostics. Secondary click is exclusively a context-menu
     // gesture; routes commit with Enter or primary double-click.
@@ -392,12 +469,7 @@ pub fn render_schematic_view(
         pick_chooser::show_chooser(ui.ctx(), state);
         handle_tool_interactions(ui, &response, state, &viewport, &symbol_context);
     }
-    refresh_symbol_context_after_interactions(
-        state,
-        &mut symbol_context,
-        before_interactions_topology,
-    );
-    let before_context_menu_topology = state.schematic.topology_version();
+    refresh_symbol_context_after_interactions(state, &mut symbol_context);
     context_menu::handle_context_menu(
         &response,
         state,
@@ -407,15 +479,21 @@ pub fn render_schematic_view(
     );
     handle_keyboard_object_navigation(&response, state, &symbol_context);
     set_canvas_cursor(ui, &response, state, shelf_drop);
-    refresh_symbol_context_after_interactions(
-        state,
-        &mut symbol_context,
-        before_context_menu_topology,
-    );
+    refresh_symbol_context_after_interactions(state, &mut symbol_context);
 
     // Refresh the frame-coherent canvas cache (culling bounds + hover
     // hit-test index) after interactions may have edited topology.
     state.schematic.ensure_canvas_cache();
+    // Badges are placed against the wires the canvas cache indexes, so they
+    // are refreshed after it.
+    scene::refresh_voltage_badges(state);
+    drawing_sheet::refresh_overflow_summary(
+        state,
+        &painter,
+        &viewport,
+        &symbol_context,
+        &drawing_sheet,
+    );
 
     draw_scene(
         &painter,
@@ -568,6 +646,31 @@ mod tests {
         assert!(state.schematic.session.editor.selection.is_empty());
     }
 
+    /// Locate on a later sheet selects the conductor that sheet draws and
+    /// centres where it draws it, and never reaches a wire on a hidden sheet
+    /// that happens to share the coordinates.
+    #[test]
+    fn locate_on_a_later_sheet_reads_that_sheets_own_geometry() {
+        let mut state = frame_cost::two_sheet_operating_point(true);
+
+        let net = select_signal_conductor(&mut state, "V(bias)").expect("Sheet 2 draws BIAS");
+        assert_eq!(net, "BIAS");
+        let editor = &state.schematic.session.editor;
+        assert_eq!(
+            editor.selection.wires.iter().copied().collect::<Vec<_>>(),
+            vec![2]
+        );
+        assert_eq!(editor.center_request, Some(Point::new(100, 0)));
+
+        let error = select_signal_conductor(&mut state, "V(vout)")
+            .expect_err("VOUT is drawn only on the hidden Sheet 1");
+        assert_eq!(error, LocateSignalError::UnknownNet("vout".to_owned()));
+        assert!(
+            !state.schematic.session.editor.selection.wires.contains(&1),
+            "a wire on the hidden sheet is never selected"
+        );
+    }
+
     #[test]
     fn second_refresh_resolves_cell_added_after_initial_interaction_refresh() {
         let mut state = AppState::default();
@@ -589,29 +692,22 @@ mod tests {
         library.add_cell(cell);
         state.library_manager.add_library(library);
 
-        let mut context = schematic_symbol_context(&state);
-        let before_interactions_topology = state.schematic.topology_version();
+        let mut context = frame_symbol_context(&mut state);
         assert!(!refresh_symbol_context_after_interactions(
-            &state,
+            &mut state,
             &mut context,
-            before_interactions_topology,
         ));
 
         // The context-menu pass runs after the tool-interaction refresh. A
         // duplicate/place action can therefore mutate topology between the
         // first refresh and painting.
-        let before_context_menu_topology = state.schematic.topology_version();
         let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
         binding.bind_interface(&[port("OUT", PortDirection::Out)]);
         let id = state
             .schematic
             .add_library_cell_component(Point::new(100, 50), binding);
 
-        let refreshed = refresh_symbol_context_after_interactions(
-            &state,
-            &mut context,
-            before_context_menu_topology,
-        );
+        let refreshed = refresh_symbol_context_after_interactions(&mut state, &mut context);
         let component = state
             .schematic
             .document()
@@ -627,6 +723,112 @@ mod tests {
         assert!(
             context.resolved_symbol(&generated_preview).is_some(),
             "generated array members resolve authored symbols by immutable binding"
+        );
+    }
+
+    /// A library holding authored masters `amp` and `buf`, whose output pins
+    /// sit at different offsets, and one placed instance of `amp`.
+    fn state_with_amp_instance() -> (AppState, u64) {
+        let mut state = AppState::default();
+        let mut library = Library::new("work");
+        for (master, reach) in [("amp", 40), ("buf", 60)] {
+            let mut cell = Cell::new(master);
+            cell.add_view(View::new("schematic", ViewType::Schematic));
+            let mut symbol_view = View::new("symbol", ViewType::Symbol);
+            SymbolDocument {
+                pins: vec![SymbolPin::new(
+                    "OUT",
+                    PortDirection::Out,
+                    Some(Point::new(reach, 0)),
+                )],
+                ..SymbolDocument::default()
+            }
+            .store_in_view(&mut symbol_view)
+            .expect("symbol stores");
+            cell.add_view(symbol_view);
+            library.add_cell(cell);
+        }
+        state.library_manager.add_library(library);
+        let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
+        binding.bind_interface(&[port("OUT", PortDirection::Out)]);
+        let id = state
+            .schematic
+            .add_library_cell_component(Point::new(100, 50), binding);
+        (state, id)
+    }
+
+    #[test]
+    fn a_steady_frame_resolves_no_symbol() {
+        let (mut state, _) = state_with_amp_instance();
+        let first = frame_symbol_context(&mut state);
+        let second = frame_symbol_context(&mut state);
+        assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    /// Each input the resolved symbols depend on, changed on its own, makes
+    /// the next frame resolve afresh. The binding is changed without a
+    /// topology bump, so it is the content comparison that catches it.
+    #[test]
+    fn every_symbol_input_resolves_the_frame_context_afresh() {
+        let (mut state, id) = state_with_amp_instance();
+        let refreshed = |state: &mut AppState, change: &dyn Fn(&mut AppState)| {
+            let before = frame_symbol_context(state);
+            change(state);
+            let after = frame_symbol_context(state);
+            !Arc::ptr_eq(&before, &after)
+        };
+
+        assert!(refreshed(&mut state, &|state| {
+            state.library_manager.add_library(Library::new("other"));
+        }));
+        assert!(refreshed(&mut state, &|state| {
+            state.workspace.insert_schematic_editor(
+                "work/amp/schematic".to_owned(),
+                SchematicState::default(),
+            );
+        }));
+        assert!(refreshed(&mut state, &|state| {
+            state.schematic.bump_topology_version();
+        }));
+        assert!(refreshed(&mut state, &|state| {
+            let mut binding = LibraryCellInstance::new("work", "buf", "schematic");
+            binding.bind_interface(&[port("OUT", PortDirection::Out)]);
+            state.schematic.session.editor.pending_library_cell = Some(
+                rspice_schematic_editor::session::placement::PendingLibraryCellPlacement::new(
+                    binding,
+                    crate::workbench::app::schematic_editor_request_source(state),
+                ),
+            );
+        }));
+
+        let terminals = |state: &mut AppState| {
+            let context = frame_symbol_context(state);
+            let component = state
+                .schematic
+                .document()
+                .components
+                .iter()
+                .find(|component| component.id == id)
+                .expect("instance placed");
+            context.terminal_points(component)
+        };
+        let amp = terminals(&mut state);
+        let topology = state.schematic.topology_version();
+        assert!(refreshed(&mut state, &|state| {
+            let component = state
+                .schematic
+                .document_mut_for_test()
+                .components
+                .iter_mut()
+                .find(|component| component.id == id)
+                .expect("instance placed");
+            component.library_cell.as_mut().expect("bound").cell = "buf".to_owned();
+        }));
+        assert_eq!(state.schematic.topology_version(), topology);
+        assert_ne!(
+            terminals(&mut state),
+            amp,
+            "the rebound instance resolves its new master's pins"
         );
     }
 

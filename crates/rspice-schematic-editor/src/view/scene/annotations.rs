@@ -12,6 +12,7 @@ use egui::{Painter, Pos2, Rect, Vec2};
 use rspice_design::schematic::component::Component;
 use rspice_design::schematic::component_type::ComponentType;
 use rspice_design_model::Point;
+use std::sync::{Arc, Mutex, PoisonError};
 
 /// What a badge annotates.
 #[derive(Debug, Clone, PartialEq)]
@@ -101,6 +102,19 @@ pub fn layout_badges(
     clearance: f32,
     view: Rect,
 ) -> Vec<PlacedBadge> {
+    layout_badges_reading_view(badges, obstacles, clearance, view).0
+}
+
+/// [`layout_badges`], and whether its outcome read `view` at all: only a
+/// class-0 badge with no clear candidate consults it, and whether a
+/// candidate is clear does not depend on the view.
+fn layout_badges_reading_view(
+    badges: &[BadgeLayoutInput],
+    obstacles: &[Obstacle],
+    clearance: f32,
+    view: Rect,
+) -> (Vec<PlacedBadge>, bool) {
+    let mut read_view = false;
     let mut order: Vec<usize> = (0..badges.len()).collect();
     order.sort_by(|&left, &right| {
         (badges[left].class, &badges[left].key, left).cmp(&(
@@ -127,6 +141,7 @@ pub fn layout_badges(
         let chosen = chosen.or_else(|| {
             (badge.class == 0)
                 .then(|| {
+                    read_view = true;
                     let overlap = |rect: &Rect| -> f32 {
                         let grown = rect.expand(clearance);
                         blockers()
@@ -154,7 +169,67 @@ pub fn layout_badges(
             placed.push(PlacedBadge { index, rect });
         }
     }
-    placed
+    (placed, read_view)
+}
+
+/// Everything [`layout_badges`] reads, held by content: a badge list, an
+/// obstacle or a clearance that differs in any way is a different layout.
+/// The view is held only when the layout read it.
+#[derive(Debug, Clone, PartialEq)]
+struct BadgeLayoutKey {
+    badges: Vec<BadgeLayoutInput>,
+    obstacles: Vec<Obstacle>,
+    clearance: f32,
+    view: Option<Rect>,
+}
+
+/// The last badge layout and what it was placed from, so a steady frame
+/// reuses it. Placing is quadratic (every badge against every obstacle and
+/// every badge already placed); recognising the same inputs is linear.
+///
+/// Behind a lock because the canvas paints through shared borrows. A clone
+/// holds nothing, so a copied session never paints another's layout.
+#[derive(Debug, Default)]
+pub struct BadgeLayoutMemo {
+    held: Mutex<Option<(BadgeLayoutKey, Arc<Vec<PlacedBadge>>)>>,
+}
+
+impl Clone for BadgeLayoutMemo {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl BadgeLayoutMemo {
+    /// The layout of these inputs: the held one if they are the inputs it
+    /// was placed from, else placed afresh and held.
+    pub fn layout(
+        &self,
+        badges: Vec<BadgeLayoutInput>,
+        obstacles: Vec<Obstacle>,
+        clearance: f32,
+        view: Rect,
+    ) -> Arc<Vec<PlacedBadge>> {
+        let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((key, placed)) = held.as_ref()
+            && key.clearance == clearance
+            && key.view.is_none_or(|held_view| held_view == view)
+            && key.badges == badges
+            && key.obstacles == obstacles
+        {
+            return Arc::clone(placed);
+        }
+        let (placed, read_view) = layout_badges_reading_view(&badges, &obstacles, clearance, view);
+        let placed = Arc::new(placed);
+        let key = BadgeLayoutKey {
+            badges,
+            obstacles,
+            clearance,
+            view: read_view.then_some(view),
+        };
+        *held = Some((key, Arc::clone(&placed)));
+        placed
+    }
 }
 
 /// The world rect an instance's name occupies, estimated from its anchor
@@ -308,6 +383,52 @@ fn screen_to_world(viewport: &Viewport, screen: Pos2) -> Pos2 {
         .to_pos2()
 }
 
+/// What placing a set of badges reads besides the memo.
+pub struct BadgePlacement<'a> {
+    pub view: &'a DesignView<'a>,
+    pub symbols: &'a SchematicSymbolContext,
+    pub annotations: &'a [OperatingPointCanvasAnnotation],
+    /// Each annotation's knockout size, in world units.
+    pub sizes: &'a [Vec2],
+    pub zoom: f32,
+    /// The visible world rect.
+    pub world_view: Rect,
+}
+
+/// Where each badge lands, in world units: read from `layout` when it holds
+/// the layout of exactly these inputs, else placed afresh (and held there).
+/// The candidates and obstacles are gathered every call, which is linear;
+/// only the quadratic placement is reused.
+pub fn place_badges(
+    placement: &BadgePlacement<'_>,
+    layout: Option<&BadgeLayoutMemo>,
+) -> Arc<Vec<PlacedBadge>> {
+    let BadgePlacement {
+        view,
+        symbols,
+        annotations,
+        sizes,
+        zoom,
+        world_view,
+    } = *placement;
+    let inputs: Vec<BadgeLayoutInput> = annotations
+        .iter()
+        .zip(sizes)
+        .map(|(annotation, size)| BadgeLayoutInput {
+            class: annotation.class,
+            key: annotation.key.clone(),
+            candidates: candidates(&annotation.subject, *size, view, symbols),
+            owner: owner(&annotation.subject),
+        })
+        .collect();
+    let obstacles = obstacles(view, symbols);
+    let clearance = CLEARANCE_PT / zoom;
+    match layout {
+        Some(memo) => memo.layout(inputs, obstacles, clearance, world_view),
+        None => Arc::new(layout_badges(&inputs, &obstacles, clearance, world_view)),
+    }
+}
+
 pub(super) fn draw_operating_point_annotations(
     painter: &Painter,
     available: Rect,
@@ -315,6 +436,7 @@ pub(super) fn draw_operating_point_annotations(
     view: &DesignView<'_>,
     symbols: &SchematicSymbolContext,
     annotations: &[OperatingPointCanvasAnnotation],
+    layout: Option<&BadgeLayoutMemo>,
 ) {
     use rspice_ui_kit::theme::{self, FontWeight};
 
@@ -347,29 +469,26 @@ pub(super) fn draw_operating_point_annotations(
             painter.layout_no_wrap(text, theme::mono(size_pt, weight), palette.info)
         })
         .collect();
-    let inputs: Vec<BadgeLayoutInput> = annotations
+    let sizes: Vec<Vec2> = galleys
         .iter()
-        .zip(&galleys)
-        .map(|(annotation, galley)| {
-            let size = (galley.size() + 2.0 * KNOCKOUT_OUTSET) / zoom;
-            BadgeLayoutInput {
-                class: annotation.class,
-                key: annotation.key.clone(),
-                candidates: candidates(&annotation.subject, size, view, symbols),
-                owner: owner(&annotation.subject),
-            }
-        })
+        .map(|galley| (galley.size() + 2.0 * KNOCKOUT_OUTSET) / zoom)
         .collect();
     let world_view = Rect::from_min_max(
         screen_to_world(viewport, available.min),
         screen_to_world(viewport, available.max),
     );
-    for placed in layout_badges(
-        &inputs,
-        &obstacles(view, symbols),
-        CLEARANCE_PT / zoom,
-        world_view,
-    ) {
+    let placed = place_badges(
+        &BadgePlacement {
+            view,
+            symbols,
+            annotations,
+            sizes: &sizes,
+            zoom,
+            world_view,
+        },
+        layout,
+    );
+    for placed in placed.iter() {
         let min = world_to_screen(viewport, placed.rect.min);
         let galley = &galleys[placed.index];
         let knockout = Rect::from_min_size(min, galley.size() + 2.0 * KNOCKOUT_OUTSET);
@@ -508,5 +627,89 @@ mod tests {
         };
         assert_eq!(rects(&forward, &badges), rects(&reversed, &reversed_input));
         assert_eq!(forward.len(), 3);
+    }
+
+    /// The held layout is reused only for the inputs it was placed from:
+    /// each input changed on its own places afresh, and the fresh layout is
+    /// the one a direct placement gives. The view is an input only while a
+    /// class-0 badge fell back on it.
+    #[test]
+    fn a_held_layout_follows_every_input() {
+        type Inputs = (Vec<BadgeLayoutInput>, Vec<Obstacle>, f32, Rect);
+        let base: Inputs = (
+            vec![
+                badge(1, "OUT", &[rect(0.0, 0.0), rect(0.0, 40.0)]),
+                badge(3, "n2", &[rect(0.0, 0.0), rect(0.0, 20.0)]),
+            ],
+            vec![Obstacle {
+                owner: Some(ObstacleOwner::Label(4)),
+                rect: Rect::from_min_size(Pos2::new(100.0, 0.0), Vec2::new(30.0, 10.0)),
+            }],
+            1.0,
+            VIEW,
+        );
+        type Change = (&'static str, fn(&mut Inputs));
+        let changes: [Change; 9] = [
+            ("class", |inputs| inputs.0[1].class = 2),
+            ("key", |inputs| inputs.0[0].key = "OUTP".to_owned()),
+            ("candidate", |inputs| {
+                inputs.0[1].candidates[1] = rect(0.0, 24.0)
+            }),
+            ("owner", |inputs| {
+                inputs.0[0].owner = Some(ObstacleOwner::Label(4));
+            }),
+            ("badge added", |inputs| {
+                inputs.0.push(badge(2, "R1", &[rect(50.0, 50.0)]));
+            }),
+            ("obstacle rect", |inputs| {
+                inputs.1[0].rect =
+                    Rect::from_min_size(Pos2::new(-5.0, -5.0), Vec2::new(30.0, 10.0));
+            }),
+            ("obstacle owner", |inputs| {
+                inputs.1[0].owner = Some(ObstacleOwner::Instance(4));
+            }),
+            ("obstacle added", |inputs| {
+                inputs.1.push(obstacle(rect(0.0, 40.0)))
+            }),
+            ("clearance", |inputs| inputs.2 = 3.0),
+        ];
+        for (input, change) in changes {
+            let memo = BadgeLayoutMemo::default();
+            let place = |(badges, obstacles, clearance, view): &Inputs| {
+                memo.layout(badges.clone(), obstacles.clone(), *clearance, *view)
+            };
+            let held = place(&base);
+            assert!(Arc::ptr_eq(&held, &place(&base)), "{input}: steady");
+            let mut changed = base.clone();
+            change(&mut changed);
+            let fresh = place(&changed);
+            assert!(!Arc::ptr_eq(&held, &fresh), "{input}: placed afresh");
+            assert_eq!(
+                *fresh,
+                layout_badges(&changed.0, &changed.1, changed.2, changed.3),
+                "{input}"
+            );
+        }
+
+        // No badge fell back on the view, so panning reuses the layout.
+        let memo = BadgeLayoutMemo::default();
+        let held = memo.layout(base.0.clone(), base.1.clone(), base.2, base.3);
+        let panned = base.3.translate(Vec2::new(500.0, 0.0));
+        assert!(Arc::ptr_eq(
+            &held,
+            &memo.layout(base.0.clone(), base.1.clone(), base.2, panned)
+        ));
+
+        // A blocked class-0 badge takes its least-covered candidate in view,
+        // so then the view is an input like any other.
+        let blocked = vec![badge(0, "R1", &[rect(0.0, 0.0), rect(400.0, 0.0)])];
+        let walls = vec![obstacle(rect(0.0, 0.0)), obstacle(rect(400.0, 0.0))];
+        let near = Rect::from_min_size(Pos2::new(-50.0, -50.0), Vec2::new(100.0, 100.0));
+        let far = near.translate(Vec2::new(400.0, 0.0));
+        let held = memo.layout(blocked.clone(), walls.clone(), 1.0, near);
+        let moved = memo.layout(blocked.clone(), walls.clone(), 1.0, far);
+        assert!(!Arc::ptr_eq(&held, &moved));
+        assert_eq!(held[0].rect, rect(0.0, 0.0));
+        assert_eq!(moved[0].rect, rect(400.0, 0.0), "the candidate in view");
     }
 }

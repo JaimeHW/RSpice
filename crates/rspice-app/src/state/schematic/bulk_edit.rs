@@ -40,3 +40,22 @@ pub(crate) fn apply_bulk_edit(
         changed: schematic.session.editor.selection.components.len(),
     })
 }
+
+/// Replace each expected instance by its edited candidate as one undo step.
+/// Returns how many instances changed.
+pub(crate) fn replace_components(
+    schematic: &mut SchematicState,
+    edits: Vec<(crate::state::Component, crate::state::Component)>,
+    description: &str,
+) -> Result<usize, String> {
+    if schematic.session.read_only {
+        return Err("The active schematic is read-only.".to_owned());
+    }
+    let edit = rspice_design::schematic::owned::bulk_edit::replace_components(
+        &mut schematic.design,
+        edits,
+        description,
+    )?;
+    schematic.finish_document_edit(edit.committed);
+    Ok(edit.value)
+}

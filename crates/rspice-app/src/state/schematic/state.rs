@@ -178,6 +178,21 @@ pub struct SchematicSession {
     /// Editor selection and dirty baseline for the current document transaction.
     pub(in crate::state::schematic) operation_cancel:
         Option<super::undo_history::OperationCancelState>,
+
+    /// The canvas's resolved symbols, kept while what they resolve from
+    /// stands still.
+    pub(crate) symbol_context: super::symbol_context_cache::SymbolContextCache,
+
+    /// The canvas's operating-point voltage badges, kept while what they are
+    /// read from stands still.
+    pub(crate) operating_point_badges: super::operating_point_memo::OperatingPointMemo,
+
+    /// The armed Move or Stretch preview, kept while its inputs stand still.
+    pub(crate) transform_preview: super::transform_preview_memo::TransformPreviewMemo,
+
+    /// The sheet's overflow advisories, kept while the drawing and the sheet
+    /// stand still.
+    pub(crate) overflow_summary: super::overflow_memo::OverflowSummaryMemo,
 }
 
 impl Default for SchematicState {

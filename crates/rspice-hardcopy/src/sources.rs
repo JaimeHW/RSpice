@@ -14,10 +14,15 @@ mod result_summary;
 mod result_view;
 mod retained_results;
 mod schematic;
+mod schematic_text;
 mod semantic;
 mod visualization;
 
 pub(crate) use geometry::authored_sheet_bounds;
+pub(crate) use schematic_text::{
+    SchematicText, SchematicTextClass, bus_declaration_text, instance_texts, net_label_bounds,
+    net_label_text, tap_slice_text,
+};
 
 pub use aggregation::resolve_hardcopy_source_set_with;
 use artifacts::validate_frozen_report_png;
@@ -31,6 +36,7 @@ pub use geometry::{
     schematic_bounds, semantic_is_empty, source_set_member_from_resolved, union_bounds,
 };
 use mapping::default_print_mapping;
+pub(crate) use mapping::{SYMBOL_PRINT_INK, WIRE_PRINT_INK};
 pub use plots::{resolve_plot_source, resolve_visualization_pane_source};
 pub use prepared::{PreparedRetainedHardcopyResolution, RetainedHardcopySourceInput};
 pub use quick_plot::{

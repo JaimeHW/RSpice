@@ -5,6 +5,7 @@ mod lifecycle;
 pub mod bus;
 pub mod drag;
 pub mod net_highlight;
+pub mod net_label_sequence;
 pub mod selection;
 pub mod snap;
 pub mod stretch;
@@ -101,6 +102,9 @@ pub struct EditorSession {
     /// is armed.
     pub pending_port_sequence: Option<PendingPortSequence>,
 
+    /// Names the Label tool places on its next clicks, without the entry.
+    pub pending_net_label_sequence: Option<net_label_sequence::NetLabelSequence>,
+
     /// Validated one-shot documentation object used while the text tool is armed.
     pub pending_design_note: Option<PendingDesignNotePlacement>,
 
@@ -166,6 +170,7 @@ impl Default for EditorSession {
             pending_stimulus: Default::default(),
             pending_bus_tap: Default::default(),
             pending_port_sequence: Default::default(),
+            pending_net_label_sequence: Default::default(),
             pending_design_note: Default::default(),
             pending_documentation_shape: Default::default(),
             documentation_shape_drawing: Default::default(),

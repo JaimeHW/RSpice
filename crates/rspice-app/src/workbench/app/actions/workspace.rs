@@ -7,6 +7,7 @@
 
 mod symbol_document;
 
+use super::hierarchy_net_highlight::NetCarry;
 use crate::diagnostics::{LogAnchor, LogSeverity, LogSource};
 use crate::schematic::view::schematic_symbol_context;
 use crate::state::{
@@ -863,6 +864,10 @@ impl AppState {
         }
         self.cancel_schematic_drag();
         self.sync_active_schematic_to_workspace();
+        let carried = self.leave_occurrence_net_highlight(match &instance {
+            Some(name) => NetCarry::Descend(name.clone()),
+            None => NetCarry::Nothing,
+        });
         let view_type = view_type_for_reference(self, &reference);
         match instance {
             Some(name) => self
@@ -877,6 +882,7 @@ impl AppState {
         self.schematic = schematic_for_workspace(self, &schematic_reference);
         self.bump_active_schematic_epoch();
         self.refresh_active_design_check_projection();
+        self.enter_occurrence_net_highlight(carried);
         self.prompt(format!("Entered {}.", reference.display_path()));
     }
 
@@ -1969,12 +1975,22 @@ impl AppState {
         }
         self.cancel_schematic_drag();
         self.sync_active_schematic_to_workspace();
+        // One level up carries the highlight out through the port; a longer
+        // jump restores what the level held.
+        let carried = self.leave_occurrence_net_highlight(
+            if index + 2 == self.workspace.content.occurrence_depth() {
+                NetCarry::Ascend
+            } else {
+                NetCarry::Nothing
+            },
+        );
         if let Some(reference) = self.workspace.focus_breadcrumb(index) {
             self.library_manager
                 .select_view(&reference.library, &reference.cell, &reference.view);
             self.schematic = schematic_for_workspace(self, &reference);
             self.bump_active_schematic_epoch();
             self.refresh_active_design_check_projection();
+            self.enter_occurrence_net_highlight(carried);
         }
     }
 

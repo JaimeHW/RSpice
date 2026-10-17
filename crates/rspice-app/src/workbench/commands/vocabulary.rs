@@ -93,6 +93,9 @@ pub enum Command {
     RenameSelection,
     ObjectProperties,
     FindInDesign,
+    FindReplace,
+    /// Run the last placement or editing command again, as it last ran.
+    RepeatLastCommand,
     Preferences,
     ZoomIn,
     ZoomOut,
@@ -195,6 +198,8 @@ pub enum Command {
     AlignSelectionBottom,
     DistributeSelectionHorizontal,
     DistributeSelectionVertical,
+    /// Move every selected object's anchor to the nearest grid point.
+    SnapSelectionToGrid,
     /// Lay the active sheet's wires that run on one line, end to end or
     /// overlapping, as one wire each.
     JoinCollinearWires,
@@ -480,6 +485,8 @@ impl Command {
             Self::RenameSelection => spec("rename-selection", "Rename selected object…", "Edit"),
             Self::ObjectProperties => spec("object-properties", "Object properties…", "Edit"),
             Self::FindInDesign => spec("find-design", "Find in design…", "Edit"),
+            Self::FindReplace => spec("find-replace", "Find and replace…", "Edit"),
+            Self::RepeatLastCommand => spec("repeat-last-command", "Repeat last command", "Edit"),
             Self::Preferences => spec("preferences", "Preferences…", "Edit"),
             Self::ZoomIn => spec("zoom-in", "Zoom in", "View"),
             Self::ZoomOut => spec("zoom-out", "Zoom out", "View"),
@@ -710,6 +717,9 @@ impl Command {
                 "Distribute vertically",
                 "Design",
             ),
+            Self::SnapSelectionToGrid => {
+                spec("snap-selection-to-grid", "Snap selection to grid", "Design")
+            }
             Self::JoinCollinearWires => {
                 spec("join-collinear-wires", "Join collinear wires", "Design")
             }
@@ -1188,6 +1198,8 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::RenameSelection,
     Command::ObjectProperties,
     Command::FindInDesign,
+    Command::FindReplace,
+    Command::RepeatLastCommand,
     Command::Preferences,
     Command::OpenWorkspace(Workspace::Project),
     Command::OpenWorkspace(Workspace::Design),
@@ -1318,6 +1330,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::AlignSelectionBottom,
     Command::DistributeSelectionHorizontal,
     Command::DistributeSelectionVertical,
+    Command::SnapSelectionToGrid,
     Command::JoinCollinearWires,
     Command::AscendHierarchy,
     Command::DescendHierarchy,

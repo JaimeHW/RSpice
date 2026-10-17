@@ -1,6 +1,7 @@
 //! Component placement, committed orientation edits, and terminal geometry.
 
 use super::{
+    clipboard::ClipboardData,
     component::{Component, LibraryCellInstance},
     component_type::ComponentType,
     document::SchematicDocument,
@@ -258,6 +259,50 @@ pub fn transform_selection(
     remaps.retain(|(before, after)| before != after);
     follow_with_unselected_wires(document, selection, &remaps);
     true
+}
+
+/// Turn or flip a copy about its own origin as one rigid body, the way
+/// [`transform_selection`] turns a selection whose every object is selected:
+/// a copy floating under the pointer is turned before it lands, so nothing
+/// on the drawing follows it.
+pub fn transform_clipboard(clipboard: &mut ClipboardData, transform: SelectionTransform) {
+    let pivot = clipboard.origin;
+    let map = |point: Point| transform.apply(point, pivot);
+    for component in &mut clipboard.components {
+        transform.orient(component);
+        component.pos = map(component.pos);
+    }
+    let conductor_points = clipboard
+        .wires
+        .iter_mut()
+        .flat_map(|wire| wire.points.iter_mut())
+        .chain(clipboard.junctions.iter_mut())
+        .chain(
+            clipboard
+                .buses
+                .iter_mut()
+                .flat_map(|bus| bus.points.iter_mut()),
+        );
+    for point in conductor_points {
+        *point = map(*point);
+    }
+    for tap in &mut clipboard.bus_taps {
+        tap.bus_point = map(tap.bus_point);
+        tap.connection_point = map(tap.connection_point);
+    }
+    for label in &mut clipboard.net_labels {
+        label.pos = map(label.pos);
+    }
+    for note in &mut clipboard.design_notes {
+        let to = map(note.pos);
+        note.translate(to - note.pos);
+    }
+    for shape in &mut clipboard.documentation_shapes {
+        map_shape_points(&mut shape.geometry, map);
+    }
+    for probe in &mut clipboard.probes {
+        probe.position = map(probe.position);
+    }
 }
 
 fn selection_has_content(document: &SchematicDocument, selection: &Selection) -> bool {

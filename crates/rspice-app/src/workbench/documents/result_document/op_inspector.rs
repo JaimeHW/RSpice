@@ -165,10 +165,7 @@ fn node_target_available(state: &AppState, name: &str) -> bool {
     }
     let name = signal_leaf(name);
     name != "0"
-        && state
-            .simulation
-            .source
-            .cross_probe
+        && crate::schematic::view::sheet_visibility::active_sheet_net_geometry(state)
             .net_to_points
             .iter()
             .any(|(candidate, points)| candidate.eq_ignore_ascii_case(name) && !points.is_empty())

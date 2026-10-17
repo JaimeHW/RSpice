@@ -808,6 +808,58 @@ impl MoveSelectionDialogState {
     }
 }
 
+/// A Paste or Duplicate floating under the pointer until a click places it.
+///
+/// The drawing does not change while it floats: the copy is held here, bound
+/// to the cell view it was asked for in and turned as R and M asked, and the
+/// click pastes it there as one undo step.
+#[derive(Debug, Clone)]
+pub(crate) struct FloatingPaste {
+    pub(crate) objects: rspice_design::schematic::clipboard::ClipboardData,
+    /// Where the copy's middle sat when the pointer took hold of it.
+    pub(crate) start: crate::state::Point,
+    /// The grid point the pointer took hold at; until the pointer is over
+    /// the canvas, nothing has, and the copy jumps to it when it arrives.
+    pub(crate) grab: Option<crate::state::Point>,
+    /// How far the pointer has carried the copy since.
+    pub(crate) delta: crate::state::Point,
+    /// The cell view and sheet the copy was bound to.
+    pub(crate) view_path: String,
+    pub(crate) sheet: Option<crate::state::SheetId>,
+    pub(crate) origin: FloatingPasteOrigin,
+    /// The drawing the placement would leave, for the position, content and
+    /// orientation it was worked out for.
+    pub(crate) preview: Option<FloatingPastePreview>,
+}
+
+impl FloatingPaste {
+    /// Where the copy's middle sits now, on the document grid.
+    pub(crate) fn at(&self) -> crate::state::Point {
+        self.start + self.delta
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct FloatingPastePreview {
+    pub(crate) at: crate::state::Point,
+    pub(crate) content_version: u64,
+    /// What the placement would change, taken once when the preview is
+    /// worked out rather than searched for on every repaint.
+    pub(crate) diff: rspice_schematic_editor::view::preview::TransformCandidateDiff,
+    pub(crate) result: Result<bool, String>,
+}
+
+/// What floated, for the line the placement answers with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FloatingPasteOrigin {
+    Paste,
+    Duplicate {
+        count: usize,
+        kept: usize,
+        unresolved_nets: bool,
+    },
+}
+
 /// Authority and interaction state of the armed Stretch tool. The selected
 /// conductor segment or documentation control point is resolved before
 /// mutation and remains stable through the live canvas preview and the

@@ -811,6 +811,7 @@ fn duplicate_and_delete_rows_run_the_real_undoable_commands() {
         .select_component(41);
 
     state.duplicate_schematic_selection_at(Point::new(22, 32));
+    assert!(state.place_floating_paste());
     assert_eq!(state.schematic.document().components.len(), 2);
     assert!(state.schematic.can_undo());
     assert!(state.schematic.undo());
@@ -842,6 +843,7 @@ fn duplicate_and_delete_rows_run_the_real_undoable_commands() {
         .select_only_net_label(label.id);
 
     state.duplicate_schematic_selection_at(Point::new(42, 42));
+    assert!(state.place_floating_paste());
     assert_eq!(state.schematic.document().net_labels.len(), 2);
     assert!(state.schematic.can_undo());
     assert!(state.schematic.undo());
@@ -1355,6 +1357,12 @@ fn a_paste_joins_wiring_on_its_own_sheet_only() {
         state.paste_schematic_clipboard_at(Point::new(100, 50)),
         Ok(true)
     );
+    assert_eq!(
+        state.schematic.document().wires,
+        vec![here.clone(), there.clone()],
+        "a floating paste changes nothing until it is placed"
+    );
+    assert!(state.place_floating_paste());
 
     let document = state.schematic.document();
     assert_eq!(
@@ -1454,6 +1462,7 @@ fn cut_paste_and_mirror_vertically_rows_run_their_commands() {
     let click = Point::new(200, 100);
     let offset = click - state.ui.schematic_clipboard.origin;
     execute_context_action(ContextAction::Paste, &mut state, click, &symbol_context);
+    assert!(state.place_floating_paste());
     let pasted = state.schematic.document().components.clone();
     assert_eq!(pasted.len(), 1);
     assert_eq!(pasted[0].pos, Point::new(20, 30) + offset);

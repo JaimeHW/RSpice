@@ -142,7 +142,7 @@ pub(crate) fn publish_visibility_policy(state: &mut AppState, policy: SchematicV
     state.schematic.session.editor.wire_drawing.routing_mode = routing_mode;
     state.schematic.session.editor.bus_drawing.routing_mode = routing_mode;
     state.ui.schematic_routing_mode = routing_mode;
-    if policy.net_highlighting != SchematicNetHighlighting::SelectedNet {
+    if !policy.net_highlighting.lights_selected_net() {
         state.schematic.session.editor.net_highlight.clear();
     }
     let selectable_note_ids = state
@@ -267,12 +267,18 @@ fn visibility_body(ui: &mut Ui, draft: &mut SchematicVisibilityPolicy) -> egui::
         "Temporary highlighting of nets in the open view.",
         "schematic-visibility-net-highlighting",
         net_highlighting_label(draft.net_highlighting),
-        &["Selected net", "Net class colors", "Off"],
+        &[
+            "Selected net",
+            "Selected net across hierarchy",
+            "Net class colors",
+            "Off",
+        ],
     );
     if let Some(index) = highlighting.0 {
         draft.net_highlighting = match index {
-            1 => SchematicNetHighlighting::NetClassColors,
-            2 => SchematicNetHighlighting::Off,
+            1 => SchematicNetHighlighting::SelectedNetAcrossHierarchy,
+            2 => SchematicNetHighlighting::NetClassColors,
+            3 => SchematicNetHighlighting::Off,
             _ => SchematicNetHighlighting::SelectedNet,
         };
     }
@@ -399,6 +405,7 @@ const fn routing_label(value: SchematicWireRoutingStyle) -> &'static str {
 const fn net_highlighting_label(value: SchematicNetHighlighting) -> &'static str {
     match value {
         SchematicNetHighlighting::SelectedNet => "Selected net",
+        SchematicNetHighlighting::SelectedNetAcrossHierarchy => "Selected net across hierarchy",
         SchematicNetHighlighting::NetClassColors => "Net class colors",
         SchematicNetHighlighting::Off => "Off",
     }

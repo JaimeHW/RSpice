@@ -46,6 +46,7 @@ mod instances;
 mod magnetics;
 mod master_index;
 mod models;
+mod sheet_geometry;
 mod source_tables;
 mod subcircuits;
 mod vector_nets;
@@ -57,6 +58,7 @@ use master_index::{MasterIndex, validate_occurrence_interface};
 pub use rspice_design::connectivity::Net;
 use rspice_design::connectivity::deck_bit_name;
 use rspice_design::hierarchy::HierarchySource;
+pub use sheet_geometry::{SheetNetGeometries, SheetNetGeometry, net_geometry_by_sheet};
 pub use source_tables::{NetlistSourceData, NetlistSourceHost, TableRoute};
 
 //=============================================================================
@@ -104,9 +106,9 @@ pub struct NetlistResult {
 #[derive(Debug, Clone)]
 pub struct CrossProbeSnapshot {
     pub source_reference: CellViewRef,
-    pub point_to_net: HashMap<Point, String>,
-    pub nets: HashMap<String, Vec<Point>>,
-    pub net_segments: HashMap<String, Vec<(Point, Point)>>,
+    /// The run's net geometry, sheet by sheet, each in the coordinates its
+    /// sheet draws it in.
+    pub sheets: SheetNetGeometries,
     pub topology_version: u64,
     /// The master each occurrence was emitted against. Cross probing never
     /// reads it; it is captured here because the same pass produces it.

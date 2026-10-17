@@ -3,6 +3,7 @@
 use super::viewport::Viewport;
 use super::{SchematicSymbolContext, schematic_symbol_context};
 use crate::state::DrawingSheetTitleFieldId;
+use crate::state::overflow_memo::OverflowKey;
 use crate::workbench::app_state::AppState;
 use egui::{Painter, Rect};
 use rspice_schematic_editor::view::drawing_sheet::{self as sheet_view, DrawingSheetCanvas};
@@ -11,6 +12,7 @@ pub(crate) use rspice_schematic_editor::view::drawing_sheet::{
     DrawingSheetOverflowItem, DrawingSheetOverflowSummary, DrawingSheetOverflowTarget,
     DrawingSheetPrintablePreview, DrawingSheetPrintablePreviewKind, FIT_SCREEN_INSET,
 };
+use std::sync::Arc;
 
 pub(crate) fn resolve_active_drawing_sheet(state: &AppState) -> ActiveDrawingSheet {
     let key = state.workspace.content.active_schematic_reference().key();
@@ -159,26 +161,96 @@ pub(super) fn draw_overflow_advisories(
     symbol_context: &SchematicSymbolContext,
     sheet: &ActiveDrawingSheet,
 ) {
-    sheet_view::draw_overflow_advisories(
-        painter,
-        available,
-        viewport,
+    if !sheet_view::overflow_advisories_shown(painter, viewport) {
+        return;
+    }
+    let summary = held_overflow_summary(state, symbol_context, sheet);
+    sheet_view::draw_overflow_advisories(painter, available, viewport, &summary);
+}
+
+fn overflow_key(
+    state: &AppState,
+    symbol_context: &SchematicSymbolContext,
+    sheet: &ActiveDrawingSheet,
+) -> OverflowKey {
+    OverflowKey {
+        drawing: super::preview::drawing_inputs(state, symbol_context),
+        geometry: sheet.geometry.clone(),
+    }
+}
+
+/// The advisories held for the drawing and sheet as they stand, or found
+/// afresh when nothing is held for them.
+fn held_overflow_summary(
+    state: &AppState,
+    symbol_context: &SchematicSymbolContext,
+    sheet: &ActiveDrawingSheet,
+) -> Arc<DrawingSheetOverflowSummary> {
+    state
+        .schematic
+        .session
+        .overflow_summary
+        .current(&overflow_key(state, symbol_context, sheet))
+        .unwrap_or_else(|| {
+            Arc::new(sheet_view::drawing_sheet_overflow_summary(
+                &super::schematic_design_view(state),
+                symbol_context,
+                sheet,
+            ))
+        })
+}
+
+/// Find the overflow advisories afresh only when the drawing or the sheet
+/// changed, and only at a zoom that shows them. Runs once a frame, before
+/// painting, where the session can hold them.
+pub(super) fn refresh_overflow_summary(
+    state: &mut AppState,
+    painter: &Painter,
+    viewport: &Viewport,
+    symbol_context: &SchematicSymbolContext,
+    sheet: &ActiveDrawingSheet,
+) {
+    if sheet_view::overflow_advisories_shown(painter, viewport) {
+        hold_overflow_summary(state, symbol_context, sheet);
+    }
+}
+
+/// Hold the advisories for the drawing and sheet as they stand, finding them
+/// only if nothing is held for exactly these inputs.
+fn hold_overflow_summary(
+    state: &mut AppState,
+    symbol_context: &SchematicSymbolContext,
+    sheet: &ActiveDrawingSheet,
+) {
+    let key = overflow_key(state, symbol_context, sheet);
+    if state
+        .schematic
+        .session
+        .overflow_summary
+        .current(&key)
+        .is_some()
+    {
+        return;
+    }
+    let summary = Arc::new(sheet_view::drawing_sheet_overflow_summary(
         &super::schematic_design_view(state),
         symbol_context,
         sheet,
-    );
+    ));
+    state.schematic.session.overflow_summary.store(key, summary);
 }
 
+/// The sheet's overflow advisories: the ones the canvas holds while the
+/// drawing and sheet stand still, so the inspector and the canvas report one
+/// answer and only one of them pays for it.
 pub(crate) fn drawing_sheet_overflow_summary(
     state: &AppState,
     symbol_context: &SchematicSymbolContext,
     sheet: &ActiveDrawingSheet,
 ) -> DrawingSheetOverflowSummary {
-    sheet_view::drawing_sheet_overflow_summary(
-        &super::schematic_design_view(state),
-        symbol_context,
-        sheet,
-    )
+    held_overflow_summary(state, symbol_context, sheet)
+        .as_ref()
+        .clone()
 }
 
 pub(crate) fn drawing_sheet_printable_preview(
@@ -325,5 +397,80 @@ mod tests {
             &mut state,
             DrawingSheetOverflowTarget::Wire(404)
         ));
+    }
+
+    /// The advisories are found once while the drawing and sheet stand still,
+    /// the inspector reads the same answer, and each input changed on its own
+    /// finds them afresh.
+    #[test]
+    fn the_overflow_summary_is_held_until_the_drawing_or_sheet_changes() {
+        let overflowing = || {
+            let mut state = AppState::default();
+            state
+                .schematic
+                .document_mut_for_test()
+                .wires
+                .push(Wire::new(
+                    41,
+                    vec![Point::new(1_080, 120), Point::new(1_120, 120)],
+                ));
+            state
+        };
+        let held = |state: &AppState, sheet: &ActiveDrawingSheet| {
+            let symbol_context = schematic_symbol_context(state);
+            state
+                .schematic
+                .session
+                .overflow_summary
+                .current(&overflow_key(state, &symbol_context, sheet))
+        };
+        let hold = |state: &mut AppState, sheet: &ActiveDrawingSheet| {
+            let symbol_context = schematic_symbol_context(state);
+            hold_overflow_summary(state, &symbol_context, sheet);
+        };
+
+        let mut state = overflowing();
+        let sheet = resolve_active_drawing_sheet(&state);
+        assert!(held(&state, &sheet).is_none());
+        hold(&mut state, &sheet);
+        let first = held(&state, &sheet).expect("held after a frame");
+        hold(&mut state, &sheet);
+        assert!(Arc::ptr_eq(
+            &first,
+            &held(&state, &sheet).expect("still held")
+        ));
+        assert_eq!(first.finding_count(), 1);
+        let symbol_context = schematic_symbol_context(&state);
+        assert_eq!(
+            drawing_sheet_overflow_summary(&state, &symbol_context, &sheet).first_target,
+            Some(DrawingSheetOverflowTarget::Wire(41))
+        );
+
+        let mut moved = sheet.clone();
+        moved.geometry.content_area.max_x += 400.0;
+        assert!(held(&state, &moved).is_none(), "sheet geometry");
+
+        type Change = (&'static str, fn(&mut AppState));
+        let changes: [Change; 3] = [
+            ("topology", |state| state.schematic.bump_topology_version()),
+            ("committed content", |state| {
+                state.schematic.init_undo_history();
+                state.schematic.begin_operation("move");
+                state.schematic.document_mut_for_test().wires[0].points[1] = Point::new(1_160, 120);
+                assert!(state.schematic.end_operation());
+            }),
+            ("symbols", |state| {
+                state
+                    .library_manager
+                    .add_library(crate::state::Library::new("other"));
+            }),
+        ];
+        for (input, change) in changes {
+            let mut state = overflowing();
+            let sheet = resolve_active_drawing_sheet(&state);
+            hold(&mut state, &sheet);
+            change(&mut state);
+            assert!(held(&state, &sheet).is_none(), "{input}");
+        }
     }
 }

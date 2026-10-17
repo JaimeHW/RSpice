@@ -598,6 +598,7 @@ fn delete_cut_and_duplicate_act_on_the_schematic_without_a_dialog() {
 
     Command::Duplicate.execute(&mut app);
     assert!(!app.state.dialogs.application_modal_open());
+    assert!(app.state.place_floating_paste());
     assert_eq!(app.state.schematic.document().components.len(), 2);
 
     Command::Cut.execute(&mut app);
@@ -1359,6 +1360,7 @@ fn a_pasted_wire_ending_inside_another_splits_it_and_dots_the_t() {
     let mut app = app_with_copied_wire(vec![through.clone(), stub.clone()], 2, (10.0, 5.0));
 
     Command::Paste.execute(&mut app);
+    assert!(app.state.place_floating_paste());
 
     let document = app.state.schematic.document();
     let tee = Point::new(100, 100);
@@ -1415,6 +1417,7 @@ fn a_pasted_pin_landing_inside_a_wire_splits_it() {
     app.state.ui.canvas_hover = Some((f64::from(target.x) / grid, f64::from(target.y) / grid));
 
     Command::Paste.execute(&mut app);
+    assert!(app.state.place_floating_paste());
 
     let document = app.state.schematic.document();
     assert_eq!(document.components.len(), 2, "the part was pasted");
@@ -1500,6 +1503,7 @@ fn a_copy_in_one_cell_pastes_into_another_with_its_coupling() {
     );
 
     Command::Paste.execute(&mut app);
+    assert!(app.state.place_floating_paste());
 
     let document = app.state.schematic.document();
     assert_eq!(document.components.len(), 6);
@@ -1639,4 +1643,64 @@ fn join_collinear_wires_lays_a_straight_run_as_one_wire_in_one_undo_step() {
     assert!(app.state.schematic.undo());
     assert_eq!(app.state.schematic.document().wires, vec![first, second]);
     assert!(!app.state.schematic.can_undo(), "one step, not two");
+}
+
+/// Repeat last command, on `.` over the canvas as Virtuoso and ADS repeat,
+/// runs the last placement or edit again; an undo is never what it repeats
+/// (audit G-11).
+#[test]
+fn repeat_runs_the_last_edit_again_on_the_canvas_key() {
+    use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, CommandPlatform};
+
+    let repeat = Command::RepeatLastCommand;
+    assert_eq!(repeat.default_shortcut_label(CommandPlatform::Desktop), ".");
+    assert_eq!(
+        repeat.shortcut_context(),
+        ShortcutContext::EngineeringCanvas
+    );
+    let sharing: Vec<Command> = COMMAND_REGISTRY
+        .iter()
+        .copied()
+        .filter(|command| {
+            *command != repeat && command.default_shortcut_label(CommandPlatform::Desktop) == "."
+        })
+        .collect();
+    assert!(sharing.is_empty(), "`.` is also bound to {sharing:?}");
+    // Repeat remembers a command by its stable id, so every command it can
+    // repeat must come back from that id as itself.
+    for command in COMMAND_REGISTRY
+        .iter()
+        .copied()
+        .filter(|command| command.repeatable())
+    {
+        assert_eq!(
+            Command::from_stable_id(command.stable_id()),
+            Some(command),
+            "{command:?}"
+        );
+    }
+
+    let (mut app, _) = app_with_selected_resistor_pair();
+    assert!(!repeat.is_enabled(&app), "nothing has run yet");
+    let offset = |app: &RSpiceApp| {
+        let components = &app.state.schematic.document().components;
+        components[1].pos - components[0].pos
+    };
+    let before = offset(&app);
+
+    Command::RotateSelection.execute(&mut app);
+    assert!(repeat.is_enabled(&app));
+    repeat.execute(&mut app);
+
+    assert_eq!(
+        offset(&app),
+        rotated_cw(rotated_cw(before)),
+        "Repeat turned the selection a second quarter"
+    );
+    Command::Undo.execute(&mut app);
+    assert_eq!(
+        Command::last_repeatable(&app),
+        Some(Command::RotateSelection),
+        "an undo is not what Repeat repeats"
+    );
 }

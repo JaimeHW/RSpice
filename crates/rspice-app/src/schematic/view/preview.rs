@@ -5,12 +5,16 @@ use super::{
     SchematicShelfDragPayload, SchematicSymbolContext, array_interaction::array_placement,
     snap_resolution::resolve_grid_pointer, viewport::Viewport,
 };
+use crate::state::transform_preview_memo::{
+    DrawingInputs, TransformPreviewKey, TransformPreviewOutcome,
+};
 use crate::state::{Point, SchematicArrayKind, SchematicArrayPlacement, SymbolResolver, Tool};
 use crate::workbench::app_state::AppState;
 use egui::{Painter, Response};
 use rspice_schematic_editor::view::preview::{self, PreviewView, TransformPreviewStyle};
+use std::sync::Arc;
 
-fn preview_view(state: &AppState) -> PreviewView<'_> {
+pub(super) fn preview_view(state: &AppState) -> PreviewView<'_> {
     PreviewView {
         design: super::schematic_design_view(state),
         editor: &state.schematic.session.editor,
@@ -18,7 +22,7 @@ fn preview_view(state: &AppState) -> PreviewView<'_> {
     }
 }
 
-fn transform_preview_style<'a>(
+pub(super) fn transform_preview_style<'a>(
     state: &AppState,
     symbol_context: &'a SchematicSymbolContext,
     symbol_library: Option<&'a SymbolLibrary>,
@@ -40,6 +44,14 @@ pub(super) fn draw_interaction_previews(
     symbol_library: Option<&SymbolLibrary>,
 ) {
     draw_move_selection_preview(
+        painter,
+        response,
+        state,
+        viewport,
+        symbol_context,
+        symbol_library,
+    );
+    super::floating_paste::draw_floating_paste_preview(
         painter,
         response,
         state,
@@ -129,25 +141,25 @@ fn draw_move_selection_preview(
         return;
     }
     let mode = state.dialogs.move_selection.mode;
-    let (candidate, result) = move_preview_candidate(state, symbol_context, delta, mode);
-    let valid = match result {
-        Ok(true) => {
+    let outcome = move_preview_diff(state, symbol_context, delta, mode);
+    let valid = match &outcome {
+        Ok(Some(_)) => {
             state.dialogs.move_selection.canvas.preview_error = None;
             true
         }
-        Ok(false) => return,
+        Ok(None) => return,
         Err(error) => {
-            state.dialogs.move_selection.canvas.preview_error = Some(error.to_string());
+            state.dialogs.move_selection.canvas.preview_error = Some(error.clone());
             false
         }
     };
 
-    if valid {
-        preview::draw_move_candidate(
+    if let Ok(Some(diff)) = &outcome {
+        preview::draw_move_diff(
             painter,
             viewport,
             &preview_view(state),
-            candidate.document(),
+            diff,
             &transform_preview_style(state, symbol_context, symbol_library),
             || state.workspace.content.active_view.display_path(),
         );
@@ -195,21 +207,20 @@ fn draw_stretch_selection_preview(
         return;
     }
     let policy = state.dialogs.stretch_selection.policy;
-    let candidate = match stretch_preview_candidate(state, symbol_context, delta, target, policy) {
-        Ok(Some(candidate)) => {
+    let diff = match stretch_preview_diff(state, symbol_context, delta, target, policy) {
+        Ok(Some(diff)) => {
             state.dialogs.stretch_selection.canvas.gesture.preview_error = None;
-            candidate
+            diff
         }
         Ok(None) => return,
         Err(error) => {
-            state.dialogs.stretch_selection.canvas.gesture.preview_error = Some(error.to_string());
-            let detail = error.to_string();
-            preview::draw_transform_feedback(painter, response, false, detail);
+            state.dialogs.stretch_selection.canvas.gesture.preview_error = Some(error.clone());
+            preview::draw_transform_feedback(painter, response, false, error);
             return;
         }
     };
 
-    preview::draw_stretch_candidate(painter, viewport, &preview_view(state), &candidate);
+    preview::draw_stretch_diff(painter, viewport, &diff);
 
     let detail = state
         .dialogs
@@ -228,6 +239,94 @@ fn draw_stretch_selection_preview(
             )
         });
     preview::draw_transform_feedback(painter, response, true, detail);
+}
+
+/// What a canvas derivation reads from the open drawing besides its own
+/// inputs.
+pub(super) fn drawing_inputs(
+    state: &AppState,
+    symbol_context: &SchematicSymbolContext,
+) -> DrawingInputs {
+    let catalog = super::sheet_visibility::active_sheet_catalog(state);
+    DrawingInputs {
+        topology_version: state.schematic.topology_version(),
+        content_version: state.schematic.content_version(),
+        symbol_revision: symbol_context.revision(),
+        active_sheet: catalog.and_then(crate::state::SheetCatalog::active_sheet_id),
+        sheet_catalog_revision: catalog.map(crate::state::SheetCatalog::revision),
+    }
+}
+
+/// The preview held for `key`, or the one `compute` finds, held from now on.
+fn held_transform_preview(
+    state: &mut AppState,
+    key: TransformPreviewKey,
+    compute: impl FnOnce(&AppState) -> TransformPreviewOutcome,
+) -> TransformPreviewOutcome {
+    if let Some(outcome) = state.schematic.session.transform_preview.current(&key) {
+        return outcome;
+    }
+    let outcome = compute(state);
+    state
+        .schematic
+        .session
+        .transform_preview
+        .store(key, outcome.clone());
+    outcome
+}
+
+/// What the armed Move would change, computed once per delta, mode,
+/// selection and drawing rather than once per frame.
+pub(super) fn move_preview_diff(
+    state: &mut AppState,
+    symbol_context: &SchematicSymbolContext,
+    delta: Point,
+    mode: crate::state::MoveSelectionMode,
+) -> TransformPreviewOutcome {
+    let key = TransformPreviewKey::Move {
+        delta,
+        mode,
+        selection: Box::new(state.schematic.session.editor.selection.clone()),
+        drawing: drawing_inputs(state, symbol_context),
+    };
+    held_transform_preview(state, key, |state| {
+        let (candidate, result) = move_preview_candidate(state, symbol_context, delta, mode);
+        match result {
+            Ok(true) => Ok(Some(Arc::new(preview::TransformCandidateDiff::between(
+                state.schematic.document(),
+                candidate.document(),
+            )))),
+            Ok(false) => Ok(None),
+            Err(error) => Err(error.to_string()),
+        }
+    })
+}
+
+/// What the armed Stretch would change, computed once per delta, target,
+/// policy and drawing rather than once per frame.
+pub(super) fn stretch_preview_diff(
+    state: &mut AppState,
+    symbol_context: &SchematicSymbolContext,
+    delta: Point,
+    target: crate::state::StretchTarget,
+    policy: crate::state::StretchOrthogonalPolicy,
+) -> TransformPreviewOutcome {
+    let key = TransformPreviewKey::Stretch {
+        delta,
+        target,
+        policy,
+        drawing: drawing_inputs(state, symbol_context),
+    };
+    held_transform_preview(state, key, |state| {
+        match stretch_preview_candidate(state, symbol_context, delta, target, policy) {
+            Ok(Some(candidate)) => Ok(Some(Arc::new(preview::TransformCandidateDiff::between(
+                state.schematic.document(),
+                &candidate,
+            )))),
+            Ok(None) => Ok(None),
+            Err(error) => Err(error.to_string()),
+        }
+    })
 }
 
 /// The document the armed Move would leave, and whether it would move.
@@ -486,6 +585,151 @@ mod tests {
     use super::*;
     use crate::schematic::view::schematic_symbol_context;
     use crate::state::ComponentType;
+
+    /// Two resistors, the first selected, on the first of two sheets, with a
+    /// wire off its terminal that a stretch can take.
+    fn movable_state() -> AppState {
+        let mut state = super::super::sheet_visibility::two_sheet_state(&[1, 2, 3], &[4]);
+        let document = state.schematic.document_mut_for_test();
+        document.components.push(crate::state::Component::new(
+            1,
+            ComponentType::Resistor,
+            Point::new(0, 0),
+        ));
+        document.components.push(crate::state::Component::new(
+            2,
+            ComponentType::Resistor,
+            Point::new(200, 0),
+        ));
+        document.wires.push(crate::state::Wire::new(
+            3,
+            vec![
+                Point::new(0, 100),
+                Point::new(0, 140),
+                Point::new(60, 140),
+                Point::new(60, 100),
+            ],
+        ));
+        state.schematic.bump_topology_version();
+        state.schematic.session.editor.selection.select_component(1);
+        state
+    }
+
+    fn held_diff(outcome: TransformPreviewOutcome) -> Arc<preview::TransformCandidateDiff> {
+        outcome
+            .expect("the preview is valid")
+            .expect("the preview changes something")
+    }
+
+    /// The move preview is computed once while its inputs stand still, and
+    /// afresh when any one of them changes.
+    #[test]
+    fn the_move_preview_is_held_until_an_input_changes() {
+        let mut state = movable_state();
+        let symbols = schematic_symbol_context(&state);
+        let mode = state.dialogs.move_selection.mode;
+        let delta = Point::new(40, 0);
+        let first = held_diff(move_preview_diff(&mut state, &symbols, delta, mode));
+        assert!(Arc::ptr_eq(
+            &first,
+            &held_diff(move_preview_diff(&mut state, &symbols, delta, mode))
+        ));
+
+        let fresh = |state: &mut AppState, delta: Point, mode| {
+            let symbols = schematic_symbol_context(state);
+            let before = held_diff(move_preview_diff(state, &symbols, Point::new(40, 0), mode));
+            let after = held_diff(move_preview_diff(state, &symbols, delta, mode));
+            !Arc::ptr_eq(&before, &after)
+        };
+        assert!(fresh(&mut state, Point::new(60, 0), mode), "delta");
+        let other_mode = if mode == crate::state::MoveSelectionMode::Connected {
+            crate::state::MoveSelectionMode::BreakConnections
+        } else {
+            crate::state::MoveSelectionMode::Connected
+        };
+        let before = held_diff(move_preview_diff(&mut state, &symbols, delta, mode));
+        let after = held_diff(move_preview_diff(&mut state, &symbols, delta, other_mode));
+        assert!(!Arc::ptr_eq(&before, &after), "mode");
+
+        type Change = (&'static str, fn(&mut AppState));
+        let changes: [Change; 5] = [
+            ("selection", |state| {
+                state.schematic.session.editor.selection.select_component(2);
+            }),
+            ("topology", |state| state.schematic.bump_topology_version()),
+            ("committed content", |state| {
+                state.schematic.init_undo_history();
+                state.schematic.begin_operation("rename");
+                state.schematic.document_mut_for_test().components[1].name = "R9".to_owned();
+                assert!(state.schematic.end_operation());
+            }),
+            ("symbols", |state| {
+                state
+                    .library_manager
+                    .add_library(crate::state::Library::new("other"));
+            }),
+            ("sheet assignment", |state| {
+                let key = state.workspace.content.active_schematic_reference().key();
+                let catalog = state
+                    .workspace
+                    .content
+                    .design_management
+                    .sheet_catalog_mut(&key)
+                    .expect("two sheets");
+                let second = catalog.sheets()[1].id();
+                catalog
+                    .assign_objects(catalog.revision(), second, [2])
+                    .expect("R2 moves to Sheet 2");
+            }),
+        ];
+        for (input, change) in changes {
+            let mut state = movable_state();
+            let symbols = schematic_symbol_context(&state);
+            let before = held_diff(move_preview_diff(&mut state, &symbols, delta, mode));
+            change(&mut state);
+            let symbols = schematic_symbol_context(&state);
+            let after = held_diff(move_preview_diff(&mut state, &symbols, delta, mode));
+            assert!(!Arc::ptr_eq(&before, &after), "{input}");
+        }
+    }
+
+    /// The held stretch preview follows its delta and drawing too, and what it
+    /// holds is the stretch's own change.
+    #[test]
+    fn the_stretch_preview_is_held_until_an_input_changes() {
+        let mut state = movable_state();
+        state.schematic.session.editor.selection.clear();
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_wire_segment(3, 1);
+        let target = state
+            .schematic
+            .default_stretch_target()
+            .expect("a segment to stretch");
+        let policy = crate::state::StretchOrthogonalPolicy::default();
+        let symbols = schematic_symbol_context(&state);
+        let diff = |state: &mut AppState, delta: Point| {
+            held_diff(stretch_preview_diff(state, &symbols, delta, target, policy))
+        };
+        let first = diff(&mut state, Point::new(0, 20));
+        assert!(Arc::ptr_eq(&first, &diff(&mut state, Point::new(0, 20))));
+        assert_eq!(
+            *first,
+            preview::TransformCandidateDiff::between(
+                state.schematic.document(),
+                &stretch_preview_candidate(&state, &symbols, Point::new(0, 20), target, policy)
+                    .expect("valid stretch")
+                    .expect("it changes the wire"),
+            )
+        );
+        assert!(!Arc::ptr_eq(&first, &diff(&mut state, Point::new(0, 40))));
+        let held = diff(&mut state, Point::new(0, 40));
+        state.schematic.bump_topology_version();
+        assert!(!Arc::ptr_eq(&held, &diff(&mut state, Point::new(0, 40))));
+    }
 
     #[test]
     fn wire_preview_snap_resolution_uses_resolved_cell_terminals() {

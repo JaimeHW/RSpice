@@ -22,6 +22,8 @@ mod block_symbols;
 mod config;
 mod geometry;
 #[cfg(test)]
+mod label_placement_tests;
+#[cfg(test)]
 mod parity_tests;
 
 pub use self::config::{SvgColor, SvgColorParseError, SvgExportConfig};

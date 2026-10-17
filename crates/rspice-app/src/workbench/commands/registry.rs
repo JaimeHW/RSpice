@@ -349,6 +349,15 @@ const RENAME_SYMBOL: &[ShortcutBinding] = &[primary(
 )];
 const FIND_DESIGN: &[ShortcutBinding] =
     &[primary(chord(Key::F, true, false, false, "Ctrl+F"), ALL)];
+// A browser keeps Ctrl+H for its history, so there the menu reaches it.
+const FIND_REPLACE: &[ShortcutBinding] = &[primary(
+    chord(Key::H, true, false, false, "Ctrl+H"),
+    DESKTOP,
+)];
+// Virtuoso and ADS both repeat the last command on a bare key; `.` was
+// bound nowhere.
+const REPEAT_LAST_COMMAND: &[ShortcutBinding] =
+    &[primary(chord(Key::Period, false, false, false, "."), ALL)];
 // Ctrl+F in a focused source editor finds in that source; on a drawing it
 // finds in the design. As with Ctrl+D the focused surface decides.
 const FIND_CODE_DOCUMENT: &[ShortcutBinding] =
@@ -593,6 +602,7 @@ impl Command {
                 | Self::ConnectivityManager
                 | Self::DesignManagement
                 | Self::SelectionBulkEdit
+                | Self::FindReplace
                 | Self::ConfigurationSets
                 | Self::RuleSetup
                 | Self::ReviewComments
@@ -689,6 +699,7 @@ impl Command {
                 | Self::ConnectivityManager
                 | Self::DesignManagement
                 | Self::SelectionBulkEdit
+                | Self::FindReplace
                 | Self::ConfigurationSets
                 | Self::RuleSetup
                 | Self::ReviewComments
@@ -752,6 +763,7 @@ impl Command {
             | Self::ZoomOneToOne
             | Self::SelectTool => ShortcutContext::EditContext,
             Self::FindInDesign
+            | Self::FindReplace
             | Self::CycleGrid
             | Self::PlaceInstance
             | Self::PlaceWire
@@ -775,6 +787,8 @@ impl Command {
             | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical
+            | Self::SnapSelectionToGrid
+            | Self::RepeatLastCommand
             | Self::NextSheet
             | Self::PreviousSheet
             | Self::NewSheet
@@ -925,6 +939,8 @@ impl Command {
             Self::RenameSelection => RENAME_SELECTION,
             Self::ObjectProperties => OBJECT_PROPERTIES,
             Self::FindInDesign => FIND_DESIGN,
+            Self::FindReplace => FIND_REPLACE,
+            Self::RepeatLastCommand => REPEAT_LAST_COMMAND,
             Self::Preferences => PREFERENCES,
             Self::ZoomIn => ZOOM_IN,
             Self::ZoomOut => ZOOM_OUT,
@@ -1096,7 +1112,7 @@ impl Command {
             Self::MonitorRecovery => "there are no secondary application windows to recover",
             // A step taken mid-drag would be folded into the drag when it
             // lands, so the history waits for the edit to finish or cancel.
-            Self::Undo | Self::Redo if app.state.schematic.has_pending_operation() => {
+            Self::Undo | Self::Redo if app.state.schematic_edit_in_progress() => {
                 "finish or cancel the edit in progress first"
             }
             Self::Undo => "nothing to undo",
@@ -1154,6 +1170,7 @@ impl Command {
             | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical
+            | Self::SnapSelectionToGrid
             | Self::JoinCollinearWires
                 if !super::active_schematic_editor(app) =>
             {
@@ -1168,6 +1185,7 @@ impl Command {
             | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical
+            | Self::SnapSelectionToGrid
             | Self::JoinCollinearWires
                 if app.state.schematic_edit_read_only() =>
             {
@@ -1185,7 +1203,8 @@ impl Command {
             | Self::RotateSelection
             | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
-            | Self::MirrorSelectionVertical => "select an editable object",
+            | Self::MirrorSelectionVertical
+            | Self::SnapSelectionToGrid => "select an editable object",
             Self::NextSheet | Self::PreviousSheet if !super::active_schematic_editor(app) => {
                 "open a schematic or testbench"
             }
@@ -1455,6 +1474,9 @@ impl Command {
             }
             Self::StimulusApplyDraft | Self::StimulusRevertDraft => {
                 "this definition has no draft to apply"
+            }
+            Self::RepeatLastCommand if app.state.workbench.last_repeatable_command.is_none() => {
+                "no placement or edit has run yet"
             }
             _ => "command is unavailable in this context",
         };

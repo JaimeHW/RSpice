@@ -166,15 +166,21 @@ pub fn draw_net_label_preview(
     .snapped_position;
     // The ghost carries the armed tool's kind, so a connector's direction tab
     // appears before the click rather than only after the transaction commits.
-    let ghost = if view.editor.tool == Tool::OffSheetConnector {
-        NetLabel::off_sheet(
-            0,
-            position,
-            "click to name",
-            CrossSheetPortDirection::default(),
-        )
-    } else {
-        NetLabel::new(0, position, "click to name")
+    // A sequence armed by the entry shows the name the click will place, with
+    // the direction the entry chose.
+    let sequence = view.editor.pending_net_label_sequence.as_ref();
+    let name = sequence
+        .and_then(|sequence| sequence.next_name())
+        .unwrap_or_else(|| "click to name".to_owned());
+    let ghost = match sequence.map(|sequence| sequence.kind) {
+        Some(kind) => NetLabel {
+            kind,
+            ..NetLabel::new(0, position, name)
+        },
+        None if view.editor.tool == Tool::OffSheetConnector => {
+            NetLabel::off_sheet(0, position, name, CrossSheetPortDirection::default())
+        }
+        None => NetLabel::new(0, position, name),
     };
     draw_net_label(painter, viewport, &ghost, false, false, true);
 }
@@ -363,8 +369,8 @@ const BAND_GAP: f32 = 3.0;
 
 mod transform;
 pub use transform::{
-    TransformPreviewStyle, draw_array_candidate, draw_move_candidate, draw_stretch_candidate,
-    draw_transform_feedback,
+    TransformCandidateDiff, TransformPreviewStyle, draw_array_candidate, draw_move_diff,
+    draw_stretch_diff, draw_transform_feedback,
 };
 
 pub fn draw_placement_badge(

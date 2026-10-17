@@ -13,6 +13,13 @@ use egui::{
 };
 
 use crate::session::visibility::DrawingSheetLayerVisibility;
+use rspice_design::schematic::{
+    bus::{Bus, BusTap},
+    component::Component,
+    design_note::DesignNote,
+    documentation_shape::DocumentationShape,
+    net_label::NetLabel,
+};
 use rspice_design_model::Point;
 use rspice_design_model::design_management::{
     DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS, DRAWING_SHEET_TITLE_BLOCK_LETTERING,
@@ -509,30 +516,30 @@ pub fn draw_base(
     );
 }
 
+/// Whether the canvas shows overflow advisories at this zoom. Asked before
+/// the advisories are found, so a zoom that hides them costs nothing.
+pub fn overflow_advisories_shown(painter: &Painter, viewport: &Viewport) -> bool {
+    let lod = DrawingSheetLod::resolve(
+        viewport.zoom,
+        painter.ctx().pixels_per_point(),
+        DRAWING_SHEET_TITLE_BLOCK_LETTERING,
+    );
+    overflow_advisories_visible(lod.tier)
+}
+
 /// Paint advisory halos above authored objects. These never block saves,
 /// checks, netlisting, or simulation.
 pub fn draw_overflow_advisories(
     painter: &Painter,
     available: Rect,
     viewport: &Viewport,
-    view: &DesignView<'_>,
-    symbol_context: &SchematicSymbolContext,
-    sheet: &ActiveDrawingSheet,
+    summary: &DrawingSheetOverflowSummary,
 ) {
-    let lod = DrawingSheetLod::resolve(
-        viewport.zoom,
-        painter.ctx().pixels_per_point(),
-        DRAWING_SHEET_TITLE_BLOCK_LETTERING,
-    );
-    if !overflow_advisories_visible(lod.tier) {
+    if summary.is_clear() || !overflow_advisories_shown(painter, viewport) {
         return;
     }
     let palette = DrawingSheetPalette::resolve(&Tokens::get(painter.ctx()));
-    let summary = drawing_sheet_overflow_summary(view, symbol_context, sheet);
-    if summary.is_clear() {
-        return;
-    }
-    for item in summary.items {
+    for item in &summary.items {
         let mut screen = item.bounds.screen_rect(viewport).expand(3.0);
         if screen.width() < 8.0 {
             screen = Rect::from_center_size(screen.center(), vec2(8.0, screen.height().max(8.0)));
@@ -669,10 +676,51 @@ pub fn drawing_sheet_overflow_summary(
     }
 }
 
+/// The object a printable extent belongs to, kept so its name is spelt only
+/// if it is reported. Every object's extent is measured; few overflow.
+#[derive(Debug, Clone, Copy)]
+enum PrintableObject<'a> {
+    Component(&'a Component),
+    Wire(u64),
+    Bus(&'a Bus),
+    BusTap(&'a BusTap),
+    Junction(u64),
+    NetLabel(&'a NetLabel),
+    DesignNote(&'a DesignNote),
+    DocumentationShape(&'a DocumentationShape),
+}
+
+impl PrintableObject<'_> {
+    /// How an overflow report names the object.
+    fn identity(self) -> String {
+        match self {
+            Self::Component(component) if component.name.trim().is_empty() => {
+                format!("instance:{}", component.id)
+            }
+            Self::Component(component) => component.name.clone(),
+            Self::Wire(id) => format!("wire:{id}"),
+            Self::Bus(bus) => bus
+                .declaration
+                .as_ref()
+                .map_or_else(|| format!("bus:{}", bus.id), ToString::to_string),
+            Self::BusTap(tap) => format!("tap:{} \u{00b7} {}", tap.id, tap.slice),
+            Self::Junction(id) => format!("junction:{id}"),
+            Self::NetLabel(label) if label.name.trim().is_empty() => {
+                format!("net-label:{}", label.id)
+            }
+            Self::NetLabel(label) => label.name.clone(),
+            Self::DesignNote(note) => format!("note:{} \u{00b7} {}", note.id, note.kind.label()),
+            Self::DocumentationShape(shape) => {
+                format!("shape:{} \u{00b7} {}", shape.id, shape.kind().label())
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct PrintableObjectBounds<'a> {
     target: DrawingSheetOverflowTarget,
-    identity: String,
+    object: PrintableObject<'a>,
     kind: &'static str,
     bounds: WorldRect,
     /// Conductors retain their exact routed centerline so concave route
@@ -754,7 +802,7 @@ fn overflow_items(
                     (object.bounds.min_y + object.bounds.max_y) * 0.5,
                 ),
                 target: object.target,
-                identity: object.identity,
+                identity: object.object.identity(),
                 kind: object.kind,
                 bounds: object.bounds,
             })
@@ -785,11 +833,7 @@ fn active_object_bounds<'a>(
                 Point::new(component.pos.x.saturating_add(label_width), component.pos.y);
             bounds.push(PrintableObjectBounds {
                 target: DrawingSheetOverflowTarget::Component(component.id),
-                identity: if component.name.trim().is_empty() {
-                    format!("instance:{}", component.id)
-                } else {
-                    component.name.clone()
-                },
+                object: PrintableObject::Component(component),
                 kind: DrawingSheetOverflowTarget::Component(component.id).kind_label(),
                 bounds: WorldRect::from_points(
                     Point::new(min.x.min(component.pos.x), min.y.min(component.pos.y)),
@@ -805,7 +849,7 @@ fn active_object_bounds<'a>(
         {
             bounds.push(PrintableObjectBounds {
                 target: DrawingSheetOverflowTarget::Wire(wire.id),
-                identity: format!("wire:{}", wire.id),
+                object: PrintableObject::Wire(wire.id),
                 kind: DrawingSheetOverflowTarget::Wire(wire.id).kind_label(),
                 bounds: rect,
                 route: Some(Cow::Borrowed(&wire.points)),
@@ -818,10 +862,7 @@ fn active_object_bounds<'a>(
         {
             bounds.push(PrintableObjectBounds {
                 target: DrawingSheetOverflowTarget::Bus(bus.id),
-                identity: bus
-                    .declaration
-                    .as_ref()
-                    .map_or_else(|| format!("bus:{}", bus.id), ToString::to_string),
+                object: PrintableObject::Bus(bus),
                 kind: DrawingSheetOverflowTarget::Bus(bus.id).kind_label(),
                 bounds: rect,
                 route: Some(Cow::Borrowed(&bus.points)),
@@ -836,7 +877,7 @@ fn active_object_bounds<'a>(
             };
             bounds.push(PrintableObjectBounds {
                 target: DrawingSheetOverflowTarget::BusTap(tap.id),
-                identity: format!("tap:{} \u{00b7} {}", tap.id, tap.slice),
+                object: PrintableObject::BusTap(tap),
                 kind: DrawingSheetOverflowTarget::BusTap(tap.id).kind_label(),
                 bounds: rect,
                 route: Some(Cow::Owned(route)),
@@ -851,7 +892,7 @@ fn active_object_bounds<'a>(
             const JUNCTION_RADIUS_WORLD: f64 = 900.0 / DRAWING_SHEET_WORLD_UNIT_UM as f64;
             bounds.push(PrintableObjectBounds {
                 target: DrawingSheetOverflowTarget::Junction(junction.id),
-                identity: format!("junction:{}", junction.id),
+                object: PrintableObject::Junction(junction.id),
                 kind: DrawingSheetOverflowTarget::Junction(junction.id).kind_label(),
                 bounds: WorldRect {
                     min_x: f64::from(junction.pos.x) - JUNCTION_RADIUS_WORLD,
@@ -868,11 +909,7 @@ fn active_object_bounds<'a>(
             let (min, max) = super::net_labels::world_bounds(label);
             bounds.push(PrintableObjectBounds {
                 target: DrawingSheetOverflowTarget::NetLabel(label.id),
-                identity: if label.name.trim().is_empty() {
-                    format!("net-label:{}", label.id)
-                } else {
-                    label.name.clone()
-                },
+                object: PrintableObject::NetLabel(label),
                 kind: DrawingSheetOverflowTarget::NetLabel(label.id).kind_label(),
                 bounds: WorldRect::from_points(min, max),
                 route: None,
@@ -884,7 +921,7 @@ fn active_object_bounds<'a>(
             let (min, max) = super::design_notes::conservative_world_bounds(note);
             bounds.push(PrintableObjectBounds {
                 target: DrawingSheetOverflowTarget::DesignNote(note.id),
-                identity: format!("note:{} \u{00b7} {}", note.id, note.kind.label()),
+                object: PrintableObject::DesignNote(note),
                 kind: DrawingSheetOverflowTarget::DesignNote(note.id).kind_label(),
                 bounds: WorldRect::from_points(min, max),
                 route: None,
@@ -896,7 +933,7 @@ fn active_object_bounds<'a>(
             let (min, max) = super::documentation_shapes::world_bounds(shape);
             bounds.push(PrintableObjectBounds {
                 target: DrawingSheetOverflowTarget::DocumentationShape(shape.id),
-                identity: format!("shape:{} \u{00b7} {}", shape.id, shape.kind().label()),
+                object: PrintableObject::DocumentationShape(shape),
                 kind: DrawingSheetOverflowTarget::DocumentationShape(shape.id).kind_label(),
                 bounds: WorldRect::from_points(min, max),
                 route: None,

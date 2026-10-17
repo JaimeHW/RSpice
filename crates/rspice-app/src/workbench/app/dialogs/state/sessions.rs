@@ -423,6 +423,9 @@ pub struct DialogState {
     /// Connectivity-aware selected-object movement transaction.
     pub(crate) move_selection: MoveSelectionDialogState,
 
+    /// A Paste or Duplicate following the pointer until a click places it.
+    pub(crate) floating_paste: Option<FloatingPaste>,
+
     /// Anchor-preserving conductor/documentation stretch transaction.
     pub(crate) stretch_selection: StretchSelectionDialogState,
 
@@ -482,6 +485,13 @@ pub struct DialogState {
     /// Stable-identity rename transaction for one component, label, logical
     /// named net, or declared bus selected in the active schematic.
     pub(crate) rename_selection: RenameSelectionDialogState,
+
+    /// Find and replace on names, net labels and values.
+    pub(crate) find_replace: crate::workbench::app::dialogs::find_replace::FindReplaceDialogState,
+
+    /// One property form over several selected instances.
+    pub(crate) shared_properties:
+        crate::workbench::app::dialogs::selection::shared_properties::SharedPropertiesDialogState,
 
     /// Project-owned technology attachment transaction.
     pub(crate) technology_attachment: TechnologyAttachmentDialogState,
@@ -575,6 +585,8 @@ impl DialogState {
             || self.rule_setup.open
             || self.object_properties.open
             || self.rename_selection.open
+            || self.find_replace.open
+            || self.shared_properties.open
             || self.technology_attachment.open
             || self.confirmation_dialog.visible
             || self.project_review_dialog.request.is_some()

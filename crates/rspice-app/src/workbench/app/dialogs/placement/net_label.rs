@@ -12,6 +12,7 @@
 
 use egui::Context;
 use rspice_schematic_editor::net_label_placement;
+use rspice_schematic_editor::session::net_label_sequence::{NetLabelSequence, entry_names};
 
 use crate::state::{CrossSheetPortDirection, NetLabel, NetLabelKind, Point, Tool};
 use crate::ui::widgets::{CanvasEntry, CanvasEntryChoice};
@@ -22,12 +23,18 @@ use crate::workbench::app_state::AppState;
 const TITLE: &str = "Net label";
 const CONNECTOR_TITLE: &str = "Off-sheet connector";
 
+/// The most names one entry may ask for, so a mistyped range cannot arm a
+/// sequence no one will click through.
+const MAX_NAMES: usize = 1024;
+
 #[derive(Debug, Clone)]
 struct NetLabelPlacementCommit {
     authority: SchematicEditAuthority,
     anchor: Point,
     name: String,
     kind: NetLabelKind,
+    /// What the tool places on the next clicks.
+    following: Option<NetLabelSequence>,
 }
 
 #[derive(Debug, Clone)]
@@ -182,21 +189,89 @@ fn validate_draft(state: &AppState) -> DraftValidation {
             "The snapped placement anchor is unavailable. Cancel and select it again.".to_owned(),
         );
     };
-    let name = draft.name.trim();
-    if name.is_empty() {
+    // A list or a bus range names one label per click; on a bus, a range
+    // names the bus whole.
+    let names = entry_names(&draft.name, anchor_on_bus(state, anchor));
+    let Some(first) = names.first() else {
         return DraftValidation::Incomplete("Enter the electrical net name.");
+    };
+    if names.len() > MAX_NAMES {
+        return DraftValidation::Invalid(format!("Name at most {MAX_NAMES} nets at once."));
     }
-    if let Err(reason) =
-        NetLabel::validate_name(name, state.schematic.document().document_policy.net_naming)
-    {
-        return DraftValidation::Invalid(format!("Net name: {reason}."));
+    let policy = state.schematic.document().document_policy.net_naming;
+    for name in &names {
+        if let Err(reason) = NetLabel::validate_name(name, policy) {
+            return DraftValidation::Invalid(if names.len() > 1 {
+                format!("{name}: net name: {reason}.")
+            } else {
+                format!("Net name: {reason}.")
+            });
+        }
     }
     DraftValidation::Valid(Box::new(NetLabelPlacementCommit {
         authority: authority.clone(),
         anchor,
-        name: name.to_owned(),
+        name: first.clone(),
         kind: draft.kind,
+        following: NetLabelSequence::following(&names, draft.kind),
     }))
+}
+
+/// Whether a bus on the active sheet runs through `anchor`.
+fn anchor_on_bus(state: &AppState, anchor: Point) -> bool {
+    state.schematic.document().buses.iter().any(|bus| {
+        bus.contains_point(anchor)
+            && crate::schematic::view::sheet_visibility::object_is_on_active_sheet(state, bus.id)
+    })
+}
+
+/// Place the name an armed sequence holds next at `anchor`, as one undo
+/// step, and arm the one after it. Returns whether a sequence answered the
+/// click; with none armed, the click opens the entry.
+pub(crate) fn place_sequenced_net_label(state: &mut AppState, anchor: Point) -> bool {
+    let Some(mut sequence) = state
+        .schematic
+        .session
+        .editor
+        .pending_net_label_sequence
+        .clone()
+    else {
+        return false;
+    };
+    let Some(name) = sequence.next_name() else {
+        state.schematic.session.editor.pending_net_label_sequence = None;
+        return false;
+    };
+    if state.dialogs.application_modal_open() {
+        return true;
+    }
+    if state.schematic_edit_read_only() {
+        state.deny_read_only_edit();
+        return true;
+    }
+    let policy = state.schematic.document().document_policy.net_naming;
+    if let Err(reason) = NetLabel::validate_name(&name, policy) {
+        state.schematic.session.editor.pending_net_label_sequence = None;
+        state.prompt(format!("{name}: net name: {reason}."));
+        return true;
+    }
+    let kind = sequence.kind;
+    let undo_label = if kind.off_sheet_direction().is_some() {
+        "place off-sheet connector"
+    } else {
+        "place net label"
+    };
+    let placed = state.schematic.with_undo(undo_label, |schematic| {
+        schematic.add_net_label_with_kind(anchor, name.clone(), kind);
+    });
+    if !placed {
+        state.prompt(format!("{name} was not placed."));
+        return true;
+    }
+    state.schematic.session.editor.pending_net_label_sequence =
+        sequence.advance().then_some(sequence);
+    state.sync_active_schematic_to_workspace();
+    true
 }
 
 fn apply_commit(state: &mut AppState, commit: NetLabelPlacementCommit) -> Result<u64, String> {
@@ -225,6 +300,8 @@ fn apply_commit(state: &mut AppState, commit: NetLabelPlacementCommit) -> Result
     });
     match (changed, placed_id) {
         (true, Some(id)) => {
+            // The tool stays armed with the next name, which the ghost shows.
+            state.schematic.session.editor.pending_net_label_sequence = commit.following;
             state.sync_active_schematic_to_workspace();
             Ok(id)
         }
@@ -327,11 +404,17 @@ mod tests {
     fn invalid_name_cannot_produce_a_commit_or_history() {
         let mut app = RSpiceApp::test_instance();
         open_at(&mut app, Point::origin());
-        app.state.dialogs.net_label_placement.name = "two nodes".to_owned();
+        app.state.dialogs.net_label_placement.name = "bell\u{7}node".to_owned();
         assert!(matches!(
             validate_draft(&app.state),
             DraftValidation::Invalid(_)
         ));
+        // One bad name in a list refuses the whole entry, naming it.
+        app.state.dialogs.net_label_placement.name = "a DATA[7 c".to_owned();
+        match validate_draft(&app.state) {
+            DraftValidation::Invalid(message) => assert!(message.starts_with("DATA[7:")),
+            other => panic!("a list with a bad name was accepted: {other:?}"),
+        }
         assert!(app.state.schematic.document().net_labels.is_empty());
         assert!(!app.state.schematic.can_undo());
 
@@ -342,6 +425,92 @@ mod tests {
         ));
         assert!(app.state.schematic.document().net_labels.is_empty());
         assert!(!app.state.schematic.can_undo());
+    }
+
+    /// Place what the entry names at `anchor`.
+    fn commit_entry(state: &mut AppState, anchor: Point, entry: &str) {
+        state.schematic.session.editor.tool = Tool::Label;
+        assert!(open_net_label_placement(state, anchor));
+        state.dialogs.net_label_placement.name = entry.to_owned();
+        let DraftValidation::Valid(commit) = validate_draft(state) else {
+            panic!("{entry} is a valid entry");
+        };
+        apply_commit(state, *commit).expect("placement");
+        state.dialogs.net_label_placement.close();
+    }
+
+    fn label_names(app: &RSpiceApp) -> Vec<String> {
+        app.state
+            .schematic
+            .document()
+            .net_labels
+            .iter()
+            .map(|label| label.name.clone())
+            .collect()
+    }
+
+    fn next_name(app: &RSpiceApp) -> Option<String> {
+        app.state
+            .schematic
+            .session
+            .editor
+            .pending_net_label_sequence
+            .as_ref()
+            .and_then(|sequence| sequence.next_name())
+    }
+
+    /// After `D0` the tool stays armed with `D1`: each click places the
+    /// next number without the entry, as its own undo step (audit G-6).
+    #[test]
+    fn a_numbered_label_keeps_the_tool_armed_with_the_next_name() {
+        let mut app = RSpiceApp::test_instance();
+        commit_entry(&mut app.state, Point::new(0, 0), "D0");
+        assert_eq!(next_name(&app).as_deref(), Some("D1"));
+
+        assert!(place_sequenced_net_label(&mut app.state, Point::new(0, 20)));
+        assert!(place_sequenced_net_label(&mut app.state, Point::new(0, 40)));
+        assert!(!app.state.dialogs.net_label_placement.open);
+        assert_eq!(label_names(&app), ["D0", "D1", "D2"]);
+        assert_eq!(next_name(&app).as_deref(), Some("D3"));
+        assert_eq!(app.state.schematic.session.editor.tool, Tool::Label);
+
+        assert!(app.state.schematic.undo());
+        assert_eq!(label_names(&app), ["D0", "D1"]);
+        // Esc ends the tool and the sequence with it.
+        app.state.schematic.cancel_interaction_step();
+        assert_eq!(next_name(&app), None);
+    }
+
+    /// A list or a bus range places one name per click, then the next click
+    /// asks for a name again; a range typed onto a bus names the bus.
+    #[test]
+    fn a_list_or_a_bus_range_places_one_name_per_click() {
+        for (entry, expected) in [
+            ("a b c", vec!["a", "b", "c"]),
+            ("D<0:2>", vec!["D<0>", "D<1>", "D<2>"]),
+        ] {
+            let mut app = RSpiceApp::test_instance();
+            commit_entry(&mut app.state, Point::new(0, 0), entry);
+            let mut y = 0;
+            while next_name(&app).is_some() {
+                y += 20;
+                assert!(place_sequenced_net_label(&mut app.state, Point::new(0, y)));
+            }
+            assert_eq!(label_names(&app), expected);
+            assert!(!place_sequenced_net_label(
+                &mut app.state,
+                Point::new(0, 200)
+            ));
+        }
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.schematic.document_mut_for_test().buses.push(
+            crate::state::Bus::segment(90, Point::new(-50, 0), Point::new(50, 0), None)
+                .expect("bus"),
+        );
+        commit_entry(&mut app.state, Point::new(0, 0), "D<0:2>");
+        assert_eq!(label_names(&app), ["D<0:2>"]);
+        assert_eq!(next_name(&app), None);
     }
 
     /// Leaving the entry leaves the document alone and keeps the tool armed,

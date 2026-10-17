@@ -14,6 +14,7 @@ use rspice_design::schematic::{
     component::Component,
     component_display::SchematicParameterLabelVisibility,
     component_type::ComponentType,
+    label_layout::{self, LayoutPoint, TextEdge},
     probe::SchematicProbe,
     wire::Wire,
 };
@@ -32,21 +33,24 @@ use super::viewport::Viewport;
 
 pub(crate) const PROBE_RADIUS: f32 = 9.0;
 pub(crate) const PROBE_CROSSHAIR_HALF_SPAN: f32 = 13.0;
-/// Where a probe's label stands from its centre, in world units: the
-/// bottom-left corner of the text.
-pub(crate) const PROBE_LABEL_OFFSET_WU: Vec2 = Vec2::new(13.0, -9.0);
-/// Where a bus declaration's bottom-left corner stands from the bus's last
-/// point, and a tap slice's from its connection point, in world units.
-pub(crate) const BUS_DECLARATION_OFFSET_WU: Vec2 = Vec2::new(8.0, -8.0);
-pub(crate) const TAP_SLICE_OFFSET_WU: Vec2 = Vec2::new(5.0, -7.0);
-/// World size of bus declarations, tap slices and probe labels.
-pub(crate) const SMALL_TEXT_WORLD: f32 = 9.0;
+/// Where a probe's label, a bus declaration and a tap slice stand, in world
+/// units, from the shared layout the SVG and the printed page read too.
+pub(crate) const PROBE_LABEL_OFFSET_WU: Vec2 = layout_vec(label_layout::PROBE_LABEL_OFFSET);
+pub(crate) const BUS_DECLARATION_OFFSET_WU: Vec2 = layout_vec(label_layout::BUS_DECLARATION_OFFSET);
+pub(crate) const TAP_SLICE_OFFSET_WU: Vec2 = layout_vec(label_layout::TAP_SLICE_OFFSET);
+pub(crate) const SMALL_TEXT_WORLD: f32 = label_layout::SMALL_TEXT_WORLD;
 /// Mono advance per glyph at [`SMALL_TEXT_WORLD`], for a greeked bar.
 const SMALL_TEXT_GLYPH_WORLD: f32 = 6.7 * SMALL_TEXT_WORLD / 11.0;
-/// Instance name and value, in world units: one type for primitives and
-/// cells, on the canvas and in the SVG.
-pub(crate) const INSTANCE_NAME_WORLD: f32 = 10.0;
-pub(crate) const INSTANCE_VALUE_WORLD: f32 = 9.0;
+pub(crate) const INSTANCE_NAME_WORLD: f32 = label_layout::INSTANCE_NAME_WORLD;
+pub(crate) const INSTANCE_VALUE_WORLD: f32 = label_layout::INSTANCE_VALUE_WORLD;
+
+const fn layout_vec(point: LayoutPoint) -> Vec2 {
+    Vec2::new(point.x, point.y)
+}
+
+pub(crate) const fn layout_pos(point: LayoutPoint) -> Pos2 {
+    Pos2::new(point.x, point.y)
+}
 
 /// Draw a wire on the canvas
 pub fn draw_wire(painter: &Painter, viewport: &Viewport, wire: &Wire, ink: ConductorInk) {
@@ -1030,21 +1034,6 @@ pub fn draw_artwork_lead_extensions(
     }
 }
 
-/// Smart label placement for components
-///
-/// Places name and value labels optimally based on:
-/// - Component dimensions and aspect ratio
-/// - Rotation (horizontal vs vertical orientation)
-/// - Terminal positions (avoid overlapping terminals)
-///
-/// Matches commercial EDA tool behavior (Cadence Virtuoso style).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TerminalAxis {
-    Horizontal,
-    Vertical,
-    Mixed,
-}
-
 /// Where a primitive's name and value sit and how they hang off their
 /// anchors. Linear in `pos` and `scale`, so the SVG evaluates it in its own
 /// units.
@@ -1056,114 +1045,29 @@ pub(crate) struct LabelLayout {
     pub(crate) value_align: egui::Align2,
 }
 
-/// Infer the dominant terminal direction after mirror/rotation transforms.
-/// This is more robust than width/height heuristics for square symbols
-/// (e.g. capacitor). Works on the static offsets — mirroring never changes
-/// an axis span and 90°/270° rotation just swaps the spans — so this runs
-/// allocation-free every frame.
-fn infer_terminal_axis(component: &Component) -> TerminalAxis {
-    let offsets = component.kind.terminal_offsets();
-    if offsets.len() < 2 {
-        return TerminalAxis::Mixed;
+/// How a run of the shared layout's text hangs off its anchor, as egui
+/// aligns a galley.
+pub(crate) const fn text_align(horizontal: TextEdge, vertical: TextEdge) -> egui::Align2 {
+    const fn align(edge: TextEdge) -> egui::Align {
+        match edge {
+            TextEdge::Start => egui::Align::Min,
+            TextEdge::Center => egui::Align::Center,
+            TextEdge::End => egui::Align::Max,
+        }
     }
-
-    let mut min_x = i32::MAX;
-    let mut max_x = i32::MIN;
-    let mut min_y = i32::MAX;
-    let mut max_y = i32::MIN;
-
-    for (_, p) in offsets {
-        min_x = min_x.min(p.x);
-        max_x = max_x.max(p.x);
-        min_y = min_y.min(p.y);
-        max_y = max_y.max(p.y);
-    }
-
-    let mut span_x = max_x - min_x;
-    let mut span_y = max_y - min_y;
-    if component.rotation.is_vertical() {
-        std::mem::swap(&mut span_x, &mut span_y);
-    }
-
-    // One-grid hysteresis to avoid ambiguous axis flapping near equal spans.
-    const AXIS_HYSTERESIS: i32 = 10;
-    if span_x > span_y + AXIS_HYSTERESIS {
-        TerminalAxis::Horizontal
-    } else if span_y > span_x + AXIS_HYSTERESIS {
-        TerminalAxis::Vertical
-    } else {
-        TerminalAxis::Mixed
-    }
+    egui::Align2([align(horizontal), align(vertical)])
 }
 
+/// The shared instance label layout (`label_layout::instance_label_layout`)
+/// evaluated at `pos` with `scale` points per world unit.
 pub(crate) fn compute_label_layout(pos: Pos2, scale: f32, component: &Component) -> LabelLayout {
-    let (width, height) = component.symbol_dimensions();
-    let is_rotated_vertical = component.rotation.is_vertical(); // R90 or R270
-
-    // Determine effective dimensions after rotation.
-    let (eff_w, eff_h) = if is_rotated_vertical {
-        (height as f32, width as f32) // Swap for rotated
-    } else {
-        (width as f32, height as f32)
-    };
-
-    // Determine label placement based on component shape and transformed terminal orientation.
-    // Horizontal terminal axis: labels above/below.
-    // Vertical terminal axis: labels left/right.
-    // Tall devices (BJTs, MOSFETs): name above, value on right side.
-    let is_tall_device = matches!(
-        component.kind,
-        ComponentType::NpnBjt
-            | ComponentType::PnpBjt
-            | ComponentType::NpnBjt4
-            | ComponentType::PnpBjt4
-            | ComponentType::NpnBjt5
-            | ComponentType::PnpBjt5
-            | ComponentType::Nmos
-            | ComponentType::Pmos
-            | ComponentType::Njfet
-            | ComponentType::Pjfet
-            | ComponentType::Nmesfet
-            | ComponentType::Pmesfet
-            | ComponentType::NVdmos
-            | ComponentType::PVdmos
-            | ComponentType::NmosSoi
-            | ComponentType::PmosSoi
-    );
-
-    // Calculate label margin from component edge.
-    let margin = 4.0 * scale;
-    let half_w = (eff_w / 2.0) * scale;
-    let half_h = (eff_h / 2.0) * scale;
-    let terminal_axis = infer_terminal_axis(component);
-
-    if is_tall_device {
-        LabelLayout {
-            name_pos: Pos2::new(pos.x, pos.y - half_h - margin),
-            name_align: egui::Align2::CENTER_BOTTOM,
-            value_pos: Pos2::new(pos.x + half_w + margin, pos.y),
-            value_align: egui::Align2::LEFT_CENTER,
-        }
-    } else {
-        // Mixed axis falls back to geometric aspect ratio.
-        let use_left_right = matches!(terminal_axis, TerminalAxis::Vertical)
-            || (matches!(terminal_axis, TerminalAxis::Mixed) && eff_h > eff_w);
-
-        if use_left_right {
-            LabelLayout {
-                name_pos: Pos2::new(pos.x - half_w - margin, pos.y),
-                name_align: egui::Align2::RIGHT_CENTER,
-                value_pos: Pos2::new(pos.x + half_w + margin, pos.y),
-                value_align: egui::Align2::LEFT_CENTER,
-            }
-        } else {
-            LabelLayout {
-                name_pos: Pos2::new(pos.x, pos.y - half_h - margin),
-                name_align: egui::Align2::CENTER_BOTTOM,
-                value_pos: Pos2::new(pos.x, pos.y + half_h + margin),
-                value_align: egui::Align2::CENTER_TOP,
-            }
-        }
+    let layout =
+        label_layout::instance_label_layout(LayoutPoint::new(pos.x, pos.y), scale, component);
+    LabelLayout {
+        name_pos: layout_pos(layout.name.anchor),
+        name_align: text_align(layout.name.horizontal, layout.name.vertical),
+        value_pos: layout_pos(layout.value.anchor),
+        value_align: text_align(layout.value.horizontal, layout.value.vertical),
     }
 }
 

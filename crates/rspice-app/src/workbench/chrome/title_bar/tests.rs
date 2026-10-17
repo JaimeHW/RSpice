@@ -808,7 +808,7 @@ fn the_design_menu_arrange_submenu_reaches_every_arrange_command() {
         .flat_map(|group| group.iter())
         .map(|command| command.spec().label)
         .collect();
-    assert_eq!(arrange_labels.len(), 12);
+    assert_eq!(arrange_labels.len(), 13);
     let before = app.state.schematic.document().components[1].pos;
     let mut frame = |events| {
         menu_items_after_frame(&ctx, events, |ui| {

@@ -67,6 +67,33 @@ pub(crate) fn multi_sheet_catalog(state: &AppState) -> Option<&SheetCatalog> {
         .filter(|catalog| catalog.sheets().len() > 1)
 }
 
+/// The active cell view's sheet catalog, however many sheets it holds.
+pub(crate) fn active_sheet_catalog(state: &AppState) -> Option<&SheetCatalog> {
+    let key = state.workspace.content.active_schematic_reference().key();
+    state
+        .workspace
+        .content
+        .design_management
+        .sheet_catalog(&key)
+}
+
+/// The sheet the canvas is showing, as a run's net geometry keys its sheets:
+/// `None` for a cell view with no sheet catalog.
+pub(crate) fn active_sheet_id(state: &AppState) -> Option<crate::state::SheetId> {
+    active_sheet_catalog(state).and_then(SheetCatalog::active_sheet_id)
+}
+
+/// The net geometry the active sheet draws, in its own coordinates.
+pub(crate) fn active_sheet_net_geometry(
+    state: &AppState,
+) -> &rspice_simulation::netlist_gen::SheetNetGeometry {
+    state
+        .simulation
+        .source
+        .cross_probe
+        .on_sheet(active_sheet_id(state))
+}
+
 /// The reading position the docks are holding.
 ///
 /// It is session state and nothing else: a scope is how one reader is looking
@@ -124,17 +151,31 @@ pub(crate) fn selection_filtered_to_active_sheet(
     source: &Selection,
 ) -> Selection {
     let mut selection = Selection::default();
+    // This runs twice a frame. Nothing selected keeps nothing, and the sheet
+    // catalog is looked up once rather than once per object.
+    if source.is_empty() {
+        return selection;
+    }
+    let catalog = active_sheet_catalog(state);
+    let on_sheet = |id: u64| {
+        rspice_schematic_editor::view::design_view::object_is_on_active_sheet(catalog, id)
+    };
 
     for object in &state.schematic.document().components {
-        if source.has_component(object.id) && object_is_on_active_sheet(state, object.id) {
+        if source.has_component(object.id) && on_sheet(object.id) {
             selection.select_component(object.id);
         }
     }
+    let wire_parts = !source.wire_segments.is_empty() || !source.wire_vertices.is_empty();
     for object in &state.schematic.document().wires {
-        if object_is_on_active_sheet(state, object.id) {
-            if source.has_wire(object.id) {
-                selection.select_wire(object.id);
-            }
+        let whole = source.has_wire(object.id);
+        if !(whole || wire_parts) || !on_sheet(object.id) {
+            continue;
+        }
+        if whole {
+            selection.select_wire(object.id);
+        }
+        if wire_parts {
             selection.wire_segments.extend(
                 source
                     .wire_segments
@@ -152,38 +193,37 @@ pub(crate) fn selection_filtered_to_active_sheet(
         }
     }
     for object in &state.schematic.document().junctions {
-        if source.has_junction(object.pos) && object_is_on_active_sheet(state, object.id) {
+        if source.has_junction(object.pos) && on_sheet(object.id) {
             selection.select_junction(object.pos);
         }
     }
     for object in &state.schematic.document().buses {
-        if source.has_bus(object.id) && object_is_on_active_sheet(state, object.id) {
+        if source.has_bus(object.id) && on_sheet(object.id) {
             selection.select_bus(object.id);
         }
     }
     for object in &state.schematic.document().bus_taps {
-        if source.has_bus_tap(object.id) && object_is_on_active_sheet(state, object.id) {
+        if source.has_bus_tap(object.id) && on_sheet(object.id) {
             selection.select_bus_tap(object.id);
         }
     }
     for object in &state.schematic.document().net_labels {
-        if source.has_net_label(object.id) && object_is_on_active_sheet(state, object.id) {
+        if source.has_net_label(object.id) && on_sheet(object.id) {
             selection.select_net_label(object.id);
         }
     }
     for object in &state.schematic.document().design_notes {
-        if source.has_design_note(object.id) && object_is_on_active_sheet(state, object.id) {
+        if source.has_design_note(object.id) && on_sheet(object.id) {
             selection.select_design_note(object.id);
         }
     }
     for object in &state.schematic.document().documentation_shapes {
-        if source.has_documentation_shape(object.id) && object_is_on_active_sheet(state, object.id)
-        {
+        if source.has_documentation_shape(object.id) && on_sheet(object.id) {
             selection.select_documentation_shape(object.id);
         }
     }
     for object in &state.schematic.document().probes {
-        if source.has_probe(object.id) && object_is_on_active_sheet(state, object.id) {
+        if source.has_probe(object.id) && on_sheet(object.id) {
             selection.select_probe(object.id);
         }
     }
@@ -411,7 +451,7 @@ pub(super) fn active_sheet_has_objects(state: &AppState) -> bool {
 /// A cell view with two sheets: `active_ids` stay on the active Sheet 1 and
 /// `hidden_ids` belong to Sheet 2. Shared by the canvas modules' tests.
 #[cfg(test)]
-pub(super) fn two_sheet_state(active_ids: &[u64], hidden_ids: &[u64]) -> AppState {
+pub(crate) fn two_sheet_state(active_ids: &[u64], hidden_ids: &[u64]) -> AppState {
     use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
 
     let mut state = AppState::default();

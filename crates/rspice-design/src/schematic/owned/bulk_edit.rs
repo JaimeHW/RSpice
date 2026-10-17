@@ -10,6 +10,59 @@ use super::super::{
 use super::{DocumentEdit, Schematic};
 use std::collections::{BTreeSet, HashSet};
 
+/// Replace each expected instance by its candidate, as one undo step, after
+/// proving every expected instance unchanged and every candidate the same
+/// instance under the same name. Returns how many instances changed.
+pub fn replace_components(
+    schematic: &mut Schematic,
+    edits: Vec<(Component, Component)>,
+    description: &str,
+) -> Result<DocumentEdit<usize>, String> {
+    let mut replacements = Vec::new();
+    for (expected, candidate) in edits {
+        let index = schematic
+            .document
+            .components
+            .iter()
+            .position(|component| component.id == expected.id)
+            .ok_or("A selected instance no longer exists.")?;
+        if schematic.document.components[index] != expected {
+            return Err(format!(
+                "{} changed before the edit applied.",
+                expected.name
+            ));
+        }
+        if candidate.id != expected.id
+            || candidate.kind != expected.kind
+            || candidate.name != expected.name
+        {
+            return Err(format!(
+                "An edit of {} cannot change its identity, type or name.",
+                expected.name
+            ));
+        }
+        if candidate != expected {
+            replacements.push((index, candidate));
+        }
+    }
+    if replacements.is_empty() {
+        return Ok(DocumentEdit {
+            value: 0,
+            committed: false,
+        });
+    }
+    schematic.begin_operation(description);
+    let changed = replacements.len();
+    for (index, component) in replacements {
+        schematic.document.components[index] = component;
+    }
+    let committed = schematic.end_operation();
+    Ok(DocumentEdit {
+        value: changed,
+        committed,
+    })
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SelectionBulkProperty {
     #[default]

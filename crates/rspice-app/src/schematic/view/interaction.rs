@@ -67,6 +67,14 @@ pub(super) fn handle_tool_interactions(
     }
     let grid_size = state.schematic.document().grid_size;
     let current_tool = state.schematic.session.editor.tool;
+    // A floating copy owns the canvas until it lands; a tool chosen since
+    // it began is the next command, and the copy is let go.
+    if state.dialogs.floating_paste.is_some() && current_tool != Tool::Select {
+        crate::workbench::app::cancel_floating_paste(state);
+    }
+    if super::floating_paste::handle_floating_paste(ui, response, state, viewport) {
+        return;
+    }
     if state.dialogs.move_selection.armed && current_tool != Tool::MoveSelection {
         state.dialogs.move_selection.close();
         // The pointer event that exposed an inconsistent tool/draft pair belongs
@@ -200,7 +208,7 @@ pub(super) fn handle_tool_interactions(
             ToolPointerAction::NetLabel(anchor) => {
                 if label_anchor_on_unmarked_crossing(state, anchor) {
                     refuse_label_on_unmarked_crossing(ui, state, anchor);
-                } else {
+                } else if !crate::workbench::app::place_sequenced_net_label(state, anchor) {
                     crate::workbench::app::open_net_label_placement(state, anchor);
                 }
             }
@@ -1509,6 +1517,7 @@ fn retained_probe_net_name(state: &AppState, position: Point) -> Option<String> 
         .net_at_in(
             &state.workspace.content.active_view,
             state.schematic.topology_version(),
+            super::sheet_visibility::active_sheet_id(state),
             position,
         )
         .cloned()

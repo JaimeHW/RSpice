@@ -255,6 +255,7 @@ fn a_duplicate_lands_on_the_grid_one_step_off_its_anchor() {
     let anchor = state.schematic_paste_anchor();
 
     assert!(state.duplicate_schematic_selection());
+    assert!(state.place_floating_paste());
 
     let copies: Vec<Point> = state
         .schematic
@@ -305,6 +306,7 @@ fn duplicate_leaves_the_clipboard_byte_identical() {
         .selection
         .select_only_component(42);
     assert!(state.duplicate_schematic_selection_at(Point::new(140, 30)));
+    assert!(state.place_floating_paste());
 
     assert_eq!(state.schematic.document().components.len(), 3);
     assert_eq!(
@@ -326,6 +328,7 @@ fn duplicate_selects_what_it_made_and_costs_one_undo_entry() {
         .select_only_component(41);
 
     assert!(state.duplicate_schematic_selection_at(Point::new(140, 30)));
+    assert!(state.place_floating_paste());
 
     let created = state
         .schematic
@@ -374,6 +377,7 @@ fn duplicate_honours_the_persisted_external_net_preference() {
             state.duplicate_schematic_selection_at(Point::new(140, 30)),
             "{preference:?} still duplicates"
         );
+        assert!(state.place_floating_paste());
         assert_eq!(
             state.schematic.document().components.len(),
             3,

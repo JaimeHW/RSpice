@@ -17,6 +17,7 @@ use super::{
 use crate::{
     session::{
         EditorSession,
+        canvas_cache::ConductorGroups,
         selection::SchematicSelectionFilter,
         visibility::{SchematicNetHighlighting, SchematicParameterLabelVisibility},
     },
@@ -32,7 +33,10 @@ mod annotations;
 mod empty;
 mod focus;
 use annotations::draw_operating_point_annotations;
-pub use annotations::{BadgeSubject, OperatingPointCanvasAnnotation};
+pub use annotations::{
+    BadgeLayoutMemo, BadgePlacement, BadgeSubject, OperatingPointCanvasAnnotation, PlacedBadge,
+    place_badges,
+};
 pub use empty::draw_empty_hint;
 pub use focus::{draw_keyboard_focus, keyboard_focus_matches_selection};
 
@@ -57,6 +61,9 @@ pub struct SceneView<'a> {
 pub struct SceneOverlays<'a> {
     pub net_class_colors: HashMap<u64, egui::Color32>,
     pub operating_point: Vec<OperatingPointCanvasAnnotation>,
+    /// Where the host holds the badges' last layout across frames; `None`
+    /// places them afresh every frame.
+    pub operating_point_layout: Option<&'a BadgeLayoutMemo>,
     pub probe_status: &'a dyn Fn(&SchematicProbe) -> ProbeVisualStatus,
     pub selected_trace_expression: &'a dyn Fn() -> Option<&'a str>,
     /// Each instance's open terminals (nothing meets them), which take the
@@ -132,7 +139,7 @@ pub fn draw_content(
     // then class colours, highlighted nets and the selection, so emphasis
     // stays on top.
     type ConductorStyle = (u8, [u8; 4]);
-    let mut conductor_groups: BTreeMap<ConductorStyle, (ConductorInk, Vec<&[Point]>)> =
+    let mut conductor_groups: BTreeMap<ConductorStyle, (ConductorInk, Vec<usize>)> =
         BTreeMap::new();
     // The ink of every wire drawn other than plain, by wire index, so a
     // junction takes the colour and the width of what it joins.
@@ -156,8 +163,9 @@ pub fn draw_content(
             || band_wires.is_some_and(|band| band.takes_polyline(&wire.points));
 
         let net_ink = match view.net_highlighting {
-            SchematicNetHighlighting::SelectedNet
-                if view.editor.net_highlight.is_wire_highlighted(wire.id) =>
+            policy
+                if policy.lights_selected_net()
+                    && view.editor.net_highlight.is_wire_highlighted(wire.id) =>
             {
                 ConductorInk::Highlighted
             }
@@ -165,9 +173,9 @@ pub fn draw_content(
                 .net_class_colors
                 .get(&wire.id)
                 .map_or(ConductorInk::Plain, |colour| ConductorInk::Class(*colour)),
-            SchematicNetHighlighting::SelectedNet | SchematicNetHighlighting::Off => {
-                ConductorInk::Plain
-            }
+            SchematicNetHighlighting::SelectedNet
+            | SchematicNetHighlighting::SelectedNetAcrossHierarchy
+            | SchematicNetHighlighting::Off => ConductorInk::Plain,
         };
         let ink = if is_selected {
             ConductorInk::Selected
@@ -185,11 +193,27 @@ pub fn draw_content(
             .entry((ink.rank(), colour_key))
             .or_insert_with(|| (ink, Vec::new()))
             .1
-            .push(wire.points.as_slice());
+            .push(index);
     }
-    for (_, (ink, polylines)) in conductor_groups {
-        for chain in chain_conductors(polylines) {
-            draw_conductor(painter, viewport, &chain, ink);
+    // The chains are held across frames while the grouping and the wires
+    // stand still.
+    let wires = &view.design.document.wires;
+    let groups: ConductorGroups = conductor_groups.into_values().collect();
+    let chains = match cache {
+        Some(cache) => cache.conductor_chains(wires, groups),
+        None => std::sync::Arc::new(
+            groups
+                .into_iter()
+                .map(|(ink, indices)| {
+                    let polylines = indices.iter().map(|index| wires[*index].points.as_slice());
+                    (ink, chain_conductors(polylines))
+                })
+                .collect(),
+        ),
+    };
+    for (ink, chains) in chains.iter() {
+        for chain in chains {
+            draw_conductor(painter, viewport, chain, *ink);
         }
     }
 
@@ -298,6 +322,7 @@ pub fn draw_content(
         &view.design,
         symbol_context,
         &overlays.operating_point,
+        overlays.operating_point_layout,
     );
 
     // Presentation geometry is a background documentation layer. It remains
@@ -642,6 +667,7 @@ mod band_tests {
             SceneOverlays {
                 net_class_colors: HashMap::new(),
                 operating_point: Vec::new(),
+                operating_point_layout: None,
                 probe_status: &|_| ProbeVisualStatus::Materialized,
                 selected_trace_expression: &|| None,
                 open_pins: &HashMap::new(),
@@ -765,6 +791,7 @@ mod hover_tests {
             SceneOverlays {
                 net_class_colors: HashMap::new(),
                 operating_point: Vec::new(),
+                operating_point_layout: None,
                 probe_status: &|_| ProbeVisualStatus::Materialized,
                 selected_trace_expression: &|| None,
                 open_pins,
