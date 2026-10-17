@@ -1131,6 +1131,56 @@ fn a_paste_follows_the_pointer_turns_with_r_and_lands_on_the_click() {
     assert!(!fixture.app.state.schematic.can_undo());
 }
 
+/// Carried to the canvas edge, a floating copy pans the view and keeps
+/// following the pointer; with nothing carried, the same pointer pans
+/// nothing (audit G-5).
+#[test]
+fn a_copy_carried_to_the_canvas_edge_pans_the_view() {
+    let mut fixture = Fixture::new(false);
+    let near_right_edge = fixture.origin + egui::vec2(590.0, 100.0);
+    let pan_before = fixture.app.state.schematic.session.editor.pan;
+    for _ in 0..3 {
+        fixture.frame(vec![egui::Event::PointerMoved(near_right_edge)], true);
+    }
+    assert_eq!(
+        fixture.app.state.schematic.session.editor.pan, pan_before,
+        "an idle pointer at the edge moved the view"
+    );
+
+    float_a_pasted_resistor(&mut fixture, 300.0);
+    fixture.frame(vec![egui::Event::PointerMoved(near_right_edge)], true);
+    let first = fixture.app.state.schematic.session.editor.pan;
+    let at_first = fixture
+        .app
+        .state
+        .dialogs
+        .floating_paste
+        .as_ref()
+        .expect("floating")
+        .at();
+    for _ in 0..5 {
+        fixture.frame(vec![], true);
+    }
+    let later = fixture.app.state.schematic.session.editor.pan;
+    let at_later = fixture
+        .app
+        .state
+        .dialogs
+        .floating_paste
+        .as_ref()
+        .expect("floating")
+        .at();
+    assert!(
+        later.0 < first.0,
+        "the view did not pan right: {first:?} -> {later:?}"
+    );
+    assert_eq!(later.1, first.1);
+    assert!(
+        at_later.x > at_first.x,
+        "the copy did not ride the pan: {at_first:?} -> {at_later:?}"
+    );
+}
+
 /// Esc lets a floating paste go and the drawing never changed.
 #[test]
 fn escape_lets_a_floating_paste_go() {

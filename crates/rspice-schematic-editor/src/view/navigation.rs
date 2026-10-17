@@ -154,6 +154,59 @@ pub fn handle_viewport_navigation(
     }
 }
 
+/// How far inside the canvas edge the pointer starts panning the view while
+/// a gesture carries something, in points.
+pub const EDGE_PAN_BAND: f32 = 24.0;
+/// The fastest the view pans at the edge, in points per second.
+pub const EDGE_PAN_MAX_SPEED: f32 = 720.0;
+
+/// How fast the view pans with the pointer `inset` points inside the canvas
+/// edge, in points per second: nothing beyond the band, rising linearly to
+/// the cap at the edge, and the cap past it.
+pub fn edge_pan_speed(inset: f32) -> f32 {
+    if inset.is_nan() || inset >= EDGE_PAN_BAND {
+        return 0.0;
+    }
+    let depth = ((EDGE_PAN_BAND - inset) / EDGE_PAN_BAND).clamp(0.0, 1.0);
+    EDGE_PAN_MAX_SPEED * depth
+}
+
+/// What one frame of `dt` seconds adds to the pan while a gesture holds the
+/// pointer near an edge of `canvas`. The view travels toward that edge, so
+/// the drawing slides the other way. A pointer off the canvas pans only
+/// while a button holds it (`held`): a pointer merely passing over to a
+/// panel is not asking for the view to move.
+pub fn edge_pan_step(canvas: Rect, pointer: Pos2, dt: f32, held: bool) -> Vec2 {
+    if !held && !canvas.contains(pointer) {
+        return Vec2::ZERO;
+    }
+    let dt = if dt.is_finite() {
+        dt.clamp(0.0, 0.1)
+    } else {
+        0.0
+    };
+    let x = edge_pan_speed(pointer.x - canvas.left()) - edge_pan_speed(canvas.right() - pointer.x);
+    let y = edge_pan_speed(pointer.y - canvas.top()) - edge_pan_speed(canvas.bottom() - pointer.y);
+    Vec2::new(x, y) * dt
+}
+
+/// Pan the view by one frame of [`edge_pan_step`]. Returns whether it moved,
+/// so the caller can ask for the next frame while the pointer rests there.
+pub fn apply_edge_pan(
+    pan: &mut (f64, f64),
+    canvas: Rect,
+    pointer: Pos2,
+    dt: f32,
+    held: bool,
+) -> bool {
+    let step = edge_pan_step(canvas, pointer, dt, held);
+    if step == Vec2::ZERO {
+        return false;
+    }
+    apply_pan_delta(pan, step);
+    true
+}
+
 fn raw_wheel_navigation_delta(ui: &Ui) -> (Vec2, bool) {
     ui.input(|input| {
         let mut normalized = Vec2::ZERO;
@@ -306,6 +359,54 @@ mod tests {
         assert_eq!(zoom, 3.0);
         assert!((before.0 - after.0).abs() < 1e-12);
         assert!((before.1 - after.1).abs() < 1e-12);
+    }
+
+    /// The edge pan starts at the band, rises toward the edge, and is capped
+    /// there and beyond it (audit G-5).
+    #[test]
+    fn the_edge_pan_speed_rises_toward_the_edge_and_is_capped() {
+        assert_eq!(edge_pan_speed(EDGE_PAN_BAND), 0.0);
+        assert_eq!(edge_pan_speed(200.0), 0.0);
+        assert_eq!(edge_pan_speed(f32::NAN), 0.0);
+        let speeds: Vec<f32> = [23.0, 18.0, 12.0, 6.0, 0.0]
+            .into_iter()
+            .map(edge_pan_speed)
+            .collect();
+        assert!(
+            speeds.windows(2).all(|pair| pair[0] < pair[1]),
+            "{speeds:?}"
+        );
+        assert_eq!(edge_pan_speed(0.0), EDGE_PAN_MAX_SPEED);
+        assert_eq!(edge_pan_speed(-50.0), EDGE_PAN_MAX_SPEED);
+        assert_eq!(edge_pan_speed(-f32::INFINITY), EDGE_PAN_MAX_SPEED);
+    }
+
+    #[test]
+    fn the_edge_pan_moves_the_view_toward_the_edge_the_pointer_is_at() {
+        let canvas = Rect::from_min_size(pos2(100.0, 50.0), vec2(400.0, 300.0));
+        let dt = 0.1;
+        assert_eq!(
+            edge_pan_step(canvas, canvas.center(), dt, false),
+            Vec2::ZERO
+        );
+        // Near the right edge the drawing slides left.
+        let right = edge_pan_step(canvas, pos2(495.0, 200.0), dt, false);
+        assert!(right.x < 0.0 && right.y == 0.0, "{right:?}");
+        // Near the top-left corner it slides right and down.
+        let corner = edge_pan_step(canvas, pos2(104.0, 52.0), dt, false);
+        assert!(corner.x > 0.0 && corner.y > 0.0, "{corner:?}");
+        // Off the canvas only a held pointer pans, at the cap.
+        let outside = pos2(40.0, 200.0);
+        assert_eq!(edge_pan_step(canvas, outside, dt, false), Vec2::ZERO);
+        assert_eq!(
+            edge_pan_step(canvas, outside, dt, true),
+            vec2(EDGE_PAN_MAX_SPEED * dt, 0.0)
+        );
+        // A stalled frame cannot fling the view.
+        assert_eq!(
+            edge_pan_step(canvas, outside, 5.0, true),
+            edge_pan_step(canvas, outside, 0.1, true)
+        );
     }
 
     #[test]

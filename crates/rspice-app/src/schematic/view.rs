@@ -15,6 +15,7 @@ mod array_interaction;
 mod bus_interaction;
 mod context_menu;
 pub(crate) mod drawing_sheet;
+mod edge_pan;
 mod floating_paste;
 mod interaction;
 mod keyboard_navigation;
@@ -321,6 +322,7 @@ pub fn render_schematic_view(
         &mut state.schematic.session.editor.pan,
         min_zoom,
     );
+    edge_pan::edge_pan(ui, &response, available, state);
     let viewport = viewport_from_camera(
         state.schematic.session.editor.pan,
         state.schematic.session.editor.zoom,
