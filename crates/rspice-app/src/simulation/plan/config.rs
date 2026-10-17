@@ -64,7 +64,7 @@ impl AnalysisDependencyRepairContext {
         let detail = detail.trim();
         Self {
             periodic_sources: Err(if detail.is_empty() {
-                "the exact elaborated periodic-source catalog is unavailable".to_owned()
+                "the list of periodic sources in the elaborated circuit is unavailable".to_owned()
             } else {
                 detail.to_owned()
             }),
@@ -137,7 +137,7 @@ impl AnalysisDependencyRepairContext {
             .as_ref()
             .map_err(|detail| detail.clone())?;
         let netlist = rspice_core::Netlist::parse(&contract.netlist_source).map_err(|error| {
-            format!("the authenticated periodic-source circuit is no longer parseable: {error}")
+            format!("the circuit that lists the periodic sources no longer parses: {error}")
         })?;
         rspice_core::Engine::new(rspice_core::SimulationConfig::default())
             .validate_pss_source_contract_with_abort(
@@ -180,7 +180,7 @@ impl AnalysisDependencyRepairContext {
                 details.push(format!("omitted: {}", omitted.join(", ")));
             }
             return Err(format!(
-                "PSS tones do not match the exact elaborated periodic-source catalog ({})",
+                "PSS tones do not match the periodic sources in the elaborated circuit ({})",
                 details.join("; ")
             ));
         }
@@ -191,7 +191,7 @@ impl AnalysisDependencyRepairContext {
 impl Default for AnalysisDependencyRepairContext {
     fn default() -> Self {
         Self::periodic_sources_unavailable(
-            "the exact elaborated periodic-source catalog is unavailable",
+            "the list of periodic sources in the elaborated circuit is unavailable",
         )
     }
 }
