@@ -31,9 +31,9 @@ mod workspace_rows;
 
 use workspace_rows::{SPECIALIST_WORKSPACE_ROWS, SpecialistWorkspaceRow};
 
-const DESCRIPTION: &str = "Find every canonical specialist engineering owner without duplicating its document or overstating runtime availability.";
-const PURPOSE_COPY: &str = "Every specialist workspace remains discoverable on tablet and phone. Opening a tool preserves its canonical owner and composes dense work into focused steps, drawers, exact-entry panels, and structured alternatives without disabling supported mutations.";
-const OWNERSHIP_COPY: &str = "Favorites and pins are personal discovery preferences; recent tools are device-local history. They never duplicate documents or change canonical ownership. Profile-hidden tools remain inspectable because projects and deep links are portable. Optional target continuation preserves context but never replaces an otherwise supported phone task. Engine, connector, preview, and sign-off eligibility remain separate from workspace visibility.";
+const DESCRIPTION: &str = "Find every specialist workspace and see which ones this build can open. Opening one never copies its document.";
+const PURPOSE_COPY: &str = "Every specialist workspace can be found on tablet and phone too. Opening a tool keeps it in the workspace that owns it and splits dense work into focused steps, drawers, value-entry panels, and simpler alternatives, without turning off any supported edits.";
+const OWNERSHIP_COPY: &str = "Favorites and pins are personal discovery preferences; recent tools are device-local history. They never copy documents or change which workspace owns them. Profile-hidden tools remain inspectable because projects and deep links are portable. Optional target continuation preserves context but never replaces an otherwise supported phone task. Engine, connector, preview, and sign-off eligibility remain separate from workspace visibility.";
 const SEARCH_PLACEHOLDER: &str = "Find AMS, RF, layout, extraction, SI/PI, model, automation…";
 const TOOLBAR_PADDING_X: i8 = 10;
 const TOOLBAR_PADDING_Y: i8 = 9;

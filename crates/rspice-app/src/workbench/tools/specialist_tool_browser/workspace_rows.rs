@@ -218,7 +218,7 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 40] = [
     SpecialistWorkspaceRow {
         surface_id: SurfaceId::HighSigmaWorkbench,
         owner: Workspace::Verify,
-        purpose: "Specify rare-event estimators, confidence, convergence, diagnostics, and source-owned tail evidence.",
+        purpose: "Specify rare-event estimators, confidence, convergence, diagnostics, and the tail samples behind each estimate.",
         tier: CanonicalTier::Preview,
         primary_module_id: "results-verification",
         module_availability: CommercialModuleAvailability::Included,
@@ -226,7 +226,7 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 40] = [
     SpecialistWorkspaceRow {
         surface_id: SurfaceId::LayoutWorkbench,
         owner: Workspace::Design,
-        purpose: "Author hierarchical custom layout with exact geometry, connectivity, constraints, and in-design checks.",
+        purpose: "Author hierarchical custom layout with geometry, connectivity, constraints, and in-design checks.",
         tier: CanonicalTier::Preview,
         primary_module_id: "physical-integration",
         module_availability: CommercialModuleAvailability::OptionalModule,
@@ -234,7 +234,7 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 40] = [
     SpecialistWorkspaceRow {
         surface_id: SurfaceId::LvsPexWorkbench,
         owner: Workspace::Verify,
-        purpose: "Configure, launch, reconcile, and review LVS and extraction evidence while preserving producer identity.",
+        purpose: "Configure, launch, reconcile, and review LVS and extraction results, keeping track of which tool produced each one.",
         tier: CanonicalTier::QualifiedExternalFirst,
         primary_module_id: "physical-integration",
         module_availability: CommercialModuleAvailability::ExternalIntegration,
@@ -242,7 +242,7 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 40] = [
     SpecialistWorkspaceRow {
         surface_id: SurfaceId::EmWorkbench,
         owner: Workspace::Verify,
-        purpose: "Prepare field-solver structures, ports, meshing, calibration, coupled analyses, and producer-bound evidence.",
+        purpose: "Prepare field-solver structures, ports, meshing, calibration, coupled analyses, and results tied to the solver that made them.",
         tier: CanonicalTier::QualifiedExternalFirst,
         primary_module_id: "physical-integration",
         module_availability: CommercialModuleAvailability::ExternalIntegration,
@@ -266,7 +266,7 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 40] = [
     SpecialistWorkspaceRow {
         surface_id: SurfaceId::DigitalEventWorkbench,
         owner: Workspace::Results,
-        purpose: "Inspect digital, analog, protocol, assertion, and mixed-domain events with linked exact-time navigation.",
+        purpose: "Inspect digital, analog, protocol, assertion, and mixed-domain events with linked navigation to each event's time.",
         tier: CanonicalTier::Preview,
         primary_module_id: "results-verification",
         module_availability: CommercialModuleAvailability::Included,
@@ -290,7 +290,7 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 40] = [
     SpecialistWorkspaceRow {
         surface_id: SurfaceId::StatisticalVisualizationWorkbench,
         owner: Workspace::Results,
-        purpose: "Explore immutable statistical samples, filters, correlations, outliers, and evidence views without changing yield truth.",
+        purpose: "Explore saved statistical samples, filters, correlations, outliers, and result views without changing the yield results.",
         tier: CanonicalTier::ReleaseTarget,
         primary_module_id: "results-verification",
         module_availability: CommercialModuleAvailability::Included,
@@ -298,7 +298,7 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 40] = [
     SpecialistWorkspaceRow {
         surface_id: SurfaceId::ReportAuthoring,
         owner: Workspace::Results,
-        purpose: "Compose traceable review documents from immutable evidence and hand finished artifacts to Release Closure.",
+        purpose: "Compose traceable review documents from saved results and hand finished documents to Release Closure.",
         tier: CanonicalTier::ReleaseTarget,
         primary_module_id: "results-verification",
         module_availability: CommercialModuleAvailability::Included,
@@ -338,7 +338,7 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 40] = [
     SpecialistWorkspaceRow {
         surface_id: SurfaceId::JobDiagnostics,
         owner: Workspace::Simulate,
-        purpose: "Inspect immutable residual, timestep, matrix, device, log, checkpoint, and target evidence for failed execution.",
+        purpose: "Inspect the saved residual, timestep, matrix, device, log, checkpoint, and target data of a failed run.",
         tier: CanonicalTier::ReleaseTarget,
         primary_module_id: "core-analog-ams",
         module_availability: CommercialModuleAvailability::Included,
@@ -418,7 +418,7 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 40] = [
     SpecialistWorkspaceRow {
         surface_id: SurfaceId::PcbWorkbench,
         owner: Workspace::Design,
-        purpose: "Author stackups, constraints, routing, extraction, verification, and manufacturing handoff with exact units.",
+        purpose: "Author stackups, constraints, routing, extraction, verification, and manufacturing handoff with explicit units.",
         tier: CanonicalTier::QualifiedExternalFirst,
         primary_module_id: "pcb-si-pi",
         module_availability: CommercialModuleAvailability::ExternalIntegration,
@@ -426,7 +426,7 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 40] = [
     SpecialistWorkspaceRow {
         surface_id: SurfaceId::CliBatchWorkbench,
         owner: Workspace::Netlist,
-        purpose: "Build, validate, schedule, observe, and exactly replay typed batch commands and frozen manifests.",
+        purpose: "Build, validate, schedule, observe, and replay batch commands and frozen manifests just as they first ran.",
         tier: CanonicalTier::ReleaseTarget,
         primary_module_id: "enterprise-automation",
         module_availability: CommercialModuleAvailability::EnterpriseControlled,
@@ -450,7 +450,7 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 40] = [
     SpecialistWorkspaceRow {
         surface_id: SurfaceId::CosimulationWorkbench,
         owner: Workspace::Simulate,
-        purpose: "Define participants, typed interfaces, synchronization, transport, failure isolation, and parity evidence.",
+        purpose: "Define participants, interfaces, synchronization, transport, failure isolation, and parity checks.",
         tier: CanonicalTier::Preview,
         primary_module_id: "enterprise-automation",
         module_availability: CommercialModuleAvailability::EnterpriseControlled,
@@ -466,7 +466,7 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 40] = [
     SpecialistWorkspaceRow {
         surface_id: SurfaceId::QuantumWorkbench,
         owner: Workspace::Simulate,
-        purpose: "Specify quantum devices, eigenmodes, participation, Hamiltonians, controls, uncertainty, and calibration evidence.",
+        purpose: "Specify quantum devices, eigenmodes, participation, Hamiltonians, controls, uncertainty, and calibration data.",
         tier: CanonicalTier::Preview,
         primary_module_id: "emerging-domains",
         module_availability: CommercialModuleAvailability::ResearchPreview,
@@ -482,7 +482,7 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 40] = [
     SpecialistWorkspaceRow {
         surface_id: SurfaceId::DeckCompatibilityCenter,
         owner: Workspace::Netlist,
-        purpose: "Inspect source semantics, mapping, deltas, equivalence evidence, and reversible migration without rewriting input decks.",
+        purpose: "Inspect what each deck statement means, mappings, differences, equivalence checks, and reversible migration without rewriting input decks.",
         tier: CanonicalTier::ReleaseTarget,
         primary_module_id: "enterprise-automation",
         module_availability: CommercialModuleAvailability::EnterpriseControlled,

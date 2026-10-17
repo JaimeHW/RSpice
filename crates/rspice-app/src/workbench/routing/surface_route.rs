@@ -192,7 +192,7 @@ pub enum SurfaceRouteParseError {
     UnknownSelector(String),
     #[error(transparent)]
     UnknownSurface(#[from] SurfaceIdParseError),
-    #[error("non-canonical surface selector `{received}`; expected `{expected}`")]
+    #[error("surface selector `{received}` must be written `{expected}`")]
     NonCanonicalSelector {
         received: String,
         expected: &'static str,
@@ -208,7 +208,7 @@ pub enum SurfaceRouteParseError {
     InvalidObjectId(String),
     #[error("product object UUID must not be nil")]
     NilObjectId,
-    #[error("non-canonical product object UUID `{received}`; expected `{expected}`")]
+    #[error("product object UUID `{received}` must be written `{expected}`")]
     NonCanonicalObjectId { received: String, expected: String },
 }
 
