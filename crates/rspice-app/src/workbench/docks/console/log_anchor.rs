@@ -1,99 +1,93 @@
-//! Following a console row's anchor.
+//! Following a console line's anchor.
 //!
-//! Split from `console.rs` because it is a different concern from painting a
-//! log line: everything here is about whether a row's target still exists and
-//! what happens when the reader commits to it. The row rendering it wraps is
-//! `super::row_with_sense`, which stays with the other row shapes.
+//! Split from the page because it is a different concern from painting a
+//! line: everything here is about whether a line's target still exists and
+//! what happens when the reader commits to it. A run's line opens that run's
+//! log on the page itself; any other anchor leaves the page for the drawing or
+//! symbol it names, which is the session's to do once the page has drawn.
 
-use egui::{Sense, Ui};
+use egui::Ui;
 
-use super::{AppState, log_message_color, log_problem, row, row_with_sense};
+use super::AppState;
+use crate::diagnostics::LogAnchor;
+use crate::workbench::state::{ConsoleChannel, ConsoleView};
 
-use crate::ui::tokens::Tokens;
-
-/// One console line, plus the jump the reader asked it to follow.
+/// Follow `anchor`, from a double-click, Enter or the context menu.
 ///
-/// The row cannot follow the anchor itself. The console paints its rows out
-/// of the log buffer, so the session is borrowed immutably for the whole
-/// pass, and navigating mutates it. The request rides back out to [`super::console`],
-/// which holds the mutable borrow — the same shape [`super::netlist_problems`] uses
-/// for the same reason. That also keeps the row off `RSpiceApp`: everything a
-/// jump needs is on `AppState`.
-pub(super) fn log_row(
-    ui: &mut Ui,
+/// A jump off the page is handed back through `jump`: the page draws from the
+/// session immutably, and navigating mutates it. Returns whether following
+/// leaves the page. An anchor whose target is gone does nothing; the line said
+/// so under the pointer before the reader committed.
+pub(super) fn follow(
     state: &AppState,
-    entry: &crate::diagnostics::LogEntry,
-) -> Option<crate::diagnostics::LogAnchor> {
-    let t = Tokens::get(ui.ctx());
-    // A warning or an error is a mark in front of the line; the source and
-    // the message stay neutral.
-    let problem = log_problem(entry.severity);
-    let source_color = t.color.text_dim;
-    let message_color = log_message_color(&t, entry.severity);
-    let message = entry.message.as_str();
-    let Some(anchor) = entry.anchor.as_ref() else {
-        row(
-            ui,
-            problem,
-            &entry.format_timestamp(),
-            entry.source.name(),
-            message,
-            source_color,
-            message_color,
-        );
-        return None;
-    };
-    // Asked before the row is sensed, not after it is clicked: an anchor
-    // whose objects the drawing no longer carries must not look like a jump.
-    let refusal = state.log_anchor_refusal(anchor);
-    let response = row_with_sense(
-        ui,
-        problem,
-        &entry.format_timestamp(),
-        entry.source.name(),
-        message,
-        source_color,
-        message_color,
-        if refusal.is_some() {
-            Sense::hover()
-        } else {
-            // accessibility-pointer-shim: this only picks the sense. The row it
-            // configures is `row_with_sense`, which announces the whole line as
-            // a button and paints the focus ring for the sense it is handed.
-            Sense::click()
-        },
-    );
-    if let Some(refusal) = refusal {
-        response.on_hover_text(refusal);
-        return None;
+    view: &mut ConsoleView,
+    anchor: &LogAnchor,
+    jump: &mut Option<LogAnchor>,
+) -> bool {
+    if state.log_anchor_refusal(anchor).is_some() {
+        return false;
     }
-    let response = response
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text(log_anchor_hint(anchor));
-    response.clicked().then(|| anchor.clone())
+    match anchor {
+        LogAnchor::ResultRun { run_sequence } => {
+            view.open(ConsoleChannel::Run(*run_sequence));
+            false
+        }
+        other => {
+            *jump = Some(other.clone());
+            true
+        }
+    }
 }
 
-/// What following this row's anchor will do, in the words of the surface it
+/// The context menu's item for a line's anchor. Returns whether choosing it
+/// leaves the page.
+pub(super) fn menu(
+    ui: &mut Ui,
+    state: &AppState,
+    view: &mut ConsoleView,
+    anchor: &LogAnchor,
+    jump: &mut Option<LogAnchor>,
+) -> bool {
+    let label = match anchor {
+        LogAnchor::ResultRun { .. } => "Open run log",
+        LogAnchor::Symbol { .. } => "Show in symbol view",
+        LogAnchor::Schematic { .. } | LogAnchor::Simulation { .. } => "Show on schematic",
+    };
+    let refusal = state.log_anchor_refusal(anchor);
+    let item = ui.add_enabled(refusal.is_none(), egui::Button::new(label));
+    if let Some(refusal) = refusal {
+        item.on_disabled_hover_text(refusal);
+        return false;
+    }
+    if !item.clicked() {
+        return false;
+    }
+    ui.close();
+    follow(state, view, anchor, jump)
+}
+
+/// What following this line's anchor will do, in the words of the surface it
 /// lands on.
-fn log_anchor_hint(anchor: &crate::diagnostics::LogAnchor) -> String {
-    use crate::diagnostics::LogAnchor;
+pub(super) fn hint(anchor: &LogAnchor) -> String {
     match anchor {
-        LogAnchor::Schematic { .. } => "Show on the schematic".to_owned(),
-        LogAnchor::Symbol { pin_name, .. } => format!("Show pin {pin_name} in the symbol view"),
+        LogAnchor::Schematic { .. } => "Double-click to show on the schematic".to_owned(),
+        LogAnchor::Symbol { pin_name, .. } => {
+            format!("Double-click to show pin {pin_name} in the symbol view")
+        }
         LogAnchor::Simulation { nets, devices } => {
             let count = nets.len() + devices.len();
             let objects = if count == 1 { "object" } else { "objects" };
-            format!("Mark the {count} {objects} this run named on the schematic")
+            format!("Double-click to mark the {count} {objects} this run named on the schematic")
         }
         LogAnchor::ResultRun { run_sequence } => {
-            format!("Open run {run_sequence} in Results")
+            format!("Double-click to open the log of Run {run_sequence}")
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::console;
+    use super::super::transcript::console;
     use super::*;
     use crate::diagnostics::LogSource;
     use crate::state::SimulationRun;
@@ -105,7 +99,7 @@ mod tests {
     /// Rows are painted galleys rather than widgets, so there is no widget id
     /// to look a rect up by. The text the row drew is the only handle a test
     /// has on it, which is the same handle a reader has.
-    fn console_row_position(state: &mut AppState, needle: &str) -> egui::Pos2 {
+    fn console_row_position(ctx: &egui::Context, state: &mut AppState, needle: &str) -> egui::Pos2 {
         fn scan(shape: &egui::epaint::Shape, needle: &str, found: &mut Option<egui::Pos2>) {
             match shape {
                 egui::epaint::Shape::Text(text) if found.is_none() => {
@@ -122,7 +116,6 @@ mod tests {
             }
         }
 
-        let ctx = console_context_for_tests();
         let output = ctx.run_ui(console_input(Vec::new()), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| console(ui, state));
         });
@@ -150,35 +143,33 @@ mod tests {
         }
     }
 
-    /// Click the console row whose message contains `needle`.
-    ///
-    /// Two frames, because egui resolves a press against the widget rects the
-    /// previous frame registered: the first lays the rows out, the second
-    /// delivers the press to the row that is now known to be there.
-    fn click_console_row(state: &mut AppState, needle: &str) {
-        let position = console_row_position(state, needle);
-        let ctx = console_context_for_tests();
-        let _ = ctx.run_ui(console_input(Vec::new()), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| console(ui, state));
-        });
-        let events = vec![
+    fn press(position: egui::Pos2) -> Vec<egui::Event> {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: position,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        };
+        vec![
             egui::Event::PointerMoved(position),
-            egui::Event::PointerButton {
-                pos: position,
-                button: egui::PointerButton::Primary,
-                pressed: true,
-                modifiers: egui::Modifiers::default(),
-            },
-            egui::Event::PointerButton {
-                pos: position,
-                button: egui::PointerButton::Primary,
-                pressed: false,
-                modifiers: egui::Modifiers::default(),
-            },
-        ];
-        let _ = ctx.run_ui(console_input(events), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| console(ui, state));
-        });
+            button(true),
+            button(false),
+        ]
+    }
+
+    /// Double-click the console row whose message contains `needle`.
+    ///
+    /// egui resolves a press against the widget rects the previous frame
+    /// registered, so the rows are laid out first; the two presses then land
+    /// in successive frames, inside the double-click interval.
+    fn double_click_console_row(state: &mut AppState, needle: &str) {
+        let ctx = console_context_for_tests();
+        let position = console_row_position(&ctx, state, needle);
+        for _ in 0..2 {
+            let _ = ctx.run_ui(console_input(press(position)), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| console(ui, state));
+            });
+        }
     }
 
     /// A sheet drawing the conductor `OUT`, with a cross-probe map captured at
@@ -206,10 +197,10 @@ mod tests {
         state
     }
 
-    /// The whole point of an anchored row: the objects a failed run named are
-    /// one click from the sentence that named them.
+    /// The whole point of an anchored line: the objects a failed run named
+    /// are a double-click from the sentence that named them.
     #[test]
-    fn clicking_an_anchored_console_row_marks_what_the_run_named() {
+    fn double_clicking_an_anchored_console_row_marks_what_the_run_named() {
         let mut state = state_with_probed_conductor();
         state
             .workbench
@@ -218,13 +209,13 @@ mod tests {
             crate::diagnostics::LogSeverity::Error,
             LogSource::Run,
             "Analysis failed: no DC path at OUT",
-            Some(crate::diagnostics::LogAnchor::Simulation {
+            Some(LogAnchor::Simulation {
                 nets: vec!["OUT".to_owned()],
                 devices: Vec::new(),
             }),
         );
 
-        click_console_row(&mut state, "no DC path at OUT");
+        double_click_console_row(&mut state, "no DC path at OUT");
 
         assert!(
             state.schematic.session.editor.selection.wires.contains(&91),
@@ -238,14 +229,14 @@ mod tests {
     }
 
     /// A name the drawing no longer carries must not look like a jump. The
-    /// row stays put, says why on hover, and navigates nowhere when pressed.
+    /// row stays put, says why on hover, and navigates nowhere when followed.
     #[test]
     fn an_unresolvable_anchor_renders_inert_and_says_why() {
         let mut state = state_with_probed_conductor();
         state
             .workbench
             .activate(crate::workbench::state::Workspace::Results);
-        let anchor = crate::diagnostics::LogAnchor::Simulation {
+        let anchor = LogAnchor::Simulation {
             nets: vec!["DELETED".to_owned()],
             devices: Vec::new(),
         };
@@ -264,7 +255,7 @@ mod tests {
             "the tooltip must name what it could not find: {refusal}"
         );
 
-        click_console_row(&mut state, "no DC path at DELETED");
+        double_click_console_row(&mut state, "no DC path at DELETED");
 
         assert!(
             state.schematic.session.editor.selection.wires.is_empty(),
@@ -284,33 +275,51 @@ mod tests {
         );
     }
 
-    /// A run anchor opens the dataset it names, and refuses once that run is
-    /// no longer retained rather than opening whatever is selected.
+    /// A run's line opens that run's log on the page, and is inert once the
+    /// run is no longer held rather than opening an empty channel.
     #[test]
-    fn a_run_anchor_opens_its_dataset_and_refuses_once_the_run_is_gone() {
+    fn a_run_line_opens_its_log_and_refuses_once_the_run_is_gone() {
         let mut app = RSpiceApp::test_instance();
+        app.state.log_buffer.clear();
         app.state
             .simulation
             .retained
             .runs
             .push(SimulationRun::new(7));
-        let anchor = crate::diagnostics::LogAnchor::ResultRun { run_sequence: 7 };
-        assert!(
-            app.state.log_anchor_refusal(&anchor).is_none(),
-            "a retained run is reachable"
+        app.state.log_buffer.log_anchored(
+            crate::diagnostics::LogSeverity::Info,
+            LogSource::Run,
+            "Run 7 started: Transient",
+            Some(LogAnchor::ResultRun { run_sequence: 7 }),
         );
 
-        app.state.jump_to_log_anchor(anchor.clone());
+        let workspace = app.state.workbench.workspace;
+        double_click_console_row(&mut app.state, "Run 7 started");
         assert_eq!(
-            app.state.workbench.workspace,
-            crate::workbench::state::Workspace::Results
+            app.state.workbench.console_view.channel,
+            ConsoleChannel::Run(7),
+            "the run's line opens the run's own log"
+        );
+        assert_eq!(
+            app.state.workbench.workspace, workspace,
+            "on the page, without leaving the workspace"
         );
 
+        app.state
+            .workbench
+            .console_view
+            .open(ConsoleChannel::Session);
         app.state.simulation.retained.runs.clear();
+        let anchor = LogAnchor::ResultRun { run_sequence: 7 };
         let refusal = app
             .state
             .log_anchor_refusal(&anchor)
             .expect("a run this session dropped cannot be opened");
         assert!(refusal.contains("Run 7"), "{refusal}");
+        let mut view = ConsoleView::default();
+        let mut jump = None;
+        assert!(!follow(&app.state, &mut view, &anchor, &mut jump));
+        assert_eq!(view.channel, ConsoleChannel::Session);
+        assert!(jump.is_none());
     }
 }

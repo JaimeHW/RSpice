@@ -238,16 +238,32 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
         // Nothing to open in Results, so Results is not offered. A control
         // that arrives at an empty dataset would be worse than no control.
         let detail = "No analysis result was retained, so there is nothing to open in Results.";
-        if matches!(lifecycle, Lifecycle::Failed) {
-            // A failure with no dataset still has an account of itself, and
-            // it is in the Console. A cancelled run has none worth a trip.
+        // A failure with no dataset still has an account of itself, and it
+        // starts at the run's line in the session's log, which the run wrote
+        // as it ended. A cancelled run has none worth a trip.
+        let failure_line = matches!(lifecycle, Lifecycle::Failed)
+            .then(|| {
+                app.state
+                    .log_buffer
+                    .entries()
+                    .filter(|entry| {
+                        entry.anchor
+                            == Some(crate::diagnostics::LogAnchor::ResultRun {
+                                run_sequence: run_id,
+                            })
+                    })
+                    .last()
+            })
+            .flatten()
+            .map(|entry| entry.id);
+        if let Some(log_id) = failure_line {
             app.state.ui.toasts.notify_with_action(
                 ctx,
                 category,
                 kind,
                 title,
                 detail,
-                crate::ui::widgets::NotificationAction::ShowInConsole,
+                crate::ui::widgets::NotificationAction::ShowInConsole { log_id },
             );
         } else {
             app.state
@@ -616,6 +632,7 @@ mod tests {
     /// the notice that is raised has to carry the dataset it announces.
     #[test]
     fn run_outcome_notices_distinguish_failure_cancellation_and_interruption() {
+        use crate::diagnostics::LogAnchor;
         use crate::state::{AnalysisResult, AnalysisType, SimulationRunLifecycle as Lifecycle};
         use crate::ui::widgets::{NotificationAction, ToastKind};
 
@@ -639,6 +656,13 @@ mod tests {
                 app.state.simulation.retained.runs[0]
                     .finish_lifecycle(lifecycle)
                     .unwrap();
+                // The line the run writes in the session's log as it ends.
+                let end_line = app.state.log_buffer.log_anchored(
+                    LogSeverity::Error,
+                    LogSource::Run,
+                    title,
+                    Some(LogAnchor::ResultRun { run_sequence: 1 }),
+                );
                 announce_run_completion(&ctx, &mut app);
                 announce_run_completion(&ctx, &mut app);
                 let activity = app.state.ui.toasts.activity();
@@ -647,12 +671,13 @@ mod tests {
                 expected.push((title.to_owned(), kind));
                 // One offer per notice. A retained dataset is the better
                 // destination; without one, only a failure has an account
-                // worth reading, and it is in the Console.
+                // worth reading, and it starts at the run's line in the
+                // session's log.
                 let offer = if retained {
                     Some(NotificationAction::OpenRunInResults { run_sequence: 1 })
                 } else {
                     matches!(lifecycle, Lifecycle::Failed)
-                        .then_some(NotificationAction::ShowInConsole)
+                        .then_some(NotificationAction::ShowInConsole { log_id: end_line })
                 };
                 assert_eq!(activity[0].action(), offer);
             }
@@ -792,7 +817,7 @@ mod tests {
         app.state.simulation.retained.runs[0].success = false;
         // Exactly what `finish_simulation_batch` leaves behind for a run that
         // sealed with nothing retained.
-        app.state.log_buffer.log_anchored(
+        let end_line = app.state.log_buffer.log_anchored(
             LogSeverity::Error,
             LogSource::Run,
             "Simulation completed with errors",
@@ -815,9 +840,9 @@ mod tests {
         assert_eq!(activity[0].title(), "Run 1 failed");
         assert_eq!(
             activity[0].action(),
-            Some(crate::ui::widgets::NotificationAction::ShowInConsole),
-            "nothing was retained, so Results is not offered; the failure's account is in the \
-             Console, so the Console is"
+            Some(crate::ui::widgets::NotificationAction::ShowInConsole { log_id: end_line }),
+            "nothing was retained, so Results is not offered; the failure's account starts at \
+             the run's line in the Console, so that line is"
         );
         assert_eq!(app.state.ui.toasts.unread_count(), 1);
     }

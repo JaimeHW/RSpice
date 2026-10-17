@@ -94,7 +94,7 @@ pub(super) fn seed_session(ctx: &egui::Context, toasts: &mut Toasts) {
         ToastKind::Error,
         "Run 40 failed",
         "No analysis result was retained, so there is nothing to open in Results.",
-        NotificationAction::ShowInConsole,
+        NotificationAction::ShowInConsole { log_id: 0 },
     );
     toasts.notify_with_action(
         ctx,

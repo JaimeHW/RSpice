@@ -24,14 +24,14 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::documents::result_document::{
     AnalysisPresentationKey, analysis_default_unit, browser_signal_unit,
     exact_result_artifact_text, exact_result_signal_last_sample, exact_result_signal_tsv,
-    result_artifact_stable_path, result_signal_stable_path, retained_evidence_is_valid,
+    retained_evidence_is_valid,
 };
 use rspice_results_ui::selection::{
     ResultArtifactPresentationKey, ResultBrowserSelectionKey, ResultExpressionPresentationKey,
     SourceWaveformPresentationKey,
 };
 
-use super::super::commands::result_navigation::reveal_producer_log;
+use super::super::commands::result_navigation::{open_run_log, producing_run};
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{PANEL_HEADER_H, WorkbenchIcon, property_row, section_header};
 use super::super::state::{ModelsPage, ProjectPage, SimulationPage, VerificationPage, Workspace};
@@ -1877,18 +1877,31 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         select_result_dataset(app, run.run_index);
                     }
                     let mut details = false;
+                    let mut log = false;
                     responses.selection.context_menu(|ui| {
                         if ui.button("Run details\u{2026}").clicked() {
                             details = true;
                             ui.close();
                         }
+                        if ui.button("Open run log").clicked() {
+                            log = true;
+                            ui.close();
+                        }
                     });
-                    if details
-                        && let Some(retained) =
-                            app.state.simulation.retained.runs.get(run.run_index)
+                    if let Some(run_id) = app
+                        .state
+                        .simulation
+                        .retained
+                        .runs
+                        .get(run.run_index)
+                        .map(|retained| retained.id)
                     {
-                        let run_id = retained.id;
-                        super::inspector::run_details::open(&mut app.state, run_id);
+                        if details {
+                            super::inspector::run_details::open(&mut app.state, run_id);
+                        }
+                        if log {
+                            open_run_log(app, run_id);
+                        }
                     }
                     if responses.overlay.is_some_and(|response| response.clicked()) {
                         let enabled = app.state.simulation.toggle_dataset_overlay(run.dataset_id);
@@ -4047,7 +4060,7 @@ fn sweep_endpoint(value: f64, unit: &str) -> String {
 
 /// Thousands-grouped sample count. A six-figure retained length is read as a
 /// magnitude, not parsed digit by digit.
-fn grouped_count(value: usize) -> String {
+pub(super) fn grouped_count(value: usize) -> String {
     let digits = value.to_string();
     let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
     for (index, digit) in digits.chars().enumerate() {
@@ -5422,14 +5435,13 @@ fn result_artifact_context_menu(
             open_result_artifact(app, artifact, true);
             ui.close();
         }
-        if ui.button("Show run log").clicked() {
-            match result_artifact_stable_path(
-                &artifact.identity,
-                &app.state.simulation.retained.runs,
-            ) {
-                Ok(path) => reveal_producer_log(app, path, artifact.identity.canonical_name()),
-                Err(error) => app.state.prompt(error),
-            }
+        // Offered only while the session holds the run that produced it.
+        if let Some(run) = producing_run(
+            &app.state.simulation.retained.runs,
+            artifact.identity.analysis().dataset_id(),
+        ) && ui.button("Open run log").clicked()
+        {
+            open_run_log(app, run);
             ui.close();
         }
     });
@@ -5613,17 +5625,13 @@ fn result_signal_context_menu(
             }
             ui.close();
         }
-        if ui.button("Show run log").clicked() {
-            match result_signal_stable_path(&key, &app.state.simulation.retained.runs) {
-                Ok(path) => {
-                    let quantity = key
-                        .resolve(&app.state.simulation.retained.runs)
-                        .map(|(.., waveform)| waveform.name.clone())
-                        .unwrap_or_default();
-                    reveal_producer_log(app, path, &quantity);
-                }
-                Err(error) => app.state.prompt(error),
-            }
+        // Offered only while the session holds the run that produced it.
+        if let Some(run) = producing_run(
+            &app.state.simulation.retained.runs,
+            key.analysis().dataset_id(),
+        ) && ui.button("Open run log").clicked()
+        {
+            open_run_log(app, run);
             ui.close();
         }
     });

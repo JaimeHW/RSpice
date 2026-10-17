@@ -211,6 +211,10 @@ fn console_empty_hints_match_mockup_spacing_and_type_scale() {
 fn an_empty_page_starts_where_its_first_row_would() {
     fn scan(shape: &egui::epaint::Shape, found: &mut Option<egui::Pos2>) {
         match shape {
+            // An empty field's galley has no extent, so the band filter below
+            // cannot place it; it is placed by where it is drawn instead.
+            egui::epaint::Shape::Text(text)
+                if text.galley.job.text.is_empty() || text.pos.y < CONSOLE_HEADER_HEIGHT => {}
             egui::epaint::Shape::Text(text) => {
                 if found.is_none_or(|best: egui::Pos2| text.pos.y < best.y) {
                     *found = Some(text.pos);
@@ -335,7 +339,7 @@ fn console_rows_paint_no_coloured_text() {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| console(ui, &mut state));
+        egui::CentralPanel::default().show(ctx, |ui| transcript::console(ui, &mut state));
     });
     let mut colors = Vec::new();
     for clipped in &output.shapes {
@@ -396,7 +400,7 @@ fn the_problem_badge_counts_records_and_not_log_entries() {
 fn clear_affordance_is_truthful_for_every_console_page() {
     let console = console_clear_action(ConsolePage::Console, true);
     assert!(console.enabled);
-    assert_eq!(console.label, "Clear console output");
+    assert_eq!(console.label, "Clear the session log");
     assert!(!console_clear_action(ConsolePage::Console, false).enabled);
 
     for page in [
@@ -406,7 +410,7 @@ fn clear_affordance_is_truthful_for_every_console_page() {
     ] {
         let action = console_clear_action(page, true);
         assert!(!action.enabled);
-        assert_ne!(action.label, "Clear console output");
+        assert_ne!(action.label, "Clear the session log");
     }
 }
 
@@ -427,6 +431,36 @@ fn the_clear_control_clears_the_visible_page_through_its_command() {
     Command::ClearConsole.execute(&mut app);
     assert!(app.state.log_buffer.is_empty());
     assert!(!Command::ClearConsole.is_enabled(&app));
+}
+
+/// A run's log is a record. Its channel offers no Clear, and the command
+/// clears nothing from it, whatever the session's log holds.
+#[test]
+fn a_run_channel_has_no_clear_and_the_command_leaves_the_session_alone() {
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .log_buffer
+        .warning(LogSource::Run, "visible console warning");
+    app.state
+        .simulation
+        .retained
+        .runs
+        .push(SimulationRun::new(3));
+    app.state.workbench.console_page = ConsolePage::Console;
+    app.state
+        .workbench
+        .console_view
+        .open(crate::workbench::state::ConsoleChannel::Run(3));
+
+    let desktop = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchState::default());
+    assert!(!clear_is_offered(
+        desktop,
+        ConsolePage::Console,
+        app.state.workbench.console_view.channel
+    ));
+    assert!(!Command::ClearConsole.is_enabled(&app));
+    Command::ClearConsole.execute(&mut app);
+    assert!(!app.state.log_buffer.is_empty());
 }
 
 #[test]
@@ -652,19 +686,28 @@ fn console_chrome_and_grid_geometry_match_the_mockup() {
 
 #[test]
 fn console_tab_lane_reserves_every_visible_trailing_action() {
+    use crate::workbench::state::ConsoleChannel;
+
+    let session = ConsoleChannel::Session;
     let desktop = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchState::default());
     for page in ConsolePage::ALL {
-        assert_eq!(console_trailing_actions_width(desktop, page, false), 90.0);
+        let clear = clear_is_offered(desktop, page, session);
+        assert_eq!(console_trailing_actions_width(desktop, clear, false), 90.0);
     }
+    // A run's log has no Clear, and the lane gives its width back to the tabs.
+    let run = clear_is_offered(desktop, ConsolePage::Console, ConsoleChannel::Run(1));
+    assert_eq!(console_trailing_actions_width(desktop, run, false), 60.0);
 
     let phone = LayoutSpec::resolve_with_pointer(390.0, 844.0, true, &WorkbenchState::default());
     for page in ConsolePage::ALL {
-        assert_eq!(console_trailing_actions_width(phone, page, true), 47.0);
+        let clear = clear_is_offered(phone, page, session);
+        assert_eq!(console_trailing_actions_width(phone, clear, true), 47.0);
     }
 
     let tablet = LayoutSpec::resolve_with_pointer(1_024.0, 768.0, true, &WorkbenchState::default());
     for page in ConsolePage::ALL {
-        assert_eq!(console_trailing_actions_width(tablet, page, true), 94.0);
+        let clear = clear_is_offered(tablet, page, session);
+        assert_eq!(console_trailing_actions_width(tablet, clear, true), 94.0);
     }
 }
 
@@ -706,111 +749,285 @@ fn painted_console_body(mut render: impl FnMut(&mut egui::Ui)) -> String {
     rendered
 }
 
+/// Each channel says why it shows no rows, in terms of that channel: a
+/// session with nothing in it, a run that wrote nothing, a find that matches
+/// nothing. None of them promises lines that will never come.
 #[test]
-fn run_outcome_header_uses_selected_history_lifecycle() {
-    use crate::state::SimulationRunLifecycle as Lifecycle;
+fn each_channel_says_why_it_shows_no_rows() {
+    use crate::workbench::state::ConsoleChannel;
 
-    let mut observed = Vec::new();
-    let mut expected = Vec::new();
-    for (lifecycle, label) in [
-        (Lifecycle::Completed, "completed"),
-        (Lifecycle::Failed, "failed"),
-        (Lifecycle::Aborted, "cancelled"),
-        (Lifecycle::Interrupted, "interrupted"),
-        (Lifecycle::LegacyUnknown, "legacy status unknown"),
-    ] {
-        let mut app = RSpiceApp::test_instance();
-        let historical = app.state.simulation.start_run();
-        historical.label = "Historical operating point".to_owned();
-        historical.success = lifecycle == Lifecycle::Completed;
-        historical.restore_lifecycle(lifecycle, 1.25).unwrap();
-        app.state.simulation.start_run().mark_running().unwrap();
-        app.state.simulation.retained.runs[0]
-            .finish_lifecycle(Lifecycle::Completed)
-            .unwrap();
-        app.state.simulation.view.active_run_idx = Some(1);
-        observed.push(painted_console_body(|ui| console_context(ui, &app)));
-        expected.push(format!(
-            "Selected result · Historical operating point · {label} · 1.25 s elapsed\n"
-        ));
-    }
-    assert_eq!(observed, expected);
-}
+    let mut state = AppState::default();
+    state.log_buffer.clear();
+    let rendered = painted_console_body(|ui| transcript::console(ui, &mut state));
+    assert!(rendered.contains("No studio activity yet."), "{rendered}");
+    assert!(!rendered.contains("will appear"), "{rendered}");
 
-/// A narrowed console shows only the producer's entries, says how much of
-/// the log that is, and offers the one control that puts the rest back.
-#[test]
-fn a_producer_filter_narrows_the_console_and_states_what_it_hid() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.log_buffer.clear();
-    app.state.log_buffer.log(
-        crate::diagnostics::LogSeverity::Info,
-        LogSource::Run,
-        "  gain = 1.234000e1",
-    );
-    app.state.log_buffer.log(
-        crate::diagnostics::LogSeverity::Info,
-        LogSource::Run,
-        "Transient: 512 points, 3 waveforms",
-    );
-    app.state.workbench.console_producer_filter =
-        Some(crate::workbench::state::ConsoleProducerFilter::new(
-            "dataset/7/analysis/3/artifact/gain",
-            "gain",
-        ));
+    state.simulation.retained.runs.push(SimulationRun::new(4));
+    state.workbench.console_view.open(ConsoleChannel::Run(4));
+    let rendered = painted_console_body(|ui| transcript::console(ui, &mut state));
+    assert!(rendered.contains("This run wrote no log."), "{rendered}");
 
-    let rendered = painted_console_body(|ui| console(ui, &mut app.state));
+    state.workbench.console_view.open(ConsoleChannel::Session);
+    state
+        .log_buffer
+        .log(LogSeverity::Info, LogSource::Studio, "Project opened");
+    state.workbench.console_view.find = "netlist".to_owned();
+    let rendered = painted_console_body(|ui| transcript::console(ui, &mut state));
     assert!(
-        rendered.contains("PRODUCER · gain · 1 of 2 entries"),
-        "the strip must state the producer and how much of the log it keeps:\n{rendered}"
-    );
-    assert!(rendered.contains("gain = 1.234000e1"), "{rendered}");
-    assert!(
-        !rendered.contains("Transient: 512 points"),
-        "an entry that is not this producer's must be filtered out:\n{rendered}"
-    );
-    assert!(rendered.contains("Show all entries"), "{rendered}");
-    assert!(
-        !app.state
-            .workbench
-            .console_producer_filter
-            .as_ref()
-            .expect("the filter survives the frame")
-            .scroll_to_newest,
-        "the one-shot scroll request is consumed by the frame that honours it"
-    );
-}
-
-/// Nothing matching is a fact about the log, and the console says which
-/// fact rather than looking like an empty session.
-#[test]
-fn an_unmatched_producer_says_why_the_console_looks_empty() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.log_buffer.clear();
-    app.state.log_buffer.log(
-        crate::diagnostics::LogSeverity::Info,
-        LogSource::Run,
-        "Transient: 512 points, 3 waveforms",
-    );
-    app.state.workbench.console_producer_filter =
-        Some(crate::workbench::state::ConsoleProducerFilter::new(
-            "dataset/7/analysis/3/quantity/V(out)",
-            "V(out)",
-        ));
-
-    let rendered = painted_console_body(|ui| console(ui, &mut app.state));
-    assert!(
-        rendered.contains("No console entry names V(out)"),
+        rendered.contains("No line contains 'netlist'."),
         "{rendered}"
     );
+}
+
+/// The dock's header with the Console page in front, at a dock `width` wide,
+/// after enough passes for sizing to settle, with the accessibility tree.
+fn console_dock_output(app: &mut RSpiceApp, width: f32) -> egui::FullOutput {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let layout = LayoutSpec::resolve(1_280.0, 760.0, &app.state.workbench);
+    let mut output = None;
+    for _ in 0..3 {
+        output = Some(ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(width, 320.0),
+                )),
+                ..Default::default()
+            },
+            |ui| super::show(ui, app, layout),
+        ));
+    }
+    output.expect("three passes ran")
+}
+
+/// Every published node's role, label and bounds.
+fn labelled_bounds(output: &egui::FullOutput) -> Vec<(egui::accesskit::Role, String, egui::Rect)> {
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("accesskit is on")
+        .nodes
+        .iter()
+        .filter_map(|(_, node)| {
+            let label = node.label()?.to_owned();
+            let bounds = node.bounds()?;
+            Some((
+                node.role(),
+                label,
+                egui::Rect::from_min_max(
+                    egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                    egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                ),
+            ))
+        })
+        .collect()
+}
+
+/// A session with a dozen runs and lines of every severity: the widest the
+/// channel selector and the counts get in an ordinary day.
+fn busy_console() -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.console_visible = true;
+    app.state.workbench.console_page = ConsolePage::Console;
+    for sequence in 1..=12 {
+        app.state
+            .simulation
+            .retained
+            .runs
+            .insert(0, SimulationRun::new(sequence));
+    }
+    app.state.log_buffer.clear();
+    for index in 0..240 {
+        app.state.log_buffer.log(
+            LogSeverity::Info,
+            LogSource::Studio,
+            format!("event {index}"),
+        );
+    }
+    for _ in 0..12 {
+        app.state
+            .log_buffer
+            .log(LogSeverity::Warning, LogSource::Netlist, "gmin stepping");
+    }
+    for _ in 0..3 {
+        app.state
+            .log_buffer
+            .log(LogSeverity::Error, LogSource::Studio, "Export failed");
+    }
+    app
+}
+
+/// The page's controls share the header band with the tabs and the dock's
+/// actions: one row, beside the tabs and short of the actions, at a 900 px
+/// dock.
+#[test]
+fn the_console_toolbar_fits_one_row_of_a_900_px_dock() {
+    let mut app = busy_console();
+    let nodes = labelled_bounds(&console_dock_output(&mut app, 900.0));
+    let find = |label: &str| {
+        nodes
+            .iter()
+            .find(|(_, candidate, _)| candidate.starts_with(label))
+            .map(|(_, _, bounds)| *bounds)
+            .unwrap_or_else(|| panic!("no {label:?} control: {nodes:?}"))
+    };
+    let tabs_end = nodes
+        .iter()
+        .filter(|(role, ..)| *role == egui::accesskit::Role::Tab)
+        .map(|(_, _, bounds)| bounds.right())
+        .fold(0.0, f32::max);
+    assert!(tabs_end > 0.0, "no tab was published: {nodes:?}");
+    let clear = find("Clear the session log");
+    let controls = [
+        find("Console channel"),
+        find("Errors, 3"),
+        find("Warnings, 12"),
+        find("Info, 240"),
+        find("Find in the log"),
+    ];
+    for control in controls {
+        assert!(
+            control.top() >= 0.0 && control.bottom() <= CONSOLE_HEADER_HEIGHT,
+            "{control:?} leaves the {CONSOLE_HEADER_HEIGHT} px band"
+        );
+        assert!(control.left() >= tabs_end, "{control:?} overlaps the tabs");
+    }
+    let field = find("Find in the log");
     assert!(
-        rendered.contains("carry no producer tag"),
-        "the empty state names the reason, not just the absence:\n{rendered}"
+        field.right() <= clear.left(),
+        "the find field {field:?} runs under Clear {clear:?}"
     );
-    assert!(
-        !rendered.contains("not yet"),
-        "the empty state states a present limitation, never a future promise:\n{rendered}"
+    assert!(field.width() >= 60.0, "the find field is cut to {field:?}");
+}
+
+/// Renders of the page for review: the session with every kind of line, a
+/// run's channel ending in its withheld-lines row, and a find with no match.
+/// `RSPICE_REVIEW_DIR` says where they go.
+#[test]
+#[ignore = "writes review renders for a person to look at"]
+fn console_page_review_renders() {
+    use crate::diagnostics::LogAnchor;
+    use crate::workbench::state::ConsoleChannel;
+
+    let directory = std::env::var_os("RSPICE_REVIEW_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let mut app = busy_console();
+    app.state.log_buffer.clear();
+    let lines: [(LogSeverity, LogSource, String); 5] = [
+        (
+            LogSeverity::Info,
+            LogSource::Studio,
+            "Project opened: amplifier".to_owned(),
+        ),
+        (
+            LogSeverity::Warning,
+            LogSource::Netlist,
+            "Model nch has no binning range for W=0.4u; the nearest bin is used".to_owned(),
+        ),
+        (
+            LogSeverity::Error,
+            LogSource::Studio,
+            format!(
+                "Could not read C:/projects/{}/netlist.cir",
+                "deep/".repeat(55)
+            ),
+        ),
+        (
+            LogSeverity::Info,
+            LogSource::Run,
+            "Run 12 started: Transient, AC".to_owned(),
+        ),
+        (
+            LogSeverity::Error,
+            LogSource::Run,
+            "Run 12 failed after 0.42 s: timestep too small".to_owned(),
+        ),
+    ];
+    for (severity, source, message) in lines {
+        let anchor =
+            (source == LogSource::Run).then_some(LogAnchor::ResultRun { run_sequence: 12 });
+        app.state
+            .log_buffer
+            .log_anchored(severity, source, message, anchor);
+    }
+    let selected = app.state.log_buffer.entries().nth(1).map(|entry| entry.id);
+    app.state.workbench.console_view.selection =
+        selected.map(crate::workbench::state::ConsoleSelection::single);
+    let layout = LayoutSpec::resolve(1_280.0, 760.0, &app.state.workbench);
+    let size = Vec2::new(900.0, 320.0);
+    let render = |name: &str, app: &mut RSpiceApp| {
+        let canvas = crate::ui::raster::render(size, |ui, _| super::show(ui, app, layout));
+        let path = directory.join(format!("console-{name}.png"));
+        std::fs::write(&path, canvas.png(size.y as usize)).expect("the review render is written");
+        eprintln!("{}", path.display());
+    };
+    render("session", &mut app);
+
+    let run = app
+        .state
+        .simulation
+        .retained
+        .run_by_sequence_mut(12)
+        .expect("the fixture holds run 12");
+    for (severity, message) in [
+        (LogSeverity::Info, "Run 12 \u{b7} RSpice \u{b7} amplifier"),
+        (
+            LogSeverity::Warning,
+            "timestep too small at 1.204 us; halving",
+        ),
+        (
+            LogSeverity::Info,
+            "Transient: 0.42 s, 1,204 steps accepted, 37 rejected",
+        ),
+    ] {
+        run.log.push(rspice_app_types::run_log::RunLogLine {
+            unix_ms: 1_760_000_000_000,
+            severity,
+            source: LogSource::Run,
+            message: message.to_owned(),
+        });
+    }
+    run.log.absorb_engine_seal(5_000, 0);
+    run.log.seal(1_760_000_000_000);
+    app.state
+        .workbench
+        .console_view
+        .open(ConsoleChannel::Run(12));
+    render("run", &mut app);
+
+    app.state
+        .workbench
+        .console_view
+        .open(ConsoleChannel::Session);
+    app.state.workbench.console_view.find = "vdd_core".to_owned();
+    render("find-empty", &mut app);
+}
+
+/// A ring that has dropped its oldest entries says so in its first row, so a
+/// truncated session never reads as the whole of it.
+#[test]
+fn a_session_that_dropped_entries_says_so_first() {
+    let mut state = AppState::default();
+    state.log_buffer = crate::diagnostics::LogBuffer::new(3);
+    for index in 0..5 {
+        state.log_buffer.log(
+            LogSeverity::Info,
+            LogSource::Studio,
+            format!("event {index}"),
+        );
+    }
+    let rendered = painted_console_body(|ui| transcript::console(ui, &mut state));
+    let first = rendered.lines().next().unwrap_or_default();
+    assert_eq!(
+        first, "Earlier entries were removed (the Console keeps the latest 3)",
+        "{rendered}"
     );
+    assert!(!rendered.contains("event 1"), "{rendered}");
+    assert!(rendered.contains("event 4"), "{rendered}");
 }
 
 #[test]

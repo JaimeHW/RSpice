@@ -66,10 +66,10 @@ impl ToastKind {
 pub enum NotificationAction {
     /// Activate the retained dataset of the run with this display sequence.
     OpenRunInResults { run_sequence: u64 },
-    /// Open the Console, where the line this notice was lifted from sits among
-    /// the lines around it. A warning is one sentence here and a paragraph
-    /// there, and the paragraph is usually what explains it.
-    ShowInConsole,
+    /// Open the Console on the line this notice was lifted from, by the log
+    /// entry's id, among the lines around it. A warning is one sentence here
+    /// and a paragraph there, and the paragraph is usually what explains it.
+    ShowInConsole { log_id: u64 },
 }
 
 impl NotificationAction {
@@ -77,7 +77,7 @@ impl NotificationAction {
     pub const fn label(self) -> &'static str {
         match self {
             Self::OpenRunInResults { .. } => "Open in Results",
-            Self::ShowInConsole => "Show in Console",
+            Self::ShowInConsole { .. } => "Show in Console",
         }
     }
 
@@ -91,7 +91,7 @@ impl NotificationAction {
     pub fn record_title(self) -> Option<String> {
         match self {
             Self::OpenRunInResults { run_sequence } => Some(format!("Run {run_sequence}")),
-            Self::ShowInConsole => None,
+            Self::ShowInConsole { .. } => None,
         }
     }
 }
@@ -473,8 +473,11 @@ impl Toasts {
             // informational line explains itself, and an offer on every row
             // would be a column of links nobody needs.
             let offer = entry.action.or_else(|| {
-                matches!(entry.kind, ToastKind::Warn | ToastKind::Error)
-                    .then_some(NotificationAction::ShowInConsole)
+                matches!(entry.kind, ToastKind::Warn | ToastKind::Error).then_some(
+                    NotificationAction::ShowInConsole {
+                        log_id: entry.log_id,
+                    },
+                )
             });
             self.record_activity(
                 // A mirrored line has no title of its own, so it is filed
@@ -1070,8 +1073,8 @@ mod tests {
             offers,
             [
                 None,
-                Some(NotificationAction::ShowInConsole),
-                Some(NotificationAction::ShowInConsole),
+                Some(NotificationAction::ShowInConsole { log_id: 1 }),
+                Some(NotificationAction::ShowInConsole { log_id: 0 }),
             ],
             "newest first: the informational line explains itself, the other two lead back"
         );

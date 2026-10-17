@@ -13,7 +13,8 @@ use crate::workbench::{AppState, RSpiceApp};
 use std::cell::RefCell;
 
 use super::state::{
-    ConsolePage, ProjectLauncherFilter, SpecificationEvidenceFilter, WorkbenchState, Workspace,
+    ConsoleChannel, ConsolePage, ProjectLauncherFilter, SpecificationEvidenceFilter,
+    WorkbenchState, Workspace,
 };
 
 pub(crate) mod code_context;
@@ -1055,8 +1056,12 @@ impl Command {
             Self::RevealProducerLog => result_navigation::producer_log_hop(app).is_ok(),
             Self::ExpressionDiagnostics => state.simulation.retained.has_results(),
             Self::ExportWaveformsCsv => result_navigation::dataset_export_is_resolvable(state),
+            // A run's log is a record; only the session's log is cleared.
             Self::ClearConsole => match state.workbench.console_page {
-                ConsolePage::Console => !state.log_buffer.is_empty(),
+                ConsolePage::Console => {
+                    state.workbench.console_view.channel == ConsoleChannel::Session
+                        && !state.log_buffer.is_empty()
+                }
                 ConsolePage::Problems | ConsolePage::Measurements | ConsolePage::TaskLog => false,
             },
             _ => true,
@@ -1470,7 +1475,12 @@ impl Command {
             // labelled for the visible one would discard work the user cannot
             // see, so the command owns the same page scope the control shows.
             Self::ClearConsole => match app.state.workbench.console_page {
-                ConsolePage::Console => app.state.clear_primary_log(),
+                ConsolePage::Console
+                    if app.state.workbench.console_view.channel == ConsoleChannel::Session =>
+                {
+                    app.state.clear_primary_log()
+                }
+                ConsolePage::Console => {}
                 ConsolePage::Problems | ConsolePage::Measurements | ConsolePage::TaskLog => {}
             },
             Self::ToggleFocusMode => {
@@ -2175,12 +2185,10 @@ impl Command {
                     .prompt(format!("Could not open the task deck: {reason}.")),
             },
             Self::RevealProducerLog => match result_navigation::producer_log_hop(app) {
-                Ok((producer, quantity)) => {
-                    result_navigation::reveal_producer_log(app, producer, &quantity);
-                }
+                Ok(run_sequence) => result_navigation::open_run_log(app, run_sequence),
                 Err(reason) => app
                     .state
-                    .prompt(format!("Could not reveal the producer log: {reason}.")),
+                    .prompt(format!("Could not open the run log: {reason}.")),
             },
             Self::VisualizationDocumentProperties => {
                 crate::workbench::documents::result_document::open_properties(&mut app.state);

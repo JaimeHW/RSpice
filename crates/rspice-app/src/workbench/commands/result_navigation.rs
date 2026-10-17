@@ -7,6 +7,7 @@
 
 use crate::ui::widgets::NotificationAction;
 use crate::workbench::RSpiceApp;
+use crate::workbench::state::ConsoleChannel;
 use crate::workbench::state::plan_provenance::{self, ProducingPlanHop};
 
 use super::vocabulary::Command;
@@ -70,13 +71,67 @@ pub(crate) fn perform_notification_action(app: &mut RSpiceApp, action: Notificat
                     ));
             }
         }
-        NotificationAction::ShowInConsole => {
-            // The command opens the dock on whichever page was last shown.
-            // The line this notice was lifted from is on the Console page.
-            Command::OpenConsole.execute(app);
-            app.state.workbench.console_page = crate::workbench::state::ConsolePage::Console;
-        }
+        NotificationAction::ShowInConsole { log_id } => show_session_line(app, log_id),
     }
+}
+
+/// Open the Console on the session's log with line `log_id` selected and in
+/// view, or at the end of the log when the line has since been dropped.
+pub(crate) fn show_session_line(app: &mut RSpiceApp, log_id: u64) {
+    let severity = app
+        .state
+        .log_buffer
+        .entries()
+        .find(|entry| entry.id == log_id)
+        .map(|entry| entry.severity);
+    let view = &mut app.state.workbench.console_view;
+    match severity {
+        Some(severity) => view.show_session_line(log_id, severity),
+        None => view.open(ConsoleChannel::Session),
+    }
+    open_console_page(app);
+}
+
+/// Open the Console on one run's own log, from its latest line.
+///
+/// Callers offer this only for a run the session still holds; a run dropped
+/// between the offer and the click is reported rather than opened as an empty
+/// channel.
+pub(crate) fn open_run_log(app: &mut RSpiceApp, run_sequence: u64) {
+    if app
+        .state
+        .simulation
+        .retained
+        .run_by_sequence(run_sequence)
+        .is_none()
+    {
+        app.state
+            .prompt(crate::workbench::AppState::retired_run_message(
+                run_sequence,
+            ));
+        return;
+    }
+    app.state
+        .workbench
+        .console_view
+        .open(ConsoleChannel::Run(run_sequence));
+    open_console_page(app);
+}
+
+/// The run that produced dataset `dataset`, while the session still holds it.
+pub(crate) fn producing_run(
+    runs: &[crate::state::SimulationRun],
+    dataset: crate::product::DatasetId,
+) -> Option<u64> {
+    runs.iter()
+        .find(|run| run.dataset_id == dataset)
+        .map(|run| run.id)
+}
+
+fn open_console_page(app: &mut RSpiceApp) {
+    // The command opens the dock on whichever page was last shown.
+    Command::OpenConsole.execute(app);
+    app.state.workbench.console_page = crate::workbench::state::ConsolePage::Console;
 }
 
 /// Resolve the producing-plan hop for the running application.
@@ -134,46 +189,23 @@ pub(crate) fn open_task_deck(state: &mut crate::workbench::AppState, sequence: u
     false
 }
 
-/// The one Data Browser quantity whose producer log the hop would reveal: its
-/// stable path, and the name it is known by.
+/// The run that produced the one check-marked Data Browser quantity, whose
+/// log the hop would open.
 ///
-/// The context menus that offer this reveal act on the row they were opened
-/// on. The palette has no row, so it acts on the browser's check-marks — and
-/// refuses rather than choosing, because the producer log of five quantities
-/// is five destinations, and picking one silently would be the studio deciding
-/// which object the reader meant.
-pub(crate) fn producer_log_hop(app: &RSpiceApp) -> Result<(String, String), &'static str> {
+/// The context menus that offer this act on the row they were opened on. The
+/// palette has no row, so it acts on the browser's check-marks — and refuses
+/// rather than choosing, because five quantities can come from five runs, and
+/// picking one silently would be the studio deciding which the reader meant.
+pub(crate) fn producer_log_hop(app: &RSpiceApp) -> Result<u64, &'static str> {
     if app.state.simulation.active_run().is_none() {
         return Err("no run is selected");
     }
     let checked = &app.state.ui.results.session.checked_result_quantities;
     let key = match checked.len() {
-        0 => return Err("check-mark the Data Browser quantity whose producer log to reveal"),
+        0 => return Err("check-mark the Data Browser quantity whose run log to open"),
         1 => checked.iter().next().expect("one check-marked quantity"),
         _ => return Err("check-mark exactly one Data Browser quantity"),
     };
-    let runs = &app.state.simulation.retained.runs;
-    let (Ok(path), Ok(quantity)) = (
-        crate::workbench::documents::result_document::result_browser_selection_stable_path(
-            key, runs,
-        ),
-        crate::workbench::documents::result_document::result_browser_selection_canonical_name(
-            key, runs,
-        ),
-    ) else {
-        return Err("the check-marked quantity no longer resolves in its immutable dataset");
-    };
-    Ok((path, quantity))
-}
-
-/// Narrow the console to one producer's entries and show its newest.
-///
-/// The filter it installs is the console's own, so the strip above the log
-/// names the producer and can be cleared from there.
-pub(crate) fn reveal_producer_log(app: &mut RSpiceApp, producer: String, quantity: &str) {
-    app.state.workbench.console_producer_filter = Some(
-        crate::workbench::state::ConsoleProducerFilter::new(producer, quantity),
-    );
-    app.state.workbench.console_page = crate::workbench::state::ConsolePage::Console;
-    Command::OpenConsole.execute(app);
+    producing_run(&app.state.simulation.retained.runs, key.dataset_id())
+        .ok_or("the run that produced the check-marked quantity is no longer held")
 }

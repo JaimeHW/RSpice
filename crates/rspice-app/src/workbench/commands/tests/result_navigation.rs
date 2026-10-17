@@ -427,9 +427,7 @@ fn the_producer_log_hop_refuses_rather_than_choosing_a_quantity() {
     let mut app = app_with_prepared_run(RunOrigin::ActivePlan);
     assert_eq!(
         Command::RevealProducerLog.availability(&app),
-        CommandAvailability::Disabled(
-            "check-mark the Data Browser quantity whose producer log to reveal"
-        ),
+        CommandAvailability::Disabled("check-mark the Data Browser quantity whose run log to open"),
     );
 
     // A typed artifact the retained analysis actually holds, so the resolved
@@ -492,23 +490,20 @@ fn the_producer_log_hop_refuses_rather_than_choosing_a_quantity() {
         CommandAvailability::Available
     );
 
-    let expected =
-        crate::workbench::documents::result_document::result_browser_selection_stable_path(
-            &artifact,
-            &app.state.simulation.retained.runs,
-        )
-        .expect("the check-marked artifact resolves a stable path");
+    let producer = app
+        .state
+        .simulation
+        .active_run()
+        .expect("the fixture selected a run")
+        .id;
     Command::RevealProducerLog.execute(&mut app);
     assert_eq!(
         app.state.workbench.console_page,
         crate::workbench::state::ConsolePage::Console
     );
-    let filter = app
-        .state
-        .workbench
-        .console_producer_filter
-        .as_ref()
-        .expect("the hop installs a producer filter");
-    assert_eq!(filter.producer, expected);
-    assert_eq!(filter.label(), "payload/scalar-measurements");
+    assert_eq!(
+        app.state.workbench.console_view.channel,
+        crate::workbench::state::ConsoleChannel::Run(producer),
+        "the hop opens the log of the run that produced the quantity"
+    );
 }

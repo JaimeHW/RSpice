@@ -124,6 +124,10 @@ pub struct LogBuffer {
     capacity: usize,
     /// Next entry ID (monotonically increasing)
     next_id: u64,
+    /// Entries dropped to stay within the capacity since the buffer was last
+    /// cleared, so the Console can say that earlier history is gone rather
+    /// than present a truncated log as the whole session.
+    evicted: u64,
 }
 
 impl Default for LogBuffer {
@@ -139,6 +143,7 @@ impl LogBuffer {
             entries: VecDeque::with_capacity(capacity.min(1024)), // Pre-allocate up to 1K
             capacity,
             next_id: 0,
+            evicted: 0,
         }
     }
 
@@ -173,8 +178,8 @@ impl LogBuffer {
         self.next_id += 1;
 
         // Remove oldest if at capacity
-        if self.entries.len() >= self.capacity {
-            self.entries.pop_front();
+        if self.entries.len() >= self.capacity && self.entries.pop_front().is_some() {
+            self.evicted = self.evicted.saturating_add(1);
         }
         self.entries.push_back(entry);
         id
@@ -207,9 +212,22 @@ impl LogBuffer {
         self.entries.is_empty()
     }
 
-    /// Clear all entries
+    /// The most entries the buffer keeps.
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    /// Entries dropped to stay within [`Self::capacity`] since the buffer was
+    /// last cleared.
+    pub fn evicted(&self) -> u64 {
+        self.evicted
+    }
+
+    /// Clear all entries. What was cleared was removed on purpose, so it is
+    /// not counted as evicted.
     pub fn clear(&mut self) {
         self.entries.clear();
+        self.evicted = 0;
     }
 
     /// Count entries of one severity.

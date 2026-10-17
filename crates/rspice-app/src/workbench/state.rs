@@ -1124,10 +1124,10 @@ pub struct WorkbenchState {
     workspace_preset: WorkspacePreset,
     #[serde(default)]
     pub console_page: ConsolePage,
-    /// The producer the Console page is narrowed to. Transient: a reading
-    /// position over a log that does not survive the session.
+    /// The reader's place on the Console page. Transient: a reading position
+    /// over logs, not a layout preference.
     #[serde(skip)]
-    pub console_producer_filter: Option<ConsoleProducerFilter>,
+    pub console_view: ConsoleView,
     #[serde(default)]
     pub design_panel: DesignPanel,
     /// Active and locally closed document presentations in each workspace.
@@ -1452,7 +1452,7 @@ impl Default for WorkbenchState {
             workspace_layouts: HashMap::new(),
             workspace_preset: WorkspacePreset::default(),
             console_page: ConsolePage::Console,
-            console_producer_filter: None,
+            console_view: ConsoleView::default(),
             design_panel: DesignPanel::Navigator,
             documents: WorkspaceDocumentRegistry::default(),
             netlist_open_documents: HashSet::new(),
