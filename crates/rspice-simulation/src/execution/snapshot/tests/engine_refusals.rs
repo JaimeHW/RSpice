@@ -254,14 +254,11 @@ V1 d 0 1\n\
                 task.execution_environment.clone(),
                 &rspice_core::NoAbort,
             );
-        let refused = refusals[0].tasks.iter().any(|refused| refused.label == task.label);
-        assert_eq!(
-            ran.is_err(),
-            refused,
-            "{}: {:?}",
-            task.label,
-            ran.err()
-        );
+        let refused = refusals[0]
+            .tasks
+            .iter()
+            .any(|refused| refused.label == task.label);
+        assert_eq!(ran.is_err(), refused, "{}: {:?}", task.label, ran.err());
     }
 }
 
