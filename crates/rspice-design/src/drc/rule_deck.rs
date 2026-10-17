@@ -21,7 +21,7 @@
 //! applied at all, is kept byte for byte, and is reported. Either way a save
 //! from this build writes back what it was given.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -258,7 +258,7 @@ impl DesignRuleDeck {
     ///
     /// Empty for a deck this build could not read: a check run under part of
     /// a deck it does not understand would be run under a policy nobody wrote.
-    pub fn severity_overrides(&self) -> HashMap<DrcViolationType, DrcSeverity> {
+    pub fn severity_overrides(&self) -> BTreeMap<DrcViolationType, DrcSeverity> {
         self.entries().collect()
     }
 

@@ -1177,7 +1177,7 @@ fn width_findings(
         ..crate::connectivity_contract::ConnectivityPolicy::default()
     };
     let connectivity = crate::connectivity::extract(schematic, |_| None, |_| None);
-    append_vector_width_violations(&connectivity, &policy, &mut result, &HashMap::new());
+    append_vector_width_violations(&connectivity, &policy, &mut result, &BTreeMap::new());
     result.violations().to_vec()
 }
 
@@ -1225,7 +1225,7 @@ fn a_width_mismatch_blocks_under_either_policy() {
 
 fn off_sheet_findings(schematic: &SchematicDocument) -> Vec<DrcViolation> {
     let mut result = DrcResult::new();
-    append_off_sheet_connector_violations(schematic, &mut result, &HashMap::new());
+    append_off_sheet_connector_violations(schematic, &mut result, &BTreeMap::new());
     result.violations().to_vec()
 }
 
@@ -1311,7 +1311,7 @@ fn partner_matching_folds_case_under_every_policy_and_honors_severity_overrides(
 
     schematic.net_labels.pop();
     let mut result = DrcResult::new();
-    let overrides = HashMap::from([(
+    let overrides = BTreeMap::from([(
         DrcViolationType::OffSheetConnectorWithoutPartner,
         DrcSeverity::Error,
     )]);
@@ -1346,7 +1346,7 @@ fn case_colliding_net_names_are_a_drc_error() {
             .push(NetLabel::new(2, Point::new(40, 0), "out"));
 
         let mut result = DrcResult::new();
-        append_case_collision_violations(&schematic, &mut result, &HashMap::new());
+        append_case_collision_violations(&schematic, &mut result, &BTreeMap::new());
         let findings = result.violations();
         assert_eq!(findings.len(), 1, "{policy:?}: one finding for one pair");
         assert_eq!(
@@ -1375,7 +1375,7 @@ fn case_colliding_net_names_are_a_drc_error() {
         .net_labels
         .push(NetLabel::new(2, Point::new(40, 0), "Out"));
     let mut result = DrcResult::new();
-    append_case_collision_violations(&repeated, &mut result, &HashMap::new());
+    append_case_collision_violations(&repeated, &mut result, &BTreeMap::new());
     assert!(result.violations().is_empty());
 
     // A lone name collides with nothing.
@@ -1383,7 +1383,7 @@ fn case_colliding_net_names_are_a_drc_error() {
     lone.net_labels
         .push(NetLabel::new(1, Point::origin(), "Out"));
     let mut result = DrcResult::new();
-    append_case_collision_violations(&lone, &mut result, &HashMap::new());
+    append_case_collision_violations(&lone, &mut result, &BTreeMap::new());
     assert!(result.violations().is_empty());
 
     // An interface port carries an authored name too, and is reported on
@@ -1394,7 +1394,7 @@ fn case_colliding_net_names_are_a_drc_error() {
         .push(NetLabel::new(1, Point::origin(), "Bias"));
     named_port(&mut mixed, "BIAS");
     let mut result = DrcResult::new();
-    append_case_collision_violations(&mixed, &mut result, &HashMap::new());
+    append_case_collision_violations(&mixed, &mut result, &BTreeMap::new());
     let findings = result.violations();
     assert_eq!(findings.len(), 1);
     assert_eq!(
@@ -1427,7 +1427,7 @@ fn the_advisory_continues_the_result_id_sequence_it_is_appended_to() {
         "existing finding",
         DrcLocation::Global,
     ));
-    append_off_sheet_connector_violations(&schematic, &mut result, &HashMap::new());
+    append_off_sheet_connector_violations(&schematic, &mut result, &BTreeMap::new());
 
     let ids: Vec<usize> = result
         .violations()

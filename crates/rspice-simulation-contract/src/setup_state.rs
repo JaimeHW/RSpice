@@ -15,14 +15,18 @@ use crate::plan_catalog::{
 };
 use crate::run_set::{ReferencePoint as ReferencePvtPoint, RunSetDimensionKind};
 use rspice_app_types::product::SimulationPlanId;
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 
 /// Portable setup with the compatibility projections still used by legacy consumers.
+///
+/// Every collection in it is ordered, so two equal setups print alike however
+/// each was built: a run is dispatched only while the setup it was checked
+/// under still prints as it did, and a hashed set prints in its hasher's order.
 #[derive(Debug, Clone, Default)]
 pub struct SimulationSetup {
     document: crate::setup_document::SimulationSetupDocument,
     /// Enabled analysis indices.
-    pub enabled: HashSet<usize>,
+    pub enabled: BTreeSet<usize>,
     /// Stable execution order. Enabled analyses absent from this vector are
     /// appended deterministically; disabled entries are ignored and removed
     /// from the persisted normalized plan.
@@ -77,7 +81,7 @@ pub struct SimulationSetup {
     pub soa: crate::soa_draft::SoaDialogState,
     /// Analyses listed in the run-set card beyond the always-listed core —
     /// exotics stay listed (dimmed) when unticked, until removed.
-    pub listed: HashSet<usize>,
+    pub listed: BTreeSet<usize>,
     /// One-shot evidence retained when a legacy run-set declaration is superseded.
     pub legacy_run_set_notes: Vec<String>,
 }

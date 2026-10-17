@@ -3,7 +3,7 @@
 //! The application supplies legacy draft values; plan identity, ordering and
 //! prerequisite binding are portable contracts.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 use rspice_app_types::product::{AnalysisInstanceId, ObjectRevision, ProjectId, SimulationPlanId};
 use uuid::Uuid;
@@ -48,12 +48,12 @@ pub fn default_global_run_set() -> RunSetState {
 }
 
 /// Decode a schema-3 analysis-index set without hiding duplicate entries.
-pub fn deserialize_analysis_set<'de, D>(deserializer: D) -> Result<HashSet<usize>, D::Error>
+pub fn deserialize_analysis_set<'de, D>(deserializer: D) -> Result<BTreeSet<usize>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     let indices = <Vec<usize> as serde::Deserialize>::deserialize(deserializer)?;
-    let mut unique = HashSet::with_capacity(indices.len());
+    let mut unique = BTreeSet::new();
     for index in indices {
         if !unique.insert(index) {
             return Err(serde::de::Error::custom(format!(
@@ -71,8 +71,8 @@ const LEGACY_ANALYSIS_PLAN_NAMESPACE: Uuid =
 /// The caller supplies the exact legacy draft for each canonical kind.
 pub fn migrate_schema3_analysis_plan(
     project_id: ProjectId,
-    enabled: &HashSet<usize>,
-    listed: &HashSet<usize>,
+    enabled: &BTreeSet<usize>,
+    listed: &BTreeSet<usize>,
     analysis_order: &[usize],
     mut draft_for: impl FnMut(AnalysisKind) -> AnalysisDraft,
 ) -> Result<SimulationPlan, String> {

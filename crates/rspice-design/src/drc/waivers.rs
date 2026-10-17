@@ -22,7 +22,7 @@
 //! not read is not applied, is kept byte for byte, and refuses edits, so a save
 //! from this build writes back exactly what it was given.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use rspice_design_model::cell_view::CellViewRef;
 use serde::{Deserialize, Serialize};
@@ -334,10 +334,13 @@ pub fn waiver_site(location: &DrcLocation) -> (Option<&CellViewRef>, String) {
 
 /// The waivers one check applies: those stored with the checked cellview,
 /// and those stored with each cellview it instantiates.
+///
+/// Ordered by cellview, so two equal sets print and compare alike however
+/// each was gathered: it rides in the configuration the run gate digests.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CheckWaivers {
     subject: Vec<DrcWaiver>,
-    instantiated: HashMap<CanonicalCellViewOwnerKey, Vec<DrcWaiver>>,
+    instantiated: BTreeMap<CanonicalCellViewOwnerKey, Vec<DrcWaiver>>,
 }
 
 impl CheckWaivers {
@@ -346,7 +349,7 @@ impl CheckWaivers {
     pub fn for_subject(waivers: &DrcWaivers) -> Self {
         Self {
             subject: applied(waivers),
-            instantiated: HashMap::new(),
+            instantiated: BTreeMap::new(),
         }
     }
 
@@ -423,12 +426,10 @@ impl CheckWaivers {
                     .is_some_and(|covering| std::ptr::eq(covering, waiver))
             })
         };
-        let mut instantiated = self.instantiated.iter().collect::<Vec<_>>();
-        instantiated.sort_by(|(left, _), (right, _)| left.cmp(right));
         self.subject
             .iter()
             .map(|waiver| (None, waiver))
-            .chain(instantiated.into_iter().flat_map(|(cellview, waivers)| {
+            .chain(self.instantiated.iter().flat_map(|(cellview, waivers)| {
                 waivers.iter().map(move |waiver| (Some(cellview), waiver))
             }))
             .filter(|(_, waiver)| !covers(waiver))

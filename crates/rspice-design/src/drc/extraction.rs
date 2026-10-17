@@ -1087,7 +1087,7 @@ fn exact_numeric_constant(definition: &PropertyDefinition, value: &PropertyValue
 fn append_connectivity_diagnostics(
     connectivity: &ExtractedConnectivity,
     result: &mut DrcResult,
-    severity_overrides: &std::collections::HashMap<DrcViolationType, DrcSeverity>,
+    severity_overrides: &BTreeMap<DrcViolationType, DrcSeverity>,
 ) {
     let mut next_id = result.total_count();
     for diagnostic in &connectivity.diagnostics {

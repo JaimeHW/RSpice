@@ -64,8 +64,13 @@ pub struct DrcConfig {
     pub check_shorted_outputs: bool,
     /// Minimum connection count for a node to not be floating
     pub min_connections: usize,
-    /// Severity overrides by violation type
-    pub severity_overrides: HashMap<DrcViolationType, DrcSeverity>,
+    /// Severity overrides by violation type.
+    ///
+    /// Ordered, so two configurations that decide the same rules print, digest
+    /// and serialize alike however each was built: the run gate compares the
+    /// configuration a pass was checked under with the one it is dispatched
+    /// under, and a hashed map's order is its hasher's, not its content's.
+    pub severity_overrides: BTreeMap<DrcViolationType, DrcSeverity>,
     /// The project's connectivity policy, as the check must apply it.
     ///
     /// A checker that defaulted this would be inventing project policy, so the
@@ -99,7 +104,7 @@ impl Default for DrcConfig {
             check_unknown_components: true,
             check_shorted_outputs: true,
             min_connections: 2,
-            severity_overrides: HashMap::new(),
+            severity_overrides: BTreeMap::new(),
             connectivity: crate::connectivity_contract::ConnectivityPolicy::default(),
             waivers: super::CheckWaivers::default(),
         }
@@ -982,7 +987,7 @@ impl DrcChecker {
 pub(super) fn append_off_sheet_connector_violations(
     schematic: &crate::schematic::document::SchematicDocument,
     result: &mut DrcResult,
-    severity_overrides: &HashMap<DrcViolationType, DrcSeverity>,
+    severity_overrides: &BTreeMap<DrcViolationType, DrcSeverity>,
 ) {
     // Two connectors are the same declaration when the netlister would join
     // them, and the netlister folds ASCII case whatever the naming policy says.
@@ -1037,7 +1042,7 @@ pub(super) fn append_vector_width_violations(
     connectivity: &ExtractedConnectivity,
     policy: &crate::connectivity_contract::ConnectivityPolicy,
     result: &mut DrcResult,
-    severity_overrides: &HashMap<DrcViolationType, DrcSeverity>,
+    severity_overrides: &BTreeMap<DrcViolationType, DrcSeverity>,
 ) {
     let mut next_id = result.total_count();
     for mismatch in &connectivity.vector_nets.mismatches {
@@ -1081,7 +1086,7 @@ pub(super) fn append_vector_width_violations(
 pub(super) fn append_case_collision_violations(
     schematic: &crate::schematic::document::SchematicDocument,
     result: &mut DrcResult,
-    severity_overrides: &HashMap<DrcViolationType, DrcSeverity>,
+    severity_overrides: &BTreeMap<DrcViolationType, DrcSeverity>,
 ) {
     let mut labels: Vec<&crate::schematic::net_label::NetLabel> =
         schematic.net_labels.iter().collect();
@@ -1158,7 +1163,7 @@ pub(super) fn append_ground_not_node_zero(
     schematic: &crate::schematic::document::SchematicDocument,
     connectivity: &ExtractedConnectivity,
     result: &mut DrcResult,
-    severity_overrides: &HashMap<DrcViolationType, DrcSeverity>,
+    severity_overrides: &BTreeMap<DrcViolationType, DrcSeverity>,
 ) {
     let mut labels: Vec<&crate::schematic::net_label::NetLabel> =
         schematic.net_labels.iter().collect();

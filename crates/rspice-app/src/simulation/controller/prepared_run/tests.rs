@@ -805,6 +805,71 @@ fn dispatch_rejects_mutation_after_explicit_preflight() {
     );
 }
 
+/// The rules a run was checked under are built again at the press and again
+/// at dispatch: the deck's decisions and the waivers stored with every open
+/// schematic. Built twice from an unedited project they are the same rules,
+/// and the run is dispatched — however many rules the deck decides and
+/// however many cellviews store waivers.
+#[test]
+fn an_unedited_rule_deck_and_waivers_never_refuse_the_dispatch() {
+    use rspice_design::drc::{DrcSeverity, DrcViolationType, DrcWaiver};
+
+    let mut state = runnable_state();
+    for rule in DrcViolationType::ALL {
+        if rule.default_severity() != DrcSeverity::Info
+            && rule.rule().floor.deck <= DrcSeverity::Info
+        {
+            state
+                .workspace
+                .content
+                .design_rules
+                .set_severity(rule, DrcSeverity::Info)
+                .expect("the rule may be reported as a note");
+        }
+    }
+    assert!(state.workspace.content.design_rules.len() >= 8);
+    for cell in ["a", "b", "c", "d", "e", "f", "g", "h"] {
+        let mut stored = crate::state::SchematicState::default();
+        stored
+            .waive(DrcWaiver {
+                rule: "DRC-FLOATING-NODE".to_owned(),
+                object: "component:1".to_owned(),
+                reason: "a test point".to_owned(),
+                author: "ana".to_owned(),
+                waived_at_ms: 1_760_000_000_000,
+            })
+            .expect("the rule may be waived");
+        state
+            .workspace
+            .insert_schematic_editor(format!("work/{cell}/schematic"), stored);
+    }
+
+    let mut controller = SimulationController::new();
+    controller
+        .prepare_run_set_for_preflight(&state)
+        .expect("preflight");
+    controller
+        .consume_snapshot_for_dispatch(&state)
+        .expect("nothing was edited between the check and the dispatch");
+}
+
+/// The setup a run was checked under is compared by what it holds: a set the
+/// session rebuilds with the same members, as restoring a plan's legacy
+/// projections does, leaves the run dispatchable.
+#[test]
+fn an_equal_setup_rebuilt_before_dispatch_does_not_refuse_it() {
+    let mut state = runnable_state();
+    state.sim_setup.listed = (0..24).collect();
+    let mut controller = SimulationController::new();
+    controller
+        .prepare_run_set_for_preflight(&state)
+        .expect("preflight");
+    state.sim_setup.listed = (0..24).rev().collect();
+    controller
+        .consume_snapshot_for_dispatch(&state)
+        .expect("the setup holds what it held");
+}
+
 #[test]
 fn governed_snapshot_check_rejects_in_flight_pvt_change() {
     let mut state = runnable_state();
