@@ -49,6 +49,10 @@ pub struct AnalysisNumericOverride {
     integration_method: Option<IntegrationMethod>,
     max_timestep: Option<f64>,
     gmin: Option<f64>,
+    /// Skipped while unset, so a record written before the option existed
+    /// serializes to the bytes it always had.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rshunt: Option<f64>,
     gmin_stepping: Option<bool>,
     source_stepping: Option<bool>,
     pseudo_transient: Option<bool>,
@@ -119,6 +123,7 @@ impl AnalysisNumericOverride {
             O::Vntol => OverrideValue::Real(self.vntol?),
             O::ResidualReltol => OverrideValue::Real(self.residual_reltol?),
             O::Gmin => OverrideValue::Real(self.gmin?),
+            O::Rshunt => OverrideValue::Real(self.rshunt?),
             O::Itl1 => OverrideValue::Count(self.itl1?),
             O::Itl4 => OverrideValue::Count(self.itl4?),
             O::GminStepping => OverrideValue::Flag(self.gmin_stepping?),
@@ -199,6 +204,7 @@ impl AnalysisNumericOverride {
             O::Vntol => self.vntol = real(),
             O::ResidualReltol => self.residual_reltol = real(),
             O::Gmin => self.gmin = real(),
+            O::Rshunt => self.rshunt = real(),
             O::Itl1 => self.itl1 = count(),
             O::Itl4 => self.itl4 = count(),
             O::GminStepping => self.gmin_stepping = flag(),

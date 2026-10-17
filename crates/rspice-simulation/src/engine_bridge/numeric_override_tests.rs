@@ -161,7 +161,7 @@ fn the_catalog_states_one_entry_and_one_consumer_per_option() {
             );
         }
     }
-    assert_eq!(seen.len(), 36, "the catalog size changed; update the count");
+    assert_eq!(seen.len(), 37, "the catalog size changed; update the count");
 }
 
 /// The admission rule, mechanically.
@@ -1008,6 +1008,7 @@ fn the_catalog_order_survives_the_split_into_package_tables() {
             NumericOverrideOption::Vntol,
             NumericOverrideOption::ResidualReltol,
             NumericOverrideOption::Gmin,
+            NumericOverrideOption::Rshunt,
             NumericOverrideOption::Itl1,
             NumericOverrideOption::Itl4,
             NumericOverrideOption::GminStepping,

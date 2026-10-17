@@ -386,7 +386,7 @@ impl SimulationController {
         let task_cancel_flag = Arc::clone(&cancel_flag);
         let task_source = source.clone();
 
-        crate::workbench::spawn_or_inline(move || {
+        spawn_or_inline(move || {
             let payload = match view {
                 DerivedViewKind::EyeDiagram => {
                     if task_cancel_flag.load(Ordering::Relaxed) {

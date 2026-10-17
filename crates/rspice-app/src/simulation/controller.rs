@@ -39,6 +39,7 @@ use crate::state::{
     RealEventTraceEvidence, SimulationRunIntent, SimulationRunLifecycle, WaveformData,
 };
 use crate::workbench::app_state::{ActiveViewer, AppState, SpecializedViewerCacheProvenance};
+use crate::workbench::spawn_or_inline;
 use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
 use rspice_results::yield_analysis::YieldAnalysisManager;
 use rspice_simulation::error::SimulationError;
@@ -63,6 +64,8 @@ mod analysis_run_config;
 mod analysis_spec_build;
 mod completion;
 use analysis_spec_build::analysis_inputs;
+mod engine_check;
+pub(crate) use engine_check::EngineCheckOutcome;
 #[cfg(test)]
 pub(crate) mod dc_history_tests;
 #[cfg(test)]
@@ -215,6 +218,8 @@ pub struct SimulationController {
     design_execution_epoch: u64,
     /// Retained preflight and generation-safe dispatch authority.
     run_authorization: crate::simulation::execution::PreparedRunAuthorization,
+    /// Preflight's build pass over the retained run's decks, while it runs.
+    engine_check: Option<engine_check::PendingEngineCheck>,
     /// Run-bound automatic export policy captured by immutable preflight.
     touchstone_export_policy: TouchstoneExportPolicy,
     /// Frozen, declared-order multi-plan campaign. Each member is an
@@ -261,6 +266,7 @@ impl SimulationController {
             transient_post: transient_post::TransientPostCoordinator::default(),
             design_execution_epoch: 0,
             run_authorization: crate::simulation::execution::PreparedRunAuthorization::default(),
+            engine_check: None,
             touchstone_export_policy: TouchstoneExportPolicy::disabled(),
             active_campaign: None,
         }
@@ -666,6 +672,7 @@ impl SimulationController {
         self.point_families.clear();
         self.cached_netlist = None;
         self.clear_prepared_run();
+        self.cancel_engine_check();
         self.current_config = None;
         self.current_spec = None;
         self.current_analysis_label = None;

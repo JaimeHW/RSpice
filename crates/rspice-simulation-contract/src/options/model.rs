@@ -57,6 +57,27 @@ pub struct SimulationOptions {
     pub pseudo_transient: bool,
     pub arc_length: bool,
     pub gmin: f64,
+    /// `.OPTIONS RSHUNT`: a resistance, in ohms, from every node to ground.
+    /// `None` places none.
+    ///
+    /// Unlike GMIN it is part of the circuit, not of the numerical policy: it
+    /// conducts in every analysis, is a noise source, and gives a node that a
+    /// source forces current into a DC path the engine accepts. A preset
+    /// therefore neither sets nor clears it. Not serialized while unset, so a
+    /// plan that never states one keeps the bytes it had before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rshunt: Option<f64>,
+    /// `.OPTIONS CONNECTRULES`: the Verilog-AMS `connectrules` block that
+    /// converts at every analog/digital boundary the design makes. `None`
+    /// states none, and the engine takes the design's only block; a design
+    /// whose libraries declare two or more refuses every boundary until one
+    /// is named.
+    ///
+    /// Like RSHUNT it decides the circuit rather than the numerics — which
+    /// converters are elaborated into it — so a preset neither sets nor
+    /// clears it. Not serialized while unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connect_rules: Option<String>,
     pub damping: DampingStrategy,
     pub method: IntegrationMethod,
     pub solver: MatrixSolver,
@@ -118,6 +139,10 @@ struct PersistedSimulationOptions {
     pseudo_transient: bool,
     arc_length: bool,
     gmin: f64,
+    #[serde(default)]
+    rshunt: Option<f64>,
+    #[serde(default)]
+    connect_rules: Option<String>,
     damping: DampingStrategy,
     method: IntegrationMethod,
     solver: MatrixSolver,
@@ -153,6 +178,8 @@ impl From<PersistedSimulationOptions> for SimulationOptions {
             pseudo_transient: fields.pseudo_transient,
             arc_length: fields.arc_length,
             gmin: fields.gmin,
+            rshunt: fields.rshunt,
+            connect_rules: fields.connect_rules,
             damping: fields.damping,
             method: fields.method,
             solver: fields.solver,
@@ -190,6 +217,8 @@ impl Default for SimulationOptions {
             pseudo_transient: true,
             arc_length: false,
             gmin: 1e-12,
+            rshunt: None,
+            connect_rules: None,
             damping: DampingStrategy::VoltageLimiting,
             method: IntegrationMethod::TrapGear,
             solver: MatrixSolver::Lu,
@@ -267,18 +296,25 @@ impl SimulationOptions {
         ("Robust", Self::robust),
     ];
 
+    /// How the Solver page labels [`Self::connect_rules`], so a finding that
+    /// names the setting names the field the reader will find.
+    pub const CONNECT_RULES_LABEL: &'static str = "Connect rules \u{b7} CONNECTRULES";
+
     /// Which named preset these options are exactly, if any.
     ///
     /// Compared by serialized value rather than by a remembered "last preset
-    /// pressed": editing a numerical field leaves the preset. Compatibility
-    /// is selected independently and is preserved when applying a preset.
-    /// Returns `None` for options that match no preset.
+    /// pressed": editing a numerical field leaves the preset. Compatibility,
+    /// the node shunt and the connect rules are selected independently and
+    /// are preserved when applying a preset. Returns `None` for options that
+    /// match no preset.
     #[must_use]
     pub fn preset_name(&self) -> Option<&'static str> {
         let current = serde_json::to_vec(self).ok()?;
         Self::PRESETS.iter().find_map(|(label, build)| {
             let mut preset = build();
             preset.compatibility = self.compatibility;
+            preset.rshunt = self.rshunt;
+            preset.connect_rules.clone_from(&self.connect_rules);
             serde_json::to_vec(&preset)
                 .ok()
                 .filter(|preset| *preset == current)
@@ -423,6 +459,9 @@ impl SimulationOptions {
         for (name, value) in [
             ("transient_lte_reltol", self.transient_lte_reltol),
             ("transient_lte_abstol", self.transient_lte_abstol),
+            // The parser refuses `RSHUNT=0` and below: a zero-ohm shunt would
+            // short every node to ground.
+            ("rshunt", self.rshunt),
         ] {
             if let Some(value) = value
                 && (!value.is_finite() || value <= 0.0)
@@ -453,6 +492,13 @@ impl SimulationOptions {
             if !value.is_finite() || value <= -273.15 {
                 errors.push(ValidationError::InvalidTemperature(name, value));
             }
+        }
+        // A block is named by a simple Verilog-AMS identifier. Anything else
+        // names no block a library can declare, and could break the card.
+        if let Some(block) = &self.connect_rules
+            && !is_simple_identifier(block)
+        {
+            errors.push(ValidationError::InvalidConnectRules(block.clone()));
         }
         if errors.is_empty() {
             Ok(())
@@ -523,6 +569,16 @@ impl SimulationOptions {
         }
         if self.gmin != default.gmin {
             lines.push(format!("+ GMIN={:e}", self.gmin));
+        }
+        // Stated only when asked for: with none, the deck holds no resistor
+        // nobody drew.
+        if let Some(rshunt) = self.rshunt {
+            lines.push(format!("+ RSHUNT={rshunt:e}"));
+        }
+        // Quoted, so the parser keeps the case-sensitive block name as it was
+        // written. With none, the engine takes the design's only block.
+        if let Some(block) = &self.connect_rules {
+            lines.push(format!("+ CONNECTRULES=\"{block}\""));
         }
         if self.gmin_stepping != default.gmin_stepping {
             lines.push(format!("+ GMINSTEPPING={}", u8::from(self.gmin_stepping)));
@@ -596,6 +652,16 @@ impl SimulationOptions {
 
         lines.join("\n")
     }
+}
+
+/// A Verilog-AMS simple identifier: a letter or underscore, then letters,
+/// digits, underscores and dollar signs.
+fn is_simple_identifier(name: &str) -> bool {
+    let mut characters = name.chars();
+    characters
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+        && characters.all(|rest| rest.is_ascii_alphanumeric() || rest == '_' || rest == '$')
 }
 
 #[cfg(test)]

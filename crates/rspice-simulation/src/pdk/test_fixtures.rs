@@ -9,8 +9,8 @@ use rspice_model_library::pdk::{
 };
 
 pub fn fixture_archive() -> (Vec<u8>, PdkPublisherTrustStore, PdkAdministrativeAuthority) {
-    let signing_key = SigningKey::from_bytes(&[0x42; 32]);
-    let model_bytes = br#".lib TT
+    fixture_archive_with_models(
+        br#".lib TT
 .model nmos_demo nmos level=1 vto=0.55
 .endl TT
 .lib SS
@@ -26,7 +26,17 @@ pub fn fixture_archive() -> (Vec<u8>, PdkPublisherTrustStore, PdkAdministrativeA
 .model nmos_demo nmos level=1 vto=0.52
 .endl FS
 "#
-    .to_vec();
+        .to_vec(),
+    )
+}
+
+/// The same signed package, with `model_bytes` as its model library. Every
+/// process reads the section of its own name, so the library must declare
+/// `.lib TT` through `.lib FS`.
+pub fn fixture_archive_with_models(
+    model_bytes: Vec<u8>,
+) -> (Vec<u8>, PdkPublisherTrustStore, PdkAdministrativeAuthority) {
+    let signing_key = SigningKey::from_bytes(&[0x42; 32]);
     let callback_bytes = wat::parse_str(
         r#"(module
                 (memory (export "memory") 1 2)

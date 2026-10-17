@@ -329,12 +329,13 @@ fn revision(app: &RSpiceApp) -> crate::product::ObjectRevision {
 }
 
 /// Every global solver bound the plan owns and no analysis form offers.
-const GLOBAL: [O; 11] = [
+const GLOBAL: [O; 12] = [
     O::Reltol,
     O::Abstol,
     O::Vntol,
     O::ResidualReltol,
     O::Gmin,
+    O::Rshunt,
     O::Pivrel,
     O::Pivtol,
     O::Solver,

@@ -486,6 +486,11 @@ impl SealedModelExecutionSources {
                                     library.root_path.display()
                                 )
                             })?;
+                        let Some(materialized_model_cards) =
+                            without_veriloga_source_directives(materialized_model_cards)
+                        else {
+                            continue;
+                        };
                         let binding = MaterializedPlanBinding::try_new(
                             CornerModelBinding {
                                 process: *process,
@@ -624,6 +629,11 @@ impl SealedModelExecutionSources {
                         path.display()
                     )
                 })?;
+            let Some(materialized_model_cards) =
+                without_veriloga_source_directives(materialized_model_cards)
+            else {
+                continue;
+            };
             sections.push(MaterializedCornerSection {
                 source_label: format!(
                     "{} [{}] ({})",
@@ -641,6 +651,45 @@ impl SealedModelExecutionSources {
         }
         Ok(sections)
     }
+}
+
+/// A model library's materialized cards without its Verilog-A source
+/// directives, or `None` when the directives were all there was.
+///
+/// Each directive a library source writes is compiled from the sealed library
+/// into a runtime of its own (`model_library_veriloga_authority`), and the deck
+/// names that runtime on an exact `.veriloga` line of its own. Spliced into the
+/// deck as the library wrote it, the directive names a file the deck does not
+/// carry, which the deck's source closure refuses, so a library that ships
+/// Verilog-A could never run. A directive's continuation records go with it.
+///
+/// A library, or a section, of Verilog-A alone — a connection library of
+/// connect rules, a set of behavioral devices — reaches the deck only as its
+/// runtimes, and has no cards to bind.
+fn without_veriloga_source_directives(cards: String) -> Option<String> {
+    if !cards
+        .lines()
+        .any(|line| rspice_core::netlist::parse_veriloga_source_directive(line).is_some())
+    {
+        return Some(cards);
+    }
+    let mut kept = String::with_capacity(cards.len());
+    let mut dropping = false;
+    for line in cards.split_inclusive('\n') {
+        if dropping && line.trim_start().starts_with('+') {
+            continue;
+        }
+        dropping = rspice_core::netlist::parse_veriloga_source_directive(line.trim_end()).is_some();
+        if !dropping {
+            kept.push_str(line);
+        }
+    }
+    kept.lines()
+        .any(|line| {
+            let line = line.trim();
+            !line.is_empty() && !line.starts_with('*')
+        })
+        .then_some(kept)
 }
 
 fn root_external_source_paths(source: &str) -> Vec<String> {

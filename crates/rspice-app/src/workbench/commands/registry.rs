@@ -1275,6 +1275,7 @@ impl Command {
                 "the active simulation execution cannot accept cancellation"
             }
             Self::StopSimulation => "no simulation is running",
+            Self::PreflightChecks => "the engine is still building the decks of the last check",
             Self::ClearResults if app.state.simulation.execution.has_active_execution() => {
                 "an active simulation execution still owns result history"
             }

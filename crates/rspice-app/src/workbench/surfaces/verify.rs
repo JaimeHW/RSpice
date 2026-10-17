@@ -544,7 +544,11 @@ fn request_analysis_run(
         app.state.workbench.active_analysis_instance = Some(id);
     }
     crate::workbench::preflight::run_and_queue(app);
-    if app.state.simulation.execution.trigger_simulation {
+    // A run that waits on the engine's check of its decks is queued when the
+    // check authorizes it.
+    if app.state.simulation.execution.trigger_simulation
+        || app.state.workbench.preflight.run_awaits_check()
+    {
         Ok(())
     } else {
         Err(

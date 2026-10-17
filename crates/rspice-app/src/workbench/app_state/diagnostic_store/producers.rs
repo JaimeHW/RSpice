@@ -12,7 +12,8 @@ use rspice_app_types::diagnostics::CanonicalDiagnosticMetadata;
 use crate::diagnostics::LogAnchor;
 use crate::state::ConvergenceAttribution;
 use crate::workbench::state::{
-    ModelsPage, PreflightAdvisory, PreflightIssue, PreflightRemediation, PreflightReport,
+    DrawnObject, ModelsPage, PreflightAdvisory, PreflightIssue, PreflightRemediation,
+    PreflightReport,
 };
 
 use super::super::AppState;
@@ -38,6 +39,8 @@ const PREFLIGHT_PRODUCER: &str = "rspice.simulation.preflight";
 const MODEL_BINDING_PRODUCER: &str = "rspice.models.binding";
 /// The deck the run is generated from.
 const NETLIST_PRODUCER: &str = "rspice.netlist.generator";
+/// The engine's own build of a dispatched deck, for what it refuses there.
+const ENGINE_PRODUCER: &str = "rspice.engine.elaboration";
 
 impl AppState {
     /// One record for a failed analysis, attributed to the objects the engine
@@ -209,6 +212,26 @@ impl AppState {
     /// the bindings move — which is exactly what the report's own currency
     /// rule already said and what no surface but the report could state.
     pub(in crate::workbench) fn publish_dispatch_diagnostics(&mut self, report: &PreflightReport) {
+        let records = self.dispatch_records(report);
+        self.publish_or_state_refusal(DiagnosticInputs::Dispatch, records);
+    }
+
+    /// The same records, decided against the dispatch inputs as they stood
+    /// when the pass that found them began (`Self::dispatch_inputs_at_press`),
+    /// so an edit made while the engine built the decks leaves them stale.
+    pub(in crate::workbench) fn publish_dispatch_diagnostics_against(
+        &mut self,
+        report: &PreflightReport,
+        inputs_at_press: crate::product::ContentDigest,
+    ) {
+        let records = self.dispatch_records(report);
+        let published =
+            self.diagnostics
+                .insert(inputs_at_press, DiagnosticInputs::Dispatch, records);
+        self.state_refusal(published);
+    }
+
+    fn dispatch_records(&self, report: &PreflightReport) -> Vec<DiagnosticRecord> {
         let project = self.workspace.content.project.id();
         let revision = report.project_revision;
         // Keyed by what each finding names as the thing to change, which is
@@ -250,7 +273,7 @@ impl AppState {
                 records.push(advisory_record(project, key, canonical, advisory));
             }
         }
-        self.publish_or_state_refusal(DiagnosticInputs::Dispatch, records);
+        records
     }
 
     /// Publish, and say so in the Console if the store refuses.
@@ -314,6 +337,7 @@ fn remediation_key(remediation: &PreflightRemediation) -> String {
         PreflightRemediation::SimulationPlan {
             analysis: Some(analysis),
         } => format!("simulation-plan:{analysis}"),
+        PreflightRemediation::SolverOptions => "solver-options".to_owned(),
         PreflightRemediation::ProjectTechnology => "project-technology".to_owned(),
         PreflightRemediation::Models {
             page,
@@ -326,6 +350,18 @@ fn remediation_key(remediation: &PreflightRemediation) -> String {
         ),
         PreflightRemediation::NetlistSource { .. } => "netlist-source".to_owned(),
         PreflightRemediation::RuleSetup => "rule-setup".to_owned(),
+        // The drawn object, in the view that draws it: two engine refusals
+        // about one net are one place, wherever the deck spelled it.
+        PreflightRemediation::Drawing { cell_view, object } => match object {
+            DrawnObject::Component { id, .. } => {
+                format!("drawing:{}:component:{id}", cell_view.key())
+            }
+            DrawnObject::Net { name, .. } => format!(
+                "drawing:{}:net:{}",
+                cell_view.key(),
+                name.to_ascii_lowercase()
+            ),
+        },
     }
 }
 
@@ -335,10 +371,15 @@ fn blocker_record(
     canonical: CanonicalDiagnosticMetadata,
     issue: &PreflightIssue,
 ) -> DiagnosticRecord {
+    let subject = DiagnosticSubject::new(project, remediation_subject(&issue.remediation));
+    let subject = match &issue.remediation {
+        PreflightRemediation::Drawing { cell_view, .. } => subject.in_cell_view(cell_view.clone()),
+        _ => subject,
+    };
     DiagnosticRecord::new(
         canonical,
         DiagnosticLevel::Error,
-        DiagnosticSubject::new(project, remediation_subject(&issue.remediation)),
+        subject,
         issue.observed.clone(),
     )
     .keyed(key)
@@ -381,6 +422,10 @@ const fn remediation_producer(remediation: &PreflightRemediation) -> (&'static s
         PreflightRemediation::Models { .. } => (MODEL_BINDING_PRODUCER, "MODEL"),
         PreflightRemediation::ProjectTechnology => (MODEL_BINDING_PRODUCER, "TECH"),
         PreflightRemediation::NetlistSource { .. } => (NETLIST_PRODUCER, "NETLIST"),
+        // The engine's refusal, whose remedy is one of the plan's options.
+        PreflightRemediation::Drawing { .. } | PreflightRemediation::SolverOptions => {
+            (ENGINE_PRODUCER, "ENGINE")
+        }
         PreflightRemediation::DesignChecks
         | PreflightRemediation::SimulationPlan { .. }
         | PreflightRemediation::RuleSetup => (PREFLIGHT_PRODUCER, "RUN"),
@@ -393,6 +438,7 @@ fn remediation_subject(remediation: &PreflightRemediation) -> String {
     match remediation {
         PreflightRemediation::DesignChecks => "Design checks".to_owned(),
         PreflightRemediation::SimulationPlan { .. } => "Simulation plan".to_owned(),
+        PreflightRemediation::SolverOptions => "Solver & convergence".to_owned(),
         PreflightRemediation::ProjectTechnology => "Project technology".to_owned(),
         PreflightRemediation::Models {
             library: Some(library),
@@ -413,6 +459,7 @@ fn remediation_subject(remediation: &PreflightRemediation) -> String {
         }
         PreflightRemediation::NetlistSource { line: None } => "Generated netlist".to_owned(),
         PreflightRemediation::RuleSetup => "Rule deck".to_owned(),
+        PreflightRemediation::Drawing { object, .. } => object.name().to_owned(),
     }
 }
 

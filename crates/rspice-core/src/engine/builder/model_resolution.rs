@@ -548,6 +548,21 @@ pub struct ModelBinInstanceInspection {
     pub multiplier: Option<f64>,
 }
 
+/// One flattened MOS instance whose geometry no card of its bin family covers,
+/// which circuit construction refuses.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelBinCoverageGap {
+    pub element: String,
+    /// The family the instance names, as it names it.
+    pub family: String,
+    pub length: Option<f64>,
+    pub width: Option<f64>,
+    pub nfin: Option<f64>,
+    /// The family card whose bounds lie closest to the instance geometry,
+    /// each axis's excess measured relative to the bound it passes.
+    pub nearest: ModelBinCardInspection,
+}
+
 /// Complete successful model-bin inspection of one exact parsed netlist.
 ///
 /// Construction fails instead of returning a partial receipt when any card is
@@ -905,6 +920,83 @@ pub(super) fn resolve_binned_model_def<'a>(
         },
         match_count: matches.len(),
     }))
+}
+
+/// The coverage gap [`resolve_binned_model_def`] refuses for this instance,
+/// or `None` when it resolves or names no bin family.
+///
+/// The candidates, their order and the containment test are that resolver's,
+/// so an instance is a gap here exactly when construction reports it
+/// uncovered.
+pub(super) fn model_bin_coverage_gap(
+    netlist: &ModelResolution<'_>,
+    element_name: &str,
+    model_name: &str,
+    instance_params: &[(String, f64)],
+    temperature_kelvin: f64,
+) -> Result<Option<ModelBinCoverageGap>, SimulationError> {
+    if find_model_def(netlist, model_name).is_some() {
+        return Ok(None);
+    }
+    let prefix = format!("{model_name}.");
+    let length = instance_param(instance_params, &["L", "LENGTH"]);
+    let width = instance_param(instance_params, &["W", "WIDTH"]);
+    let nfin = instance_param(instance_params, &["NFIN"]);
+    let mut nearest: Option<(f64, ModelBinCardInspection)> = None;
+    for (declaration_order, model_def) in netlist.models.iter().enumerate() {
+        if model_def.name.len() <= prefix.len()
+            || !model_def.name[..prefix.len()].eq_ignore_ascii_case(&prefix)
+        {
+            continue;
+        }
+        let Some(geometry) = ModelBinCardGeometry::resolve(netlist, model_def, temperature_kelvin)?
+        else {
+            continue;
+        };
+        if geometry.matches(instance_params) {
+            return Ok(None);
+        }
+        let distance = relative_excess(length, geometry.length)
+            + relative_excess(width, geometry.width)
+            + relative_excess(nfin, geometry.nfin);
+        if nearest.as_ref().is_none_or(|(best, _)| distance < *best) {
+            nearest = Some((
+                distance,
+                ModelBinCardInspection {
+                    model: model_def.name.clone(),
+                    family: model_bin_family_name(&model_def.name).to_owned(),
+                    model_type: model_def.model_type.clone(),
+                    declaration_order,
+                    geometry,
+                },
+            ));
+        }
+    }
+    Ok(nearest.map(|(_, nearest)| ModelBinCoverageGap {
+        element: element_name.to_owned(),
+        family: model_name.to_owned(),
+        length,
+        width,
+        nfin,
+        nearest,
+    }))
+}
+
+/// How far `value` lies outside `range`, squared and relative to the bound it
+/// passes. An axis the card does not bound, or a value it lacks, adds nothing.
+fn relative_excess(value: Option<f64>, range: ModelBinAxisRange) -> f64 {
+    let Some(value) = value else {
+        return 0.0;
+    };
+    let excess = |bound: f64| {
+        let scale = bound.abs().max(f64::MIN_POSITIVE);
+        ((value - bound) / scale).powi(2)
+    };
+    match (range.min, range.max) {
+        (Some(min), _) if value < min && !bin_bound_equal(value, min) => excess(min),
+        (_, Some(max)) if value > max && !bin_bound_equal(value, max) => excess(max),
+        _ => 0.0,
+    }
 }
 
 pub(super) fn find_binned_model_def<'a>(

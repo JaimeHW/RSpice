@@ -213,11 +213,12 @@ fn an_authored_connect_module_selects_its_executable_body() {
             _
         ))
     ));
-    check_execution(&selected, Kind::Adc, "din").unwrap();
+    check_execution(&selected, Kind::Adc, "din", "a1").unwrap();
 }
 
 /// A design whose rules do not cover the boundary is an error naming the net
-/// and both disciplines, which is the diagnostic section 7.8.4 asks for.
+/// and both disciplines, which is the diagnostic section 7.8.4 asks for, and
+/// the instance whose port the boundary is, which is where it is shown.
 #[test]
 fn an_uncovered_boundary_names_the_net_and_both_disciplines() {
     let source = "\
@@ -234,6 +235,7 @@ endconnectrules
     let (table, db) = table(source);
     let error = select_for_boundary(&table, &db, Kind::Adc, "din", "a1", "in")
         .expect_err("no analog-to-discrete rule");
+    assert_eq!(error.instance_name(), Some("a1"));
     let error = format!("{error}");
     assert!(error.contains("din"), "names the net: {error}");
     assert!(error.contains("electrical"), "{error}");

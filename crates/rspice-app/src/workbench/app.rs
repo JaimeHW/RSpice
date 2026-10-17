@@ -663,7 +663,9 @@ impl RSpiceApp {
             &self.state.workspace.content.active_view.display_path(),
             self.state.simulation.execution.has_active_execution(),
         );
-        if self.state.simulation.execution.has_active_execution() {
+        if self.state.simulation.execution.has_active_execution()
+            || self.state.workbench.preflight.checking.is_some()
+        {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
         if matches!(

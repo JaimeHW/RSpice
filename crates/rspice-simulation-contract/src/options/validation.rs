@@ -15,6 +15,8 @@ pub enum ValidationError {
     InvalidTimestep(&'static str, f64),
     TimestepOrder(f64, f64),
     InvalidTemperature(&'static str, f64),
+    /// A connect-rule block name that is not a simple identifier.
+    InvalidConnectRules(String),
 }
 
 impl fmt::Display for ValidationError {
@@ -41,6 +43,10 @@ impl fmt::Display for ValidationError {
             ValidationError::InvalidTemperature(name, val) => {
                 write!(f, "{} must be finite and > -273.15C, got {}", name, val)
             }
+            ValidationError::InvalidConnectRules(block) => write!(
+                f,
+                "connectrules must name a connect-rule block by a simple identifier, got '{block}'"
+            ),
         }
     }
 }

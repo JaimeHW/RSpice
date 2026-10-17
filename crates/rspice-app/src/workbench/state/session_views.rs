@@ -1113,6 +1113,10 @@ pub enum PreflightRemediation {
         /// the reader left it.
         analysis: Option<crate::product::AnalysisInstanceId>,
     },
+    /// The Solver & convergence page, where the plan's engine options are
+    /// set: a finding whose remedy is one of them and that no drawn object
+    /// owns, such as a design's connect rules with no block named.
+    SolverOptions,
     ProjectTechnology,
     /// One page of the Models workspace, and the object it opens on. A
     /// model-binding finding is repaired where the bindings live — Corners &
@@ -1148,6 +1152,42 @@ pub enum PreflightRemediation {
     /// The project's design rule setup, where the deck a finding is about is
     /// edited.
     RuleSetup,
+    /// One object drawn in the configured design, in the cell view that draws
+    /// it.
+    ///
+    /// An engine refusal names deck nodes and elements. They are read back to
+    /// the drawing through the hierarchy the deck was written from, so the
+    /// finding opens the owning cell view — a sub-cell's, for a node inside
+    /// an instance — and selects what the engine named there.
+    Drawing {
+        cell_view: crate::state::CellViewRef,
+        object: DrawnObject,
+    },
+}
+
+/// An object on one sheet, named the way the sheet names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DrawnObject {
+    Component {
+        id: u64,
+        name: String,
+    },
+    /// A net, selected through one wire it runs on, or through a component
+    /// on it when it is drawn pin to pin.
+    Net {
+        name: String,
+        wire: Option<u64>,
+        component: Option<u64>,
+    },
+}
+
+impl DrawnObject {
+    /// The name the drawing gives it.
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Component { name, .. } | Self::Net { name, .. } => name,
+        }
+    }
 }
 
 impl PreflightRemediation {
@@ -1338,6 +1378,29 @@ pub struct PreflightDialogState {
     /// loop consumes it on its next pass, so the request records intent
     /// without its origin naming the workflow.
     pub(in crate::workbench) run_and_queue_requested: bool,
+    /// A pass whose decks the engine is still building, off the UI thread.
+    pub(in crate::workbench) checking: Option<PreflightCheck>,
+    /// The reader stopped that pass. The frame loop cancels it before it
+    /// looks for the pass's verdict, so a verdict that lands in between
+    /// authorizes nothing.
+    pub(in crate::workbench) check_cancel_requested: bool,
+}
+
+/// What a pass decided before its engine build began, held until the build
+/// says what the engine refuses.
+#[derive(Debug, Clone)]
+pub(in crate::workbench) struct PreflightCheck {
+    /// The report as far as the press took it: the revisions it inspected,
+    /// and its advisories. The engine's refusals join its blockers.
+    pub(in crate::workbench) report: PreflightReport,
+    /// What the report authorizes if the engine refuses nothing.
+    pub(in crate::workbench) contract: PreparedPreflightContract,
+    /// Whether the run is queued once the report authorizes it: a Run press
+    /// rather than a check alone.
+    pub(in crate::workbench) queue: bool,
+    /// The dispatch inputs as they stood at the press, which the findings
+    /// are decided against. `None` when they could not be read then.
+    pub(in crate::workbench) inputs_at_press: Option<crate::product::ContentDigest>,
 }
 
 impl PreflightDialogState {
@@ -1361,6 +1424,23 @@ impl PreflightDialogState {
     /// Consume a pending request. Returns whether one was outstanding.
     pub fn take_run_and_queue_request(&mut self) -> bool {
         std::mem::take(&mut self.run_and_queue_requested)
+    }
+
+    /// Ask the frame loop to stop the pass whose decks the engine is
+    /// building. Nothing when no pass is.
+    pub(in crate::workbench) fn request_check_cancel(&mut self) {
+        self.check_cancel_requested = self.checking.is_some();
+    }
+
+    /// Consume a pending stop. Returns whether one was outstanding.
+    pub(in crate::workbench) fn take_check_cancel_request(&mut self) -> bool {
+        std::mem::take(&mut self.check_cancel_requested)
+    }
+
+    /// Whether a press asked for a run that the pass in flight will queue
+    /// once it authorizes one.
+    pub(in crate::workbench) fn run_awaits_check(&self) -> bool {
+        self.checking.as_ref().is_some_and(|check| check.queue)
     }
 
     /// Where the retained report stands against the live design.

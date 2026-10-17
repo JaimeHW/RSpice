@@ -109,6 +109,7 @@ pub enum NumericOverrideOption {
     Vntol,
     ResidualReltol,
     Gmin,
+    Rshunt,
     Itl1,
     Itl4,
     GminStepping,

@@ -745,3 +745,67 @@ fn xyce_winding_ic_participates_in_nonlinear_dc_bias() {
     // Xyce 7.10 independent bias solution at the default 27 C.
     assert!((voltage(&point, "out") - 0.577617386).abs() < 1e-6);
 }
+
+/// A loop of voltage sources and inductors is singular in every DC solve: the
+/// DC stamp shorts each winding, the loop's branch rows sum to a constant, and
+/// neither GMIN nor RSHUNT stamps a branch row. The circuit names each loop it
+/// refuses, and a winding the solve holds at its `IC=` is not part of one.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_loop_through_dc_shorted_windings_is_refused_by_every_dc_solve() {
+    let cases: [(&str, &[&str], bool); 4] = [
+        (
+            "V across L\nV1 a 0 1\nL1 a 0 1u\n.end\n",
+            &["V1", "L1"],
+            true,
+        ),
+        (
+            "V L V\nV1 a 0 1\nL1 a b 1u\nV2 b 0 1\n.end\n",
+            &["V1", "V2", "L1"],
+            true,
+        ),
+        (
+            "Shunted V L V\nV1 a 0 1\nL1 a b 1u\nV2 b 0 2\nR1 a 0 1k\n.options RSHUNT=1k\n.end\n",
+            &["V1", "V2", "L1"],
+            true,
+        ),
+        (
+            "V across V\nV1 a 0 1\nV2 a 0 1\n.end\n",
+            &["V1", "V2"],
+            false,
+        ),
+    ];
+    for (deck, members, through_inductor) in cases {
+        let netlist = parse(deck);
+        let engine = engine();
+        engine
+            .run_dc_op(&netlist)
+            .expect_err("a loop of fixed branch voltages has no unique DC solution");
+        engine
+            .run_dc_sweep(&netlist, "V1", 0.0, 1.0, 0.5)
+            .expect_err("no point of a DC sweep has a unique solution either");
+        let loops = engine
+            .build_circuit(&netlist)
+            .expect("the loop is refused by the solve, not by construction")
+            .dc_branch_voltage_loops();
+        assert_eq!(loops.len(), 1, "{deck}: {loops:?}");
+        let named: Vec<String> = loops[0]
+            .members
+            .iter()
+            .map(|member| member.to_ascii_uppercase())
+            .collect();
+        assert_eq!(named, members, "{deck}");
+        assert_eq!(loops[0].through_inductor, through_inductor, "{deck}");
+    }
+
+    let xyce = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+    let held = parse("Held winding\nV1 a 0 1\nL1 a 0 1u IC=1m\n.end\n");
+    xyce.run_dc_op(&held)
+        .expect("a winding held at its IC is a current in the DC solve");
+    assert!(
+        xyce.build_circuit(&held)
+            .unwrap()
+            .dc_branch_voltage_loops()
+            .is_empty()
+    );
+}

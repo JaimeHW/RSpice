@@ -565,24 +565,7 @@ impl DiagnosticInputs {
                 subject,
                 state.symbol_pin_check_inputs(subject)?,
             )),
-            Self::Dispatch => {
-                let (root, revision, closure) = scope.configured_topology();
-                digest_of(&(
-                    state.workspace.content.project.id(),
-                    state.workspace.content.project.revision().get(),
-                    root,
-                    revision,
-                    closure,
-                    state.active_plan_revision(),
-                    // The report these findings were published from. Every
-                    // edit to a simulation input — plan, models, technology,
-                    // bindings, solver options — invalidates it at its own
-                    // commit boundary, and so does dispatching the run it
-                    // authorized. Once it is gone its findings describe a
-                    // pass nobody can act on, so they read stale with it.
-                    state.workbench.preflight.report.is_some(),
-                ))
-            }
+            Self::Dispatch => dispatch_digest(scope, state.workbench.preflight.report.is_some()),
             Self::Run { run_sequence } => {
                 let retained = state
                     .simulation
@@ -600,6 +583,44 @@ impl DiagnosticInputs {
             } => dispatched_setup_digest(scope, &(campaign, member_index)),
             Self::RuleDeck => super::rule_deck::live_input_digest(state),
         }
+    }
+}
+
+/// The dispatch inputs: the configured topology closure, the active plan, and
+/// whether the report the findings came from is retained.
+fn dispatch_digest(
+    scope: &DigestScope<'_>,
+    report_retained: bool,
+) -> Result<ContentDigest, String> {
+    let state = scope.state;
+    let (root, revision, closure) = scope.configured_topology();
+    digest_of(&(
+        state.workspace.content.project.id(),
+        state.workspace.content.project.revision().get(),
+        root,
+        revision,
+        closure,
+        state.active_plan_revision(),
+        // The report these findings were published from. Every edit to a
+        // simulation input — plan, models, technology, bindings, solver
+        // options — invalidates it at its own commit boundary, and so does
+        // dispatching the run it authorized. Once it is gone its findings
+        // describe a pass nobody can act on, so they read stale with it.
+        report_retained,
+    ))
+}
+
+impl AppState {
+    /// The digest a pass started now publishes its findings against, taken
+    /// before the engine builds its decks.
+    ///
+    /// The build runs off the UI thread while the reader goes on editing, so
+    /// the findings it returns are about the design as it stood at the press.
+    /// Decided against the live inputs instead, a finding about an edited
+    /// design would read as current. The report is counted as retained, as
+    /// it will be when they are published.
+    pub(in crate::workbench) fn dispatch_inputs_at_press(&self) -> Result<ContentDigest, String> {
+        dispatch_digest(&DigestScope::new(self), true)
     }
 }
 

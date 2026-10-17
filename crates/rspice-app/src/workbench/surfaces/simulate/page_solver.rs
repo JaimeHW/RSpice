@@ -108,6 +108,7 @@ fn compatibility_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                 .label()
                 .to_owned();
             let mut picked = None;
+            let mut connect_rules_response = None;
             field_pair(
                 ui,
                 (
@@ -123,17 +124,33 @@ fn compatibility_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                         );
                     },
                 ),
-                None,
+                Some((
+                    SimulationOptions::CONNECT_RULES_LABEL,
+                    &mut |ui: &mut Ui, width: f32| {
+                        connect_rules_response = Some(mono_input(
+                            ui,
+                            SimulationOptions::CONNECT_RULES_LABEL,
+                            &mut app.state.sim_setup.session.options_draft.connect_rules,
+                            width,
+                        ));
+                    },
+                )),
             );
             if let Some(index) = picked {
                 app.state.sim_setup.session.options_draft.compatibility =
                     SimulationCompatibility::ALL[index];
                 commit_draft(app);
             }
+            if let Some(response) = connect_rules_response {
+                commit_on_release(app, &response);
+            }
         });
         card_note(
             ui,
-            "Xyce-specific Newton controls require Xyce compatibility. This policy also selects available device-model variants; source syntax is unchanged.",
+            "Xyce-specific Newton controls require Xyce compatibility. This policy also selects \
+                 available device-model variants; source syntax is unchanged. CONNECTRULES names \
+                 the connectrules block that converts at every analog/digital boundary; empty \
+                 takes the design's only block.",
         );
     });
 }
@@ -216,6 +233,12 @@ fn policy_strip(ui: &mut Ui, app: &mut RSpiceApp) {
     {
         let mut options = build();
         options.compatibility = app.state.sim_setup.options.compatibility;
+        // A resistor in the circuit, not a numerical setting: no preset
+        // places or removes it. Nor does one choose the connect rules.
+        options.rshunt = app.state.sim_setup.options.rshunt;
+        options
+            .connect_rules
+            .clone_from(&app.state.sim_setup.options.connect_rules);
         app.state.sim_setup.session.options_draft = OptionsDialogState::from_options(&options);
         apply_options(app, &options);
     }
@@ -294,8 +317,9 @@ enum PendingChange {
     None,
     /// The draft does not parse or does not validate.
     Invalid(Vec<String>),
-    /// The draft is a valid, different option set.
-    Ready(SimulationOptions),
+    /// The draft is a valid, different option set. Boxed: the options are
+    /// ten times the size of either other answer.
+    Ready(Box<SimulationOptions>),
 }
 
 fn pending_change(app: &RSpiceApp) -> PendingChange {
@@ -311,7 +335,7 @@ fn pending_change(app: &RSpiceApp) -> PendingChange {
     if current.is_some() && current == requested {
         PendingChange::None
     } else {
-        PendingChange::Ready(options)
+        PendingChange::Ready(Box::new(options))
     }
 }
 
@@ -953,13 +977,34 @@ fn matrix_policy(ui: &mut Ui, app: &mut RSpiceApp) {
             for response in [pivrel_response, pivtol_response].into_iter().flatten() {
                 commit_on_release(app, &response);
             }
+
+            let mut rshunt_response = None;
+            field_pair(
+                ui,
+                (
+                    "Node shunt to ground · RSHUNT",
+                    &mut |ui: &mut Ui, width: f32| {
+                        rshunt_response = Some(mono_input(
+                            ui,
+                            "Node shunt to ground \u{b7} RSHUNT",
+                            &mut app.state.sim_setup.session.options_draft.rshunt,
+                            width,
+                        ));
+                    },
+                ),
+                None,
+            );
+            if let Some(response) = rshunt_response {
+                commit_on_release(app, &response);
+            }
         });
         card_note(
             ui,
             "The factorization backend and the pivot thresholds decide whether two runs of the \
                  same plan produce bit-identical results. A change here is recorded as a \
                  configuration change and invalidates any parity evidence taken under the previous \
-                 setting.",
+                 setting. RSHUNT, in ohms, places a resistor from every node to ground in every \
+                 analysis; empty places none.",
         );
     });
 }
@@ -1025,12 +1070,12 @@ fn topology_contract(ui: &mut Ui) {
             rule_row(
                 ui,
                 "Nodes without a DC path",
-                "refused at preflight · offending nodes listed",
+                "forced ones refused at preflight for OP, AC, noise, PZ, sensitivity",
             );
             rule_row(
                 ui,
                 "Voltage-source loops",
-                "refused · loop membership listed",
+                "refused · sources alone by design rules · via inductors at every DC point",
             );
             rule_row(
                 ui,
@@ -1039,15 +1084,17 @@ fn topology_contract(ui: &mut Ui) {
             );
             rule_row(
                 ui,
-                "Node shunt",
-                "an author-sized element · satisfies the check as a real device",
+                "Node shunt · RSHUNT",
+                "an author-sized resistor at every node · satisfies the check as a real device",
             );
         });
         card_note(
             ui,
-            "Topology acceptance is not configurable: a design without a DC path to every node \
-                 cannot produce a defensible operating point, so preflight refuses it rather than \
-                 reporting a bias a conditioning shunt invented.",
+            "Preflight builds every deck the run dispatches and states what the engine refuses \
+                 there; it solves nothing. A node no element conducts from at DC is solved when \
+                 nothing forces current into it, as behind a coupling capacitor, and refused \
+                 when a source does. A .DC sweep and a transient's startup refuse such a node \
+                 from the sweep value and the startup waveform, which only the run knows.",
         );
     });
 }
@@ -1347,6 +1394,10 @@ pub(super) fn plan_preset_value(
         O::Vntol => format_value(options.vntol),
         O::ResidualReltol => format_value(options.residual_reltol),
         O::Gmin => format_value(options.gmin),
+        // No shunt is placed unless the plan states one.
+        O::Rshunt => options
+            .rshunt
+            .map_or_else(|| "none".to_owned(), format_value),
         O::Itl1 => options.itl1.to_string(),
         O::Itl4 => options.itl4.to_string(),
         O::GminStepping => flag_preset(options.gmin_stepping),
