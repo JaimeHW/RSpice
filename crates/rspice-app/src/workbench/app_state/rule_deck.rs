@@ -93,7 +93,7 @@ fn rule_deck_records(state: &AppState) -> Vec<DiagnosticRecord> {
                 DeckIssue::UnknownRule { code } | DeckIssue::UnreadableSeverity { code, .. } => {
                     format!("Rule deck \u{00b7} {code}")
                 }
-                DeckIssue::BelowFloor { rule, .. } => {
+                DeckIssue::BelowFloor { rule, .. } | DeckIssue::AboveCeiling { rule, .. } => {
                     format!("Rule deck \u{00b7} {}", rule.rule_code())
                 }
                 DeckIssue::UnsupportedSchema { .. } | DeckIssue::Unreadable { .. } => {
@@ -125,6 +125,9 @@ fn issue_identity(issue: &DeckIssue) -> (&'static str, String) {
         DeckIssue::BelowFloor { rule, .. } => {
             ("RULE-DECK-BELOW-FLOOR", rule.rule_code().to_owned())
         }
+        DeckIssue::AboveCeiling { rule, .. } => {
+            ("RULE-DECK-ABOVE-CEILING", rule.rule_code().to_owned())
+        }
         DeckIssue::UnsupportedSchema { .. } => ("RULE-DECK-UNSUPPORTED-SCHEMA", String::new()),
         DeckIssue::Unreadable { .. } => ("RULE-DECK-UNREADABLE", String::new()),
     }
@@ -132,16 +135,18 @@ fn issue_identity(issue: &DeckIssue) -> (&'static str, String) {
 
 /// How much each issue stands against a sign-off.
 ///
-/// A deck that is not applied, or a decided rule checked at its default,
-/// means the design is checked under a policy the team did not write: a rule
-/// they promoted to a blocker no longer blocks. A row naming a rule this build
-/// does not have changes nothing this build checks, and a row clamped to its
-/// rule's floor is checked more strictly than written, which hides nothing:
-/// every finding it affects says what it is reported at.
+/// A deck that is not applied, a decided rule checked at its default, or a
+/// row clamped to its rule's ceiling, means the design is checked under a
+/// policy the team did not write: a rule they promoted to a blocker does not
+/// block. A row naming a rule this build does not have changes nothing this
+/// build checks, and a row clamped to its rule's floor is checked more
+/// strictly than written, which hides nothing: every finding it affects says
+/// what it is reported at.
 const fn issue_level(issue: &DeckIssue) -> DiagnosticLevel {
     match issue {
         DeckIssue::UnknownRule { .. } | DeckIssue::BelowFloor { .. } => DiagnosticLevel::Info,
-        DeckIssue::UnreadableSeverity { .. }
+        DeckIssue::AboveCeiling { .. }
+        | DeckIssue::UnreadableSeverity { .. }
         | DeckIssue::UnsupportedSchema { .. }
         | DeckIssue::Unreadable { .. } => DiagnosticLevel::Warning,
     }
@@ -234,6 +239,38 @@ mod tests {
                 .design_rules
                 .severity(rspice_design::drc::DrcViolationType::DuplicateName),
             Some(rspice_design::drc::DrcSeverity::Error)
+        );
+    }
+
+    /// A stored row that promotes an unused cellview to an error is applied
+    /// as a warning, and the page says so in one record.
+    #[test]
+    fn a_row_above_the_ceiling_is_reported_as_clamped() {
+        let mut state = AppState::default();
+        state.workspace.content.project.path = Some("designs/amp.rspice".into());
+        state.workspace.content.design_rules = serde_json::from_str(
+            r#"{"schema_version":1,"severities":{"DRC-UNUSED-CELLVIEW":"Error"}}"#,
+        )
+        .expect("a stored deck always reads");
+        state.publish_rule_deck_issues();
+        state.publish_rule_deck_issues();
+        let records = deck_records(&state);
+        assert_eq!(records.len(), 1, "{records:?}");
+        assert_eq!(&*records[0].canonical.code, "RULE-DECK-ABOVE-CEILING");
+        assert_eq!(records[0].level, DiagnosticLevel::Warning);
+        assert!(
+            records[0].message.starts_with("amp.rspice: ")
+                && records[0].message.contains("DRC-UNUSED-CELLVIEW"),
+            "{}",
+            records[0].message
+        );
+        assert_eq!(
+            state
+                .workspace
+                .content
+                .design_rules
+                .severity(rspice_design::drc::DrcViolationType::UnusedCellView),
+            Some(rspice_design::drc::DrcSeverity::Warning)
         );
     }
 

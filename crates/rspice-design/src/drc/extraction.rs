@@ -431,10 +431,12 @@ pub fn append_unused_cellviews(
         .map(|candidate| (candidate.key().to_ascii_lowercase(), candidate))
         .filter(|(key, _)| !reached.contains(key))
         .collect::<BTreeMap<_, _>>();
+    // Held to the rule's ceiling whoever built the configuration: an unused
+    // cellview never blocks a run.
     let severity = config
         .severity_overrides
         .get(&DrcViolationType::UnusedCellView)
-        .copied();
+        .map(|severity| DrcViolationType::UnusedCellView.rule().applied(*severity));
     for reference in unused.into_values() {
         let message = format!(
             "{} is not reached from {} under its configuration",

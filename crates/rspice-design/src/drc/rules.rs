@@ -41,8 +41,20 @@ pub struct DrcRule {
     pub default_severity: DrcSeverity,
     /// How low the rule may be set, and how low its findings are reported.
     pub floor: DrcFloor,
+    /// How high a project's deck may set the rule. Below Critical only for a
+    /// rule about the project's libraries rather than the design that runs,
+    /// which must never block a run.
+    pub max_severity: DrcSeverity,
     /// Whether one finding of the rule may be waived.
     pub waivable: bool,
+}
+
+impl DrcRule {
+    /// What a deck that sets the rule to `severity` checks it at: never
+    /// below its floor and never above its ceiling.
+    pub fn applied(&self, severity: DrcSeverity) -> DrcSeverity {
+        severity.max(self.floor.deck).min(self.max_severity)
+    }
 }
 
 /// How low a rule's findings may go.
@@ -103,6 +115,7 @@ impl DrcViolationType {
                     warning. Connect the net to the terminal it was meant for, or delete it.",
                 default_severity: DrcSeverity::Warning,
                 floor: ANY,
+                max_severity: DrcSeverity::Critical,
                 waivable: true,
             },
             Self::UnconnectedPin => &DrcRule {
@@ -114,6 +127,7 @@ impl DrcViolationType {
                     where the terminal is meant to be left open.",
                 default_severity: DrcSeverity::Warning,
                 floor: ANY,
+                max_severity: DrcSeverity::Critical,
                 waivable: true,
             },
             Self::UndrivenInput => &DrcRule {
@@ -126,6 +140,7 @@ impl DrcViolationType {
                     left open.",
                 default_severity: DrcSeverity::Error,
                 floor: ANY,
+                max_severity: DrcSeverity::Critical,
                 waivable: true,
             },
             Self::UnloadedOutput => &DrcRule {
@@ -137,6 +152,7 @@ impl DrcViolationType {
                     or waive the finding where it is meant to be open.",
                 default_severity: DrcSeverity::Warning,
                 floor: ANY,
+                max_severity: DrcSeverity::Critical,
                 waivable: true,
             },
             Self::OrphanNetLabel => &DrcRule {
@@ -147,6 +163,7 @@ impl DrcViolationType {
                     names, or remove it.",
                 default_severity: DrcSeverity::Warning,
                 floor: ANY,
+                max_severity: DrcSeverity::Critical,
                 waivable: true,
             },
             Self::DanglingWire => &DrcRule {
@@ -157,6 +174,7 @@ impl DrcViolationType {
                     it was drawn for is missing. Complete the connection or delete the segment.",
                 default_severity: DrcSeverity::Warning,
                 floor: ANY,
+                max_severity: DrcSeverity::Critical,
                 waivable: true,
             },
             Self::MalformedBus => &DrcRule {
@@ -167,6 +185,7 @@ impl DrcViolationType {
                     the bus or correct its declaration.",
                 default_severity: DrcSeverity::Error,
                 floor: ENGINE_REFUSES,
+                max_severity: DrcSeverity::Critical,
                 waivable: false,
             },
             Self::UnnamedBus => &DrcRule {
@@ -178,6 +197,7 @@ impl DrcViolationType {
                     range.",
                 default_severity: DrcSeverity::Warning,
                 floor: ANY,
+                max_severity: DrcSeverity::Critical,
                 waivable: true,
             },
             Self::BusRangeConflict => &DrcRule {
@@ -188,6 +208,7 @@ impl DrcViolationType {
                     deck is not built. Make the connected declarations and the tap ranges agree.",
                 default_severity: DrcSeverity::Error,
                 floor: ENGINE_REFUSES,
+                max_severity: DrcSeverity::Critical,
                 waivable: false,
             },
             Self::DanglingBusTap => &DrcRule {
@@ -198,6 +219,7 @@ impl DrcViolationType {
                     built. Connect the tap to its target.",
                 default_severity: DrcSeverity::Error,
                 floor: ENGINE_REFUSES,
+                max_severity: DrcSeverity::Critical,
                 waivable: false,
             },
             Self::MixedBusTap => &DrcRule {
@@ -209,6 +231,7 @@ impl DrcViolationType {
                     from the bus.",
                 default_severity: DrcSeverity::Error,
                 floor: ENGINE_REFUSES,
+                max_severity: DrcSeverity::Critical,
                 waivable: false,
             },
             Self::DuplicateBusMemberDriver => &DrcRule {
@@ -219,6 +242,7 @@ impl DrcViolationType {
                     its value is whichever wins. Leave one driver on the member.",
                 default_severity: DrcSeverity::Error,
                 floor: ANY,
+                max_severity: DrcSeverity::Critical,
                 waivable: true,
             },
             Self::VectorWidthMismatch => &DrcRule {
@@ -231,6 +255,7 @@ impl DrcViolationType {
                     explicit slice of the bus.",
                 default_severity: DrcSeverity::Error,
                 floor: ENGINE_REFUSES,
+                max_severity: DrcSeverity::Critical,
                 waivable: false,
             },
             Self::OffSheetConnectorWithoutPartner => &DrcRule {
@@ -242,6 +267,7 @@ impl DrcViolationType {
                     this an ordinary net label.",
                 default_severity: DrcSeverity::Info,
                 floor: ANY,
+                max_severity: DrcSeverity::Critical,
                 waivable: true,
             },
             Self::AmbiguousCrossing => &DrcRule {
@@ -254,6 +280,7 @@ impl DrcViolationType {
                     join the wires, or move the object onto one of them.",
                 default_severity: DrcSeverity::Error,
                 floor: AUTHOR_MUST_DECIDE,
+                max_severity: DrcSeverity::Critical,
                 waivable: false,
             },
             Self::ShortedOutputs => &DrcRule {
@@ -264,6 +291,7 @@ impl DrcViolationType {
                     one declared output on the net.",
                 default_severity: DrcSeverity::Error,
                 floor: ANY,
+                max_severity: DrcSeverity::Critical,
                 waivable: true,
             },
             Self::MissingGround => &DrcRule {
@@ -275,6 +303,7 @@ impl DrcViolationType {
                     ports and is not asked. Add a ground symbol.",
                 default_severity: DrcSeverity::Critical,
                 floor: ENGINE_REFUSES,
+                max_severity: DrcSeverity::Critical,
                 waivable: false,
             },
             Self::SourceToSource => &DrcRule {
@@ -286,6 +315,7 @@ impl DrcViolationType {
                     its sources.",
                 default_severity: DrcSeverity::Error,
                 floor: ENGINE_REFUSES,
+                max_severity: DrcSeverity::Critical,
                 waivable: false,
             },
             Self::UndrivenNet => &DrcRule {
@@ -298,6 +328,7 @@ impl DrcViolationType {
                     output.",
                 default_severity: DrcSeverity::Error,
                 floor: ANY,
+                max_severity: DrcSeverity::Critical,
                 waivable: true,
             },
             Self::GroundNotNodeZero => &DrcRule {
@@ -310,6 +341,7 @@ impl DrcViolationType {
                     or move the label to the net meant as ground.",
                 default_severity: DrcSeverity::Error,
                 floor: ANY,
+                max_severity: DrcSeverity::Critical,
                 waivable: true,
             },
             Self::SupplyTiedToGround => &DrcRule {
@@ -322,6 +354,7 @@ impl DrcViolationType {
                     of its own.",
                 default_severity: DrcSeverity::Error,
                 floor: ANY,
+                max_severity: DrcSeverity::Critical,
                 waivable: true,
             },
             Self::RecursiveInstantiation => &DrcRule {
@@ -333,6 +366,7 @@ impl DrcViolationType {
                     instance that reaches its own cellview, or bind it to another view.",
                 default_severity: DrcSeverity::Critical,
                 floor: ENGINE_REFUSES,
+                max_severity: DrcSeverity::Critical,
                 waivable: false,
             },
             Self::UnusedCellView => &DrcRule {
@@ -344,11 +378,12 @@ impl DrcViolationType {
                     changes nothing a run reports. Reference and technology libraries are never \
                     reported. Only Check Design reports it, because only a walk of the whole \
                     design knows what it reached. It says something about the project's \
-                    libraries rather than about an object in a drawing, so it is a note and is \
-                    not waived: instantiate the cellview, delete it, or move it to a reference \
-                    library.",
+                    libraries rather than about an object in a drawing, so it is a note, is \
+                    never set above a warning and never blocks a run, and is not waived: \
+                    instantiate the cellview, delete it, or move it to a reference library.",
                 default_severity: DrcSeverity::Info,
                 floor: ANY,
+                max_severity: DrcSeverity::Warning,
                 waivable: false,
             },
             Self::DuplicateName => &DrcRule {
@@ -358,6 +393,7 @@ impl DrcViolationType {
                     duplicate element name, so the run is refused. Rename one of the components.",
                 default_severity: DrcSeverity::Critical,
                 floor: ENGINE_REFUSES,
+                max_severity: DrcSeverity::Critical,
                 waivable: false,
             },
             Self::EmptyName => &DrcRule {
@@ -371,6 +407,7 @@ impl DrcViolationType {
                     a reference designator.",
                 default_severity: DrcSeverity::Warning,
                 floor: UNWRITTEN_REFUSES,
+                max_severity: DrcSeverity::Critical,
                 waivable: false,
             },
             Self::InvalidName => &DrcRule {
@@ -384,6 +421,7 @@ impl DrcViolationType {
                     underscores.",
                 default_severity: DrcSeverity::Warning,
                 floor: UNWRITTEN_REFUSES,
+                max_severity: DrcSeverity::Critical,
                 waivable: false,
             },
             Self::CaseCollidingNetNames => &DrcRule {
@@ -395,6 +433,7 @@ impl DrcViolationType {
                     the two nets.",
                 default_severity: DrcSeverity::Error,
                 floor: ANY,
+                max_severity: DrcSeverity::Critical,
                 waivable: true,
             },
             Self::MissingParameter => &DrcRule {
@@ -406,6 +445,7 @@ impl DrcViolationType {
                     warning and no further, and a finding cannot be waived. Set the parameter.",
                 default_severity: DrcSeverity::Error,
                 floor: INVENTED_VALUE,
+                max_severity: DrcSeverity::Critical,
                 waivable: false,
             },
             Self::ValueOutOfRange => &DrcRule {
@@ -416,6 +456,7 @@ impl DrcViolationType {
                     the out-of-range value is deliberate.",
                 default_severity: DrcSeverity::Warning,
                 floor: ANY,
+                max_severity: DrcSeverity::Critical,
                 waivable: true,
             },
             Self::UnknownComponent => &DrcRule {
@@ -428,6 +469,7 @@ impl DrcViolationType {
                     model.",
                 default_severity: DrcSeverity::Error,
                 floor: ENGINE_REFUSES,
+                max_severity: DrcSeverity::Critical,
                 waivable: false,
             },
             Self::UnresolvedReference => &DrcRule {
@@ -439,6 +481,7 @@ impl DrcViolationType {
                     and the run fails at parse. Name exactly one instance.",
                 default_severity: DrcSeverity::Error,
                 floor: ENGINE_REFUSES,
+                max_severity: DrcSeverity::Critical,
                 waivable: false,
             },
             Self::SymbolUnplacedPin => &DrcRule {
@@ -450,6 +493,7 @@ impl DrcViolationType {
                     terminal grid.",
                 default_severity: DrcSeverity::Error,
                 floor: ENGINE_REFUSES,
+                max_severity: DrcSeverity::Critical,
                 waivable: false,
             },
             Self::SymbolOrphanedPin => &DrcRule {
@@ -461,6 +505,7 @@ impl DrcViolationType {
                     to the schematic.",
                 default_severity: DrcSeverity::Error,
                 floor: ENGINE_REFUSES,
+                max_severity: DrcSeverity::Critical,
                 waivable: false,
             },
             Self::SymbolPinOffGrid => &DrcRule {
@@ -471,6 +516,7 @@ impl DrcViolationType {
                     is placed. Move the pin onto the grid.",
                 default_severity: DrcSeverity::Error,
                 floor: ANY,
+                max_severity: DrcSeverity::Critical,
                 waivable: true,
             },
         }
@@ -598,10 +644,30 @@ mod tests {
             assert!(entry.explanation.len() > 80, "{rule:?}");
             assert!(!entry.explanation.contains("  "), "{rule:?}");
             assert!(entry.default_severity >= entry.floor.deck, "{rule:?}");
+            assert!(entry.default_severity <= entry.max_severity, "{rule:?}");
             assert!(
                 entry.floor.unwritten_instance >= entry.floor.deck,
                 "{rule:?}"
             );
+            assert!(
+                entry.floor.unwritten_instance <= entry.max_severity,
+                "{rule:?}"
+            );
+        }
+    }
+
+    /// Whether a cellview is used says something about the project's
+    /// libraries, not about the design that runs, so no deck may make it
+    /// block a run. It is the one rule held below Critical.
+    #[test]
+    fn only_an_unused_cellview_is_held_below_an_error() {
+        for rule in DrcViolationType::ALL {
+            let ceiling = rule.rule().max_severity;
+            if rule == DrcViolationType::UnusedCellView {
+                assert_eq!(ceiling, DrcSeverity::Warning);
+            } else {
+                assert_eq!(ceiling, DrcSeverity::Critical, "{rule:?}");
+            }
         }
     }
 

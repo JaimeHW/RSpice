@@ -361,6 +361,49 @@ fn a_cell_states_its_own_lost_ground_label_and_keeps_its_waiver() {
     );
 }
 
+/// An unused cellview is a note about the project's libraries, never a
+/// reason to refuse a run. A stored deck that promotes it to an error is
+/// checked at a warning: the page lists the spare cellview as a warning, and
+/// Check Design's receipt, which preflight blocks on, holds no more errors
+/// than under the shipped deck. The run gate never computes the rule, so
+/// the three agree.
+#[test]
+fn a_deck_cannot_make_an_unused_cellview_block_a_run() {
+    use crate::workbench::app_state::design_checks::CheckScope;
+    use crate::workbench::app_state::diagnostic_store::DiagnosticLevel;
+
+    let errors = |fixture: &mut Fixture| {
+        fixture.state.check_design().expect("the design checks");
+        let summary = fixture
+            .state
+            .current_design_check(&fixture.top, CheckScope::Design)
+            .expect("Check Design describes the design")
+            .summary();
+        summary.errors + summary.critical
+    };
+    let shipped = errors(&mut fixture());
+
+    let mut promoted = fixture();
+    promoted.state.workspace.content.design_rules = serde_json::from_str(
+        r#"{"schema_version":1,"severities":{"DRC-UNUSED-CELLVIEW":"Error"}}"#,
+    )
+    .expect("a stored deck always reads");
+    assert_eq!(errors(&mut promoted), shipped, "preflight blocks on no more");
+
+    let listed = listing::listing(&promoted.state);
+    let unused = (0..listed.len())
+        .filter_map(|index| listed.row(index))
+        .filter(|row| row.code == UNUSED)
+        .map(|row| (row.subject.clone(), row.level))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        unused,
+        [(promoted.spare.display_path(), DiagnosticLevel::Warning)],
+        "{:?}",
+        rows(&promoted.state)
+    );
+}
+
 /// The objects of the rows naming `cell_view`.
 fn rows_in(state: &AppState, cell_view: &CellViewRef) -> Vec<String> {
     rows(state)
