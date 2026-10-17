@@ -185,8 +185,13 @@ use rspice_core::analysis::harmonic_balance::{
 // and why; `Netlist::unread_root_source`, the ones in the deck's own text;
 // `source_map_for_editor_as_read`, the editor map with them applied; and
 // `NetlistSourceMap::unread_definition_for`, where a name nothing read binds
-// is written. The census is 5,733, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5733;
+// is written. The census was 5,733, with no slack.
+// `netlist::spell_ground_probe_arguments` adds one: a schematic run's
+// preparation (`rspice-simulation` analysis_preparation) writes the drawn
+// ground's names as node 0 inside the cards and expressions it adds to the
+// deck by the parser's own rule for where a node argument stands, rather than
+// a copy of it. The census is 5,734, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5734;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

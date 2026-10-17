@@ -262,7 +262,7 @@ where
     );
     let occurrences =
         projection_occurrence_nets(inputs.libraries, &execution_projection, design_nets);
-    let (effective_saved_outputs, used_automatic_outputs, capture_membership) =
+    let (mut effective_saved_outputs, used_automatic_outputs, capture_membership) =
         effective_plan_capture(
             inputs.analysis.sim_setup.save_policy.output_selection_mode,
             &plan_payload.saved_outputs,
@@ -271,6 +271,9 @@ where
             &occurrences,
             plan.plan_id(),
         )?;
+    effective_saved_outputs
+        .iter_mut()
+        .for_each(crate::analysis_preparation::spell_output_as_the_deck);
     validate_plan_saved_output_budget(
         &plan_payload.capture_groups,
         &effective_saved_outputs,
