@@ -153,7 +153,10 @@ pub fn simplify_wire_path(points: Vec<Point>) -> Vec<Point> {
     result
 }
 
-/// Optimize all wires by removing collinear intermediate points
+/// Optimize all wires by removing collinear intermediate points, and the
+/// vertices a wire doubles back at over a stretch another wire runs all of:
+/// that other wire carries whatever reaches the stretch, so the doubled
+/// span adds nothing.
 pub fn optimize_all_wires(document: &mut SchematicDocument) -> bool {
     let mut changed = false;
     for wire in &mut document.wires {
@@ -165,7 +168,173 @@ pub fn optimize_all_wires(document: &mut SchematicDocument) -> bool {
         wire.points = simplified;
         changed = true;
     }
+    for index in 0..document.wires.len() {
+        let wire = &document.wires[index];
+        if !wire
+            .points
+            .windows(3)
+            .any(|corner| folds_back(corner[0], corner[1], corner[2]))
+        {
+            continue;
+        }
+        let wire_id = wire.id;
+        let mut points = wire.points.clone();
+        let mut renumbered = (0..points.len()).collect::<Vec<_>>();
+        if !retract_fold_backs(
+            document,
+            wire_id,
+            &mut points,
+            &mut renumbered,
+            FoldStretch::Carried,
+        ) {
+            continue;
+        }
+        document.wires[index].points = points;
+        for connection in document
+            .connections
+            .iter_mut()
+            .filter(|connection| connection.wire_id == wire_id)
+        {
+            if let Some(&moved_to) = renumbered.get(connection.point_index) {
+                connection.point_index = moved_to;
+            }
+        }
+        changed = true;
+    }
     changed
+}
+
+/// Whether the run from `before` to `vertex` turns straight back on itself
+/// to `after`.
+pub(super) fn folds_back(before: Point, vertex: Point, after: Point) -> bool {
+    let delta = |from: i32, to: i32| i64::from(to) - i64::from(from);
+    let (in_x, in_y) = (delta(before.x, vertex.x), delta(before.y, vertex.y));
+    let (out_x, out_y) = (delta(vertex.x, after.x), delta(vertex.y, after.y));
+    in_x * out_y == in_y * out_x && in_x * out_x + in_y * out_y < 0
+}
+
+/// Which doubled-over stretches may come out of a wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum FoldStretch {
+    /// Only one another wire runs all of.
+    Carried,
+    /// That, or one nothing but the wire itself reaches.
+    CarriedOrBare,
+}
+
+/// Take out of `route`, wire `wire_id`'s vertices, each vertex it turns
+/// straight back at where `may_go` lets the stretch it doubles over go: from
+/// the vertex back to the nearer of its neighbours, which stays on the wire.
+/// The ends stay where they are. `point_indices` says where each earlier
+/// vertex went and is renumbered to match. Returns whether a vertex went.
+pub(super) fn retract_fold_backs(
+    document: &SchematicDocument,
+    wire_id: u64,
+    route: &mut Vec<Point>,
+    point_indices: &mut [usize],
+    may_go: FoldStretch,
+) -> bool {
+    let mut retracted = route.clone();
+    let mut renumbered = point_indices.to_vec();
+    let mut index = 1;
+    while index + 1 < retracted.len() {
+        let (before, vertex, after) =
+            (retracted[index - 1], retracted[index], retracted[index + 1]);
+        let reach = |point: Point| {
+            (i64::from(point.x) - i64::from(vertex.x)).abs()
+                + (i64::from(point.y) - i64::from(vertex.y)).abs()
+        };
+        let kept = if reach(before) <= reach(after) {
+            before
+        } else {
+            after
+        };
+        if !folds_back(before, vertex, after)
+            || !stretch_can_go(document, wire_id, kept, vertex, may_go)
+        {
+            index += 1;
+            continue;
+        }
+        remove_route_vertex(&mut retracted, &mut renumbered, index);
+        if before == after {
+            // Out and back to the same point: one of the two copies goes,
+            // never an end of the wire.
+            if index + 1 < retracted.len() {
+                remove_route_vertex(&mut retracted, &mut renumbered, index);
+            } else if index > 1 {
+                remove_route_vertex(&mut retracted, &mut renumbered, index - 1);
+            }
+        }
+        index = index.saturating_sub(1).max(1);
+    }
+    // Each run left joins two that lay on one line, so the wire keeps its
+    // angles; only a run that shrank to nothing refuses the whole change.
+    let retracted_any = retracted.len() < route.len()
+        && retracted.len() >= 2
+        && retracted.windows(2).all(|pair| pair[0] != pair[1]);
+    if retracted_any {
+        *route = retracted;
+        point_indices.copy_from_slice(&renumbered);
+    }
+    retracted_any
+}
+
+/// Whether the stretch from `kept` to `dropped` can come out of wire
+/// `wire_id` with every connection left as it was: another wire runs all of
+/// it, and so carries whatever reaches it and meets this wire at `kept`; or,
+/// where `may_go` allows, nothing but this wire reaches it, `kept` aside: no
+/// other wire, dot, pin, net label or bus tap.
+fn stretch_can_go(
+    document: &SchematicDocument,
+    wire_id: u64,
+    kept: Point,
+    dropped: Point,
+    may_go: FoldStretch,
+) -> bool {
+    let others = move || document.wires.iter().filter(move |wire| wire.id != wire_id);
+    let carried = others().any(|wire| {
+        wire.segments()
+            .any(|segment| segment.contains_point(kept) && segment.contains_point(dropped))
+    });
+    if carried {
+        return true;
+    }
+    if may_go == FoldStretch::Carried {
+        return false;
+    }
+    let stretch = WireSegment::new(kept, dropped);
+    let on_stretch = |point: Point| point != kept && stretch.contains_point(point);
+    let touches_a_wire = others()
+        .any(|wire| wire.points.iter().copied().any(on_stretch) || wire.contains_point(dropped));
+    !touches_a_wire
+        && !document
+            .junctions
+            .iter()
+            .any(|junction| on_stretch(junction.pos))
+        && !document
+            .net_labels
+            .iter()
+            .any(|label| on_stretch(label.pos))
+        && !document
+            .bus_taps
+            .iter()
+            .any(|tap| on_stretch(tap.connection_point))
+        && !super::junction_edit::placed_pins(document)
+            .into_iter()
+            .any(on_stretch)
+}
+
+/// Take vertex `index` out of `route` and renumber where the old vertices
+/// went: those past it move one place back, and one that went to it goes to
+/// the vertex that takes its place.
+fn remove_route_vertex(route: &mut Vec<Point>, point_indices: &mut [usize], index: usize) {
+    route.remove(index);
+    for moved_to in point_indices
+        .iter_mut()
+        .filter(|moved_to| **moved_to > index)
+    {
+        *moved_to -= 1;
+    }
 }
 
 /// Remove degenerate segments from all wires
@@ -564,6 +733,34 @@ mod tests {
             ..SchematicDocument::default()
         };
         optimize_all_wires(&mut document);
+        assert_eq!(document.wires[0].points, folded);
+    }
+
+    /// A wire that doubles back over a stretch another wire runs all of
+    /// stops where the other wire meets it; one that doubles back over a
+    /// stretch only partly run, or run by nothing, keeps its fold.
+    #[test]
+    fn cleanup_takes_out_a_fold_another_wire_runs() {
+        let p = Point::new;
+        let folded = vec![p(200, 180), p(200, 100), p(120, 100), p(180, 100)];
+        let mut document = SchematicDocument {
+            wires: vec![
+                Wire::new(1, folded.clone()),
+                Wire::new(2, vec![p(120, 100), p(180, 100)]),
+            ],
+            ..SchematicDocument::default()
+        };
+        assert!(optimize_all_wires(&mut document));
+        assert_eq!(
+            document.wires[0].points,
+            vec![p(200, 180), p(200, 100), p(180, 100)]
+        );
+
+        document.wires = vec![
+            Wire::new(1, folded.clone()),
+            Wire::new(2, vec![p(140, 100), p(180, 100)]),
+        ];
+        assert!(!optimize_all_wires(&mut document));
         assert_eq!(document.wires[0].points, folded);
     }
 }

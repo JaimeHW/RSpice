@@ -82,6 +82,29 @@ fn a_part_dropped_onto_a_pin_and_a_wire_end_gets_its_dot() {
     ]);
 }
 
+/// R1 flipped down onto R4 brought wire 29 up onto the run of wire 27.
+/// Flipping the crossing wire with R3 and R4 then moved both ends of wire
+/// 27, which was squared again before wire 29 followed, and it ran out to
+/// (120, 100) and back over wire 29:
+/// [(200, 180), (200, 100), (120, 100), (180, 100)].
+#[test]
+fn a_followed_wire_never_doubles_back_over_a_wire_beside_it() {
+    holds(&[
+        Sheet,
+        Sheet,
+        Draw(vec![p(280, 100), p(140, 180)]),
+        Draw(vec![p(280, 180), p(240, 100)]),
+        Transform(
+            vec![Pick::Part(1), Pick::Wire(38), Pick::Wire(29)],
+            Turn::MirrorVertical,
+        ),
+        Transform(
+            vec![Pick::Wire(35), Pick::Part(3), Pick::Part(4)],
+            Turn::MirrorHorizontal,
+        ),
+    ]);
+}
+
 /// Undoing the switch to Sheet 2 and then moving a part on Sheet 1 is a
 /// new edit after the undo: the switch can no longer be redone. Redo
 /// replayed it anyway.
