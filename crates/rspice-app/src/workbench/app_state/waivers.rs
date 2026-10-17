@@ -87,11 +87,15 @@ pub(in crate::workbench) fn finding_waiver_action(
     subject: &CellViewRef,
     violation: &DrcViolation,
 ) -> Option<WaiverAction> {
-    let target = WaiverTarget::of_finding(subject, violation)?;
-    Some(if violation.waiver.is_some() {
-        WaiverAction::Remove(target)
-    } else {
-        WaiverAction::Waive(target)
+    let mut target = WaiverTarget::of_finding(subject, violation)?;
+    Some(match &violation.waiver {
+        // The waiver as it is stored, which an earlier build may have named
+        // otherwise than this finding is keyed.
+        Some(waiver) => {
+            target.object.clone_from(&waiver.object);
+            WaiverAction::Remove(target)
+        }
+        None => WaiverAction::Waive(target),
     })
 }
 

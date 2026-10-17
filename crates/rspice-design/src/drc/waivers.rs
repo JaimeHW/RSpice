@@ -322,13 +322,28 @@ pub fn location_key(location: &DrcLocation) -> String {
         }
         DrcLocation::Global => "global".to_owned(),
         DrcLocation::CellView { reference } => format!("cellview:{}", reference.key()),
-        DrcLocation::SymbolPin {
-            reference,
-            pin_name,
-            ..
-        } => format!("symbol-pin:{}:{pin_name}", reference.key()),
+        // The symbol is the document a pin's waiver is stored in, so naming it
+        // again would keep the waiver from travelling with a copied or renamed
+        // cell.
+        DrcLocation::SymbolPin { pin_name, .. } => format!("symbol-pin:{pin_name}"),
         DrcLocation::Point { x, y } => format!("point:{x}:{y}"),
     }
+}
+
+/// Whether a waiver that names `stored` names the object a finding located at
+/// `location` is keyed by, `object`.
+///
+/// A symbol-pin waiver written by an earlier build named its symbol beside
+/// the pin. It still names the pin of the symbol it names, which is the one
+/// whose check finds it and stores it, and nothing in any other — a copy of
+/// that symbol included, where it is reported as covering nothing.
+fn names(stored: &str, location: &DrcLocation, object: &str) -> bool {
+    stored == object
+        || matches!(
+            location,
+            DrcLocation::SymbolPin { reference, pin_name, .. }
+                if stored == format!("symbol-pin:{}:{pin_name}", reference.key())
+        )
 }
 
 /// Where the waiver of a finding located at `location` is stored, and the
@@ -401,9 +416,9 @@ impl CheckWaivers {
                 .get(&owner_key(cellview))
                 .map_or(&[][..], Vec::as_slice),
         };
-        stored
-            .iter()
-            .find(|waiver| waiver.rule == code && waiver.object == object)
+        stored.iter().find(|waiver| {
+            waiver.rule == code && names(&waiver.object, &violation.location, &object)
+        })
     }
 
     /// State on every finding in `result` the waiver that covers it, and on
@@ -422,8 +437,10 @@ impl CheckWaivers {
             .iter()
             .filter(|waiver| {
                 !result.violations().iter().any(|violation| {
-                    matches!(waiver_site(&violation.location), (None, ref object) if *object == waiver.object)
-                        && violation.violation_type.rule_code() == waiver.rule
+                    matches!(
+                        waiver_site(&violation.location),
+                        (None, ref object) if names(&waiver.object, &violation.location, object)
+                    ) && violation.violation_type.rule_code() == waiver.rule
                 })
             })
             .collect()
