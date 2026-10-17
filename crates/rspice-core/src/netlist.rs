@@ -884,6 +884,19 @@ impl GroundPolicy {
 /// `Netlist::source_text`; this transformation is for execution-facing typed
 /// fields, including braced and quoted expressions.
 pub(crate) fn apply_ground_policy_to_probe_references(input: &str, policy: GroundPolicy) -> String {
+    spell_ground_probe_arguments(input, &|node| policy.is_ground(node))
+}
+
+/// Write every node-probe argument `is_ground` names as node `0`.
+///
+/// An argument is a node only as the whole argument of a node-probe accessor
+/// (`V`, `VR`, `VI`, `VM`, `VP`, `VDB`, `N`), in a card, a braced expression
+/// or a quoted one, at any nesting. Everything else keeps its spelling: a
+/// parameter, a device or a current probe named like a ground is not a node.
+/// This is the rule the parser applies to a deck's typed fields under its
+/// dialect's [`GroundPolicy`]; a caller whose ground names are not a dialect's
+/// (a schematic's, say) applies it with its own predicate.
+pub fn spell_ground_probe_arguments(input: &str, is_ground: &dyn Fn(&str) -> bool) -> String {
     fn is_identifier_start(character: char) -> bool {
         character.is_ascii_alphabetic() || character == '_'
     }
@@ -948,9 +961,9 @@ pub(crate) fn apply_ground_policy_to_probe_references(input: &str, policy: Groun
         arguments
     }
 
-    fn replace_atomic_argument(argument: &str, policy: GroundPolicy) -> String {
+    fn replace_atomic_argument(argument: &str, is_ground: &dyn Fn(&str) -> bool) -> String {
         let trimmed = argument.trim();
-        if !policy.is_ground(trimmed) || trimmed == "0" {
+        if trimmed == "0" || !is_ground(trimmed) {
             return argument.to_string();
         }
         let leading = argument.len() - argument.trim_start().len();
@@ -962,7 +975,7 @@ pub(crate) fn apply_ground_policy_to_probe_references(input: &str, policy: Groun
         )
     }
 
-    fn rewrite(input: &str, policy: GroundPolicy) -> String {
+    fn rewrite(input: &str, is_ground: &dyn Fn(&str) -> bool) -> String {
         let mut output = String::with_capacity(input.len());
         let mut cursor = 0usize;
         while cursor < input.len() {
@@ -1011,13 +1024,13 @@ pub(crate) fn apply_ground_policy_to_probe_references(input: &str, policy: Groun
             let close =
                 matching_parenthesis(input, open).expect("matching parenthesis was checked above");
             output.push_str(&input[identifier_start..=open]);
-            let rewritten_inner = rewrite(&input[open + 1..close], policy);
+            let rewritten_inner = rewrite(&input[open + 1..close], is_ground);
             let arguments = split_arguments(&rewritten_inner);
             for (index, argument) in arguments.iter().enumerate() {
                 if index != 0 {
                     output.push(',');
                 }
-                output.push_str(&replace_atomic_argument(argument, policy));
+                output.push_str(&replace_atomic_argument(argument, is_ground));
             }
             output.push(')');
             cursor = close + 1;
@@ -1025,7 +1038,7 @@ pub(crate) fn apply_ground_policy_to_probe_references(input: &str, policy: Groun
         output
     }
 
-    rewrite(input, policy)
+    rewrite(input, is_ground)
 }
 
 /// Represents a parsed netlist ready for circuit construction
@@ -16067,5 +16080,28 @@ mod tests {
             netlist.analyses.as_slice(),
             [AnalysisCommand::Tran { .. }, AnalysisCommand::Noise { .. }]
         ));
+    }
+
+    /// A caller's own ground names are written as node 0 where the parser
+    /// reads a node, and nowhere else: a parameter, a device or a current
+    /// probe called `gnd` keeps its name.
+    #[test]
+    fn a_callers_ground_names_are_spelled_as_node_zero_only_as_node_arguments() {
+        let drawn = |node: &str| ["gnd", "gnd!"].iter().any(|g| node.eq_ignore_ascii_case(g));
+        for (authored, spelled) in [
+            (
+                ".MEAS TRAN m FIND V(out,GND!) AT=1m",
+                ".MEAS TRAN m FIND V(out,0) AT=1m",
+            ),
+            ("{V(out)-V( gnd! )}", "{V(out)-V( 0 )}"),
+            ("vdb(out, GND)", "vdb(out, 0)"),
+            (
+                ".MEAS TRAN m PARAM='gnd*I(gnd)+V(gnd)'",
+                ".MEAS TRAN m PARAM='gnd*I(gnd)+V(0)'",
+            ),
+            ("V(out,gnd2)*gnd", "V(out,gnd2)*gnd"),
+        ] {
+            assert_eq!(spell_ground_probe_arguments(authored, &drawn), spelled);
+        }
     }
 }
