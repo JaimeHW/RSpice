@@ -6060,14 +6060,23 @@ mod tests {
     /// A project with two libraries, an active configuration and a recovery
     /// catalog behind it, so every Project rail has rows to show.
     fn project_app(page: ProjectPage) -> RSpiceApp {
-        use crate::workbench::lifecycle::project_checkpoint::{
-            ProjectCheckpointReason, fixture_summary,
-        };
-
         let mut app = RSpiceApp::test_instance();
         app.state = crate::workbench::examples::hierarchy_reference::build().state;
         app.state.workbench.workspace = Workspace::Project;
         app.state.workbench.project_page = page;
+        // A checkpoint locator names native files, so the recovery catalog
+        // has rows only where those exist.
+        #[cfg(not(target_arch = "wasm32"))]
+        seed_recovery_catalog(&mut app);
+        app
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn seed_recovery_catalog(app: &mut RSpiceApp) {
+        use crate::workbench::lifecycle::project_checkpoint::{
+            ProjectCheckpointReason, fixture_summary,
+        };
+
         let now = crate::time_compat::checked_unix_time_ms().expect("clock");
         let name = app.state.workspace.content.project.name().to_owned();
         app.state.dialogs.project_checkpoint_recovery.project_id =
@@ -6088,7 +6097,6 @@ mod tests {
             fixture_summary(&name, revision, reason, now - age, bytes)
         })
         .collect();
-        app
     }
 
     /// The four Project rails as PNGs, with their measured geometry beside

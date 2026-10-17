@@ -1580,7 +1580,8 @@ fn update_browser_before_unload_guard(has_unsaved_changes: bool) {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
+// The review writes its fixture through the native file system.
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod chrome_review_tests;
 
 #[cfg(test)]

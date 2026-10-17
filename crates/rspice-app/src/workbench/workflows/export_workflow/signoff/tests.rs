@@ -66,11 +66,14 @@ impl ExportWorkflowIo for Recorder {
     }
 
     fn observe_destination(&self, path: &Path) -> Result<ObservedExportDestination, String> {
-        Ok(if self.existing.iter().any(|existing| existing == path) {
-            ObservedExportDestination::occupied(path.to_path_buf())
-        } else {
-            ObservedExportDestination::backend_managed(path.to_path_buf())
-        })
+        // A browser destination is a download, which never stands occupied.
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.existing.iter().any(|existing| existing == path) {
+            return Ok(ObservedExportDestination::occupied(path.to_path_buf()));
+        }
+        Ok(ObservedExportDestination::backend_managed(
+            path.to_path_buf(),
+        ))
     }
 
     fn write_waveform_csv(
