@@ -559,6 +559,12 @@ fn checkpoint_run_reads(
 /// held. `Debug` prints every field, a float as the shortest text that reads
 /// back as the same value, and a string escaped, so two values that print
 /// alike hold alike.
+///
+/// The converse holds only for a value whose every collection is ordered: a
+/// hashed map or set prints in its hasher's order, which differs between two
+/// equal collections built apart, and a run would then be refused at dispatch
+/// with nothing edited. Each value digested here holds ordered collections
+/// only.
 fn debug_digest(domain: &str, value: &impl std::fmt::Debug) -> ContentDigest {
     struct Sink(Sha256);
 

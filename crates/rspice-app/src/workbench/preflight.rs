@@ -236,13 +236,17 @@ pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) 
         PreflightVerdict::NoVerdict => report.blockers.push(engine_refusals::no_verdict_issue()),
     }
     let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
+    // A rule deck or a waiver edited while the decks were built moves none
+    // of those revisions, and the dispatch refuses the run over it. So a run
+    // the pass would authorize is held to what its dispatch holds it to: the
+    // inputs captured at the press, the design-check rules among them.
     let unedited = report.is_current_for(
         state.workspace.content.project.revision().get(),
         &topology_root,
         topology_revision,
         &topology_closure,
         state.active_plan_revision(),
-    );
+    ) && (report.prepared.is_none() || controller.retained_run_is_current(state));
     if retained && unedited {
         conclude(state, controller, report, inputs_at_press, queue);
     } else {

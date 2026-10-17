@@ -27,6 +27,8 @@ const DESCRIPTION: &str = "The severity each design rule is reported at in this 
 /// Why an option below a rule's floor cannot be chosen.
 const REFUSES_THE_RUN: &str = "A finding of this rule refuses the run whatever it is reported as";
 const INVENTED_VALUE: &str = "The run would simulate a value nobody entered";
+/// Why an option above a rule's ceiling cannot be chosen.
+const NEVER_BLOCKS: &str = "This rule is about the project's libraries and never blocks a run";
 
 /// The draft deck the dialog edits, and why the last edit was refused.
 #[derive(Debug, Clone, Default)]
@@ -222,7 +224,8 @@ fn floor_cell(rule: DrcViolationType) -> String {
 /// (the default is option 0), each with the reason it is refused.
 fn refused_options(rule: DrcViolationType) -> Vec<(usize, &'static str)> {
     let floor = rule.rule().floor.deck;
-    let reason = if floor >= DrcSeverity::Error {
+    let ceiling = rule.rule().max_severity;
+    let below = if floor >= DrcSeverity::Error {
         REFUSES_THE_RUN
     } else {
         INVENTED_VALUE
@@ -230,8 +233,16 @@ fn refused_options(rule: DrcViolationType) -> Vec<(usize, &'static str)> {
     DrcSeverity::ALL
         .iter()
         .enumerate()
-        .filter(|(_, severity)| **severity < floor)
-        .map(|(index, _)| (index + 1, reason))
+        .filter_map(|(index, severity)| {
+            let reason = if *severity < floor {
+                below
+            } else if *severity > ceiling {
+                NEVER_BLOCKS
+            } else {
+                return None;
+            };
+            Some((index + 1, reason))
+        })
         .collect()
 }
 
@@ -289,6 +300,12 @@ mod tests {
             vec![(1, INVENTED_VALUE)]
         );
         assert!(refused_options(DrcViolationType::DanglingWire).is_empty());
+        // An unused cellview is a note about the libraries: nothing above a
+        // warning may be picked for it.
+        assert_eq!(
+            refused_options(DrcViolationType::UnusedCellView),
+            vec![(3, NEVER_BLOCKS), (4, NEVER_BLOCKS)]
+        );
         // An empty reference may be set to anything; the instance the deck
         // cannot write is held at an error by the checker, and the floor
         // column says so.

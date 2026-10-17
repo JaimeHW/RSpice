@@ -22,7 +22,7 @@
 //! not read is not applied, is kept byte for byte, and refuses edits, so a save
 //! from this build writes back exactly what it was given.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use rspice_design_model::cell_view::CellViewRef;
 use serde::{Deserialize, Serialize};
@@ -271,11 +271,17 @@ impl<'de> Deserialize<'de> for DrcWaivers {
 ///
 /// What survives an unrelated edit is the object's own identity, so that is
 /// what the key is: a component or wire by its id, a terminal by its
-/// component and pin, a net or a label by its name. Where the object is drawn
+/// component and pin, a named net or a label by its name, and a net the
+/// drawing does not name by the terminals on it. Where the object is drawn
 /// and what the message says about it are not part of it. A finding inside an
 /// instantiated cellview is keyed by the occurrence path down to that view and
 /// its own key inside it, which is what tells `X1/M3` from `X2/M3`. A point is
 /// the last resort, for a finding that names no object at all.
+///
+/// An unnamed net's name is the extractor's number for it, which placing
+/// anything to its left gives another net, so it is never the key: a waiver
+/// keyed by it would move to whichever net took the number. One stored that
+/// way by an earlier build covers nothing, and is reported for it.
 pub fn location_key(location: &DrcLocation) -> String {
     match location {
         DrcLocation::Terminal {
@@ -284,7 +290,19 @@ pub fn location_key(location: &DrcLocation) -> String {
             ..
         } => format!("terminal:{component_id}:{pin_name}"),
         DrcLocation::Component { id, .. } => format!("component:{id}"),
-        DrcLocation::Node { net_name } => format!("net:{net_name}"),
+        DrcLocation::Node {
+            net_name,
+            terminals,
+        } if terminals.is_empty() => format!("net:{net_name}"),
+        DrcLocation::Node { terminals, .. } => {
+            // Length-prefixed, because a pin name may contain any separator
+            // chosen here.
+            let terminals = terminals
+                .iter()
+                .map(|(component, pin)| format!("{component}:{}:{pin}", pin.len()))
+                .collect::<String>();
+            format!("net-of:{terminals}")
+        }
         DrcLocation::Wire { id } => format!("wire:{id}"),
         DrcLocation::NetLabel { name } => format!("label:{name}"),
         DrcLocation::Bus { id } => format!("bus:{id}"),
@@ -304,13 +322,28 @@ pub fn location_key(location: &DrcLocation) -> String {
         }
         DrcLocation::Global => "global".to_owned(),
         DrcLocation::CellView { reference } => format!("cellview:{}", reference.key()),
-        DrcLocation::SymbolPin {
-            reference,
-            pin_name,
-            ..
-        } => format!("symbol-pin:{}:{pin_name}", reference.key()),
+        // The symbol is the document a pin's waiver is stored in, so naming it
+        // again would keep the waiver from travelling with a copied or renamed
+        // cell.
+        DrcLocation::SymbolPin { pin_name, .. } => format!("symbol-pin:{pin_name}"),
         DrcLocation::Point { x, y } => format!("point:{x}:{y}"),
     }
+}
+
+/// Whether a waiver that names `stored` names the object a finding located at
+/// `location` is keyed by, `object`.
+///
+/// A symbol-pin waiver written by an earlier build named its symbol beside
+/// the pin. It still names the pin of the symbol it names, which is the one
+/// whose check finds it and stores it, and nothing in any other — a copy of
+/// that symbol included, where it is reported as covering nothing.
+fn names(stored: &str, location: &DrcLocation, object: &str) -> bool {
+    stored == object
+        || matches!(
+            location,
+            DrcLocation::SymbolPin { reference, pin_name, .. }
+                if stored == format!("symbol-pin:{}:{pin_name}", reference.key())
+        )
 }
 
 /// Where the waiver of a finding located at `location` is stored, and the
@@ -334,10 +367,13 @@ pub fn waiver_site(location: &DrcLocation) -> (Option<&CellViewRef>, String) {
 
 /// The waivers one check applies: those stored with the checked cellview,
 /// and those stored with each cellview it instantiates.
+///
+/// Ordered by cellview, so two equal sets print and compare alike however
+/// each was gathered: it rides in the configuration the run gate digests.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CheckWaivers {
     subject: Vec<DrcWaiver>,
-    instantiated: HashMap<CanonicalCellViewOwnerKey, Vec<DrcWaiver>>,
+    instantiated: BTreeMap<CanonicalCellViewOwnerKey, Vec<DrcWaiver>>,
 }
 
 impl CheckWaivers {
@@ -346,7 +382,7 @@ impl CheckWaivers {
     pub fn for_subject(waivers: &DrcWaivers) -> Self {
         Self {
             subject: applied(waivers),
-            instantiated: HashMap::new(),
+            instantiated: BTreeMap::new(),
         }
     }
 
@@ -380,9 +416,9 @@ impl CheckWaivers {
                 .get(&owner_key(cellview))
                 .map_or(&[][..], Vec::as_slice),
         };
-        stored
-            .iter()
-            .find(|waiver| waiver.rule == code && waiver.object == object)
+        stored.iter().find(|waiver| {
+            waiver.rule == code && names(&waiver.object, &violation.location, &object)
+        })
     }
 
     /// State on every finding in `result` the waiver that covers it, and on
@@ -401,8 +437,10 @@ impl CheckWaivers {
             .iter()
             .filter(|waiver| {
                 !result.violations().iter().any(|violation| {
-                    matches!(waiver_site(&violation.location), (None, ref object) if *object == waiver.object)
-                        && violation.violation_type.rule_code() == waiver.rule
+                    matches!(
+                        waiver_site(&violation.location),
+                        (None, ref object) if names(&waiver.object, &violation.location, object)
+                    ) && violation.violation_type.rule_code() == waiver.rule
                 })
             })
             .collect()
@@ -423,12 +461,10 @@ impl CheckWaivers {
                     .is_some_and(|covering| std::ptr::eq(covering, waiver))
             })
         };
-        let mut instantiated = self.instantiated.iter().collect::<Vec<_>>();
-        instantiated.sort_by(|(left, _), (right, _)| left.cmp(right));
         self.subject
             .iter()
             .map(|waiver| (None, waiver))
-            .chain(instantiated.into_iter().flat_map(|(cellview, waivers)| {
+            .chain(self.instantiated.iter().flat_map(|(cellview, waivers)| {
                 waivers.iter().map(move |waiver| (Some(cellview), waiver))
             }))
             .filter(|(_, waiver)| !covers(waiver))
@@ -571,6 +607,7 @@ mod tests {
             DrcViolationType::ShortedOutputs,
             DrcLocation::Node {
                 net_name: "out".to_owned(),
+                terminals: Vec::new(),
             },
         ));
         assert!(result.has_errors());

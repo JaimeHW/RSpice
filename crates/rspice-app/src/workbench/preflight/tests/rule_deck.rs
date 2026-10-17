@@ -152,3 +152,81 @@ fn a_rule_the_deck_demotes_lets_the_page_preflight_and_the_run_through_alike() {
          under the shipped defaults and refuse it"
     );
 }
+
+/// Press Run on the divider with a label on nothing, change what the rules
+/// say about it with `edit` while the worker prepares the run, and finish the
+/// pass.
+fn run_with_the_rules_edited_in_flight(edit: impl FnOnce(&mut AppState)) -> RSpiceApp {
+    let mut app = runnable_app();
+    app.state
+        .schematic
+        .add_net_label(Point::new(600, 600), "spare".to_owned());
+    app.state.sync_active_schematic_to_workspace();
+    let release = app.simulation_controller.hold_next_preflight_worker();
+    run_and_queue(&mut app);
+    edit(&mut app.state);
+    release.send(()).expect("the worker waits to prepare");
+    app.settle_preflight();
+    app
+}
+
+/// A deck or a waiver edited while a pass builds its decks moves none of the
+/// revisions the pass inspected, and the dispatch refuses the run over it.
+/// The pass is held to the dispatch's identity of what it prepared, so it
+/// concludes stale: nothing is authorized or queued under rules that no
+/// longer stand.
+#[test]
+fn rules_edited_during_a_pass_authorize_nothing() {
+    let promoted = run_with_the_rules_edited_in_flight(|state| {
+        state
+            .workspace
+            .content
+            .design_rules
+            .set_severity(DrcViolationType::OrphanNetLabel, DrcSeverity::Error)
+            .expect("an orphan label may be promoted");
+        // As applying the Rule Setup dialog does.
+        state.workbench.preflight.invalidate();
+    });
+    let waived = run_with_the_rules_edited_in_flight(|state| {
+        let target = page_waiver_target(state, DrcViolationType::OrphanNetLabel);
+        state
+            .waive_finding(&target, "a spare label")
+            .expect("the finding is waived");
+    });
+    for (edit, app) in [("deck", promoted), ("waiver", waived)] {
+        assert!(
+            !app.state.simulation.execution.trigger_simulation,
+            "{edit}: nothing is queued"
+        );
+        assert!(
+            app.simulation_controller.retained_run_deck().is_none(),
+            "{edit}: nothing is authorized"
+        );
+        assert!(
+            app.state.workbench.preflight.report.is_none(),
+            "{edit}: a stale pass retains no report"
+        );
+    }
+}
+
+/// What waives the page's finding of `rule`, as its row offers it.
+fn page_waiver_target(
+    state: &mut AppState,
+    rule: DrcViolationType,
+) -> crate::workbench::app_state::waivers::WaiverTarget {
+    use crate::workbench::app_state::diagnostic_store::listing;
+    use crate::workbench::app_state::waivers::WaiverAction;
+
+    state
+        .run_active_design_checks()
+        .expect("the configured design checks");
+    let listed = listing::listing(state);
+    (0..listed.len())
+        .filter_map(|index| listed.row(index))
+        .filter(|row| row.code == rule.rule_code())
+        .find_map(|row| match row.waiver_action {
+            Some(WaiverAction::Waive(target)) => Some(target.clone()),
+            _ => None,
+        })
+        .expect("the page offers to waive the finding")
+}

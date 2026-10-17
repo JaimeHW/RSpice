@@ -21,7 +21,7 @@
 //! applied at all, is kept byte for byte, and is reported. Either way a save
 //! from this build writes back what it was given.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -87,6 +87,12 @@ pub enum DeckIssue {
         rule: DrcViolationType,
         stored: DrcSeverity,
     },
+    /// A row sets a rule above the highest severity a deck may set it to. The
+    /// rule is checked at that ceiling; the row is written back as stored.
+    AboveCeiling {
+        rule: DrcViolationType,
+        stored: DrcSeverity,
+    },
 }
 
 impl std::fmt::Display for DeckIssue {
@@ -121,6 +127,15 @@ impl std::fmt::Display for DeckIssue {
                 rule.rule().floor.deck.display_name(),
                 rule.rule().floor.deck.display_name(),
             ),
+            Self::AboveCeiling { rule, stored } => write!(
+                formatter,
+                "the rule deck sets {} to {}, above {}, the highest it may be set to; it is \
+                 checked at {}",
+                rule.rule_code(),
+                stored.display_name(),
+                rule.rule().max_severity.display_name(),
+                rule.rule().max_severity.display_name(),
+            ),
         }
     }
 }
@@ -134,6 +149,9 @@ pub enum DeckEditRefusal {
     /// The severity is below the lowest the rule may be set to. Its entry in
     /// the rule table says why.
     BelowFloor { rule: DrcViolationType },
+    /// The severity is above the highest the rule may be set to. Its entry
+    /// in the rule table says why.
+    AboveCeiling { rule: DrcViolationType },
 }
 
 impl std::fmt::Display for DeckEditRefusal {
@@ -159,6 +177,16 @@ impl std::fmt::Display for DeckEditRefusal {
                     )
                 }
             }
+            Self::AboveCeiling { rule } => {
+                let entry = rule.rule();
+                write!(
+                    formatter,
+                    "{} cannot be set above {}: it is about the project's libraries, not the \
+                     design that runs",
+                    entry.title,
+                    entry.max_severity.display_name()
+                )
+            }
         }
     }
 }
@@ -182,13 +210,14 @@ impl DesignRuleDeck {
     /// The severity this deck sets for `rule`, or `None` where it defers to
     /// the rule's own default.
     ///
-    /// Never below the rule's floor: a stored row below it — written by hand,
-    /// or by a build whose floor was lower — is applied at the floor and
-    /// reported by [`Self::issues`].
+    /// Never below the rule's floor nor above its ceiling: a stored row
+    /// outside them — written by hand, or by a build that held the rule
+    /// elsewhere — is applied at the nearer bound and reported by
+    /// [`Self::issues`].
     pub fn severity(&self, rule: DrcViolationType) -> Option<DrcSeverity> {
         self.severities
             .get(&rule)
-            .map(|stored| (*stored).max(rule.rule().floor.deck))
+            .map(|stored| rule.rule().applied(*stored))
     }
 
     /// What `rule` will be reported as: its default unless this deck says
@@ -209,7 +238,8 @@ impl DesignRuleDeck {
     /// `severity` equal to the rule's own default clears the entry instead of
     /// writing it. A row kept for the same code because its severity could
     /// not be read is replaced: the reader has now decided it. A severity
-    /// below the rule's floor is refused, with the reason.
+    /// below the rule's floor or above its ceiling is refused, with the
+    /// reason.
     pub fn set_severity(
         &mut self,
         rule: DrcViolationType,
@@ -221,6 +251,9 @@ impl DesignRuleDeck {
         }
         if severity < rule.rule().floor.deck {
             return Err(DeckEditRefusal::BelowFloor { rule });
+        }
+        if severity > rule.rule().max_severity {
+            return Err(DeckEditRefusal::AboveCeiling { rule });
         }
         let replaced = self.retained.remove(rule.rule_code()).is_some();
         Ok(self.severities.insert(rule, severity) != Some(severity) || replaced)
@@ -251,31 +284,32 @@ impl DesignRuleDeck {
     pub fn entries(&self) -> impl Iterator<Item = (DrcViolationType, DrcSeverity)> + '_ {
         self.severities
             .iter()
-            .map(|(rule, severity)| (*rule, (*severity).max(rule.rule().floor.deck)))
+            .map(|(rule, severity)| (*rule, rule.rule().applied(*severity)))
     }
 
     /// The deck as [`super::DrcConfig::severity_overrides`] takes it.
     ///
     /// Empty for a deck this build could not read: a check run under part of
     /// a deck it does not understand would be run under a policy nobody wrote.
-    pub fn severity_overrides(&self) -> HashMap<DrcViolationType, DrcSeverity> {
+    pub fn severity_overrides(&self) -> BTreeMap<DrcViolationType, DrcSeverity> {
         self.entries().collect()
     }
 
     /// Everything in the stored deck this build did not apply as written, in
     /// a stable order: the whole deck first where it was not read, then each
-    /// row below its rule's floor, then each kept row by its code.
+    /// row below its rule's floor or above its ceiling, then each kept row by
+    /// its code.
     pub fn issues(&self) -> Vec<DeckIssue> {
         let mut issues = Vec::new();
         if let Some(unread) = &self.unread {
             issues.push(unread.issue.clone());
         }
         for (rule, stored) in &self.severities {
-            if *stored < rule.rule().floor.deck {
-                issues.push(DeckIssue::BelowFloor {
-                    rule: *rule,
-                    stored: *stored,
-                });
+            let (rule, stored) = (*rule, *stored);
+            if stored < rule.rule().floor.deck {
+                issues.push(DeckIssue::BelowFloor { rule, stored });
+            } else if stored > rule.rule().max_severity {
+                issues.push(DeckIssue::AboveCeiling { rule, stored });
             }
         }
         for (code, stored) in &self.retained {
@@ -709,6 +743,53 @@ mod tests {
             [DeckIssue::BelowFloor {
                 rule: DrcViolationType::SourceToSource,
                 stored: DrcSeverity::Info,
+            }]
+        );
+        assert_eq!(written(&deck), stored);
+    }
+
+    /// Whether a cellview is used is a note about the project's libraries,
+    /// so the deck may set it as high as a warning and no higher, and says
+    /// why it refuses an error.
+    #[test]
+    fn a_severity_above_the_rules_ceiling_is_refused_with_the_reason() {
+        let mut deck = DesignRuleDeck::default();
+        let unused = DrcViolationType::UnusedCellView;
+        for severity in [DrcSeverity::Error, DrcSeverity::Critical] {
+            let refusal = deck
+                .set_severity(unused, severity)
+                .expect_err("an unused cellview never blocks a run");
+            assert_eq!(refusal, DeckEditRefusal::AboveCeiling { rule: unused });
+            assert!(
+                refusal.to_string().contains("cannot be set above Warning"),
+                "{refusal}"
+            );
+        }
+        assert!(deck.is_empty());
+        assert_eq!(deck.set_severity(unused, DrcSeverity::Warning), Ok(true));
+        assert_eq!(deck.severity(unused), Some(DrcSeverity::Warning));
+    }
+
+    /// A stored row above the ceiling is reported once and applied at the
+    /// ceiling, and written back as it was stored.
+    #[test]
+    fn a_stored_row_above_the_ceiling_is_clamped_and_reported() {
+        let stored = serde_json::json!({
+            "schema_version": 1,
+            "severities": {"DRC-UNUSED-CELLVIEW": "Error"},
+        });
+        let deck = read(&stored.to_string());
+        let unused = DrcViolationType::UnusedCellView;
+        assert_eq!(deck.severity(unused), Some(DrcSeverity::Warning));
+        assert_eq!(
+            deck.severity_overrides().get(&unused),
+            Some(&DrcSeverity::Warning)
+        );
+        assert_eq!(
+            deck.issues(),
+            [DeckIssue::AboveCeiling {
+                rule: unused,
+                stored: DrcSeverity::Error,
             }]
         );
         assert_eq!(written(&deck), stored);

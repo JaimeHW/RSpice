@@ -316,6 +316,28 @@ pub const LIVE_RULES: [DrcViolationType; 13] = [
     DrcViolationType::DuplicateName,
 ];
 
+/// The rules some of whose findings only the walk from a subject computes.
+///
+/// A global is one node across the design, so whether ideal sources close a
+/// loop through one, whether two declared outputs drive one, whether anything
+/// else in the design touches one, and whether a cellview ties one to ground
+/// that another reaches as a node of its own, are answered over every
+/// cellview the walk reaches and every occurrence of each — and the answer
+/// depends on where the walk starts. Such a finding is stated inside the
+/// cellview it is drawn in, beside that cellview's own findings of the same
+/// rules.
+///
+/// A check of one cellview's contents computes none of them, and a check that
+/// starts from another subject computes them for another design. Neither can
+/// say that a finding of these rules stated by the walk from the configured
+/// root is gone; only that walk can.
+pub const HIERARCHY_RULES: [DrcViolationType; 4] = [
+    DrcViolationType::SourceToSource,
+    DrcViolationType::ShortedOutputs,
+    DrcViolationType::FloatingNode,
+    DrcViolationType::SupplyTiedToGround,
+];
+
 /// Check one cellview's drawing against the [`LIVE_RULES`] alone.
 ///
 /// One extraction of the drawing and nothing below it. Each finding is the
@@ -409,10 +431,12 @@ pub fn append_unused_cellviews(
         .map(|candidate| (candidate.key().to_ascii_lowercase(), candidate))
         .filter(|(key, _)| !reached.contains(key))
         .collect::<BTreeMap<_, _>>();
+    // Held to the rule's ceiling whoever built the configuration: an unused
+    // cellview never blocks a run.
     let severity = config
         .severity_overrides
         .get(&DrcViolationType::UnusedCellView)
-        .copied();
+        .map(|severity| DrcViolationType::UnusedCellView.rule().applied(*severity));
     for reference in unused.into_values() {
         let message = format!(
             "{} is not reached from {} under its configuration",
@@ -483,15 +507,18 @@ fn check_subject(
                 check_one_view(view.document, &view_config, &components, &connectivity);
             // A ground mark the deck does not write as node 0 is a fact of the
             // cellview that draws it, unlike whether the design reaches node 0
-            // at all, so it is stated with that cellview's findings.
-            if config.check_missing_ground {
-                append_ground_not_node_zero(
-                    view.document,
-                    &connectivity,
-                    &mut report,
-                    &config.severity_overrides,
-                );
-            }
+            // at all, so it is stated with that cellview's findings — whoever
+            // checks it. A cell that takes its reference through its ports is
+            // not asked whether it reaches ground, and still states its own
+            // ground labels: otherwise its check would find nothing where the
+            // design's check found a waived error, and report the waiver as
+            // covering nothing.
+            append_ground_not_node_zero(
+                view.document,
+                &connectivity,
+                &mut report,
+                &config.severity_overrides,
+            );
             graph.append_recursive_findings(
                 index,
                 reach,
@@ -786,6 +813,9 @@ fn extract_components(
             component_type: comp.kind.spice_prefix().to_string(),
             pins,
             is_voltage_source,
+            series_resistance: comp
+                .source_parasitics()
+                .is_some_and(|parasitics| parasitics.series_resistance.is_some()),
             is_current_source,
             is_ground_symbol: comp.kind == ComponentType::Ground,
             reference_required,
@@ -1087,7 +1117,7 @@ fn exact_numeric_constant(definition: &PropertyDefinition, value: &PropertyValue
 fn append_connectivity_diagnostics(
     connectivity: &ExtractedConnectivity,
     result: &mut DrcResult,
-    severity_overrides: &std::collections::HashMap<DrcViolationType, DrcSeverity>,
+    severity_overrides: &BTreeMap<DrcViolationType, DrcSeverity>,
 ) {
     let mut next_id = result.total_count();
     for diagnostic in &connectivity.diagnostics {
@@ -1318,8 +1348,10 @@ impl GlobalTouches {
                     0,
                     DrcViolationType::FloatingNode,
                     format!("Global node '{node}' has only {total} connection(s) in the design"),
+                    // A global's name is what the node is.
                     DrcLocation::Node {
                         net_name: node.clone(),
+                        terminals: Vec::new(),
                     },
                 ),
             ));
@@ -1457,6 +1489,11 @@ impl GlobalDrives {
                 let (Some(plus), Some(minus)) = (terminal("+"), terminal("-")) else {
                     continue;
                 };
+                // Behind its `rs` the deck writes the source onto a node of
+                // its own, so it is no branch between the drawn nets.
+                if component.series_resistance {
+                    continue;
+                }
                 self.sources.push(SourceBranch {
                     view,
                     identity,
@@ -1634,8 +1671,11 @@ impl GlobalDriven {
     /// rewire: the conflict is stated inside the first driver's occurrence,
     /// which is where a reader goes to resolve it.
     fn location(&self, occurrences: &[Occurrences], views: &[ReachedView<'_>]) -> DrcLocation {
+        // Stated by name: a global's name is what the node is, and a loop no
+        // global carries is a source loop, which is repaired, never waived.
         let node = DrcLocation::Node {
             net_name: self.nodes[0].clone(),
+            terminals: Vec::new(),
         };
         let first = &self.drivers[0];
         if self.drivers.iter().any(|driver| driver.view == SUBJECT) {

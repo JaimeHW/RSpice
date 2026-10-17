@@ -105,7 +105,9 @@ pub(super) fn height(available: f32) -> f32 {
 /// `refusal` is why its route cannot be followed, where the page checked and
 /// found one; `listed` is what the filters are listing, which is what the
 /// copy-everything verb promises to copy; `waiving` is the waiver being
-/// written for this finding, which asks for its reason in place of the verbs.
+/// written for this finding, which asks for its reason in place of the verbs;
+/// `waiver_refusal` is why its waiver cannot be changed here, which disables
+/// the verb and is stated beside the finding.
 pub(super) fn detail(
     ui: &mut Ui,
     row: &DiagnosticRow<'_>,
@@ -113,6 +115,7 @@ pub(super) fn detail(
     listed: Listed,
     refusal: Option<&str>,
     waiving: Option<&mut WaiverDraft>,
+    waiver_refusal: Option<&str>,
 ) -> DetailActions {
     let tokens = Tokens::get(ui.ctx());
     let mut actions = DetailActions::default();
@@ -184,10 +187,12 @@ pub(super) fn detail(
             }
             // Offered only where the producer said a waiver is possible: a
             // current design-rule finding whose rule may be waived, or a
-            // stored waiver that does nothing.
+            // stored waiver that does nothing. Disabled where the document
+            // that stores it cannot be edited here, which the region says.
             if let Some(action) = row.waiver_action
                 && Button::new(waiver_verb(action))
                     .compact()
+                    .enabled(waiver_refusal.is_none())
                     .show(ui)
                     .clicked()
             {
@@ -224,6 +229,11 @@ pub(super) fn detail(
                 line(ui, &standing, tokens.color.text_faint, FontWeight::Medium);
             }
             if let Some(refusal) = refusal {
+                line(ui, refusal, tokens.color.text_faint, FontWeight::Medium);
+            }
+            if row.waiver_action.is_some()
+                && let Some(refusal) = waiver_refusal
+            {
                 line(ui, refusal, tokens.color.text_faint, FontWeight::Medium);
             }
             for related in row.related {

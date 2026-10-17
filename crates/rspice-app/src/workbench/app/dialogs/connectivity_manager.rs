@@ -577,7 +577,7 @@ fn endpoint_contract(
 
 fn violation_targets_net(violation: &DrcViolation, net: &DesignNet) -> bool {
     match &violation.location {
-        DrcLocation::Node { net_name } | DrcLocation::NetLabel { name: net_name } => {
+        DrcLocation::Node { net_name, .. } | DrcLocation::NetLabel { name: net_name } => {
             net_name.eq_ignore_ascii_case(&net.name)
         }
         DrcLocation::Wire { id } => net.wire_ids.contains(id),
@@ -1663,7 +1663,7 @@ fn reveal_drc_location(schematic: &mut SchematicState, location: &DrcLocation) {
                 schematic.session.editor.center_request = Some(point);
             }
         }
-        DrcLocation::Node { net_name } => {
+        DrcLocation::Node { net_name, .. } => {
             if let Some(label) = schematic
                 .document()
                 .net_labels

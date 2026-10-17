@@ -1,6 +1,6 @@
 //! Exact schema-3 setup reader. This type is never serialized.
 
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 
 use crate::drafts::{AcSetup, DcSetup, TranSetup};
 use crate::legacy_plan_migration::{NoiseSetup, default_global_run_set, deserialize_analysis_set};
@@ -48,7 +48,7 @@ pub struct LegacySimulationSetupRead {
     pub analysis_plan: Option<SimulationPlan>,
     /// Enabled analysis indices.
     #[serde(default, deserialize_with = "deserialize_analysis_set")]
-    pub enabled: HashSet<usize>,
+    pub enabled: BTreeSet<usize>,
     /// Stable execution order. Enabled analyses absent from this vector are
     /// appended deterministically; disabled entries are ignored and removed
     /// from the persisted normalized plan.
@@ -131,5 +131,5 @@ pub struct LegacySimulationSetupRead {
     /// Analyses listed in the run-set card beyond the always-listed core —
     /// exotics stay listed (dimmed) when unticked, until removed.
     #[serde(default, deserialize_with = "deserialize_analysis_set")]
-    pub listed: HashSet<usize>,
+    pub listed: BTreeSet<usize>,
 }

@@ -187,6 +187,49 @@ fn the_row_menu_waives_the_row_it_was_opened_on() {
     assert!(asked.has("Reason"), "{:?}", asked.texts);
 }
 
+/// A finding whose waiver is stored in a document the workbench does not edit
+/// here — a symbol's pin finding, still current while a schematic is in
+/// front — offers its verb disabled and says why, and pressing it asks for no
+/// reason that could not be recorded.
+#[test]
+fn a_waiver_that_cannot_be_recorded_here_is_not_offered() {
+    use crate::workbench::app_state::waivers::WaiverTarget;
+
+    let mut state = open_state();
+    let symbol = crate::state::CellViewRef::new("work", "amp", "symbol");
+    let finding = record(
+        &state,
+        "SYMBOL-PIN-OFF-GRID",
+        DiagnosticLevel::Warning,
+        "Pin off grid: OUT",
+    )
+    .with_waiver_action(Some(WaiverAction::Waive(WaiverTarget {
+        cell_view: symbol.clone(),
+        rule: Arc::from("SYMBOL-PIN-OFF-GRID"),
+        object: "symbol-pin:OUT".to_owned(),
+    })));
+    publish(&mut state, vec![finding]);
+    let id = listing(&state).row(0).expect("the finding is listed").id;
+    state.diagnostics.set_current_finding(Some(id));
+
+    let harness = Harness::new();
+    harness.settle(&mut state);
+    let render = harness.frame(&mut state, sized(egui::RawInput::default()));
+    let reason = format!("Open {} to change its waivers", symbol.display_path());
+    assert!(render.has("Waive\u{2026}"), "{:?}", render.texts);
+    assert!(
+        render.has(&reason),
+        "the region says why: {:?}",
+        render.texts
+    );
+    let _ = harness.frame(&mut state, click_on(&render, "Waive\u{2026}"));
+    harness.settle(&mut state);
+    assert!(
+        state.problems_view.waiving.is_none(),
+        "no reason is asked for a waiver that cannot be recorded"
+    );
+}
+
 /// A copied row carries the waiver as its last column, and the copied heading
 /// names it: a waived finding pasted into a review says who accepted it, why
 /// and when.

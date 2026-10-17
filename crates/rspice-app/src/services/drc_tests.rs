@@ -339,7 +339,8 @@ fn typed_bus_member_conflict_is_reported_by_drc_and_honors_severity_policy() {
     assert_eq!(
         conflict.location,
         DrcLocation::Node {
-            net_name: "DATA[3]".to_owned()
+            net_name: "DATA[3]".to_owned(),
+            terminals: Vec::new(),
         }
     );
 }
@@ -457,12 +458,22 @@ fn an_autonamed_single_connection_node_is_reported_floating() {
         floating[0].related_items,
         vec![reference_of(&schematic, resistor)]
     );
-    let DrcLocation::Node { net_name } = &floating[0].location else {
+    let DrcLocation::Node {
+        net_name,
+        terminals,
+    } = &floating[0].location
+    else {
         panic!("a floating node is located on its node");
     };
     assert!(
         net_name.starts_with("net") && net_name[3..].chars().all(|c| c.is_ascii_digit()),
         "the deck's autoname, not a coordinate: {net_name}"
+    );
+    // The autoname is a number another edit can move; the node is also
+    // named by the one terminal on it.
+    assert!(
+        matches!(terminals.as_slice(), [(id, _)] if *id == resistor),
+        "{terminals:?}"
     );
 }
 
@@ -547,6 +558,7 @@ fn a_labelled_terminal_with_no_conductor_is_floating_under_the_label_name() {
             finding.location
                 == DrcLocation::Node {
                     net_name: "dangling".to_owned(),
+                    terminals: Vec::new(),
                 }
         })
         .expect("the label names the node the finding quotes");

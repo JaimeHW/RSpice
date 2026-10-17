@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::checker::component_identity;
 use super::input::ComponentInfo;
+use super::types::DrcLocation;
 use crate::connectivity::ExtractedConnectivity;
 use crate::schematic::port::PortDirection;
 
@@ -55,6 +56,28 @@ pub(super) struct NetInfo {
     /// The node name as the drawing spells it, which is the one a finding
     /// quotes. It differs from the key only for a projected vector bit.
     pub(super) display_name: String,
+    /// The drawing gives this node no name: no label, port or global names
+    /// it, and its name is the number the extractor gave it by position.
+    pub(super) numbered: bool,
+    /// Every placed terminal on this node, by component id and pin, sorted:
+    /// what a numbered node is, whatever number it is given.
+    pub(super) terminals: Vec<(u64, String)>,
+}
+
+impl NetInfo {
+    /// Where a finding about this node, written `name`, is located: by the
+    /// terminals on it as well, where its name is only a number an unrelated
+    /// edit can give another node.
+    pub(super) fn location(&self, name: &str) -> DrcLocation {
+        DrcLocation::Node {
+            net_name: name.to_owned(),
+            terminals: if self.numbered {
+                self.terminals.clone()
+            } else {
+                Vec::new()
+            },
+        }
+    }
 }
 
 /// Fold the extraction and its terminals into one entry per node name.
@@ -75,6 +98,7 @@ pub(super) fn fold_nets(
         entry.is_ground |= crate::schematic::ground_names::is_ground_reference(&name);
         entry.wire_ids.extend(net.wires.iter().copied());
         entry.tapped |= tapped;
+        entry.numbered |= net.label.is_none();
     }
 
     for component in components {
@@ -83,6 +107,7 @@ pub(super) fn fold_nets(
             let entry = nets.entry(pin.net_name.clone()).or_default();
             entry.is_ground |= crate::schematic::ground_names::is_ground_reference(&pin.net_name);
             entry.connection_count += 1;
+            entry.terminals.push((component.id, pin.name.clone()));
             if !pin.attached {
                 entry.unattached_count += 1;
                 if pin.optional {
@@ -130,6 +155,8 @@ pub(super) fn fold_nets(
         net.declared_inputs.sort();
         net.wire_ids.sort_unstable();
         net.wire_ids.dedup();
+        net.terminals.sort();
+        net.terminals.dedup();
     }
     nets
 }

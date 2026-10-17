@@ -73,7 +73,8 @@ impl CheckScope {
 }
 
 /// What one design-rule pass states: for each cellview, the rules whose
-/// findings about objects drawn in it the pass reports.
+/// findings about objects drawn in it the pass decides, and every finding it
+/// states.
 ///
 /// A pass published with its coverage takes over every finding an earlier
 /// pass states under it, so a finding is listed once, by the newest check
@@ -82,36 +83,48 @@ impl CheckScope {
 /// design states `amp`'s findings itself, and the design check's statements
 /// of them at `X1` and `X2` leave the list; a check of the design after that
 /// takes them back.
+///
+/// A pass takes over only what it computed. Where it decides a rule for a
+/// cellview, a finding of that rule it does not state is one it looked for
+/// and did not find. Where it does not — the rules only the walk from the
+/// configured root computes, for every pass narrower than that walk — it
+/// takes over the findings it states again and leaves every other standing,
+/// because it never looked for them.
 #[derive(Debug, Clone, Default)]
 pub(in crate::workbench) struct RuleCoverage {
     cellviews: BTreeMap<CanonicalCellViewOwnerKey, RuleScope>,
+    /// Each finding the pass states, by rule, the cellview its object is
+    /// drawn in, and the object as a waiver names it.
+    stated: std::collections::BTreeSet<(String, CanonicalCellViewOwnerKey, String)>,
 }
 
-/// Which rules a pass states about one cellview.
+/// Which rules a pass decides about one cellview.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RuleScope {
     /// Every rule a check of the cellview's contents decides: all but
     /// whether the cellview is used, which only a check of the whole design
-    /// can say.
+    /// can say, and the rules only the walk from the configured root
+    /// computes.
     Contents,
     /// Every rule.
     Every,
     /// Only whether the cellview is used.
     Use,
-    /// The rules checked while the cellview is drawn.
+    /// The rules checked while the cellview is drawn, less those only the
+    /// walk from the configured root computes.
     Live,
 }
 
 impl RuleScope {
     fn covers(self, code: &str) -> bool {
         let unused = DrcViolationType::UnusedCellView.rule_code();
+        let is = |rules: &[DrcViolationType]| rules.iter().any(|rule| rule.rule_code() == code);
+        let walked = is(&rspice_design::drc::HIERARCHY_RULES);
         match self {
             Self::Every => true,
-            Self::Contents => code != unused,
+            Self::Contents => code != unused && !walked,
             Self::Use => code == unused,
-            Self::Live => rspice_design::drc::LIVE_RULES
-                .iter()
-                .any(|rule| rule.rule_code() == code),
+            Self::Live => is(&rspice_design::drc::LIVE_RULES) && !walked,
         }
     }
 }
@@ -121,13 +134,42 @@ impl RuleCoverage {
         self.cellviews.insert(owner_key(cell_view), scope);
     }
 
+    /// Record every finding `result`, a pass of `subject`, states.
+    fn restate(&mut self, subject: &CellViewRef, result: &DrcResult) {
+        self.stated
+            .extend(result.violations().iter().map(|violation| {
+                let (drawn_in, object) = rspice_design::drc::waiver_site(&violation.location);
+                (
+                    violation.violation_type.rule_code().to_owned(),
+                    owner_key(drawn_in.unwrap_or(subject)),
+                    object,
+                )
+            }));
+    }
+
+    /// Whether this pass states the finding of rule `code` about `object`,
+    /// drawn in `drawn_in`.
+    fn takes_over(&self, code: &str, drawn_in: &CanonicalCellViewOwnerKey, object: &str) -> bool {
+        self.cellviews
+            .get(drawn_in)
+            .is_some_and(|scope| scope.covers(code))
+            || self
+                .stated
+                .contains(&(code.to_owned(), drawn_in.clone(), object.to_owned()))
+    }
+
     /// Whether this pass states the finding `record` holds.
     pub(in crate::workbench) fn covers(&self, record: &DiagnosticRecord) -> bool {
-        record
-            .drawn_in
-            .as_ref()
-            .and_then(|cell_view| self.cellviews.get(cell_view))
-            .is_some_and(|scope| scope.covers(&record.canonical.code))
+        let Some(drawn_in) = record.drawn_in.as_ref() else {
+            return false;
+        };
+        match record.drawn_object.as_deref() {
+            Some(object) => self.takes_over(&record.canonical.code, drawn_in, object),
+            None => self
+                .cellviews
+                .get(drawn_in)
+                .is_some_and(|scope| scope.covers(&record.canonical.code)),
+        }
     }
 }
 
@@ -376,7 +418,7 @@ impl AppState {
         // one of them needs to ask the live drawing where its object is and
         // both insertions take the state mutably.
         let records = design_rule_records(self, &subject, &result, StoredWaivers::Stated);
-        let coverage = check_coverage(self, &subject, scope)?;
+        let coverage = check_coverage(self, &subject, scope, &result)?;
         // Published before the receipt is stored, because the store can
         // refuse a batch and the receipt cannot: a receipt stored first would
         // put findings on the canvas and the check pill that the Problems
@@ -512,18 +554,29 @@ impl AppState {
             subject: subject.clone(),
         });
         self.withdraw_diagnostics(&DiagnosticInputs::DesignCheck { subject });
+        // What the cleared passes had taken over from the checks still
+        // standing is theirs again.
+        self.restate_design_checks();
     }
 
-    /// State every current design-rule finding again against the waivers as
-    /// they now stand: after a waiver is recorded or removed, and after an
-    /// undo or redo that may have done either.
+    /// State every current design-rule pass again, in the order the passes
+    /// were published: after a waiver is recorded or removed, after an undo
+    /// or redo that may have done either, and after a pass is withdrawn.
+    ///
+    /// Against the waivers as they now stand, each finding says whether it
+    /// counts. And each pass takes over again what it took over when it was
+    /// published, from the passes still standing: a withdrawn pass — a live
+    /// pass when live checking is turned off, a cellview's checks when they
+    /// are cleared — had taken findings over from older passes that still
+    /// describe the design, and those findings are listed again rather than
+    /// leaving the list while the run gate still counts them.
     ///
     /// Only a current pass is re-stated. Its findings still describe the
     /// design, and a waiver changes whether each counts, not what was found,
     /// so the pass keeps its digest and stays current. A stale pass is left
     /// as it is: re-stating it would publish findings about a design that has
     /// moved under the digest of the one in front of the reader.
-    pub(in crate::workbench) fn refresh_waived_findings(&mut self) {
+    pub(in crate::workbench) fn restate_design_checks(&mut self) {
         // In the order they were published, so each still takes over from the
         // checks before it what it took over then.
         let mut subjects = self
@@ -554,7 +607,7 @@ impl AppState {
                 self.record(
                     crate::diagnostics::LogSeverity::Warning,
                     crate::diagnostics::LogSource::Studio,
-                    format!("Findings could not be stated again against the waivers: {error}"),
+                    format!("Findings could not be stated again: {error}"),
                 );
             }
         }
@@ -623,13 +676,19 @@ impl AppState {
             }
             (Some(explicit), Some(live)) => (explicit, live),
         };
-        let subject = owner_key(subject);
+        // Taken over as the Problems page takes it over: by the rule the live
+        // pass decides here, or by the live pass stating the finding again.
+        let mut coverage = RuleCoverage::default();
+        coverage.state(subject, RuleScope::Live);
+        coverage.restate(subject, &live.result);
         let mut composed = DrcResult::new();
         for violation in explicit.result.violations() {
-            let taken_over = rspice_design::drc::waiver_site(&violation.location)
-                .0
-                .is_none_or(|drawn_in| owner_key(drawn_in) == subject)
-                && RuleScope::Live.covers(violation.violation_type.rule_code());
+            let (drawn_in, object) = rspice_design::drc::waiver_site(&violation.location);
+            let taken_over = coverage.takes_over(
+                violation.violation_type.rule_code(),
+                &owner_key(drawn_in.unwrap_or(subject)),
+                &object,
+            );
             if !taken_over {
                 composed.add_violation(violation.clone());
             }
@@ -675,9 +734,8 @@ fn design_rule_records(
             )
             .map(DiagnosticRoute::Anchor);
             canonical.suppression = violation.waiver.as_ref().map(waivers::suppression_of);
-            let drawn_in = rspice_design::drc::waiver_site(&violation.location)
-                .0
-                .unwrap_or(subject);
+            let (drawn_in, object) = rspice_design::drc::waiver_site(&violation.location);
+            let drawn_in = drawn_in.unwrap_or(subject);
             // A finding about a whole cellview is stated in that cellview, not
             // in the one whose check found it.
             let cell_view = match &violation.location {
@@ -693,6 +751,7 @@ fn design_rule_records(
             )
             .keyed(key)
             .drawn_in(drawn_in)
+            .drawn_object(object)
             .with_details(violation.violation_type.suggested_fix())
             .with_rule(violation.violation_type.rule().explanation)
             .with_route(route)
@@ -794,14 +853,17 @@ fn project_schematics(state: &AppState) -> Vec<CellViewRef> {
         .collect()
 }
 
-/// What a pass of `scope` over `subject` states, read off the same projected
-/// design and walk the check took.
+/// What a pass of `scope` over `subject`, which found `result`, states: the
+/// rules it decides, read off the same projected design and walk the check
+/// took, and every finding it states.
 fn check_coverage(
     state: &AppState,
     subject: &CellViewRef,
     scope: CheckScope,
+    result: &DrcResult,
 ) -> Result<RuleCoverage, String> {
     let mut coverage = RuleCoverage::default();
+    coverage.restate(subject, result);
     match scope {
         CheckScope::Cellview => {
             coverage.state(subject, RuleScope::Contents);
@@ -813,6 +875,28 @@ fn check_coverage(
         }
         CheckScope::Hierarchy | CheckScope::Design => {}
     }
+    let walked = reached_cellviews(state, subject)?;
+    let reached = if scope == CheckScope::Design {
+        // Whether a cellview is used is decided for every schematic of the
+        // project's own: the ones the walk reached by being reached, and the
+        // rest by being reported.
+        for candidate in project_schematics(state) {
+            coverage.state(&candidate, RuleScope::Use);
+        }
+        RuleScope::Every
+    } else {
+        RuleScope::Contents
+    };
+    coverage.state(subject, reached);
+    for cell_view in &walked {
+        coverage.state(cell_view, reached);
+    }
+    Ok(coverage)
+}
+
+/// The cellviews a check of `subject` descends into, `subject` among them,
+/// read off the same projected design and walk the check takes.
+fn reached_cellviews(state: &AppState, subject: &CellViewRef) -> Result<Vec<CellViewRef>, String> {
     let projection = state
         .workspace
         .design_projection(
@@ -826,23 +910,7 @@ fn check_coverage(
         state.library_manager.catalog(),
         &projection,
     );
-    let reads = rspice_design::drc::check_reads(checked, subject, &hierarchy);
-    let reached = if scope == CheckScope::Design {
-        // Whether a cellview is used is decided for every schematic of the
-        // project's own: the ones the walk reached by being reached, and the
-        // rest by being reported.
-        for candidate in project_schematics(state) {
-            coverage.state(&candidate, RuleScope::Use);
-        }
-        RuleScope::Every
-    } else {
-        RuleScope::Contents
-    };
-    coverage.state(subject, reached);
-    for cell_view in &reads.reached {
-        coverage.state(cell_view, reached);
-    }
-    Ok(coverage)
+    Ok(rspice_design::drc::check_reads(checked, subject, &hierarchy).reached)
 }
 
 /// A stable key of the object a rule finding is located at: the design

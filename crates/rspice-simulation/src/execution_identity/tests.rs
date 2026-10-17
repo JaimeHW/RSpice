@@ -1360,45 +1360,10 @@ fn drc_identity_tags_are_never_renumbered() {
         DrcViolationType::SupplyTiedToGround => 34,
         DrcViolationType::UnusedCellView => 35,
     };
-    let types = [
-        DrcViolationType::FloatingNode,
-        DrcViolationType::UnconnectedPin,
-        DrcViolationType::OrphanNetLabel,
-        DrcViolationType::DanglingWire,
-        DrcViolationType::ShortedOutputs,
-        DrcViolationType::MissingGround,
-        DrcViolationType::SourceToSource,
-        DrcViolationType::DuplicateName,
-        DrcViolationType::EmptyName,
-        DrcViolationType::InvalidName,
-        DrcViolationType::MissingParameter,
-        DrcViolationType::ValueOutOfRange,
-        DrcViolationType::UnknownComponent,
-        DrcViolationType::SymbolUnplacedPin,
-        DrcViolationType::SymbolOrphanedPin,
-        DrcViolationType::SymbolPinOffGrid,
-        DrcViolationType::MalformedBus,
-        DrcViolationType::UnnamedBus,
-        DrcViolationType::BusRangeConflict,
-        DrcViolationType::DanglingBusTap,
-        DrcViolationType::MixedBusTap,
-        DrcViolationType::DuplicateBusMemberDriver,
-        DrcViolationType::OffSheetConnectorWithoutPartner,
-        DrcViolationType::CaseCollidingNetNames,
-        DrcViolationType::VectorWidthMismatch,
-        DrcViolationType::UndrivenInput,
-        DrcViolationType::UnloadedOutput,
-        DrcViolationType::RecursiveInstantiation,
-        DrcViolationType::UnresolvedReference,
-        DrcViolationType::AmbiguousCrossing,
-        DrcViolationType::ShortedPart,
-        DrcViolationType::UndrivenNet,
-        DrcViolationType::GroundNotNodeZero,
-        DrcViolationType::SupplyTiedToGround,
-        DrcViolationType::UnusedCellView,
-    ];
+    // Every rule the checker has, by the list a test in the design crate
+    // holds to the enum: a rule added there is pinned here or this fails.
     let mut seen = std::collections::BTreeSet::new();
-    for violation_type in types {
+    for violation_type in DrcViolationType::ALL {
         let tag = drc_violation_type_tag(violation_type);
         assert_eq!(tag, pinned_type(violation_type), "{violation_type:?}");
         assert!(seen.insert(tag), "tag {tag} names two kinds");
@@ -1429,6 +1394,7 @@ fn drc_identity_tags_are_never_renumbered() {
         (
             DrcLocation::Node {
                 net_name: "a".to_owned(),
+                terminals: Vec::new(),
             },
             4,
         ),
@@ -1584,6 +1550,7 @@ fn drc_identity_bytes_are_pinned_for_every_location_kind() {
         (
             DrcLocation::Node {
                 net_name: "vdd!".to_owned(),
+                terminals: Vec::new(),
             },
             Box::new(|bytes: &mut Vec<u8>| {
                 location(bytes, 4);

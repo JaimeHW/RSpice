@@ -26,8 +26,10 @@ pub(super) fn diagnostic_location(anchor: &ConnectivityAnchor) -> DrcLocation {
         ConnectivityAnchor::Bus(id) => DrcLocation::Bus { id: *id },
         ConnectivityAnchor::BusTap(id) => DrcLocation::BusTap { id: *id },
         ConnectivityAnchor::NetLabel(name) => DrcLocation::NetLabel { name: name.clone() },
+        // A connectivity finding about a net is about a name it was given.
         ConnectivityAnchor::Net(name) => DrcLocation::Node {
             net_name: name.clone(),
+            terminals: Vec::new(),
         },
         ConnectivityAnchor::Component { id, name } => DrcLocation::Component {
             id: *id,
@@ -68,8 +70,13 @@ pub struct DrcConfig {
     pub check_shorted_outputs: bool,
     /// Minimum connection count for a node to not be floating
     pub min_connections: usize,
-    /// Severity overrides by violation type
-    pub severity_overrides: HashMap<DrcViolationType, DrcSeverity>,
+    /// Severity overrides by violation type.
+    ///
+    /// Ordered, so two configurations that decide the same rules print, digest
+    /// and serialize alike however each was built: the run gate compares the
+    /// configuration a pass was checked under with the one it is dispatched
+    /// under, and a hashed map's order is its hasher's, not its content's.
+    pub severity_overrides: BTreeMap<DrcViolationType, DrcSeverity>,
     /// The project's connectivity policy, as the check must apply it.
     ///
     /// A checker that defaulted this would be inventing project policy, so the
@@ -103,7 +110,7 @@ impl Default for DrcConfig {
             check_unknown_components: true,
             check_shorted_outputs: true,
             min_connections: 2,
-            severity_overrides: HashMap::new(),
+            severity_overrides: BTreeMap::new(),
             connectivity: crate::connectivity_contract::ConnectivityPolicy::default(),
             waivers: super::CheckWaivers::default(),
         }
@@ -221,7 +228,7 @@ impl DrcChecker {
 
         // Check mutually exclusive driver contracts on the resolved net map.
         if self.config.check_shorted_outputs {
-            self.check_source_to_source(components, &mut result);
+            self.check_source_to_source(components, &net_map, &mut result);
             self.check_shorted_outputs(&net_map, &mut result);
             self.check_duplicate_bus_member_drivers(&net_map, &mut result);
             self.check_undriven_nets(&net_map, &mut result);
@@ -770,9 +777,7 @@ impl DrcChecker {
                         id,
                         DrcViolationType::FloatingNode,
                         format!("Node '{}' has only {} connection(s)", name, connections),
-                        DrcLocation::Node {
-                            net_name: name.clone(),
-                        },
+                        net.location(name),
                     )
                     .with_related(net.connected_components.clone()),
                 );
@@ -788,10 +793,19 @@ impl DrcChecker {
     /// closes a loop is one finding, as it is one refusal there: it names the
     /// sources the loop runs through and stands at the node the closing source
     /// holds against the rest.
-    fn check_source_to_source(&mut self, components: &[ComponentInfo], result: &mut DrcResult) {
+    ///
+    /// The branches are the ones the deck writes. A source behind its `rs` is
+    /// written onto a node of its own that only the series resistor joins to
+    /// the drawn net, so it is no branch between the drawn nets.
+    fn check_source_to_source(
+        &mut self,
+        components: &[ComponentInfo],
+        net_map: &HashMap<String, NetInfo>,
+        result: &mut DrcResult,
+    ) {
         let mut sources = components
             .iter()
-            .filter(|component| component.is_voltage_source)
+            .filter(|component| component.is_voltage_source && !component.series_resistance)
             .filter_map(|component| {
                 let terminal = |name: &str| {
                     component
@@ -834,18 +848,18 @@ impl DrcChecker {
                     names.join(", ")
                 )
             };
+            let location = net_map.get(node).map_or_else(
+                || DrcLocation::Node {
+                    net_name: node.to_owned(),
+                    terminals: Vec::new(),
+                },
+                |net| net.location(node),
+            );
             let id = self.next_id();
             self.add_violation(
                 result,
-                DrcViolation::new(
-                    id,
-                    DrcViolationType::SourceToSource,
-                    message,
-                    DrcLocation::Node {
-                        net_name: node.to_owned(),
-                    },
-                )
-                .with_related(names),
+                DrcViolation::new(id, DrcViolationType::SourceToSource, message, location)
+                    .with_related(names),
             );
         }
     }
@@ -881,9 +895,7 @@ impl DrcChecker {
                         drivers.len(),
                         drivers.join(", ")
                     ),
-                    DrcLocation::Node {
-                        net_name: net_name.clone(),
-                    },
+                    net.location(net_name),
                 )
                 .with_related(drivers),
             );
@@ -930,9 +942,7 @@ impl DrcChecker {
                         receivers.len(),
                         receivers.join(", ")
                     ),
-                    DrcLocation::Node {
-                        net_name: name.clone(),
-                    },
+                    net.location(name),
                 )
                 .with_related(receivers.clone()),
             );
@@ -965,9 +975,7 @@ impl DrcChecker {
                         drivers.len(),
                         drivers.join(", ")
                     ),
-                    DrcLocation::Node {
-                        net_name: net.display_name.clone(),
-                    },
+                    net.location(&net.display_name),
                 )
                 .with_related(drivers),
             );
@@ -986,7 +994,7 @@ impl DrcChecker {
 pub(super) fn append_off_sheet_connector_violations(
     schematic: &crate::schematic::document::SchematicDocument,
     result: &mut DrcResult,
-    severity_overrides: &HashMap<DrcViolationType, DrcSeverity>,
+    severity_overrides: &BTreeMap<DrcViolationType, DrcSeverity>,
 ) {
     // Two connectors are the same declaration when the netlister would join
     // them, and the netlister folds ASCII case whatever the naming policy says.
@@ -1041,7 +1049,7 @@ pub(super) fn append_vector_width_violations(
     connectivity: &ExtractedConnectivity,
     policy: &crate::connectivity_contract::ConnectivityPolicy,
     result: &mut DrcResult,
-    severity_overrides: &HashMap<DrcViolationType, DrcSeverity>,
+    severity_overrides: &BTreeMap<DrcViolationType, DrcSeverity>,
 ) {
     let mut next_id = result.total_count();
     for mismatch in &connectivity.vector_nets.mismatches {
@@ -1085,7 +1093,7 @@ pub(super) fn append_vector_width_violations(
 pub(super) fn append_case_collision_violations(
     schematic: &crate::schematic::document::SchematicDocument,
     result: &mut DrcResult,
-    severity_overrides: &HashMap<DrcViolationType, DrcSeverity>,
+    severity_overrides: &BTreeMap<DrcViolationType, DrcSeverity>,
 ) {
     let mut labels: Vec<&crate::schematic::net_label::NetLabel> =
         schematic.net_labels.iter().collect();
@@ -1162,7 +1170,7 @@ pub(super) fn append_ground_not_node_zero(
     schematic: &crate::schematic::document::SchematicDocument,
     connectivity: &ExtractedConnectivity,
     result: &mut DrcResult,
-    severity_overrides: &HashMap<DrcViolationType, DrcSeverity>,
+    severity_overrides: &BTreeMap<DrcViolationType, DrcSeverity>,
 ) {
     let mut labels: Vec<&crate::schematic::net_label::NetLabel> =
         schematic.net_labels.iter().collect();

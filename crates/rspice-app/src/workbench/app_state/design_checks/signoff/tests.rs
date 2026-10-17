@@ -137,6 +137,35 @@ fn a_finding_s_fields_are_escaped_as_rfc_4180_writes_them() {
     );
 }
 
+/// The report says a waiver covers nothing only where Check Design looked: a
+/// waiver stored with a schematic the design never reaches — a second
+/// testbench, a cell nothing places — is about findings this check does not
+/// compute, so it is not reported stale.
+#[test]
+fn a_waiver_stored_where_the_design_never_reaches_is_not_unmatched() {
+    let mut state = open_state();
+    let mut spare = crate::state::SchematicState::default();
+    spare
+        .waive(rspice_design::drc::DrcWaiver {
+            rule: "DRC-FLOATING-NODE".to_owned(),
+            object: "component:1".to_owned(),
+            reason: "a test point".to_owned(),
+            author: "ana".to_owned(),
+            waived_at_ms: 1_760_000_000_000,
+        })
+        .expect("the rule may be waived");
+    state
+        .workspace
+        .insert_schematic_editor("work/spare/schematic".to_owned(), spare);
+
+    let report = state.signoff_report(DATE).expect("the report builds");
+    assert!(
+        report.summary.contains("Unmatched waivers\n  none\n"),
+        "{}",
+        report.summary
+    );
+}
+
 /// A report is built from a check of the design as it stands: an edit after
 /// one report is in the next, which runs Check Design again.
 #[test]

@@ -276,6 +276,9 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) -> bool {
                 .route
                 .as_ref()
                 .and_then(|route| route_refusal(state, route));
+            let waiver_refusal = row
+                .waiver_action
+                .and_then(|action| state.waiver_edit_refusal(&action.target().cell_view));
             // A finding can stop being waivable while its reason is being
             // typed — waived from elsewhere, or gone stale under a re-check —
             // and the reason then has nothing left to be recorded against.
@@ -306,6 +309,7 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) -> bool {
                             },
                             refusal.as_deref(),
                             waiving,
+                            waiver_refusal.as_deref(),
                         )
                     },
                 )
@@ -642,8 +646,19 @@ fn finding_row(
         intent.route = route;
     }
     if let Some(action) = row.waiver_action {
+        // Disabled, saying why, where the document that stores the waiver
+        // cannot be edited here: the edit would refuse for that reason.
+        let refusal = state.waiver_edit_refusal(&action.target().cell_view);
         response.context_menu(|ui| {
-            if ui.button(detail::waiver_verb(action)).clicked() {
+            let verb = ui.add_enabled(
+                refusal.is_none(),
+                egui::Button::new(detail::waiver_verb(action)),
+            );
+            let verb = match &refusal {
+                Some(refusal) => verb.on_disabled_hover_text(refusal),
+                None => verb,
+            };
+            if verb.clicked() {
                 match action {
                     // The reason is asked for in the detail region, which
                     // the row has to be current to open.

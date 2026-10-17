@@ -14,7 +14,7 @@ use crate::schematic::component_type::ComponentType;
 use crate::schematic::document::SchematicDocument;
 use rspice_app_types::hierarchy_path::InstancePath;
 use rspice_design_model::cell_view::CellViewRef;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 /// The subject's index in the walk. It is the only cellview whose findings are
 /// stated without an occurrence path.
@@ -344,7 +344,7 @@ impl<'a> InstanceGraph<'a> {
         &self,
         view: usize,
         reach: CheckReach,
-        severity_overrides: &HashMap<DrcViolationType, DrcSeverity>,
+        severity_overrides: &BTreeMap<DrcViolationType, DrcSeverity>,
         result: &mut DrcResult,
     ) {
         for recursive in &self.recursive {

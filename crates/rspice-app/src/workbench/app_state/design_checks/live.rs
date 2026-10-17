@@ -152,7 +152,7 @@ impl AppState {
         };
         let input_digest = self.diagnostic_live_digest(&inputs)?;
         let records = design_rule_records(self, &subject, &result, StoredWaivers::Left);
-        let coverage: RuleCoverage = check_coverage(self, &subject, CheckScope::Live)?;
+        let coverage: RuleCoverage = check_coverage(self, &subject, CheckScope::Live, &result)?;
         self.publish_superseding(inputs, records, &coverage)?;
         let is_active_subject =
             owner_key(&subject) == owner_key(&self.workspace.content.active_schematic_reference());
@@ -197,13 +197,15 @@ impl AppState {
             self.record(
                 LogSeverity::Warning,
                 LogSource::Studio,
-                format!("Findings could not be stated again against the waivers: {error}"),
+                format!("Findings could not be stated again: {error}"),
             );
         }
     }
 
     /// Withdraw every live pass, for live checking turned off: its findings
     /// would otherwise stand on the list with nothing keeping them current.
+    /// What each had taken over from an explicit check that still describes
+    /// the design is that check's again.
     fn withdraw_live_checks(&mut self) {
         if self.design_checks.live.is_empty() {
             return;
@@ -216,6 +218,7 @@ impl AppState {
         for subject in subjects {
             self.withdraw_diagnostics(&DiagnosticInputs::LiveCheck { subject });
         }
+        self.restate_design_checks();
         self.refresh_active_design_check_projection();
     }
 }

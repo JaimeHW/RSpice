@@ -122,6 +122,112 @@ fn a_waiver_survives_a_recheck_after_an_unrelated_edit() {
     );
 }
 
+/// A resistor at `x` with one leg wired out to nothing: a node of one
+/// connection that no label names, so the extractor numbers it by where it is
+/// drawn. Returns the resistor's name.
+fn stub_a_resistor(state: &mut AppState, x: i32) -> String {
+    let mut name = String::new();
+    state.schematic.with_undo("Stub a resistor", |schematic| {
+        let id = schematic.add_component(ComponentType::Resistor, Point::new(x, 0));
+        let resistor = schematic
+            .document()
+            .components
+            .iter()
+            .find(|component| component.id == id)
+            .expect("the resistor is placed");
+        name.clone_from(&resistor.name);
+        let leg = resistor.terminal_positions()[0].1;
+        schematic
+            .add_wire(vec![leg, Point::new(leg.x, leg.y - 100)])
+            .expect("a two-point wire commits");
+    });
+    state.sync_active_schematic_to_workspace();
+    name
+}
+
+/// The floating-node finding on `name`'s stub, as `result` states it and as
+/// the page lists it: told apart from the other stubs' by what the check says
+/// stands on the node, not by anything a waiver is keyed by.
+fn stub_finding<'a>(
+    result: &'a DrcResult,
+    records: &'a [DiagnosticRecord],
+    name: &str,
+) -> (&'a DrcViolation, &'a DiagnosticRecord) {
+    let finding = result
+        .violations()
+        .iter()
+        .find(|finding| {
+            finding.violation_type == DrcViolationType::FloatingNode
+                && finding.related_items == [name]
+        })
+        .unwrap_or_else(|| panic!("{name}'s stub floats: {:?}", result.violations()));
+    let floating = DrcViolationType::FloatingNode.rule_code();
+    match of_code(records, floating)
+        .into_iter()
+        .filter(|record| record.message == finding.message)
+        .collect::<Vec<_>>()[..]
+    {
+        [record] => (finding, record),
+        ref found => panic!("one record of {name}'s stub, found {}", found.len()),
+    }
+}
+
+/// The net a finding on a node no label names is on: the extractor's number
+/// for it.
+fn numbered_net(finding: &DrcViolation) -> &str {
+    match &finding.location {
+        DrcLocation::Node { net_name, .. } => net_name,
+        other => panic!("a floating node is located on its node: {other:?}"),
+    }
+}
+
+/// Identity is structural on a node no label names too. Placing a part to
+/// its left renumbers the node; the waiver of its finding stays on that node
+/// and covers no other node's — as it would not if the finding were known by
+/// its number.
+#[test]
+fn a_waiver_on_an_unnamed_node_survives_a_recheck_after_its_node_is_renumbered() {
+    let mut state = AppState::default();
+    state.project_lifecycle.authority.open_session();
+    let first = stub_a_resistor(&mut state, 400);
+    let waived = stub_a_resistor(&mut state, 800);
+    let result = state
+        .run_active_design_checks()
+        .expect("the checks run on the drawing");
+    let records = published(&state);
+    let (before, record) = stub_finding(&result, &records, &waived);
+    let numbered_before = numbered_net(before).to_owned();
+    state
+        .waive_finding(&to_waive(record), "a test point")
+        .expect("a floating node may be waived");
+
+    let left = stub_a_resistor(&mut state, -400);
+    let result = state
+        .run_active_design_checks()
+        .expect("the checks run on the drawing");
+    let records = published(&state);
+    let (after, record) = stub_finding(&result, &records, &waived);
+    assert_ne!(
+        numbered_net(after),
+        numbered_before,
+        "precondition: the part to the left renumbers the waived node"
+    );
+    assert!(
+        record.waived(),
+        "the waiver still covers its node's finding"
+    );
+    for other in [&first, &left] {
+        assert!(
+            !stub_finding(&result, &records, other).1.waived(),
+            "and not {other}'s"
+        );
+    }
+    assert!(
+        of_code(&records, "WAIVER-UNMATCHED").is_empty(),
+        "and nothing says it covers nothing"
+    );
+}
+
 /// A waiver is on one object. Another finding of the same rule, on another
 /// object, is not covered by it and is offered a waiver of its own.
 #[test]

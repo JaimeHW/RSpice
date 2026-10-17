@@ -55,6 +55,15 @@ pub(in crate::workbench) enum WaiverAction {
     Delete(WaiverTarget),
 }
 
+impl WaiverAction {
+    /// Where the waiver this acts on is stored, and what it names there.
+    pub(in crate::workbench) const fn target(&self) -> &WaiverTarget {
+        match self {
+            Self::Waive(target) | Self::Remove(target) | Self::Delete(target) => target,
+        }
+    }
+}
+
 impl WaiverTarget {
     /// Where a finding of `subject`'s check is waived, for a rule that may be
     /// waived at all.
@@ -87,11 +96,15 @@ pub(in crate::workbench) fn finding_waiver_action(
     subject: &CellViewRef,
     violation: &DrcViolation,
 ) -> Option<WaiverAction> {
-    let target = WaiverTarget::of_finding(subject, violation)?;
-    Some(if violation.waiver.is_some() {
-        WaiverAction::Remove(target)
-    } else {
-        WaiverAction::Waive(target)
+    let mut target = WaiverTarget::of_finding(subject, violation)?;
+    Some(match &violation.waiver {
+        // The waiver as it is stored, which an earlier build may have named
+        // otherwise than this finding is keyed.
+        Some(waiver) => {
+            target.object.clone_from(&waiver.object);
+            WaiverAction::Remove(target)
+        }
+        None => WaiverAction::Waive(target),
     })
 }
 
@@ -360,7 +373,7 @@ impl AppState {
         }
         let schematics = after.schematics != before.schematics;
         if schematics {
-            self.refresh_waived_findings();
+            self.restate_design_checks();
         }
         schematics
     }
@@ -399,13 +412,58 @@ impl AppState {
         )
     }
 
+    /// Why the waivers stored with `cell_view` cannot be changed here, or
+    /// `None` where they can.
+    ///
+    /// The one answer to it: the page offers Waive and Remove by it, and
+    /// [`Self::edit_waivers`] edits by it, so a verb is never offered that
+    /// the edit then refuses. A waiver is an edit of the document that stores
+    /// it, so that document has to be one the workbench edits: the view in
+    /// front of the reader, or a schematic the project holds open. A library
+    /// the project borrows read-only is never edited from here.
+    pub(in crate::workbench) fn waiver_edit_refusal(
+        &self,
+        cell_view: &CellViewRef,
+    ) -> Option<String> {
+        if self.workbench.safe_mode.project_read_only() {
+            return Some("The project is read-only".to_owned());
+        }
+        let borrowed = self
+            .library_manager
+            .catalog()
+            .libraries_by_key()
+            .any(|(_, library)| {
+                library.read_only && library.name.eq_ignore_ascii_case(&cell_view.library)
+            });
+        if borrowed {
+            return Some(format!("{} is read-only", cell_view.library));
+        }
+        let key = cell_view.key();
+        let active = self
+            .workspace
+            .content
+            .active_view
+            .key()
+            .eq_ignore_ascii_case(&key);
+        let editable = match self.workspace.content.active_view_type() {
+            ViewType::Schematic | ViewType::Testbench | ViewType::Symbol if active => true,
+            _ => self
+                .workspace
+                .content
+                .schematic_buffers
+                .keys()
+                .any(|held| held.eq_ignore_ascii_case(&key)),
+        };
+        (!editable).then(|| format!("Open {} to change its waivers", cell_view.display_path()))
+    }
+
     fn edit_waivers(
         &mut self,
         cell_view: &CellViewRef,
         edit: StoredWaiverEdit,
     ) -> Result<(), String> {
-        if self.workbench.safe_mode.project_read_only() {
-            return Err("The project is read-only.".to_owned());
+        if let Some(refusal) = self.waiver_edit_refusal(cell_view) {
+            return Err(format!("{refusal}."));
         }
         let key = cell_view.key();
         let active = self
@@ -433,10 +491,7 @@ impl AppState {
                     .find(|held| held.eq_ignore_ascii_case(&key))
                     .cloned()
                     .ok_or_else(|| {
-                        format!(
-                            "{} is not open in this project; open it to change its waivers.",
-                            cell_view.display_path()
-                        )
+                        format!("Open {} to change its waivers.", cell_view.display_path())
                     })?;
                 let mut editor = self
                     .workspace
@@ -446,7 +501,7 @@ impl AppState {
             }
         }
         self.workbench.preflight.invalidate();
-        self.refresh_waived_findings();
+        self.restate_design_checks();
         Ok(())
     }
 

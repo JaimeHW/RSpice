@@ -76,6 +76,7 @@ fn resistor(id: u64, name: &str, pins: Vec<PinInfo>) -> ComponentInfo {
         component_type: "resistor".to_string(),
         pins,
         is_voltage_source: false,
+        series_resistance: false,
         is_current_source: false,
         is_ground_symbol: false,
         reference_required: true,
@@ -98,6 +99,7 @@ fn vsource(id: u64, name: &str, plus_net: &str, minus_net: &str) -> ComponentInf
         component_type: "voltage_source".to_string(),
         pins: vec![plus, pin("-", minus_net)],
         is_voltage_source: true,
+        series_resistance: false,
         is_current_source: false,
         is_ground_symbol: false,
         reference_required: true,
@@ -123,6 +125,7 @@ fn interface_port(id: u64, net: &str, attached: bool) -> ComponentInfo {
             ..pin("1", net)
         }],
         is_voltage_source: false,
+        series_resistance: false,
         is_current_source: false,
         is_ground_symbol: false,
         reference_required: false,
@@ -154,6 +157,7 @@ fn ground_symbol(id: u64, point: Point, attached: bool) -> ComponentInfo {
             bulk: false,
         }],
         is_voltage_source: false,
+        series_resistance: false,
         is_current_source: false,
         is_ground_symbol: true,
         reference_required: false,
@@ -341,7 +345,8 @@ fn single_connection_net_is_floating() {
     assert_eq!(
         floating[0].location,
         DrcLocation::Node {
-            net_name: "out".to_string()
+            net_name: "out".to_string(),
+            terminals: Vec::new(),
         }
     );
     // Related items identify the component so the UI can highlight it.
@@ -357,7 +362,8 @@ fn ground_net_is_never_floating() {
     assert_eq!(
         floating[0].location,
         DrcLocation::Node {
-            net_name: "a".to_string()
+            net_name: "a".to_string(),
+            terminals: Vec::new(),
         }
     );
 }
@@ -377,7 +383,8 @@ fn min_connections_config_is_honored() {
     assert_eq!(
         floating[0].location,
         DrcLocation::Node {
-            net_name: "vin".to_string()
+            net_name: "vin".to_string(),
+            terminals: Vec::new(),
         }
     );
 }
@@ -397,7 +404,8 @@ fn two_voltage_sources_across_one_pair_are_source_to_source() {
     assert_eq!(
         shorted[0].location,
         DrcLocation::Node {
-            net_name: "vin".to_string()
+            net_name: "vin".to_string(),
+            terminals: Vec::new(),
         }
     );
     assert_eq!(
@@ -449,7 +457,8 @@ fn a_ring_of_three_sources_is_one_loop() {
     assert_eq!(
         loops[0].location,
         DrcLocation::Node {
-            net_name: "a".to_string()
+            net_name: "a".to_string(),
+            terminals: Vec::new(),
         }
     );
 
@@ -1177,7 +1186,7 @@ fn width_findings(
         ..crate::connectivity_contract::ConnectivityPolicy::default()
     };
     let connectivity = crate::connectivity::extract(schematic, |_| None, |_| None);
-    append_vector_width_violations(&connectivity, &policy, &mut result, &HashMap::new());
+    append_vector_width_violations(&connectivity, &policy, &mut result, &BTreeMap::new());
     result.violations().to_vec()
 }
 
@@ -1225,7 +1234,7 @@ fn a_width_mismatch_blocks_under_either_policy() {
 
 fn off_sheet_findings(schematic: &SchematicDocument) -> Vec<DrcViolation> {
     let mut result = DrcResult::new();
-    append_off_sheet_connector_violations(schematic, &mut result, &HashMap::new());
+    append_off_sheet_connector_violations(schematic, &mut result, &BTreeMap::new());
     result.violations().to_vec()
 }
 
@@ -1311,7 +1320,7 @@ fn partner_matching_folds_case_under_every_policy_and_honors_severity_overrides(
 
     schematic.net_labels.pop();
     let mut result = DrcResult::new();
-    let overrides = HashMap::from([(
+    let overrides = BTreeMap::from([(
         DrcViolationType::OffSheetConnectorWithoutPartner,
         DrcSeverity::Error,
     )]);
@@ -1346,7 +1355,7 @@ fn case_colliding_net_names_are_a_drc_error() {
             .push(NetLabel::new(2, Point::new(40, 0), "out"));
 
         let mut result = DrcResult::new();
-        append_case_collision_violations(&schematic, &mut result, &HashMap::new());
+        append_case_collision_violations(&schematic, &mut result, &BTreeMap::new());
         let findings = result.violations();
         assert_eq!(findings.len(), 1, "{policy:?}: one finding for one pair");
         assert_eq!(
@@ -1375,7 +1384,7 @@ fn case_colliding_net_names_are_a_drc_error() {
         .net_labels
         .push(NetLabel::new(2, Point::new(40, 0), "Out"));
     let mut result = DrcResult::new();
-    append_case_collision_violations(&repeated, &mut result, &HashMap::new());
+    append_case_collision_violations(&repeated, &mut result, &BTreeMap::new());
     assert!(result.violations().is_empty());
 
     // A lone name collides with nothing.
@@ -1383,7 +1392,7 @@ fn case_colliding_net_names_are_a_drc_error() {
     lone.net_labels
         .push(NetLabel::new(1, Point::origin(), "Out"));
     let mut result = DrcResult::new();
-    append_case_collision_violations(&lone, &mut result, &HashMap::new());
+    append_case_collision_violations(&lone, &mut result, &BTreeMap::new());
     assert!(result.violations().is_empty());
 
     // An interface port carries an authored name too, and is reported on
@@ -1394,7 +1403,7 @@ fn case_colliding_net_names_are_a_drc_error() {
         .push(NetLabel::new(1, Point::origin(), "Bias"));
     named_port(&mut mixed, "BIAS");
     let mut result = DrcResult::new();
-    append_case_collision_violations(&mixed, &mut result, &HashMap::new());
+    append_case_collision_violations(&mixed, &mut result, &BTreeMap::new());
     let findings = result.violations();
     assert_eq!(findings.len(), 1);
     assert_eq!(
@@ -1427,7 +1436,7 @@ fn the_advisory_continues_the_result_id_sequence_it_is_appended_to() {
         "existing finding",
         DrcLocation::Global,
     ));
-    append_off_sheet_connector_violations(&schematic, &mut result, &HashMap::new());
+    append_off_sheet_connector_violations(&schematic, &mut result, &BTreeMap::new());
 
     let ids: Vec<usize> = result
         .violations()
