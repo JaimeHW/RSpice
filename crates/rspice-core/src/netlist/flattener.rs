@@ -597,6 +597,18 @@ impl<'a> Flattener<'a> {
         let root_path = HierarchyPath::root_with_separator(self.config.hierarchy_separator);
         for (element_index, element) in netlist.elements.iter().enumerate() {
             poll_parse_abort(abort, element_index)?;
+            let bound = match self.bind_root_forward_instance_params(element, &global_scope, abort)
+            {
+                Ok(bound) => bound,
+                Err(error) => {
+                    self.handle_branch_error(
+                        error,
+                        &format!("top-level element {}", element.name),
+                    )?;
+                    continue;
+                }
+            };
+            let element = bound.as_ref().unwrap_or(element);
             let stack_len = self.expansion_stack.len();
             if let Err(error) = self.flatten_element(
                 element,
@@ -3259,6 +3271,116 @@ impl<'a> Flattener<'a> {
             }
         }
         Ok(merged)
+    }
+
+    /// Bind the instance assignments a top-level element deferred because
+    /// they name a `.PARAM` the deck defines further down.
+    ///
+    /// A root `.PARAM` is visible to every reader in the deck, wherever it is
+    /// written: ngspice moves the definitions ahead of the elements before it
+    /// evaluates either. This is the top-level counterpart of the binding
+    /// `substitute_params` gives a subcircuit body, against the completed root
+    /// scope, so model-bin selection and the device builder read one geometry,
+    /// area, and multiplier; the builders never read a deferred assignment.
+    /// Assignments that read a Spectre statistical parameter stay deferred
+    /// for the per-trial materialization after flattening.
+    fn bind_root_forward_instance_params(
+        &self,
+        element: &Element,
+        scope: &ParamContext,
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Element>, ParseWithAbortError> {
+        let statistical = |(_, expression): &(String, String)| {
+            scope.expression_references_spectre_statistics(expression)
+        };
+        let pending = match &element.kind {
+            ElementKind::Resistor {
+                deferred_params, ..
+            }
+            | ElementKind::Capacitor {
+                deferred_params, ..
+            }
+            | ElementKind::Inductor {
+                deferred_params, ..
+            }
+            | ElementKind::Diode {
+                deferred_params, ..
+            }
+            | ElementKind::Bjt {
+                deferred_params, ..
+            }
+            | ElementKind::Mosfet {
+                deferred_params, ..
+            }
+            | ElementKind::Jfet {
+                deferred_params, ..
+            }
+            | ElementKind::Mesfet {
+                deferred_params, ..
+            }
+            | ElementKind::XyceMemristor {
+                deferred_params, ..
+            } => deferred_params,
+            _ => return Ok(None),
+        };
+        if pending.iter().all(statistical) {
+            return Ok(None);
+        }
+        let mut bound = element.clone();
+        if let ElementKind::Resistor {
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::Capacitor {
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::Inductor {
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::Diode {
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::Bjt {
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::Mosfet {
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::Jfet {
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::Mesfet {
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::XyceMemristor {
+            instance_params,
+            deferred_params,
+            ..
+        } = &mut bound.kind
+        {
+            let (kept, forward): (Vec<_>, Vec<_>) = std::mem::take(deferred_params)
+                .into_iter()
+                .partition(statistical);
+            *instance_params =
+                self.merge_deferred_params(instance_params, &forward, scope, abort)?;
+            *deferred_params = kept;
+        }
+        Ok(Some(bound))
     }
 
     /// Merge deferred (expression-valued) instance parameters over the
