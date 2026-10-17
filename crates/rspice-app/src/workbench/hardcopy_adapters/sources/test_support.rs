@@ -125,16 +125,19 @@ pub(crate) fn resolve_retained_hardcopy_source(
                     });
                 }
                 let active_key = state.workspace.content.active_key();
-                let sheet_catalog = matches!(scope, HardcopyScope::CurrentSheet)
-                    .then(|| {
-                        state
-                            .workspace
-                            .content
-                            .design_management
-                            .sheet_catalog(&active_key)
-                    })
-                    .flatten();
-                let sheet_id = sheet_catalog.and_then(SheetCatalog::active_sheet_id);
+                let catalog = state
+                    .workspace
+                    .content
+                    .design_management
+                    .sheet_catalog(&active_key);
+                let (sheet_catalog, sheet_id) = match scope {
+                    HardcopyScope::CurrentSheet => {
+                        (catalog, catalog.and_then(SheetCatalog::active_sheet_id))
+                    }
+                    // The catalog alone holds a selection to the active sheet.
+                    HardcopyScope::Selection => (catalog, None),
+                    _ => (None, None),
+                };
                 let identity = if let (Some(catalog), Some(sheet_id)) = (sheet_catalog, sheet_id) {
                     let sheet = catalog.find(sheet_id).ok_or_else(|| {
                         HardcopySourceError::InvalidSheetPartition(format!(

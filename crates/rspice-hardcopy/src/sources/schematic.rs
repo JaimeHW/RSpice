@@ -217,8 +217,12 @@ pub fn resolve_schematic_source(
     if selection.is_some_and(|selection| selection.has_probes) {
         return Err(HardcopySourceError::ProbeSelectionUnsupported);
     }
-    let governed_sheet = match (source.sheet_catalog, source.sheet_id) {
-        (Some(catalog), Some(sheet_id)) if matches!(source.scope, HardcopyScope::CurrentSheet) => {
+    // Every sheet of a cell view shares one coordinate space, so the catalog
+    // decides which objects a page may draw. A selection keeps the cell
+    // view's identity but is held to the sheet in view, and prints without
+    // that sheet's frame.
+    let sheet_partition = match (source.sheet_catalog, source.sheet_id, &source.scope) {
+        (Some(catalog), Some(sheet_id), HardcopyScope::CurrentSheet) => {
             catalog
                 .validate()
                 .map_err(|error| HardcopySourceError::InvalidSheetPartition(error.to_string()))?;
@@ -229,16 +233,27 @@ pub fn resolve_schematic_source(
             }
             Some((catalog, sheet_id))
         }
-        (None, None) => None,
+        (Some(catalog), None, HardcopyScope::Selection) => {
+            catalog
+                .validate()
+                .map_err(|error| HardcopySourceError::InvalidSheetPartition(error.to_string()))?;
+            catalog
+                .active_sheet_id()
+                .map(|sheet_id| (catalog, sheet_id))
+        }
+        (None, None, _) => None,
         _ => {
             return Err(HardcopySourceError::InvalidSheetPartition(
-                "sheet catalog and sheet identity must be supplied together only for CurrentSheet"
+                "a sheet identity needs its catalog and names only a current sheet; a catalog \
+                 alone partitions only a selection"
                     .to_owned(),
             ));
         }
     };
+    let governed_sheet =
+        sheet_partition.filter(|_| matches!(source.scope, HardcopyScope::CurrentSheet));
     let object_is_in_scope = |object_id: u64| {
-        governed_sheet.is_none_or(|(catalog, sheet_id)| {
+        sheet_partition.is_none_or(|(catalog, sheet_id)| {
             // The canvas's existing governed-sheet contract assigns legacy
             // unassigned objects to the active sheet. Reusing it here makes
             // every object publish on exactly one sheet without leakage.

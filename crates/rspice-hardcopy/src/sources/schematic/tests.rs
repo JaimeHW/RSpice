@@ -370,3 +370,58 @@ fn stale_schematic_authority_is_rejected_before_digesting() {
     .unwrap_err();
     assert!(matches!(error, HardcopySourceError::StaleSchematic { .. }));
 }
+
+#[test]
+fn a_governed_selection_prints_only_the_active_sheet() {
+    // Two sheets share one coordinate space; both wires lie on the same line.
+    let mut document = SchematicDocument::default();
+    for wire_id in [11, 22] {
+        document
+            .wires
+            .push(Wire::segment(wire_id, Point::new(0, 0), Point::new(20, 0)));
+    }
+    let schematic = Schematic::from_document(document);
+    let mut catalog = SheetCatalog::default();
+    let first_id = catalog
+        .create_sheet(sheet_definition("First"), None)
+        .unwrap();
+    let second_id = catalog
+        .create_sheet(sheet_definition("Second"), Some(first_id))
+        .unwrap();
+    catalog
+        .assign_objects(catalog.revision(), first_id, [11])
+        .unwrap();
+    catalog
+        .assign_objects(catalog.revision(), second_id, [22])
+        .unwrap();
+    catalog.set_active(second_id).unwrap();
+    let mut selection = rspice_design::schematic::selection::Selection::default();
+    selection.wires.extend([11, 22]);
+
+    let resolved = resolve_schematic_source(SchematicHardcopySource {
+        identity: identity("governed-schematic"),
+        schematic: &schematic,
+        selection: SchematicHardcopySelection::capture(&selection, &HardcopyScope::Selection),
+        expected_topology_version: schematic.topology_version(),
+        symbol_resolver: None,
+        sheet_catalog: Some(&catalog),
+        sheet_id: None,
+        project_default_drawing_sheet: None,
+        project_title_block_field_values: None,
+        scope: HardcopyScope::Selection,
+    })
+    .unwrap();
+    let HardcopySemanticDocument::Schematic(semantic) = resolved.semantic_document() else {
+        panic!("expected schematic")
+    };
+    assert_eq!(
+        semantic
+            .wires
+            .iter()
+            .map(|wire| wire.id)
+            .collect::<Vec<_>>(),
+        [22]
+    );
+    // A selection prints the chosen objects, not the sheet they sit on.
+    assert_eq!(semantic.drawing_sheet, None);
+}

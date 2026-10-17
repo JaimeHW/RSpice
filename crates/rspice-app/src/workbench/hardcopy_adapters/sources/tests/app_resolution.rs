@@ -361,6 +361,20 @@ fn a_multi_sheet_cell_view_prints_every_sheet_on_its_own_page() {
 }
 
 #[test]
+fn a_selection_prints_only_what_is_selected_on_the_active_sheet() {
+    let (mut state, base_key, _) = two_sheets_drawn_at_the_same_place();
+    // A selection made while every sheet was listed, as the navigator's
+    // "All sheets" scope can, still holds the second sheet's wire.
+    let selection = &mut state.schematic.session.editor.selection;
+    selection.wires.insert(11);
+    selection.wires.insert(22);
+    assert_eq!(
+        printed_wire_ids(&resolve_prepared(&state, &base_key, HardcopyScope::Selection).unwrap()),
+        [[11]]
+    );
+}
+
+#[test]
 fn global_app_resolver_rejects_stale_results_registry() {
     let mut state = AppState::default();
     let mut run = SimulationRun::new(1);

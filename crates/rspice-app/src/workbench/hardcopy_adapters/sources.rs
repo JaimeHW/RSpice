@@ -499,27 +499,29 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
                         scope,
                     );
                 }
-                let (identity, sheet_catalog, sheet_id) =
-                    if matches!(scope, HardcopyScope::CurrentSheet) {
-                        if let Some(catalog) = catalog
-                            && let Some(sheet_id) = catalog.active_sheet_id()
-                        {
-                            let sheet = catalog.find(sheet_id).ok_or_else(|| {
-                                HardcopySourceError::InvalidSheetPartition(format!(
-                                    "active sheet {sheet_id} is not retained"
-                                ))
-                            })?;
-                            (
-                                schematic_sheet_identity(&identity, sheet)?,
-                                Some(catalog.clone()),
-                                Some(sheet_id),
-                            )
-                        } else {
-                            (identity, None, None)
-                        }
-                    } else {
-                        (identity, None, None)
-                    };
+                let active_sheet = catalog.and_then(|catalog| {
+                    catalog
+                        .active_sheet_id()
+                        .map(|sheet_id| (catalog, sheet_id))
+                });
+                let (identity, sheet_catalog, sheet_id) = match (&scope, active_sheet) {
+                    (HardcopyScope::CurrentSheet, Some((catalog, sheet_id))) => {
+                        let sheet = catalog.find(sheet_id).ok_or_else(|| {
+                            HardcopySourceError::InvalidSheetPartition(format!(
+                                "active sheet {sheet_id} is not retained"
+                            ))
+                        })?;
+                        (
+                            schematic_sheet_identity(&identity, sheet)?,
+                            Some(catalog.clone()),
+                            Some(sheet_id),
+                        )
+                    }
+                    // A selection can still hold objects of a sheet that is
+                    // not in view; the catalog holds it to the active sheet.
+                    (HardcopyScope::Selection, _) => (identity, catalog.cloned(), None),
+                    _ => (identity, None, None),
+                };
                 prepare_schematic_resolution(state, identity, sheet_catalog, sheet_id, false, scope)
             }
             ViewType::Symbol => {
