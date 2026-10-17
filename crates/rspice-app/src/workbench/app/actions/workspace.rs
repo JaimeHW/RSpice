@@ -101,15 +101,19 @@ impl AppState {
             return false;
         }
         let symbols = schematic_symbol_context(self);
-        self.schematic.session.editor.clipboard = self
-            .schematic
-            .capture_complete_selection_resolved(|component| {
+        let on_sheet =
+            |id| crate::schematic::view::sheet_visibility::object_is_on_active_sheet(self, id);
+        let clipboard = self.schematic.capture_complete_selection_resolved(
+            |component| {
                 symbols
                     .named_terminal_points(component)
                     .into_iter()
                     .map(|(_, point)| point)
                     .collect()
-            });
+            },
+            &on_sheet,
+        );
+        self.schematic.session.editor.clipboard = clipboard;
         true
     }
 

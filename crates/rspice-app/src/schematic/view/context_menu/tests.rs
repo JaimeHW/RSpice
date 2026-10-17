@@ -1277,3 +1277,56 @@ fn render_the_per_target_context_menus_for_review() {
         writeln!(report, "{}", path.display()).ok();
     }
 }
+
+/// Sheet 2 reuses Sheet 1's layout: a wire joins its two parts at the very
+/// points where R3 and R4 stand unconnected on Sheet 1, and a junction sits
+/// where Sheet 1's selected wires cross without one. Copy took that wire
+/// and that dot as if they joined the selection, so every paste carried a
+/// short the source sheet does not have (audit U-5).
+#[test]
+fn copy_takes_no_wire_or_junction_from_another_sheet() {
+    let mut state =
+        crate::schematic::view::sheet_visibility::two_sheet_state(&[1, 3, 5, 7], &[2, 6]);
+    let r3 = Component::new(1, ComponentType::Resistor, Point::origin());
+    let r4 = Component::new(3, ComponentType::Resistor, Point::new(100, 0));
+    let r3_right = r3.terminal_positions()[1].1;
+    let r4_left = r4.terminal_positions()[0].1;
+    let drawing = state.schematic.document_mut_for_test();
+    drawing.components.extend([r3, r4]);
+    drawing.wires.push(Wire::segment(2, r3_right, r4_left));
+    drawing
+        .wires
+        .push(Wire::segment(5, Point::new(-50, -50), Point::new(150, -50)));
+    drawing
+        .wires
+        .push(Wire::segment(7, Point::new(50, -100), Point::new(50, 0)));
+    drawing
+        .junctions
+        .push(Junction::new(6, Point::new(50, -50)));
+    let selection = &mut state.schematic.session.editor.selection;
+    for id in [1, 3] {
+        selection.select_component(id);
+    }
+    for id in [5, 7] {
+        selection.select_wire(id);
+    }
+
+    let symbol_context = schematic_symbol_context(&state);
+    execute_context_action(
+        ContextAction::Copy,
+        &mut state,
+        Point::origin(),
+        &symbol_context,
+    );
+
+    let clipboard = &state.schematic.session.editor.clipboard;
+    assert_eq!(clipboard.components.len(), 2);
+    let mut copied: Vec<u64> = clipboard.wires.iter().map(|wire| wire.id).collect();
+    copied.sort_unstable();
+    assert_eq!(copied, vec![5, 7], "Sheet 2's wire was copied");
+    assert!(
+        clipboard.junctions.is_empty(),
+        "Sheet 2's junction was copied: {:?}",
+        clipboard.junctions
+    );
+}

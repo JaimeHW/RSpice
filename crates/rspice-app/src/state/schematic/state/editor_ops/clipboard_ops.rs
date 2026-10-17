@@ -27,13 +27,16 @@ impl SchematicState {
             return;
         }
 
-        self.session.editor.clipboard = self.capture_complete_selection_resolved(|component| {
-            component
-                .terminal_positions()
-                .into_iter()
-                .map(|(_, point)| point)
-                .collect()
-        });
+        self.session.editor.clipboard = self.capture_complete_selection_resolved(
+            |component| {
+                component
+                    .terminal_positions()
+                    .into_iter()
+                    .map(|(_, point)| point)
+                    .collect()
+            },
+            &|_| true,
+        );
     }
 
     /// Capture the current complete-object selection without modifying the
@@ -45,10 +48,13 @@ impl SchematicState {
     /// primitives.  Whole conductors explicitly selected by the user are
     /// retained, as are conductors whose two endpoints terminate on selected
     /// components.  Bus-tap ownership and explicit junction intent are closed
-    /// over in the same deterministic way as Copy.
+    /// over in the same deterministic way as Copy. `on_sheet` names the objects
+    /// on the sheet being copied from; another sheet's wires and junctions at
+    /// the same coordinates are left behind.
     pub(crate) fn capture_complete_selection_resolved(
         &self,
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+        on_sheet: &dyn Fn(u64) -> bool,
     ) -> ClipboardData {
         clipboard_edit::capture_complete_selection(
             self.design.document(),
@@ -69,6 +75,7 @@ impl SchematicState {
                 .iter()
                 .map(|junction| junction.pos),
             terminal_points_for,
+            on_sheet,
         )
     }
 

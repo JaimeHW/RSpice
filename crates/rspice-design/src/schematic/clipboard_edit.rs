@@ -33,11 +33,17 @@ pub struct CopySelection<'a> {
 
 /// Copy the requested objects and the conductors, source buses and junctions
 /// required by the existing complete-object copy policy, in document order.
+///
+/// `on_sheet` names the objects on the sheet being copied from. Every sheet
+/// of a cell view shares one document and its coordinates, so a wire that
+/// joins two selected pins, or a junction on a copied wire, counts only when
+/// it is drawn on that sheet.
 pub fn capture_complete_selection(
     document: &SchematicDocument,
     selection: CopySelection<'_>,
     junctions: impl Iterator<Item = Point> + Clone,
     mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+    on_sheet: &dyn Fn(u64) -> bool,
 ) -> ClipboardData {
     let selected_comps: Vec<Component> = document
         .components
@@ -65,7 +71,7 @@ pub fn capture_complete_selection(
         }
 
         // Check if both endpoints connect to selected components
-        if wire.points.len() >= 2 {
+        if wire.points.len() >= 2 && on_sheet(wire.id) {
             let start = wire.points[0];
             let end = *wire.points.last().unwrap();
 
@@ -83,6 +89,7 @@ pub fn capture_complete_selection(
     let mut junctions_to_copy: Vec<Point> = document
         .junctions
         .iter()
+        .filter(|junction| on_sheet(junction.id))
         .map(|j| j.pos)
         .filter(|pos| {
             junctions.clone().any(|selected| selected == *pos)

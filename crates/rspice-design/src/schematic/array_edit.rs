@@ -1377,14 +1377,12 @@ fn capture_array_selection(
         },
         state.selection.junctions.clone(),
         terminal_points_for,
+        state.selection.on_sheet,
     );
     // A conductor joins the selected parts only on the sheet they are drawn
     // on. Another sheet's wire between the same two points, or its junction
     // on a copied wire's line, is not part of the circuit being repeated.
     let on_sheet = state.selection.on_sheet;
-    objects
-        .wires
-        .retain(|wire| state.selection.objects.wires.contains(&wire.id) || on_sheet(wire.id));
     let selected_components = &state.selection.objects.components;
     let captured_wire_ids: HashSet<u64> = objects.wires.iter().map(|wire| wire.id).collect();
     for wire in &state.document.wires {
