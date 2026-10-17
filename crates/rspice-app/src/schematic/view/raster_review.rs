@@ -1030,3 +1030,32 @@ fn no_canvas_text_is_painted_below_the_legibility_floor() {
         }
     }
 }
+
+/// A selected design note keeps its ink and takes the canvas selection's
+/// rect, as a selected net label does (D1 section 2: text never takes the
+/// selection colour, and canvas states use the canvas tokens, not the
+/// interface accent). Its text turned the accent, inside an accent rect.
+#[test]
+fn a_selected_note_keeps_its_ink_inside_the_canvas_selection() {
+    let mut state = analog_sheet();
+    let note = state.schematic.document().design_notes[0].id;
+    let selection = &mut state.schematic.session.editor.selection;
+    selection.clear();
+    selection.design_notes.insert(note);
+    let render = render(&mut state, themes()[0].1, at_zoom(1.0, ANALOG_CENTRE), 1.0);
+    let colour = &render.tokens.color;
+    let text = painted_text(&render.shapes)
+        .into_iter()
+        .find(|text| text.text.starts_with("Five-transistor OTA"))
+        .expect("the note is painted");
+    assert_eq!(text.colour, colour.text_dim, "the note keeps its ink");
+    let framed = leaf_shapes(&render.shapes)
+        .into_iter()
+        .any(|(_, shape)| match shape {
+            Shape::Rect(rect) => {
+                rect.stroke.color == colour.canvas_select && rect.rect.contains_rect(text.rect)
+            }
+            _ => false,
+        });
+    assert!(framed, "the note stands in a canvas-selection rect");
+}

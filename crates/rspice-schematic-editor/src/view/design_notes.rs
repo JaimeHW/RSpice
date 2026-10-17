@@ -19,6 +19,9 @@ pub(crate) const OFFSET_Y_WORLD: f32 = 3.0;
 pub(crate) const MARKER_RADIUS_WORLD: f32 = 2.0;
 const GLYPH_WIDTH_WORLD: f32 = 7.2;
 const POINTER_SLOP: f32 = 3.0;
+/// The fill behind a selected note's text, over the canvas, as a selected
+/// net label has.
+const SELECTION_FILL_ALPHA: f32 = 0.12;
 
 #[derive(Clone)]
 struct DesignNoteScreenLayout {
@@ -71,11 +74,10 @@ fn screen_layout(
     })
 }
 
-fn note_color(kind: DesignNoteKind, selected: bool) -> Color32 {
+/// A note's ink. Selection never recolours it: text never takes the
+/// selection colour, and a selected note gets the selection rect instead.
+fn note_color(kind: DesignNoteKind) -> Color32 {
     let palette = rspice_ui_kit::tokens::active_palette();
-    if selected {
-        return palette.accent;
-    }
     match kind {
         DesignNoteKind::PlainText => palette.text_dim,
         DesignNoteKind::PropertyDisplay => palette.net_label,
@@ -93,18 +95,22 @@ pub fn draw_design_note(
     hovered: bool,
 ) {
     let palette = rspice_ui_kit::tokens::active_palette();
-    let color = note_color(note.kind, selected);
+    let color = note_color(note.kind);
     let text = note.rendered_text(context);
     let Some(layout) = screen_layout(painter.ctx(), viewport, note, &text, color) else {
         return;
     };
 
     if selected {
-        painter.rect_filled(layout.bounds, 2.0, palette.accent_dim);
+        painter.rect_filled(
+            layout.bounds,
+            2.0,
+            palette.canvas_select.gamma_multiply(SELECTION_FILL_ALPHA),
+        );
         painter.rect_stroke(
             layout.bounds,
             2.0,
-            Stroke::new(1.0, palette.accent),
+            Stroke::new(1.0, palette.canvas_select),
             egui::StrokeKind::Inside,
         );
     } else if hovered {
@@ -165,7 +171,7 @@ pub fn design_note_at(
 ) -> Option<u64> {
     notes.iter().rev().find_map(|note| {
         let text = note.rendered_text(context);
-        screen_layout(ctx, viewport, note, &text, note_color(note.kind, false))
+        screen_layout(ctx, viewport, note, &text, note_color(note.kind))
             .filter(|layout| {
                 layout.bounds.contains(pointer)
                     || Rect::from_center_size(layout.anchor, egui::Vec2::splat(9.0))
@@ -220,8 +226,7 @@ fn hit_bounds(
     context: &DesignNoteRenderContext<'_>,
 ) -> Option<Rect> {
     let text = note.rendered_text(context);
-    screen_layout(ctx, viewport, note, &text, note_color(note.kind, false))
-        .map(|layout| layout.bounds)
+    screen_layout(ctx, viewport, note, &text, note_color(note.kind)).map(|layout| layout.bounds)
 }
 
 #[cfg(test)]
