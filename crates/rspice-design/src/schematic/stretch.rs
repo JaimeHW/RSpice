@@ -288,12 +288,14 @@ fn conductor_stretch_candidate(
     let affected_indices = affected_segment_indices(source_points.len(), segment_index);
     let source_affected = indexed_segments(&source_points, &affected_indices);
     validate_orthogonal_policy(object_id, source_segment, &source_affected, delta, policy)?;
+    let carried = carried_ends(document, target, source_segment);
     reject_source_anchors(
         document,
         target,
         segment_index,
         source_segment,
         terminal_points_by_component,
+        &carried,
     )?;
 
     let mut candidate = document.clone();
@@ -304,6 +306,7 @@ fn conductor_stretch_candidate(
         points[segment_index + 1] = checked_offset(points[segment_index + 1], delta)?;
     }
     translate_attached_taps(document, &mut candidate, target, source_segment, delta)?;
+    let carried_segments = carry_neighbour_ends(&mut candidate, &carried, delta, policy)?;
 
     let candidate_points =
         conductor_points(&candidate, target).ok_or(StretchSelectionError::StaleTarget)?;
@@ -341,6 +344,7 @@ fn conductor_stretch_candidate(
         target,
         segment_index,
         &affected_indices,
+        &carried,
     )?;
     validate_new_terminal_and_body_contacts(
         &candidate,
@@ -350,8 +354,272 @@ fn conductor_stretch_candidate(
         terminal_points_by_component,
         component_bounds_by_component,
     )?;
+    for segment in &carried_segments {
+        validate_carried_segment(
+            document,
+            &candidate,
+            *segment,
+            terminal_points_by_component,
+            component_bounds_by_component,
+        )?;
+    }
 
     Ok(candidate)
+}
+
+/// A wire that ends on a corner of the stretched segment and touches it
+/// nowhere else. The wire tool stores each segment of a route as its own
+/// wire, so the segments either side of the stretched one are other wires:
+/// they follow the corner instead of pinning it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CarriedEnd {
+    wire_index: usize,
+    /// The corner the wire's first vertex sits on, if it does.
+    first: Option<Point>,
+    /// The corner the wire's last vertex sits on, if it does.
+    last: Option<Point>,
+}
+
+fn carried_ends(
+    state: &SchematicDocument,
+    target: ConductorTarget,
+    selected: WireSegment,
+) -> Vec<CarriedEnd> {
+    let ConductorTarget::Wire(target_id) = target else {
+        return Vec::new();
+    };
+    let corners = [selected.start, selected.end];
+    let mut carried = Vec::new();
+    for (wire_index, wire) in state.wires.iter().enumerate() {
+        let count = wire.points.len();
+        if wire.id == target_id || count < 2 {
+            continue;
+        }
+        let first = corners.contains(&wire.points[0]);
+        let last = corners.contains(&wire.points[count - 1]);
+        if !first && !last {
+            continue;
+        }
+        let shared = |index: usize| (index == 0 && first) || (index == count - 1 && last);
+        let touches_elsewhere = wire
+            .points
+            .iter()
+            .enumerate()
+            .any(|(index, point)| !shared(index) && selected.contains_point(*point))
+            || corners.iter().any(|corner| {
+                let at_shared_end = (first && wire.points[0] == *corner)
+                    || (last && wire.points[count - 1] == *corner);
+                !at_shared_end && polyline_contains_point(&wire.points, *corner)
+            });
+        if !touches_elsewhere {
+            carried.push(CarriedEnd {
+                wire_index,
+                first: first.then_some(wire.points[0]),
+                last: last.then_some(wire.points[count - 1]),
+            });
+        }
+    }
+    carried
+}
+
+fn carries_wire(carried: &[CarriedEnd], wire_index: usize) -> bool {
+    carried.iter().any(|end| end.wire_index == wire_index)
+}
+
+fn carries_corner(carried: &[CarriedEnd], point: Point) -> bool {
+    carried
+        .iter()
+        .any(|end| end.first == Some(point) || end.last == Some(point))
+}
+
+/// The part of a carried wire the stretch lays anew, against what it
+/// replaces: the end segment itself, or, where the end turns at its old
+/// corner, the new leg from that corner.
+#[derive(Debug, Clone, Copy)]
+struct CarriedSegment {
+    wire_index: usize,
+    before: WireSegment,
+    after: WireSegment,
+}
+
+/// Move each carried end with its corner. Under Preserve orthogonal an end
+/// whose segment would slant keeps its old corner as a vertex and turns
+/// there to follow; the pin connections of a wire that gains a vertex at
+/// its start move up by one. A dot on a carried corner moves with it.
+fn carry_neighbour_ends(
+    candidate: &mut SchematicDocument,
+    carried: &[CarriedEnd],
+    delta: Point,
+    policy: StretchOrthogonalPolicy,
+) -> Result<Vec<CarriedSegment>, StretchSelectionError> {
+    let mut laid = Vec::with_capacity(carried.len());
+    for end in carried {
+        let wire = &mut candidate.wires[end.wire_index];
+        let object_id = wire.id;
+        if let ([start, finish], Some(_), Some(_)) = (wire.points.as_slice(), end.first, end.last) {
+            // A single segment between the two corners travels with them.
+            let before = WireSegment::new(*start, *finish);
+            let after = WireSegment::new(
+                checked_offset(*start, delta)?,
+                checked_offset(*finish, delta)?,
+            );
+            wire.points = vec![after.start, after.end];
+            laid.push(CarriedSegment {
+                wire_index: end.wire_index,
+                before,
+                after,
+            });
+            continue;
+        }
+        for (first, corner) in [(true, end.first), (false, end.last)] {
+            let Some(corner) = corner else {
+                continue;
+            };
+            let moved = checked_offset(corner, delta)?;
+            let last = wire.points.len() - 1;
+            let (end_index, neighbour_index) = if first { (0, 1) } else { (last, last - 1) };
+            let neighbour = wire.points[neighbour_index];
+            let before = WireSegment::new(neighbour, corner);
+            let after = WireSegment::new(neighbour, moved);
+            let squares = policy == StretchOrthogonalPolicy::PreserveOrthogonal;
+            if squares && !before.is_orthogonal() {
+                return Err(StretchSelectionError::NonOrthogonalSource { object_id });
+            }
+            if squares && !after.is_orthogonal() {
+                if first {
+                    wire.points.insert(0, moved);
+                    for connection in candidate
+                        .connections
+                        .iter_mut()
+                        .filter(|connection| connection.wire_id == object_id)
+                    {
+                        connection.point_index += 1;
+                    }
+                } else {
+                    wire.points.push(moved);
+                }
+                laid.push(CarriedSegment {
+                    wire_index: end.wire_index,
+                    before: WireSegment::new(corner, corner),
+                    after: WireSegment::new(corner, moved),
+                });
+            } else {
+                if after.is_zero_length() {
+                    return Err(StretchSelectionError::DegenerateGeometry { object_id });
+                }
+                wire.points[end_index] = moved;
+                laid.push(CarriedSegment {
+                    wire_index: end.wire_index,
+                    before,
+                    after,
+                });
+            }
+        }
+    }
+    for junction in &mut candidate.junctions {
+        if carries_corner(carried, junction.pos) {
+            junction.pos = checked_offset(junction.pos, delta)?;
+        }
+    }
+    Ok(laid)
+}
+
+/// The newly laid part of a carried wire may touch only what its old part
+/// touched: no new pin, body, dot, label or conductor contact, and no
+/// conductor doubled along it.
+fn validate_carried_segment(
+    original: &SchematicDocument,
+    candidate: &SchematicDocument,
+    segment: CarriedSegment,
+    terminal_points_by_component: &std::collections::HashMap<u64, Vec<Point>>,
+    component_bounds_by_component: &std::collections::HashMap<u64, (i32, i32, i32, i32)>,
+) -> Result<(), StretchSelectionError> {
+    let CarriedSegment {
+        wire_index,
+        before,
+        after,
+    } = segment;
+    let object_id = candidate.wires[wire_index].id;
+    for component in &candidate.components {
+        let terminals = terminal_points_by_component
+            .get(&component.id)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        if terminals
+            .iter()
+            .any(|terminal| after.contains_point(*terminal) && !before.contains_point(*terminal))
+        {
+            return Err(StretchSelectionError::UnintendedTerminalContact {
+                object_id,
+                component_id: component.id,
+            });
+        }
+        let bounds = extended_component_bounds(
+            component_bounds_by_component
+                .get(&component.id)
+                .copied()
+                .unwrap_or_else(|| component.bounding_box()),
+            terminals,
+        );
+        if segment_enters_open_rect(after, bounds) && !segment_enters_open_rect(before, bounds) {
+            return Err(StretchSelectionError::ComponentBodyEntry {
+                object_id,
+                component_id: component.id,
+            });
+        }
+    }
+    for (old, new) in original.junctions.iter().zip(&candidate.junctions) {
+        if after.contains_point(new.pos) != before.contains_point(old.pos) {
+            return Err(StretchSelectionError::FixedAnchor { point: new.pos });
+        }
+    }
+    for label in &candidate.net_labels {
+        if after.contains_point(label.pos) != before.contains_point(label.pos) {
+            return Err(StretchSelectionError::NetLabelAnchor {
+                label_id: label.id,
+                point: label.pos,
+            });
+        }
+    }
+    let touches = |segment: WireSegment, points: &[Point]| {
+        points.iter().any(|point| segment.contains_point(*point))
+            || polyline_contains_point(points, segment.start)
+            || polyline_contains_point(points, segment.end)
+    };
+    let overlaps = |segment: WireSegment, points: &[Point]| {
+        points
+            .windows(2)
+            .any(|pair| positive_length_overlap(segment, WireSegment::new(pair[0], pair[1])))
+    };
+    let others = original
+        .wires
+        .iter()
+        .zip(&candidate.wires)
+        .enumerate()
+        .filter(|(index, _)| *index != wire_index)
+        .map(|(_, (old, new))| (new.id, old.points.as_slice(), new.points.as_slice()))
+        .chain(
+            original
+                .buses
+                .iter()
+                .zip(&candidate.buses)
+                .map(|(old, new)| (new.id, old.points.as_slice(), new.points.as_slice())),
+        );
+    for (other_id, old_points, new_points) in others {
+        if overlaps(after, new_points) && !overlaps(before, old_points) {
+            return Err(StretchSelectionError::ConductorOverlap {
+                object_id,
+                other_id,
+            });
+        }
+        if touches(after, new_points) && !touches(before, old_points) {
+            return Err(StretchSelectionError::UnintendedConductorContact {
+                object_id,
+                other_id,
+            });
+        }
+    }
+    Ok(())
 }
 
 fn commit_stretch_candidate(
@@ -361,18 +629,14 @@ fn commit_stretch_candidate(
 ) -> Result<(), StretchSelectionError> {
     match target {
         StretchTarget::WireSegment { wire_id, .. } => {
-            let points = candidate
-                .wires
-                .iter()
-                .find(|wire| wire.id == wire_id)
-                .map(|wire| wire.points.clone())
-                .ok_or(StretchSelectionError::StaleTarget)?;
-            document
-                .wires
-                .iter_mut()
-                .find(|wire| wire.id == wire_id)
-                .ok_or(StretchSelectionError::StaleTarget)?
-                .points = points;
+            if !candidate.wires.iter().any(|wire| wire.id == wire_id) {
+                return Err(StretchSelectionError::StaleTarget);
+            }
+            // The candidate is this document with the segment, the
+            // neighbours that follow its corners and their dots moved.
+            document.wires = candidate.wires;
+            document.junctions = candidate.junctions;
+            document.connections = candidate.connections;
             document.bus_taps = candidate.bus_taps;
         }
         StretchTarget::BusSegment { bus_id, .. } => {
@@ -553,6 +817,7 @@ fn reject_source_anchors(
     segment_index: usize,
     selected: WireSegment,
     terminal_points_by_component: &std::collections::HashMap<u64, Vec<Point>>,
+    carried: &[CarriedEnd],
 ) -> Result<(), StretchSelectionError> {
     if let ConductorTarget::Wire(wire_id) = target
         && state.connections.iter().any(|connection| {
@@ -594,11 +859,10 @@ fn reject_source_anchors(
             });
         }
     }
-    if let Some(junction) = state
-        .junctions
-        .iter()
-        .find(|junction| selected.contains_point(junction.pos))
-    {
+    // A dot on a corner the neighbours follow moves with them.
+    if let Some(junction) = state.junctions.iter().find(|junction| {
+        selected.contains_point(junction.pos) && !carries_corner(carried, junction.pos)
+    }) {
         return Err(StretchSelectionError::FixedAnchor {
             point: junction.pos,
         });
@@ -614,8 +878,8 @@ fn reject_source_anchors(
         });
     }
 
-    for wire in &state.wires {
-        if target == ConductorTarget::Wire(wire.id) {
+    for (wire_index, wire) in state.wires.iter().enumerate() {
+        if target == ConductorTarget::Wire(wire.id) || carries_wire(carried, wire_index) {
             continue;
         }
         if let Some(point) = unrelated_anchor_point(&wire.points, selected) {
@@ -708,6 +972,7 @@ fn validate_new_conductor_conflicts(
     target: ConductorTarget,
     selected_index: usize,
     affected_indices: &[usize],
+    carried: &[CarriedEnd],
 ) -> Result<(), StretchSelectionError> {
     let object_id = target.object_id();
     let original_points = conductor_points(original, target).expect("target was preflighted");
@@ -745,17 +1010,35 @@ fn validate_new_conductor_conflicts(
         }
     }
 
-    for wire in &candidate.wires {
+    for (wire_index, wire) in candidate.wires.iter().enumerate() {
         let same = target == ConductorTarget::Wire(wire.id);
-        let obstacle_indices = obstacle_indices(wire.points.len(), same, affected_indices);
-        if obstacle_indices.is_empty() {
-            continue;
-        }
         let old_wire = original
             .wires
             .iter()
             .find(|old| old.id == wire.id)
             .expect("candidate preserves wire identities");
+        // A carried wire is judged by the part the stretch leaves as it
+        // was; the part it lays anew is checked on its own.
+        let carried_end = carried.iter().find(|end| end.wire_index == wire_index);
+        let (candidate_points, obstacle_indices) = match carried_end {
+            Some(end) => {
+                let last = old_wire.points.len().saturating_sub(2);
+                let kept = (0..old_wire.points.len().saturating_sub(1))
+                    .filter(|index| {
+                        !((end.first.is_some() && *index == 0)
+                            || (end.last.is_some() && *index == last))
+                    })
+                    .collect::<Vec<_>>();
+                (old_wire.points.as_slice(), kept)
+            }
+            None => (
+                wire.points.as_slice(),
+                obstacle_indices(wire.points.len(), same, affected_indices),
+            ),
+        };
+        if obstacle_indices.is_empty() {
+            continue;
+        }
         validate_against_obstacle(
             object_id,
             wire.id,
@@ -766,7 +1049,7 @@ fn validate_new_conductor_conflicts(
                 new_moved,
             },
             &old_wire.points,
-            &wire.points,
+            candidate_points,
             &obstacle_indices,
         )?;
     }
@@ -796,13 +1079,14 @@ fn validate_new_conductor_conflicts(
         )?;
     }
 
-    for junction in &candidate.junctions {
+    // A dot carried with a corner is compared where it was and where it is.
+    for (old, junction) in original.junctions.iter().zip(&candidate.junctions) {
         let new_contact = candidate_affected
             .iter()
             .any(|(_, segment)| segment.contains_point(junction.pos));
         let old_contact = original_affected
             .iter()
-            .any(|(_, segment)| segment.contains_point(junction.pos));
+            .any(|(_, segment)| segment.contains_point(old.pos));
         if new_contact != old_contact {
             return Err(StretchSelectionError::FixedAnchor {
                 point: junction.pos,
@@ -1090,5 +1374,185 @@ fn documentation_shape_point_mut(
             2 => Some(box_corner),
             _ => None,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schematic::net_label::Junction;
+    use crate::schematic::wire::{Wire, WireConnection};
+
+    fn document(wires: Vec<Wire>) -> SchematicDocument {
+        SchematicDocument {
+            wires,
+            ..SchematicDocument::default()
+        }
+    }
+
+    fn stretch(
+        document: &mut SchematicDocument,
+        wire_id: u64,
+        delta: Point,
+    ) -> Result<bool, StretchSelectionError> {
+        stretch_target_resolved(
+            document,
+            delta,
+            StretchTarget::WireSegment {
+                wire_id,
+                segment_index: 0,
+            },
+            StretchOrthogonalPolicy::PreserveOrthogonal,
+            |_| Vec::new(),
+            Component::bounding_box,
+        )
+    }
+
+    fn points(document: &SchematicDocument, wire_id: u64) -> Vec<Point> {
+        document
+            .wires
+            .iter()
+            .find(|wire| wire.id == wire_id)
+            .map(|wire| wire.points.clone())
+            .expect("the wire is still there")
+    }
+
+    fn p(x: i32, y: i32) -> Point {
+        Point::new(x, y)
+    }
+
+    fn geometry(document: &SchematicDocument) -> (Vec<Wire>, Vec<Junction>, Vec<WireConnection>) {
+        (
+            document.wires.clone(),
+            document.junctions.clone(),
+            document.connections.clone(),
+        )
+    }
+
+    /// The wire tool stores each segment of a route as its own wire, so the
+    /// segments either side of the one being stretched are other wires.
+    /// They share its corners and follow them instead of pinning them.
+    #[test]
+    fn a_drawn_route_stretches_with_the_segments_either_side() {
+        let mut document = document(vec![
+            Wire::segment(1, p(0, 0), p(0, 20)),
+            Wire::segment(2, p(0, 20), p(40, 20)),
+            Wire::segment(3, p(40, 20), p(40, 0)),
+        ]);
+
+        assert_eq!(stretch(&mut document, 2, p(0, 10)), Ok(true));
+
+        assert_eq!(points(&document, 1), [p(0, 0), p(0, 30)]);
+        assert_eq!(points(&document, 2), [p(0, 30), p(40, 30)]);
+        assert_eq!(points(&document, 3), [p(40, 30), p(40, 0)]);
+    }
+
+    /// A neighbour running on in the stretched segment's own direction is
+    /// squared again: it keeps its old corner and turns there to follow.
+    #[test]
+    fn a_straight_on_neighbour_turns_at_its_old_corner_to_follow() {
+        for forward in [true, false] {
+            let next = if forward {
+                Wire::segment(3, p(40, 20), p(80, 20))
+            } else {
+                Wire::segment(3, p(80, 20), p(40, 20))
+            };
+            let mut document = document(vec![Wire::segment(2, p(0, 20), p(40, 20)), next]);
+
+            assert_eq!(stretch(&mut document, 2, p(0, 10)), Ok(true));
+
+            let mut expected = vec![p(40, 30), p(40, 20), p(80, 20)];
+            if !forward {
+                expected.reverse();
+            }
+            assert_eq!(points(&document, 3), expected, "forward: {forward}");
+            assert!(document.wires.iter().all(Wire::is_orthogonal));
+        }
+    }
+
+    /// A pin connection on the far end of a neighbour that gained a vertex
+    /// at its start still names that far end.
+    #[test]
+    fn a_neighbours_pin_connection_follows_its_renumbered_far_end() {
+        let mut document = document(vec![
+            Wire::segment(2, p(0, 20), p(40, 20)),
+            Wire::segment(3, p(40, 20), p(80, 20)),
+        ]);
+        document
+            .connections
+            .push(WireConnection::new(3, 1, 9, "1".to_owned()));
+
+        assert_eq!(stretch(&mut document, 2, p(0, 10)), Ok(true));
+
+        assert_eq!(points(&document, 3)[2], p(80, 20));
+        assert_eq!(document.connections[0].point_index, 2);
+    }
+
+    /// A T at the corner moves as one: the stem on either side follows and
+    /// its dot goes with the corner.
+    #[test]
+    fn a_dot_at_a_carried_corner_moves_with_it() {
+        let mut document = document(vec![
+            Wire::segment(2, p(0, 20), p(40, 20)),
+            Wire::segment(3, p(40, 20), p(40, 0)),
+            Wire::segment(4, p(40, 20), p(40, 40)),
+        ]);
+        document.junctions.push(Junction::new(5, p(40, 20)));
+
+        assert_eq!(stretch(&mut document, 2, p(0, 10)), Ok(true));
+
+        assert_eq!(points(&document, 3), [p(40, 30), p(40, 0)]);
+        assert_eq!(points(&document, 4), [p(40, 30), p(40, 40)]);
+        assert_eq!(document.junctions[0].pos, p(40, 30));
+    }
+
+    /// Following would lay one neighbour along another, a doubled
+    /// conductor; the stretch refuses and changes nothing.
+    #[test]
+    fn a_neighbour_that_would_double_another_refuses_atomically() {
+        let mut document = document(vec![
+            Wire::segment(2, p(0, 20), p(40, 20)),
+            Wire::segment(3, p(40, 20), p(40, 0)),
+            Wire::segment(4, p(40, 20), p(80, 20)),
+        ]);
+        let before = geometry(&document);
+
+        assert!(matches!(
+            stretch(&mut document, 2, p(0, 10)),
+            Err(StretchSelectionError::ConductorOverlap { .. })
+        ));
+        assert_eq!(geometry(&document), before);
+    }
+
+    /// A neighbour the stretch would shrink to nothing refuses.
+    #[test]
+    fn a_neighbour_collapsed_to_a_point_refuses_atomically() {
+        let mut document = document(vec![
+            Wire::segment(1, p(0, 0), p(0, 20)),
+            Wire::segment(2, p(0, 20), p(40, 20)),
+        ]);
+        let before = geometry(&document);
+
+        assert_eq!(
+            stretch(&mut document, 2, p(0, -20)),
+            Err(StretchSelectionError::DegenerateGeometry { object_id: 1 })
+        );
+        assert_eq!(geometry(&document), before);
+    }
+
+    /// A wire that ends on the stretched segment's interior, or that the
+    /// segment's corner lands inside, is not a neighbour: it still pins it.
+    #[test]
+    fn a_stem_on_the_interior_and_a_through_wire_still_pin_the_segment() {
+        for other in [
+            Wire::segment(3, p(20, 20), p(20, 40)),
+            Wire::segment(3, p(40, 0), p(40, 40)),
+        ] {
+            let mut document = document(vec![Wire::segment(2, p(0, 20), p(40, 20)), other]);
+            assert!(matches!(
+                stretch(&mut document, 2, p(0, 10)),
+                Err(StretchSelectionError::FixedAnchor { .. })
+            ));
+        }
     }
 }

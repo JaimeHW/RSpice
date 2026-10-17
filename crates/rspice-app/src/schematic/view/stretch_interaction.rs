@@ -380,6 +380,51 @@ mod tests {
         );
     }
 
+    /// A drawn route stretches with the segment beside it, which is its own
+    /// wire. Sheet 2's wire ends on the other corner: it is another sheet's
+    /// wiring, so it neither follows the corner nor pins it.
+    #[test]
+    fn a_route_stretches_with_its_neighbour_and_leaves_another_sheets_wire() {
+        let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[7, 8], &[21]);
+        let hidden = Wire::segment(21, Point::new(20, 20), Point::new(20, 0));
+        state.schematic.document_mut_for_test().wires = vec![
+            Wire::segment(8, Point::new(0, 0), Point::new(0, 20)),
+            Wire::segment(7, Point::new(0, 20), Point::new(20, 20)),
+            hidden.clone(),
+        ];
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_wire_segment(7, 0);
+        state.schematic.init_undo_history();
+        arm_test_stretch(&mut state);
+        state.dialogs.stretch_selection.canvas.gesture.preview_delta = Point::new(0, 10);
+        let symbols = schematic_symbol_context(&state);
+
+        commit_armed_stretch_selection(&mut state, &symbols);
+
+        let wire = |id: u64| {
+            state
+                .schematic
+                .document()
+                .wires
+                .iter()
+                .find(|wire| wire.id == id)
+                .cloned()
+        };
+        assert_eq!(
+            wire(7).map(|wire| wire.points),
+            Some(vec![Point::new(0, 30), Point::new(20, 30)])
+        );
+        assert_eq!(
+            wire(8).map(|wire| wire.points),
+            Some(vec![Point::new(0, 0), Point::new(0, 30)])
+        );
+        assert_eq!(wire(21), Some(hidden));
+    }
+
     /// The preview runs with the other sheets out of reach, as the commit
     /// does: Sheet 2's junction on the segment refuses neither.
     #[test]
