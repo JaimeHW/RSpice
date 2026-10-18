@@ -17,6 +17,7 @@ use egui::{Frame, Id, Layout, Panel, Sense, Ui, Vec2};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app::sheets::{self as sheet_actions, SheetDeletePlan, SheetEntry};
+use crate::workbench::app_state::session::shortcuts::request_engineering_canvas_focus_in_this_pass;
 use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::design_system::WorkbenchIcon;
@@ -280,8 +281,16 @@ fn sheet_chips(
                 };
             }
             drag = DragGesture::default();
-        } else if response.response.clicked() && !selected {
-            action = StripAction::Activate(entry.id);
+        } else if response.response.clicked() {
+            if !selected {
+                action = StripAction::Activate(entry.id);
+            }
+            // A tab takes the reader to a sheet, and the canvas's single
+            // keys act only while it holds focus: without this, R or W after
+            // the tab did nothing until the canvas was clicked. The sheet is
+            // switched before the canvas is drawn, so the canvas this pass
+            // draws is the one to take the keyboard.
+            request_engineering_canvas_focus_in_this_pass(&ctx);
         }
 
         if let Some(menu) = response.menu {
@@ -302,6 +311,7 @@ fn sheet_chips(
 
     if add_chip(ui, height).clicked() {
         action = StripAction::NewSheetAfter(active);
+        request_engineering_canvas_focus_in_this_pass(&ctx);
     }
     if let Some(x) = caret {
         let t = Tokens::get(ui.ctx());

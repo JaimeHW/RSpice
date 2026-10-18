@@ -215,6 +215,149 @@ fn the_active_chip_carries_the_accent_edge_the_document_row_uses() {
     );
 }
 
+/// A click on a sheet's tab leaves the keyboard with the canvas, so the next
+/// bare key arms its tool on the sheet just opened. The canvas's single keys
+/// act only while it holds focus, and the click on the chip took it: after a
+/// tab, W did nothing until the canvas was clicked again.
+#[test]
+fn after_a_sheet_tab_the_canvas_still_takes_its_keys() {
+    /// The strip, the document row and the canvas, run together a frame at
+    /// a time, as the workbench runs them.
+    struct Desk {
+        ctx: Context,
+        app: RSpiceApp,
+        time: f64,
+    }
+
+    impl Desk {
+        /// Runs one frame and returns every named node with its bounds.
+        fn frame(&mut self, events: Vec<egui::Event>) -> Vec<(String, Rect)> {
+            self.time += 0.02;
+            let app = &mut self.app;
+            let output = self.ctx.run_ui(
+                RawInput {
+                    events,
+                    focused: true,
+                    time: Some(self.time),
+                    ..frame_input()
+                },
+                |ui| {
+                    app.handle_shortcuts(ui.ctx());
+                    chrome_rows(ui, app);
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        crate::schematic::view::render_schematic_view(ui, &mut app.state, None);
+                    });
+                },
+            );
+            output
+                .platform_output
+                .accesskit_update
+                .into_iter()
+                .flat_map(|update| update.nodes)
+                .filter_map(|(_, node)| {
+                    let bounds = node.bounds()?;
+                    Some((
+                        node.label()?.to_owned(),
+                        Rect::from_min_max(
+                            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                        ),
+                    ))
+                })
+                .collect::<Vec<_>>()
+        }
+    }
+
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut app = app_with_sheets(2);
+    app.state.schematic.session.editor.needs_fit = false;
+    app.state.schematic.session.editor.needs_drawing_sheet_fit = false;
+    let entries = sheet_actions::sheet_entries(&app.state);
+    let mut desk = Desk {
+        ctx,
+        app,
+        time: 0.0,
+    };
+    let click = |at: egui::Pos2| {
+        [
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            vec![egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        ]
+    };
+    let tap = |key: egui::Key| {
+        [true, false].map(|pressed| {
+            vec![egui::Event::Key {
+                key,
+                physical_key: Some(key),
+                pressed,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }]
+        })
+    };
+    let tool = |app: &RSpiceApp| app.state.schematic.session.editor.tool;
+
+    desk.frame(Vec::new());
+    let named = desk.frame(Vec::new());
+    let find = |name: &str| {
+        named
+            .iter()
+            .find(|(label, _)| label == name)
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| panic!("nothing is named {name:?}"))
+    };
+    let canvas = find("Schematic canvas");
+    let second = find(&entries[1].name);
+
+    for events in click(canvas.right_bottom() - egui::vec2(40.0, 40.0)) {
+        desk.frame(events);
+    }
+    for events in tap(egui::Key::W) {
+        desk.frame(events);
+    }
+    assert_eq!(
+        tool(&desk.app),
+        crate::state::Tool::Wire,
+        "the canvas takes W"
+    );
+    for events in tap(egui::Key::Escape) {
+        desk.frame(events);
+    }
+    assert_eq!(tool(&desk.app), crate::state::Tool::Select);
+
+    for events in click(second.center()) {
+        desk.frame(events);
+    }
+    assert_eq!(
+        sheet_actions::active_sheet_id(&desk.app.state),
+        Some(entries[1].id),
+        "the tab opens its sheet"
+    );
+    for events in tap(egui::Key::W) {
+        desk.frame(events);
+    }
+    assert_eq!(
+        tool(&desk.app),
+        crate::state::Tool::Wire,
+        "W after the tab arms the wire tool"
+    );
+}
+
 #[test]
 fn a_strip_action_routes_straight_to_the_sheet_actions() {
     let mut app = app_with_sheets(2);
