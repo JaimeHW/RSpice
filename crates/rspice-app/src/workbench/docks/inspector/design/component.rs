@@ -23,7 +23,7 @@ pub(super) fn component_panel(
         .find(|component| component.id == id)
         .cloned()
     else {
-        sheet_panel(ui, app);
+        super::sheet::sheet_panel(ui, &mut app.state);
         return;
     };
     let evidence = component_model_evidence(&app.state, &component);

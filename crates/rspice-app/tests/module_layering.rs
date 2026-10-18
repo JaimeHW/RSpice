@@ -252,7 +252,13 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
 /// surface carried 67 of these on its own. None of the 67 is banked: the
 /// ceiling follows the measurement down, and the result viewer that absorbed
 /// the Studio's capabilities takes the session slices its forms read.
-const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 800;
+///
+/// 800 -> 793 on 2026-10-18, when the design inspector's sheet panel began
+/// editing the sheet through Page Setup's transaction. That transaction only
+/// ever touched the application's state, so it and its three helpers take
+/// `AppState` now, and the sheet panel, which no longer dispatches toolbar
+/// commands, takes the state too.
+const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 793;
 
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")

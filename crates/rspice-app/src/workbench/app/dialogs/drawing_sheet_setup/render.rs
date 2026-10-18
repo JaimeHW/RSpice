@@ -10,8 +10,8 @@ use egui::{
 };
 
 use crate::state::{
-    DrawingSheetPresetScope, DrawingSheetStandard, DrawingSheetStandardSeries,
-    SchematicPageOrientation,
+    AuthoredDrawingSheetSize, DrawingSheetPresetScope, DrawingSheetStandard,
+    DrawingSheetStandardSeries, SchematicPageOrientation, SchematicSheetFormat,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -27,7 +27,7 @@ use super::state::{
     BorderTemplateChoice, DrawingSheetDraft, DrawingSheetSection, DrawingSheetSetupState,
     DrawingSheetSupportRequest, FieldProblem, MarginEdge, PageSetupScope, SheetDisplayUnit,
     SheetSizeChoice, TitleBlockAnchorChoice, TitleBlockRotationChoice, TitleBlockTemplateChoice,
-    ZoneEdgesChoice, ZoneLabelsChoice, ZoneModeChoice, format_um,
+    ZoneEdgesChoice, ZoneLabelsChoice, ZoneModeChoice, display_unit_from_model, format_um,
 };
 
 const TITLE: &str = "Page setup";
@@ -180,7 +180,7 @@ impl RSpiceApp {
             DialogChoice::Primary if read_only => {
                 self.state.dialogs.drawing_sheet_setup.close();
             }
-            DialogChoice::Primary => match apply_drawing_sheet_setup(self) {
+            DialogChoice::Primary => match apply_drawing_sheet_setup(&mut self.state) {
                 Ok(message) | Err(message) => self.state.prompt(message),
             },
             DialogChoice::Ghost | DialogChoice::Cancelled => {
@@ -1624,6 +1624,37 @@ fn selected_size_label(state: &DrawingSheetSetupState) -> String {
                 },
             ),
         SheetSizeChoice::Custom => "One-off custom size…".to_owned(),
+    }
+}
+
+/// The Format menu's label for `standard` on the sheet `format` describes:
+/// its designation and oriented size in that sheet's unit. A surface offering
+/// the same choice names it exactly as this dialog does.
+pub(crate) fn standard_size_choice_label(
+    standard: DrawingSheetStandard,
+    format: &SchematicSheetFormat,
+) -> String {
+    format_choice_label(
+        standard.label(),
+        standard.portrait_dimensions_um(),
+        format.orientation,
+        display_unit_from_model(format.display_unit),
+    )
+}
+
+/// The Format menu's label for the size `format` already has, custom sizes
+/// included.
+pub(crate) fn current_size_choice_label(format: &SchematicSheetFormat) -> String {
+    match &format.authored_size {
+        AuthoredDrawingSheetSize::Standard { standard } => {
+            standard_size_choice_label(*standard, format)
+        }
+        AuthoredDrawingSheetSize::Custom { snapshot } => format_choice_label(
+            &snapshot.name,
+            format.portrait_dimensions_um(),
+            format.orientation,
+            display_unit_from_model(format.display_unit),
+        ),
     }
 }
 

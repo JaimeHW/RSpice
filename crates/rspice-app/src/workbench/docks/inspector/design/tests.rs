@@ -105,7 +105,7 @@ fn each_editable_group_reserves_its_strip_only_for_its_own_fields() {
     assert!(!editing_parameter_field(&app.state, id));
 }
 
-fn accesskit_nodes(
+pub(super) fn accesskit_nodes(
     mut add_contents: impl FnMut(&mut egui::Ui),
 ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
     let ctx = egui::Context::default();
@@ -122,7 +122,7 @@ fn accesskit_nodes(
 
 /// Everything one inspector panel paints, at the dock's real width.
 #[cfg(not(target_arch = "wasm32"))]
-fn painted_panel(mut contents: impl FnMut(&mut Ui)) -> String {
+pub(super) fn painted_panel(mut contents: impl FnMut(&mut Ui)) -> String {
     fn walk(shape: &egui::epaint::Shape, into: &mut String) {
         match shape {
             egui::epaint::Shape::Text(painted) => {
@@ -1662,21 +1662,6 @@ fn terminal_rows_start_at_the_panel_inset_with_no_empty_caret_column() {
         PANEL_INSET + TERMINAL_ROW_ICON_W + TERMINAL_ROW_ICON_GAP
     );
     assert!((net.right() - (312.0 - PANEL_INSET)).abs() < 0.5, "{net:?}");
-}
-
-/// With nothing selected the panel holds what the sheet needs from the
-/// reader: the route to Page Setup and the schematic checks. What the tab,
-/// the status bar and the navigator already say about the sheet, and the print
-/// format Page Setup owns, are not restated.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_sheet_panel_holds_only_page_setup_and_checks() {
-    let mut app = RSpiceApp::test_instance();
-    let painted = painted_panel(|ui| sheet_panel(ui, &mut app));
-    assert_eq!(
-        painted,
-        "Drawing sheet\nPage setup…\nChecks\nnot run\nCheck cellview\n"
-    );
 }
 
 /// A probe states the signal it saves, and an unbound one is the problem to
