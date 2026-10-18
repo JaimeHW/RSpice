@@ -23,6 +23,7 @@ pub(crate) mod language;
 mod navigation;
 mod param_scan;
 mod relink;
+mod source_index;
 pub(crate) use navigation::{open_diagnostic_location, open_source_location};
 pub(crate) use relink::{
     NetlistDependencyRelinkState, begin_dependency_relink, cancel_dependency_relink,
@@ -45,6 +46,7 @@ pub(crate) use editor::editor_id;
 pub use editor::show as show_editor;
 pub(crate) use executed_deck::run_snapshot_source;
 pub use executed_deck::{ExecutedDeckSelection, ExecutedDeckVerification};
+pub(crate) use source_index::{root_deck_source_index, visible_source_index};
 
 /// Exact, derived state of one project-owned netlist publication.
 ///
@@ -105,25 +107,6 @@ pub(crate) fn owned_netlist_publication_state(
         // synchronization is deliberately independent from run readiness.
         run_eligible: validated,
     }
-}
-
-/// The outline and line offsets of the buffer the editor is showing.
-///
-/// Parsing costs the whole deck and the navigator reads the outline on every
-/// frame, so a large netlist would spend the frame budget re-deriving a
-/// structure that did not change. The index is rebuilt only when the bytes
-/// differ from the ones it was built from: that comparison is a memcmp, and
-/// unlike a revision counter it cannot go stale behind a writer that forgets
-/// to bump it.
-pub(crate) fn visible_source_index(
-    state: &mut AppState,
-) -> std::sync::Arc<crate::state::NetlistSourceIndex> {
-    let source = state.simulation.source.netlist_content.as_str();
-    if !state.ui.netlist.source_index.describes(source) {
-        state.ui.netlist.source_index =
-            std::sync::Arc::new(crate::state::NetlistSourceIndex::parse(source));
-    }
-    std::sync::Arc::clone(&state.ui.netlist.source_index)
 }
 
 /// Invalidate byte-bound review evidence after any ownership or source edit.
@@ -2408,6 +2391,9 @@ pub struct NetlistDocumentState {
     /// Outline and line offsets of the visible buffer. Read through
     /// [`visible_source_index`], which is what keeps it current.
     source_index: std::sync::Arc<crate::state::NetlistSourceIndex>,
+    /// The same for the project's top-level deck while the editor shows other
+    /// text. Read through [`root_deck_source_index`].
+    root_deck_index: std::sync::Arc<crate::state::NetlistSourceIndex>,
 }
 
 impl NetlistDocumentState {

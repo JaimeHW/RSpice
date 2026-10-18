@@ -6,8 +6,8 @@
 //! promotion. The page shares the no-project landing's geometry and action
 //! idiom so the workbench's landing surfaces read as one product, and every
 //! fact on it is live document state: the deck preview, the outline counts,
-//! and the publication state all come from the same source index and
-//! projection the Netlist workspace itself renders.
+//! and the publication state all come from the project's own deck, indexed the
+//! way the Netlist workspace indexes it.
 
 use egui::{
     Align, Align2, Color32, Layout, Rect, ScrollArea, Sense, Stroke, Ui, UiBuilder, Vec2,
@@ -23,7 +23,7 @@ use crate::workbench::design_system::{
     property_card, property_row, property_row_problem,
 };
 use crate::workbench::documents::netlist_document::{
-    OwnedNetlistPublicationState, owned_netlist_publication_state, visible_source_index,
+    OwnedNetlistPublicationState, owned_netlist_publication_state, root_deck_source_index,
 };
 use crate::workbench::state::Workspace;
 use crate::workbench::{AppState, RSpiceApp};
@@ -163,7 +163,7 @@ fn header(ui: &mut Ui, project_name: &str) {
 }
 
 fn body(ui: &mut Ui, state: &mut AppState, action: &mut Option<NetlistFirstAction>) {
-    let index = visible_source_index(state);
+    let index = root_deck_source_index(state);
     let facts = deck_facts(state, &index);
 
     let available = ui.available_rect_before_wrap();
@@ -835,7 +835,7 @@ mod tests {
     #[test]
     fn deck_facts_read_the_live_document_rather_than_placeholders() {
         let mut app = netlist_first_app();
-        let index = visible_source_index(&mut app.state);
+        let index = root_deck_source_index(&mut app.state);
         let facts = deck_facts(&app.state, &index);
 
         assert!(facts.name.contains("front_end"), "name: {}", facts.name);
@@ -908,6 +908,36 @@ mod tests {
             "Precision front-end bench",
         ] {
             assert!(text.contains(expected), "missing {expected:?} in:\n{text}");
+        }
+    }
+
+    #[test]
+    fn a_restored_session_shows_its_deck_before_the_editor_has_been_opened() {
+        let saved = netlist_first_app();
+        let session = serde_json::to_string(&saved.state).expect("session serializes");
+        let mut app = RSpiceApp::test_instance();
+        app.state = serde_json::from_str(&session).expect("session restores");
+        assert!(app.state.is_netlist_first_without_schematic());
+
+        let text = painted_text(vec2(1440.0, 900.0), |ui| show(ui, &mut app)).join("\n");
+        assert!(!text.contains("The deck has no source text."), "{text}");
+        assert!(
+            text.contains("R1 in inn 4.7k"),
+            "deck lines missing in:\n{text}"
+        );
+        let index = root_deck_source_index(&mut app.state);
+        assert_eq!(deck_facts(&app.state, &index).lines, 13);
+    }
+
+    #[test]
+    fn the_landing_shows_the_deck_while_the_editor_shows_other_text() {
+        let mut app = netlist_first_app();
+        // An include file open in the editor, or nothing projected into it yet.
+        for editor in ["* models.inc\n.model NFET NMOS (LEVEL=1)\n", ""] {
+            editor.clone_into(&mut app.state.simulation.source.netlist_content);
+            let text = painted_text(vec2(1440.0, 900.0), |ui| show(ui, &mut app)).join("\n");
+            assert!(text.contains("Precision front-end bench"), "{text}");
+            assert!(!text.contains("* models.inc"), "{text}");
         }
     }
 
