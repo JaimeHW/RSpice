@@ -631,10 +631,19 @@ impl ModelBinCardGeometry {
     }
 
     fn matches(self, instance_params: &[(String, f64)]) -> bool {
-        let length = instance_param(instance_params, &["L", "LENGTH"]);
-        let width = instance_param(instance_params, &["W", "WIDTH"]);
-        let nfin = instance_param(instance_params, &["NFIN"]);
+        self.contains(
+            instance_param(instance_params, &["L", "LENGTH"]),
+            instance_param(instance_params, &["W", "WIDTH"]),
+            instance_param(instance_params, &["NFIN"]),
+        )
+    }
 
+    /// Whether an instance of this geometry selects this card, by the test
+    /// circuit construction applies: every bounded axis inclusive at both
+    /// ends within the bin tolerance, and an instance that omits a dimension
+    /// the card bounds outside it.
+    #[must_use]
+    pub fn contains(self, length: Option<f64>, width: Option<f64>, nfin: Option<f64>) -> bool {
         bin_range_contains(length, self.length.min, self.length.max)
             && bin_range_contains(width, self.width.min, self.width.max)
             && bin_range_contains(nfin, self.nfin.min, self.nfin.max)

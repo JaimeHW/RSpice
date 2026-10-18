@@ -223,9 +223,14 @@ use rspice_core::analysis::harmonic_balance::{
 // it, so the device models that record notices do not reach up into
 // `analysis` through it. The move adds one re-export and no name:
 // `analysis::error` re-exports the aid for the `ContinuationFailure` beside
-// it, and every public path to it is unchanged. The census is 5,734, with no
+// it, and every public path to it is unchanged. The census was 5,734, with no
 // slack.
-const MAX_PUBLIC_ITEMS: usize = 5734;
+// `ModelBinCardGeometry::contains` adds one: the model library
+// (`rspice-model-library` bin_family.rs) names the bin a component's L and W
+// select for the Properties model picker by the containment test circuit
+// construction applies, rather than by a copy of its tolerance. The census is
+// 5,735, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5735;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

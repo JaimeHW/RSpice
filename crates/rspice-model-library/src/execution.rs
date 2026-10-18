@@ -8,7 +8,7 @@ use crate::{
 };
 use rspice_app_types::product::{ContentDigest, ProcessCorner};
 use sha2::{Digest as _, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Immutable, content-addressed model namespace used by one nominal run.
 ///
@@ -318,7 +318,23 @@ pub fn resolve_materialized_definition_namespace(
     let mut applied = Vec::new();
     let mut unresolved = Vec::new();
 
+    // A decision for a family settles every card an instance naming it could
+    // run: another provider's bins of it, and another provider's card of the
+    // family's own name, which the engine would run in place of every bin.
+    let settled = settle_family_decisions(
+        &bindings,
+        &definitions,
+        &record_index,
+        &mut losers,
+        &mut applied,
+        &mut unresolved,
+    );
+
     for ((scope, normalized_name), providers) in groups {
+        let providers = providers
+            .into_iter()
+            .filter(|definition| !settled.contains(&definition_identity(definition)))
+            .collect::<Vec<_>>();
         if providers.len() < 2 {
             continue;
         }
@@ -423,6 +439,90 @@ pub fn resolve_materialized_definition_namespace(
         })
         .collect::<Result<Vec<_>, String>>()?;
     Ok((bindings, applied))
+}
+
+/// One definition's place in the materialization.
+fn definition_identity(definition: &MaterializedDefinition) -> (usize, usize) {
+    (definition.binding_index, definition.name_span.start)
+}
+
+/// Mask every definition a family decision's losing providers would let an
+/// instance naming the family run, and report which definitions it masked.
+///
+/// A decision is a family decision when its provider holds bins of the name
+/// and no card of the name itself: one that holds the card is settled by name
+/// like any other. A bin with a decision of its own is left to that decision,
+/// and refused when it names another provider, because an instance naming the
+/// family would then run cards from two libraries.
+fn settle_family_decisions<'a>(
+    bindings: &[MaterializedPlanBinding],
+    definitions: &'a [MaterializedDefinition],
+    records: &BTreeMap<(ModelConsumerScope, String), &ModelResolutionRecord>,
+    losers: &mut BTreeMap<usize, Vec<&'a MaterializedDefinition>>,
+    applied: &mut Vec<ModelResolutionRecord>,
+    unresolved: &mut Vec<String>,
+) -> BTreeSet<(usize, usize)> {
+    let decided_by = |record: &ModelResolutionRecord, definition: &MaterializedDefinition| {
+        let binding = &bindings[definition.binding_index];
+        binding.provider_library == record.provider_library
+            && binding.provider_source_digest == record.provider_source_digest
+    };
+    let mut settled = BTreeSet::new();
+    for ((scope, family), record) in records {
+        if *scope != ModelConsumerScope::PrimitiveModel {
+            continue;
+        }
+        let card_of_the_name = |definition: &&MaterializedDefinition| {
+            definition.scope == ModelConsumerScope::PrimitiveModel
+                && definition.normalized_name == *family
+        };
+        let bin_of_the_family = |definition: &&MaterializedDefinition| {
+            definition.scope == ModelConsumerScope::PrimitiveModel
+                && crate::model_bin_family(&definition.normalized_name) == Some(family.as_str())
+        };
+        let decided = definitions
+            .iter()
+            .filter(|definition| decided_by(record, definition))
+            .collect::<Vec<_>>();
+        if decided.iter().any(card_of_the_name) || !decided.iter().any(bin_of_the_family) {
+            continue;
+        }
+        let mut masked = false;
+        for definition in definitions.iter().filter(|definition| {
+            (card_of_the_name(definition) || bin_of_the_family(definition))
+                && !decided_by(record, definition)
+        }) {
+            if let Some(own) = records.get(&(*scope, definition.normalized_name.clone()))
+                && definition.normalized_name != *family
+            {
+                if own.provider_library != record.provider_library
+                    || own.provider_source_digest != record.provider_source_digest
+                {
+                    unresolved.push(format!(
+                        "{} '{}' is decided for '{}' but its family '{}' for '{}', so an instance naming '{}' would run cards from both",
+                        scope.label(),
+                        definition.normalized_name,
+                        own.provider_library,
+                        family,
+                        record.provider_library,
+                        family
+                    ));
+                }
+                continue;
+            }
+            if settled.insert(definition_identity(definition)) {
+                losers
+                    .entry(definition.binding_index)
+                    .or_default()
+                    .push(definition);
+                masked = true;
+            }
+        }
+        if masked {
+            applied.push((*record).clone());
+        }
+    }
+    settled
 }
 
 fn mask_materialized_definition(
@@ -581,6 +681,72 @@ mod tests {
                 .expect_err("duplicate decisions cannot overwrite each other")
                 .contains("repeated")
         );
+    }
+
+    const KIT_BINS: &str = ".model nch.1 nmos (lmin=0.1u lmax=1u)\n.model nch.2 nmos (lmin=1u lmax=10u)\n.model pch.1 pmos (lmin=0.1u lmax=1u)\n";
+    const VENDOR_BINS: &str = ".model nch.1 nmos (lmin=0.1u lmax=2u)\n.model nch.2 nmos (lmin=2u lmax=10u)\n.model nch nmos (vto=0.4)\n";
+
+    fn decided(name: &str, library: &str, cards: &str) -> ModelResolutionRecord {
+        ModelResolutionRecord {
+            normalized_name: name.to_owned(),
+            provider_library: library.to_owned(),
+            provider_definition: name.to_owned(),
+            provider_source_digest: ContentDigest::from_bytes(
+                Sha256::digest(cards.as_bytes()).into(),
+            ),
+            ..decision()
+        }
+    }
+
+    fn kit_and_vendor() -> Vec<MaterializedPlanBinding> {
+        vec![
+            provider("kit", ProcessCorner::TT, KIT_BINS),
+            provider("vendor", ProcessCorner::TT, VENDOR_BINS),
+        ]
+    }
+
+    /// Deciding a family decides every card an instance naming it could run:
+    /// the other library's bins and its card of the family's own name, which
+    /// the engine would otherwise run in place of every bin.
+    #[test]
+    fn a_family_decision_settles_its_bins_and_the_card_of_its_name() {
+        let record = decided("nch", "kit", KIT_BINS);
+        let (bindings, applied) =
+            resolve_materialized_definition_namespace(kit_and_vendor(), &[record.clone()])
+                .expect("the family decision settles the namespace");
+        assert_eq!(applied, [record]);
+        let cards = bindings
+            .iter()
+            .map(|binding| binding.materialized_model_cards.as_str())
+            .collect::<String>();
+        assert!(cards.contains("nch.1 nmos (lmin=0.1u lmax=1u)"), "{cards}");
+        assert!(cards.contains("nch.2 nmos (lmin=1u lmax=10u)"), "{cards}");
+        assert!(cards.contains("pch.1"), "{cards}");
+        assert!(!cards.contains("lmax=2u"), "{cards}");
+        assert!(!cards.contains("vto=0.4"), "{cards}");
+    }
+
+    /// Without a decision the shared bins contest the namespace as cards do.
+    #[test]
+    fn an_undecided_family_shared_by_two_libraries_fails_closed() {
+        let error = resolve_materialized_definition_namespace(kit_and_vendor(), &[])
+            .expect_err("two libraries' bins of one family cannot both run");
+        assert!(error.contains("nch.1"), "{error}");
+    }
+
+    /// A bin decided for one library while its family is decided for another
+    /// would hand one instance cards from both.
+    #[test]
+    fn a_bin_decided_against_its_family_fails_closed() {
+        let error = resolve_materialized_definition_namespace(
+            kit_and_vendor(),
+            &[
+                decided("nch", "kit", KIT_BINS),
+                decided("nch.2", "vendor", VENDOR_BINS),
+            ],
+        )
+        .expect_err("a family and its bin cannot run from two libraries");
+        assert!(error.contains("its family 'nch'"), "{error}");
     }
 
     #[test]
