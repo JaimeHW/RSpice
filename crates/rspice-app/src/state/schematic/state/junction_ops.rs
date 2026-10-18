@@ -24,8 +24,10 @@ impl SchematicState {
 
     /// Update junction markers based on current wire topology: orphaned
     /// markers go first, then geometry places the ones it now implies.
-    pub fn update_wire_junctions(&mut self, scope: &ActiveSheetTopology) {
-        self.remove_orphan_junctions(scope);
-        self.auto_place_junctions(scope);
+    pub fn update_wire_junctions(&mut self, _scope: &ActiveSheetTopology) {
+        let (removed, placed) = self.design.update_wire_junctions();
+        if removed > 0 || placed {
+            self.session.is_dirty = true;
+        }
     }
 }

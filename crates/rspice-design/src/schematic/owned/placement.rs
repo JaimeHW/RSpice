@@ -106,4 +106,18 @@ impl Schematic {
         }
         removed
     }
+    /// [`Self::remove_orphan_junctions`] then [`Self::auto_place_junctions`],
+    /// with the junction rule built once. Returns how many dots went and
+    /// whether any were added.
+    pub fn update_wire_junctions(&mut self) -> (usize, bool) {
+        let (removed, placed) =
+            junction_edit::update_junctions(&mut self.document, &mut self.identity);
+        if removed > 0 {
+            self.invalidate_topology();
+        }
+        if placed {
+            self.invalidate_topology();
+        }
+        (removed, placed)
+    }
 }

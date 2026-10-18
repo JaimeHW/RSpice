@@ -278,12 +278,35 @@ pub fn auto_place_junctions(
     identity: &mut SchematicIdentity,
 ) -> bool {
     let rule = JunctionRule::for_document(document);
-    let mut changes = retain_meaningful_junctions(document, &rule) > 0;
+    let removed = retain_meaningful_junctions(document, &rule) > 0;
+    place_missing_junctions(document, identity, &rule) || removed
+}
+
+/// [`remove_orphan_junctions`] then [`auto_place_junctions`], judged by one
+/// [`JunctionRule`]: the rule reads only the wires and the pins, which
+/// removing a dot leaves alone. Returns how many dots went and whether any
+/// were added.
+pub fn update_junctions(
+    document: &mut SchematicDocument,
+    identity: &mut SchematicIdentity,
+) -> (usize, bool) {
+    let rule = JunctionRule::for_document(document);
+    let removed = retain_meaningful_junctions(document, &rule);
+    (removed, place_missing_junctions(document, identity, &rule))
+}
+
+/// Add a dot wherever `rule` says one belongs and none is.
+fn place_missing_junctions(
+    document: &mut SchematicDocument,
+    identity: &mut SchematicIdentity,
+    rule: &JunctionRule,
+) -> bool {
     let mut marked = document
         .junctions
         .iter()
         .map(|junction| junction.pos)
         .collect::<HashSet<_>>();
+    let mut changes = false;
     for point in rule.points(document) {
         if marked.insert(point) {
             let id = identity.allocate(document);
