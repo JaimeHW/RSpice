@@ -17,27 +17,25 @@
 //! cell given its need never cuts one short. A free-text field needs a
 //! typical length chosen for it, and a longer value is elided.
 //!
-//! # How the fields are split into rows
+//! # How the grid is drawn
 //!
-//! Fields keep the order the sheet lists them in and fill the rows from the
-//! top, each row taking the next run of them. A row with room for its cells'
-//! needs gives every cell a share of the field grid in proportion to its
-//! need, so the width to spare is spread across the row. A row without room
-//! gives each fixed-form field its whole need first — a page number, a date
-//! or a status cut short says nothing — and the free-text fields share what
-//! is left in proportion to theirs; only a row whose fixed-form fields alone
-//! overrun the grid shares all of it in proportion. Either way the last cell
-//! takes what integer rounding leaves, so a row spans the grid exactly.
+//! The cells form columns whose rules run straight down the block. Fields
+//! keep the order the sheet lists them in and fill the rows from the top,
+//! left to right, as many to a row as it takes to seat them all, while
+//! leaving every row at least one: a sheet showing fewer fields than the
+//! template has rows gives each its own row. The last cell of a row reaches
+//! the block's edge, across any columns a short row leaves unfilled.
 //!
-//! Of every way to cut the list into the template's rows, the layout takes
-//! the one whose fullest row overruns the grid by least. That is no overrun
-//! at all whenever some cut lets every row fit, and then no cell is narrower
-//! than its need. Among cuts that tie, it takes the one whose row needs are
-//! most even — the least sum of their squares — so the width a block has to
-//! spare is shared alike rather than heaped on one row; and among cuts that
-//! tie on both, the one that fills its earlier rows first. A sheet showing
-//! fewer fields than the template has rows gives each field a row of its own
-//! and leaves the rest empty.
+//! The columns are as even as they can be while each is as wide as its cells
+//! need, so a block with room for everything its fields typically hold is an
+//! even grid. A block without that room gives way a step at a time: each
+//! column keeps its fixed-form values, its document type and its captions
+//! whole; then its fixed-form values and captions; then its captions alone —
+//! a page number, a date or a status cut short says nothing, where long free
+//! text cut short still names what it is. The columns are as even as those
+//! floors allow, and only a block too narrow even for its captions shares its
+//! width in proportion to them. The last column takes what integer rounding
+//! leaves, so every full row spans the grid exactly.
 //!
 //! The layout depends on which fields a sheet shows and never on what they
 //! hold, so a cell does not move while a value is typed into it, and a
@@ -45,8 +43,6 @@
 //!
 //! Lettering never shrinks to fit: a value or caption longer than its cell
 //! holds is cut with an ellipsis.
-
-use std::ops::Range;
 
 use super::*;
 
@@ -93,18 +89,24 @@ impl DrawingSheetTitleFieldId {
     /// out.
     #[must_use]
     pub const fn title_cell_need_um(self) -> u64 {
-        let lettering = DRAWING_SHEET_TITLE_BLOCK_LETTERING;
-        let value_um =
-            self.typical_value_chars() * drawing_sheet_mono_advance_um(lettering.data_um);
-        // Every caption is ASCII, so its length is its character count.
-        let caption_um =
-            self.display_label().len() as u64 * drawing_sheet_mono_advance_um(lettering.caption_um);
-        let lettered_um = if value_um > caption_um {
+        let value_um = self.typical_value_chars()
+            * drawing_sheet_mono_advance_um(DRAWING_SHEET_TITLE_BLOCK_LETTERING.data_um)
+            + DRAWING_SHEET_TITLE_CELL_PADDING_UM * 2;
+        let caption_um = self.title_caption_need_um();
+        if value_um > caption_um {
             value_um
         } else {
             caption_um
-        };
-        lettered_um + DRAWING_SHEET_TITLE_CELL_PADDING_UM * 2
+        }
+    }
+
+    /// Width of the cell that holds this field's caption whole, padding
+    /// included.
+    const fn title_caption_need_um(self) -> u64 {
+        // Every caption is ASCII, so its length is its character count.
+        self.display_label().len() as u64
+            * drawing_sheet_mono_advance_um(DRAWING_SHEET_TITLE_BLOCK_LETTERING.caption_um)
+            + DRAWING_SHEET_TITLE_CELL_PADDING_UM * 2
     }
 }
 
@@ -249,27 +251,34 @@ pub fn drawing_sheet_title_layout(
                 .is_some_and(|field| field.visible)
         })
         .collect::<Vec<_>>();
-    let needs = fields
+    let places = grid_places(fields.len(), rows);
+    let columns = places
         .iter()
-        .map(|id| id.title_cell_need_um())
-        .collect::<Vec<_>>();
-    let mut cells = Vec::with_capacity(fields.len());
-    for (row, run) in split_into_rows(&needs, rows, grid_width_um)
-        .into_iter()
+        .map(|&(_, column)| column + 1)
+        .max()
+        .unwrap_or(1);
+    let widths = column_widths(&fields, &places, columns, grid_width_um);
+    let cells = fields
+        .iter()
+        .zip(&places)
         .enumerate()
-    {
-        let widths = share_row(&fields[run.clone()], &needs[run.clone()], grid_width_um);
-        let mut x_um = grid_x_um;
-        for (index, cell_width_um) in run.zip(widths) {
-            cells.push(DrawingSheetTitleCell {
-                id: fields[index],
+        .map(|(index, (&id, &(row, column)))| {
+            let x_um = grid_x_um + widths[..column].iter().sum::<u64>();
+            // The last cell of a row reaches the block's edge, across any
+            // columns a short row leaves unfilled.
+            let ends_row = places.get(index + 1).is_none_or(|&(next, _)| next != row);
+            DrawingSheetTitleCell {
+                id,
                 row,
                 x_um,
-                width_um: cell_width_um,
-            });
-            x_um += cell_width_um;
-        }
-    }
+                width_um: if ends_row {
+                    width_um - x_um
+                } else {
+                    widths[column]
+                },
+            }
+        })
+        .collect();
     Some(DrawingSheetTitleLayout {
         width_um,
         height_um,
@@ -279,99 +288,94 @@ pub fn drawing_sheet_title_layout(
     })
 }
 
-/// The widths of one row's cells, which together span `grid_width_um`
-/// exactly, by the rule the module documentation sets out.
-fn share_row(fields: &[DrawingSheetTitleFieldId], needs: &[u64], grid_width_um: u64) -> Vec<u64> {
-    let total_um = needs.iter().sum::<u64>().max(1);
-    let fixed_um = fields
-        .iter()
-        .zip(needs)
-        .filter(|(id, _)| id.has_fixed_form())
-        .map(|(_, need)| need)
-        .sum::<u64>();
-    let free_um = total_um.saturating_sub(fixed_um);
-    let mut widths = if total_um <= grid_width_um || fixed_um >= grid_width_um || free_um == 0 {
-        needs
+/// The row and column of each of `count` fields on a grid of `rows` rows,
+/// by the rule the module documentation sets out.
+fn grid_places(count: usize, rows: usize) -> Vec<(usize, usize)> {
+    let columns = count.div_ceil(rows).max(1);
+    let mut places = Vec::with_capacity(count);
+    let mut remaining = count;
+    for row in 0..rows {
+        // As many as a row holds, while leaving each row below one of its own.
+        let taken = columns
+            .min(remaining.saturating_sub(rows - row - 1))
+            .max(1)
+            .min(remaining);
+        places.extend((0..taken).map(|column| (row, column)));
+        remaining -= taken;
+    }
+    places
+}
+
+/// The width a column keeps for `id` at `step` of giving way: from 0, all
+/// it typically holds, down to 3, its caption alone.
+fn kept_um(id: DrawingSheetTitleFieldId, step: usize) -> u64 {
+    let whole = match step {
+        0 => true,
+        // Document type is a term from a short list, such as IEC 61082's
+        // "Circuit diagram", and the first a crowded block lets go.
+        1 => id.has_fixed_form() || id == DrawingSheetTitleFieldId::DocumentType,
+        2 => id.has_fixed_form(),
+        _ => false,
+    };
+    if whole {
+        id.title_cell_need_um()
+    } else {
+        id.title_caption_need_um()
+    }
+}
+
+/// The width of each column, by the rule the module documentation sets out.
+fn column_widths(
+    fields: &[DrawingSheetTitleFieldId],
+    places: &[(usize, usize)],
+    columns: usize,
+    grid_width_um: u64,
+) -> Vec<u64> {
+    let floors_at = |step| {
+        let mut floors = vec![0_u64; columns];
+        for (&id, &(_, column)) in fields.iter().zip(places) {
+            floors[column] = floors[column].max(kept_um(id, step));
+        }
+        floors
+    };
+    let floors = (0..3)
+        .map(floors_at)
+        .find(|floors| floors.iter().sum::<u64>() <= grid_width_um)
+        .unwrap_or_else(|| floors_at(3));
+    level_widths(&floors, grid_width_um)
+}
+
+/// Widths that span `total_um` exactly and are as even as they can be while
+/// none is narrower than its floor: every column below a common level is
+/// raised to it. Floors that overrun `total_um` share it in proportion.
+fn level_widths(floors: &[u64], total_um: u64) -> Vec<u64> {
+    let floor_um = floors.iter().sum::<u64>();
+    let mut widths = if floor_um > total_um {
+        floors
             .iter()
-            .map(|need| grid_width_um * need / total_um)
+            .map(|floor| total_um * floor / floor_um)
             .collect::<Vec<_>>()
     } else {
-        let free_room_um = grid_width_um - fixed_um;
-        fields
+        // Columns whose floor stands above the level keep it; the rest share
+        // what is left alike.
+        let mut descending = floors.to_vec();
+        descending.sort_unstable_by(|left, right| right.cmp(left));
+        let (mut remaining_um, mut sharing) = (total_um, floors.len() as u64);
+        for floor in descending {
+            if floor * sharing <= remaining_um {
+                break;
+            }
+            remaining_um -= floor;
+            sharing -= 1;
+        }
+        let level_um = remaining_um / sharing.max(1);
+        floors
             .iter()
-            .zip(needs)
-            .map(|(id, need)| {
-                if id.has_fixed_form() {
-                    *need
-                } else {
-                    free_room_um * need / free_um
-                }
-            })
+            .map(|floor| (*floor).max(level_um))
             .collect::<Vec<_>>()
     };
     if let Some((last, others)) = widths.split_last_mut() {
-        *last = grid_width_um - others.iter().sum::<u64>();
+        *last = total_um - others.iter().sum::<u64>();
     }
     widths
-}
-
-/// Cut `needs` into at most `rows` contiguous runs, by the rule the module
-/// documentation sets out.
-fn split_into_rows(needs: &[u64], rows: usize, grid_width_um: u64) -> Vec<Range<usize>> {
-    let count = needs.len();
-    if count == 0 {
-        return Vec::new();
-    }
-    let runs = rows.min(count);
-    let mut prefix = Vec::with_capacity(count + 1);
-    prefix.push(0_u64);
-    for need in needs {
-        prefix.push(prefix[prefix.len() - 1] + need);
-    }
-    let score = |cuts: &[usize]| {
-        run_bounds(cuts, count).fold((0_u64, 0_u128), |(overrun, squares), (start, end)| {
-            let need = prefix[end] - prefix[start];
-            (
-                overrun.max(need.saturating_sub(grid_width_um)),
-                squares + u128::from(need) * u128::from(need),
-            )
-        })
-    };
-    // The cuts between runs, strictly increasing, visited in lexicographic
-    // order: a later cut set fills its earlier rows more, so taking the last
-    // of a tie fills earlier rows first.
-    let mut cuts = (1..runs).collect::<Vec<_>>();
-    let mut best = (score(&cuts), cuts.clone());
-    while advance_cuts(&mut cuts, count) {
-        let candidate = score(&cuts);
-        if candidate <= best.0 {
-            best = (candidate, cuts.clone());
-        }
-    }
-    run_bounds(&best.1, count)
-        .map(|(start, end)| start..end)
-        .collect()
-}
-
-/// The start and end of every run the `cuts` make in a list of `count`.
-fn run_bounds(cuts: &[usize], count: usize) -> impl Iterator<Item = (usize, usize)> + '_ {
-    std::iter::once(0)
-        .chain(cuts.iter().copied())
-        .zip(cuts.iter().copied().chain(std::iter::once(count)))
-}
-
-/// Step `cuts` to the next strictly increasing set drawn from `1..count`, or
-/// return `false` once every set has been visited.
-fn advance_cuts(cuts: &mut [usize], count: usize) -> bool {
-    let picked = cuts.len();
-    for index in (0..picked).rev() {
-        if cuts[index] < count - picked + index {
-            cuts[index] += 1;
-            for later in index + 1..picked {
-                cuts[later] = cuts[later - 1] + 1;
-            }
-            return true;
-        }
-    }
-    false
 }

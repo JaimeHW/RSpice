@@ -114,9 +114,9 @@ fn the_compact_block_letters_its_fixed_form_values_whole() {
 
 /// A sheet that shows every field on the compact block — how sheets were
 /// saved before fields could be hidden — has more to letter than the block
-/// holds. The free-text fields give way; a page number, revision, paper
-/// size, date, status or classification is still lettered whole, caption
-/// and all.
+/// holds. The free text gives way; a page number, revision, paper size,
+/// date, status or classification is still lettered whole, and every caption
+/// is.
 #[test]
 fn an_overfull_block_cuts_free_text_and_keeps_fixed_forms_whole() {
     let compact = SchematicSheetFormat::default()
@@ -138,6 +138,9 @@ fn an_overfull_block_cuts_free_text_and_keeps_fixed_forms_whole() {
         assert_eq!(cell.letter_value(value), value, "{field:?} cuts {value:?}");
         assert_eq!(cell.letter_caption(), field.display_label());
         assert!(cell.width_um >= field.title_cell_need_um(), "{field:?}");
+    }
+    for cell in &layout.cells {
+        assert_eq!(cell.letter_caption(), cell.id.display_label());
     }
     // The block is over-full, so something gives way, and it is free text.
     let cut = TYPICAL_VALUES
@@ -214,32 +217,67 @@ fn every_row_spans_the_field_grid_exactly() {
     }
 }
 
+/// The cells' rules run straight down the block. A block with room for all
+/// its fields hold is an even grid; a crowded one stays in columns, and only
+/// the column that must hold more is wider.
 #[test]
-fn a_cell_is_sized_by_what_it_holds() {
-    // The cells that hold a short fixed form are narrower than the cells that
-    // hold free text, and while every row fits, no cell is narrower than the
-    // width its field needs.
-    let layout = layout_of(&with_project(&SchematicSheetFormat::default()));
-    let width = |field| layout.cell(field).unwrap().width_um;
-    assert!(width(Field::Page) < width(Field::CellView));
-    assert!(width(Field::Revision) < width(Field::SheetTitle));
-    for cell in &layout.cells {
-        assert!(
-            cell.width_um >= cell.id.title_cell_need_um(),
-            "{:?} is {} um wide and needs {}",
-            cell.id,
-            cell.width_um,
-            cell.id.title_cell_need_um()
-        );
+fn columns_line_up_and_stay_even_while_everything_fits() {
+    let column_edges = |layout: &DrawingSheetTitleLayout| {
+        let mut edges = layout
+            .cells
+            .iter()
+            .map(|cell| cell.x_um)
+            .collect::<Vec<_>>();
+        edges.sort_unstable();
+        edges.dedup();
+        edges
+    };
+    for format in [
+        SchematicSheetFormat::default(),
+        with_project(&SchematicSheetFormat::default()),
+    ] {
+        let layout = layout_of(&format);
+        let columns = layout.cells.iter().filter(|cell| cell.row == 0).count();
+        assert_eq!(column_edges(&layout).len(), columns);
+        let even_um = layout.grid_width_um() / columns as u64;
+        for cell in &layout.cells {
+            let ends_row = cell.x_um + cell.width_um == layout.width_um;
+            if !ends_row {
+                assert_eq!(cell.width_um, even_um, "{:?}", cell.id);
+            }
+            assert!(
+                cell.width_um >= cell.id.title_cell_need_um(),
+                "{:?} is {} um wide and needs {}",
+                cell.id,
+                cell.width_um,
+                cell.id.title_cell_need_um()
+            );
+        }
     }
+
+    let compact = layout_of(
+        &SchematicSheetFormat::default()
+            .try_update(|draft| {
+                draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact
+            })
+            .unwrap(),
+    );
+    let columns = compact.cells.iter().filter(|cell| cell.row == 0).count();
+    assert_eq!(column_edges(&compact).len(), columns);
+    let document_type = compact.cell(Field::DocumentType).unwrap();
+    let cell_view = compact.cell(Field::CellView).unwrap();
+    assert!(document_type.width_um > cell_view.width_um);
+
     // A caption is ASCII, so its byte length is its character count.
     for field in DrawingSheetTitleFieldId::ALL {
         assert!(field.display_label().is_ascii());
     }
 }
 
+/// Fields fill the rows from the top in the order the sheet lists them, and
+/// every row gets at least one.
 #[test]
-fn rows_are_cut_so_the_fullest_overruns_least_and_the_rest_share_alike() {
+fn fields_fill_the_rows_from_the_top_in_order() {
     let shown = [
         Field::Project,
         Field::DocumentType,
@@ -264,7 +302,7 @@ fn rows_are_cut_so_the_fullest_overruns_least_and_the_rest_share_alike() {
             ],
         ]
     );
-    // The compact block's needs fill it: every row fits only cut this way.
+    // The compact block has a row fewer, so the same fields run four to a row.
     let compact = standard
         .try_update(|draft| draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact)
         .unwrap();
