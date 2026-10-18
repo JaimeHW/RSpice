@@ -574,8 +574,10 @@ mod phase_digit_tests {
     /// places after the point: four digits of 45.678° is 45.68.
     #[test]
     fn a_phase_reads_at_significant_digits_in_the_chosen_unit() {
-        let mut policy = QuantityPresentationPolicy::default();
-        policy.angle_display = AngleDisplay::Degrees;
+        let mut policy = QuantityPresentationPolicy {
+            angle_display: AngleDisplay::Degrees,
+            ..QuantityPresentationPolicy::default()
+        };
         let degrees = phase_sample(45.678_f64.to_radians(), 4, policy);
         assert!(degrees.starts_with("45.68"), "{degrees}");
         policy.angle_display = AngleDisplay::Radians;

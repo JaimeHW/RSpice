@@ -733,10 +733,10 @@ impl AppState {
         if file.get("format").and_then(Value::as_str) != Some(SETTINGS_FORMAT) {
             return Err("it is not an RSpice settings file".to_owned());
         }
-        if !file
+        if file
             .get("version")
             .and_then(Value::as_u64)
-            .is_some_and(|version| version >= 1)
+            .is_none_or(|version| version < 1)
         {
             return Err("its version is missing or not a whole number".to_owned());
         }

@@ -361,16 +361,15 @@ mod tests {
             crate::Theme::default().apply(&ctx);
             ctx.global_style_mut(|style| style.animation_time = animation_time);
             // The second pass, after anything the first one settled.
-            let output = (0..2)
-                .map(|_| {
-                    ctx.run_ui(Default::default(), |ctx| {
-                        egui::CentralPanel::default().show(ctx, |ui| {
-                            busy_mark(ui, 14.0);
-                        });
-                    })
+            let pass = || {
+                ctx.run_ui(Default::default(), |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        busy_mark(ui, 14.0);
+                    });
                 })
-                .last()
-                .expect("two passes");
+            };
+            let _ = pass();
+            let output = pass();
             let painted = output
                 .shapes
                 .iter()

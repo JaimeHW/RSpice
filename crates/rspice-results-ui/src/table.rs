@@ -1101,8 +1101,10 @@ mod tests {
             unit: "V".to_owned(),
             status: "converged".to_owned(),
         };
-        let mut policy = QuantityPresentationPolicy::default();
-        policy.copied_value_format = CopiedValueFormat::EngineeringNotationWithUnit;
+        let mut policy = QuantityPresentationPolicy {
+            copied_value_format: CopiedValueFormat::EngineeringNotationWithUnit,
+            ..QuantityPresentationPolicy::default()
+        };
         let engineering = copied_operating_point_row(&row, &policy);
         assert!(
             engineering.starts_with("Node\tV(out)\t1.5") && engineering.contains(" mV\tconverged"),
