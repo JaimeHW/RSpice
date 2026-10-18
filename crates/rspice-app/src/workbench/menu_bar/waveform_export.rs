@@ -1,5 +1,6 @@
 //! Waveform export actions.
 
+mod format_picker;
 mod hdf5;
 mod matlab;
 mod noise_stack;
@@ -17,6 +18,8 @@ use rspice_formats::waveform_io::result::{
 };
 use rspice_results_ui::eye_diagram::EyeTimebaseProvenance;
 use typed_csv::prepare_typed_result_csv;
+
+pub(crate) use format_picker::{open_dataset_export_picker, show_dataset_export_picker};
 
 const NO_ACTIVE_ANALYSIS_MESSAGE: &str = "No active result analysis is selected for export.";
 const NO_SAMPLES_MESSAGE: &str = "No waveform samples available to export.";

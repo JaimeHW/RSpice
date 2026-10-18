@@ -37,13 +37,19 @@ pub use units::{
     fmt_in_unit, fmt_in_unit_readout, unit_carries_its_decade,
 };
 
+/// How a complex quantity is split into traces.
+///
+/// Magnitude and phase draws the phase in degrees; the pane shows it in
+/// whichever angle unit the reader chose, so a separate radians mode would
+/// only say the same thing twice. Sessions that stored that retired mode
+/// read back as magnitude and phase.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ComplexNumberDisplay {
     #[default]
+    #[serde(alias = "magnitude-phase-radians")]
     MagnitudePhaseDegrees,
     RealImaginary,
-    MagnitudePhaseRadians,
 }
 
 impl ComplexNumberDisplay {
@@ -51,15 +57,14 @@ impl ComplexNumberDisplay {
         match self {
             Self::MagnitudePhaseDegrees => 0,
             Self::RealImaginary => 1,
-            Self::MagnitudePhaseRadians => 2,
         }
     }
 
     pub fn from_index(index: usize) -> Result<Self, &'static str> {
         match index {
-            0 => Ok(Self::MagnitudePhaseDegrees),
+            // Index 2 was magnitude and phase in radians.
+            0 | 2 => Ok(Self::MagnitudePhaseDegrees),
             1 => Ok(Self::RealImaginary),
-            2 => Ok(Self::MagnitudePhaseRadians),
             _ => Err("complex-number display index is outside its domain"),
         }
     }

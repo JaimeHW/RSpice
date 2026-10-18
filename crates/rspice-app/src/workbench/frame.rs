@@ -166,12 +166,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
             &keys,
         );
     }
-    if std::mem::take(&mut app.state.ui.export_csv_requested) {
-        crate::workbench::menu_bar::action_export_csv_with_io(
-            &mut app.state,
-            app.export_workflow_io.as_ref(),
-        );
-    }
+    run_dataset_export(ctx, app);
     if std::mem::take(&mut app.state.ui.open_producing_plan_requested) {
         commands::vocabulary::Command::OpenProducingPlan.execute(app);
     }
@@ -211,6 +206,20 @@ fn show_toasts(
         layout.toolbar_height,
         large_targets,
     )
+}
+
+/// "Export dataset…" asks for a format, then writes the displayed result in
+/// it. A result document's own export button arrives here as a request.
+fn run_dataset_export(ctx: &Context, app: &mut RSpiceApp) {
+    if std::mem::take(&mut app.state.ui.export_csv_requested) {
+        crate::workbench::menu_bar::open_dataset_export_picker(&mut app.state);
+    }
+    if crate::workbench::menu_bar::show_dataset_export_picker(ctx, &mut app.state) {
+        crate::workbench::menu_bar::action_export_csv_with_io(
+            &mut app.state,
+            app.export_workflow_io.as_ref(),
+        );
+    }
 }
 
 /// Announce each run the moment it stops running, and each campaign when it
@@ -608,12 +617,7 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
             &keys,
         );
     }
-    if std::mem::take(&mut app.state.ui.export_csv_requested) {
-        crate::workbench::menu_bar::action_export_csv_with_io(
-            &mut app.state,
-            app.export_workflow_io.as_ref(),
-        );
-    }
+    run_dataset_export(ctx, app);
     if std::mem::take(&mut app.state.ui.open_producing_plan_requested) {
         commands::vocabulary::Command::OpenProducingPlan.execute(app);
     }

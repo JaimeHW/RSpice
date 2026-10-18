@@ -28,7 +28,7 @@ pub use io::{
 pub use merge::{
     ImportBindingClass, ShortcutConflictPolicy, ShortcutImportOptions, ShortcutImportPlan,
     ShortcutImportReceipt, ShortcutMergePolicy, apply_shortcut_import, plan_shortcut_import,
-    rollback_shortcut_import, shortcut_library_digest,
+    shortcut_library_digest,
 };
 pub use projection::{ShortcutExportRequest, ShortcutExportScope, build_shortcut_reference_model};
 pub use schema::DecodedShortcutArtifact;

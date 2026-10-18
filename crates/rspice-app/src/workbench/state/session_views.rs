@@ -1856,26 +1856,18 @@ where
 pub enum SpecialistToolFilter {
     #[default]
     All,
-    ActiveProfile,
     Pinned,
     Favorites,
     Recent,
 }
 
 impl SpecialistToolFilter {
-    pub const ALL: [Self; 5] = [
-        Self::All,
-        Self::ActiveProfile,
-        Self::Pinned,
-        Self::Favorites,
-        Self::Recent,
-    ];
+    pub const ALL: [Self; 4] = [Self::All, Self::Pinned, Self::Favorites, Self::Recent];
 
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
             Self::All => "All",
-            Self::ActiveProfile => "Active profile",
             Self::Pinned => "Pinned",
             Self::Favorites => "Favorites",
             Self::Recent => "Recent",

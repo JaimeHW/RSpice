@@ -6,7 +6,7 @@
 
 use crate::workbench::routing::availability::{SurfaceExecutionAvailability, surface_availability};
 use crate::workbench::routing::surface_catalog::{CanonicalTier, SurfaceId};
-use crate::workbench::state::{EngineeringProfile, Workspace};
+use crate::workbench::state::Workspace;
 
 /// Commercial module disposition from the governed surface registry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -46,118 +46,6 @@ impl SpecialistWorkspaceRow {
     #[must_use]
     pub const fn label(self) -> &'static str {
         self.surface_id.label()
-    }
-
-    /// Whether the selected engineering profile includes this workspace
-    /// in everyday navigation. Profile visibility is discoverability only and
-    /// never changes route execution availability.
-    #[must_use]
-    pub const fn shown_in_profile(self, profile: EngineeringProfile) -> bool {
-        match profile {
-            EngineeringProfile::AnalogIc => matches!(
-                self.surface_id,
-                SurfaceId::ReleaseCockpit
-                    | SurfaceId::MultiTestStudio
-                    | SurfaceId::AmsWorkbench
-                    | SurfaceId::RfWorkbench
-                    | SurfaceId::HighSigmaWorkbench
-                    | SurfaceId::DeviceSafetyWorkbench
-                    | SurfaceId::DigitalEventWorkbench
-                    | SurfaceId::StatisticalVisualizationWorkbench
-                    | SurfaceId::ReportAuthoring
-                    | SurfaceId::ModelEditor
-                    | SurfaceId::ModelExtraction
-                    | SurfaceId::ModelCorrelation
-                    | SurfaceId::JobDiagnostics
-                    | SurfaceId::RegressionOrchestration
-                    | SurfaceId::ApiBrowser
-                    | SurfaceId::LibraryCharacterization
-                    | SurfaceId::PdkTechnologyAdmin
-                    | SurfaceId::CliBatchWorkbench
-                    | SurfaceId::SolverQualificationCenter
-                    | SurfaceId::DeckCompatibilityCenter
-                    | SurfaceId::ProtectedIpCenter
-                    | SurfaceId::LibraryCellviewManager
-            ),
-            EngineeringProfile::RfMicrowave => matches!(
-                self.surface_id,
-                SurfaceId::ReleaseCockpit
-                    | SurfaceId::MultiTestStudio
-                    | SurfaceId::RfWorkbench
-                    | SurfaceId::RfApplicationWorkbench
-                    | SurfaceId::HighSigmaWorkbench
-                    | SurfaceId::DeviceSafetyWorkbench
-                    | SurfaceId::RfDataDisplayWorkbench
-                    | SurfaceId::StatisticalVisualizationWorkbench
-                    | SurfaceId::ReportAuthoring
-                    | SurfaceId::ModelEditor
-                    | SurfaceId::ModelExtraction
-                    | SurfaceId::ModelCorrelation
-                    | SurfaceId::JobDiagnostics
-                    | SurfaceId::RegressionOrchestration
-                    | SurfaceId::ApiBrowser
-                    | SurfaceId::PdkTechnologyAdmin
-                    | SurfaceId::CliBatchWorkbench
-                    | SurfaceId::SolverQualificationCenter
-                    | SurfaceId::DeckCompatibilityCenter
-                    | SurfaceId::ProtectedIpCenter
-                    | SurfaceId::LibraryCellviewManager
-            ),
-            EngineeringProfile::SiPi => matches!(
-                self.surface_id,
-                SurfaceId::ReleaseCockpit
-                    | SurfaceId::MultiTestStudio
-                    | SurfaceId::DeviceSafetyWorkbench
-                    | SurfaceId::ReportAuthoring
-                    | SurfaceId::JobDiagnostics
-                    | SurfaceId::RegressionOrchestration
-                    | SurfaceId::ApiBrowser
-                    | SurfaceId::PdkTechnologyAdmin
-                    | SurfaceId::CliBatchWorkbench
-                    | SurfaceId::SolverQualificationCenter
-                    | SurfaceId::DeckCompatibilityCenter
-                    | SurfaceId::ProtectedIpCenter
-                    | SurfaceId::LibraryCellviewManager
-            ),
-            EngineeringProfile::Power => matches!(
-                self.surface_id,
-                SurfaceId::ReleaseCockpit
-                    | SurfaceId::MultiTestStudio
-                    | SurfaceId::DeviceSafetyWorkbench
-                    | SurfaceId::StatisticalVisualizationWorkbench
-                    | SurfaceId::ReportAuthoring
-                    | SurfaceId::ModelEditor
-                    | SurfaceId::ModelExtraction
-                    | SurfaceId::ModelCorrelation
-                    | SurfaceId::JobDiagnostics
-                    | SurfaceId::RegressionOrchestration
-                    | SurfaceId::ApiBrowser
-                    | SurfaceId::CliBatchWorkbench
-                    | SurfaceId::SolverQualificationCenter
-                    | SurfaceId::DeckCompatibilityCenter
-                    | SurfaceId::ProtectedIpCenter
-                    | SurfaceId::LibraryCellviewManager
-            ),
-            EngineeringProfile::Emerging => matches!(
-                self.surface_id,
-                SurfaceId::ReleaseCockpit
-                    | SurfaceId::MultiTestStudio
-                    | SurfaceId::DeviceSafetyWorkbench
-                    | SurfaceId::ReportAuthoring
-                    | SurfaceId::ModelEditor
-                    | SurfaceId::ModelExtraction
-                    | SurfaceId::JobDiagnostics
-                    | SurfaceId::RegressionOrchestration
-                    | SurfaceId::ApiBrowser
-                    | SurfaceId::PdkTechnologyAdmin
-                    | SurfaceId::CliBatchWorkbench
-                    | SurfaceId::SolverQualificationCenter
-                    | SurfaceId::DeckCompatibilityCenter
-                    | SurfaceId::ProtectedIpCenter
-                    | SurfaceId::LibraryCellviewManager
-            ),
-            EngineeringProfile::All => true,
-        }
     }
 
     /// Engine/service boundary for the workspace's tier. It is a qualification
@@ -530,7 +418,6 @@ mod tests {
                 surface_availability(row.surface_id),
                 "workspace data may not infer a route executor"
             );
-            assert!(row.shown_in_profile(EngineeringProfile::All));
         }
     }
 }

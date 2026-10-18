@@ -349,67 +349,6 @@ impl WorkspaceDocumentRegistry {
     }
 }
 
-/// Personal engineering-navigation profile from the governed mockup.
-///
-/// Profiles only reduce everyday discovery. They never change project data,
-/// route identity, entitlement, runtime availability, or qualification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum EngineeringProfile {
-    #[default]
-    AnalogIc,
-    RfMicrowave,
-    SiPi,
-    Power,
-    Emerging,
-    All,
-}
-
-impl EngineeringProfile {
-    pub const ALL: [Self; 6] = [
-        Self::AnalogIc,
-        Self::RfMicrowave,
-        Self::SiPi,
-        Self::Power,
-        Self::Emerging,
-        Self::All,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::AnalogIc => "Analog & mixed-signal IC",
-            Self::RfMicrowave => "RF, microwave & wireless",
-            Self::SiPi => "SI, PI, package & PCB",
-            Self::Power => "Power electronics",
-            Self::Emerging => "Photonics & quantum",
-            Self::All => "All engineering domains",
-        }
-    }
-
-    pub const fn detail(self) -> &'static str {
-        match self {
-            Self::AnalogIc => {
-                "Schematic, custom layout, AMS, RF/periodic, variation, PDK, model and sign-off workflows."
-            }
-            Self::RfMicrowave => {
-                "Periodic, network, load-pull, EM, RF display, measurement and application-design workflows."
-            }
-            Self::SiPi => {
-                "Channel, SerDes, PDN, package, board, EM, compliance and manufacturing workflows."
-            }
-            Self::Power => {
-                "Converters, devices, magnetics, controls, electrothermal and lab-correlation workflows."
-            }
-            Self::Emerging => {
-                "Electronic-photonic, field, heterogeneous integration and quantum electronics research workflows."
-            }
-            Self::All => {
-                "Expose every installed specialist workspace. Best for evaluators, administrators and cross-domain teams."
-            }
-        }
-    }
-}
-
 /// Width class used by layout composition.  Breakpoints are based on task
 /// density rather than an assumed device or operating system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1010,8 +949,8 @@ pub struct WorkbenchState {
     /// project stores; this registry only controls where each is presented.
     #[serde(default)]
     pub window_session: crate::workbench::lifecycle::window_session::WindowSessionRegistry,
-    #[serde(default)]
-    pub engineering_profile: EngineeringProfile,
+    // An `engineering_profile` key from older sessions is ignored: the
+    // profile only ever narrowed one specialist tool list and is retired.
     /// Version marker used to distinguish sessions that predate canonical
     /// routes from sessions whose current route is intentionally Design.
     #[serde(default)]
@@ -1434,7 +1373,6 @@ impl Default for WorkbenchState {
         Self {
             workspace: Workspace::Design,
             window_session: crate::workbench::lifecycle::window_session::WindowSessionRegistry::default(),
-            engineering_profile: EngineeringProfile::AnalogIc,
             navigation_schema_version: NAVIGATION_SCHEMA_VERSION,
             layout_schema_version: LAYOUT_SCHEMA_VERSION,
             navigation: SurfaceNavigation::default(),

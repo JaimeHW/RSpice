@@ -543,10 +543,8 @@ pub fn build_models<A: AsRef<AnalysisResult<WaveformData>>, R: AsRef<SimulationR
                 && is_phase)
                 || is_time_complex_phase
             {
-                match complex_display {
-                    ComplexNumberDisplay::MagnitudePhaseRadians => TraceKind::PhaseRad,
-                    _ => TraceKind::PhaseDeg,
-                }
+                // Drawn in degrees; the pane shows the reader's angle unit.
+                TraceKind::PhaseDeg
             } else if analysis.analysis_type.uses_complex_bode_projection() && is_mag {
                 TraceKind::MagnitudeDb
             } else if matches!(

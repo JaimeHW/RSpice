@@ -1479,21 +1479,19 @@ fn complex_display_policy_uses_original_components_or_radian_phase() {
     assert_eq!(cartesian[0].traces[0].y.as_slice(), &[0.8, 6.0]);
     assert_eq!(cartesian[0].traces[1].name, "im(V(out))");
     assert_eq!(cartesian[0].traces[1].y.as_slice(), &[0.6, 8.0]);
+}
 
-    let radians = build_models(
-        &simulation,
-        &mut derived,
-        &Tokens::default(),
-        false,
-        ComplexNumberDisplay::MagnitudePhaseRadians,
-        None,
-        &HashSet::new(),
+/// A session that stored the retired radians mode reads back as magnitude
+/// and phase; the phase pane then follows the angle unit under Units.
+#[test]
+fn the_retired_radians_mode_reads_back_as_magnitude_and_phase() {
+    let restored: ComplexNumberDisplay =
+        serde_json::from_str("\"magnitude-phase-radians\"").expect("retired mode decodes");
+    assert_eq!(restored, ComplexNumberDisplay::MagnitudePhaseDegrees);
+    assert_eq!(
+        ComplexNumberDisplay::from_index(2),
+        Ok(ComplexNumberDisplay::MagnitudePhaseDegrees)
     );
-    assert!(matches!(radians[0].traces[0].kind, TraceKind::MagnitudeDb));
-    assert_eq!(radians[0].traces[0].y.as_slice(), &[0.0, 20.0]);
-    assert!(matches!(radians[0].traces[1].kind, TraceKind::PhaseRad));
-    assert!((radians[0].traces[1].y[0] - std::f64::consts::PI).abs() < 1e-12);
-    assert!((radians[0].traces[1].y[1] - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
 }
 
 #[test]

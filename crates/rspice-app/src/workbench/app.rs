@@ -176,12 +176,12 @@ pub(crate) use dialogs::symbol_definition::{
 pub(crate) use dialogs::hardcopy::{HardcopyDialogState, HardcopyWorkflow, open_hardcopy_workflow};
 
 pub(crate) use dialogs::state::{
-    ArraySelectionDialogState, ArraySelectionPreviewCache, DescendHierarchyDialogState,
-    EngineeringTableDialogPage, EngineeringTableDialogState, EngineeringTableExportFormat,
-    EngineeringTableExportScope, GridSnapRoutingDialogState, GridSnapRoutingDraft,
-    GridSnapRoutingFocusTarget, GridSnapSpacingChoice, HelpCenterPage, HierarchyDescendEditMode,
-    NewWindowInitialContent, PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone,
-    RenameSelectionTarget, ReplaceInstanceOpen, RunDetailsDialogState,
+    ArraySelectionDialogState, ArraySelectionPreviewCache, DatasetExportPicker,
+    DescendHierarchyDialogState, EngineeringTableDialogPage, EngineeringTableDialogState,
+    EngineeringTableExportFormat, EngineeringTableExportScope, GridSnapRoutingDialogState,
+    GridSnapRoutingDraft, GridSnapRoutingFocusTarget, GridSnapSpacingChoice, HelpCenterPage,
+    HierarchyDescendEditMode, NewWindowInitialContent, PlanRemovalConsequence, PlanRemovalTarget,
+    PlanRemovalTone, RenameSelectionTarget, ReplaceInstanceOpen, RunDetailsDialogState,
     TechnologyAttachmentDialogState, WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
 };
 pub use dialogs::state::{DialogState, LicensePhase};

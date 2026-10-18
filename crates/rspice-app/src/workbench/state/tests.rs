@@ -161,7 +161,6 @@ fn session_saved_with_the_deleted_visualization_studio_still_restores() {
         "touch_pane:stage)"
     );
     let mut state = WorkbenchState::default();
-    state.engineering_profile = EngineeringProfile::RfMicrowave;
     state.activate(Workspace::Results);
     let saved = ron::to_string(&state).expect("workbench serializes");
     let saved = saved.replacen(
@@ -173,8 +172,10 @@ fn session_saved_with_the_deleted_visualization_studio_still_restores() {
         saved.contains("?surface=visualization-studio"),
         "the session must have quit on the Studio for this to prove anything"
     );
+    // The retired engineering profile rides along, as it does in every
+    // session saved before it was removed.
     let saved = format!(
-        "{},{STUDIO})",
+        "{},engineering_profile:r#rf-microwave,{STUDIO})",
         saved
             .strip_suffix(')')
             .expect("a workbench session is a RON struct")
@@ -184,10 +185,6 @@ fn session_saved_with_the_deleted_visualization_studio_still_restores() {
         ron::from_str(&saved).expect("a session that kept the Studio's state restores");
     restored.reconcile_restored_navigation();
 
-    assert_eq!(
-        restored.engineering_profile,
-        EngineeringProfile::RfMicrowave
-    );
     assert_eq!(
         restored.current_route(),
         SurfaceRoute::surface(SurfaceId::Design)
@@ -641,9 +638,9 @@ fn application_modals_own_global_input_exclusively() {
 #[test]
 fn session_saved_with_the_deleted_capability_matrix_still_restores() {
     let mut state = WorkbenchState::default();
-    state.engineering_profile = EngineeringProfile::RfMicrowave;
     state.activate(Workspace::Results);
     let mut saved = serde_json::to_value(&state).expect("workbench serializes");
+    saved["engineering_profile"] = serde_json::json!("rf-microwave");
     saved["capability_matrix"] = serde_json::json!({ "section": "workspaces" });
     saved["navigation"] = serde_json::json!({
         "current": "?surface=feature-availability",
@@ -656,10 +653,6 @@ fn session_saved_with_the_deleted_capability_matrix_still_restores() {
         serde_json::from_value(saved).expect("an old session restores");
     restored.reconcile_restored_navigation();
 
-    assert_eq!(
-        restored.engineering_profile,
-        EngineeringProfile::RfMicrowave
-    );
     assert_eq!(
         restored.current_route(),
         SurfaceRoute::surface(SurfaceId::Design)

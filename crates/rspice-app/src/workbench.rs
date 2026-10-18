@@ -85,8 +85,8 @@ pub(crate) use localization::{MessageCatalog, MessageId};
 pub(crate) use preferences::DrawingSheetPersonalPreferences;
 pub use preferences::{
     BackgroundTaskAttention, ChoicePreference, ComplexNumberDisplay, ConsoleLaunchBehavior,
-    EngineeringExportFormat, LargeDatasetDisplay, ScalarPreference, TogglePreference,
-    UserPreferences, WorkspacePreferences, WorkspacePreset,
+    EngineeringExportFormat, ScalarPreference, TogglePreference, UserPreferences,
+    WorkspacePreferences, WorkspacePreset,
 };
 pub use routing::availability::{
     SurfaceExecutionAvailability, SurfaceRouteUnavailable, surface_availability,
@@ -103,7 +103,7 @@ pub use shortcuts::{
     ShortcutProfileIssueSeverity, ShortcutSequence, ShortcutStroke, SingleKeyCanvasPolicy,
     shortcut_context_precedence_rank,
 };
-pub use state::{EngineeringProfile, WorkbenchState};
+pub use state::WorkbenchState;
 
 pub use app::RSpiceApp;
 pub use app_state::AppState;

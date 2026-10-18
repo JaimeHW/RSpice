@@ -1032,7 +1032,6 @@ impl RSpiceApp {
                 local_index_count,
                 self.state.dialogs.command_palette.query.trim().is_empty()
                     && scope == PaletteScope::All,
-                self.state.workbench.engineering_profile.label(),
             );
         });
 
@@ -1615,7 +1614,6 @@ fn render_footer(
     shown: usize,
     local_index_count: usize,
     suggestions: bool,
-    engineering_profile: &str,
 ) {
     let c = Tokens::get(surface.ctx()).color;
     surface.painter().rect_filled(rect, 0.0, c.bg_panel);
@@ -1623,7 +1621,7 @@ fn render_footer(
         .painter()
         .hline(rect.x_range(), rect.top(), Stroke::new(1.0, c.border));
     let provider = format!(
-        "{shown} {} · {local_index_count} searchable in {engineering_profile}",
+        "{shown} {} · {local_index_count} searchable",
         if suggestions { "suggested" } else { "shown" }
     );
     let provider_galley = surface.fonts_mut(|fonts| {

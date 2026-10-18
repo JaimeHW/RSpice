@@ -39,10 +39,12 @@ const IMPORT_CLASSES: [ImportBindingClass; 4] = [
     ImportBindingClass::Results,
     ImportBindingClass::Simulation,
 ];
-const MERGE_POLICIES: [ShortcutMergePolicy; 3] = [
+/// How an import combines with the current bindings. Importing into a named
+/// preset is not offered: nothing in RSpice lists, switches to or deletes a
+/// named preset, so one written there could never be used.
+const MERGE_POLICIES: [ShortcutMergePolicy; 2] = [
     ShortcutMergePolicy::MergeNonConflicting,
     ShortcutMergePolicy::ReplaceCurrentUserBindings,
-    ShortcutMergePolicy::ImportNamedPreset,
 ];
 const CONFLICT_POLICIES: [ShortcutConflictPolicy; 3] = [
     ShortcutConflictPolicy::KeepCurrentAndReport,
@@ -85,11 +87,6 @@ pub(crate) enum ShortcutPortabilityAction {
     CancelImportSource,
     CommitImport(Box<ShortcutImportPlan>),
     CancelImportCommit,
-    #[allow(
-        dead_code,
-        reason = "constructed only by the retained receipt undo owner; the mockup dialog intentionally has no invented rollback control"
-    )]
-    RollbackImport(Box<ShortcutImportReceipt>),
     PublishExport(Box<PreparedShortcutArtifact>),
 }
 
@@ -99,7 +96,6 @@ enum ImportPending {
     None,
     Source,
     Commit,
-    Rollback,
 }
 
 /// Retained, isolated import review. No field contains a source path or source
@@ -282,23 +278,6 @@ impl ShortcutImportDialogState {
         }
     }
 
-    /// Start the receipt's guarded rollback. The live library still remains
-    /// untouched until the caller durably completes the returned action.
-    #[allow(
-        dead_code,
-        reason = "called by the contextual receipt undo owner, not rendered as an extra mockup dialog control"
-    )]
-    pub(crate) fn begin_rollback(&mut self) -> Result<ShortcutPortabilityAction, &'static str> {
-        if self.pending != ImportPending::None {
-            return Err("a shortcut portability operation is already in progress");
-        }
-        let Some(receipt) = self.last_receipt.clone() else {
-            return Err("there is no retained shortcut import receipt to roll back");
-        };
-        self.pending = ImportPending::Rollback;
-        Ok(ShortcutPortabilityAction::RollbackImport(Box::new(receipt)))
-    }
-
     pub(crate) fn complete_commit(&mut self, result: Result<ShortcutImportReceipt, String>) {
         if self.pending != ImportPending::Commit {
             return;
@@ -337,20 +316,6 @@ impl ShortcutImportDialogState {
                 // cleanup from dispatching duplicate cancellation effects.
                 self.error = Some(error);
             }
-        }
-    }
-
-    pub(crate) fn complete_rollback(&mut self, result: Result<(), String>) {
-        if self.pending != ImportPending::Rollback {
-            return;
-        }
-        self.pending = ImportPending::None;
-        match result {
-            Ok(()) => {
-                self.last_receipt = None;
-                self.error = None;
-            }
-            Err(error) => self.error = Some(error),
         }
     }
 }
@@ -479,9 +444,7 @@ impl ShortcutPortabilityDialogsState {
                     self.import.cancel_requested = true;
                     ShortcutPortabilityAction::CancelImportCommit
                 }
-                ImportPending::Source | ImportPending::Commit | ImportPending::Rollback => {
-                    ShortcutPortabilityAction::None
-                }
+                ImportPending::Source | ImportPending::Commit => ShortcutPortabilityAction::None,
             };
         }
         if self.export.is_open() && !self.export.pending {
@@ -512,18 +475,6 @@ impl ShortcutPortabilityDialogsState {
 
     pub(crate) fn import_commit_cancelled(&mut self, result: Result<(), String>) {
         self.import.commit_cancelled(result);
-    }
-
-    #[allow(
-        dead_code,
-        reason = "called by the contextual receipt undo owner, not rendered as an extra mockup dialog control"
-    )]
-    pub(crate) fn begin_rollback(&mut self) -> Result<ShortcutPortabilityAction, &'static str> {
-        self.import.begin_rollback()
-    }
-
-    pub(crate) fn complete_rollback(&mut self, result: Result<(), String>) {
-        self.import.complete_rollback(result);
     }
 
     pub(crate) fn complete_export(
@@ -570,11 +521,10 @@ fn render_import_dialog(
     let cancel_enabled = match state.pending {
         ImportPending::None => true,
         ImportPending::Source | ImportPending::Commit => !state.cancel_requested,
-        ImportPending::Rollback => false,
     };
     let mut dialog = Dialog::new(IMPORT_TITLE, IMPORT_PRIMARY)
         .description(
-            "Import a versioned shortcut profile after reviewing compatibility, conflicts, and protected bindings.",
+            "Bring in key bindings from a shortcut file after checking them for conflicts.",
         )
         .size(DialogSize::Transaction)
         .primary_enabled(can_apply)
@@ -597,18 +547,13 @@ fn render_import_dialog(
         dialog = match state.pending {
             ImportPending::Source => dialog.transaction_state(
                 DialogTransactionTone::Progress,
-                "Selecting shortcut source",
-                "Waiting for the platform file picker to complete or cancel.",
+                "Choosing a shortcut file",
+                "Waiting for the file picker.",
             ),
             ImportPending::Commit => dialog.transaction_state(
                 DialogTransactionTone::Progress,
-                "Publishing shortcut profile",
-                "The live profile changes only after durable publication succeeds.",
-            ),
-            ImportPending::Rollback => dialog.transaction_state(
-                DialogTransactionTone::Progress,
-                "Restoring prior shortcut profile",
-                "The retained predecessor is being validated and published.",
+                "Saving shortcuts\u{2026}",
+                "Your current shortcuts stay in effect until the import is saved.",
             ),
             ImportPending::None => dialog,
         };
@@ -642,7 +587,7 @@ fn render_import_dialog(
                 action = ShortcutPortabilityAction::CancelImportCommit;
             }
             ImportPending::None => state.request_idle_cancel(),
-            ImportPending::Source | ImportPending::Commit | ImportPending::Rollback => {}
+            ImportPending::Source | ImportPending::Commit => {}
         },
         DialogChoice::None | DialogChoice::Secondary | DialogChoice::Primary => {}
     }
@@ -677,7 +622,7 @@ fn render_import_body(
     let source_requested = workflow_row(
         ui,
         "Source",
-        "RSpice shortcut profile or supported editor preset.",
+        "An RSpice shortcut file or a VS Code keybindings file.",
         |ui| {
             value_column(ui, |ui| {
                 source_well(
@@ -695,8 +640,8 @@ fn render_import_body(
     let mut options_changed = false;
     workflow_row(
         ui,
-        "Merge policy",
-        "Protected accessibility and operating-system bindings remain explicit.",
+        "Current bindings",
+        "Protected system and accessibility shortcuts always ask first.",
         |ui| {
             value_column(ui, |ui| {
                 let labels = MERGE_POLICIES
@@ -708,7 +653,7 @@ fn render_import_body(
                         select(
                             ui,
                             "preferences.shortcuts.import.merge-policy",
-                            "Merge policy",
+                            "Current bindings",
                             state.options.merge_policy.label(),
                             &labels,
                             control_width(ui),
@@ -722,76 +667,6 @@ fn render_import_body(
             });
         },
     );
-
-    if state.options.merge_policy == ShortcutMergePolicy::ImportNamedPreset {
-        workflow_row(
-            ui,
-            "Preset name",
-            "Create a named profile without changing the active shortcut map.",
-            |ui| {
-                value_column(ui, |ui| {
-                    let width = control_width(ui);
-                    let height = Tokens::get(ui.ctx()).metrics.ctl_h;
-                    let response = if controls_enabled {
-                        ui.add_enabled_ui(true, |ui| {
-                            ui.add_sized(
-                                [width, height],
-                                egui::TextEdit::singleline(
-                                    state.options.preset_name.get_or_insert_with(String::new),
-                                )
-                                .hint_text("Preset name"),
-                            )
-                        })
-                        .inner
-                    } else {
-                        // A disabled widget closure still executes. Render a
-                        // detached display value so a malformed or restored
-                        // pending state can never materialize `Some("")`.
-                        let mut display = state.options.preset_name.clone().unwrap_or_default();
-                        ui.add_enabled_ui(false, |ui| {
-                            ui.add_sized(
-                                [width, height],
-                                egui::TextEdit::singleline(&mut display).hint_text("Preset name"),
-                            )
-                        })
-                        .inner
-                    };
-                    if response.changed() {
-                        options_changed = true;
-                    }
-                });
-            },
-        );
-        let preset_exists = state
-            .options
-            .preset_name
-            .as_deref()
-            .is_some_and(|name| base.named_preset(name.trim()).is_some());
-        if preset_exists {
-            workflow_row(
-                ui,
-                "Existing preset",
-                "Replacement remains explicit and is recorded by the import receipt.",
-                |ui| {
-                    let response = ui
-                        .add_enabled_ui(controls_enabled, |ui| {
-                            ui.checkbox(
-                                &mut state.options.overwrite_existing_preset,
-                                "Replace existing named preset",
-                            )
-                        })
-                        .inner;
-                    options_changed |= response.changed();
-                },
-            );
-        } else if controls_enabled && state.options.overwrite_existing_preset {
-            state.options.overwrite_existing_preset = false;
-            options_changed = true;
-        }
-    } else if controls_enabled && state.options.preset_name.take().is_some() {
-        state.options.overwrite_existing_preset = false;
-        options_changed = true;
-    }
 
     render_import_summary(ui, state.plan.as_ref(), state.options.conflict_policy);
 
@@ -1077,9 +952,7 @@ fn render_export_dialog(
     };
     let transaction_error = state.error.clone();
     let mut dialog = Dialog::new(EXPORT_TITLE, EXPORT_PRIMARY)
-        .description(
-            "Export a portable shortcut profile with explicit scope, format, platform mappings, and privacy boundaries.",
-        )
+        .description("Share key bindings between machines or with your team.")
         .size(DialogSize::Transaction)
         .primary_enabled(!state.pending)
         .ghost(cancel_label)
@@ -1100,8 +973,8 @@ fn render_export_dialog(
     } else if state.pending {
         dialog = dialog.transaction_state(
             DialogTransactionTone::Progress,
-            "Publishing shortcut profile",
-            "Waiting for the platform export destination to complete or cancel.",
+            "Saving shortcut file\u{2026}",
+            "Waiting for you to choose where to save it.",
         );
     }
     let choice = dialog.show(ctx, |ui| render_export_body(ui, state));
@@ -1147,7 +1020,7 @@ fn render_export_body(ui: &mut Ui, state: &mut ShortcutExportDialogState) {
     workflow_row(
         ui,
         "Format",
-        "Versioned schema with stable command identifiers.",
+        "JSON imports back into RSpice. Markdown and PDF are for reading.",
         |ui| {
             value_column(ui, |ui| {
                 let labels = ShortcutArtifactFormat::ALL
@@ -1177,7 +1050,7 @@ fn render_export_body(ui: &mut Ui, state: &mut ShortcutExportDialogState) {
     workflow_row(
         ui,
         "Scope",
-        "Defaults can be omitted for a smaller personal override.",
+        "Your changes only, every binding, or the current workspace's bindings.",
         |ui| {
             value_column(ui, |ui| {
                 let labels = EXPORT_SCOPES
@@ -1207,7 +1080,7 @@ fn render_export_body(ui: &mut Ui, state: &mut ShortcutExportDialogState) {
     workflow_row(
         ui,
         "Platform mappings",
-        "Preserve explicit desktop and browser alternatives.",
+        "Keep the separate desktop and browser keys a command may have.",
         |ui| {
             value_column(ui, |ui| {
                 let changed = ui
@@ -1230,12 +1103,12 @@ fn render_export_body(ui: &mut Ui, state: &mut ShortcutExportDialogState) {
     workflow_row(
         ui,
         "Privacy",
-        "Projects, paths, recent commands, macros, credentials, and automation source are excluded.",
+        "Only key bindings are written. No projects, paths, history or credentials.",
         |ui| {
             value_column(ui, |ui| {
                 let t = Tokens::get(ui.ctx());
                 ui.label(
-                    egui::RichText::new("portable profile only")
+                    egui::RichText::new("key bindings only")
                         .font(theme::sans(tokens::FS_0, FontWeight::Medium))
                         .color(t.color.text_dim),
                 );
@@ -1364,7 +1237,7 @@ fn source_well(ui: &mut Ui, value: Option<&str>, enabled: bool) -> bool {
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, "Source"));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_value(value.unwrap_or(IMPORT_SOURCE_PLACEHOLDER));
-        node.set_description("Choose an RSpice shortcut profile or supported editor preset");
+        node.set_description("Choose an RSpice shortcut file or a VS Code keybindings file");
     });
     if enabled {
         theme::paint_focus_ring(ui, &response, field.rect);
@@ -1493,7 +1366,6 @@ mod tests {
             [
                 "Merge non-conflicting bindings",
                 "Replace current user bindings",
-                "Import into a named preset",
             ]
         );
         assert_eq!(
@@ -1716,47 +1588,6 @@ mod tests {
     }
 
     #[test]
-    fn named_preset_validation_never_falls_through_to_an_active_import() {
-        let base = ShortcutProfileLibrary::default();
-        let artifact = exported_artifact(&ShortcutPreferences::default());
-        let mut state = ShortcutImportDialogState::default();
-        open_with_artifact(&mut state, &base, artifact);
-        state.options.merge_policy = ShortcutMergePolicy::ImportNamedPreset;
-        state.options.preset_name = Some("   ".to_owned());
-        state.plan_dirty = true;
-        state.synchronize_plan(&base);
-        assert!(state.plan.is_none());
-        assert!(state.error.is_some());
-    }
-
-    #[test]
-    fn rollback_effect_retains_the_exact_receipt_until_success() {
-        let base = ShortcutProfileLibrary::default();
-        let artifact = exported_artifact(&ShortcutPreferences::default());
-        let plan =
-            plan_shortcut_import(&base, &artifact, &ShortcutImportOptions::default()).unwrap();
-        let mut published = base.clone();
-        let receipt = apply_shortcut_import(&mut published, &plan, |_| Ok(())).unwrap();
-        let receipt_source = receipt.source_name().to_owned();
-        let mut state = ShortcutImportDialogState {
-            last_receipt: Some(receipt),
-            ..ShortcutImportDialogState::default()
-        };
-
-        let action = state.begin_rollback().unwrap();
-        assert!(matches!(
-            action,
-            ShortcutPortabilityAction::RollbackImport(receipt)
-                if receipt.source_name() == receipt_source
-        ));
-        state.complete_rollback(Err("durable store unavailable".to_owned()));
-        assert!(state.last_receipt.is_some());
-        state.begin_rollback().unwrap();
-        state.complete_rollback(Ok(()));
-        assert!(state.last_receipt.is_none());
-    }
-
-    #[test]
     fn export_effect_contains_fully_prepared_private_artifact() {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
@@ -1881,7 +1712,7 @@ mod tests {
                 .count(),
             16
         );
-        for label in ["Source", "Merge policy", "Conflict handling"] {
+        for label in ["Source", "Current bindings", "Conflict handling"] {
             assert!(nodes.iter().any(|(_, node)| node.label() == Some(label)));
         }
     }
@@ -1916,7 +1747,7 @@ mod tests {
             },
         );
         let nodes = output.platform_output.accesskit_update.unwrap().nodes;
-        for label in ["Source", "Merge policy", "Conflict handling"] {
+        for label in ["Source", "Current bindings", "Conflict handling"] {
             assert!(
                 nodes
                     .iter()
@@ -1938,8 +1769,7 @@ mod tests {
         let mut state = ShortcutImportDialogState {
             open: true,
             options: ShortcutImportOptions {
-                merge_policy: ShortcutMergePolicy::ImportNamedPreset,
-                preset_name: None,
+                merge_policy: ShortcutMergePolicy::ReplaceCurrentUserBindings,
                 ..ShortcutImportOptions::default()
             },
             pending: ImportPending::Commit,

@@ -61,7 +61,7 @@ use crate::ui::plot::sample::{SweepShape, sample_at_with_shape};
 use crate::ui::plot::{self, DisplayDecimation, XScale, fmt_si_significant};
 use crate::ui::tokens::Tokens;
 use crate::workbench::AppState;
-use crate::workbench::{ComplexNumberDisplay, LargeDatasetDisplay};
+use crate::workbench::ComplexNumberDisplay;
 use rspice_results::family_projection::SourceSampleSelection;
 #[cfg(test)]
 use rspice_results_ui::waves::navigation::model_x_axis;
@@ -400,14 +400,6 @@ pub(super) fn drop_marker_at_cursor_a(state: &mut AppState, t: &Tokens) {
     }
 }
 
-const fn display_decimation(policy: LargeDatasetDisplay) -> DisplayDecimation {
-    match policy {
-        LargeDatasetDisplay::EnvelopeExtrema => DisplayDecimation::EnvelopeExtrema,
-        LargeDatasetDisplay::UniformDisplaySampling => DisplayDecimation::Uniform,
-        LargeDatasetDisplay::NoDisplayDecimation => DisplayDecimation::FullResolution,
-    }
-}
-
 // ---------------------------------------------------------------------------
 // center view
 // ---------------------------------------------------------------------------
@@ -478,7 +470,9 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
             pane_chrome,
             readout: presentation.readout(),
             quantity,
-            display_decimation: display_decimation(presentation.large_dataset_display()),
+            // Every pane keeps each pixel column's extremes: uniform sampling
+            // drops peaks, and drawing every point stalls on a long run.
+            display_decimation: DisplayDecimation::EnvelopeExtrema,
         },
     );
 }

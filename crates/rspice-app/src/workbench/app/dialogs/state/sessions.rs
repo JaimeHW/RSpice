@@ -173,6 +173,15 @@ impl WindowSessionDialogState {
 
 /// The run Run details… is open on, with its manifest taken once when the
 /// dialog opened: projecting a run digests every sample it retained.
+/// The open "Export dataset…" format picker: the format chosen so far, by
+/// its stored index, and whether the view it exports shows more than one
+/// analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DatasetExportPicker {
+    pub(crate) format: usize,
+    pub(crate) several_analyses: bool,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct RunDetailsDialogState {
     pub(crate) run_id: u64,
@@ -304,6 +313,8 @@ pub struct DialogState {
     /// Why a removal the plan will not perform was refused before it was
     /// staged. The review above asks; this one only states.
     pub(crate) plan_removal_refusal: PlanRemovalRefusal,
+    /// The format question "Export dataset…" asks, while it is open.
+    pub(crate) dataset_export: Option<DatasetExportPicker>,
     /// A saved-file open found a bound, eligible autosave checkpoint; the
     /// restore dialog resolves it before either exact byte snapshot is loaded.
     #[cfg(not(target_arch = "wasm32"))]
@@ -541,6 +552,7 @@ impl DialogState {
             || self.library_deletion_review.target.is_some()
             || self.plan_removal_review.target.is_some()
             || self.plan_removal_refusal.analysis.is_some()
+            || self.dataset_export.is_some()
             || self.preferences_open
             || self.hardcopy.open
             || self.drawing_sheet_setup.open

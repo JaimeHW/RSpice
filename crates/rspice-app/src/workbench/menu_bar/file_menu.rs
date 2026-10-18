@@ -104,8 +104,10 @@ pub(crate) fn dispatch_file_menu_action(
         FileMenuAction::ExportSvg => {
             super::export_actions::action_export_svg_with_io(state, export_workflow_io)
         }
+        // The format is asked first; the frame runs the export once it is
+        // answered, because the picker is a dialog that lives across frames.
         FileMenuAction::ExportCsvWaveforms => {
-            super::waveform_export::action_export_csv_with_io(state, export_workflow_io)
+            super::waveform_export::open_dataset_export_picker(state);
         }
         FileMenuAction::ExportPublicationSnapshot => {
             super::export_actions::action_export_publication_snapshot_with_io(

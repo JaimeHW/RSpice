@@ -1355,15 +1355,10 @@ pub fn shortcut_library_digest(
         .map_err(|error| ShortcutImportPlanError::Serialization(error.to_string()))
 }
 
-/// What an applied import left behind: enough to name the source in the undo
-/// affordance, and enough to restore the exact predecessor library if the
-/// bindings have not moved on since.
+/// What an applied import left behind: the name of the file it came from.
 #[derive(Debug, Clone)]
 pub struct ShortcutImportReceipt {
     source_name: String,
-    applied_revision: u64,
-    applied_digest: [u8; 32],
-    predecessor: ShortcutProfileLibrary,
 }
 
 impl ShortcutImportReceipt {
@@ -1377,7 +1372,6 @@ impl ShortcutImportReceipt {
 pub enum ShortcutImportApplyError {
     PlanNotReady,
     StaleBase,
-    StaleAppliedState,
     Persistence(String),
     Serialization(String),
     Library(ShortcutProfileLibraryError),
@@ -1390,10 +1384,6 @@ impl fmt::Display for ShortcutImportApplyError {
             Self::StaleBase => write!(
                 formatter,
                 "shortcut bindings changed after the import review was prepared"
-            ),
-            Self::StaleAppliedState => write!(
-                formatter,
-                "shortcut bindings changed after import; undo would erase later edits"
             ),
             Self::Persistence(error) | Self::Serialization(error) => error.fmt(formatter),
             Self::Library(error) => error.fmt(formatter),
@@ -1416,41 +1406,15 @@ pub fn apply_shortcut_import(
     if library.revision() != plan.base_revision || current_digest != plan.base_digest {
         return Err(ShortcutImportApplyError::StaleBase);
     }
-    let predecessor = library.clone();
     let mut published = library.clone();
     published
         .replace_content_from(&plan.candidate_library)
         .map_err(ShortcutImportApplyError::Library)?;
     persist(&published).map_err(ShortcutImportApplyError::Persistence)?;
-    let applied_revision = published.revision();
-    let applied_digest = shortcut_library_digest(&published)
-        .map_err(|error| ShortcutImportApplyError::Serialization(error.to_string()))?;
     *library = published;
     Ok(ShortcutImportReceipt {
         source_name: plan.source_name.clone(),
-        applied_revision,
-        applied_digest,
-        predecessor,
     })
-}
-
-pub fn rollback_shortcut_import(
-    library: &mut ShortcutProfileLibrary,
-    receipt: &ShortcutImportReceipt,
-    persist: impl FnOnce(&ShortcutProfileLibrary) -> Result<(), String>,
-) -> Result<(), ShortcutImportApplyError> {
-    let digest = shortcut_library_digest(library)
-        .map_err(|error| ShortcutImportApplyError::Serialization(error.to_string()))?;
-    if library.revision() != receipt.applied_revision || digest != receipt.applied_digest {
-        return Err(ShortcutImportApplyError::StaleAppliedState);
-    }
-    let mut restored = library.clone();
-    restored
-        .replace_content_from(&receipt.predecessor)
-        .map_err(ShortcutImportApplyError::Library)?;
-    persist(&restored).map_err(ShortcutImportApplyError::Persistence)?;
-    *library = restored;
-    Ok(())
 }
 
 #[cfg(test)]

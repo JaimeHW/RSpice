@@ -427,12 +427,15 @@ impl ResolvedShortcutBinding {
     }
 }
 
+/// A binding policy stored in the shortcut file. One written with labels is
+/// a choice Preferences offers; one without is kept at its shipped value for
+/// files that carry it, and has no control.
 macro_rules! policy_enum {
     (
         $(#[$meta:meta])*
         pub enum $name:ident {
-            $default:ident => $default_label:literal
-            $(, $variant:ident => $label:literal)* $(,)?
+            $default:ident
+            $(, $variant:ident)* $(,)?
         }
     ) => {
         $(#[$meta])*
@@ -445,6 +448,21 @@ macro_rules! policy_enum {
 
         impl Default for $name {
             fn default() -> Self { Self::$default }
+        }
+    };
+    (
+        $(#[$meta:meta])*
+        pub enum $name:ident {
+            $default:ident => $default_label:literal
+            $(, $variant:ident => $label:literal)* $(,)?
+        }
+    ) => {
+        policy_enum! {
+            $(#[$meta])*
+            pub enum $name {
+                $default
+                $(, $variant)*
+            }
         }
 
         impl $name {
@@ -490,15 +508,15 @@ impl ChordTimeoutPolicy {
 
 policy_enum! {
     pub enum ProtectedShortcutPolicy {
-        RequireConflictFreeAlternate => "Require a conflict-free alternate",
-        AllowWithConfirmation => "Allow with confirmation"
+        RequireConflictFreeAlternate,
+        AllowWithConfirmation
     }
 }
 
 policy_enum! {
     pub enum ContextPrecedencePolicy {
-        ModalEditorWorkspaceGlobal => "Modal → editor → workspace → global",
-        EditorModalWorkspaceGlobal => "Editor → modal → workspace → global"
+        ModalEditorWorkspaceGlobal,
+        EditorModalWorkspaceGlobal
     }
 }
 

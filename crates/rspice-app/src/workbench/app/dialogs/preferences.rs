@@ -14,7 +14,7 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::commands::ShortcutContext;
 use crate::workbench::shortcuts::artifacts::{
     ShortcutArtifactExportOutcome, ShortcutArtifactImportOutcome, ShortcutImportReceipt,
-    apply_shortcut_import, export_shortcut_artifact, rollback_shortcut_import,
+    apply_shortcut_import, export_shortcut_artifact,
 };
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
@@ -53,7 +53,6 @@ fn set_pending_restore(ctx: &Context, category: Option<PreferenceCategory>) {
 
 #[derive(Debug, Default)]
 pub(in crate::workbench) struct PreferencePageActions {
-    pub(in crate::workbench) open_workspace_layout_manager: bool,
     pub(in crate::workbench) open_shortcut_editor: bool,
     pub(in crate::workbench) open_shortcut_import: bool,
     pub(in crate::workbench) open_shortcut_export: bool,
@@ -62,7 +61,6 @@ pub(in crate::workbench) struct PreferencePageActions {
     pub(in crate::workbench) show_settings_file: bool,
     pub(in crate::workbench) shortcut_policy_candidate:
         Option<crate::workbench::ShortcutPreferences>,
-    pub(in crate::workbench) updated_profile_label: Option<&'static str>,
 }
 
 impl RSpiceApp {
@@ -150,10 +148,6 @@ impl RSpiceApp {
             ctx.data_mut(|data| data.insert_temp(category_id, category));
         }
 
-        if let Some(label) = actions.updated_profile_label {
-            self.state
-                .prompt(engineering_profile_updated_message(label));
-        }
         if shell_response.restore_defaults_requested {
             set_pending_restore(ctx, Some(category));
         }
@@ -190,16 +184,6 @@ impl RSpiceApp {
         }
         if actions.show_settings_file {
             self.state.show_preferences_file();
-        }
-        if actions.open_workspace_layout_manager {
-            let preset = self
-                .state
-                .ui
-                .preferences
-                .workspace()
-                .map(crate::workbench::WorkspacePreferences::preset)
-                .unwrap_or_default();
-            self.state.dialogs.workspace_layout_manager.open(preset);
         }
         if let Some(profile) = actions.shortcut_policy_candidate {
             self.begin_shortcut_policy_publication(ctx, profile);
@@ -375,10 +359,12 @@ impl RSpiceApp {
                             .shortcut_portability
                             .import_commit_cancelled(Ok(()));
                     } else {
-                        self.state.dialogs.shortcut_portability.import_commit_cancelled(Err(
-                            "The durable commit boundary was already reached; the completed import remains active."
-                                .to_owned(),
-                        ));
+                        self.state
+                            .dialogs
+                            .shortcut_portability
+                            .import_commit_cancelled(Err(
+                                "The import had already been saved and is in effect.".to_owned(),
+                            ));
                     }
                 }
                 #[cfg(not(target_arch = "wasm32"))]
@@ -386,26 +372,8 @@ impl RSpiceApp {
                     .dialogs
                     .shortcut_portability
                     .import_commit_cancelled(Err(
-                        "Native shortcut publication completes synchronously and cannot be cancelled after commit."
-                            .to_owned(),
+                        "The import was already saved and can no longer be cancelled.".to_owned(),
                     ));
-            }
-            ShortcutPortabilityAction::RollbackImport(receipt) => {
-                match stage_shortcut_rollback(
-                    self.state.ui.preferences.shortcut_profiles(),
-                    &receipt,
-                ) {
-                    Ok(candidate) => self.publish_shortcut_candidate(
-                        ctx,
-                        &candidate,
-                        ShortcutLibraryPublicationContinuation::Rollback,
-                    ),
-                    Err(error) => self
-                        .state
-                        .dialogs
-                        .shortcut_portability
-                        .complete_rollback(Err(error)),
-                }
             }
             ShortcutPortabilityAction::PublishExport(artifact) => {
                 let result = export_shortcut_artifact(&artifact).map_err(|error| error.to_string());
@@ -576,10 +544,6 @@ impl RSpiceApp {
                     .shortcut_portability
                     .complete_import(Err(message.to_owned()));
                 self.state
-                    .dialogs
-                    .shortcut_portability
-                    .complete_rollback(Err(message.to_owned()));
-                self.state
                     .record(LogSeverity::Error, LogSource::Studio, message);
             }
             return;
@@ -649,22 +613,6 @@ impl AppState {
                     .shortcut_portability
                     .complete_import(result.map(|()| *receipt));
             }
-            ShortcutLibraryPublicationContinuation::Rollback => {
-                if result.is_ok() {
-                    self.record(
-                        LogSeverity::Info,
-                        LogSource::Studio,
-                        "Undid the shortcut profile import.",
-                    );
-                } else if let Err(error) = &result {
-                    self.record(
-                        LogSeverity::Error,
-                        LogSource::Studio,
-                        format!("Undoing the shortcut profile import was not saved: {error}"),
-                    );
-                }
-                self.dialogs.shortcut_portability.complete_rollback(result);
-            }
             ShortcutLibraryPublicationContinuation::SettingsImport(staged) => {
                 self.finish_settings_import(*staged, result);
             }
@@ -686,16 +634,6 @@ fn stage_shortcut_import(
     let receipt =
         apply_shortcut_import(&mut staged, plan, |_| Ok(())).map_err(|error| error.to_string())?;
     Ok((staged, receipt))
-}
-
-fn stage_shortcut_rollback(
-    base: &crate::workbench::shortcuts::ShortcutProfileLibrary,
-    receipt: &ShortcutImportReceipt,
-) -> Result<crate::workbench::shortcuts::ShortcutProfileLibrary, String> {
-    let mut staged = base.clone();
-    rollback_shortcut_import(&mut staged, receipt, |_| Ok(()))
-        .map_err(|error| error.to_string())?;
-    Ok(staged)
 }
 
 fn close_preferences(state: &mut AppState) {
@@ -726,20 +664,6 @@ pub(in crate::workbench) fn normalize_autosave_minutes(minutes: u8) -> u8 {
         4..=7 => 5,
         _ => 10,
     }
-}
-
-pub(in crate::workbench) fn engineering_profile_detail(
-    profile: crate::workbench::EngineeringProfile,
-) -> &'static str {
-    if profile == crate::workbench::EngineeringProfile::All {
-        "Capability discovery reports every installed or specified specialist workspace for evaluators, administrators and cross-domain teams."
-    } else {
-        profile.detail()
-    }
-}
-
-fn engineering_profile_updated_message(label: &str) -> String {
-    format!("Engineering profile set to {label}. Open project documents are unchanged.")
 }
 
 #[cfg(test)]
@@ -946,15 +870,10 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn every_exposed_preferences_action_routes_to_a_real_executor() {
+    fn the_layout_manager_stays_reachable_without_a_preferences_row() {
+        use crate::workbench::commands::vocabulary::Command;
         let mut layout_app = test_app();
-        layout_app.execute_preference_page_actions(
-            &Context::default(),
-            PreferencePageActions {
-                open_workspace_layout_manager: true,
-                ..PreferencePageActions::default()
-            },
-        );
+        Command::WorkspaceLayouts.execute(&mut layout_app);
         assert!(layout_app.state.dialogs.workspace_layout_manager.open);
         assert!(layout_app.state.dialogs.application_modal_open());
     }
@@ -1241,13 +1160,5 @@ mod tests {
         assert_eq!(normalize_autosave_minutes(0), 2);
         assert_eq!(normalize_autosave_minutes(5), 5);
         assert_eq!(normalize_autosave_minutes(15), 10);
-    }
-
-    #[test]
-    fn engineering_profile_copy_describes_implemented_behavior() {
-        assert_eq!(
-            engineering_profile_updated_message("Power electronics"),
-            "Engineering profile set to Power electronics. Open project documents are unchanged."
-        );
     }
 }

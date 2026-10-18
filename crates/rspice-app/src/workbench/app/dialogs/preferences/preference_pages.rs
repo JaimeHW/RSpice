@@ -9,9 +9,8 @@
 
 use egui::Ui;
 
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, select};
+use crate::ui::tokens::Tokens;
+use crate::ui::widgets::select;
 use crate::ui::{Density, EngineeringCanvasTheme, Mode};
 use crate::workbench::{
     BackgroundTaskAttention, ChoicePreference, ConsoleLaunchBehavior, ScalarPreference,
@@ -45,7 +44,7 @@ pub(super) fn render(
     match category {
         PreferenceCategory::Appearance => appearance(ui, state),
         PreferenceCategory::Accessibility => accessibility(ui, state),
-        PreferenceCategory::Workspace => workspace(ui, state, actions),
+        PreferenceCategory::Workspace => workspace(ui, state),
         PreferenceCategory::Shortcuts => {
             super::shortcut_preferences::render_page(ui, state, actions);
         }
@@ -157,24 +156,6 @@ fn solver_threads_row(ui: &mut Ui, state: &mut AppState) {
             }
         });
     });
-}
-
-fn action_row(
-    ui: &mut Ui,
-    title: &'static str,
-    detail: &'static str,
-    action_id: &'static str,
-    label: &'static str,
-) -> bool {
-    let mut clicked = false;
-    preference_row(ui, title, detail, |ui| {
-        value_column(ui, |ui| {
-            clicked = ui
-                .push_id(action_id, |ui| Button::new(label).show(ui).clicked())
-                .inner;
-        });
-    });
-    clicked
 }
 
 fn choice_row(
@@ -351,41 +332,10 @@ fn appearance(ui: &mut Ui, state: &mut AppState) {
     );
 }
 
-fn workspace(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
-    // No static help on this row: the line under the control says what the
-    // selected profile actually covers, which is the same question answered
-    // concretely. Two explanations of one setting is one too many.
-    preference_row(ui, "Engineering profile", "", |ui| {
-        let profiles = crate::workbench::EngineeringProfile::ALL;
-        let labels = profiles
-            .iter()
-            .map(|profile| profile.label().to_owned())
-            .collect::<Vec<_>>();
-        let active = profiles
-            .iter()
-            .position(|profile| *profile == state.workbench.engineering_profile)
-            .unwrap_or_default();
-        if let Some(selected) = select(
-            ui,
-            "preferences.workspace.engineering-profile",
-            "Engineering profile",
-            profiles[active].label(),
-            &labels,
-            control_width(ui),
-        ) {
-            let profile = profiles[selected];
-            if profile != state.workbench.engineering_profile {
-                state.workbench.engineering_profile = profile;
-                actions.updated_profile_label = Some(profile.label());
-            }
-        }
-        ui.add_space(4.0);
-        setting_detail(
-            ui,
-            super::engineering_profile_detail(state.workbench.engineering_profile),
-            control_width(ui),
-        );
-    });
+fn workspace(ui: &mut Ui, state: &mut AppState) {
+    // An "Engineering profile" row used to open this page. It narrowed one
+    // specialist tool list and nothing else, so it told a reader the
+    // workbench was tailored to their domain when it was not.
     if state.ui.preferences.workspace().is_none() {
         return;
     }
@@ -459,18 +409,9 @@ fn workspace(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActi
         },
     );
     // A "Dock sizes" row used to sit here reading back the navigator,
-    // inspector and console widths in pixels. The reader sets those by
-    // dragging the splitter and sees the result as they drag; a second,
-    // non-interactive account of the same three numbers decides nothing.
-    if action_row(
-        ui,
-        "Per-workspace layouts",
-        "Each workspace keeps its own docks and console state.",
-        "workspace-layouts",
-        "Manage layouts…",
-    ) {
-        actions.open_workspace_layout_manager = true;
-    }
+    // inspector and console widths in pixels, and after it a "Manage
+    // layouts…" button for a dialog that applies the same three templates as
+    // the preset row above. The dialog stays on the Window menu.
 
     section_heading(ui, "Background work");
     solver_threads_row(ui, state);
@@ -773,50 +714,19 @@ fn results(ui: &mut Ui, state: &mut AppState) {
             "Nearest accepted point",
         ],
     );
-    choice_row(
+    keyword_choice_row(
         ui,
         state,
         ChoicePreference::ComplexNumberDisplay,
         "Complex-number display",
-        "Viewer-specific axes may override this without changing the dataset.",
-        &[
-            "Magnitude / phase · degrees",
-            "Real / imaginary",
-            "Magnitude / phase · radians",
-        ],
+        "Phase uses the angle unit set in Units and notation.",
+        &["Magnitude and phase", "Real and imaginary"],
+        &["polar", "cartesian", "bode"],
     );
-    section_heading(ui, "Data and export");
-    choice_row(
-        ui,
-        state,
-        ChoicePreference::LargeDatasetDisplay,
-        "Large-dataset display",
-        "Visual decimation preserves extrema, crossings and cursor source samples.",
-        &[
-            "Envelope + extrema-preserving decimation",
-            "Uniform display sampling",
-            "No display decimation",
-        ],
-    );
-    choice_row(
-        ui,
-        state,
-        ChoicePreference::EngineeringExport,
-        "Default engineering export",
-        "Exports keep full stored precision. Native bundles reopen in RSpice.",
-        &[
-            "CSV",
-            "Touchstone where compatible",
-            "TSV",
-            "RSpice Result Bundle",
-            "RSpice Dataset Bundle",
-            "VCD · event timelines",
-            "NumPy .npy · one array, column order stated",
-            "NumPy .npz · one named array per signal",
-            "HDF5 dataset · one analysis, names and units carried",
-            "MATLAB v5 · column vectors, complex for AC",
-        ],
-    );
+    // A "Large-dataset display" row used to follow, offering to sample long
+    // runs uniformly (which drops peaks) or not at all (which stalls). Every
+    // pane now keeps each pixel column's extremes. The export format that
+    // used to sit after it is asked by "Export dataset…" itself.
 }
 
 /// What a new project starts from, and what saving one does.
@@ -992,23 +902,6 @@ fn set_browser_spoken_feedback(state: &mut AppState, enabled: bool) {
     crate::workbench::browser::accessibility::set_spoken_feedback(enabled);
 }
 
-/// A line derived from the control above it, wrapped to that control's own
-/// width so the two share a right edge.
-fn setting_detail(ui: &mut Ui, text: &str, width: f32) {
-    let t = Tokens::get(ui.ctx());
-    ui.scope(|ui| {
-        ui.set_max_width(width);
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(text)
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-            )
-            .wrap(),
-        );
-    });
-}
-
 /// Put every setting on `category`'s page back to what RSpice ships.
 ///
 /// Page-scoped rather than global: a reader who has made one page unreadable
@@ -1045,7 +938,6 @@ pub(super) fn restore_defaults(
             set_browser_spoken_feedback(state, false);
         }
         PreferenceCategory::Workspace => {
-            state.workbench.engineering_profile = crate::workbench::EngineeringProfile::default();
             preferences.restore_defaults(&[], &[], &[ScalarPreference::LocalParallelSlots]);
             if let Ok(workspace) = preferences.workspace_mut() {
                 *workspace = WorkspacePreferences::default();
@@ -1107,8 +999,6 @@ pub(super) fn restore_defaults(
             &[
                 ChoicePreference::CursorInterpolation,
                 ChoicePreference::ComplexNumberDisplay,
-                ChoicePreference::LargeDatasetDisplay,
-                ChoicePreference::EngineeringExport,
             ],
             &[],
             &[ScalarPreference::DisplayedSignificantDigits],
@@ -1212,6 +1102,9 @@ mod tests {
             "ChoicePreference::DataResidency",
             "ChoicePreference::ExtensionPolicy",
             "ChoicePreference::ExtensionUpdates",
+            // Every waveform pane keeps each pixel column's extremes; a stored
+            // value from an older build is decoded and ignored.
+            "ChoicePreference::LargeDatasetDisplay",
             "TogglePreference::RestorePlotDocuments",
             "TogglePreference::SynchronizeResultFamilyCrossProbes",
             "TogglePreference::AutomaticDiagnostics",

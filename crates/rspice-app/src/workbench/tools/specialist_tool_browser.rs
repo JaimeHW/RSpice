@@ -24,7 +24,7 @@ use crate::workbench::{AppState, RSpiceApp};
 use crate::workbench::{
     RouteTransitionSource, SurfaceExecutionAvailability, SurfaceId, SurfaceRoute,
     design_system::WorkbenchIcon,
-    state::{EngineeringProfile, SpecialistToolBrowserState, SpecialistToolFilter, Workspace},
+    state::{SpecialistToolBrowserState, SpecialistToolFilter, Workspace},
 };
 
 mod workspace_rows;
@@ -77,7 +77,6 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
         return;
     }
 
-    let profile = app.state.workbench.engineering_profile;
     let mut requested_action = None;
     let choice = Dialog::new("Specialist tool browser", "Close")
         .description(DESCRIPTION)
@@ -88,10 +87,10 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
         .show_with_initial_body_focus(ctx, |ui| {
             let browser = &mut app.state.workbench.specialist_tool_browser;
             purpose_banner(ui);
-            let search_id = toolbar(ui, browser, profile);
+            let search_id = toolbar(ui, browser);
             filter_bar(ui, browser);
-            let rows = visible_rows(browser, profile);
-            tool_grid(ui, browser, profile, &rows, &mut requested_action);
+            let rows = visible_rows(browser);
+            tool_grid(ui, browser, &rows, &mut requested_action);
             ownership_banner(ui);
             Some(search_id)
         });
@@ -199,17 +198,13 @@ fn purpose_banner(ui: &mut Ui) {
     );
 }
 
-fn toolbar(
-    ui: &mut Ui,
-    browser: &mut SpecialistToolBrowserState,
-    profile: EngineeringProfile,
-) -> Id {
+fn toolbar(ui: &mut Ui, browser: &mut SpecialistToolBrowserState) -> Id {
     let t = Tokens::get(ui.ctx());
     let frame = Frame::NONE
         .fill(t.color.bg_panel)
         .inner_margin(Margin::symmetric(TOOLBAR_PADDING_X, TOOLBAR_PADDING_Y))
         .show(ui, |ui| {
-            let count = visible_rows(browser, profile).len();
+            let count = visible_rows(browser).len();
             let mut search_id = Id::NULL;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
@@ -406,28 +401,20 @@ fn filter_button(ui: &mut Ui, label: &str, selected: bool, last: bool) -> Respon
     response
 }
 
-fn visible_rows(
-    browser: &SpecialistToolBrowserState,
-    profile: EngineeringProfile,
-) -> Vec<&'static SpecialistWorkspaceRow> {
+fn visible_rows(browser: &SpecialistToolBrowserState) -> Vec<&'static SpecialistWorkspaceRow> {
     let query = browser.query.trim().to_lowercase();
     let mut rows = SPECIALIST_WORKSPACE_ROWS
         .iter()
-        .filter(|row| filter_includes(browser, profile, row))
+        .filter(|row| filter_includes(browser, row))
         .filter(|row| query_matches(row, &query))
         .collect::<Vec<_>>();
     rows.sort_by(|left, right| compare_rows(browser, left, right));
     rows
 }
 
-fn filter_includes(
-    browser: &SpecialistToolBrowserState,
-    profile: EngineeringProfile,
-    row: &SpecialistWorkspaceRow,
-) -> bool {
+fn filter_includes(browser: &SpecialistToolBrowserState, row: &SpecialistWorkspaceRow) -> bool {
     match browser.filter {
         SpecialistToolFilter::All => true,
-        SpecialistToolFilter::ActiveProfile => row.shown_in_profile(profile),
         SpecialistToolFilter::Pinned => browser.is_pinned(row.surface_id),
         SpecialistToolFilter::Favorites => browser.is_favorite(row.surface_id),
         SpecialistToolFilter::Recent => browser.is_recent(row.surface_id),
@@ -493,7 +480,6 @@ fn recent_rank(browser: &SpecialistToolBrowserState, surface: SurfaceId) -> usiz
 fn tool_grid(
     ui: &mut Ui,
     browser: &SpecialistToolBrowserState,
-    profile: EngineeringProfile,
     rows: &[&SpecialistWorkspaceRow],
     requested_action: &mut Option<BrowserAction>,
 ) {
@@ -520,7 +506,6 @@ fn tool_grid(
                     if let Some(action) = tool_card(
                         ui,
                         browser,
-                        profile,
                         row,
                         card_width,
                         row_height,
@@ -565,13 +550,11 @@ const fn compact_layout_for_width(local_width: f32, has_touch_screen: bool) -> b
     local_width <= COMPACT_BREAKPOINT || has_touch_screen
 }
 
-const fn tool_status_copy(available: bool, shown_in_profile: bool) -> &'static str {
-    if !available {
-        "specified · unavailable"
-    } else if shown_in_profile {
-        "active profile"
+const fn tool_status_copy(available: bool) -> &'static str {
+    if available {
+        "available"
     } else {
-        "available by deep link"
+        "specified · unavailable"
     }
 }
 
@@ -644,7 +627,6 @@ fn tool_card_layout(rect: Rect, action_side: f32, status_text_width: f32) -> Too
 fn tool_card(
     ui: &mut Ui,
     browser: &SpecialistToolBrowserState,
-    profile: EngineeringProfile,
     row: &SpecialistWorkspaceRow,
     width: f32,
     height: f32,
@@ -685,11 +667,11 @@ fn tool_card(
     }
 
     let status_font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let profile_copy = tool_status_copy(available, row.shown_in_profile(profile));
+    let status_copy = tool_status_copy(available);
     let status_text_width = ui
         .painter()
         .layout_no_wrap(
-            profile_copy.to_owned(),
+            status_copy.to_owned(),
             status_font.clone(),
             t.color.text_dim,
         )
@@ -737,7 +719,7 @@ fn tool_card(
         let status_painter = ui.painter().with_clip_rect(status_rect);
         let status = elide_to_width(
             &status_painter,
-            profile_copy,
+            status_copy,
             &status_font,
             status_rect.width().max(1.0),
         );
@@ -756,7 +738,7 @@ fn tool_card(
         let status_painter = ui.painter().with_clip_rect(status_line);
         let status = elide_to_width(
             &status_painter,
-            profile_copy,
+            status_copy,
             &status_font,
             status_line.width().max(1.0),
         );
@@ -785,7 +767,7 @@ fn tool_card(
             "{}; {}; {}; {}; {}",
             row.purpose,
             row.owner.owner_label(),
-            profile_copy,
+            status_copy,
             row.engine_service_boundary(),
             availability_copy(availability)
         ));
@@ -796,7 +778,7 @@ fn tool_card(
         row.label(),
         row.owner.owner_label(),
         phone_mode(row.surface_id),
-        profile_copy,
+        status_copy,
         availability_copy(availability)
     ));
 
@@ -1097,7 +1079,7 @@ mod tests {
     #[test]
     fn empty_query_projects_all_40_governed_specialist_owners() {
         let browser = SpecialistToolBrowserState::default();
-        let rows = visible_rows(&browser, EngineeringProfile::AnalogIc);
+        let rows = visible_rows(&browser);
         assert_eq!(rows.len(), 40);
         assert_eq!(
             rows[0].surface_id.archetype().as_str(),
@@ -1111,7 +1093,7 @@ mod tests {
             query: "models-pdk correlation".to_owned(),
             ..SpecialistToolBrowserState::default()
         };
-        let rows = visible_rows(&browser, EngineeringProfile::AnalogIc);
+        let rows = visible_rows(&browser);
         assert!(
             rows.iter()
                 .any(|row| row.surface_id == SurfaceId::ModelCorrelation)
@@ -1120,7 +1102,7 @@ mod tests {
 
         browser.query = "library-cellview-manager".to_owned();
         assert_eq!(
-            visible_rows(&browser, EngineeringProfile::AnalogIc)
+            visible_rows(&browser)
                 .into_iter()
                 .map(|row| row.surface_id)
                 .collect::<Vec<_>>(),
@@ -1136,18 +1118,12 @@ mod tests {
         browser.recents = vec![SurfaceId::PhotonicsWorkbench];
 
         browser.filter = SpecialistToolFilter::Pinned;
-        assert_eq!(
-            visible_rows(&browser, EngineeringProfile::AnalogIc)[0].surface_id,
-            SurfaceId::RfWorkbench
-        );
+        assert_eq!(visible_rows(&browser)[0].surface_id, SurfaceId::RfWorkbench);
         browser.filter = SpecialistToolFilter::Favorites;
-        assert_eq!(
-            visible_rows(&browser, EngineeringProfile::AnalogIc)[0].surface_id,
-            SurfaceId::ModelEditor
-        );
+        assert_eq!(visible_rows(&browser)[0].surface_id, SurfaceId::ModelEditor);
         browser.filter = SpecialistToolFilter::Recent;
         assert_eq!(
-            visible_rows(&browser, EngineeringProfile::AnalogIc)[0].surface_id,
+            visible_rows(&browser)[0].surface_id,
             SurfaceId::PhotonicsWorkbench
         );
         assert_eq!(browser.pinned, [SurfaceId::RfWorkbench]);
@@ -1163,7 +1139,7 @@ mod tests {
             recents: vec![SurfaceId::RfWorkbench],
             ..SpecialistToolBrowserState::default()
         };
-        let rows = visible_rows(&browser, EngineeringProfile::All);
+        let rows = visible_rows(&browser);
         assert_eq!(rows[0].surface_id, SurfaceId::QuantumWorkbench);
         assert_eq!(rows[1].surface_id, SurfaceId::PcbWorkbench);
         assert_eq!(rows[2].surface_id, SurfaceId::RfWorkbench);
@@ -1190,7 +1166,9 @@ mod tests {
     fn specialist_filter_group_wraps_with_the_mockup_gap() {
         assert_eq!(FILTER_GAP, 4.0);
         let wide_height = rendered_filter_height(900.0);
-        let phone_height = rendered_filter_height(280.0);
+        // Four filters fit a 280 pt phone on one line; a narrower surface
+        // is where the group has to wrap.
+        let phone_height = rendered_filter_height(160.0);
         assert!(
             phone_height >= wide_height + 28.0,
             "phone filters did not wrap: wide={wide_height}, phone={phone_height}"
@@ -1206,11 +1184,9 @@ mod tests {
     }
 
     #[test]
-    fn unavailable_tools_are_never_described_as_active_or_deep_link_available() {
-        assert_eq!(tool_status_copy(false, true), "specified · unavailable");
-        assert_eq!(tool_status_copy(false, false), "specified · unavailable");
-        assert_eq!(tool_status_copy(true, true), "active profile");
-        assert_eq!(tool_status_copy(true, false), "available by deep link");
+    fn unavailable_tools_are_never_described_as_available() {
+        assert_eq!(tool_status_copy(false), "specified · unavailable");
+        assert_eq!(tool_status_copy(true), "available");
     }
 
     #[test]

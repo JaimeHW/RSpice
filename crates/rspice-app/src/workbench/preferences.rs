@@ -353,6 +353,8 @@ pub struct ResultPresentationPolicy {
     displayed_significant_digits: DisplayedSignificantDigits,
     cursor_interpolation: CursorInterpolation,
     complex_number_display: ComplexNumberDisplay,
+    /// Stored for older sessions and reported back to them; no pane reads
+    /// it, because every pane keeps each pixel column's extremes.
     large_dataset_display: LargeDatasetDisplay,
     engineering_export: EngineeringExportFormat,
 }
@@ -389,11 +391,6 @@ impl ResultPresentationPolicy {
     #[must_use]
     pub const fn complex_number_display(self) -> ComplexNumberDisplay {
         self.complex_number_display
-    }
-
-    #[must_use]
-    pub const fn large_dataset_display(self) -> LargeDatasetDisplay {
-        self.large_dataset_display
     }
 
     #[must_use]
@@ -1621,8 +1618,8 @@ mod tests {
             ComplexNumberDisplay::RealImaginary
         );
         assert_eq!(
-            policy.large_dataset_display(),
-            LargeDatasetDisplay::NoDisplayDecimation
+            preferences.choice(ChoicePreference::LargeDatasetDisplay),
+            LargeDatasetDisplay::NoDisplayDecimation.index()
         );
         assert_eq!(
             policy.engineering_export(),

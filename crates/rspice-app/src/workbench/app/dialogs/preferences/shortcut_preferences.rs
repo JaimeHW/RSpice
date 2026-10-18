@@ -20,8 +20,8 @@ use crate::workbench::commands::{
 };
 use crate::workbench::shortcuts::MAX_SHORTCUT_SEQUENCE_STROKES;
 use crate::workbench::{
-    ChordTimeoutPolicy, ContextPrecedencePolicy, ProtectedShortcutPolicy, ShortcutBindingSlot,
-    ShortcutPreferences, ShortcutProfileAudit, ShortcutProfileIssue, ShortcutProfileIssueCode,
+    ChordTimeoutPolicy, ProtectedShortcutPolicy, ShortcutBindingSlot, ShortcutPreferences,
+    ShortcutProfileAudit, ShortcutProfileIssue, ShortcutProfileIssueCode,
     ShortcutProfileIssueSeverity, ShortcutSequence, ShortcutStroke, SingleKeyCanvasPolicy,
 };
 
@@ -65,8 +65,8 @@ pub(super) fn render_page(ui: &mut Ui, state: &mut AppState, actions: &mut Prefe
 
     preference_row(
         ui,
-        "Portable profile",
-        "Import or export stable command identifiers and platform mappings.",
+        "Shortcut file",
+        "Share key bindings between machines or with your team.",
         |ui| {
             value_column(ui, |ui| {
                 let phone = ui.ctx().content_rect().width() <= 560.0;
@@ -113,7 +113,7 @@ pub(super) fn render_page(ui: &mut Ui, state: &mut AppState, actions: &mut Prefe
         },
     );
 
-    section_heading(ui, "Binding policy");
+    section_heading(ui, "Key handling");
     // A browser commit is asynchronous. Keep showing the candidate selected
     // by the user while the persist-before-live owner has the controls locked.
     let policy_pending = state.dialogs.shortcut_policy_candidate.is_some();
@@ -167,7 +167,7 @@ fn render_policy_rows(ui: &mut Ui, profile: &mut ShortcutPreferences) {
     if let Some(index) = policy_select(
         ui,
         "Chord timeout",
-        "Applies only to multi-key command chords and never to normal text entry.",
+        "How long RSpice waits for the next key of a multi-key shortcut.",
         "preferences.shortcuts.chord-timeout",
         current.label(),
         ChordTimeoutPolicy::ALL
@@ -180,39 +180,10 @@ fn render_policy_rows(ui: &mut Ui, profile: &mut ShortcutPreferences) {
             .set_chord_timeout(ChordTimeoutPolicy::ALL[index]);
     }
 
-    let current = profile.policies().protected_shortcuts();
-    if let Some(index) = policy_select(
-        ui,
-        "Protected platform shortcuts",
-        "Browser and accessibility bindings cannot be shadowed silently.",
-        "preferences.shortcuts.protected-platform",
-        current.label(),
-        ProtectedShortcutPolicy::ALL
-            .iter()
-            .map(|value| value.label().to_owned())
-            .collect(),
-    ) {
-        profile
-            .policies_mut()
-            .set_protected_shortcuts(ProtectedShortcutPolicy::ALL[index]);
-    }
-
-    let current = profile.policies().context_precedence();
-    if let Some(index) = policy_select(
-        ui,
-        "Context precedence",
-        "Resolve global, workspace, editor and modal bindings deterministically.",
-        "preferences.shortcuts.context-precedence",
-        current.label(),
-        ContextPrecedencePolicy::ALL
-            .iter()
-            .map(|value| value.label().to_owned())
-            .collect(),
-    ) {
-        profile
-            .policies_mut()
-            .set_context_precedence(ContextPrecedencePolicy::ALL[index]);
-    }
+    // "Protected platform shortcuts" and "Context precedence" rows used to
+    // follow. The first only changed how loudly the editor's audit reported
+    // nine commands; the second reordered a resolver nobody needs to tune.
+    // Both values stay in the shortcut file at what RSpice ships.
 }
 
 fn policy_select(
@@ -373,7 +344,7 @@ pub(super) fn render_editor(ctx: &Context, state: &mut AppState) {
             Some((
                 DialogTransactionTone::Progress,
                 "Saving",
-                "Controls stay locked until the profile is written.".to_owned(),
+                "Controls unlock when the shortcuts are saved.".to_owned(),
             ))
         } else if editor.discard_confirmation {
             Some((
@@ -392,19 +363,14 @@ pub(super) fn render_editor(ctx: &Context, state: &mut AppState) {
                 )
             })
         };
-        let mut dialog = Dialog::new(
-            "Keyboard shortcut editor",
-            "Save shortcut profile",
-        )
-        .description(
-            "Edit context-aware command bindings, resolve conflicts, and save one validated portable shortcut profile.",
-        )
-        .size(DialogSize::CapabilityReview)
-        .primary_enabled(save_enabled)
-        .primary_on_enter(false)
-        .ghost(cancel_label)
-        .body_scroll_offset(&mut scroll_offset)
-        .flush_body();
+        let mut dialog = Dialog::new("Keyboard shortcut editor", "Save shortcut profile")
+            .description("Change the keys for any command, resolve conflicts, and save.")
+            .size(DialogSize::CapabilityReview)
+            .primary_enabled(save_enabled)
+            .primary_on_enter(false)
+            .ghost(cancel_label)
+            .body_scroll_offset(&mut scroll_offset)
+            .flush_body();
         if let Some((tone, title, detail)) = transaction_state.as_ref() {
             dialog = dialog.transaction_state(*tone, *title, detail.as_str());
         }
@@ -427,7 +393,7 @@ pub(super) fn render_editor(ctx: &Context, state: &mut AppState) {
                     state.dialogs.shortcut_editor.close_and_discard();
                 } else {
                     state.dialogs.shortcut_editor.error_summary = Some(
-                        "The durable commit boundary was already reached. Keep this editor open while the saved profile is installed."
+                        "The shortcuts are already being saved. Keep this editor open until it finishes."
                             .to_owned(),
                     );
                 }
@@ -1663,10 +1629,10 @@ mod tests {
             .nodes;
         assert!(nodes.iter().any(|(_, node)| {
             node.role() == egui::accesskit::Role::Heading
-                && node.label() == Some("Binding policy")
+                && node.label() == Some("Key handling")
                 && node.level() == Some(4)
         }));
-        for label in ["Key bindings", "Portable profile"] {
+        for label in ["Key bindings", "Shortcut file"] {
             assert!(
                 nodes.iter().any(|(_, node)| {
                     node.role() == egui::accesskit::Role::Label && node.label() == Some(label)
@@ -1696,7 +1662,7 @@ mod tests {
         }));
 
         let bindings = node_bounds(&nodes, egui::accesskit::Role::Label, "Key bindings");
-        let portable = node_bounds(&nodes, egui::accesskit::Role::Label, "Portable profile");
+        let portable = node_bounds(&nodes, egui::accesskit::Role::Label, "Shortcut file");
         let edit = node_bounds(
             &nodes,
             egui::accesskit::Role::Button,

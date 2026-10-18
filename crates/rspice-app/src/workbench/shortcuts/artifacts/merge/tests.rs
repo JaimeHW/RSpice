@@ -908,7 +908,7 @@ fn named_preset_import_leaves_active_profile_byte_equivalent() {
 }
 
 #[test]
-fn apply_persists_before_live_mutation_and_rollback_is_monotonic() {
+fn apply_persists_before_live_mutation() {
     let mut library = ShortcutProfileLibrary::default();
     let mut imported = ShortcutPreferences::default();
     set(
@@ -930,30 +930,10 @@ fn apply_persists_before_live_mutation_and_rollback_is_monotonic() {
     let before = library.clone();
     assert!(apply_shortcut_import(&mut library, &plan, |_| Err("disk full".to_owned())).is_err());
     assert_eq!(library, before);
-    let receipt = apply_shortcut_import(&mut library, &plan, |_| Ok(())).unwrap();
-    let applied_revision = library.revision();
-    rollback_shortcut_import(&mut library, &receipt, |_| Ok(())).unwrap();
-    assert_eq!(library.revision(), applied_revision + 1);
-    assert_eq!(
+    apply_shortcut_import(&mut library, &plan, |_| Ok(())).unwrap();
+    assert_ne!(
         shortcut_library_digest(&library).unwrap(),
         shortcut_library_digest(&before).unwrap()
-    );
-}
-
-#[test]
-fn rollback_refuses_to_erase_a_later_edit() {
-    let mut library = ShortcutProfileLibrary::default();
-    let plan = plan_shortcut_import(
-        &library,
-        &artifact_from(&ShortcutPreferences::default()),
-        &ShortcutImportOptions::default(),
-    )
-    .unwrap();
-    let receipt = apply_shortcut_import(&mut library, &plan, |_| Ok(())).unwrap();
-    let _ = library.active_mut().unwrap();
-    assert_eq!(
-        rollback_shortcut_import(&mut library, &receipt, |_| Ok(())).unwrap_err(),
-        ShortcutImportApplyError::StaleAppliedState
     );
 }
 
@@ -978,33 +958,6 @@ fn apply_rejects_a_stale_revision_before_persistence() {
         ShortcutImportApplyError::StaleBase
     );
     assert!(!persisted);
-}
-
-#[test]
-fn rollback_persistence_failure_leaves_applied_state_untouched() {
-    let mut library = ShortcutProfileLibrary::default();
-    let mut imported = ShortcutPreferences::default();
-    set(
-        &mut imported,
-        Command::ZoomFit,
-        ShortcutBindingSlot::Primary,
-        CommandPlatform::Desktop,
-        Key::F6,
-    );
-    let plan = plan_shortcut_import(
-        &library,
-        &artifact_from(&imported),
-        &ShortcutImportOptions::default(),
-    )
-    .unwrap();
-    let receipt = apply_shortcut_import(&mut library, &plan, |_| Ok(())).unwrap();
-    let applied = library.clone();
-
-    assert!(matches!(
-        rollback_shortcut_import(&mut library, &receipt, |_| Err("disk full".to_owned())),
-        Err(ShortcutImportApplyError::Persistence(_))
-    ));
-    assert_eq!(library, applied);
 }
 
 #[test]

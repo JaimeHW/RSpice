@@ -1490,6 +1490,6 @@ mod sessions;
 
 pub use sessions::DialogState;
 pub(crate) use sessions::{
-    HelpCenterPage, NewWindowInitialContent, RunDetailsDialogState, WindowLayoutChoice,
-    WindowSessionPage, WindowWorkflow,
+    DatasetExportPicker, HelpCenterPage, NewWindowInitialContent, RunDetailsDialogState,
+    WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
 };
