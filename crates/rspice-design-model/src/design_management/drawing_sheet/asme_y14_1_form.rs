@@ -338,6 +338,26 @@ const fn y14_35_revision_letter(letter: char) -> bool {
     letter.is_ascii_uppercase() && !matches!(letter, 'I' | 'O' | 'Q' | 'S' | 'X' | 'Z')
 }
 
+/// ASME Y14.1 5.2 recommends that every sheet of a multi-sheet drawing be
+/// the same size. A recommendation, so an advisory: a schematic that mixes
+/// sizes is drawn as it is.
+pub const DRAWING_SHEET_MIXED_SIZES_ADVISORY: &str = "This schematic's sheets are not all one size; ASME Y14.1 recommends one size for every sheet of a drawing.";
+
+/// Whether `sizes`, the paper of each sheet of one drawing, mix sizes: two
+/// of them differ in either dimension, whatever each is called.
+#[must_use]
+pub fn drawing_sheet_sizes_mixed<'a>(
+    sizes: impl IntoIterator<Item = &'a AuthoredDrawingSheetSize>,
+) -> bool {
+    let mut sizes = sizes
+        .into_iter()
+        .map(AuthoredDrawingSheetSize::portrait_dimensions_um);
+    let Some(first) = sizes.next() else {
+        return false;
+    };
+    sizes.any(|size| size != first)
+}
+
 /// What ASME Y14.35 advises against in a revision, if `revision` does it:
 /// anything but capitals from its sequence, A to Y and then AA, AB and on,
 /// or more than two of them. A dash, the initial issue, is none of these.

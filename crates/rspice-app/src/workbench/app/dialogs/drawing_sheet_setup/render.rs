@@ -908,6 +908,19 @@ fn format_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fie
             state.draft.apply_size_choice(selected);
         }
     }
+    // The advice belongs to the size that triggers it.
+    if let Some(advisory) = state.mixed_size_advisory() {
+        ui.add_space(6.0);
+        let t = Tokens::get(ui.ctx());
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(advisory)
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.warn),
+            )
+            .wrap(),
+        );
+    }
     ui.add_space(12.0);
 
     if state.draft.size == SheetSizeChoice::Custom {

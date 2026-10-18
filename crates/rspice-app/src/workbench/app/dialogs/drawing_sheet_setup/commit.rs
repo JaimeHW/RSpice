@@ -152,12 +152,43 @@ pub(crate) fn open_drawing_sheet_setup_for_state(state: &mut AppState) -> bool {
         })
         .unwrap_or_default();
     let writable_sheet_count = sheet_count.saturating_sub(managed_sheet_names.len());
+    // Every other sheet's paper, as each is drawn: a sheet that follows the
+    // project default is drawn on its paper.
+    let settings = state
+        .workspace
+        .content
+        .design_management
+        .drawing_sheet_settings();
+    let other_sheet_sizes = governed
+        .as_ref()
+        .and_then(|governed| {
+            let catalog = state
+                .workspace
+                .content
+                .design_management
+                .sheet_catalog(&governed.cell_view_key)?;
+            Some(
+                catalog
+                    .sheets()
+                    .iter()
+                    .filter(|sheet| sheet.id() != governed.sheet_id)
+                    .map(|sheet| match sheet.page_format().inheritance {
+                        crate::state::DrawingSheetInheritance::ProjectDefault => {
+                            settings.default_format.authored_size.clone()
+                        }
+                        _ => sheet.page_format().authored_size.clone(),
+                    })
+                    .collect(),
+            )
+        })
+        .unwrap_or_default();
     state.dialogs.drawing_sheet_setup = DrawingSheetSetupState {
         open: true,
         document_name: state.workspace.content.active_display_path().to_owned(),
         sheet_name,
         sheet_count,
         writable_sheet_count,
+        other_sheet_sizes,
         managed_sheet_names,
         available_presets,
         project_default: state

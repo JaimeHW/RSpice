@@ -6,14 +6,15 @@
 //! that model cannot leak output-media concepts back into this workflow.
 
 use crate::state::{
-    AuthoredDrawingSheetSize, CustomDrawingSheetSnapshot, DrawingSheetBorderTemplate,
-    DrawingSheetDisplayUnit, DrawingSheetFrameConvention, DrawingSheetInheritance,
-    DrawingSheetManagedTemplateSnapshot, DrawingSheetMargins, DrawingSheetMarks,
-    DrawingSheetPreset, DrawingSheetPresetScope, DrawingSheetScale, DrawingSheetStandard,
-    DrawingSheetStandardSeries, DrawingSheetTitleBlock, DrawingSheetTitleBlockAnchor,
-    DrawingSheetTitleBlockRotation, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId,
-    DrawingSheetTitleFieldState, DrawingSheetZoneMode, DrawingSheetZones, SchematicPageOrientation,
-    SchematicSheetFormat, SchematicSheetFormatDraft, SheetId, drawing_sheet_automatic_zone_counts,
+    AuthoredDrawingSheetSize, CustomDrawingSheetSnapshot, DRAWING_SHEET_MIXED_SIZES_ADVISORY,
+    DrawingSheetBorderTemplate, DrawingSheetDisplayUnit, DrawingSheetFrameConvention,
+    DrawingSheetInheritance, DrawingSheetManagedTemplateSnapshot, DrawingSheetMargins,
+    DrawingSheetMarks, DrawingSheetPreset, DrawingSheetPresetScope, DrawingSheetScale,
+    DrawingSheetStandard, DrawingSheetStandardSeries, DrawingSheetTitleBlock,
+    DrawingSheetTitleBlockAnchor, DrawingSheetTitleBlockRotation, DrawingSheetTitleBlockTemplate,
+    DrawingSheetTitleFieldId, DrawingSheetTitleFieldState, DrawingSheetZoneMode,
+    DrawingSheetZones, SchematicPageOrientation, SchematicSheetFormat, SchematicSheetFormatDraft,
+    SheetId, drawing_sheet_automatic_zone_counts, drawing_sheet_sizes_mixed,
 };
 use crate::workbench::app::SchematicEditAuthority;
 
@@ -876,6 +877,8 @@ pub(crate) struct DrawingSheetSetupState {
     pub(crate) sheet_name: String,
     pub(crate) sheet_count: usize,
     pub(crate) writable_sheet_count: usize,
+    /// The paper of every other sheet of the schematic, as each is drawn.
+    pub(crate) other_sheet_sizes: Vec<AuthoredDrawingSheetSize>,
     pub(crate) managed_sheet_names: Vec<String>,
     pub(crate) available_presets: Vec<DrawingSheetPreset>,
     pub(crate) project_default: SchematicSheetFormat,
@@ -907,6 +910,7 @@ impl Default for DrawingSheetSetupState {
             sheet_name: "Active sheet".to_owned(),
             sheet_count: 1,
             writable_sheet_count: 1,
+            other_sheet_sizes: Vec::new(),
             managed_sheet_names: Vec::new(),
             available_presets: Vec::new(),
             project_default: SchematicSheetFormat::default(),
@@ -926,6 +930,20 @@ impl Default for DrawingSheetSetupState {
 impl DrawingSheetSetupState {
     pub(crate) fn close(&mut self) {
         *self = Self::default();
+    }
+
+    /// ASME Y14.1's advice when the draft leaves an ANSI or ARCH
+    /// schematic's sheets on more than one size. Applying the draft to every
+    /// sheet gives them one.
+    pub(crate) fn mixed_size_advisory(&self) -> Option<&'static str> {
+        if self.draft.scope == PageSetupScope::Document
+            || self.draft.frame_convention() != DrawingSheetFrameConvention::AsmeY141
+        {
+            return None;
+        }
+        let size = self.draft.validate().ok()?.page_format.authored_size;
+        drawing_sheet_sizes_mixed(std::iter::once(&size).chain(&self.other_sheet_sizes))
+            .then_some(DRAWING_SHEET_MIXED_SIZES_ADVISORY)
     }
 
     pub(crate) fn is_dirty(&self) -> bool {
@@ -1460,5 +1478,45 @@ mod tests {
                 .iter()
                 .any(|problem| problem.field == "title-fields")
         );
+    }
+
+    /// ASME Y14.1 5.2 recommends one size for every sheet of a drawing:
+    /// Page Setup advises, and refuses nothing, when the draft leaves an
+    /// ANSI or ARCH schematic's sheets on more than one size.
+    #[test]
+    fn a_draft_mixing_an_asme_schematics_sizes_is_advised_against() {
+        let on = |standard| {
+            let mut format =
+                SchematicSheetFormat::from_standard(standard, SchematicPageOrientation::Landscape);
+            format = format
+                .try_update(|draft| {
+                    draft
+                        .title_block
+                        .fields
+                        .get_mut(&DrawingSheetTitleFieldId::SheetTitle)
+                        .unwrap()
+                        .value = "Sheet 1".to_owned();
+                })
+                .unwrap();
+            DrawingSheetSetupState {
+                draft: DrawingSheetDraft::from_format(&format),
+                other_sheet_sizes: vec![AuthoredDrawingSheetSize::Standard {
+                    standard: DrawingSheetStandard::AnsiD,
+                }],
+                ..DrawingSheetSetupState::default()
+            }
+        };
+        let mut state = on(DrawingSheetStandard::AnsiB);
+        assert_eq!(
+            state.mixed_size_advisory(),
+            Some(crate::state::DRAWING_SHEET_MIXED_SIZES_ADVISORY)
+        );
+        assert!(state.draft.validate().is_ok(), "an advisory, not a refusal");
+        // Applied to every sheet, the draft gives them one size.
+        state.draft.scope = PageSetupScope::Document;
+        assert_eq!(state.mixed_size_advisory(), None);
+        assert_eq!(on(DrawingSheetStandard::AnsiD).mixed_size_advisory(), None);
+        // ISO 5457 makes no such recommendation.
+        assert_eq!(on(DrawingSheetStandard::IsoA3).mixed_size_advisory(), None);
     }
 }

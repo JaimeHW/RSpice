@@ -965,3 +965,24 @@ fn sheet_one_of_several_says_all_sheets_are_the_same_revision_near_its_block() {
         })
     );
 }
+
+#[test]
+fn sheets_mix_sizes_when_any_two_differ_whatever_each_is_called() {
+    let standard = |standard| AuthoredDrawingSheetSize::Standard { standard };
+    let b = standard(DrawingSheetStandard::AnsiB);
+    let d = standard(DrawingSheetStandard::AnsiD);
+    assert!(!drawing_sheet_sizes_mixed([]));
+    assert!(!drawing_sheet_sizes_mixed([&b]));
+    assert!(!drawing_sheet_sizes_mixed([&b, &b, &b]));
+    assert!(drawing_sheet_sizes_mixed([&b, &b, &d]));
+    // A custom size the size of ANSI B is the same paper.
+    let custom = SchematicSheetFormat::try_custom(
+        "Ledger",
+        279_400,
+        431_800,
+        SchematicPageOrientation::Landscape,
+    )
+    .unwrap()
+    .authored_size;
+    assert!(!drawing_sheet_sizes_mixed([&b, &custom]));
+}
