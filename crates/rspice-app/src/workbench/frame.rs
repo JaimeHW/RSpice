@@ -242,7 +242,17 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
         .workspace()
         .map(WorkspacePreferences::background_task_attention)
         .unwrap_or_default();
+    let focused = ctx.input(|input| input.viewport().focused);
+    let mut request = None;
     for notice in notices {
+        let wanted = attention_request(focused, notice.elapsed_seconds, notice.kind, attention);
+        request = match (request, wanted) {
+            (Some(egui::UserAttentionType::Critical), _)
+            | (_, Some(egui::UserAttentionType::Critical)) => {
+                Some(egui::UserAttentionType::Critical)
+            }
+            (request, wanted) => request.or(wanted),
+        };
         let category = crate::ui::widgets::NotificationCategory::Job;
         let toasts = &mut app.state.ui.toasts;
         if !attention.retains(notice.is_failure()) {
@@ -270,6 +280,46 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
             }
         }
     }
+    // Once a frame, as urgently as the most serious outcome asks. The window
+    // is marked in the taskbar or dock; it never takes focus.
+    if let Some(urgency) = request {
+        ctx.send_viewport_cmd_to(
+            egui::ViewportId::ROOT,
+            egui::ViewportCommand::RequestUserAttention(urgency),
+        );
+    }
+}
+
+/// Whether an outcome just announced asks for the reader's attention from
+/// outside the window, and how urgently.
+///
+/// Only an outcome that raised a toast, only while the main window is not
+/// the one in front, and only for work long enough that the reader may have
+/// turned to something else. Never in the browser, where the tab's title
+/// already changes.
+fn attention_request(
+    window_focused: Option<bool>,
+    elapsed_seconds: f64,
+    kind: crate::ui::widgets::ToastKind,
+    attention: BackgroundTaskAttention,
+) -> Option<egui::UserAttentionType> {
+    use crate::ui::widgets::ToastKind;
+
+    /// Work shorter than this was watched rather than waited for.
+    const AWAY_AFTER_SECONDS: f64 = 5.0;
+    if cfg!(target_arch = "wasm32")
+        || window_focused != Some(false)
+        || elapsed_seconds.is_nan()
+        || elapsed_seconds < AWAY_AFTER_SECONDS
+        || !attention.retains(kind != ToastKind::Success)
+    {
+        return None;
+    }
+    Some(if kind == ToastKind::Error {
+        egui::UserAttentionType::Critical
+    } else {
+        egui::UserAttentionType::Informational
+    })
 }
 
 /// One run or campaign outcome, in the words the shell announces it with.
@@ -278,6 +328,8 @@ struct RunNotice {
     title: String,
     detail: String,
     action: Option<crate::ui::widgets::NotificationAction>,
+    /// How long the work took, in seconds.
+    elapsed_seconds: f64,
 }
 
 impl RunNotice {
@@ -414,6 +466,7 @@ fn run_notice(state: &AppState, run_id: crate::product::RunId) -> Option<RunNoti
         title,
         detail,
         action,
+        elapsed_seconds: run.elapsed_time,
     })
 }
 
@@ -436,6 +489,8 @@ fn campaign_notice(
             title: format!("Campaign '{campaign}': '{plan}' failed"),
             detail: reason,
             action: Some(NotificationAction::ShowInConsole { log_id }),
+            // Refused before it ran; the campaign's end speaks for the wait.
+            elapsed_seconds: 0.0,
         },
         CampaignOutcome::Finished {
             name,
@@ -452,6 +507,7 @@ fn campaign_notice(
             title: format!("Campaign '{name}' finished"),
             detail: format!("{completed} completed, {failed} failed \u{b7} {elapsed_seconds:.2} s"),
             action: Some(NotificationAction::ShowInConsole { log_id }),
+            elapsed_seconds,
         },
     }
 }
@@ -1664,6 +1720,106 @@ mod tests {
             assert_eq!(shows("Run 1 complete"), clean_toasts, "{attention:?}");
             assert_eq!(shows("Run 2 failed"), failure_toasts, "{attention:?}");
         }
+    }
+
+    /// An outcome asks for attention from outside the window only when it
+    /// raised a toast, the main window is not the one in front, and the work
+    /// took long enough that the reader may have turned away. A failure asks
+    /// urgently; anything else asks plainly. The browser build never asks.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn only_long_work_that_ends_behind_the_readers_back_asks_for_attention() {
+        use crate::ui::widgets::ToastKind::{Error, Success, Warn};
+        use BackgroundTaskAttention::{BadgeAndNotify, NotifyOnFailureOnly, Silent};
+        use egui::UserAttentionType::{Critical, Informational};
+
+        let cases = [
+            (
+                (Some(false), 30.0, Success, BadgeAndNotify),
+                Some(Informational),
+            ),
+            (
+                (Some(false), 30.0, Warn, BadgeAndNotify),
+                Some(Informational),
+            ),
+            ((Some(false), 30.0, Error, BadgeAndNotify), Some(Critical)),
+            ((Some(false), 5.0, Error, BadgeAndNotify), Some(Critical)),
+            ((Some(false), 4.9, Error, BadgeAndNotify), None),
+            ((Some(false), f64::NAN, Error, BadgeAndNotify), None),
+            ((Some(true), 30.0, Error, BadgeAndNotify), None),
+            // A host that cannot say is taken to have the reader's eye.
+            ((None, 30.0, Error, BadgeAndNotify), None),
+            ((Some(false), 30.0, Success, NotifyOnFailureOnly), None),
+            (
+                (Some(false), 30.0, Warn, NotifyOnFailureOnly),
+                Some(Informational),
+            ),
+            (
+                (Some(false), 30.0, Error, NotifyOnFailureOnly),
+                Some(Critical),
+            ),
+            ((Some(false), 30.0, Success, Silent), None),
+            ((Some(false), 30.0, Error, Silent), None),
+        ];
+        for ((focused, elapsed, kind, attention), expected) in cases {
+            assert_eq!(
+                attention_request(focused, elapsed, kind, attention),
+                expected,
+                "{focused:?} {elapsed} {kind:?} {attention:?}"
+            );
+        }
+    }
+
+    /// A long run that fails while the reader is in another window marks
+    /// RSpice's main window for them, once, and never brings it forward.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_long_failure_behind_the_readers_back_marks_the_main_window() {
+        use crate::state::SimulationRunLifecycle as Lifecycle;
+        use egui::{UserAttentionType, ViewportCommand, ViewportId, ViewportInfo};
+
+        let ctx = Context::default();
+        let mut app = RSpiceApp::test_instance();
+        app.state.simulation.start_run().lifecycle = Lifecycle::Running;
+        app.state.simulation.start_run().lifecycle = Lifecycle::Running;
+        announce_run_completion(&ctx, &mut app);
+        for run in &mut app.state.simulation.retained.runs {
+            run.lifecycle = Lifecycle::Failed;
+            run.elapsed_time = 90.0;
+        }
+        let mut input = egui::RawInput::default();
+        input.viewports.insert(
+            ViewportId::ROOT,
+            ViewportInfo {
+                focused: Some(false),
+                ..Default::default()
+            },
+        );
+
+        let output = ctx.run_ui(input, |ui| announce_run_completion(ui.ctx(), &mut app));
+
+        let commands = output
+            .viewport_output
+            .get(&ViewportId::ROOT)
+            .map(|viewport| viewport.commands.clone())
+            .unwrap_or_default();
+        let requests = commands
+            .iter()
+            .filter(|command| matches!(command, ViewportCommand::RequestUserAttention(_)))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            requests,
+            [&ViewportCommand::RequestUserAttention(
+                UserAttentionType::Critical
+            )],
+            "two failures, one request"
+        );
+        assert!(
+            !commands
+                .iter()
+                .any(|command| matches!(command, ViewportCommand::Focus)),
+            "the window never takes focus: {commands:?}"
+        );
     }
 
     /// The notice centre is for failures the reader has to be told about, so
