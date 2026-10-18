@@ -1,12 +1,13 @@
 //! Nothing selected: the sheet is the object, and the panel edits it.
 //!
 //! The rows are the sheet's own properties, editable where they stand: its
-//! paper size and orientation, its title block, and the title-block values
-//! this sheet authors. Each edit is one Page Setup transaction, with the
-//! dialog's validation and undo entry, so the two cannot disagree. Margins,
-//! frames, zones and custom sizes stay in Page Setup. Project-owned values and
-//! the fields the product fills in (cell, page, revision, date) are not
-//! offered here: they are set for the whole project, or derived.
+//! paper size and orientation, its title block, and every value its title
+//! block shows that someone types — this sheet's own, then the document's,
+//! which every sheet in the project letters alike. Each edit is one Page
+//! Setup transaction, with the dialog's validation and undo entry, so the two
+//! cannot disagree. Margins, frames, zones, custom sizes and which fields a
+//! block shows stay in Page Setup. The fields RSpice fills in itself
+//! (project, cell, page, paper size) are not offered: nothing types them.
 //!
 //! What the document tab, the sheet strip, the status bar and the navigator
 //! already say about the sheet is not said again, and the toolbar's commands
@@ -24,9 +25,9 @@ use crate::schematic::view::drawing_sheet::{
 };
 use crate::schematic::view::frame_symbol_context;
 use crate::state::{
-    AuthoredDrawingSheetSize, DrawingSheetStandard, DrawingSheetTitleBlockTemplate,
-    DrawingSheetTitleFieldId, DrawingSheetTitleFieldValueAuthority, SchematicPageOrientation,
-    SheetId,
+    AuthoredDrawingSheetSize, DrawingSheetReleaseStatus, DrawingSheetStandard,
+    DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, DrawingSheetTitleFieldValueAuthority,
+    SchematicPageOrientation, SchematicSheetFormat, SheetId,
 };
 use crate::ui::icons::Icon;
 use crate::ui::widgets::Button;
@@ -40,7 +41,7 @@ use crate::workbench::design_system::{
     Problem, problem_line, property_row_combo, property_row_input_with_hint,
     schematic_property_row as property_row, schematic_property_row_problem as property_row_problem,
 };
-use rspice_ui_kit::panels::section_header;
+use rspice_ui_kit::panels::{section_header, section_header_explained};
 
 /// The Size menu's entry for a size the standard list does not hold.
 const CUSTOM_SIZE: &str = "custom";
@@ -61,6 +62,7 @@ pub(super) fn sheet_panel(ui: &mut Ui, state: &mut AppState) {
     let mut edit = None;
     sheet_section(ui, state, &sheet, editable, &mut edit);
     title_block_section(ui, &sheet, &identity, editable, &mut edit);
+    document_section(ui, state, &sheet, &identity, editable, &mut edit);
     checks_section(ui, state);
     if let Some(edit) = edit
         && let Err(error) = apply_drawing_sheet_edit(state, edit)
@@ -209,13 +211,12 @@ fn title_block_section(
         return;
     }
 
-    let managed_snapshot = format.title_block.managed_template.as_ref();
     for field in format.title_block_field_order() {
         let Some(authored) = format.title_block.fields.get(&field) else {
             continue;
         };
         if !authored.visible
-            || field.is_project_owned()
+            || is_document_field(field)
             || field.policy().value_authority != DrawingSheetTitleFieldValueAuthority::Authored
         {
             continue;
@@ -225,9 +226,7 @@ fn title_block_section(
             DrawingSheetTitleFieldId::SheetTitle => sheet.sheet_name.as_str(),
             _ => field.default_value(),
         };
-        let locked =
-            managed && managed_snapshot.is_some_and(|snapshot| snapshot.locks_field(field));
-        if editable && !locked {
+        if editable && !locked_by_organization(format, field) {
             title_field_row(ui, identity, field, &authored.value, fallback, edit);
         } else {
             let shown = [authored.value.trim(), fallback]
@@ -236,6 +235,153 @@ fn title_block_section(
                 .unwrap_or("\u{2014}");
             property_row(ui, field.display_label(), shown);
         }
+    }
+}
+
+/// The document's values that this sheet's title block shows: its revision,
+/// date of issue and release status, and the project's owner, document number
+/// and classification. Every sheet in the project letters the same values, so
+/// the header says a change here changes them all.
+fn document_section(
+    ui: &mut Ui,
+    state: &AppState,
+    sheet: &ActiveDrawingSheet,
+    identity: &SheetIdentity,
+    editable: bool,
+    edit: &mut Option<DrawingSheetEdit>,
+) {
+    let format = &sheet.format;
+    if format.title_block.template == DrawingSheetTitleBlockTemplate::None {
+        return;
+    }
+    let fields = format
+        .title_block_field_order()
+        .into_iter()
+        .filter(|field| {
+            is_document_field(*field)
+                && format
+                    .title_block
+                    .fields
+                    .get(field)
+                    .is_some_and(|authored| authored.visible)
+        })
+        .collect::<Vec<_>>();
+    if fields.is_empty() {
+        return;
+    }
+    section_header_explained(
+        ui,
+        "Document",
+        "All sheets",
+        "Every sheet in the project letters these values, so a change here changes them all.",
+    );
+    let status = state
+        .workspace
+        .content
+        .design_management
+        .drawing_sheet_settings()
+        .document_control
+        .status;
+    for field in fields {
+        let writable = editable && !locked_by_organization(format, field);
+        if field == DrawingSheetTitleFieldId::DocumentStatus {
+            if writable {
+                let mut selected = status.label().to_owned();
+                let choices = DrawingSheetReleaseStatus::ALL
+                    .map(|choice| (choice.label().to_owned(), choice.label().to_owned()));
+                if property_row_combo(
+                    ui,
+                    field.display_label(),
+                    "sheet-inspector-document-status",
+                    &mut selected,
+                    &choices,
+                    true,
+                ) && let Some(choice) = DrawingSheetReleaseStatus::ALL
+                    .into_iter()
+                    .find(|choice| choice.label() == selected)
+                {
+                    *edit = Some(DrawingSheetEdit::Status(choice));
+                }
+            } else {
+                property_row(ui, field.display_label(), status.label());
+            }
+            continue;
+        }
+        let stored = stored_title_value(state, format, field);
+        if writable {
+            // The date is refused unless it is written the one way Page
+            // Setup reads it.
+            let hint = if field == DrawingSheetTitleFieldId::Date {
+                "YYYY-MM-DD"
+            } else {
+                ""
+            };
+            title_field_row(ui, identity, field, &stored, hint, edit);
+        } else {
+            let shown = if stored.trim().is_empty() {
+                "\u{2014}"
+            } else {
+                stored.as_str()
+            };
+            property_row(ui, field.display_label(), shown);
+        }
+    }
+}
+
+/// Whether `field` holds a value of the whole document, kept by the project
+/// and lettered alike on every sheet, rather than one of this sheet's own.
+const fn is_document_field(field: DrawingSheetTitleFieldId) -> bool {
+    field.is_project_owned()
+        || matches!(
+            field,
+            DrawingSheetTitleFieldId::Revision
+                | DrawingSheetTitleFieldId::Date
+                | DrawingSheetTitleFieldId::DocumentStatus
+        )
+}
+
+/// Whether the organization's block fixes `field`, so no sheet edits it.
+fn locked_by_organization(format: &SchematicSheetFormat, field: DrawingSheetTitleFieldId) -> bool {
+    format.title_block.template == DrawingSheetTitleBlockTemplate::OrganizationManaged
+        && format
+            .title_block
+            .managed_template
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.locks_field(field))
+}
+
+/// What `field` holds where it is kept — the document control, the project,
+/// or this sheet — as the panel edits it.
+fn stored_title_value(
+    state: &AppState,
+    format: &SchematicSheetFormat,
+    field: DrawingSheetTitleFieldId,
+) -> String {
+    let settings = state
+        .workspace
+        .content
+        .design_management
+        .drawing_sheet_settings();
+    let on_sheet = || {
+        format
+            .title_block
+            .fields
+            .get(&field)
+            .map(|authored| authored.value.clone())
+            .unwrap_or_default()
+    };
+    match field {
+        DrawingSheetTitleFieldId::Revision => settings.document_control.revision_index().to_owned(),
+        DrawingSheetTitleFieldId::Date => settings.document_control.revision_date_utc.clone(),
+        // The project's value, or one an older build left on the sheet, as
+        // the title block resolves it.
+        _ if field.is_project_owned() => settings
+            .title_block_field_values
+            .get(&field)
+            .filter(|value| !value.trim().is_empty())
+            .cloned()
+            .unwrap_or_else(on_sheet),
+        _ => on_sheet(),
     }
 }
 
@@ -276,8 +422,8 @@ fn take_title_field_draft(
     draft
 }
 
-/// One title-block value. The sheet takes it once, as one undo step, when the
-/// field is left — Enter, Tab or a click elsewhere — and Escape abandons it.
+/// One title-block value. It lands once, as one undo step, when the field is
+/// left — Enter, Tab or a click elsewhere — and Escape abandons it.
 fn title_field_row(
     ui: &mut Ui,
     sheet: &SheetIdentity,
@@ -324,13 +470,8 @@ pub(super) fn commit_pending_title_field(ctx: &egui::Context, state: &mut AppSta
         if draft.sheet != sheet {
             continue;
         }
-        let stored = resolve_active_drawing_sheet(state)
-            .format
-            .title_block
-            .fields
-            .get(&field)
-            .map(|authored| authored.value.clone())
-            .unwrap_or_default();
+        let format = resolve_active_drawing_sheet(state).format;
+        let stored = stored_title_value(state, &format, field);
         if draft.text.trim() == stored {
             continue;
         }

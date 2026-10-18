@@ -1,9 +1,10 @@
 //! Authority capture and atomic publication for drawing-sheet setup.
 
 use crate::state::{
-    DrawingSheetStandard, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId,
-    DrawingSheetTransactionKind, DrawingSheetTransactionReceipt, DrawingSheetTransactionSkip,
-    SchematicPageOrientation, SchematicSheetFormat, SheetId, ViewType,
+    DrawingSheetDocumentControl, DrawingSheetReleaseStatus, DrawingSheetStandard,
+    DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, DrawingSheetTransactionKind,
+    DrawingSheetTransactionReceipt, DrawingSheetTransactionSkip, SchematicPageOrientation,
+    SchematicSheetFormat, SheetId, ViewType,
 };
 use crate::workbench::SurfaceId;
 use crate::workbench::app::RSpiceApp;
@@ -368,9 +369,12 @@ pub(crate) enum DrawingSheetEdit {
     Size(DrawingSheetStandard),
     Orientation(SchematicPageOrientation),
     TitleBlock(DrawingSheetTitleBlockTemplate),
-    /// A title-block value this sheet authors. Project-owned and automatic
-    /// fields are not edited this way.
+    /// A typed title-block value, kept where its field keeps it: on this
+    /// sheet, on the project for the values every sheet shares, or in the
+    /// document control for the revision and its date.
     TitleField(DrawingSheetTitleFieldId, String),
+    /// Where the document stands in its release.
+    Status(DrawingSheetReleaseStatus),
 }
 
 /// Apply one property of the active sheet without showing Page Setup.
@@ -398,15 +402,87 @@ pub(crate) fn apply_drawing_sheet_edit(
         DrawingSheetEdit::TitleBlock(template) => {
             draft.set_title_block_template(title_template_from_model(template));
         }
-        DrawingSheetEdit::TitleField(field, value) => {
-            if let Some(authored) = draft.title_fields.get_mut(&field) {
-                authored.value = value;
-            }
+        DrawingSheetEdit::TitleField(field, value) => stage_title_value(state, field, value),
+        DrawingSheetEdit::Status(status) => {
+            stage_document_control(state, |control| control.status = status);
         }
     }
     let outcome = apply_drawing_sheet_setup(state);
     state.dialogs.drawing_sheet_setup.close();
     outcome
+}
+
+/// Stage one title-block value in the open Page Setup transaction, where the
+/// Title block fields dialog would stage it: the revision and its date in the
+/// document control, the values every sheet shares on the project, and the
+/// rest on this sheet.
+fn stage_title_value(state: &mut AppState, field: DrawingSheetTitleFieldId, value: String) {
+    match field {
+        DrawingSheetTitleFieldId::Revision => {
+            stage_document_control(state, |control| control.revision = value);
+        }
+        DrawingSheetTitleFieldId::Date => {
+            stage_document_control(state, |control| control.revision_date_utc = value);
+        }
+        _ if field.is_project_owned() => {
+            // Page Setup publishes every project-owned value it stages, so
+            // the ones not being edited are staged as they stand, including
+            // a value an older build left on the sheet itself.
+            let mut values = state
+                .workspace
+                .content
+                .design_management
+                .drawing_sheet_settings()
+                .title_block_field_values
+                .clone();
+            values.insert(field, value);
+            let setup = &mut state.dialogs.drawing_sheet_setup;
+            for id in DrawingSheetTitleFieldId::PROJECT_OWNED {
+                let staged = values.entry(id).or_default();
+                if id != field
+                    && staged.is_empty()
+                    && let Some(legacy) = setup.draft.title_fields.get(&id)
+                {
+                    staged.clone_from(&legacy.value);
+                }
+                setup
+                    .draft
+                    .title_fields
+                    .entry(id)
+                    .or_default()
+                    .value
+                    .clone_from(staged);
+            }
+            setup.staged_project_title_values = Some(values);
+        }
+        _ => {
+            if let Some(authored) = state
+                .dialogs
+                .drawing_sheet_setup
+                .draft
+                .title_fields
+                .get_mut(&field)
+            {
+                authored.value = value;
+            }
+        }
+    }
+}
+
+/// Stage the project's document control with one change made to it.
+fn stage_document_control(
+    state: &mut AppState,
+    change: impl FnOnce(&mut DrawingSheetDocumentControl),
+) {
+    let mut control = state
+        .workspace
+        .content
+        .design_management
+        .drawing_sheet_settings()
+        .document_control
+        .clone();
+    change(&mut control);
+    state.dialogs.drawing_sheet_setup.staged_document_control = Some(control);
 }
 
 /// Open Page Setup on a one-off custom size, its width and height ready to
