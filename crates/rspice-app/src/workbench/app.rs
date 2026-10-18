@@ -1426,17 +1426,7 @@ impl eframe::App for RSpiceApp {
             });
         }
         self.prepare_frame(&ctx);
-        let held_before = self.cloud_account.snapshot().phase.is_held();
-        self.cloud_account.poll();
-        // A session that ended on its own is said once, when it ends: the
-        // Account page states it too, but only to someone already there.
-        if let Some(reason) = self
-            .cloud_account
-            .snapshot()
-            .phase
-            .lost_session_reason(held_before)
-            .map(str::to_owned)
-        {
+        if let Some(reason) = self.cloud_account.poll_for_lost_session() {
             self.state
                 .report_warning("Signed out of RSpice Cloud", reason);
         }

@@ -867,6 +867,18 @@ impl CloudAccountService {
         &self.snapshot
     }
 
+    /// [`Self::poll`], returning why a held session ended on its own during
+    /// it, when one did. The shell says that once, when it happens: the
+    /// Account page states it too, but only to someone already there.
+    pub(crate) fn poll_for_lost_session(&mut self) -> Option<String> {
+        let held_before = self.snapshot.phase.is_held();
+        self.poll();
+        self.snapshot
+            .phase
+            .lost_session_reason(held_before)
+            .map(str::to_owned)
+    }
+
     /// Drain executor events into the snapshot. Returns whether it changed.
     pub(crate) fn poll(&mut self) -> bool {
         let mut changed = false;
