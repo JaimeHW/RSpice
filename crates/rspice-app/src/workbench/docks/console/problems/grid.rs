@@ -181,7 +181,7 @@ pub(super) fn header(ui: &mut Ui, columns: &Columns, view: &ProblemsView) -> Opt
                 rect.bottom(),
             ),
         );
-        let sorted = view.sort == Some(column);
+        let sorted = view.sort == column;
         let response = ui.interact(
             cell,
             egui::Id::new(("workbench.problems.header", column.label())),
@@ -235,7 +235,7 @@ pub(super) fn header(ui: &mut Ui, columns: &Columns, view: &ProblemsView) -> Opt
 /// in. Severity reads worst first when it is ascending, because that is the
 /// order a reader asks for by clicking it.
 fn header_announcement(column: ProblemColumn, view: &ProblemsView) -> String {
-    if view.sort != Some(column) {
+    if view.sort != column {
         return format!("Sort by {}", column.label());
     }
     let direction = match (column, view.descending) {

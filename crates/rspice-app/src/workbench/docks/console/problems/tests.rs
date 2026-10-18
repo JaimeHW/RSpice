@@ -672,32 +672,33 @@ fn with_a_scrollbar_the_rows_still_line_up_and_stop_short_of_it() {
 #[test]
 fn the_ordered_column_says_which_way_and_draws_its_mark() {
     let mut state = state_with_design_findings();
-    let unsorted = render(&mut state, sized(egui::RawInput::default()));
-    assert!(
-        unsorted
+    let says = |render: &Render, words: &str| {
+        render
             .nodes
             .iter()
-            .any(|node| node.role == Role::Button && node.says() == Some("Sort by Severity")),
-        "an unordered heading offers to order by itself",
-    );
-    let header_marks = unsorted.triangles.len();
-
-    state.problems_view.sort = Some(ProblemColumn::Severity);
+            .any(|node| node.role == Role::Button && node.says() == Some(words))
+    };
     let ascending = render(&mut state, sized(egui::RawInput::default()));
     assert!(
-        ascending
-            .nodes
-            .iter()
-            .any(|node| node.role == Role::Button
-                && node.says() == Some("Severity, sorted worst first")),
-        "the ordered heading states the order it is read in",
+        says(&ascending, "Severity, sorted worst first"),
+        "a page opens worst first, and its heading says so",
     );
-    assert_eq!(
-        ascending.triangles.len(),
-        header_marks + 1,
-        "ordering a column adds exactly one painted mark",
+    assert!(
+        says(&ascending, "Sort by Rule"),
+        "an unordered heading offers to order by itself",
     );
 
+    state.problems_view.sort = ProblemColumn::Code;
+    let by_rule = render(&mut state, sized(egui::RawInput::default()));
+    assert!(says(&by_rule, "Rule, sorted ascending"));
+    assert!(says(&by_rule, "Sort by Severity"));
+    assert_eq!(
+        by_rule.triangles.len(),
+        ascending.triangles.len(),
+        "the mark moves with the order: one column carries it at a time",
+    );
+
+    state.problems_view.sort = ProblemColumn::Severity;
     state.problems_view.descending = true;
     let descending = render(&mut state, sized(egui::RawInput::default()));
     assert!(descending.nodes.iter().any(|node| node.role == Role::Button
@@ -727,15 +728,21 @@ fn the_ordered_column_says_which_way_and_draws_its_mark() {
     assert!(apex_down(&descending), "descending points its apex down");
 }
 
-/// Ordering by severity puts the worst finding first, and reversing it puts it
-/// last. The fixture reports the warning first, so an unsorted page would
-/// fail the first assertion.
+/// A page opens worst first, whatever order its producers reported in, and
+/// reversing the order puts the worst finding last. The fixture reports the
+/// warning first, so a page listing in reported order would fail the first
+/// assertion.
 #[test]
-fn ordering_by_severity_lists_the_worst_finding_first() {
+fn a_page_opens_with_the_worst_finding_first() {
     let mut state = open_state();
     let warning = record(&state, "T-WARN", DiagnosticLevel::Warning, "the warning");
     let error = record(&state, "T-ERROR", DiagnosticLevel::Error, "the error");
     publish(&mut state, vec![warning, error]);
+    assert_eq!(
+        listing(&state).row(0).map(|row| row.message),
+        Some("the warning"),
+        "precondition: the producer reported the warning first",
+    );
     let positions = |render: &Render| {
         (
             render.text("the error").expect("the error is listed").y,
@@ -743,14 +750,6 @@ fn ordering_by_severity_lists_the_worst_finding_first() {
         )
     };
 
-    let as_reported = render(&mut state, sized(egui::RawInput::default()));
-    let (error, warning) = positions(&as_reported);
-    assert!(
-        warning < error,
-        "precondition: the producer reported the warning first",
-    );
-
-    state.problems_view.sort = Some(ProblemColumn::Severity);
     let (error, warning) = positions(&render(&mut state, sized(egui::RawInput::default())));
     assert!(
         error < warning,
@@ -760,6 +759,63 @@ fn ordering_by_severity_lists_the_worst_finding_first() {
     state.problems_view.descending = true;
     let (error, warning) = positions(&render(&mut state, sized(egui::RawInput::default())));
     assert!(warning < error, "reversing the order reverses the rows");
+}
+
+/// Findings of one severity are listed by rule, then by subject, then by
+/// location, whichever order they were reported in — and in that same order
+/// whichever way the severity is read.
+#[test]
+fn findings_of_one_severity_are_listed_by_rule_subject_and_location() {
+    use crate::state::CellViewRef;
+
+    let mut state = open_state();
+    let finding = |state: &AppState, code: &str, subject: &str, cell: &str, message: &str| {
+        let mut record = record(state, code, DiagnosticLevel::Warning, message);
+        record.subject.object = subject.to_owned();
+        record.subject.cell_view = Some(CellViewRef::new("work", cell, "schematic"));
+        record
+    };
+    let records = vec![
+        finding(&state, "T-B", "Net 'a'", "top", "rule b"),
+        finding(&state, "T-A", "Net 'b'", "top", "subject b"),
+        finding(&state, "T-A", "Net 'a'", "top", "location top"),
+        finding(&state, "T-A", "Net 'a'", "amp", "location amp"),
+        record(&state, "T-Z", DiagnosticLevel::Error, "the error"),
+    ];
+    publish(&mut state, records);
+
+    let messages = |descending: bool| {
+        let view = ProblemsView {
+            descending,
+            ..ProblemsView::default()
+        };
+        let listed = listing(&state);
+        let arrangement = Arrangement::build(&listed, &view);
+        arrangement
+            .listed_rows()
+            .filter_map(|index| listed.row(index).map(|row| row.message.to_owned()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        messages(false),
+        [
+            "the error",
+            "location amp",
+            "location top",
+            "subject b",
+            "rule b"
+        ],
+    );
+    assert_eq!(
+        messages(true),
+        [
+            "location amp",
+            "location top",
+            "subject b",
+            "rule b",
+            "the error"
+        ],
+    );
 }
 
 /// Findings with equal keys keep the order their producer reported them in,
@@ -777,7 +833,7 @@ fn findings_with_equal_keys_keep_their_reported_order_either_way() {
 
     let messages = |descending: bool| {
         let mut view = state.problems_view.clone();
-        view.sort = Some(ProblemColumn::Code);
+        view.sort = ProblemColumn::Code;
         view.descending = descending;
         let listed = listing(&state);
         let arrangement = Arrangement::build(&listed, &view);
@@ -817,7 +873,7 @@ fn locations_order_by_line_number_not_by_spelling() {
         NetlistDiagnosticCollection::try_new(vec![tenth, ninth], "")
             .expect("the fixture collection is well formed"),
     );
-    state.problems_view.sort = Some(ProblemColumn::Location);
+    state.problems_view.sort = ProblemColumn::Location;
 
     let render = render(&mut state, sized(egui::RawInput::default()));
     let ninth = render.text("on the ninth line").expect("listed").y;
@@ -2209,7 +2265,7 @@ fn every_severity_cell_fits_the_widest_measured_cell() {
 #[test]
 fn the_arrangement_is_rebuilt_only_when_what_it_was_built_from_changes() {
     let mut state = state_with_findings(5);
-    state.problems_view.sort = Some(ProblemColumn::Message);
+    state.problems_view.sort = ProblemColumn::Message;
     let ctx = egui::Context::default();
     let arranged = |state: &AppState| {
         let listed = listing(state);
@@ -2305,7 +2361,7 @@ fn the_arrangement_is_rebuilt_when_a_row_changes_in_place() {
     );
 
     state.problems_view.text.clear();
-    state.problems_view.sort = Some(ProblemColumn::Subject);
+    state.problems_view.sort = ProblemColumn::Subject;
     let by_subject = arranged(&state);
     republish(&mut state, &|record| {
         record.subject.object = "Node 'n9'".to_owned();

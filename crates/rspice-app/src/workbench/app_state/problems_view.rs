@@ -113,10 +113,12 @@ impl SeverityFilter {
 /// the shell's own, and nothing below it reads them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProblemsView {
-    /// The column the rows are ordered by. `None` keeps the order the
-    /// producers reported in, which is also the order the badge counts them
-    /// in and the only order that costs nothing to produce.
-    pub(in crate::workbench) sort: Option<ProblemColumn>,
+    /// The column the rows are ordered by. There is always one: the order
+    /// producers happened to report in says nothing a reader can use, and a
+    /// page that opened on it listed a warning above the critical finding
+    /// under it.
+    pub(in crate::workbench) sort: ProblemColumn,
+    /// Whether the order is reversed. Severity read forward is worst first.
     pub(in crate::workbench) descending: bool,
     pub(in crate::workbench) severities: SeverityFilter,
     /// The producer the grid is narrowed to, by its exact identity. A partial
@@ -170,7 +172,8 @@ impl WaiverDraft {
 }
 
 /// The reading position a session starts from: every severity, waivers
-/// included, nothing grouped, in the order the producers reported.
+/// included, nothing grouped, worst first — as every reference tool opens
+/// its list.
 ///
 /// Written out rather than derived, because a derived default would list no
 /// waived findings — and a session aggregate built field by field elsewhere in
@@ -179,7 +182,7 @@ impl WaiverDraft {
 impl Default for ProblemsView {
     fn default() -> Self {
         Self {
-            sort: None,
+            sort: ProblemColumn::Severity,
             descending: false,
             severities: SeverityFilter::default(),
             producer: None,
@@ -201,10 +204,10 @@ impl ProblemsView {
     /// reverses, and the first click on a new column must not inherit the
     /// previous column's direction.
     pub(in crate::workbench) fn order_by(&mut self, column: ProblemColumn) {
-        if self.sort == Some(column) {
+        if self.sort == column {
             self.descending = !self.descending;
         } else {
-            self.sort = Some(column);
+            self.sort = column;
             self.descending = false;
         }
     }
@@ -249,21 +252,20 @@ impl ProblemsView {
                 .any(|level| !self.severities.lists(*level))
     }
 
-    /// Whether the rows can be drawn straight from the listing, without an
-    /// order of their own being built first.
-    pub(in crate::workbench) fn lists_everything_as_reported(&self) -> bool {
-        self.sort.is_none() && !self.grouping.is_grouped() && !self.is_filtered()
-    }
-
     /// Whether arranging the rows under this position reads what a row says
     /// — its subject, location or message — rather than only what its facet
     /// states. Those are the arrangements that cost a spelled-out row each.
+    /// Severity is among them: findings of one severity and rule are ordered
+    /// by their subject and then their location.
     pub(in crate::workbench) fn reads_row_text(&self) -> bool {
         !self.text.is_empty()
             || self.grouping == ProblemGrouping::Subject
             || matches!(
                 self.sort,
-                Some(ProblemColumn::Subject | ProblemColumn::Location | ProblemColumn::Message)
+                ProblemColumn::Severity
+                    | ProblemColumn::Subject
+                    | ProblemColumn::Location
+                    | ProblemColumn::Message
             )
     }
 
@@ -314,10 +316,13 @@ impl ProblemsView {
 mod tests {
     use super::*;
 
+    /// A session lists everything, worst first: the order every reference
+    /// tool opens its list in.
     #[test]
-    fn a_session_starts_listing_everything_in_the_order_it_was_reported() {
+    fn a_session_starts_listing_everything_worst_first() {
         let view = ProblemsView::default();
-        assert!(view.lists_everything_as_reported());
+        assert_eq!(view.sort, ProblemColumn::Severity);
+        assert!(!view.descending, "severity read forward is worst first");
         assert!(!view.is_filtered());
         for level in DiagnosticLevel::ALL {
             assert!(view.severities.lists(level), "{level:?} must be listed");
@@ -331,13 +336,13 @@ mod tests {
     fn ordering_by_the_sorted_column_reverses_it() {
         let mut view = ProblemsView::default();
         view.order_by(ProblemColumn::Severity);
-        assert_eq!(view.sort, Some(ProblemColumn::Severity));
-        assert!(!view.descending);
-        view.order_by(ProblemColumn::Severity);
-        assert!(view.descending);
+        assert_eq!(view.sort, ProblemColumn::Severity);
+        assert!(view.descending, "the column a session opens on reverses");
         view.order_by(ProblemColumn::Code);
-        assert_eq!(view.sort, Some(ProblemColumn::Code));
+        assert_eq!(view.sort, ProblemColumn::Code);
         assert!(!view.descending, "a new column starts ascending");
+        view.order_by(ProblemColumn::Code);
+        assert!(view.descending);
     }
 
     #[test]
@@ -345,7 +350,6 @@ mod tests {
         let mut severity = ProblemsView::default();
         severity.severities.toggle(DiagnosticLevel::Hint);
         assert!(severity.is_filtered());
-        assert!(!severity.lists_everything_as_reported());
 
         let mut producer = ProblemsView::default();
         producer.producer = Some("rspice.design.rules".to_owned());
@@ -365,7 +369,6 @@ mod tests {
             !grouped.is_filtered(),
             "grouping shows the same rows in groups; it narrows nothing"
         );
-        assert!(!grouped.lists_everything_as_reported());
     }
 
     /// Clearing the filters lists everything and keeps how it is read.
@@ -387,7 +390,7 @@ mod tests {
         assert_eq!(
             view,
             ProblemsView {
-                sort: Some(ProblemColumn::Code),
+                sort: ProblemColumn::Code,
                 descending: true,
                 grouping: ProblemGrouping::Code,
                 collapsed: ["DRC-FLOATING-NODE".to_owned()].into(),

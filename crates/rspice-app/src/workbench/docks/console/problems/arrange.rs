@@ -15,14 +15,13 @@
 //! findings by folding their [`RowFacet`]s, which spell nothing out. A frame
 //! whose stamp and position match the last build visits no stored row, sorts
 //! nothing and spells out no row. A position that reads row text — a text
-//! filter, an order by subject, location or message, groups by subject — also
-//! folds the editors' row text into the stamp, because one of their rows can
-//! be republished saying something else under the same identity; a stored
-//! batch's fingerprint already covers what its rows say.
+//! filter, an order by severity, subject, location or message, groups by
+//! subject — also folds the editors' row text into the stamp, because one of
+//! their rows can be republished saying something else under the same
+//! identity; a stored batch's fingerprint already covers what its rows say.
 //!
-//! When nothing is filtered, ordered or grouped, no order is built at all: the
-//! page draws the listing as its producers reported it, which is the order the
-//! badge counts in.
+//! The rows are always ordered. The order producers happened to report in
+//! says nothing a reader can use, so a page opens worst first.
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -145,15 +144,11 @@ struct Stamp {
 /// The rows the page prints, with the groups and counts that describe them.
 pub(super) struct Arrangement {
     /// Every finding the filters admit, in print order, a group's findings
-    /// together and collapsed groups included. Empty when the listing is
-    /// drawn exactly as reported.
+    /// together and collapsed groups included.
     order: Vec<usize>,
     /// The printed lines, built only when the rows are grouped; ungrouped,
     /// `order` is the printed lines.
     lines: Vec<Line>,
-    /// How many findings the listing holds, when they are drawn exactly as
-    /// reported and `order` is therefore empty.
-    as_reported: Option<usize>,
     groups: Vec<Group>,
     /// Where each group's findings start in `order`.
     group_starts: Vec<usize>,
@@ -254,7 +249,6 @@ struct CurrentRow {
 impl Arrangement {
     pub(super) fn build(listed: &DiagnosticListing<'_>, view: &ProblemsView) -> Self {
         let needle = view.text.to_lowercase();
-        let as_reported = view.lists_everything_as_reported();
         let total = listed.len();
         let mut severities = [0_usize; DiagnosticLevel::ALL.len()];
         let mut waived = 0;
@@ -288,16 +282,13 @@ impl Arrangement {
                 count += 1;
                 widest_code = widest_code.max(facet.code.chars().count());
                 widest_producer = widest_producer.max(facet.producer.chars().count());
-                if !as_reported {
-                    admitted.push(index);
-                }
+                admitted.push(index);
             }
         }
 
         let mut arrangement = Self {
             order: Vec::new(),
             lines: Vec::new(),
-            as_reported: as_reported.then_some(total),
             groups: Vec::new(),
             group_starts: Vec::new(),
             listed: count,
@@ -315,13 +306,8 @@ impl Arrangement {
             needle,
             stamp: None,
         };
-        if as_reported {
-            return arrangement;
-        }
 
-        if let Some(column) = view.sort {
-            admitted = ordered(listed, admitted, column, view.descending);
-        }
+        admitted = ordered(listed, admitted, view.sort, view.descending);
         if view.grouping.is_grouped() {
             let grouped = group(listed, &admitted, view.grouping, view);
             arrangement.order = grouped.order;
@@ -348,19 +334,18 @@ impl Arrangement {
 
     /// Printed lines, group headers included.
     pub(super) fn lines(&self) -> usize {
-        match self.as_reported {
-            Some(total) => total,
-            None if self.view.grouping.is_grouped() => self.lines.len(),
-            None => self.order.len(),
+        if self.view.grouping.is_grouped() {
+            self.lines.len()
+        } else {
+            self.order.len()
         }
     }
 
     pub(super) fn line(&self, index: usize) -> Option<Line> {
-        match self.as_reported {
-            Some(total) if index < total => Some(Line::Row(index)),
-            Some(_) => None,
-            None if self.view.grouping.is_grouped() => self.lines.get(index).copied(),
-            None => self.order.get(index).copied().map(Line::Row),
+        if self.view.grouping.is_grouped() {
+            self.lines.get(index).copied()
+        } else {
+            self.order.get(index).copied().map(Line::Row)
         }
     }
 
@@ -401,18 +386,17 @@ impl Arrangement {
     /// Every finding the filters admit, in print order, collapsed groups
     /// included: what "listed" counts.
     pub(super) fn listed_rows(&self) -> impl Iterator<Item = usize> + '_ {
-        (0..self.as_reported.unwrap_or(0)).chain(self.order.iter().copied())
+        self.order.iter().copied()
     }
 
     /// Which printed line a finding is on, when it is printed at all.
     pub(super) fn line_of(&self, listing_index: usize) -> Option<usize> {
-        match self.as_reported {
-            Some(total) => (listing_index < total).then_some(listing_index),
-            None if self.view.grouping.is_grouped() => self
-                .lines
+        if self.view.grouping.is_grouped() {
+            self.lines
                 .iter()
-                .position(|line| *line == Line::Row(listing_index)),
-            None => self.order.iter().position(|row| *row == listing_index),
+                .position(|line| *line == Line::Row(listing_index))
+        } else {
+            self.order.iter().position(|row| *row == listing_index)
         }
     }
 
@@ -421,7 +405,7 @@ impl Arrangement {
     ///
     /// Group headers are lines like any other: a collapsed group is reached,
     /// and opened again, from its header. Every move is arithmetic on line
-    /// numbers, so a list drawn as reported is never walked.
+    /// numbers, so no list is walked to make one.
     pub(super) fn step_line(&self, from: Option<usize>, step: isize) -> Option<usize> {
         let count = self.lines();
         if count == 0 {
@@ -492,22 +476,7 @@ fn ordered(
     descending: bool,
 ) -> Vec<usize> {
     match column {
-        ProblemColumn::Severity => {
-            // Ascending is worst first, which is the lowest rung. It is the
-            // only order a reader asks for by clicking a severity column, and
-            // the header says which way it is reading in words rather than
-            // leaving a triangle to imply it.
-            let mut keyed: Vec<(usize, usize)> = admitted
-                .iter()
-                .filter_map(|index| {
-                    listed
-                        .facet(*index)
-                        .map(|facet| (facet.level.rung(), *index))
-                })
-                .collect();
-            sort_keyed(&mut keyed, descending, Ord::cmp);
-            undecorate(keyed)
-        }
+        ProblemColumn::Severity => by_severity(listed, &admitted, descending),
         ProblemColumn::Code | ProblemColumn::Producer => {
             let mut keyed: Vec<(String, usize)> = admitted
                 .iter()
@@ -542,6 +511,67 @@ fn ordered(
             undecorate(keyed)
         }
     }
+}
+
+/// Order the admitted rows worst first, or least severe first when
+/// `descending`.
+///
+/// Ascending is worst first, which is the lowest rung: the order a page opens
+/// in, and the header says which way it is reading in words rather than
+/// leaving a triangle to imply it. Findings of one severity are ordered as a
+/// reader goes looking for them — by rule, then by what they are about, then
+/// by where — so two findings never swap places because their producers
+/// reported them the other way round. Only the severity is reversed: inside
+/// one severity the order reads the same either way.
+///
+/// The rule is a facet; the subject and the location have to be spelled out,
+/// so they are, only for findings that share a severity and a rule.
+fn by_severity(listed: &DiagnosticListing<'_>, admitted: &[usize], descending: bool) -> Vec<usize> {
+    let mut keyed: Vec<(usize, String, usize)> = admitted
+        .iter()
+        .filter_map(|index| {
+            listed
+                .facet(*index)
+                .map(|facet| (facet.level.rung(), facet.code.to_lowercase(), *index))
+        })
+        .collect();
+    keyed.sort_by(|left, right| {
+        let rung = left.0.cmp(&right.0);
+        let rung = if descending { rung.reverse() } else { rung };
+        rung.then_with(|| natural(&left.1, &right.1))
+    });
+    let mut order = Vec::with_capacity(keyed.len());
+    let mut start = 0;
+    while start < keyed.len() {
+        let (rung, code) = (keyed[start].0, &keyed[start].1);
+        let end = start
+            + keyed[start..]
+                .iter()
+                .take_while(|key| key.0 == rung && key.1 == *code)
+                .count();
+        if end - start == 1 {
+            order.push(keyed[start].2);
+        } else {
+            let mut run: Vec<(String, String, usize)> = keyed[start..end]
+                .iter()
+                .filter_map(|(_, _, index)| {
+                    listed.row(*index).map(|row| {
+                        (
+                            row.subject.to_lowercase(),
+                            row.location.to_lowercase(),
+                            *index,
+                        )
+                    })
+                })
+                .collect();
+            run.sort_by(|left, right| {
+                natural(&left.0, &right.0).then_with(|| natural(&left.1, &right.1))
+            });
+            order.extend(run.into_iter().map(|(_, _, index)| index));
+        }
+        start = end;
+    }
+    order
 }
 
 /// Sort a key list stably in the direction the reader asked for.
