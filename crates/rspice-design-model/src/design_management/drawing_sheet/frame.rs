@@ -250,8 +250,7 @@ pub fn drawing_sheet_zone_lettering_um(
     }
     ISO_3098_HEIGHTS_UM
         .into_iter()
-        .filter(|height_um| *height_um < target_um && fits(*height_um))
-        .next_back()
+        .rfind(|height_um| *height_um < target_um && fits(*height_um))
         .unwrap_or(ISO_3098_HEIGHTS_UM[0])
 }
 

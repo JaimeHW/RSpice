@@ -28,10 +28,13 @@ fn layout(format: &SchematicSheetFormat) -> DrawingSheetZoneLayout {
         .expect("the sheet has zones")
 }
 
-fn lines(
-    artwork: &DrawingSheetFrameArtwork,
-    layer: DrawingSheetFrameLayer,
-) -> Vec<((i64, i64), (i64, i64), u64)> {
+/// A point in sheet micrometres.
+type At = (i64, i64);
+
+/// A frame line: where it starts and ends, and its width.
+type FrameLine = (At, At, u64);
+
+fn lines(artwork: &DrawingSheetFrameArtwork, layer: DrawingSheetFrameLayer) -> Vec<FrameLine> {
     artwork
         .layer(layer)
         .filter_map(|mark| match mark {
