@@ -144,6 +144,7 @@ pub(super) fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
         analysis,
         &matrix,
         &mut controls.controls,
+        context.policy.angle_display,
         |block, sample| matrix_csv(&matrix, analysis, block, sample),
     ) {
         context.results.session.polar.quantity = Some(coefficient.waveform_name);
@@ -339,7 +340,17 @@ pub(crate) mod tests {
                 complex.imag[1].to_bits()
             );
         }
-        assert!(formatted(0.0, 0.0, 2).contains("phase undefined"));
+        use crate::quantity::AngleDisplay;
+        assert!(formatted(0.0, 0.0, 2, AngleDisplay::Degrees).contains("phase undefined"));
+        // The phase reads in the unit Angle display chose.
+        assert_eq!(
+            formatted(0.0, 1.0, 1, AngleDisplay::Degrees),
+            "1.00000000e0 ∠ 90.000000°"
+        );
+        assert_eq!(
+            formatted(0.0, 1.0, 1, AngleDisplay::Radians),
+            "1.00000000e0 ∠ 1.570796 rad"
+        );
         assert!((magnitude_db(1e308, 1e308) - (6160.0 + 10.0 * 2.0_f64.log10())).abs() < 1e-10);
     }
 

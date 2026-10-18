@@ -2,6 +2,7 @@
 
 use crate::waveform::WaveformData;
 use egui::Ui;
+use rspice_app_types::quantity::AngleDisplay;
 use rspice_results::{
     analysis_result::AnalysisResult,
     analysis_type::AnalysisType,
@@ -49,7 +50,14 @@ pub struct OpenCoefficient {
     pub frequency: f64,
 }
 
-pub fn formatted(real: f64, imaginary: f64, representation: usize) -> String {
+/// One coefficient as the representation shows it, its phase in the unit
+/// Angle display chose.
+pub fn formatted(
+    real: f64,
+    imaginary: f64,
+    representation: usize,
+    angle_display: AngleDisplay,
+) -> String {
     if real == 0.0 && imaginary == 0.0 && representation != 0 {
         return if representation == 2 {
             "−∞ dB · phase undefined"
@@ -58,22 +66,21 @@ pub fn formatted(real: f64, imaginary: f64, representation: usize) -> String {
         }
         .to_owned();
     }
+    let phase = || {
+        let radians = imaginary.atan2(real);
+        match angle_display {
+            AngleDisplay::Degrees => format!("{:.6}°", radians.to_degrees()),
+            AngleDisplay::Radians => format!("{radians:.6} rad"),
+        }
+    };
     match representation {
-        1 => format!(
-            "{:.8e} ∠ {:.6}°",
-            real.hypot(imaginary),
-            imaginary.atan2(real).to_degrees()
-        ),
+        1 => format!("{:.8e} ∠ {}", real.hypot(imaginary), phase()),
         2 => {
             let magnitude = real.hypot(imaginary);
             if magnitude == 0.0 {
                 "−∞ dB · phase undefined".to_owned()
             } else {
-                format!(
-                    "{:.6} dB ∠ {:.6}°",
-                    magnitude_db(real, imaginary),
-                    imaginary.atan2(real).to_degrees()
-                )
+                format!("{:.6} dB ∠ {}", magnitude_db(real, imaginary), phase())
             }
         }
         _ => format!("{real:.8e} {imaginary:+.8e}j"),
@@ -143,6 +150,7 @@ pub fn show(
     analysis: &AnalysisResult<WaveformData>,
     matrix: &NetworkLayout,
     controls: &mut NetworkMatrixControls,
+    angle_display: AngleDisplay,
     mut copy_exact: impl FnMut(usize, usize) -> String,
 ) -> Option<OpenCoefficient> {
     let mut open_coefficient = None;
@@ -270,7 +278,7 @@ pub fn show(
                     let complex = waveform.complex.as_ref().expect("resolved complex coefficient");
                     let real = complex.real[controls.sample];
                     let imaginary = complex.imag[controls.sample];
-                    let label = formatted(real, imaginary, controls.representation);
+                    let label = formatted(real, imaginary, controls.representation, angle_display);
                     if controls.heatmap {
                         let color = heat_color(magnitude_db(real, imaginary), controls.floor_db, &tokens.color);
                         let rect = ui.max_rect().shrink(2.0);
