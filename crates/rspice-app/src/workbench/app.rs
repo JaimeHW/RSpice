@@ -434,12 +434,8 @@ impl RSpiceApp {
 
     /// Create a new application instance
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        // Load persisted state if available
-        let mut state: AppState = if let Some(storage) = cc.storage {
-            AppState::restore_eframe_session(storage).unwrap_or_default()
-        } else {
-            AppState::default()
-        };
+        // Load the persisted session, with the preferences file read over it.
+        let mut state = AppState::restore_with_preferences_file(cc.storage);
 
         let console_open = state
             .ui
@@ -1467,6 +1463,7 @@ impl eframe::App for RSpiceApp {
         self.render_secondary_application_windows(&ctx);
         self.refresh_live_checks(&ctx);
         self.render_frame_dialogs(&ctx);
+        self.state.persist_preferences_file(&ctx);
         self.end_frame(&simulation_input_before_frame);
     }
 
@@ -1482,6 +1479,8 @@ impl eframe::App for RSpiceApp {
 
     /// Save state on exit
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        // Preferences belong to the device: saved even when a mirror skips the rest.
+        self.state.flush_preferences_file();
         // A live mirror is streamed session data, not device-owned recovery
         // state. Never let eframe autosave, browser local storage, or the
         // global Verilog-A library silently retain it. The previously stored

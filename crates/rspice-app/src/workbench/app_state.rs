@@ -284,6 +284,9 @@ pub struct AppState {
     /// UI transaction paired with the single browser shortcut-library CAS.
     pub(crate) shortcut_library_publication_continuation:
         Option<session::shortcut_library::ShortcutLibraryPublicationContinuation>,
+    /// Where the preferences file lives and what has been written to it.
+    /// Unbound in a default state, so nothing but a launch touches the disk.
+    pub(crate) preferences_file: Box<session::preferences_file::PreferencesFileRuntime>,
 }
 
 impl Default for AppState {

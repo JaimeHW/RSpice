@@ -349,7 +349,7 @@ fn decode_store_bytes(bytes: &[u8]) -> ShortcutProfileLibraryRestore {
     }))
 }
 
-fn validate_library(library: &ShortcutProfileLibrary) -> Result<(), String> {
+pub(crate) fn validate_library(library: &ShortcutProfileLibrary) -> Result<(), String> {
     if !library.is_compatible() {
         return Err("shortcut profile library is incompatible".to_owned());
     }

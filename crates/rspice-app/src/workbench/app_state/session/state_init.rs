@@ -209,6 +209,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         shortcut_library_persistence:
             crate::workbench::app_state::session::shortcut_library::ShortcutLibraryPersistenceRuntime::default(),
         shortcut_library_publication_continuation: None,
+        preferences_file: Box::default(),
     };
     let startup_errors = pdk_load_error
         .map(|error| {

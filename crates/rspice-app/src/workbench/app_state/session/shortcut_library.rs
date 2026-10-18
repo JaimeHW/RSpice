@@ -103,6 +103,8 @@ pub(crate) enum ShortcutLibraryPublicationContinuation {
     Policy,
     Import(Box<crate::workbench::shortcuts::artifacts::ShortcutImportReceipt>),
     Rollback,
+    /// A settings file whose preferences go live once its shortcuts are saved.
+    SettingsImport(Box<super::preferences_file::StagedSettingsImport>),
 }
 
 impl AppState {

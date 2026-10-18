@@ -1015,7 +1015,7 @@ pub(crate) fn open_diagnostics_folder(state: &AppState) -> Result<PathBuf, Strin
 }
 
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
-fn reveal_directory(directory: &Path) -> Result<(), String> {
+pub(crate) fn reveal_directory(directory: &Path) -> Result<(), String> {
     use std::os::windows::process::CommandExt as _;
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -1028,7 +1028,7 @@ fn reveal_directory(directory: &Path) -> Result<(), String> {
 }
 
 #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
-fn reveal_directory(directory: &Path) -> Result<(), String> {
+pub(crate) fn reveal_directory(directory: &Path) -> Result<(), String> {
     std::process::Command::new("open")
         .arg(directory)
         .spawn()
@@ -1037,7 +1037,7 @@ fn reveal_directory(directory: &Path) -> Result<(), String> {
 }
 
 #[cfg(all(not(target_arch = "wasm32"), target_os = "linux"))]
-fn reveal_directory(directory: &Path) -> Result<(), String> {
+pub(crate) fn reveal_directory(directory: &Path) -> Result<(), String> {
     std::process::Command::new("xdg-open")
         .arg(directory)
         .spawn()

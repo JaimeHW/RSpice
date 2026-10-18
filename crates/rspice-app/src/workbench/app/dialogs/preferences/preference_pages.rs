@@ -43,7 +43,7 @@ pub(super) fn render(
         }
         PreferenceCategory::Units => units(ui, state),
         PreferenceCategory::Schematic => schematic(ui, state),
-        PreferenceCategory::Projects => projects(ui, state),
+        PreferenceCategory::Projects => projects(ui, state, actions),
         PreferenceCategory::Results => results(ui, state),
     }
 }
@@ -774,7 +774,49 @@ fn results(ui: &mut Ui, state: &mut AppState) {
 /// solver preset alone under two paragraphs explaining which numerical options
 /// it does *not* own, and Files, storage and recovery held the other two under
 /// a section heading each. They answer one question between them.
-fn projects(ui: &mut Ui, state: &mut AppState) {
+fn projects(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
+    // One file holding every preference and the shortcut library in use.
+    preference_row(
+        ui,
+        "Settings file",
+        "Move your preferences and shortcuts to another machine.",
+        |ui| {
+            value_column(ui, |ui| {
+                let phone = ui.ctx().content_rect().width() <= 560.0;
+                let width = ui.available_width();
+                let height = if phone {
+                    44.0
+                } else {
+                    Tokens::get(ui.ctx()).metrics.ctl_h
+                };
+                ui.allocate_ui_with_layout(
+                    egui::vec2(width, height),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let button = |ui: &mut Ui, id: &'static str, label: &'static str| {
+                            ui.push_id(id, |ui| {
+                                Button::new(label).min_height(height).show(ui).clicked()
+                            })
+                            .inner
+                        };
+                        if button(ui, "preferences.projects.settings-import", "Import\u{2026}") {
+                            actions.import_settings_file = true;
+                        }
+                        if button(ui, "preferences.projects.settings-export", "Export\u{2026}") {
+                            actions.export_settings_file = true;
+                        }
+                        // A browser keeps the file in its own storage, which
+                        // no file manager can open.
+                        #[cfg(not(target_arch = "wasm32"))]
+                        if button(ui, "preferences.projects.settings-show", "Show file") {
+                            actions.show_settings_file = true;
+                        }
+                    },
+                );
+            });
+        },
+    );
     choice_row(
         ui,
         state,

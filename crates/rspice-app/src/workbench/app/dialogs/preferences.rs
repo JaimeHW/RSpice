@@ -22,11 +22,16 @@ use self::preferences_shell::PreferenceCategory;
 use self::shortcut_portability_dialogs::{ShortcutExportEnvironment, ShortcutPortabilityAction};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::session::preferences_file::{
+    MAX_SETTINGS_FILE_BYTES, SETTINGS_FILE,
+};
 use crate::workbench::app_state::session::shortcut_library::{
     ShortcutLibraryPublication, ShortcutLibraryPublicationContinuation,
 };
 
 const CATEGORY_STATE_ID: &str = "rspice.preferences.active-category";
+const SETTINGS_IMPORT_ID: &str = "rspice.preferences.settings-file.import";
+const SETTINGS_EXPORT_ID: &str = "rspice.preferences.settings-file.export";
 
 #[derive(Debug, Default)]
 pub(in crate::workbench) struct PreferencePageActions {
@@ -34,6 +39,9 @@ pub(in crate::workbench) struct PreferencePageActions {
     pub(in crate::workbench) open_shortcut_editor: bool,
     pub(in crate::workbench) open_shortcut_import: bool,
     pub(in crate::workbench) open_shortcut_export: bool,
+    pub(in crate::workbench) import_settings_file: bool,
+    pub(in crate::workbench) export_settings_file: bool,
+    pub(in crate::workbench) show_settings_file: bool,
     pub(in crate::workbench) shortcut_policy_candidate:
         Option<crate::workbench::ShortcutPreferences>,
     pub(in crate::workbench) updated_profile_label: Option<&'static str>,
@@ -42,6 +50,7 @@ pub(in crate::workbench) struct PreferencePageActions {
 impl RSpiceApp {
     pub(in crate::workbench) fn render_preferences_dialog(&mut self, ctx: &Context) {
         self.poll_shortcut_portability_source();
+        self.poll_settings_file_transfer(ctx);
         self.finish_shortcut_library_publication();
         let category_id = Id::new(CATEGORY_STATE_ID);
         let current_surface = self.state.workbench.current_route().surface_id();
@@ -143,6 +152,15 @@ impl RSpiceApp {
         }
         if actions.open_shortcut_export {
             self.state.dialogs.shortcut_portability.open_export();
+        }
+        if actions.import_settings_file {
+            self.begin_settings_import(ctx);
+        }
+        if actions.export_settings_file {
+            self.begin_settings_export(ctx);
+        }
+        if actions.show_settings_file {
+            self.state.show_preferences_file();
         }
         if actions.open_workspace_layout_manager {
             let preset = self
@@ -407,6 +425,66 @@ impl RSpiceApp {
         }
     }
 
+    fn begin_settings_import(&mut self, ctx: &Context) {
+        if let Err(refusal) = crate::io::file_exchange::open_file(
+            ctx,
+            Id::new(SETTINGS_IMPORT_ID),
+            SETTINGS_FILE,
+            MAX_SETTINGS_FILE_BYTES,
+        ) {
+            self.state.prompt(refusal);
+        }
+    }
+
+    fn begin_settings_export(&mut self, ctx: &Context) {
+        let started = self.state.settings_file_bytes().and_then(|bytes| {
+            crate::io::file_exchange::save_file(
+                ctx,
+                Id::new(SETTINGS_EXPORT_ID),
+                SETTINGS_FILE,
+                SETTINGS_FILE.fallback_name.to_owned(),
+                bytes,
+            )
+        });
+        if let Err(refusal) = started {
+            self.state
+                .prompt(format!("Settings were not exported: {refusal}"));
+        }
+    }
+
+    /// Collect a settings-file pick, whether or not Preferences is still
+    /// open: a result left in its mailbox would reach the next pick instead.
+    fn poll_settings_file_transfer(&mut self, ctx: &Context) {
+        match crate::io::file_exchange::take_saved(ctx, Id::new(SETTINGS_EXPORT_ID)) {
+            Some(Ok(Some(saved))) => {
+                self.state
+                    .prompt(format!("Settings exported to {}.", saved.name));
+            }
+            Some(Err(refusal)) => self.state.prompt(refusal),
+            Some(Ok(None)) | None => {}
+        }
+        match crate::io::file_exchange::take_opened(ctx, Id::new(SETTINGS_IMPORT_ID)) {
+            Some(Ok(Some(file))) => {
+                match self
+                    .state
+                    .stage_settings_import(&file.name, file.text.as_bytes())
+                {
+                    Ok((shortcuts, staged)) => self.publish_shortcut_candidate(
+                        ctx,
+                        &shortcuts,
+                        ShortcutLibraryPublicationContinuation::SettingsImport(Box::new(staged)),
+                    ),
+                    Err(reason) => self.state.prompt(format!(
+                        "Settings were not imported from {}: {reason}. Nothing was changed.",
+                        file.name
+                    )),
+                }
+            }
+            Some(Err(refusal)) => self.state.prompt(refusal),
+            Some(Ok(None)) | None => {}
+        }
+    }
+
     fn finish_shortcut_library_publication(&mut self) {
         if self
             .state
@@ -512,6 +590,9 @@ impl AppState {
                     );
                 }
                 self.dialogs.shortcut_portability.complete_rollback(result);
+            }
+            ShortcutLibraryPublicationContinuation::SettingsImport(staged) => {
+                self.finish_settings_import(*staged, result);
             }
         }
     }
@@ -857,6 +938,58 @@ mod tests {
                 .dialogs
                 .shortcut_portability
                 .application_modal_open()
+        );
+    }
+
+    /// Export… writes a settings file through the shared picker, and Import…
+    /// on another installation puts its contents in force.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn settings_file_actions_move_settings_between_installations() {
+        use crate::io::file_exchange::{ScriptedChoice, script_next_choice, take_pickers_opened};
+
+        let ctx = Context::default();
+        let folder =
+            std::env::temp_dir().join(format!("rspice-settings-file-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&folder).expect("temp folder");
+        let path = folder.join("rspice-settings.json");
+        let _ = take_pickers_opened();
+
+        let mut source = test_app();
+        source.state.ui.autosave_minutes = 10;
+        script_next_choice(ScriptedChoice::Chose(path.clone()));
+        source.execute_preference_page_actions(
+            &ctx,
+            PreferencePageActions {
+                export_settings_file: true,
+                ..PreferencePageActions::default()
+            },
+        );
+        source.poll_settings_file_transfer(&ctx);
+        assert_eq!(
+            source.state.prompt_text(),
+            Some("Settings exported to rspice-settings.json.")
+        );
+
+        let mut target = test_app();
+        target.state.enable_volatile_test_shortcut_persistence();
+        script_next_choice(ScriptedChoice::Chose(path));
+        target.execute_preference_page_actions(
+            &ctx,
+            PreferencePageActions {
+                import_settings_file: true,
+                ..PreferencePageActions::default()
+            },
+        );
+        target.poll_settings_file_transfer(&ctx);
+        assert_eq!(target.state.ui.autosave_minutes, 10);
+        assert_eq!(
+            target.state.prompt_text(),
+            Some("Settings imported from rspice-settings.json.")
+        );
+        assert_eq!(
+            take_pickers_opened(),
+            vec![SETTINGS_FILE.label, SETTINGS_FILE.label]
         );
     }
 

@@ -488,6 +488,10 @@ pub struct UiSessionStateSer {
     duplicate_external_nets: crate::state::DuplicateExternalNets,
     #[serde(default)]
     engineering_table_views: crate::state::engineering_table::EngineeringTableViewStore,
+    // `theme` and the next three fields are still written here so an older
+    // build finds them, but the session no longer owns them: the preferences
+    // file is read over this copy at launch
+    // (`app_state::session::preferences_file`).
     #[serde(default = "default_autosave_minutes")]
     autosave_minutes: u8,
     #[serde(default)]
@@ -509,11 +513,15 @@ pub struct UiSessionStateSer {
     )>,
 }
 
+/// The autosave interval a session starts with when nothing chose one.
+pub(crate) const DEFAULT_AUTOSAVE_MINUTES: u8 = 5;
+
 fn default_autosave_minutes() -> u8 {
-    5
+    DEFAULT_AUTOSAVE_MINUTES
 }
 
-fn normalize_autosave_minutes(minutes: u8) -> u8 {
+/// Map any stored interval onto the 2, 5 and 10 minutes Preferences offers.
+pub(crate) fn normalize_autosave_minutes(minutes: u8) -> u8 {
     match minutes {
         2 | 5 | 10 => minutes,
         0..=3 => 2,
