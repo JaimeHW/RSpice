@@ -42,6 +42,18 @@
 //! dependency, so they are excluded. `use`, type positions, and paths all
 //! count equally: the metric tracks coupling, not import style.
 //!
+//! A name the crate root brings into scope counts too. `lib.rs` re-exports
+//! the crate's primary types, and `crate::SimulationError`,
+//! `crate::CircuitData` or `crate::Engine` names no module, so a scan for
+//! `crate::<module>` alone never saw them: that is how `notice -> analysis`,
+//! through `crate::ContinuationAid`, hid a `device -> notice -> analysis`
+//! cycle. [`crate_root_names`] reads the root's `use` declarations and follows
+//! each name through the modules that pass it on to the one that defines it,
+//! so `crate::SimulationError` counts toward `analysis`, where the type is
+//! written, and not `engine`, which only re-exports it. A name the root
+//! defines itself, such as `Value`, or takes from another crate, such as
+//! `Complex64`, is no edge.
+//!
 //! Nothing under `src/` is excluded. `device/veriloga_builtins/` used to be,
 //! first because it held the generated corpus — 172 files, 49 MB, and generated
 //! code is the generator's business rather than this ratchet's — and then,
@@ -196,19 +208,24 @@ const LAYERS: &[(&str, u32)] = &[
 /// Upward dependencies, recorded with the exact reference count each stands at.
 ///
 /// This list was empty until 2026-09-11 and is meant to be empty again. Three
-/// edges landed in the September parser and sensitivity work without it, and
-/// each entry below says what retires it.
+/// edges landed in the September parser and sensitivity work without it. Nine
+/// more were already there, behind names the crate root re-exports, until the
+/// scan learned to follow those names on 2026-10-17; the same change showed
+/// `netlist -> engine` at 13 rather than 5. Each entry below says what retires
+/// it.
 ///
-/// - `netlist -> engine`, 5. Unit tests in `netlist.rs`, `netlist/flattener.rs`
-///   and `netlist/parser/values.rs` that check a parse by running
-///   `Engine::default().run_dc_op` on the netlist they just built. The physical
-///   check is the point of them — a positional `AREA`, a scoped subcircuit
-///   binding and an instance-argument expression are all things a parser can
-///   get wrong without saying so — but reaching six ranks up to make it is
-///   still the inversion this test measures. They retire by moving the
-///   physical half into an integration test under `crates/rspice-core/tests/`,
-///   which is an external crate and therefore not an edge at all; the
-///   parser-internal half has to stay, because it drives
+/// - `netlist -> engine`, 13. Unit tests in `netlist.rs`,
+///   `netlist/add_resistors.rs`, `netlist/flattener.rs`, `netlist/parser.rs`,
+///   `netlist/parser/values.rs`, `netlist/source_map.rs` and
+///   `netlist/startup.rs` that check a parse by running the netlist they just
+///   built through `Engine`; eight of them name it `crate::Engine`. The
+///   physical check is the point of them — a positional `AREA`, a scoped
+///   subcircuit binding and an instance-argument expression are all things a
+///   parser can get wrong without saying so — but reaching six ranks up to
+///   make it is still the inversion this test measures. They retire by moving
+///   the physical half into an integration test under
+///   `crates/rspice-core/tests/`, which is an external crate and therefore not
+///   an edge at all; the parser-internal half has to stay, because it drives
 ///   `super::parse_numeric_field_value` and its siblings directly.
 /// - `netlist -> circuit`, 1. One unit test in `netlist/flattener.rs` that
 ///   reads a materialized source waveform back through
@@ -222,10 +239,73 @@ const LAYERS: &[(&str, u32)] = &[
 ///   is what the adapter was written to avoid, so the edge retires by moving
 ///   the shared kernel below both callers — into `expr`, whose types its
 ///   signatures already name — rather than by duplicating it.
+///
+/// The rest were found through the crate root's names.
+///
+/// - `analysis -> engine`, 3; `circuit -> engine`, 11; `device -> engine`, 6.
+///   Unit tests that run a deck through `crate::Engine` to get a circuit or a
+///   result to check: `analysis/measure_signals.rs`; six in
+///   `circuit/mixed_signal/coupled_tests.rs` and one each in
+///   `circuit/mixed_checkpoint/tests.rs`, `circuit/force_accept.rs`,
+///   `circuit/net_kind.rs`, `circuit/storage/passive/thermal_tests.rs` and
+///   `circuit/xyce_dae.rs`; and in `device/mosfet`, three in `bsim4v8`
+///   (`device/charge_tests.rs`, `tests.rs`) and three in `b3soi/dd.rs` and
+///   `dd/derivative_tests.rs`. They retire as `netlist -> engine` does, by
+///   moving the half that needs the facade into an integration test.
+/// - `device -> analysis`, 5. Unit tests in `device/stamp_error.rs` (2) and
+///   `device/veriloga.rs` (3) that check a `StampError` keeps its
+///   classification when it widens to `crate::SimulationError`. The widening
+///   is `analysis::error`'s `From<StampError>`, so they retire by moving
+///   beside it.
+/// - `device -> circuit`, 11. `instantiate_builtin` and
+///   `instantiate_builtin_scoped` in `device/veriloga_builtins.rs` take the
+///   `&mut crate::CircuitData` they create a built-in model's nodes and
+///   branches in (2, production), and nine of that file's unit tests build one
+///   to instantiate into. Their only callers are in `engine::builder`, so the
+///   edge retires by moving the two entry points, and their tests, up beside
+///   them.
+/// - `config -> analysis`, 5, and a cycle with it: `analysis::error` names
+///   `config::SimulationConfigError`, whose `UnsupportedCapability` variant
+///   carries the `UnsupportedCapabilityError` that `analysis::error` defines
+///   and `HdlRunConfig::unlanded_option` builds (3, production); two
+///   unit-test lines widen a config error to `SimulationError`. Retires by
+///   moving the refusal type below `config`, which first needs
+///   `NetlistSourceLocation`, its one field from above `config`, to move down
+///   with it.
+/// - `xspice -> analysis`, 4. Production: the digital testbench's
+///   `DigitalRunError::Unsupported` in `xspice/verilog/host.rs`, and the
+///   refusals `xspice/verilog.rs` and `xspice/verilog/mixed/checkpoint.rs`
+///   raise, carry the same `UnsupportedCapabilityError`. Retires with it.
+/// - `circuit -> analysis`, 25. Production: the mixed-signal scheduler
+///   (`circuit/scheduler.rs`, `circuit/scheduler/trial.rs`), mixed-signal port
+///   elaboration (`circuit/mixed_signal.rs`) and model acceptance
+///   (`circuit/external_models.rs`) return `SimulationError` and
+///   `ElaborationError`, and `circuit/mixed_checkpoint.rs` builds an
+///   `UnsupportedCapabilityError`. The error taxonomy sits in `analysis`, and
+///   the edge retires by giving `analysis::error` a rank of its own just below
+///   `circuit`: its `From<CircuitError>` impl moves into `circuit`, and the
+///   `s_param::PortError` its `RfPort` variant carries, the one analysis type
+///   it names, moves down with it.
+/// - `abort_signal -> transient_observation`, 2. A tie, not an inversion:
+///   `TransientSample`, the view of one accepted sample a transient hook is
+///   handed, borrows the run's current- and voltage-impulse traces, which is
+///   what `transient_observation` sits below the hooks to hold. Both are
+///   rank-0 leaves, and `io` and `numerics`, at rank 1, read `abort_signal`,
+///   so the order cannot be stated without lifting `abort_signal` to rank 1
+///   and every rank from `io` up by one. That renumbering retires it.
 const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
+    ("abort_signal", "transient_observation", 2),
+    ("analysis", "engine", 3),
+    ("circuit", "analysis", 25),
+    ("circuit", "engine", 11),
+    ("config", "analysis", 5),
+    ("device", "analysis", 5),
+    ("device", "circuit", 11),
+    ("device", "engine", 6),
     ("netlist", "circuit", 1),
     ("netlist", "device", 1),
-    ("netlist", "engine", 5),
+    ("netlist", "engine", 13),
+    ("xspice", "analysis", 4),
 ];
 
 fn src_dir() -> PathBuf {
@@ -575,6 +655,7 @@ fn crate_root_names(source: ModuleSource<'_>) -> BTreeMap<String, String> {
 fn edge_counts() -> BTreeMap<(String, String), usize> {
     let root = src_dir();
     let modules: Vec<&str> = LAYERS.iter().map(|(name, _)| *name).collect();
+    let root_names = crate_root_names(&|path| module_source(&root, path));
     let mut edges: BTreeMap<(String, String), usize> = BTreeMap::new();
 
     for file in rust_sources(&root) {
@@ -591,6 +672,15 @@ fn edge_counts() -> BTreeMap<(String, String), usize> {
             let count = count_occurrences(&code, &format!("crate::{to}"));
             if count > 0 {
                 *edges.entry((from.clone(), (*to).to_owned())).or_default() += count;
+            }
+        }
+        for (name, to) in &root_names {
+            if *to == from {
+                continue;
+            }
+            let count = count_occurrences(&code, &format!("crate::{name}"));
+            if count > 0 {
+                *edges.entry((from.clone(), to.clone())).or_default() += count;
             }
         }
     }
