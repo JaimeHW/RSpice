@@ -18,8 +18,8 @@ use egui::Ui;
 
 use crate::schematic::view::sheet_visibility::{self, SheetScope};
 use crate::state::{
-    AnalysisResultPayload, CellViewRef, Component, ComponentType, DisplayMode, NetNamingPolicy,
-    PropertyDefinition, PropertyType, PropertyValue, SoaRuleVerdictEvidence,
+    AnalysisResultPayload, CellViewRef, Component, ComponentType, DisplayMode, PropertyDefinition,
+    PropertyType, PropertyValue, SoaRuleVerdictEvidence,
 };
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};

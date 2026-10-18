@@ -1864,6 +1864,33 @@ fn the_net_inspector_states_the_sheets_a_connector_partners_with() {
     );
 }
 
+/// Connectivity joins `Bias` and `BIAS` under either naming setting, so the
+/// inspector counts their connectors as one net's under both.
+#[test]
+fn the_net_inspector_folds_case_the_way_connectivity_does() {
+    use crate::state::{CrossSheetPortDirection, NetLabel, NetNamingPolicy};
+
+    for policy in [
+        NetNamingPolicy::StrictCaseSensitive,
+        NetNamingPolicy::SpiceCompatibleRelaxed,
+    ] {
+        let mut state = AppState::default();
+        let document = state.schematic.document_mut_for_test();
+        document.document_policy.net_naming = policy;
+        for (id, x, name, direction) in [
+            (1, 20, "BIAS", CrossSheetPortDirection::Output),
+            (2, 40, "bias", CrossSheetPortDirection::Input),
+        ] {
+            document
+                .net_labels
+                .push(NetLabel::off_sheet(id, Point::new(x, 0), name, direction));
+        }
+        let declared = off_sheet_declaration(&state, "Bias").expect("both connectors declare");
+        assert_eq!(declared.direction, "input, output", "{policy:?}");
+        assert_eq!(normalized_net_name("Out"), normalized_net_name("out"));
+    }
+}
+
 /// Give the workspace an active configuration that cannot resolve: its DUT
 /// path names an instance the expanded hierarchy has not got. The design
 /// projection refuses such a configuration, so a surface that still shows

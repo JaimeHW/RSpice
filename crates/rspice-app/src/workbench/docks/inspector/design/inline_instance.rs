@@ -936,11 +936,9 @@ pub(super) struct OffSheetDeclaration {
 /// `None` for a net no off-sheet connector names, which is why its rows are
 /// absent rather than filled with "not applicable".
 pub(super) fn off_sheet_declaration(state: &AppState, name: &str) -> Option<OffSheetDeclaration> {
-    let policy = state.schematic.document().document_policy.net_naming;
-    let same_name = |candidate: &str| match policy {
-        NetNamingPolicy::StrictCaseSensitive => candidate == name,
-        NetNamingPolicy::SpiceCompatibleRelaxed => candidate.eq_ignore_ascii_case(name),
-    };
+    // Net names are not case-sensitive under either naming policy: the
+    // extraction joins `Out` and `out`, so their connectors are one net's.
+    let same_name = |candidate: &str| candidate.eq_ignore_ascii_case(name);
     let connectors: Vec<&crate::state::NetLabel> = state
         .schematic
         .document()
@@ -1303,12 +1301,7 @@ pub(super) fn net_name_collision_count(state: &AppState, net: &DesignNet) -> usi
                 .net_at(label.pos)
                 .is_some_and(|extracted| extracted.wires.iter().any(|id| wire_ids.contains(id)))
         })
-        .map(|label| {
-            normalized_net_name(
-                &label.name,
-                state.schematic.document().document_policy.net_naming,
-            )
-        })
+        .map(|label| normalized_net_name(&label.name))
         .collect::<std::collections::HashSet<_>>();
     for terminal in &net.terminals {
         if let Some(port) = state
@@ -1319,24 +1312,18 @@ pub(super) fn net_name_collision_count(state: &AppState, net: &DesignNet) -> usi
             .find(|component| component.id == terminal.component_id)
             .and_then(Component::port_spec)
         {
-            names.insert(normalized_net_name(
-                &port.name,
-                state.schematic.document().document_policy.net_naming,
-            ));
+            names.insert(normalized_net_name(&port.name));
         }
     }
-    names.insert(normalized_net_name(
-        &net.name,
-        state.schematic.document().document_policy.net_naming,
-    ));
+    names.insert(normalized_net_name(&net.name));
     names.len().saturating_sub(1)
 }
 
-pub(super) fn normalized_net_name(name: &str, policy: NetNamingPolicy) -> String {
-    match policy {
-        NetNamingPolicy::StrictCaseSensitive => name.to_owned(),
-        NetNamingPolicy::SpiceCompatibleRelaxed => name.to_ascii_lowercase(),
-    }
+/// The spelling two names share when they are one net. Connectivity folds
+/// case under both naming policies (the policy only limits which characters
+/// a name may use), so this does too.
+pub(super) fn normalized_net_name(name: &str) -> String {
+    name.to_ascii_lowercase()
 }
 
 pub(super) fn select_component(app: &mut RSpiceApp, id: u64) {

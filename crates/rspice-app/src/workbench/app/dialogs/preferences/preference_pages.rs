@@ -684,11 +684,11 @@ fn schematic(ui: &mut Ui, state: &mut AppState) {
         ui,
         state,
         ChoicePreference::NetNamingPolicy,
-        "Net naming policy",
-        "Case, global-net syntax and bus expansion are checked before netlisting.",
+        "Net name characters",
+        "Net names are not case-sensitive: Out and out are one net.",
         &[
-            "Strict project policy · case sensitive",
-            "SPICE-compatible relaxed",
+            "ASCII letters, digits, _.$:/![]<>-",
+            "Any printable character but spaces",
         ],
     );
     choice_row(
@@ -1378,8 +1378,8 @@ mod tests {
             .find("TogglePreference::HierarchicalEditInPlace")
             .expect("hierarchical edit-in-place row");
         let net_naming = schematic
-            .find("\"Net naming policy\"")
-            .expect("net naming policy row");
+            .find("\"Net name characters\"")
+            .expect("net name characters row");
         assert!(selection < edit_in_place && edit_in_place < net_naming);
     }
 }
