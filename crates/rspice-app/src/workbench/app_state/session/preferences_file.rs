@@ -171,7 +171,13 @@ fn parse(bytes: &[u8], limit: usize) -> Result<Value, String> {
             limit / (1024 * 1024)
         ));
     }
-    serde_json::from_slice(bytes).map_err(|error| format!("it is not valid JSON ({error})"))
+    serde_json::from_slice(bytes).map_err(|error| {
+        format!(
+            "it is not valid JSON at line {}, column {}",
+            error.line(),
+            error.column()
+        )
+    })
 }
 
 /// Decode a preferences object.
@@ -564,8 +570,8 @@ impl AppState {
                     LogSeverity::Warning,
                     LogSource::Studio,
                     format!(
-                        "The preferences file could not be read ({reason}), so default settings \
-                         are in use. The unreadable file was kept as {backup}."
+                        "The preferences file could not be read: {reason}. Default settings are \
+                         in use, and the unreadable file was kept as {backup}."
                     ),
                 );
                 self.write_preferences_file();
@@ -576,9 +582,9 @@ impl AppState {
                     LogSeverity::Error,
                     LogSource::Studio,
                     format!(
-                        "The preferences file {} could not be read ({reason}) or moved aside \
-                         ({error}). This session uses the settings it restored and will not \
-                         write that file.",
+                        "The preferences file {} could not be read: {reason}. It could not be \
+                         moved aside either: {error}. This session uses the settings it \
+                         restored and will not write that file.",
                         store.describe()
                     ),
                 );
