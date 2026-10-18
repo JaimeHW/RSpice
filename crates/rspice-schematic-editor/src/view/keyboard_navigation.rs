@@ -81,6 +81,19 @@ pub fn handle_keyboard_object_navigation(
     if !capabilities.traversal_enabled {
         return KeyboardNavigationOutcome::Ignored;
     }
+    // The candidates are every object on the sheet with its bounds, so they
+    // are found only when an arrow key asks to move between them; a frame
+    // without one leaves the input as it found it either way.
+    let arrow_pending = response.ctx.input(|input| {
+        input.events.iter().any(|event| {
+            TRAVERSAL_KEYS
+                .iter()
+                .any(|&key| is_unmodified_press(event, key))
+        })
+    });
+    if !arrow_pending {
+        return KeyboardNavigationOutcome::Ignored;
+    }
 
     let candidates = traversal_candidates(view, symbol_context);
     if candidates.is_empty() {
@@ -118,18 +131,32 @@ pub fn handle_keyboard_object_navigation(
     }))
 }
 
+/// The keys that move the keyboard focus between objects.
+const TRAVERSAL_KEYS: [Key; 4] = [
+    Key::ArrowLeft,
+    Key::ArrowRight,
+    Key::ArrowUp,
+    Key::ArrowDown,
+];
+
+fn is_unmodified_press(event: &Event, requested: Key) -> bool {
+    matches!(
+        event,
+        Event::Key {
+            key,
+            pressed: true,
+            modifiers,
+            ..
+        } if *key == requested && modifiers.is_none()
+    )
+}
+
 fn consume_unmodified_key(input: &mut InputState, requested: Key) -> bool {
-    let Some(index) = input.events.iter().position(|event| {
-        matches!(
-            event,
-            Event::Key {
-                key,
-                pressed: true,
-                modifiers,
-                ..
-            } if *key == requested && modifiers.is_none()
-        )
-    }) else {
+    let Some(index) = input
+        .events
+        .iter()
+        .position(|event| is_unmodified_press(event, requested))
+    else {
         return false;
     };
     input.events.remove(index);
