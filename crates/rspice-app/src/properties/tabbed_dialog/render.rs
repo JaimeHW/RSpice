@@ -46,6 +46,7 @@ pub fn render_tabbed_property_dialog(
         commit_policy,
     };
     let mut services = ComponentDialogServices {
+        reference: state.component_name.as_deref(),
         model_browser: &mut state.model_browser,
         session_error: &mut state.session_error,
         preview: ComponentPreview {
@@ -77,6 +78,8 @@ struct ComponentPreview<'a> {
 }
 
 struct ComponentDialogServices<'a> {
+    /// The instance's designator when the editor was opened.
+    reference: Option<&'a str>,
     model_browser: &'a mut ModelBrowserState,
     session_error: &'a mut Option<String>,
     preview: ComponentPreview<'a>,
@@ -96,19 +99,46 @@ impl ComponentPropertyServices for ComponentDialogServices<'_> {
                 }
             }
             PropertyBrowseRequest::Model => {
-                self.model_browser.type_filter =
-                    draft.component_type.and_then(model_type_for_component);
-                self.model_browser.allow_corner_selection = false;
-                self.model_browser.selected_library = draft
-                    .get_value("model_library")
-                    .map(PropertyValue::display_string)
-                    .filter(|value| !value.trim().is_empty());
-                self.model_browser.selected_model = draft
-                    .get_value("model")
-                    .map(PropertyValue::display_string)
-                    .filter(|value| !value.trim().is_empty());
-                self.model_browser.selected_corner = None;
-                self.model_browser.open = true;
+                let Some(kind) = draft.component_type else {
+                    return;
+                };
+                let text = |name: &str| {
+                    draft
+                        .get_value(name)
+                        .map(PropertyValue::display_string)
+                        .map(|value| value.trim().to_owned())
+                        .filter(|value| !value.is_empty())
+                };
+                // The designator as the draft holds it, so a rename typed
+                // before Browse is the name the browser speaks to.
+                let reference = text("name")
+                    .or_else(|| self.reference.map(str::to_owned))
+                    .unwrap_or_else(|| kind.display_name().to_owned());
+                // The drawn size as the draft holds it, which selects the bin
+                // of a binned family. An expression of design variables is
+                // not evaluated here, and selects none.
+                let dimension = |name: &str| {
+                    let value = draft.get_value(name)?;
+                    value.as_number().or_else(|| {
+                        let text = value.display_string();
+                        let text = text.trim();
+                        let literal = text
+                            .strip_prefix('{')
+                            .and_then(|text| text.strip_suffix('}'))
+                            .unwrap_or(text);
+                        crate::quantity::parse_engineering_value(literal).ok()
+                    })
+                };
+                self.model_browser.open_for_instance(
+                    &reference,
+                    kind,
+                    text("model"),
+                    text("model_library"),
+                    crate::properties::model_browser::InstanceGeometry {
+                        length: dimension("l"),
+                        width: dimension("w"),
+                    },
+                );
             }
         }
     }
@@ -323,11 +353,7 @@ fn render_model_browser(
         use crate::properties::model_browser::{ModelBrowserResult, render_model_browser};
 
         match render_model_browser(ctx, &mut state.model_browser, model_library_manager) {
-            ModelBrowserResult::Selected {
-                library,
-                model,
-                corner: _,
-            } => {
+            ModelBrowserResult::Selected { library, model } => {
                 state.draft.set_value("model", PropertyValue::String(model));
                 state
                     .draft
@@ -346,47 +372,6 @@ fn render_model_browser(
             ModelBrowserResult::None => {}
         }
     }
-}
-
-/// Which model type the browser opens filtered to, for a placement of `kind`.
-///
-/// The filter narrows what a reader is shown; it is not the binding contract,
-/// which `validate_component_model_compatibility` owns and applies afterwards.
-/// So a device answers the *type its cards carry*: an SOI MOSFET's cards are
-/// MOSFET cards told apart by their level, and share this filter with bulk
-/// ones, while a VDMOS card carries a type of its own and does not.
-fn model_type_for_component(
-    kind: crate::state::ComponentType,
-) -> Option<crate::state::model_library::ModelType> {
-    use crate::state::ComponentType;
-    use crate::state::model_library::ModelType;
-    Some(match kind {
-        ComponentType::Nmos | ComponentType::NmosSoi => ModelType::Nmos,
-        ComponentType::Pmos | ComponentType::PmosSoi => ModelType::Pmos,
-        ComponentType::NVdmos => ModelType::NVdmos,
-        ComponentType::PVdmos => ModelType::PVdmos,
-        ComponentType::NpnBjt | ComponentType::NpnBjt4 | ComponentType::NpnBjt5 => ModelType::Npn,
-        ComponentType::PnpBjt | ComponentType::PnpBjt4 | ComponentType::PnpBjt5 => ModelType::Pnp,
-        ComponentType::Njfet => ModelType::Njfet,
-        ComponentType::Pjfet => ModelType::Pjfet,
-        ComponentType::Nmesfet => ModelType::Nmesfet,
-        ComponentType::Pmesfet => ModelType::Pmesfet,
-        ComponentType::Diode => ModelType::Diode,
-        ComponentType::Resistor => ModelType::Resistor,
-        ComponentType::Capacitor => ModelType::Capacitor,
-        ComponentType::Inductor | ComponentType::SaturableInductor => ModelType::Inductor,
-        ComponentType::LossyTransmissionLine
-        | ComponentType::CoupledTransmissionLine
-        | ComponentType::RfPort => ModelType::Rf,
-        // Switches, memristors and cell instances are bound to cards this
-        // vocabulary has no family for, so the unclassified type is where
-        // their cards genuinely are rather than a shrug.
-        ComponentType::Memristor
-        | ComponentType::VSwitch
-        | ComponentType::ISwitch
-        | ComponentType::CellInstance => ModelType::Other,
-        _ => return None,
-    })
 }
 
 #[cfg(test)]

@@ -49,9 +49,15 @@ fn evidence_contents(
     action: &mut ComponentPropertyDialogResult,
     pane: egui::Rect,
 ) {
-    if show_source_preview {
-        stimulus_section(ui, draft, context, services, action, pane);
-    }
+    stimulus_section(
+        ui,
+        draft,
+        context,
+        show_source_preview,
+        services,
+        action,
+        pane,
+    );
 }
 
 /// The colour a provenance chip takes.
@@ -93,20 +99,32 @@ pub fn provenance_colour(
 /// fact the two rows under the old card spent four lines on. The lifecycle
 /// word is not repeated here: the dialog header already carries it, in the
 /// same colours, two inches up.
+///
+/// Drawn whenever the dialog gave this pane its half, which it does for either
+/// half of the section, and each half is drawn on what it needs alone. Both
+/// used to wait on the library record, so a source whose record the host
+/// could not resolve lost its waveform as well, and the editor showed an empty
+/// pane beside the parameters.
 fn stimulus_section(
     ui: &mut Ui,
     draft: &ComponentPropertyDraft,
     context: &ComponentEditorContext,
+    show_source_preview: bool,
     services: &mut impl ComponentPropertyServices,
     action: &mut ComponentPropertyDialogResult,
     pane: egui::Rect,
 ) {
-    let Some(stimulus) = context.stimulus.as_ref() else {
+    let stimulus = context.stimulus.as_ref();
+    if !show_source_preview && stimulus.is_none() {
         return;
-    };
+    }
     section_block(ui, "Stimulus", pane, |ui| {
-        services.preview_source(ui, draft);
-        stimulus_body(ui, draft, stimulus, action);
+        if show_source_preview {
+            services.preview_source(ui, draft);
+        }
+        if let Some(stimulus) = stimulus {
+            stimulus_body(ui, draft, stimulus, action);
+        }
     });
 }
 
@@ -366,6 +384,68 @@ mod tests {
             }),
             ..ComponentEditorContext::default()
         }
+    }
+
+    /// A preview service that draws a stand-in for the curve.
+    struct Waveform;
+
+    impl ComponentPropertyServices for Waveform {
+        fn browse(
+            &mut self,
+            _: super::super::PropertyBrowseRequest<'_>,
+            _: &mut ComponentPropertyDraft,
+        ) {
+        }
+        fn preview_source(&mut self, ui: &mut Ui, _: &ComponentPropertyDraft) {
+            ui.label("waveform");
+        }
+    }
+
+    /// Whatever made the dialog give this pane its half is drawn in it.
+    ///
+    /// The dialog splits for a preview or for a library record, either one,
+    /// and the section used to wait on the record for both of its halves: a
+    /// source whose record the host could not resolve got a pane beside its
+    /// parameters with nothing in it at all.
+    #[test]
+    fn the_stimulus_pane_draws_whichever_half_it_was_given() {
+        let painted = |context: &ComponentEditorContext, show_source_preview: bool| {
+            let ctx = egui::Context::default();
+            rspice_ui_kit::Theme::default().apply(&ctx);
+            let draft = ComponentPropertyDraft::default();
+            let mut action = ComponentPropertyDialogResult::None;
+            ctx.run_ui(Default::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    evidence_pane(
+                        ui,
+                        &draft,
+                        context,
+                        show_source_preview,
+                        &mut Waveform,
+                        &mut action,
+                    );
+                });
+            })
+            .shapes
+            .into_iter()
+            .filter_map(|clipped| match clipped.shape {
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+        };
+        let has = |texts: &[String], wanted: &str| texts.iter().any(|text| text == wanted);
+
+        let unresolved = painted(&ComponentEditorContext::default(), true);
+        assert!(
+            has(&unresolved, "Stimulus") && has(&unresolved, "waveform"),
+            "a source with no library record still shows its curve: {unresolved:?}"
+        );
+        let record_only = painted(&adopted_context(), false);
+        assert!(
+            has(&record_only, "Stimulus") && has(&record_only, "Save as library definition…"),
+            "a library record shows its verbs without a curve: {record_only:?}"
+        );
     }
 
     /// A verb that acts on the instance's card is withheld while the editor

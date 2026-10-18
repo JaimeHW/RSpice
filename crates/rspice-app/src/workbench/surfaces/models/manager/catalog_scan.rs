@@ -21,6 +21,7 @@ pub(super) fn project_catalog_scan(
         .to_ascii_lowercase();
     let facet = app.state.workbench.models_view.project_facet;
     let mut rows = Vec::new();
+    let mut total = 0usize;
     let mut facets = [0usize; ProjectModelFacet::ALL.len()];
     let mut review_shown = 0usize;
     for library in app.state.model_library_manager.libraries_sorted() {
@@ -28,9 +29,20 @@ pub(super) fn project_catalog_scan(
         let built_in = matches!(library.source_authority, ModelSourceAuthority::BuiltIn);
         let drifted = !drift::findings_for(app.state, &library.name).is_empty();
         let library_source = library.root_path.as_deref().map(path_label);
-        for model in library.models.values() {
-            let usages = consumers.of(library, &model.name);
-            let review = model_needs_review(library, model);
+        // A binned family is one row, named as an instance binds it; its bins
+        // are its detail, not rows beside it.
+        for entry in library.bindable_models() {
+            let cards = entry.cards();
+            let model = cards[0];
+            let (usages, bins) = match &entry {
+                BindableModel::Card(card) => (Cow::Borrowed(consumers.of(library, &card.name)), 0),
+                BindableModel::Family(family) => (
+                    Cow::Owned(consumers.of_family(library, family)),
+                    family.bins.len(),
+                ),
+            };
+            let review = cards.iter().any(|card| model_needs_review(library, card));
+            total += 1;
             let matches = |facet: ProjectModelFacet| match facet {
                 ProjectModelFacet::All => true,
                 ProjectModelFacet::Bound => !usages.is_empty(),
@@ -44,7 +56,14 @@ pub(super) fn project_catalog_scan(
             if !matches(facet) {
                 continue;
             }
-            if !query.is_empty() && !model_matches_query(library, model, &query) {
+            // A family is found by its own name or by anything one of its bins
+            // reports.
+            if !query.is_empty()
+                && !contains_query(entry.name(), &query)
+                && !cards
+                    .iter()
+                    .any(|card| model_matches_query(library, card, &query))
+            {
                 continue;
             }
             if review {
@@ -52,7 +71,8 @@ pub(super) fn project_catalog_scan(
             }
             rows.push(ProjectModelRow {
                 library: library.name.clone(),
-                model: model.name.clone(),
+                model: entry.name().to_owned(),
+                bins,
                 family: model.model_type.display_name(),
                 source: model
                     .file_path
@@ -72,22 +92,21 @@ pub(super) fn project_catalog_scan(
                     .first()
                     .map(|consumer| bindings::consumer_designator(consumer).to_owned()),
                 usage_count: usages.len(),
-                vectors: library
-                    .model_qualification
-                    .get(&model.name)
-                    .map_or(0, |qualification| {
-                        qualification
-                            .suites
-                            .iter()
-                            .map(|suite| suite.vectors.len())
-                            .sum()
-                    }),
+                // Qualification is kept per card, so a family's vectors are
+                // its bins' together.
+                vectors: cards
+                    .iter()
+                    .filter_map(|card| library.model_qualification.get(&card.name))
+                    .flat_map(|qualification| &qualification.suites)
+                    .map(|suite| suite.vectors.len())
+                    .sum(),
             });
         }
     }
     sort_catalog_rows(&mut rows, app.state.workbench.models_view.catalog_sort);
     ProjectCatalogScan {
         rows,
+        total,
         facets,
         review: review_shown,
         consumer_diagnostics: consumers.diagnostics.clone(),
@@ -153,16 +172,19 @@ pub(super) fn model_matches_query(
     model: &DeviceModel,
     query: &str,
 ) -> bool {
-    let contains = |field: &str| {
-        field.len() >= query.len()
-            && field
-                .as_bytes()
-                .windows(query.len())
-                .any(|window| window.eq_ignore_ascii_case(query.as_bytes()))
-    };
+    let contains = |field: &str| contains_query(field, query);
     contains(&model.name)
         || contains(&model.description)
         || contains(model.model_type.display_name())
         || contains(&library.name)
         || model.parameters.keys().any(|parameter| contains(parameter))
+}
+
+/// Whether a lower-cased search term appears in one field, ignoring ASCII case.
+fn contains_query(field: &str, query: &str) -> bool {
+    field.len() >= query.len()
+        && field
+            .as_bytes()
+            .windows(query.len())
+            .any(|window| window.eq_ignore_ascii_case(query.as_bytes()))
 }

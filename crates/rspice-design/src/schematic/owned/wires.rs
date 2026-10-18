@@ -19,9 +19,10 @@ impl Schematic {
         }
         split
     }
-    pub fn split_wires_under_pins(&mut self, pins: &[Point]) -> bool {
+    /// `parts` holds each part's pins; see [`wire_edit::split_wires_under_pins`].
+    pub fn split_wires_under_pins(&mut self, parts: &[Vec<Point>]) -> bool {
         let changed =
-            wire_edit::split_wires_under_pins(&mut self.document, &mut self.identity, pins);
+            wire_edit::split_wires_under_pins(&mut self.document, &mut self.identity, parts);
         if changed {
             self.invalidate_topology();
         }

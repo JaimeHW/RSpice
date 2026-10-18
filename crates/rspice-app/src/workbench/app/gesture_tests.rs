@@ -1198,3 +1198,37 @@ fn escape_lets_a_floating_paste_go() {
     fixture.frame(vec![fixture.button(400.0, false)], true);
     assert_eq!(fixture.app.state.schematic.document().components.len(), 1);
 }
+
+/// Esc drops the tool and the canvas keeps the keyboard, so the next bare
+/// key arms its tool. egui lets go of a focused widget on Escape unless the
+/// widget claims the key, and the canvas's single keys act only while it
+/// holds focus: after Esc, W did nothing until the canvas was clicked again.
+#[test]
+fn after_escape_the_canvas_still_takes_its_keys() {
+    let mut fixture = Fixture::new(false);
+    let empty = fixture.origin + egui::vec2(400.0, 100.0);
+    fixture.frame(vec![egui::Event::PointerMoved(empty)], true);
+    fixture.frame(vec![fixture.button(400.0, true)], true);
+    fixture.frame(vec![fixture.button(400.0, false)], true);
+    let tool = |fixture: &Fixture| fixture.app.state.schematic.session.editor.tool;
+    let tap = |fixture: &mut Fixture, pressed: egui::Key| {
+        fixture.frame(vec![key(pressed)], true);
+        fixture.frame(
+            vec![egui::Event::Key {
+                key: pressed,
+                physical_key: Some(pressed),
+                pressed: false,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            true,
+        );
+    };
+
+    tap(&mut fixture, egui::Key::W);
+    assert_eq!(tool(&fixture), Tool::Wire);
+    tap(&mut fixture, egui::Key::Escape);
+    assert_eq!(tool(&fixture), Tool::Select, "Esc drops the tool");
+    tap(&mut fixture, egui::Key::W);
+    assert_eq!(tool(&fixture), Tool::Wire, "W after Esc arms the wire tool");
+}

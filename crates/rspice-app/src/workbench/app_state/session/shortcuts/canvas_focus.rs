@@ -10,6 +10,7 @@ use crate::workbench::state::Workspace;
 
 const CANVAS_FOCUS_RECORD_ID: &str = "rspice-engineering-canvas-focus-owner";
 const CANVAS_FOCUS_REQUEST_ID: &str = "rspice-engineering-canvas-focus-request";
+const CANVAS_FOCUS_IN_PASS_ID: &str = "rspice-engineering-canvas-focus-in-pass";
 const ESCAPE_OWNER_RECORD_ID: &str = "rspice-escape-owner";
 
 /// How many passes a request for canvas focus waits for a canvas to be drawn.
@@ -39,6 +40,18 @@ pub(crate) fn request_engineering_canvas_focus(ctx: &egui::Context) {
     ctx.data_mut(|data| data.insert_temp(Id::new(CANVAS_FOCUS_REQUEST_ID), pass));
 }
 
+/// Ask that the canvas drawn later in this same pass take keyboard focus.
+///
+/// For a control painted above the canvas that changes what the canvas shows
+/// before the canvas is drawn, as a sheet tab does: the canvas this pass draws
+/// is already the one the reader arrives at. Taking the keyboard there, not a
+/// pass later, is what lets a key pressed in the very next frame reach it. A
+/// request no canvas answers in its own pass is dropped.
+pub(crate) fn request_engineering_canvas_focus_in_this_pass(ctx: &egui::Context) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| data.insert_temp(Id::new(CANVAS_FOCUS_IN_PASS_ID), pass));
+}
+
 /// Report the exact egui response that owns keyboard focus for a schematic,
 /// testbench, or symbol canvas. Pointer activation explicitly transfers focus
 /// from any prior text/control owner to the engineering canvas, and so does a
@@ -58,8 +71,30 @@ pub(crate) fn report_engineering_canvas_focus(response: &Response, view_type: Vi
             Some(_) | None => false,
         }
     });
-    if response.clicked() || response.drag_started() || requested {
+    let requested_in_pass = response.ctx.data_mut(|data| {
+        let id = Id::new(CANVAS_FOCUS_IN_PASS_ID);
+        let pass = data.get_temp::<u64>(id);
+        data.remove::<u64>(id);
+        pass == Some(now)
+    });
+    if response.clicked() || response.drag_started() || requested || requested_in_pass {
         response.request_focus();
+    }
+    // Esc drops the canvas's tool, not its keyboard. egui lets go of a
+    // focused widget on Escape unless the widget claims the key, and the
+    // canvas's single keys act only while it holds focus, so W, R or C after
+    // Esc did nothing until the canvas was clicked again. Tab and the arrows
+    // are left to egui.
+    if response.has_focus() {
+        response.ctx.memory_mut(|memory| {
+            memory.set_focus_lock_filter(
+                response.id,
+                egui::EventFilter {
+                    escape: true,
+                    ..Default::default()
+                },
+            );
+        });
     }
     response.ctx.data_mut(|data| {
         data.insert_temp(

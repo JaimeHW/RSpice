@@ -203,6 +203,11 @@ pub(crate) use schematic::named_net::{
 pub(crate) use dialogs::check_and_save::open_check_and_save_dialog;
 pub(crate) use dialogs::drawing_sheet_layers::open_drawing_sheet_layers_dialog;
 pub(crate) use dialogs::drawing_sheet_overflow::open_drawing_sheet_overflow_review;
+pub(crate) use dialogs::drawing_sheet_setup::{
+    DrawingSheetEdit, apply_drawing_sheet_edit, current_size_choice_label,
+    drawing_sheet_setup_available_for_state, open_drawing_sheet_setup_for_custom_size,
+    standard_size_choice_label,
+};
 pub(crate) use dialogs::engineering_table::open_engineering_table_dialog;
 pub(crate) use dialogs::grid_snap_routing::open_grid_snap_routing_dialog;
 pub(crate) use dialogs::hierarchy::create::{

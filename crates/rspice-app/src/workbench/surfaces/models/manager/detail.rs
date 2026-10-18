@@ -26,7 +26,15 @@ use super::*;
 /// number of cards in the section the model came from.
 struct SelectedModelDetail<'a> {
     library: String,
+    /// The card the pane shows: the selection, or one bin of its family.
     model: String,
+    /// The name Bind gives an instance: the card's own, or — for a bin — its
+    /// family's, which is how a deck binds a binned device. Pinning one bin
+    /// would run that card at every size.
+    binding: String,
+    /// Every bin of the family the card belongs to, in declaration order, or
+    /// none when the card is no bin of one.
+    bins: Vec<BinWindow>,
     family: &'static str,
     level: &'static str,
     /// Whether the library names an external root a pin can be taken from, and
@@ -55,14 +63,22 @@ struct SelectedModelDetail<'a> {
     envelope: DeclaredEnvelope,
     qualification: Option<QualificationCounts>,
     /// The instances bound to this model, borrowed from the catalog page's one
-    /// consumer index rather than copied out of it.
-    usages: &'a [String],
+    /// consumer index rather than copied out of it — or, for a family, its
+    /// consumers and its bins' gathered together.
+    usages: Cow<'a, [String]>,
     selected_component: Option<u64>,
     binding_block_reason: Option<String>,
     /// The reference designator the bind action would land on, resolved only
     /// when it would actually land: a primary that names an instance it is
     /// refusing to bind to is worse than one that says "selection".
     bind_target: Option<String>,
+}
+
+/// One bin of the selected family, and the L and W it holds.
+struct BinWindow {
+    name: String,
+    length: (Option<f64>, Option<f64>),
+    width: (Option<f64>, Option<f64>),
 }
 
 /// What the card itself declares about the device's operating envelope.
@@ -117,17 +133,25 @@ fn project_selection<'a>(
             "Use the table above or choose a model source in the Navigator.",
         ));
     };
-    let Some((library, model)) = app
-        .state
-        .model_library_manager
-        .get_library(library_name)
-        .and_then(|library| library.get_model(model_name).map(|model| (library, model)))
-    else {
-        return Err((
-            "The selected model no longer resolves.",
-            "Rescan or clear the selection; stale identities are never retargeted automatically.",
-        ));
+    let stale = (
+        "The selected model no longer resolves.",
+        "Rescan or clear the selection; stale identities are never retargeted automatically.",
+    );
+    let Some(library) = app.state.model_library_manager.get_library(library_name) else {
+        return Err(stale);
     };
+    // A binned family's selection is one of its bins, and naming the family
+    // itself selects its first.
+    let family = selection_family(library, model_name);
+    let Some(model) = library
+        .get_model(model_name)
+        .or_else(|| family.as_ref().map(|family| family.bins[0]))
+    else {
+        return Err(stale);
+    };
+    let binding = family
+        .as_ref()
+        .map_or_else(|| model.name.clone(), |family| family.name.to_owned());
 
     let mut parameters = model
         .parameters
@@ -154,7 +178,7 @@ fn project_selection<'a>(
                 app.state,
                 component_id,
                 &library.name,
-                &model.name,
+                &binding,
             )
             .err()
         },
@@ -175,9 +199,27 @@ fn project_selection<'a>(
         })
         .filter(|reference| !reference.is_empty());
 
+    let usages = match &family {
+        Some(family) => Cow::Owned(consumers.of_family(library, family)),
+        None => Cow::Borrowed(consumers.of(library, &model.name)),
+    };
+    let bins = family.map_or_else(Vec::new, |family| {
+        family
+            .bins
+            .iter()
+            .map(|bin| BinWindow {
+                name: bin.name.clone(),
+                length: (bin.l_min, bin.l_max),
+                width: (bin.w_min, bin.w_max),
+            })
+            .collect()
+    });
+
     Ok(SelectedModelDetail {
         library: library.name.clone(),
         model: model.name.clone(),
+        binding,
+        bins,
         family: model.model_type.display_name(),
         level: model.level.display_name(),
         has_root: library.has_external_root(),
@@ -225,7 +267,7 @@ fn project_selection<'a>(
                     .count(),
             }
         }),
-        usages: consumers.of(library, &model.name),
+        usages,
         selected_component,
         binding_block_reason,
         bind_target,
@@ -257,15 +299,22 @@ pub(super) fn selected_model_detail(
                 // open pushes the cards below it off the page, which is the
                 // same failure the action row's allocation guards against.
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                // A family is named as an instance binds it; the bin on show
+                // is named over its parameters.
                 ui.label(
-                    RichText::new(&detail.model)
+                    RichText::new(&detail.binding)
                         .monospace()
                         .font(theme::mono(tokens::FS_2, FontWeight::SemiBold))
                         .color(t.color.text),
                 );
+                let bins = match detail.bins.len() {
+                    0 => String::new(),
+                    1 => " · 1 bin".to_owned(),
+                    count => format!(" · {count} bins"),
+                };
                 ui.label(
                     RichText::new(format!(
-                        "{} · {} · {}",
+                        "{} · {} · {}{bins}",
                         detail.family, detail.level, detail.library
                     ))
                     .font(theme::sans(tokens::FS_1, FontWeight::Regular))
@@ -338,7 +387,7 @@ pub(super) fn selected_model_detail(
                     if bind.clicked()
                         && let Some(component_id) = detail.selected_component
                     {
-                        app.queue_model_binding(component_id, &detail.library, &detail.model);
+                        app.queue_model_binding(component_id, &detail.library, &detail.binding);
                     }
                     if Button::new("Qualification").show(ui).clicked() {
                         app.state.workbench.models_page = ModelsPage::Qualification;
@@ -407,7 +456,7 @@ pub(super) fn selected_model_detail(
         // rows. Anything less leaves the surface ending in dead space.
         ui.columns(4, |columns| {
             parameter_card(&mut columns[0], &detail, region_h);
-            characteristic_card(&mut columns[1], &detail, region_h);
+            declaration_card(&mut columns[1], &detail, app, region_h);
             qualification_card(&mut columns[2], &detail, app, region_h);
             usage_card(&mut columns[3], &detail, app, region_h);
         });
@@ -419,7 +468,7 @@ pub(super) fn selected_model_detail(
             .show(ui, |ui| {
                 ui.columns(2, |columns| {
                     parameter_card(&mut columns[0], &detail, row_h);
-                    characteristic_card(&mut columns[1], &detail, row_h);
+                    declaration_card(&mut columns[1], &detail, app, row_h);
                 });
                 ui.columns(2, |columns| {
                     qualification_card(&mut columns[0], &detail, app, row_h);
@@ -432,7 +481,7 @@ pub(super) fn selected_model_detail(
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 parameter_card(ui, &detail, DETAIL_PANE_MIN_H);
-                characteristic_card(ui, &detail, DETAIL_PANE_MIN_H);
+                declaration_card(ui, &detail, app, DETAIL_PANE_MIN_H);
                 qualification_card(ui, &detail, app, DETAIL_PANE_MIN_H);
                 usage_card(ui, &detail, app, DETAIL_PANE_MIN_H);
             });
@@ -650,10 +699,16 @@ fn routed_count(ui: &mut Ui, name: &str, value: &str, note: &str) -> egui::Respo
 }
 
 fn parameter_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>, height: f32) {
+    // A family's parameters are one bin's, so the count says whose.
+    let meta = if detail.bins.is_empty() {
+        format!("{} values", detail.parameter_total)
+    } else {
+        format!("{} · {} values", detail.model, detail.parameter_total)
+    };
     filled_detail_pane(
         ui,
         "Resolved parameters",
-        Some(&format!("{} values", detail.parameter_total)),
+        Some(&meta),
         height,
         "models-detail-parameters",
         |ui| {
@@ -697,6 +752,120 @@ fn parameter_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>, height: f32) {
             }
         },
     );
+}
+
+/// The second card: a family's bins, or a lone card's declared envelope.
+fn declaration_card(
+    ui: &mut Ui,
+    detail: &SelectedModelDetail<'_>,
+    app: &mut ManagerRenderContext<'_>,
+    height: f32,
+) {
+    if detail.bins.is_empty() {
+        characteristic_card(ui, detail, height);
+    } else {
+        bins_card(ui, detail, app, height);
+    }
+}
+
+/// Every bin of the selected family, with the L and W window it holds.
+///
+/// The simulator picks the bin from an instance's L and W, so Bind gives the
+/// instance the family and these are what it may run. The pane shows one bin's
+/// parameters at a time, and a bin's row is how to show another.
+fn bins_card(
+    ui: &mut Ui,
+    detail: &SelectedModelDetail<'_>,
+    app: &mut ManagerRenderContext<'_>,
+    height: f32,
+) {
+    filled_detail_pane(
+        ui,
+        "Bins",
+        Some(&format!("{} cards · chosen by L and W", detail.bins.len())),
+        height,
+        "models-detail-bins",
+        |ui| {
+            for bin in &detail.bins {
+                if bin_row(ui, bin, bin.name == detail.model).clicked() {
+                    app.state.workbench.selected_model = Some(bin.name.clone());
+                }
+            }
+        },
+    );
+}
+
+/// One bin: its name, and its L and W windows.
+fn bin_row(ui: &mut Ui, bin: &BinWindow, shown: bool) -> egui::Response {
+    const INSET: f32 = 3.0;
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 22.0), Sense::click());
+    let [length, width] = [bin.length, bin.width].map(bin_window_label);
+    let announcement = format!("{} · L {length} · W {width}", bin.name);
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            shown,
+            &announcement,
+        )
+    });
+    if shown {
+        ui.painter()
+            .rect_filled(rect, 0.0, t.color.accent.linear_multiply(0.14));
+        ui.painter().vline(
+            rect.left(),
+            rect.y_range(),
+            Stroke::new(2.0, t.color.accent),
+        );
+    } else if response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+    }
+    theme::paint_focus_ring(ui, &response, rect);
+    let name_width = rect.width() * 0.26;
+    let window_width = (rect.width() - name_width) * 0.5;
+    ui.painter().text(
+        egui::pos2(rect.left() + INSET, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        elide(ui, &bin.name, (name_width - INSET * 2.0).max(1.0), true),
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        t.color.text,
+    );
+    for (index, (axis, window)) in [("L", length), ("W", width)].into_iter().enumerate() {
+        ui.painter().text(
+            egui::pos2(
+                rect.left() + name_width + window_width * index as f32 + INSET,
+                rect.center().y,
+            ),
+            egui::Align2::LEFT_CENTER,
+            elide(
+                ui,
+                &format!("{axis} {window}"),
+                (window_width - INSET * 2.0).max(1.0),
+                true,
+            ),
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            t.color.text_dim,
+        );
+    }
+    response
+}
+
+/// A bin's window on one axis, short enough for a third of a pane: the unit
+/// once, `30n–60nm`. Words rather than inequality signs at an open end, which
+/// the bundled faces do not carry.
+fn bin_window_label((low, high): (Option<f64>, Option<f64>)) -> String {
+    match (low, high) {
+        (Some(low), Some(high)) => format!(
+            "{}\u{2013}{}",
+            engineering_value(low),
+            engineering_quantity(high, "m")
+        ),
+        (Some(low), None) => format!("min {}", engineering_quantity(low, "m")),
+        (None, Some(high)) => format!("max {}", engineering_quantity(high, "m")),
+        (None, None) => "any".to_owned(),
+    }
 }
 
 /// What the card declares about the device's operating envelope.
@@ -842,7 +1011,7 @@ fn usage_card(
     app: &mut ManagerRenderContext<'_>,
     height: f32,
 ) {
-    let usages = detail.usages;
+    let usages = &*detail.usages;
     filled_detail_pane(
         ui,
         "Where used",
@@ -879,7 +1048,7 @@ fn usage_card(
                         if opened {
                             app.state.workbench.models_view.dialog =
                                 Some(ModelsWorkbenchDialog::BindingTrace {
-                                    model: detail.model.clone(),
+                                    model: detail.binding.clone(),
                                     consumers: usages.to_vec(),
                                 });
                         }
@@ -893,7 +1062,7 @@ fn usage_card(
                     {
                         app.state.workbench.models_view.dialog =
                             Some(ModelsWorkbenchDialog::BindingTrace {
-                                model: detail.model.clone(),
+                                model: detail.binding.clone(),
                                 consumers: usages.to_vec(),
                             });
                     }

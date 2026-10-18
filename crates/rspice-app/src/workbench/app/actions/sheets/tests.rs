@@ -164,6 +164,47 @@ fn a_new_sheet_lands_after_the_active_one_and_becomes_current() {
     assert_eq!(active_sheet_id(&state), Some(entries[1].id));
 }
 
+/// A schematic with no sheet catalog is one drawing. "New sheet" refused
+/// it, sending the user to Design management first; it now keeps what is
+/// drawn as Sheet 1 and enters an empty Sheet 2, and one undo gives the
+/// single drawing back.
+#[test]
+fn a_new_sheet_on_a_single_drawing_keeps_the_drawing_as_sheet_1() {
+    let mut state = AppState::default();
+    state.schematic.document_mut_for_test().components = vec![
+        Component::new(10, ComponentType::Resistor, Point::new(10, 10)),
+        Component::new(20, ComponentType::Capacitor, Point::new(40, 10)),
+    ];
+    assert!(active_sheet_catalog(&state).is_none());
+
+    new_sheet(&mut state).expect("the first new sheet creates the catalog");
+
+    let entries = sheet_entries(&state);
+    let names = entries
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["Sheet 1", "Sheet 2"]);
+    assert_eq!(active_sheet_id(&state), Some(entries[1].id));
+    let catalog = active_sheet_catalog(&state).expect("catalog");
+    for object in [10, 20] {
+        assert_eq!(
+            catalog.sheet_for_object(object),
+            Some(entries[0].id),
+            "object {object} stays on Sheet 1"
+        );
+    }
+
+    state
+        .undo_project_design()
+        .expect("one guarded transaction");
+    assert!(
+        active_sheet_catalog(&state).is_none(),
+        "one undo gives back the single drawing"
+    );
+    assert_eq!(state.schematic.document().components.len(), 2);
+}
+
 #[test]
 fn renaming_a_sheet_moves_the_printed_title_with_it() {
     let (mut state, first, _) = two_sheet_state();

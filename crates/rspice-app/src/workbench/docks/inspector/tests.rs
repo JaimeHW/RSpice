@@ -29,6 +29,50 @@ fn catalog_test_diode(params: &str) -> (RSpiceApp, u64) {
     (app, id)
 }
 
+/// The Models workspace binds a binned family by its name, after checking
+/// every bin suits the instance: any of them may be the one its size selects.
+#[test]
+fn catalog_binding_binds_a_binned_family_whose_every_bin_suits_the_instance() {
+    use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
+    let mut app = RSpiceApp::test_instance();
+    app.state.model_library_manager.clear();
+    let mut kit = ModelLibrary::new("kit");
+    for bin in ["nch.1", "nch.2"] {
+        let mut card = DeviceModel::new(bin, ModelType::Nmos);
+        card.spice_type = Some("NMOS".to_owned());
+        kit.add_model(card);
+    }
+    app.state.model_library_manager.add_library(kit);
+    app.state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
+    let nmos = app
+        .state
+        .schematic
+        .add_component(ComponentType::Nmos, crate::state::Point::origin());
+    let pmos = app
+        .state
+        .schematic
+        .add_component(ComponentType::Pmos, crate::state::Point::new(200, 0));
+
+    let refusal = validate_component_model_catalog_binding(&app.state, pmos, "kit", "nch")
+        .expect_err("an NMOS family does not suit a PMOS instance");
+    assert!(!refusal.contains("no longer present"), "{refusal}");
+    bind_component_model_from_catalog(&mut app, nmos, "kit", "nch").expect("bind the family");
+    let params = &app
+        .state
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == nmos)
+        .expect("nmos")
+        .params;
+    assert!(params.ends_with("model=nch model_library=kit"), "{params}");
+}
+
 #[test]
 fn catalog_binding_preserves_raw_parameters_and_refuses_malformed_text_atomically() {
     let original = r#"off note="a  b" expr={a + f(b,c)}"#;

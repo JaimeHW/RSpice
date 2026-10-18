@@ -1124,6 +1124,10 @@ fn announce_row(ui: &Ui, response: &Response, label: &str, value: &str) {
     });
 }
 
+/// How far a property field's text stands in from the field's left edge,
+/// typed or chosen.
+const FIELD_TEXT_INSET: i8 = 8;
+
 /// The margin a single-line field takes so its text sits centred in `field`.
 fn field_margin(ui: &Ui, field: Rect, horizontal: i8) -> egui::Margin {
     hinted_field_margin(ui, field, horizontal, false)
@@ -1334,7 +1338,12 @@ fn property_row_text_edit_in(
     let value_rect = slot.field();
     let mut edit = edit
         .font(egui::TextStyle::Monospace)
-        .margin(hinted_field_margin(ui, value_rect, 8, hint_shown))
+        .margin(hinted_field_margin(
+            ui,
+            value_rect,
+            FIELD_TEXT_INSET,
+            hint_shown,
+        ))
         .desired_width(value_rect.width())
         .text_color(t.color.text);
     if invalid {
@@ -1595,9 +1604,11 @@ fn property_row_combo_in(
         |ui| {
             ui.set_width(value_rect.width());
             // The combo's frame is the field's: its padding shrinks to what
-            // centres its text in the row's field height.
+            // centres its text in the row's field height, and its text starts
+            // where a typed field's does.
             let text = ui.text_style_height(&egui::TextStyle::Button);
             let spacing = ui.spacing_mut();
+            spacing.button_padding.x = f32::from(FIELD_TEXT_INSET);
             spacing.button_padding.y = ((value_rect.height() - text) * 0.5).max(0.0);
             spacing.interact_size.y = value_rect.height();
             ui.add_enabled_ui(enabled, |ui| {

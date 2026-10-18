@@ -1211,11 +1211,6 @@ impl Command {
             Self::NewSheet | Self::DeleteSheet if app.state.schematic_edit_read_only() => {
                 "the active schematic is read-only"
             }
-            Self::NextSheet | Self::PreviousSheet | Self::NewSheet | Self::DeleteSheet
-                if crate::workbench::app::sheets::sheet_count(&app.state) == 0 =>
-            {
-                "create the governed sheet catalog in Design management first"
-            }
             Self::NextSheet | Self::PreviousSheet | Self::DeleteSheet => {
                 "the active cell view has a single sheet"
             }

@@ -163,6 +163,50 @@ fn an_instance_naming_something_the_closure_defines_is_not_unresolved() {
     assert_eq!(unbound[0].component_id, 2);
 }
 
+/// A family's name is a definition an instance binds: it is indexed with the
+/// libraries that provide it, so two of them contest it here like a card, and
+/// an instance naming it is not reported as unbound.
+#[test]
+fn a_binned_family_is_indexed_under_the_name_it_binds() {
+    use crate::state::model_library::ModelType;
+    let mut state = AppState::default();
+    state.model_library_manager.clear();
+    for name in ["kit", "vendor"] {
+        let mut library = ModelLibrary::new(name);
+        for bin in ["nch.1", "nch.2"] {
+            let mut card = DeviceModel::new(bin, ModelType::Nmos);
+            card.section = Some("tt".to_owned());
+            library.add_model(card);
+        }
+        state.model_library_manager.add_library(library);
+    }
+    let index = definition_index(&state);
+    let family = index
+        .iter()
+        .find(|row| row.definition == "nch")
+        .expect("the family is indexed");
+    assert_eq!(family.providers, ["kit", "vendor"]);
+    assert_eq!(family.sections, ["tt"]);
+    assert!(family.contested());
+
+    state.workspace.ensure_active_buffer();
+    let mut schematic = state
+        .workspace
+        .active_schematic()
+        .map(|source| source.clone_editor())
+        .unwrap_or_default();
+    let mut component = crate::state::Component::new(
+        1,
+        crate::state::ComponentType::Nmos,
+        crate::state::Point::new(0, 0),
+    );
+    component.name = "M1".to_owned();
+    component.value = "nch".to_owned();
+    schematic.document_mut_for_test().components.push(component);
+    state.workspace.save_active_schematic(&schematic);
+    assert!(unbound_instances(&state, &definition_index(&state)).is_empty());
+}
+
 #[test]
 fn every_shipped_resolution_rule_names_an_owner() {
     // The card is a claim about who refuses. A row with an empty owner is a

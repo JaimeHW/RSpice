@@ -97,7 +97,7 @@ pub enum ContextAction {
 }
 
 /// The Arrange page's commands, in the Design menu's order: turn and flip,
-/// line up, space out.
+/// line up, space out, put back on the grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArrangeAction {
     RotateClockwise,
@@ -112,6 +112,7 @@ pub enum ArrangeAction {
     AlignBottom,
     DistributeHorizontal,
     DistributeVertical,
+    SnapToGrid,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,6 +138,8 @@ pub enum ContextIcon {
     /// The Arrange page's way back to the menu.
     Back,
     ZoomBox,
+    /// Snap Selection to Grid, as the Design menu's Arrange draws it.
+    Grid,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -892,6 +895,7 @@ impl ContextIcon {
             Self::Arrange => paint_arrange_icon(painter, rect, color),
             Self::Back => WorkbenchIcon::ArrowLeft.paint(painter, rect, color),
             Self::ZoomBox => WorkbenchIcon::ZoomIn.paint(painter, rect, color),
+            Self::Grid => WorkbenchIcon::Grid.paint(painter, rect, color),
         }
     }
 }

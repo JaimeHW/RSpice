@@ -3,10 +3,10 @@
 use super::{
     document::SchematicDocument,
     identity::SchematicIdentity,
-    wire::{Wire, WireSegment},
+    wire::{Wire, WireSegment, WiresThrough},
 };
 use rspice_design_model::Point;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Add a wire
 pub fn add_wire(
@@ -506,19 +506,56 @@ pub fn move_vertices_at(document: &mut SchematicDocument, old_pos: Point, new_po
 /// A pin exactly where wire interiors cross with no junction is left alone:
 /// splitting there would join both wires, and which one the pin means is the
 /// user's call, which the design check asks for.
+///
+/// `parts` holds each part's pins. Where two pins of one part land inside
+/// one straight run of a wire, the piece of it between them would run under
+/// the part's body from pin to pin and short the part; that piece goes, so
+/// the part stands in series where it was dropped.
 pub fn split_wires_under_pins(
     document: &mut SchematicDocument,
     identity: &mut SchematicIdentity,
-    pins: &[Point],
+    parts: &[Vec<Point>],
 ) -> bool {
     let crossings = super::junction_edit::CrossingIndex::new(&document.wires, &document.junctions);
+    let splits = |pin: Point| !crossings.is_unmarked_crossing(pin);
+    let mut bridged = Vec::new();
+    for pins in parts {
+        for (index, &first) in pins.iter().enumerate() {
+            for &second in &pins[index + 1..] {
+                let one_run = document.wires.iter().any(|wire| {
+                    !wire.points.contains(&first)
+                        && !wire.points.contains(&second)
+                        && wire.segments().any(|segment| {
+                            segment.contains_point(first) && segment.contains_point(second)
+                        })
+                });
+                if first != second && one_run && splits(first) && splits(second) {
+                    bridged.push((first, second));
+                }
+            }
+        }
+    }
+    let before = document
+        .wires
+        .iter()
+        .map(|wire| wire.id)
+        .collect::<HashSet<_>>();
     let mut changed = false;
-    for &pin in pins {
-        if crossings.is_unmarked_crossing(pin) {
+    for &pin in parts.iter().flatten() {
+        if !splits(pin) {
             continue;
         }
         for wire in wires_to_split_at(document, pin) {
             changed |= split_wire(document, identity, wire, pin).is_some();
+        }
+    }
+    for (first, second) in bridged {
+        if let Some(index) = document.wires.iter().position(|wire| {
+            !before.contains(&wire.id)
+                && (wire.points == [first, second] || wire.points == [second, first])
+        }) {
+            document.wires.remove(index);
+            changed = true;
         }
     }
     changed
@@ -534,31 +571,381 @@ pub fn split_wires_under_pins(
 /// under the lower id. An end of either that falls inside that extent stays
 /// a vertex when anything else meets it there (another wire, a pin, a dot,
 /// a label or a tap end), so whatever met it still meets a vertex.
+///
+/// Pairs merge in a fixed order: the lowest line first (by direction, then
+/// offset), and on a line the first pair in drawing order, until none is
+/// left; the pieces take the place in the drawing of the wire whose id they
+/// keep.
 pub fn merge_collinear_wires(
     document: &mut SchematicDocument,
     identity: &mut SchematicIdentity,
     seeds: Option<&HashSet<u64>>,
     join_end_to_end: bool,
 ) -> bool {
-    let pins = super::junction_edit::placed_pins(document)
-        .into_iter()
-        .collect::<HashSet<_>>();
-    let mut seeds = seeds.cloned();
-    let mut changed = false;
-    while let Some((first, second)) =
-        next_collinear_pair(document, seeds.as_ref(), &pins, join_end_to_end)
-    {
-        let laid = merge_wire_pair(document, identity, first, second, &pins);
-        if let Some(seeds) = seeds.as_mut() {
-            seeds.extend(laid);
+    let mut merge = CollinearMerge::new(document, seeds.cloned(), join_end_to_end);
+    for line in 0..merge.lines.len() {
+        while let Some((left, right)) = merge.next_pair(line) {
+            merge.merge_pair(identity, line, left, right);
         }
-        changed = true;
     }
-    changed
+    let Some(rewrite) = merge.finish() else {
+        return false;
+    };
+    rewrite.apply(document);
+    true
 }
 
 /// Which line a segment lies on: its reduced direction and its offset.
-fn line_key(start: Point, end: Point) -> Option<((i64, i64), i64)> {
+type LineKey = ((i64, i64), i64);
+
+/// One single-segment wire of a line, as a merge holds it.
+struct LineWire {
+    /// Where it stands in the drawing: the position of the wire it came
+    /// from, then its order among that wire's pieces.
+    place: (usize, Vec<usize>),
+    id: u64,
+    ends: [Point; 2],
+}
+
+impl LineWire {
+    /// [`Wire::contains_point`], for a wire of one segment.
+    fn contains(&self, point: Point) -> bool {
+        self.ends.contains(&point)
+            || WireSegment::new(self.ends[0], self.ends[1]).contains_point(point)
+    }
+}
+
+/// A merge of collinear wires, worked out against the drawing as it stood
+/// and written back once.
+///
+/// A merge changes nothing off its own line: the pieces lie on the pair's
+/// line and cover exactly the points the pair covered. So each line, lowest
+/// first, merges until no pair on it qualifies, the order a fresh scan of
+/// the whole drawing after every merge would take, and the drawing is
+/// rewritten when every line is done. Whether anything else meets a point
+/// is answered from what no merge changes (pins, dots, labels, tap ends and
+/// the cover of every wire off the line) and from the line's own wires as
+/// they stand. A fresh scan after each merge passed over every wire once
+/// per merge, and a drawing whose rails join end to end along every row
+/// took tens of milliseconds to clean up.
+struct CollinearMerge<'a> {
+    document: &'a SchematicDocument,
+    seeds: Option<HashSet<u64>>,
+    join_end_to_end: bool,
+    /// Each line's single-segment wires in drawing order, lines in key
+    /// order.
+    lines: Vec<(LineKey, Vec<LineWire>)>,
+    /// The line of each single-segment wire, by its position in the drawing.
+    line_of: Vec<Option<LineKey>>,
+    /// Pins, dots, label anchors and tap ends.
+    fixed: HashSet<Point>,
+    /// The drawing's wires through a point, built when first asked.
+    through: Option<WiresThrough<'a>>,
+    /// Ids the merges took out of the drawing, and ids they added to it.
+    gone: HashSet<u64>,
+    born: HashSet<u64>,
+    /// The connections on each wire, by position in the connection list.
+    connections: HashMap<u64, Vec<usize>>,
+    /// Each moved connection's wire and vertex now, `None` once dropped.
+    reconnected: HashMap<usize, Option<(u64, usize)>>,
+    /// Positions in the drawing whose wire took part in a merge.
+    merged: HashSet<usize>,
+}
+
+impl<'a> CollinearMerge<'a> {
+    fn new(
+        document: &'a SchematicDocument,
+        seeds: Option<HashSet<u64>>,
+        join_end_to_end: bool,
+    ) -> Self {
+        let mut lines: HashMap<LineKey, Vec<LineWire>> = HashMap::new();
+        let mut line_of = vec![None; document.wires.len()];
+        for (position, wire) in document.wires.iter().enumerate() {
+            if let [start, end] = wire.points.as_slice()
+                && let Some(key) = line_key(*start, *end)
+            {
+                line_of[position] = Some(key);
+                lines.entry(key).or_default().push(LineWire {
+                    place: (position, Vec::new()),
+                    id: wire.id,
+                    ends: [*start, *end],
+                });
+            }
+        }
+        let mut lines = lines.into_iter().collect::<Vec<_>>();
+        lines.sort_unstable_by_key(|(key, _)| *key);
+        let fixed = super::junction_edit::placed_pins(document)
+            .into_iter()
+            .chain(document.junctions.iter().map(|junction| junction.pos))
+            .chain(document.net_labels.iter().map(|label| label.pos))
+            .chain(document.bus_taps.iter().map(|tap| tap.connection_point))
+            .collect();
+        let mut connections: HashMap<u64, Vec<usize>> = HashMap::new();
+        for (position, connection) in document.connections.iter().enumerate() {
+            connections
+                .entry(connection.wire_id)
+                .or_default()
+                .push(position);
+        }
+        Self {
+            document,
+            seeds,
+            join_end_to_end,
+            lines,
+            line_of,
+            fixed,
+            through: None,
+            gone: HashSet::new(),
+            born: HashSet::new(),
+            connections,
+            reconnected: HashMap::new(),
+            merged: HashSet::new(),
+        }
+    }
+
+    /// The first pair on `line`, in drawing order, that merges: by position
+    /// in the line's list.
+    fn next_pair(&mut self, line: usize) -> Option<(usize, usize)> {
+        let count = self.lines[line].1.len();
+        for left in 0..count {
+            for right in left + 1..count {
+                let wires = &self.lines[line].1;
+                let (first, second) = (wires[left].id, wires[right].id);
+                if self
+                    .seeds
+                    .as_ref()
+                    .is_some_and(|seeds| !seeds.contains(&first) && !seeds.contains(&second))
+                {
+                    continue;
+                }
+                let [a, b] = wires[left].ends;
+                let [c, d] = wires[right].ends;
+                let left_segment = WireSegment::new(a, b);
+                let right_segment = WireSegment::new(c, d);
+                let shared = [a, b].into_iter().find(|point| *point == c || *point == d);
+                let overlap = left_segment.contains_point(c) && c != a && c != b
+                    || left_segment.contains_point(d) && d != a && d != b
+                    || right_segment.contains_point(a) && a != c && a != d
+                    || right_segment.contains_point(b) && b != c && b != d
+                    || (a == c && b == d)
+                    || (a == d && b == c);
+                if overlap
+                    || (self.join_end_to_end
+                        && shared.is_some_and(|point| {
+                            !self.meets_anything_else(line, point, first, second)
+                        }))
+                {
+                    return Some((left, right));
+                }
+            }
+        }
+        None
+    }
+
+    /// Whether anything but wires `first` and `second` meets `point` on
+    /// `line`.
+    fn meets_anything_else(&mut self, line: usize, point: Point, first: u64, second: u64) -> bool {
+        if self.fixed.contains(&point) {
+            return true;
+        }
+        let (key, wires) = &self.lines[line];
+        if wires
+            .iter()
+            .any(|wire| wire.id != first && wire.id != second && wire.contains(point))
+        {
+            return true;
+        }
+        let document = self.document;
+        self.through
+            .get_or_insert_with(|| WiresThrough::new(&document.wires))
+            .indices(point)
+            .into_iter()
+            .any(|position| self.line_of[position] != Some(*key))
+    }
+
+    /// Whether the drawing as merged so far holds `id`.
+    fn in_use(&self, id: u64) -> bool {
+        self.born.contains(&id)
+            || (!self.gone.contains(&id) && super::identity::live_id_in_use(self.document, id))
+    }
+
+    /// Replace the pair at `left` and `right` on `line` with the pieces of
+    /// their combined extent, broken only where something else meets a
+    /// former end. Connections on either move to the piece that keeps their
+    /// vertex.
+    fn merge_pair(
+        &mut self,
+        identity: &mut SchematicIdentity,
+        line: usize,
+        left: usize,
+        right: usize,
+    ) {
+        let wires = &self.lines[line].1;
+        let old = [
+            (wires[left].id, wires[left].ends),
+            (wires[right].id, wires[right].ends),
+        ];
+        let (first, second) = (old[0].0, old[1].0);
+        let mut ends = old
+            .iter()
+            .flat_map(|(_, ends)| ends.iter().copied())
+            .collect::<Vec<_>>();
+        ends.sort_by_key(|point| (point.x, point.y));
+        ends.dedup();
+        let (start, end) = (ends[0], ends[ends.len() - 1]);
+        let mut breaks = vec![start];
+        for &point in &ends[1..ends.len() - 1] {
+            if self.meets_anything_else(line, point, first, second) {
+                breaks.push(point);
+            }
+        }
+        breaks.push(end);
+        let mut ids = vec![first.min(second), first.max(second)];
+        while ids.len() < breaks.len() - 1 {
+            ids.push(identity.allocate_unless(|id| self.in_use(id)));
+        }
+        ids.truncate(breaks.len() - 1);
+        let pieces = breaks
+            .windows(2)
+            .zip(&ids)
+            .map(|(pair, id)| (*id, [pair[0], pair[1]]))
+            .collect::<Vec<_>>();
+
+        for id in [first, second] {
+            if !ids.contains(&id) && !self.born.remove(&id) {
+                self.gone.insert(id);
+            }
+        }
+        for &id in &ids {
+            if id != first && id != second && !self.gone.remove(&id) {
+                self.born.insert(id);
+            }
+        }
+        // Both wires' connections are taken before any is moved: a piece can
+        // keep the id of either wire, and a moved connection is not moved
+        // twice.
+        let moving =
+            old.map(|(wire, ends)| (ends, self.connections.remove(&wire).unwrap_or_default()));
+        for (ends, positions) in moving {
+            for position in positions {
+                let point_index = match self.reconnected.get(&position) {
+                    Some(Some((_, point_index))) => *point_index,
+                    Some(None) => continue,
+                    None => self.document.connections[position].point_index,
+                };
+                let moved = ends.get(point_index).and_then(|point| {
+                    pieces.iter().find_map(|(piece, piece_ends)| {
+                        piece_ends
+                            .iter()
+                            .position(|vertex| vertex == point)
+                            .map(|index| (*piece, index))
+                    })
+                });
+                if let Some((piece, _)) = moved {
+                    self.connections.entry(piece).or_default().push(position);
+                }
+                self.reconnected.insert(position, moved);
+            }
+        }
+        if let Some(seeds) = self.seeds.as_mut() {
+            seeds.extend(ids.iter().copied());
+        }
+
+        // The pieces take the place in the drawing of the wire whose id they
+        // keep, so a route that lays nothing new over existing wires leaves
+        // the drawing exactly as it was and commits no step.
+        let wires = &mut self.lines[line].1;
+        self.merged.insert(wires[left].place.0);
+        self.merged.insert(wires[right].place.0);
+        let (kept, other) = if wires[left].id == first.min(second) {
+            (left, right)
+        } else {
+            (right, left)
+        };
+        let place = wires[kept].place.clone();
+        let split = pieces.len() > 1;
+        let laid = pieces
+            .into_iter()
+            .enumerate()
+            .map(|(order, (id, ends))| {
+                let mut place = place.clone();
+                if split {
+                    place.1.push(order);
+                }
+                LineWire { place, id, ends }
+            })
+            .collect::<Vec<_>>();
+        wires.remove(other);
+        let at = if other < kept { kept - 1 } else { kept };
+        wires.splice(at..=at, laid);
+    }
+
+    /// The rewrite the merges add up to, `None` when nothing merged.
+    fn finish(self) -> Option<CollinearRewrite> {
+        if self.merged.is_empty() {
+            return None;
+        }
+        let mut pieces: HashMap<usize, Vec<(Vec<usize>, Wire)>> = self
+            .merged
+            .iter()
+            .map(|position| (*position, Vec::new()))
+            .collect();
+        for (_, wires) in self.lines {
+            for wire in wires {
+                if let Some(laid) = pieces.get_mut(&wire.place.0) {
+                    laid.push((wire.place.1, Wire::new(wire.id, wire.ends.to_vec())));
+                }
+            }
+        }
+        for laid in pieces.values_mut() {
+            laid.sort_by(|left, right| left.0.cmp(&right.0));
+        }
+        Some(CollinearRewrite {
+            pieces,
+            reconnected: self.reconnected,
+        })
+    }
+}
+
+/// What a merge of collinear wires writes back.
+struct CollinearRewrite {
+    /// The wires that stand in place of each merged wire, in drawing order.
+    pieces: HashMap<usize, Vec<(Vec<usize>, Wire)>>,
+    /// Each moved connection's wire and vertex, `None` when it is dropped.
+    reconnected: HashMap<usize, Option<(u64, usize)>>,
+}
+
+impl CollinearRewrite {
+    fn apply(mut self, document: &mut SchematicDocument) {
+        let wires = std::mem::take(&mut document.wires);
+        document.wires.reserve(wires.len());
+        for (position, wire) in wires.into_iter().enumerate() {
+            match self.pieces.remove(&position) {
+                Some(laid) => document
+                    .wires
+                    .extend(laid.into_iter().map(|(_, piece)| piece)),
+                None => document.wires.push(wire),
+            }
+        }
+        let mut position = 0;
+        document.connections.retain_mut(|connection| {
+            let kept = match self.reconnected.get(&position) {
+                None => true,
+                Some(None) => false,
+                Some(Some((wire, point_index))) => {
+                    connection.wire_id = *wire;
+                    connection.point_index = *point_index;
+                    true
+                }
+            };
+            position += 1;
+            kept
+        });
+    }
+}
+
+/// The line a segment lies on, `None` for a segment of no length.
+fn line_key(start: Point, end: Point) -> Option<LineKey> {
     let mut dx = i64::from(end.x) - i64::from(start.x);
     let mut dy = i64::from(end.y) - i64::from(start.y);
     if dx == 0 && dy == 0 {
@@ -579,163 +966,6 @@ fn greatest_common_divisor(mut a: i64, mut b: i64) -> i64 {
         (a, b) = (b, a % b);
     }
     a
-}
-
-/// Whether anything but wires `first` and `second` meets `point`.
-fn meets_anything_else(
-    document: &SchematicDocument,
-    pins: &HashSet<Point>,
-    point: Point,
-    first: u64,
-    second: u64,
-) -> bool {
-    pins.contains(&point)
-        || document
-            .wires
-            .iter()
-            .any(|wire| wire.id != first && wire.id != second && wire.contains_point(point))
-        || document
-            .junctions
-            .iter()
-            .any(|junction| junction.pos == point)
-        || document.net_labels.iter().any(|label| label.pos == point)
-        || document
-            .bus_taps
-            .iter()
-            .any(|tap| tap.connection_point == point)
-}
-
-fn next_collinear_pair(
-    document: &SchematicDocument,
-    seeds: Option<&HashSet<u64>>,
-    pins: &HashSet<Point>,
-    join_end_to_end: bool,
-) -> Option<(u64, u64)> {
-    let mut lines: std::collections::HashMap<_, Vec<&Wire>> = std::collections::HashMap::new();
-    for wire in &document.wires {
-        if let [start, end] = wire.points.as_slice()
-            && let Some(key) = line_key(*start, *end)
-        {
-            lines.entry(key).or_default().push(wire);
-        }
-    }
-    let mut keys = lines.keys().copied().collect::<Vec<_>>();
-    keys.sort_unstable();
-    for key in keys {
-        let wires = &lines[&key];
-        for (index, left) in wires.iter().enumerate() {
-            for right in &wires[index + 1..] {
-                if seeds
-                    .is_some_and(|seeds| !seeds.contains(&left.id) && !seeds.contains(&right.id))
-                {
-                    continue;
-                }
-                let (a, b) = (left.points[0], left.points[1]);
-                let (c, d) = (right.points[0], right.points[1]);
-                let left_segment = WireSegment::new(a, b);
-                let right_segment = WireSegment::new(c, d);
-                let shared = [a, b].into_iter().find(|point| *point == c || *point == d);
-                let overlap = left_segment.contains_point(c) && c != a && c != b
-                    || left_segment.contains_point(d) && d != a && d != b
-                    || right_segment.contains_point(a) && a != c && a != d
-                    || right_segment.contains_point(b) && b != c && b != d
-                    || (a == c && b == d)
-                    || (a == d && b == c);
-                let end_to_end = !overlap
-                    && shared.is_some_and(|point| {
-                        !meets_anything_else(document, pins, point, left.id, right.id)
-                    });
-                if overlap || (join_end_to_end && end_to_end) {
-                    return Some((left.id, right.id));
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Replace two collinear wires with the pieces of their combined extent,
-/// broken only where something else meets a former end. Returns the ids
-/// of the pieces. Pin connections on either wire move to the piece that
-/// keeps their vertex.
-fn merge_wire_pair(
-    document: &mut SchematicDocument,
-    identity: &mut SchematicIdentity,
-    first: u64,
-    second: u64,
-    pins: &HashSet<Point>,
-) -> Vec<u64> {
-    let old = document
-        .wires
-        .iter()
-        .filter(|wire| wire.id == first || wire.id == second)
-        .map(|wire| (wire.id, wire.points.clone()))
-        .collect::<Vec<_>>();
-    let mut ends = old
-        .iter()
-        .flat_map(|(_, points)| points.iter().copied())
-        .collect::<Vec<_>>();
-    ends.sort_by_key(|point| (point.x, point.y));
-    ends.dedup();
-    let (Some(&start), Some(&end)) = (ends.first(), ends.last()) else {
-        return Vec::new();
-    };
-    let mut breaks = vec![start];
-    breaks.extend(
-        ends[1..ends.len() - 1]
-            .iter()
-            .copied()
-            .filter(|point| meets_anything_else(document, pins, *point, first, second)),
-    );
-    breaks.push(end);
-    let mut ids = vec![first.min(second), first.max(second)];
-    while ids.len() < breaks.len() - 1 {
-        ids.push(identity.allocate(document));
-    }
-    ids.truncate(breaks.len() - 1);
-    let pieces = breaks
-        .windows(2)
-        .zip(&ids)
-        .map(|(pair, id)| Wire::new(*id, pair.to_vec()))
-        .collect::<Vec<_>>();
-    // The pieces take the place in the drawing of the wire whose id they
-    // keep, so a route that lays nothing new over existing wires leaves the
-    // drawing exactly as it was and commits no step.
-    let kept = first.min(second);
-    let position = document
-        .wires
-        .iter()
-        .filter(|wire| wire.id != first.max(second))
-        .position(|wire| wire.id == kept)
-        .unwrap_or(document.wires.len());
-    document
-        .wires
-        .retain(|wire| wire.id != first && wire.id != second);
-    let position = position.min(document.wires.len());
-    document
-        .wires
-        .splice(position..position, pieces.iter().cloned());
-    document.connections.retain_mut(|connection| {
-        let Some((_, points)) = old.iter().find(|(id, _)| *id == connection.wire_id) else {
-            return true;
-        };
-        let Some(point) = points.get(connection.point_index) else {
-            return false;
-        };
-        let Some((piece, index)) = pieces.iter().find_map(|piece| {
-            piece
-                .points
-                .iter()
-                .position(|vertex| vertex == point)
-                .map(|index| (piece.id, index))
-        }) else {
-            return false;
-        };
-        connection.wire_id = piece;
-        connection.point_index = index;
-        true
-    });
-    ids
 }
 
 /// Existing wires crossing a point without a vertex, in document order.

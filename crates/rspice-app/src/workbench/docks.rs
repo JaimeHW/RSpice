@@ -85,6 +85,20 @@ fn panel_cache_is_stale(
         || !cached_size.is_some_and(|cached| (cached - authoritative_size).abs() <= 0.5)
 }
 
+/// Show a dock's contents, then claim the whole dock for them.
+///
+/// egui stores a panel's rectangle as the rectangle its contents covered,
+/// and along the panel's axis that is only as far as they drew. It reads the
+/// rectangle back as the next frame's size, so a page shorter or narrower
+/// than the dock would pull the dock back to the page the moment a drag let
+/// go. Claiming the whole dock makes the stored rectangle, and the size
+/// copied back while the splitter is dragged, the size the reader chose.
+fn fill_dock<R>(ui: &mut egui::Ui, contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let shown = contents(ui);
+    ui.expand_to_include_rect(ui.max_rect());
+    shown
+}
+
 fn splitter_is_dragged(ctx: &Context, panel_id: &'static str) -> bool {
     ctx.read_response(Id::new(panel_id).with("__resize"))
         .is_some_and(|response| response.dragged())
@@ -185,7 +199,7 @@ pub fn show_navigator(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSp
     } else {
         panel.exact_size(layout.navigator_width).resizable(false)
     };
-    let shown = panel.show(root, |ui| navigator::show(ui, app));
+    let shown = panel.show(root, |ui| fill_dock(ui, |ui| navigator::show(ui, app)));
     if layout.navigator_resizable && splitter_is_dragged(ctx, NAVIGATOR_PANEL_ID) {
         let actual = shown.response.rect.width();
         app.state.workbench.navigator_width =
@@ -244,7 +258,7 @@ pub fn show_inspector(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSp
         // canvas and adjacent controls as selection content changes.
         panel.exact_size(layout.inspector_width).resizable(false)
     };
-    let shown = panel.show(root, |ui| inspector::show(ui, app));
+    let shown = panel.show(root, |ui| fill_dock(ui, |ui| inspector::show(ui, app)));
     if layout.inspector_resizable && splitter_is_dragged(ctx, INSPECTOR_PANEL_ID) {
         let actual = shown.response.rect.width();
         app.state.workbench.inspector_width =
@@ -306,12 +320,7 @@ pub fn show_console(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec
         panel.exact_size(layout.console_height).resizable(false)
     };
     let shown = panel.show(root, |ui| {
-        console::show(ui, app, layout);
-        // egui stores a panel's height as the height its contents covered,
-        // and reads it back as the next frame's height. A page shorter than
-        // the dock would pull the dock back up to it the moment a drag let
-        // go, so the dock claims all of itself, whatever the page draws.
-        ui.expand_to_include_rect(ui.max_rect());
+        fill_dock(ui, |ui| console::show(ui, app, layout))
     });
     if layout.console_resizable && splitter_is_dragged(ctx, CONSOLE_PANEL_ID) {
         app.state.workbench.console_height = shown
@@ -392,45 +401,25 @@ mod tests {
         );
     }
 
-    /// The console dock, dragged taller than the page in it draws, keeps the
-    /// height it was dragged to once the drag lets go and on every frame
-    /// after. egui stores a panel's height as the height its contents
-    /// covered, so a one-line page used to pull the dock back to its floor
-    /// the moment the drag ended.
+    /// Every dock, dragged larger than the page in it draws, keeps the size it
+    /// was dragged to once the drag lets go and on every frame after. egui
+    /// stores a panel's size as the size its contents covered, so a short
+    /// Problems page or a narrow tree used to pull its dock back to the page
+    /// the moment the drag ended. The three docks are shown together, in the
+    /// order the workbench frame shows them, and each case drags one of them
+    /// away from the window edge it is attached to.
     #[test]
-    fn a_dragged_console_keeps_its_height_over_a_short_page() {
-        use super::{CONSOLE_PANEL_ID, show_console, synchronize_panel_memory};
+    fn every_dock_keeps_the_size_it_was_dragged_to() {
+        use super::{
+            CONSOLE_PANEL_ID, INSPECTOR_PANEL_ID, NAVIGATOR_PANEL_ID, show_console, show_inspector,
+            show_navigator, synchronize_panel_memory,
+        };
         use crate::workbench::RSpiceApp;
         use crate::workbench::state::ConsolePage;
 
-        const SCREEN: egui::Vec2 = egui::vec2(1_280.0, 900.0);
-        let mut app = RSpiceApp::test_instance();
-        app.state.workbench.console_visible = true;
-        app.state.workbench.console_page = ConsolePage::Problems;
-        app.state.workbench.console_height = 150.0;
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        // Where the dock's top edge is, read off its splitter, which egui
-        // centres on that edge.
-        let frame = |app: &mut RSpiceApp, events: Vec<egui::Event>| {
-            let layout = LayoutSpec::resolve(SCREEN.x, SCREEN.y, &app.state.workbench);
-            let _ = ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
-                    events,
-                    ..Default::default()
-                },
-                |ui| {
-                    synchronize_panel_memory(ui.ctx(), app, layout);
-                    show_console(ui, app, layout);
-                },
-            );
-            ctx.read_response(egui::Id::new(CONSOLE_PANEL_ID).with("__resize"))
-                .expect("a resizable dock has a splitter")
-                .rect
-                .center()
-                .y
-        };
+        // Wide, so both side docks are docked and resizable.
+        const SCREEN: egui::Vec2 = egui::vec2(1_600.0, 1_000.0);
+        const DRAG: f32 = 120.0;
         let button = |pos, pressed| egui::Event::PointerButton {
             pos,
             button: egui::PointerButton::Primary,
@@ -438,35 +427,72 @@ mod tests {
             modifiers: egui::Modifiers::NONE,
         };
 
-        let top = frame(&mut app, Vec::new());
-        assert!(
-            (SCREEN.y - top - 150.0).abs() < 1.0,
-            "precondition: the dock opens at its stored height, not at {}",
-            SCREEN.y - top,
-        );
-        let grab = egui::pos2(640.0, top);
-        let dropped = egui::pos2(640.0, top - 150.0);
-        frame(&mut app, vec![egui::Event::PointerMoved(grab)]);
-        frame(&mut app, vec![button(grab, true)]);
-        frame(
-            &mut app,
-            vec![egui::Event::PointerMoved(grab - egui::vec2(0.0, 75.0))],
-        );
-        frame(&mut app, vec![egui::Event::PointerMoved(dropped)]);
-        frame(&mut app, vec![button(dropped, false)]);
-        for _ in 0..4 {
-            let top = frame(&mut app, Vec::new());
+        for (panel_id, grow) in [
+            (NAVIGATOR_PANEL_ID, egui::vec2(1.0, 0.0)),
+            (INSPECTOR_PANEL_ID, egui::vec2(-1.0, 0.0)),
+            (CONSOLE_PANEL_ID, egui::vec2(0.0, -1.0)),
+        ] {
+            let mut app = RSpiceApp::test_instance();
+            app.state.workbench.console_visible = true;
+            app.state.workbench.console_page = ConsolePage::Problems;
+            let ctx = egui::Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            // How far the dragged dock reaches from its window edge, read off
+            // its splitter, which egui centres on the dock's free edge.
+            let mut frame = |events: Vec<egui::Event>| {
+                let layout = LayoutSpec::resolve(SCREEN.x, SCREEN.y, &app.state.workbench);
+                let _ = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        synchronize_panel_memory(ui.ctx(), &app, layout);
+                        show_navigator(ui, &mut app, layout);
+                        show_inspector(ui, &mut app, layout);
+                        show_console(ui, &mut app, layout);
+                    },
+                );
+                let edge = ctx
+                    .read_response(egui::Id::new(panel_id).with("__resize"))
+                    .expect("a resizable dock has a splitter")
+                    .rect
+                    .center();
+                let size = match panel_id {
+                    NAVIGATOR_PANEL_ID => edge.x,
+                    INSPECTOR_PANEL_ID => SCREEN.x - edge.x,
+                    _ => SCREEN.y - edge.y,
+                };
+                (edge, size)
+            };
+
+            let (grab, opened) = frame(Vec::new());
+            let dropped = grab + grow * DRAG;
+            frame(vec![egui::Event::PointerMoved(grab)]);
+            frame(vec![button(grab, true)]);
+            frame(vec![egui::Event::PointerMoved(grab + grow * DRAG * 0.5)]);
+            frame(vec![egui::Event::PointerMoved(dropped)]);
+            frame(vec![button(dropped, false)]);
+            for _ in 0..4 {
+                let (_, held) = frame(Vec::new());
+                assert!(
+                    (held - opened - DRAG).abs() < 1.0,
+                    "{panel_id} was dragged from {opened} to {} px and now stands {held} px",
+                    opened + DRAG,
+                );
+            }
+            let stored = match panel_id {
+                NAVIGATOR_PANEL_ID => app.state.workbench.navigator_width,
+                INSPECTOR_PANEL_ID => app.state.workbench.inspector_width,
+                _ => app.state.workbench.console_height,
+            };
             assert!(
-                (SCREEN.y - top - 300.0).abs() < 1.0,
-                "the dock was dragged to 300 px and now stands {} px tall",
-                SCREEN.y - top,
+                (stored - opened - DRAG).abs() < 1.0,
+                "{panel_id} stored {stored} px, not the {} px it was dragged to",
+                opened + DRAG,
             );
         }
-        assert!(
-            (app.state.workbench.console_height - 300.0).abs() < 1.0,
-            "the stored height is the dragged one, not {}",
-            app.state.workbench.console_height,
-        );
     }
 
     #[test]

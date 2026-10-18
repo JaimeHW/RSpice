@@ -403,3 +403,32 @@ fn undo_steps_back_past_a_sheet_switch_once_the_new_sheet_is_edited() {
     assert_eq!(bench.sheet_of(part), 1, "the part is back on Sheet 2");
     assert_eq!(bench.sheet_of(wire), 0, "the wire is back on Sheet 1");
 }
+
+/// A resistor dropped with both pins inside one straight wire stands in
+/// series on it. The wire split at each pin and the piece between the pins
+/// stayed under the body, wired from pin to pin, so the resistor was
+/// shorted: the deck joined both its ends and both neighbours on one net.
+#[test]
+fn a_part_dropped_across_a_wire_stands_in_series_on_it() {
+    let mut bench = Bench::new(&[
+        ("R1", ComponentType::Resistor, p(100, 100), Rotation::R0),
+        ("R2", ComponentType::Resistor, p(400, 100), Rotation::R0),
+    ]);
+    bench.draw_wire(&[p(120, 100), p(380, 100)]);
+    bench.place(ComponentType::Resistor, p(250, 100), Rotation::R0);
+    assert_eq!(
+        bench.nets(),
+        super::nets(&[&["R1.-", "R3.+"], &["R2.+", "R3.-"]]),
+        "{}",
+        bench.describe()
+    );
+    assert_eq!(bench.dots(), super::dots(&[]), "{}", bench.describe());
+
+    bench.undo();
+    assert_eq!(
+        bench.nets(),
+        super::nets(&[&["R1.-", "R2.+"]]),
+        "{}",
+        bench.describe()
+    );
+}

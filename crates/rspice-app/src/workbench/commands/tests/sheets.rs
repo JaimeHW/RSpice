@@ -168,15 +168,22 @@ fn sheet_commands_state_why_they_are_unavailable() {
     );
 
     app.state.schematic.session.read_only = false;
-    for command in SHEET_COMMANDS {
+    for command in [
+        Command::NextSheet,
+        Command::PreviousSheet,
+        Command::DeleteSheet,
+    ] {
         assert_eq!(
             command.availability(&app),
-            CommandAvailability::Disabled(
-                "create the governed sheet catalog in Design management first"
-            ),
-            "{command:?}"
+            CommandAvailability::Disabled("the active cell view has a single sheet"),
+            "a drawing with no sheet catalog is one sheet: {command:?}"
         );
     }
+    assert_eq!(
+        Command::NewSheet.availability(&app),
+        CommandAvailability::Available,
+        "a new sheet on a single drawing creates the catalog"
+    );
 
     let single = app_with_sheets(1);
     for command in [

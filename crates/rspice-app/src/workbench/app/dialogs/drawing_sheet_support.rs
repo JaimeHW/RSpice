@@ -2432,8 +2432,10 @@ mod tests {
 
         app.state.dialogs.drawing_sheet_setup.open = true;
         app.state.dialogs.drawing_sheet_setup.support_suspended = false;
-        crate::workbench::app::dialogs::drawing_sheet_setup::apply_drawing_sheet_setup(&mut app)
-            .unwrap();
+        crate::workbench::app::dialogs::drawing_sheet_setup::apply_drawing_sheet_setup(
+            &mut app.state,
+        )
+        .unwrap();
 
         let designs = &app.state.workspace.content.design_management;
         let saved = designs

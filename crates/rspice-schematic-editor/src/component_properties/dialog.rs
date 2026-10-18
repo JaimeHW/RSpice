@@ -91,6 +91,7 @@ pub fn render_component_property_dialog(
             .as_deref()
             .or(component_name),
     );
+    let evidence = has_evidence(context, show_source_preview);
     let mut dialog = Dialog::new("Edit instance properties", "OK")
         .description(&described)
         .size(DIALOG_SIZE)
@@ -107,6 +108,9 @@ pub fn render_component_property_dialog(
     if let Some(hint) = footer_hint.as_deref() {
         dialog = dialog.hint(hint).hint_tone(footer_tone);
     }
+    if !evidence {
+        dialog = dialog.width_from_content(PARAMETERS_ONLY_WIDTH);
+    }
 
     let mut side_action = ComponentPropertyDialogResult::None;
     let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
@@ -118,9 +122,10 @@ pub fn render_component_property_dialog(
         );
         let wide = ctx.content_rect().width() > 760.0;
         let first_parameter;
-        // With nothing to show beside them, the parameters take the whole body
-        // rather than leaving a pane that holds a divider and no content.
-        if !has_evidence(context, show_source_preview) {
+        // With nothing to show beside them, the parameters are the whole body,
+        // on a surface narrowed to them rather than one with a pane that holds
+        // a divider and no content.
+        if !evidence {
             clip_to_pane(ui);
             first_parameter = render_component_parameters(
                 ui,
@@ -229,6 +234,14 @@ const PARAMETERS_MINIMUM: f32 = 300.0;
 
 /// How much of a stacked body the parameters take.
 const STACKED_PARAMETERS_SHARE: f32 = 0.56;
+
+/// The surface width of an editor that holds its parameters alone.
+///
+/// The parameters pane of the two-pane surface and the surface's border, so a
+/// field is as wide in a resistor's editor as it is beside a source's
+/// waveform. A form on the whole two-pane surface stretched its grid into
+/// wells over 400 points wide, for values such as `1k`.
+const PARAMETERS_ONLY_WIDTH: f32 = 461.0;
 
 /// A body split into two panes and the rule between them.
 ///
@@ -367,4 +380,220 @@ fn component_identity_header(
         frame.response.rect.bottom(),
         Stroke::new(1.0, c.border),
     );
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use rspice_design::properties::{PropertyCatalog, component::collect_properties_with_sheet};
+    use rspice_design::schematic::component::Component;
+    use rspice_design::schematic::component_type::ComponentType;
+    use rspice_design_model::Point;
+
+    struct NoServices;
+
+    impl ComponentPropertyServices for NoServices {
+        fn browse(&mut self, _: PropertyBrowseRequest<'_>, _: &mut ComponentPropertyDraft) {}
+        fn preview_source(&mut self, _: &mut Ui, _: &ComponentPropertyDraft) {}
+    }
+
+    /// How far apart the two columns of a freshly opened `kind`'s editor
+    /// start, read off the captions `left` and `right` on its first row.
+    fn column_pitch(
+        kind: ComponentType,
+        show_source_preview: bool,
+        left: &str,
+        right: &str,
+    ) -> f32 {
+        let catalog = PropertyCatalog::new();
+        let sheet = catalog.get(kind).expect("catalog sheet").clone();
+        let component = Component::new(1, kind, Point::origin());
+        let mut draft = ComponentPropertyDraft::default();
+        draft.reset(
+            kind,
+            &sheet,
+            collect_properties_with_sheet(&component, Some(&sheet)),
+        );
+        let context = ComponentEditorContext::default();
+        let ctx = egui::Context::default();
+        rspice_ui_kit::Theme::default().apply(&ctx);
+        let mut frame = || {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    render_component_property_dialog(
+                        ui.ctx(),
+                        &mut draft,
+                        ComponentPropertyDialogView {
+                            component_name: Some("X1"),
+                            context: &context,
+                            sheet: &sheet,
+                            advisories: &[],
+                            session_error: None,
+                            model_browser_open: false,
+                            show_source_preview,
+                            quantity_policy: QuantityPresentationPolicy::default(),
+                            number_locale: UiNumberLocale::default(),
+                            commit_policy: PropertyCommitPolicy::default(),
+                        },
+                        &mut NoServices,
+                    );
+                },
+            )
+        };
+        drop(frame());
+        drop(frame());
+        let shapes = frame().shapes;
+        let x = |wanted: &str| {
+            shapes
+                .iter()
+                .find_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) if text.galley.text() == wanted => Some(text.pos.x),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{wanted:?} was not painted"))
+        };
+        x(right) - x(left)
+    }
+
+    /// Scroll a source's editor to its advanced head, as a reader has to, and
+    /// press it. Returns whether the section is open afterwards, and whether
+    /// its last field is on screen.
+    fn press_the_advanced_head() -> (bool, bool) {
+        let kind = ComponentType::VoltageSourceSin;
+        let catalog = PropertyCatalog::new();
+        let sheet = catalog.get(kind).expect("catalog sheet").clone();
+        let component = Component::new(1, kind, Point::origin());
+        let mut draft = ComponentPropertyDraft::default();
+        draft.reset(
+            kind,
+            &sheet,
+            collect_properties_with_sheet(&component, Some(&sheet)),
+        );
+        let context = ComponentEditorContext::default();
+        let ctx = egui::Context::default();
+        rspice_ui_kit::Theme::default().apply(&ctx);
+        let mut run = |events: Vec<egui::Event>| {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1100.0, 760.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    render_component_property_dialog(
+                        ui.ctx(),
+                        &mut draft,
+                        ComponentPropertyDialogView {
+                            component_name: Some("V1"),
+                            context: &context,
+                            sheet: &sheet,
+                            advisories: &[],
+                            session_error: None,
+                            model_browser_open: false,
+                            show_source_preview: true,
+                            quantity_policy: QuantityPresentationPolicy::default(),
+                            number_locale: UiNumberLocale::default(),
+                            commit_policy: PropertyCommitPolicy::default(),
+                        },
+                        &mut NoServices,
+                    );
+                },
+            )
+            .shapes
+        };
+        let find = |shapes: &[egui::epaint::ClippedShape], wanted: &str| {
+            shapes.iter().find_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) if text.galley.text() == wanted => {
+                    Some(text.pos + text.galley.size() * 0.5)
+                }
+                _ => None,
+            })
+        };
+        drop(run(Vec::new()));
+        let mut shapes = run(Vec::new());
+        // Far enough that the head is clear of the footer, and no further: a
+        // head pressed at the foot of the pane opens onto fields out of sight.
+        for _ in 0..20 {
+            if find(&shapes, "Advanced").is_some_and(|at| at.y < 560.0) {
+                break;
+            }
+            shapes = run(vec![
+                egui::Event::PointerMoved(egui::pos2(300.0, 400.0)),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, -40.0),
+                    modifiers: egui::Modifiers::default(),
+                    phase: egui::TouchPhase::Move,
+                },
+            ]);
+        }
+        // The wheel's own easing finishes before the reader presses.
+        for _ in 0..30 {
+            shapes = run(Vec::new());
+        }
+        let at = find(&shapes, "Advanced").expect("the head scrolls into view");
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        };
+        drop(run(vec![
+            egui::Event::PointerMoved(at),
+            button(true),
+            button(false),
+        ]));
+        // Time for the scroll it asked for to land.
+        for _ in 0..60 {
+            shapes = run(Vec::new());
+        }
+        (
+            draft.show_advanced,
+            find(&shapes, "Distortion F2 Phase").is_some(),
+        )
+    }
+
+    /// Pressing the advanced head opens it and brings what it opened into
+    /// view; the fields would otherwise open below the pane's foot, and the
+    /// press look like it had done nothing.
+    #[test]
+    fn pressing_the_advanced_head_opens_it_onto_its_fields() {
+        assert_eq!(press_the_advanced_head(), (true, true));
+    }
+
+    /// A field is as wide in an editor that holds parameters alone as it is
+    /// beside a source's waveform.
+    ///
+    /// A resistor's editor used to take the whole two-pane surface for its
+    /// one pane, which made each of its columns twice as wide as a source's.
+    #[test]
+    fn a_form_alone_has_the_columns_it_has_beside_a_source() {
+        let source = column_pitch(
+            ComponentType::VoltageSourceSin,
+            true,
+            "DC Offset (VO) *",
+            "Amplitude (VA) *",
+        );
+        let alone = column_pitch(ComponentType::Resistor, false, "Resistance *", "Multiplier");
+        // A pane that overflows gives its scroll bar a gutter and one that
+        // fits does not, and the two columns share whatever that leaves.
+        let ctx = egui::Context::default();
+        rspice_ui_kit::Theme::default().apply(&ctx);
+        let bar = ctx.global_style().spacing.scroll;
+        let gutter = bar.bar_width + bar.bar_inner_margin + bar.bar_outer_margin;
+        assert!(
+            (alone - source).abs() <= gutter * 0.5 + 0.5,
+            "a resistor's columns start {alone} apart, a source's {source}"
+        );
+    }
 }

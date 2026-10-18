@@ -511,6 +511,25 @@ pub(in crate::workbench::surfaces) fn definition_index(state: &AppState) -> Vec<
                 sections.entry(key).or_default().insert(section.to_owned());
             }
         }
+        // A binned family is a name an instance binds, provided as the
+        // catalog's provider resolution provides it, so a family two
+        // libraries share is contested, and resolved, here like a card.
+        for family in library.bin_families() {
+            let key = (
+                ModelConsumerScope::PrimitiveModel,
+                family.name.to_ascii_lowercase(),
+            );
+            providers
+                .entry(key.clone())
+                .or_default()
+                .insert(library.name.clone());
+            for section in family.bins.iter().filter_map(|bin| bin.section.as_deref()) {
+                sections
+                    .entry(key.clone())
+                    .or_default()
+                    .insert(section.to_owned());
+            }
+        }
         for subcircuit in library.subcircuits.values() {
             if subcircuit.section.as_deref().is_none_or(|section| {
                 active_sections

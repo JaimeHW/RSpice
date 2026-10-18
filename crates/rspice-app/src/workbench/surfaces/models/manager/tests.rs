@@ -9,6 +9,7 @@ use super::*;
 use crate::state::model_library::{ModelQualificationState, ModelType};
 use crate::state::{Component, ComponentType, Point};
 
+mod binned_family;
 mod provider_dialog;
 
 #[test]
@@ -223,6 +224,7 @@ fn ordering_the_catalog_is_total_under_every_column_and_reverses_whole() {
         ProjectModelRow {
             library: library.to_owned(),
             model: model.to_owned(),
+            bins: 0,
             family,
             source: format!("{library}.lib"),
             pinned: false,
@@ -298,6 +300,7 @@ fn the_status_column_orders_by_exactly_what_the_cell_says() {
     let mut row = ProjectModelRow {
         library: "alpha".to_owned(),
         model: "nch".to_owned(),
+        bins: 0,
         family: "NMOS",
         source: "alpha.lib".to_owned(),
         pinned: false,
@@ -340,6 +343,7 @@ fn the_used_by_cell_names_one_consumer_and_counts_the_others() {
     let mut row = ProjectModelRow {
         library: "alpha".to_owned(),
         model: "nch".to_owned(),
+        bins: 0,
         family: "NMOS",
         source: "alpha.lib".to_owned(),
         pinned: false,
@@ -442,6 +446,7 @@ fn catalog_row(review: bool, pinned: bool) -> ProjectModelRow {
     ProjectModelRow {
         library: "alpha".to_owned(),
         model: "nch".to_owned(),
+        bins: 0,
         family: "NMOS",
         source: "alpha.lib".to_owned(),
         pinned,

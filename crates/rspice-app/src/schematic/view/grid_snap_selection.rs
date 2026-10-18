@@ -22,6 +22,19 @@ enum Snap {
     Probe(u64, Point),
 }
 
+/// Snap Selection to Grid as a command runs it, and say what it did: one
+/// path for the Design menu, the palette and the canvas menu's Arrange page.
+pub(crate) fn run_snap_selection_to_grid(state: &mut AppState, symbols: &SchematicSymbolContext) {
+    match snap_selection_to_grid(state, symbols) {
+        Ok(0) => state.prompt("The selection is on the grid already."),
+        Ok(moved) => state.prompt(format!(
+            "Snapped {moved} {} to the grid.",
+            if moved == 1 { "object" } else { "objects" }
+        )),
+        Err(error) => state.prompt(error),
+    }
+}
+
 /// Snap what is selected on the active sheet. Returns how many objects
 /// moved; nothing selected off the grid moves nothing and records nothing.
 pub(crate) fn snap_selection_to_grid(

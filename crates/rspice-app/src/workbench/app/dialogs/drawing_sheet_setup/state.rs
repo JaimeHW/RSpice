@@ -1071,7 +1071,7 @@ pub(crate) fn format_signed_um(value_um: i64, unit: SheetDisplayUnit) -> String 
     }
 }
 
-fn display_unit_from_model(unit: DrawingSheetDisplayUnit) -> SheetDisplayUnit {
+pub(super) fn display_unit_from_model(unit: DrawingSheetDisplayUnit) -> SheetDisplayUnit {
     match unit {
         DrawingSheetDisplayUnit::Millimetres => SheetDisplayUnit::Millimetres,
         DrawingSheetDisplayUnit::Centimetres => SheetDisplayUnit::Centimetres,
@@ -1153,7 +1153,9 @@ fn zone_labels_to_model(value: ZoneLabelsChoice) -> DrawingSheetZoneLabels {
     }
 }
 
-fn title_template_from_model(value: DrawingSheetTitleBlockTemplate) -> TitleBlockTemplateChoice {
+pub(super) fn title_template_from_model(
+    value: DrawingSheetTitleBlockTemplate,
+) -> TitleBlockTemplateChoice {
     match value {
         DrawingSheetTitleBlockTemplate::Compact => TitleBlockTemplateChoice::Compact,
         DrawingSheetTitleBlockTemplate::Standard => TitleBlockTemplateChoice::Standard,

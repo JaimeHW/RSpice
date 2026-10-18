@@ -23,7 +23,7 @@ pub(super) fn component_panel(
         .find(|component| component.id == id)
         .cloned()
     else {
-        sheet_panel(ui, app);
+        super::sheet::sheet_panel(ui, &mut app.state);
         return;
     };
     let evidence = component_model_evidence(&app.state, &component);
@@ -257,12 +257,12 @@ pub(super) fn catalog_model_location(
             Some(binding.cell.as_str()),
             (!component.value.trim().is_empty()).then_some(component.value.trim()),
         ];
-        if let Some(model) = candidates.into_iter().flatten().find_map(|candidate| {
-            library
-                .models
-                .values()
-                .find(|model| model.name.eq_ignore_ascii_case(candidate))
-        }) {
+        // A binned family opens at its first bin, as below.
+        if let Some(model) = candidates
+            .into_iter()
+            .flatten()
+            .find_map(|candidate| library.executable_cards(candidate).into_iter().next())
+        {
             return Some((library.name.clone(), model.name.clone()));
         }
     }
@@ -281,10 +281,12 @@ pub(super) fn catalog_model_location(
         .ok()
         .flatten()?;
     let library = state.model_library_manager.get_library(&provider.library)?;
+    // A binned family opens at its first bin; which bin runs is the
+    // simulator's choice from the instance's geometry.
     let model = library
-        .models
-        .values()
-        .find(|model| model.name == provider.definition)?;
+        .executable_cards(&provider.definition)
+        .into_iter()
+        .next()?;
     Some((library.name.clone(), model.name.clone()))
 }
 
@@ -372,27 +374,52 @@ pub(super) fn bound_model_choices(
     let Some(library) = state.model_library_manager.get_library(&binding.library) else {
         return Vec::new();
     };
-    let Some(current_model) = library
-        .models
-        .values()
-        .find(|model| model.name.eq_ignore_ascii_case(current))
-    else {
+    let Some(current_model) = library.executable_cards(current).into_iter().next() else {
         return Vec::new();
     };
+    // A binned family is one choice, by the name an instance binds; its bins
+    // are what the simulator picks from by L and W, not choices beside it.
     let mut models = library
-        .models
-        .values()
-        .filter(|model| {
-            crate::state::model_library::models_have_compatible_device_family(current_model, model)
-        })
-        .map(|model| model.name.clone())
-        .collect::<Vec<_>>();
-    models.sort_by_key(|name| name.to_ascii_lowercase());
-    models.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
-    models
+        .bindable_models()
         .into_iter()
-        .map(|model| (model.clone(), model))
-        .collect()
+        .filter(|model| {
+            model.cards().iter().all(|card| {
+                crate::state::model_library::models_have_compatible_device_family(
+                    current_model,
+                    card,
+                )
+            })
+        })
+        .map(|model| {
+            use crate::state::model_library::BindableModel;
+            let label = match &model {
+                BindableModel::Card(card) => card.name.clone(),
+                BindableModel::Family(family) if family.bins.len() == 1 => {
+                    format!("{} · 1 bin", family.name)
+                }
+                BindableModel::Family(family) => {
+                    format!("{} · {} bins", family.name, family.bins.len())
+                }
+            };
+            (model.name().to_owned(), label)
+        })
+        .collect::<Vec<_>>();
+    // An instance already pinned to one bin keeps that bin as its current
+    // choice, so the row says what it runs; choosing the family unpins it.
+    if !models
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case(current))
+        && let Some(family) = crate::state::model_library::model_bin_family(&current_model.name)
+            .and_then(|family| library.bin_family(family))
+    {
+        models.push((
+            current_model.name.clone(),
+            format!("{} · bin of {}", current_model.name, family.name),
+        ));
+    }
+    models.sort_by_key(|(name, _)| name.to_ascii_lowercase());
+    models.dedup_by(|left, right| left.0.eq_ignore_ascii_case(&right.0));
+    models
 }
 
 pub(super) fn bound_model_section_choices(
@@ -471,17 +498,18 @@ pub(crate) fn apply_bound_model_choice(
         .model_library_manager
         .get_library(&library_name)
         .ok_or_else(|| format!("Model library '{library_name}' is no longer loaded."))?;
-    let candidate = library
-        .models
-        .values()
-        .find(|model| model.name.eq_ignore_ascii_case(selected_model))
-        .ok_or_else(|| {
-            format!("Model '{selected_model}' is no longer present in library '{library_name}'.")
-        })?;
-    let candidate_name = candidate.name.clone();
-    let candidate_source = candidate
-        .file_path
-        .clone()
+    let candidate = library.bindable_model(selected_model).ok_or_else(|| {
+        format!("Model '{selected_model}' is no longer present in library '{library_name}'.")
+    })?;
+    let candidate_name = candidate.name().to_owned();
+    // The file holding every card the name can run, or the library's root
+    // when a family's bins are spread over more than one.
+    let cards = candidate.cards();
+    let candidate_source = cards
+        .iter()
+        .all(|card| card.file_path == cards[0].file_path)
+        .then(|| cards[0].file_path.clone())
+        .flatten()
         .or_else(|| library.root_path.clone());
     let changed =
         app.state

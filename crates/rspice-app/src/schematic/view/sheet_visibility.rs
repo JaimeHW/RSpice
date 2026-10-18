@@ -352,10 +352,54 @@ pub(crate) fn with_active_wire_topology<R>(
 }
 
 /// Whether an object belongs to one of the cell view's other sheets.
+///
+/// The catalog is found once, not once per object: a topology scope asks
+/// this of every object in the document, on every frame of a drag, and
+/// spelling the cell view's key and looking its catalog up afresh for each
+/// of them cost 13 ms of every drag frame at production scale.
 pub(crate) fn off_active_sheet(
     workspace: &crate::state::ProjectWorkspace,
 ) -> impl Fn(u64) -> bool + '_ {
-    |id| !object_is_on_active_sheet_in_workspace(workspace, id)
+    let key = workspace.content.active_schematic_reference().key();
+    let catalog = workspace.content.design_management.sheet_catalog(&key);
+    move |id| !rspice_schematic_editor::view::design_view::object_is_on_active_sheet(catalog, id)
+}
+
+/// The active sheet's own connectivity, where the canvas draws it: its parts,
+/// conductors, junctions, labels, buses and taps, under the document's
+/// policy.
+///
+/// Every sheet draws in the document's one coordinate space, so this is the
+/// document with the other sheets' objects left out: borrowed when the cell
+/// view has one sheet, otherwise a copy of the active sheet's objects alone.
+pub(super) fn active_sheet_connectivity(
+    state: &AppState,
+) -> Cow<'_, rspice_design::schematic::document::SchematicDocument> {
+    let document = state.schematic.document();
+    if multi_sheet_catalog(state).is_none() {
+        return Cow::Borrowed(document);
+    }
+    let off_sheet = off_active_sheet(&state.workspace);
+    let on_sheet = |id: u64| !off_sheet(id);
+    Cow::Owned(rspice_design::schematic::document::SchematicDocument {
+        components: kept(&document.components, |object| on_sheet(object.id)),
+        wires: kept(&document.wires, |object| on_sheet(object.id)),
+        buses: kept(&document.buses, |object| on_sheet(object.id)),
+        bus_taps: kept(&document.bus_taps, |object| on_sheet(object.id)),
+        net_labels: kept(&document.net_labels, |object| on_sheet(object.id)),
+        junctions: kept(&document.junctions, |object| on_sheet(object.id)),
+        grid_size: document.grid_size,
+        document_policy: document.document_policy,
+        ..Default::default()
+    })
+}
+
+fn kept<T: Clone>(objects: &[T], keep: impl Fn(&T) -> bool) -> Vec<T> {
+    objects
+        .iter()
+        .filter(|object| keep(object))
+        .cloned()
+        .collect()
 }
 
 /// The same operation on a schematic borrowed apart from its workspace: a

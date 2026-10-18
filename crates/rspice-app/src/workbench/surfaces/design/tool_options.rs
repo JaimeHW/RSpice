@@ -19,6 +19,34 @@ use crate::workbench::AppState;
 const NAME_GAP: f32 = 12.0;
 
 pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
+    let top = ui.cursor().top();
+    options(ui, state);
+    hold_drawing_still(ui, state, ui.cursor().top() - top);
+}
+
+/// The strip takes its height from the top of the canvas, so the canvas
+/// moves down when the strip comes and back up when it goes. The drawing
+/// must not move with it: whatever the pointer was over when M or S was
+/// pressed is still under it for the click that follows. The pan takes the
+/// change, once per change of height, per document.
+fn hold_drawing_still(ui: &Ui, state: &mut AppState, height: f32) {
+    let id = egui::Id::new((
+        "tool-options-strip-height",
+        state.workspace.content.active_key(),
+    ));
+    let last = ui.data_mut(|data| {
+        let last = data.get_temp::<f32>(id);
+        data.insert_temp(id, height);
+        last
+    });
+    if let Some(last) = last
+        && last != height
+    {
+        state.schematic.session.editor.pan.1 -= f64::from(height - last);
+    }
+}
+
+fn options(ui: &mut Ui, state: &mut AppState) {
     match state.schematic.session.editor.tool {
         Tool::MoveSelection if state.dialogs.move_selection.armed => {
             strip(ui, "Move", |ui| {
@@ -130,6 +158,44 @@ mod tests {
         let mut cancelled = armed_move();
         crate::workbench::app::cancel_armed_move_selection(&mut cancelled);
         assert!(!painted(&mut cancelled));
+    }
+
+    /// Pressing S or M brings the strip in above the canvas and pushes the
+    /// canvas down by its height. The drawing moved down with it, out from
+    /// under the pointer, so the click meant to take the segment the pointer
+    /// was on landed 38 px beside it. The pan now takes up the strip's height
+    /// as it comes and as it goes.
+    #[test]
+    fn the_drawing_stays_put_when_the_strip_comes_and_goes() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        // Where the canvas starts (the cursor below the strip) and where the
+        // drawing's origin lands on screen.
+        let frame = |state: &mut AppState| {
+            let mut measured = (0.0, 0.0);
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                show(ui, state);
+                let canvas_top = f64::from(ui.cursor().top());
+                measured = (
+                    canvas_top,
+                    canvas_top + state.schematic.session.editor.pan.1,
+                );
+            });
+            measured
+        };
+        let mut state = armed_stretch();
+        crate::workbench::app::cancel_armed_stretch_selection(&mut state);
+        let (resting_top, resting) = frame(&mut state);
+
+        crate::workbench::app::arm_stretch_selection(&mut state);
+        let (armed_top, armed) = frame(&mut state);
+        assert!(armed_top > resting_top, "the strip took its height");
+        assert_eq!(armed, resting, "arming moved the drawing");
+
+        crate::workbench::app::cancel_armed_stretch_selection(&mut state);
+        let (done_top, done) = frame(&mut state);
+        assert_eq!(done_top, resting_top);
+        assert_eq!(done, resting, "ending the command moved the drawing");
     }
 
     #[cfg(not(target_arch = "wasm32"))]

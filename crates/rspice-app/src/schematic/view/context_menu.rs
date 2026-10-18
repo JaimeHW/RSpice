@@ -301,6 +301,8 @@ const ARRANGE_ENTRIES: &[ContextEntry] = &[
     ContextEntry::Separator,
     arrange(ArrangeAction::DistributeHorizontal, ContextIcon::Arrange),
     arrange(ArrangeAction::DistributeVertical, ContextIcon::Arrange),
+    ContextEntry::Separator,
+    arrange(ArrangeAction::SnapToGrid, ContextIcon::Grid),
 ];
 
 const fn arrange(action: ArrangeAction, icon: ContextIcon) -> ContextEntry {
@@ -328,6 +330,7 @@ const fn arrange_command(action: ArrangeAction) -> Command {
         ArrangeAction::AlignBottom => Command::AlignSelectionBottom,
         ArrangeAction::DistributeHorizontal => Command::DistributeSelectionHorizontal,
         ArrangeAction::DistributeVertical => Command::DistributeSelectionVertical,
+        ArrangeAction::SnapToGrid => Command::SnapSelectionToGrid,
     }
 }
 
@@ -346,7 +349,8 @@ fn arrange_layout(action: ArrangeAction) -> Option<SelectionLayoutCommand> {
         ArrangeAction::RotateClockwise
         | ArrangeAction::RotateCounterClockwise
         | ArrangeAction::MirrorHorizontal
-        | ArrangeAction::MirrorVertical => return None,
+        | ArrangeAction::MirrorVertical
+        | ArrangeAction::SnapToGrid => return None,
     })
 }
 
@@ -598,12 +602,15 @@ fn select_pointer_target(
 }
 
 /// Select what the menu opens on, unless it is already in the selection,
-/// and name it as the menu's target.
+/// and name it as the menu's target. A net highlight stays lit on an
+/// instance the menu can descend into, so Descend carries it.
 fn select_context_target(state: &mut AppState, target: Option<PointerTarget>) -> ContextTarget {
     let Some(target) = target else {
         return ContextTarget::Canvas;
     };
-    state.schematic.session.editor.net_highlight.clear();
+    if !super::requests::picks_instance_to_descend(state, Some(target)) {
+        state.schematic.session.editor.net_highlight.clear();
+    }
     match target {
         PointerTarget::Component(id) => {
             if !state.schematic.session.editor.selection.has_component(id) {
@@ -1136,6 +1143,12 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             }),
             "Select at least one editable object",
         ),
+        // The Design menu's availability for the same command.
+        ContextAction::ArrangeCommand(ArrangeAction::SnapToGrid) => (
+            !state.schematic_edit_read_only()
+                && !state.schematic.session.editor.selection.is_empty(),
+            "Select at least one editable object",
+        ),
         ContextAction::ArrangeCommand(arrangement) => match arrange_layout(arrangement) {
             Some(layout) => match selection_layout_availability(state, layout) {
                 Ok(()) => (true, ""),
@@ -1282,6 +1295,9 @@ fn execute_context_action(
         }
         // A page turn, which the menu takes itself.
         ContextAction::Arrange => {}
+        ContextAction::ArrangeCommand(ArrangeAction::SnapToGrid) => {
+            super::grid_snap_selection::run_snap_selection_to_grid(state, symbol_context);
+        }
         ContextAction::ArrangeCommand(arrangement) => match arrange_layout(arrangement) {
             Some(layout) => match apply_selection_layout(state, symbol_context, layout) {
                 Ok(true) => {}

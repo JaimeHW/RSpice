@@ -58,26 +58,29 @@ fn drawing_sheet_document_control_is_backward_compatible_and_calendar_strict() {
         status: DrawingSheetReleaseStatus::InReview,
         change_reference: "ECO-1042".to_owned(),
     };
-    assert!(matches!(
-        invalid_date.validate(),
-        Err(DesignManagementError::InvalidText {
-            field: "drawing sheet document revision date",
-            ..
-        })
-    ));
+    assert_eq!(
+        invalid_date.validate().unwrap_err().to_string(),
+        "The date must be a calendar date written YYYY-MM-DD."
+    );
 
     let released_draft = DrawingSheetDocumentControl {
         revision_date_utc: "2026-08-04".to_owned(),
         status: DrawingSheetReleaseStatus::Released,
         ..DrawingSheetDocumentControl::default()
     };
-    assert!(matches!(
-        released_draft.validate(),
-        Err(DesignManagementError::InvalidText {
-            field: "released drawing sheet document revision",
-            ..
-        })
-    ));
+    assert_eq!(
+        released_draft.validate().unwrap_err().to_string(),
+        "A released or obsolete document needs a revision."
+    );
+    let undated = DrawingSheetDocumentControl {
+        revision: "B".to_owned(),
+        status: DrawingSheetReleaseStatus::Obsolete,
+        ..DrawingSheetDocumentControl::default()
+    };
+    assert_eq!(
+        undated.validate().unwrap_err().to_string(),
+        "A released or obsolete document needs a date."
+    );
 
     let released = DrawingSheetDocumentControl {
         revision: "B".to_owned(),
@@ -97,10 +100,7 @@ fn drawing_sheet_document_control_is_backward_compatible_and_calendar_strict() {
         };
         assert!(matches!(
             unindexed.validate(),
-            Err(DesignManagementError::InvalidText {
-                field: "released drawing sheet document revision",
-                ..
-            })
+            Err(DesignManagementError::DocumentControl(message)) if message.contains("revision")
         ));
     }
 }

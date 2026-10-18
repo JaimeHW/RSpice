@@ -16,17 +16,10 @@ use std::collections::{HashMap, HashSet};
 
 use egui::Ui;
 
-use crate::schematic::view::{
-    drawing_sheet::{
-        DrawingSheetOverflowSummary, drawing_sheet_overflow_summary, resolve_active_drawing_sheet,
-    },
-    frame_symbol_context,
-    sheet_visibility::{self, SheetScope},
-};
+use crate::schematic::view::sheet_visibility::{self, SheetScope};
 use crate::state::{
-    AnalysisResultPayload, CellViewRef, Component, ComponentType, DisplayMode,
-    DrawingSheetTitleBlockTemplate, NetNamingPolicy, PropertyDefinition, PropertyType,
-    PropertyValue, SoaRuleVerdictEvidence,
+    AnalysisResultPayload, CellViewRef, Component, ComponentType, DisplayMode, NetNamingPolicy,
+    PropertyDefinition, PropertyType, PropertyValue, SoaRuleVerdictEvidence,
 };
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
@@ -361,6 +354,10 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         }
     }
 
+    if inspected != DesignSubject::Sheet {
+        sheet::commit_pending_title_field(ui.ctx(), &mut app.state);
+    }
+
     match inspected {
         DesignSubject::Component(id) => component_panel(ui, app, id, &sheet),
         DesignSubject::Net(name) => net_panel(ui, app, &name, &sheet.nets),
@@ -368,7 +365,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         DesignSubject::Shape(id) => shape_panel(ui, app, id),
         DesignSubject::Probe(id) => probe_panel(ui, app, id),
         DesignSubject::Multi => multi_panel(ui, app),
-        DesignSubject::Sheet => sheet_panel(ui, app),
+        DesignSubject::Sheet => sheet::sheet_panel(ui, &mut app.state),
     }
 }
 
@@ -579,29 +576,6 @@ fn action_stack(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
     });
 }
 
-/// One action bound to a workbench command, disabled with the registry's
-/// exact reason when the command cannot run.
-fn command_action(
-    ui: &mut Ui,
-    app: &mut RSpiceApp,
-    command: Command,
-    icon: Icon,
-    label: &str,
-    destructive: bool,
-) {
-    let availability = command.availability(app);
-    let response = Button::new(label)
-        .icon(icon)
-        .destructive(destructive)
-        .enabled(availability.is_available())
-        .show(ui);
-    if let CommandAvailability::Disabled(reason) = availability {
-        response.on_disabled_hover_text(reason);
-    } else if response.clicked() {
-        command.execute(app);
-    }
-}
-
 /// The sheet one inspected object lives on, stated where the object's own
 /// identity is.
 ///
@@ -740,153 +714,8 @@ fn checks_status(state: &AppState) -> Option<String> {
 mod inline_instance;
 use inline_instance::*;
 
-// Sheet inspector
-// =============================================================================
-
-/// Nothing selected: what the sheet itself needs from the reader — its print
-/// problems with the route to Page Setup, and its schematic checks. What the
-/// document tab, the status bar and the navigator already say about the sheet
-/// is not said again here.
-fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp) {
-    drawing_sheet_inspector(ui, app);
-
-    // The header says whether the check is current and how many errors it
-    // found; a row appears only for a finding to act on.
-    section_header(ui, "Checks", checks_status(&app.state).as_deref());
-    let open_pins = sheet_open_pin_findings(&app.state);
-    let floating_nets = sheet_floating_net_findings(&app.state);
-    if !open_pins.is_empty() {
-        property_row_problem(
-            ui,
-            "Connectivity",
-            &count_label(open_pins.len(), "unconnected pin"),
-            Some(findings_problem(&open_pins)),
-        );
-    }
-    if !floating_nets.is_empty() {
-        property_row_problem(
-            ui,
-            "Floating nets",
-            &floating_nets.len().to_string(),
-            Some(findings_problem(&floating_nets)),
-        );
-    }
-    action_stack(ui, |ui| {
-        command_action(
-            ui,
-            app,
-            Command::CheckCellview,
-            Icon::Check,
-            "Check cellview",
-            false,
-        );
-    });
-}
-
-/// The sheet's print problems — a title block that does not fit, objects
-/// outside the drawing area — and the route to Page Setup, where the format
-/// itself is set and read. A read-only sheet with nothing wrong has no
-/// section.
-fn drawing_sheet_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
-    let sheet = resolve_active_drawing_sheet(&app.state);
-    // The canvas's own cached context: the inspector resolves nothing.
-    let symbol_context = frame_symbol_context(&mut app.state);
-    let overflow = drawing_sheet_overflow_summary(&app.state, &symbol_context, &sheet);
-    let substituted = sheet.format.title_block_substituted();
-    let writable = !app.state.schematic_edit_read_only();
-    if !writable && !substituted && overflow.is_clear() {
-        return;
-    }
-
-    section_header(ui, "Drawing sheet", None);
-    if substituted {
-        let requested = drawing_sheet_title_template_name(sheet.format.title_block.template);
-        let effective = drawing_sheet_title_template_name(
-            sheet.geometry.physical.effective_title_block_template,
-        );
-        problem_line(
-            ui,
-            Problem::Warning,
-            &format!(
-                "{requested} doesn't fit; {effective} is printed. Enlarge the sheet in Page Setup."
-            ),
-        );
-    }
-    if !overflow.is_clear() {
-        problem_line(
-            ui,
-            Problem::Warning,
-            &drawing_sheet_overflow_text(&overflow),
-        );
-    }
-    if writable || !overflow.is_clear() {
-        action_stack(ui, |ui| {
-            if !overflow.is_clear() {
-                if Button::new("Show first")
-                    .icon(Icon::ZoomFit)
-                    .show(ui)
-                    .clicked()
-                {
-                    crate::schematic::view::drawing_sheet::show_first_drawing_sheet_overflow(
-                        &mut app.state,
-                    );
-                }
-                if Button::new("Review all…").show(ui).clicked() {
-                    crate::workbench::app::open_drawing_sheet_overflow_review(&mut app.state);
-                }
-            }
-            if writable {
-                command_action(
-                    ui,
-                    app,
-                    Command::PageSetup,
-                    Icon::File,
-                    "Page setup…",
-                    false,
-                );
-            }
-        });
-    }
-}
-
-const fn drawing_sheet_title_template_name(
-    template: DrawingSheetTitleBlockTemplate,
-) -> &'static str {
-    match template {
-        DrawingSheetTitleBlockTemplate::Compact => "RSpice compact",
-        DrawingSheetTitleBlockTemplate::Standard => "RSpice standard",
-        DrawingSheetTitleBlockTemplate::Wide => "RSpice wide",
-        DrawingSheetTitleBlockTemplate::OrganizationManaged => "Organization block",
-        DrawingSheetTitleBlockTemplate::None => "No title block",
-    }
-}
-
-/// How many objects stand outside the drawing area, and where.
-fn drawing_sheet_overflow_text(summary: &DrawingSheetOverflowSummary) -> String {
-    let mut details = Vec::with_capacity(2);
-    if summary.outside_border > 0 {
-        let mut outside = format!("{} outside the border", summary.outside_border);
-        if summary.off_paper > 0 {
-            outside.push_str(&format!(" · {} beyond the paper edge", summary.off_paper));
-        }
-        details.push(outside);
-    }
-    if summary.title_block_collisions > 0 {
-        details.push(format!(
-            "{} overlapping the title block",
-            summary.title_block_collisions
-        ));
-    }
-    let headline = format!(
-        "{} outside the drawing area",
-        count_label(summary.finding_count(), "object")
-    );
-    if details.is_empty() {
-        headline
-    } else {
-        format!("{headline}: {}", details.join(" · "))
-    }
-}
+// The sheet inspector, shown with nothing selected, lives in `design/sheet.rs`.
+mod sheet;
 
 // =============================================================================
 // Multi-selection inspector

@@ -105,7 +105,7 @@ fn each_editable_group_reserves_its_strip_only_for_its_own_fields() {
     assert!(!editing_parameter_field(&app.state, id));
 }
 
-fn accesskit_nodes(
+pub(super) fn accesskit_nodes(
     mut add_contents: impl FnMut(&mut egui::Ui),
 ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
     let ctx = egui::Context::default();
@@ -122,7 +122,7 @@ fn accesskit_nodes(
 
 /// Everything one inspector panel paints, at the dock's real width.
 #[cfg(not(target_arch = "wasm32"))]
-fn painted_panel(mut contents: impl FnMut(&mut Ui)) -> String {
+pub(super) fn painted_panel(mut contents: impl FnMut(&mut Ui)) -> String {
     fn walk(shape: &egui::epaint::Shape, into: &mut String) {
         match shape {
             egui::epaint::Shape::Text(painted) => {
@@ -1309,6 +1309,68 @@ fn bound_model_choices_accept_same_family_across_catalog_model_types() {
     );
 }
 
+/// A binned family is one model choice, named as an instance binds it. An
+/// instance pinned to one bin keeps that bin as its current choice, so the row
+/// says what it runs, and choosing the family binds the family's name.
+#[test]
+fn bound_model_choices_offer_a_binned_family_once() {
+    let mut app = RSpiceApp::test_instance();
+    let mut kit = ModelLibrary::new("kit");
+    for name in ["nch.1", "nch.2", "nch_hv"] {
+        let mut card = DeviceModel::new(name, ModelType::Nmos);
+        card.spice_type = Some("NMOS".to_owned());
+        kit.add_model(card);
+    }
+    app.state.model_library_manager.add_library(kit);
+    let mut binding = LibraryCellInstance::new("kit", "nch_cell", "spice");
+    binding.module_name = Some("nch.1".to_owned());
+    binding.netlist_template = Some("M{name} {nodes} {model} {params}".to_owned());
+    let component = Component::new(61, ComponentType::CellInstance, Point::origin())
+        .with_library_cell(binding)
+        .with_name_value("XM1", "nch_cell");
+    app.state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(component);
+    app.state.schematic.init_undo_history();
+
+    let component = app.state.schematic.document().components[0].clone();
+    let choices = bound_model_choices(&app.state, &component, "nch.1");
+    let owned = |pairs: &[(&str, &str)]| {
+        pairs
+            .iter()
+            .map(|(value, label)| ((*value).to_owned(), (*label).to_owned()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        choices,
+        owned(&[
+            ("nch", "nch · 2 bins"),
+            ("nch.1", "nch.1 · bin of nch"),
+            ("nch_hv", "nch_hv"),
+        ])
+    );
+
+    assert!(apply_bound_model_choice(&mut app, 61, "nch").expect("the family validates"));
+    let component = app.state.schematic.document().components[0].clone();
+    assert_eq!(
+        component
+            .library_cell
+            .as_ref()
+            .and_then(|binding| binding.module_name.as_deref()),
+        Some("nch")
+    );
+    assert_eq!(
+        bound_model_choices(&app.state, &component, "nch"),
+        owned(&[("nch", "nch · 2 bins"), ("nch_hv", "nch_hv")]),
+        "once the family is bound, no bin is offered beside it"
+    );
+    let evidence = super::super::component_model_evidence(&app.state, &component);
+    assert_eq!(evidence.model.as_deref(), Some("nch"));
+    assert!(evidence.problem.is_none(), "{:?}", evidence.problem);
+}
+
 #[test]
 fn a_veriloga_cell_opens_its_exact_code_source_target() {
     let mut state = AppState::default();
@@ -1662,21 +1724,6 @@ fn terminal_rows_start_at_the_panel_inset_with_no_empty_caret_column() {
         PANEL_INSET + TERMINAL_ROW_ICON_W + TERMINAL_ROW_ICON_GAP
     );
     assert!((net.right() - (312.0 - PANEL_INSET)).abs() < 0.5, "{net:?}");
-}
-
-/// With nothing selected the panel holds what the sheet needs from the
-/// reader: the route to Page Setup and the schematic checks. What the tab,
-/// the status bar and the navigator already say about the sheet, and the print
-/// format Page Setup owns, are not restated.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_sheet_panel_holds_only_page_setup_and_checks() {
-    let mut app = RSpiceApp::test_instance();
-    let painted = painted_panel(|ui| sheet_panel(ui, &mut app));
-    assert_eq!(
-        painted,
-        "Drawing sheet\nPage setup…\nChecks\nnot run\nCheck cellview\n"
-    );
 }
 
 /// A probe states the signal it saves, and an unbound one is the problem to
