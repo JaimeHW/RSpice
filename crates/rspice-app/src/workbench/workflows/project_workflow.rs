@@ -992,14 +992,49 @@ pub(crate) fn request_close_project(state: &mut AppState) -> bool {
     state
         .workbench
         .begin_project_close(ProjectCloseDestination::EmptyWorkbench);
-    let nothing_to_protect = !state.simulation.execution.has_active_execution()
-        && !state.workbench.model_editor_has_unsaved_changes()
-        && crate::workbench::lifecycle::project_lifecycle::dirty_documents(state).is_empty();
-    if nothing_to_protect {
+    if closing_loses_nothing(state) {
         return close_project_discard(state);
     }
     state.dialogs.project_review_dialog.show_close_project();
     true
+}
+
+/// Whether closing the open project loses nothing: no unsaved document or
+/// model candidate, and no local run that would have to stop. A project never
+/// saved to a file always has something to lose.
+fn closing_loses_nothing(state: &AppState) -> bool {
+    !state.simulation.execution.has_active_execution()
+        && !state.workbench.model_editor_has_unsaved_changes()
+        && crate::workbench::lifecycle::project_lifecycle::dirty_documents(state).is_empty()
+}
+
+/// Bind the project the restored session holds, then apply Projects and
+/// files ▸ On startup. Called once the session and preferences are restored,
+/// because the choice is read from them.
+pub(crate) fn open_session_project(state: &mut AppState) {
+    crate::workbench::lifecycle::project_lifecycle::initialize_from_session(state);
+    #[cfg(not(target_arch = "wasm32"))]
+    apply_startup_project_choice(state);
+}
+
+/// "Start with no project" closes the reopened project when that loses
+/// nothing, as Close Project would without asking. Unsaved work keeps it open.
+/// Desktop only: the browser binds its project file after startup, once its
+/// storage answers, so there is nothing settled to close here.
+#[cfg(not(target_arch = "wasm32"))]
+fn apply_startup_project_choice(state: &mut AppState) {
+    if state.ui.preferences.reopen_last_project() || !state.project_lifecycle.is_open() {
+        return;
+    }
+    if closing_loses_nothing(state) {
+        close_project_discard(state);
+    } else if state.project_lifecycle.accepted().is_some() {
+        state.record(
+            LogSeverity::Info,
+            LogSource::Studio,
+            "The last project was reopened because it has unsaved changes.",
+        );
+    }
 }
 
 pub(crate) fn close_project_discard(state: &mut AppState) -> bool {

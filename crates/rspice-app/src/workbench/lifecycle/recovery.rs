@@ -1323,7 +1323,7 @@ mod tests {
     fn discovery_retains_malformed_checkpoint_as_blocked_evidence() {
         let root = unique_temp_dir("recovery-discovery");
         let source = root.join("design.rsch");
-        crate::io::save_schematic(&SchematicState::default(), &source).expect("save source");
+        crate::io::save_schematic(&SchematicState::default(), &source, true).expect("save source");
         let checkpoint =
             crate::workbench::workflows::file_workflow::autosave_checkpoint_path(&source);
         std::fs::write(&checkpoint, "not schematic json").expect("write malformed checkpoint");
@@ -1347,7 +1347,7 @@ mod tests {
     fn discovery_lists_every_generation_even_when_the_source_is_live() {
         let root = unique_temp_dir("recovery-generations");
         let source = root.join("design.rsch");
-        crate::io::save_schematic(&SchematicState::default(), &source).expect("save source");
+        crate::io::save_schematic(&SchematicState::default(), &source, true).expect("save source");
         let legacy = crate::workbench::workflows::file_workflow::autosave_checkpoint_path(&source);
         std::fs::write(&legacy, "not schematic json").expect("write malformed legacy point");
         let mut generated_name = legacy.as_os_str().to_owned();

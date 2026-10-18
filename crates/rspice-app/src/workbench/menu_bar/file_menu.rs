@@ -223,6 +223,7 @@ mod tests {
             &self,
             _: &crate::state::SchematicState,
             _: &std::path::Path,
+            _: bool,
         ) -> Result<(), crate::io::SchematicIoError> {
             panic!("unexpected file I/O")
         }

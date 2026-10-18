@@ -159,6 +159,65 @@ fn close_project_discards_onto_the_no_project_landing_not_the_launcher() {
     );
 }
 
+/// Projects and files ▸ On startup. "Start with no project" closes a project
+/// reopened from its file when that loses nothing, and lands on the
+/// no-project workspace; unsaved changes keep it open whichever is chosen.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn startup_closes_a_saved_project_only_when_asked_and_nothing_is_lost() {
+    use crate::state::{ComponentType, Point};
+    use crate::workbench::ChoicePreference;
+    use crate::workbench::lifecycle::project_lifecycle::{SaveScope, save_native};
+
+    let folder = std::env::temp_dir().join(format!(
+        "rspice-startup-choice-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&folder).expect("create the test folder");
+    let reopened = |name: &str, choice: usize| {
+        let mut state = AppState::default();
+        save_native(
+            &mut state,
+            SaveScope::AllDocuments,
+            &folder.join(name),
+            DestinationAuthority::UserSelected,
+        )
+        .expect("save the project");
+        state
+            .ui
+            .preferences
+            .set_choice(ChoicePreference::StartupProject, choice)
+            .expect("the startup choice has two options");
+        state
+    };
+
+    let mut kept = reopened("kept.rspiceproj", 0);
+    apply_startup_project_choice(&mut kept);
+    assert!(kept.project_lifecycle.is_open(), "Reopen last project");
+
+    let mut closed = reopened("closed.rspiceproj", 1);
+    apply_startup_project_choice(&mut closed);
+    assert!(!closed.project_lifecycle.is_open());
+    assert_eq!(
+        closed.workbench.workspace,
+        crate::workbench::state::Workspace::Project
+    );
+
+    let mut edited = reopened("edited.rspiceproj", 1);
+    edited
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(3, 8));
+    apply_startup_project_choice(&mut edited);
+    assert!(edited.project_lifecycle.is_open(), "unsaved changes stay");
+
+    drop((kept, closed, edited));
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
 /// Closing the project while an edit settles drops the edit with everything
 /// else the design held: nothing is checked afterwards, and nothing says a
 /// check failed.

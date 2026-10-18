@@ -937,7 +937,7 @@ mod tests {
     fn current_session_checkpoint_is_hidden_and_cleanup_is_complete() {
         let root = unique_temp_dir("current-session");
         let source = root.join("design.rsch");
-        crate::io::save_schematic(&SchematicState::default(), &source).expect("save source");
+        crate::io::save_schematic(&SchematicState::default(), &source, true).expect("save source");
 
         let checkpoint = write_checkpoint(&source, &SchematicState::default())
             .expect("write managed checkpoint");
@@ -957,7 +957,7 @@ mod tests {
     fn repeated_autosaves_publish_new_generation_before_retiring_owned_predecessor() {
         let root = unique_temp_dir("generation-rotation");
         let source = root.join("design.rsch");
-        crate::io::save_schematic(&SchematicState::default(), &source).expect("save source");
+        crate::io::save_schematic(&SchematicState::default(), &source, true).expect("save source");
 
         let first =
             write_checkpoint(&source, &SchematicState::default()).expect("write first generation");
@@ -990,7 +990,7 @@ mod tests {
     fn autosave_never_overwrites_or_retires_preexisting_legacy_bytes() {
         let root = unique_temp_dir("legacy-preservation");
         let source = root.join("design.rsch");
-        crate::io::save_schematic(&SchematicState::default(), &source).expect("save source");
+        crate::io::save_schematic(&SchematicState::default(), &source, true).expect("save source");
         let legacy = crate::workbench::workflows::file_workflow::autosave_checkpoint_path(&source);
         let legacy_bytes = serialize_checkpoint(&source, &SchematicState::default())
             .expect("serialize legacy checkpoint");
@@ -1025,7 +1025,7 @@ mod tests {
     fn successor_autosave_preserves_a_released_managed_recovery_generation() {
         let root = unique_temp_dir("managed-preservation");
         let source = root.join("design.rsch");
-        crate::io::save_schematic(&SchematicState::default(), &source).expect("save source");
+        crate::io::save_schematic(&SchematicState::default(), &source, true).expect("save source");
         let retained = write_checkpoint(&source, &SchematicState::default())
             .expect("write retained generation");
         orphan_test_checkpoint(&retained).expect("simulate prior owner exit");
@@ -1081,7 +1081,7 @@ mod tests {
     fn legacy_checkpoint_is_openable_but_never_destructively_discarded() {
         let root = unique_temp_dir("legacy");
         let source = root.join("design.rsch");
-        crate::io::save_schematic(&SchematicState::default(), &source).expect("save source");
+        crate::io::save_schematic(&SchematicState::default(), &source, true).expect("save source");
         let checkpoint =
             crate::workbench::workflows::file_workflow::autosave_checkpoint_path(&source);
         let bytes = serialize_checkpoint(&source, &SchematicState::default())
@@ -1107,7 +1107,7 @@ mod tests {
     fn bound_candidate_rejects_checkpoint_replaced_after_listing() {
         let root = unique_temp_dir("checkpoint-race");
         let source = root.join("design.rsch");
-        crate::io::save_schematic(&SchematicState::default(), &source).expect("save source");
+        crate::io::save_schematic(&SchematicState::default(), &source, true).expect("save source");
         let checkpoint = write_checkpoint(&source, &SchematicState::default())
             .expect("write managed checkpoint");
         orphan_test_checkpoint(&checkpoint).expect("simulate prior process exit");
@@ -1142,7 +1142,7 @@ mod tests {
     fn manifest_binds_the_saved_source_snapshot() {
         let root = unique_temp_dir("source-binding");
         let source = root.join("design.rsch");
-        crate::io::save_schematic(&SchematicState::default(), &source).expect("save source");
+        crate::io::save_schematic(&SchematicState::default(), &source, true).expect("save source");
         let checkpoint = write_checkpoint(&source, &SchematicState::default())
             .expect("write managed checkpoint");
         orphan_test_checkpoint(&checkpoint).expect("simulate prior process exit");
@@ -1166,7 +1166,7 @@ mod tests {
                 ComponentType::Capacitor,
                 Point::new(5, 5),
             ));
-        crate::io::save_schematic(&changed, &source).expect("replace saved source");
+        crate::io::save_schematic(&changed, &source, true).expect("replace saved source");
         assert_eq!(
             read_source_snapshot(&source, &binding)
                 .expect("read changed source")
@@ -1181,7 +1181,7 @@ mod tests {
     fn clean_save_never_retires_a_dead_foreign_session_checkpoint() {
         let root = unique_temp_dir("foreign-clean-save");
         let source = root.join("design.rsch");
-        crate::io::save_schematic(&SchematicState::default(), &source).expect("save source");
+        crate::io::save_schematic(&SchematicState::default(), &source, true).expect("save source");
         let checkpoint = write_checkpoint(&source, &SchematicState::default())
             .expect("write managed checkpoint");
         orphan_test_checkpoint(&checkpoint).expect("simulate writer crash");
@@ -1191,7 +1191,7 @@ mod tests {
             .document_mut_for_test()
             .components
             .push(Component::new(1, ComponentType::Inductor, Point::new(7, 7)));
-        crate::io::save_schematic(&stale_buffer, &source).expect("save stale buffer");
+        crate::io::save_schematic(&stale_buffer, &source, true).expect("save stale buffer");
         let error = cleanup_checkpoint(&source)
             .expect_err("clean save must retain foreign recovery evidence");
         assert!(error.contains("another or earlier session"));
@@ -1205,7 +1205,7 @@ mod tests {
     fn cleanup_rejects_bytes_replaced_under_the_current_writer_lease() {
         let root = unique_temp_dir("current-writer-replaced");
         let source = root.join("design.rsch");
-        crate::io::save_schematic(&SchematicState::default(), &source).expect("save source");
+        crate::io::save_schematic(&SchematicState::default(), &source, true).expect("save source");
         let checkpoint = write_checkpoint(&source, &SchematicState::default())
             .expect("write managed checkpoint");
 

@@ -9,6 +9,7 @@
 
 mod navigation;
 mod simulation;
+mod startup_files;
 mod waveform_defaults;
 
 use egui::Ui;
@@ -813,6 +814,7 @@ fn projects(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActio
         "Findings are reported after the save completes. A save is never refused by them.",
         "Run design checks on save",
     );
+    startup_files::section(ui, state);
 }
 
 fn accessibility(ui: &mut Ui, state: &mut AppState) {
@@ -1007,7 +1009,15 @@ pub(super) fn restore_defaults(
         ),
         PreferenceCategory::Projects => {
             state.ui.autosave_minutes = super::DEFAULT_AUTOSAVE_MINUTES;
-            preferences.restore_defaults(&[], &[TogglePreference::RunDesignChecksOnSave], &[]);
+            preferences.restore_defaults(
+                &[ChoicePreference::StartupProject],
+                &[
+                    TogglePreference::RunDesignChecksOnSave,
+                    TogglePreference::KeepSaveBackup,
+                ],
+                &[ScalarPreference::RecentFilesListed],
+            );
+            state.trim_recent_files();
         }
         PreferenceCategory::Results => {
             preferences.restore_defaults(
@@ -1045,6 +1055,7 @@ mod tests {
         [
             include_str!("preference_pages/navigation.rs"),
             include_str!("preference_pages/simulation.rs"),
+            include_str!("preference_pages/startup_files.rs"),
             include_str!("preference_pages/waveform_defaults.rs"),
             own,
         ]
@@ -1369,6 +1380,9 @@ mod tests {
             ("hotkeys", "Key bindings"),
             ("trackpad", "Mouse wheel"),
             ("retention", "Runs kept"),
+            ("launch", "On startup"),
+            ("mru", "Recent files listed"),
+            ("backup", "Keep a backup when saving"),
         ] {
             assert!(
                 labels_found_by(query).iter().any(|label| label == row),
@@ -1474,6 +1488,7 @@ mod tests {
             (ScalarPreference::DisplayedSignificantDigits, 12),
             (ScalarPreference::LocalParallelSlots, 1),
             (ScalarPreference::RunsKept, 50),
+            (ScalarPreference::RecentFilesListed, 20),
         ] {
             if keys.contains(&format!("ScalarPreference::{key:?}")) {
                 state

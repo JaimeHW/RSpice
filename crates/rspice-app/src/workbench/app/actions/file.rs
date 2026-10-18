@@ -457,6 +457,7 @@ mod tests {
             &self,
             _schematic: &SchematicState,
             path: &Path,
+            _keep_backup: bool,
         ) -> Result<(), SchematicIoError> {
             self.saved_paths.borrow_mut().push(path.to_path_buf());
             Ok(())

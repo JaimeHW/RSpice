@@ -1210,9 +1210,8 @@ impl AppState {
     }
 
     /// Record a file in the recent-files list (most recent first, deduped,
-    /// capped at 8 — the conventional depth for an EDA File menu).
+    /// capped at Projects and files ▸ Recent files listed).
     pub(crate) fn remember_recent_file(&mut self, kind: RecentKind, path: &std::path::Path) {
-        const MAX_RECENT_FILES: usize = 8;
         let previous = self
             .recent_files
             .iter()
@@ -1231,7 +1230,14 @@ impl AppState {
         };
         self.recent_files.retain(|recent| recent.path != entry.path);
         self.recent_files.insert(0, entry);
-        self.recent_files.truncate(MAX_RECENT_FILES);
+        self.trim_recent_files();
+    }
+
+    /// Drop the oldest recent files beyond what Projects and files ▸ Recent
+    /// files listed keeps, so lowering it shortens the list at once.
+    pub(crate) fn trim_recent_files(&mut self) {
+        let listed = self.ui.preferences.recent_files_listed();
+        self.recent_files.truncate(listed);
     }
 
     /// Change a project pin without changing its recency or file identity.
@@ -1342,6 +1348,41 @@ mod tests {
         assert_eq!(state.recent_files[0].path, schematic);
         assert_eq!(state.recent_files[1].path, project);
         assert!(state.recent_files[1].pinned);
+    }
+
+    /// The list keeps as many files as Recent files listed asks, newest
+    /// first, and lowering the count shortens it at once.
+    #[test]
+    fn the_recent_list_keeps_as_many_files_as_preferences_ask() {
+        let mut state = AppState::default();
+        let path = |index: usize| std::path::PathBuf::from(format!("C:/Engineering/{index}.rsch"));
+        for index in 0..10 {
+            state.remember_recent_file(RecentKind::Schematic, &path(index));
+        }
+        assert_eq!(state.recent_files.len(), 8, "the shipped count is 8");
+
+        state
+            .ui
+            .preferences
+            .set_scalar(crate::workbench::ScalarPreference::RecentFilesListed, 12)
+            .expect("12 is an offered count");
+        for index in 10..20 {
+            state.remember_recent_file(RecentKind::Schematic, &path(index));
+        }
+        assert_eq!(state.recent_files.len(), 12);
+
+        state
+            .ui
+            .preferences
+            .set_scalar(crate::workbench::ScalarPreference::RecentFilesListed, 5)
+            .expect("5 is an offered count");
+        state.trim_recent_files();
+        let kept = state
+            .recent_files
+            .iter()
+            .map(|recent| recent.path.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(kept, (15..20).rev().map(path).collect::<Vec<_>>());
     }
 
     #[test]

@@ -52,10 +52,13 @@ pub(crate) trait FileWorkflowIo {
     fn show_open_dialog(&self) -> Result<PathBuf, SchematicIoError>;
     fn show_save_dialog(&self, default_name: Option<&str>) -> Result<PathBuf, SchematicIoError>;
     fn load_schematic(&self, path: &Path) -> Result<SchematicState, SchematicIoError>;
+    /// Write `schematic` to `path`, first copying the previous file to a
+    /// backup when `keep_backup` asks.
     fn save_schematic(
         &self,
         schematic: &SchematicState,
         path: &Path,
+        keep_backup: bool,
     ) -> Result<(), SchematicIoError>;
     fn saved_paths_are_reopenable(&self) -> bool {
         true
@@ -84,8 +87,9 @@ impl FileWorkflowIo for NativeFileWorkflowIo {
         &self,
         schematic: &SchematicState,
         path: &Path,
+        keep_backup: bool,
     ) -> Result<(), SchematicIoError> {
-        crate::io::save_schematic(schematic, path)
+        crate::io::save_schematic(schematic, path, keep_backup)
     }
 
     fn saved_paths_are_reopenable(&self) -> bool {
@@ -382,7 +386,11 @@ pub(crate) fn save_schematic_to_path_with_io(
     update_current_file: bool,
     io: &(impl FileWorkflowIo + ?Sized),
 ) -> bool {
-    match io.save_schematic(&state.schematic, path) {
+    let keep_backup = state
+        .ui
+        .preferences
+        .toggle(crate::workbench::TogglePreference::KeepSaveBackup);
+    match io.save_schematic(&state.schematic, path, keep_backup) {
         Ok(()) => {
             let saved_path_is_reopenable = io.saved_paths_are_reopenable();
             if saved_path_is_reopenable && update_current_file {
@@ -516,6 +524,7 @@ mod tests {
             &self,
             _schematic: &SchematicState,
             _path: &Path,
+            _keep_backup: bool,
         ) -> Result<(), SchematicIoError> {
             Ok(())
         }
@@ -824,5 +833,39 @@ mod tests {
         assert!(state.schematic.session.is_dirty);
         assert!(state.workspace.any_dirty());
         assert!(state.recent_files.is_empty());
+    }
+
+    /// Projects and files ▸ Keep a backup when saving: a second save copies
+    /// the first file to `.rsch.bak` only while the setting is on.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_schematic_save_keeps_the_previous_file_only_when_asked() {
+        let folder = std::env::temp_dir().join(format!(
+            "rspice-save-backup-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&folder).expect("create the test folder");
+        for keep in [true, false] {
+            let path = folder.join(format!("design-{keep}.rsch"));
+            let mut state = AppState::default();
+            state
+                .ui
+                .preferences
+                .set_toggle(crate::workbench::TogglePreference::KeepSaveBackup, keep);
+            for _ in 0..2 {
+                assert!(save_schematic_to_path_with_io(
+                    &mut state,
+                    &path,
+                    true,
+                    &NativeFileWorkflowIo
+                ));
+            }
+            assert_eq!(path.with_extension("rsch.bak").exists(), keep);
+        }
+        let _ = std::fs::remove_dir_all(&folder);
     }
 }

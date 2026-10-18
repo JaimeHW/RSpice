@@ -499,7 +499,7 @@ impl RSpiceApp {
             );
         }
         state.restore_active_schematic_from_workspace();
-        crate::workbench::lifecycle::project_lifecycle::initialize_from_session(&mut state);
+        crate::workbench::workflows::project_workflow::open_session_project(&mut state);
         #[cfg(target_arch = "wasm32")]
         initialize_browser_surface_navigation(&mut state, &cc.egui_ctx);
         #[cfg(target_arch = "wasm32")]

@@ -602,10 +602,12 @@ pub enum ChoicePreference {
     AcFrequencyAxis,
     /// Phase traces wrapped to ±180°, or unwrapped, when a viewer starts.
     AcPhase,
+    /// Reopen the last project at startup, or start with none.
+    StartupProject,
 }
 
 impl ChoicePreference {
-    pub(crate) const ALL: [Self; 58] = [
+    pub(crate) const ALL: [Self; 59] = [
         Self::LegacyWorkspacePreset,
         Self::LegacyConsoleOnLaunch,
         Self::LegacySchematicGrid,
@@ -664,6 +666,7 @@ impl ChoicePreference {
         Self::AcMagnitude,
         Self::AcFrequencyAxis,
         Self::AcPhase,
+        Self::StartupProject,
     ];
 
     pub const fn stable_id(self) -> &'static str {
@@ -726,6 +729,7 @@ impl ChoicePreference {
             Self::AcMagnitude => "ac-magnitude",
             Self::AcFrequencyAxis => "ac-frequency-axis",
             Self::AcPhase => "ac-phase",
+            Self::StartupProject => "startup-project",
         }
     }
 
@@ -785,7 +789,8 @@ impl ChoicePreference {
             | Self::CanvasPanButton
             | Self::AcMagnitude
             | Self::AcFrequencyAxis
-            | Self::AcPhase => 1,
+            | Self::AcPhase
+            | Self::StartupProject => 1,
             Self::CanvasZoomSpeed | Self::WaveTraceWidth => 2,
         }
     }
@@ -823,10 +828,11 @@ pub enum TogglePreference {
     InvertWheelZoom,
     CanvasEdgePan,
     WaveMinorGrid,
+    KeepSaveBackup,
 }
 
 impl TogglePreference {
-    pub(crate) const ALL: [Self; 13] = [
+    pub(crate) const ALL: [Self; 14] = [
         Self::ReducedMotion,
         Self::CanvasKeyboardNavigation,
         Self::HierarchicalEditInPlace,
@@ -840,6 +846,7 @@ impl TogglePreference {
         Self::InvertWheelZoom,
         Self::CanvasEdgePan,
         Self::WaveMinorGrid,
+        Self::KeepSaveBackup,
     ];
 
     pub const fn stable_id(self) -> &'static str {
@@ -857,6 +864,7 @@ impl TogglePreference {
             Self::InvertWheelZoom => "invert-wheel-zoom",
             Self::CanvasEdgePan => "canvas-edge-pan",
             Self::WaveMinorGrid => "wave-minor-grid",
+            Self::KeepSaveBackup => "keep-save-backup",
         }
     }
 
@@ -884,14 +892,16 @@ pub enum ScalarPreference {
     DisplayedSignificantDigits,
     ParallelTaskCeiling,
     RunsKept,
+    RecentFilesListed,
 }
 
 impl ScalarPreference {
-    const ALL: [Self; 4] = [
+    const ALL: [Self; 5] = [
         Self::LocalParallelSlots,
         Self::DisplayedSignificantDigits,
         Self::ParallelTaskCeiling,
         Self::RunsKept,
+        Self::RecentFilesListed,
     ];
 
     const fn stable_id(self) -> &'static str {
@@ -900,6 +910,7 @@ impl ScalarPreference {
             Self::DisplayedSignificantDigits => "displayed-significant-digits",
             Self::ParallelTaskCeiling => "parallel-task-ceiling",
             Self::RunsKept => "runs-kept",
+            Self::RecentFilesListed => "recent-files-listed",
         }
     }
 
@@ -914,6 +925,8 @@ impl ScalarPreference {
             Self::DisplayedSignificantDigits => 7,
             Self::ParallelTaskCeiling => 64,
             Self::RunsKept => 20,
+            // The conventional depth of an EDA File menu.
+            Self::RecentFilesListed => 8,
         }
     }
 
@@ -923,6 +936,7 @@ impl ScalarPreference {
             Self::DisplayedSignificantDigits => (3, 17),
             Self::ParallelTaskCeiling => (1, 4096),
             Self::RunsKept => (1, 100),
+            Self::RecentFilesListed => (1, 50),
         }
     }
 }
@@ -1464,6 +1478,19 @@ impl UserPreferences {
             linear_magnitude: self.choice(ChoicePreference::AcMagnitude) == 1,
             linear_frequency: self.choice(ChoicePreference::AcFrequencyAxis) == 1,
         }
+    }
+
+    /// Whether startup reopens the project the last session had open.
+    #[must_use]
+    pub fn reopen_last_project(&self) -> bool {
+        self.choice(ChoicePreference::StartupProject) == 0
+    }
+
+    /// How many recently opened projects and schematics the recent list
+    /// keeps.
+    #[must_use]
+    pub fn recent_files_listed(&self) -> usize {
+        self.scalar(ScalarPreference::RecentFilesListed) as usize
     }
 
     /// Whether a waveform viewer starts with phase unwrapped.

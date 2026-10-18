@@ -132,7 +132,7 @@ fn render_the_chrome_console_jobs_and_launcher_for_review() {
     let source = root.join("rc_lowpass.rsch");
     let mut saved = SchematicState::default();
     crate::workbench::examples::load_example("RC Lowpass Filter", &mut saved);
-    crate::io::save_schematic(&saved, &source).expect("save the design");
+    crate::io::save_schematic(&saved, &source, true).expect("save the design");
     // Spelled as `file_workflow::autosave_checkpoint_path` writes it, so this
     // review adds no app -> workflows edge.
     let mut checkpoint_name = source.clone().into_os_string();

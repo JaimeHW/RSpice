@@ -13,7 +13,8 @@
 //! # Features
 //!
 //! - **Atomic Saves**: Write to temp file, then rename to prevent corruption
-//! - **Automatic Backup**: Creates `.bak` file before overwriting
+//! - **Backup**: Copies the previous file to `.rsch.bak` before overwriting,
+//!   unless Preferences turns it off
 //! - **Version Migration**: Handles older file format versions gracefully
 //! - **Native Dialogs**: Uses rfd for platform-native file pickers
 
@@ -276,10 +277,17 @@ pub fn show_save_dialog(default_name: Option<&str>) -> Result<PathBuf, Schematic
 /// Save schematic to file
 ///
 /// Uses atomic write pattern:
-/// 1. Create backup of existing file (if any)
+/// 1. Create backup of existing file (if any, and if `keep_backup`)
 /// 2. Write to temporary file
 /// 3. Rename temp file to target (atomic on most filesystems)
-pub fn save_schematic(schematic: &SchematicState, path: &Path) -> Result<(), SchematicIoError> {
+///
+/// `keep_backup` is Projects and files ▸ Keep a backup when saving: the
+/// previous file is first copied to `.rsch.bak`.
+pub fn save_schematic(
+    schematic: &SchematicState,
+    path: &Path,
+    keep_backup: bool,
+) -> Result<(), SchematicIoError> {
     // Create the file structure
     let mut file = SchematicFile::new(schematic.clone());
 
@@ -292,15 +300,21 @@ pub fn save_schematic(schematic: &SchematicState, path: &Path) -> Result<(), Sch
         file.metadata.title = Some(stem.to_string_lossy().to_string());
     }
 
-    save_schematic_file(&file, path)
+    save_schematic_file(&file, path, keep_backup)
 }
 
 /// Save a complete schematic file structure
 ///
 /// This is the low-level save function used by `save_schematic`.
-pub fn save_schematic_file(file: &SchematicFile, path: &Path) -> Result<(), SchematicIoError> {
+pub fn save_schematic_file(
+    file: &SchematicFile,
+    path: &Path,
+    keep_backup: bool,
+) -> Result<(), SchematicIoError> {
     #[cfg(target_arch = "wasm32")]
     {
+        // A download has no predecessor on disk to keep.
+        let _ = keep_backup;
         let contents = serialize_schematic_file(file)?;
         crate::workbench::browser::download::download_text_file(path, &contents)
             .map_err(SchematicIoError::Io)?;
@@ -311,7 +325,7 @@ pub fn save_schematic_file(file: &SchematicFile, path: &Path) -> Result<(), Sche
     {
         // Publish the predecessor backup transactionally as well. A failed
         // backup never truncates an earlier backup or the primary file.
-        if path.exists() {
+        if keep_backup && path.exists() {
             let backup_path = path.with_extension("rsch.bak");
             if let Err(e) = crate::io::durable_file::atomic_copy(path, &backup_path) {
                 log::warn!("Failed to create backup: {}", e);
