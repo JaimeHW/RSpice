@@ -88,9 +88,8 @@ pub use device_catalog::{
     engine_only_xspice_devices, validate_builtin_xspice_binding,
 };
 pub use document_policy::{
-    NetNamingPolicy, OperatingPointAnnotationPolicy, PropertyCommitPolicy, SchematicDocumentPolicy,
-    SchematicGridPitch, SchematicPageOrientation, SchematicPageSize, SelectionCrossingPolicy,
-    WireJunctionPolicy,
+    NetNamingPolicy, SchematicDocumentPolicy, SchematicGridPitch, SchematicPageOrientation,
+    SchematicPageSize, SelectionCrossingPolicy, WireJunctionPolicy,
 };
 pub use documentation_shape::{
     DocumentationShape, DocumentationShapeError, DocumentationShapeGeometry,

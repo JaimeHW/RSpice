@@ -318,8 +318,8 @@ impl RSpiceApp {
 mod tests {
     use super::*;
     use crate::state::{
-        CellViewRef, ComponentType, Library, OperatingPointAnnotationPolicy, Point,
-        SchematicGridPitch, SymbolDocument,
+        CellViewRef, ComponentType, Library, NetNamingPolicy, Point, SchematicGridPitch,
+        SymbolDocument,
     };
     use crate::workbench::ChoicePreference;
 
@@ -347,7 +347,7 @@ mod tests {
         app.state
             .ui
             .preferences
-            .set_choice(ChoicePreference::OperatingPointAnnotation, 2)
+            .set_choice(ChoicePreference::NetNamingPolicy, 1)
             .unwrap();
         app.state.dialogs.new_cell_library = "policy_test".to_owned();
         app.state.dialogs.new_cell_name = "amp".to_owned();
@@ -392,11 +392,8 @@ mod tests {
                 SchematicGridPitch::Metric.canvas_grid_size()
             );
             assert_eq!(
-                document
-                    .document()
-                    .document_policy
-                    .operating_point_annotations,
-                OperatingPointAnnotationPolicy::Hidden
+                document.document().document_policy.net_naming,
+                NetNamingPolicy::SpiceCompatibleRelaxed
             );
         }
     }

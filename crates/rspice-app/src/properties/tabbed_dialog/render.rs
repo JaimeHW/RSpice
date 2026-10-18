@@ -20,7 +20,6 @@ pub fn render_tabbed_property_dialog(
     model_library_manager: &crate::state::ModelLibraryManager,
     quantity_policy: QuantityPresentationPolicy,
     number_locale: UiNumberLocale,
-    commit_policy: crate::state::PropertyCommitPolicy,
 ) -> ComponentPropertyDialogResult {
     if !state.open {
         return ComponentPropertyDialogResult::None;
@@ -43,7 +42,6 @@ pub fn render_tabbed_property_dialog(
         show_source_preview: crate::simulation::stimulus_realize::is_independent_source(kind),
         quantity_policy,
         number_locale,
-        commit_policy,
     };
     let mut services = ComponentDialogServices {
         reference: state.component_name.as_deref(),
@@ -587,7 +585,6 @@ mod tests {
                         &library,
                         QuantityPresentationPolicy::default(),
                         UiNumberLocale::default(),
-                        crate::state::PropertyCommitPolicy::default(),
                     );
                 },
             );

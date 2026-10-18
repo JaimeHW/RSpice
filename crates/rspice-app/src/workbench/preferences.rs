@@ -763,6 +763,10 @@ impl ChoicePreference {
                 | Self::FamilyTraceLabeling
                 | Self::DefaultAxisPolicy
                 | Self::MeasurementEvaluation
+                // Operating-point annotation is View > Visibility's, and a
+                // property edit always applies whole.
+                | Self::OperatingPointAnnotation
+                | Self::PropertyCommitPolicy
         )
     }
 }

@@ -28,7 +28,6 @@ pub fn render_property_dialog(
     }
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let number_locale = state.ui.number_locale;
-    let commit_policy = state.schematic.document().document_policy.property_commit;
     let editor_context = component_editor_context(state);
     let result = render_tabbed_property_dialog(
         ctx,
@@ -38,7 +37,6 @@ pub fn render_property_dialog(
         &state.model_library_manager,
         quantity_policy,
         number_locale,
-        commit_policy,
     );
 
     // Handle dialog result - apply changes back to component
@@ -620,10 +618,9 @@ fn component_property_session_error(state: &AppState) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{
-        CellViewRef, Component, ComponentType, Point, PropertyCommitPolicy, PropertyValue,
-    };
+    use crate::state::{CellViewRef, Component, ComponentType, Point, PropertyValue};
     use crate::workbench::app::open_property_editor;
+    use rspice_design::schematic::document_policy::PropertyCommitPolicy;
 
     fn dialog_input(events: Vec<egui::Event>) -> egui::RawInput {
         egui::RawInput {
@@ -1279,8 +1276,11 @@ mod tests {
         );
     }
 
+    /// A document an earlier build stored with "apply valid fields" still
+    /// loads, and its edits apply whole: one invalid field holds back the
+    /// valid one beside it until it is fixed.
     #[test]
-    fn rendered_partial_policy_commits_only_valid_fields_and_retains_invalid_draft() {
+    fn a_stored_partial_commit_setting_applies_edits_whole() {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut state = state_with_resistor();
@@ -1311,33 +1311,18 @@ mod tests {
             render_property_dialog(ctx, &mut state);
         });
 
+        // The valid name is held back with the invalid multiplier.
         assert!(state.tabbed_property_dialog.open);
-        assert_eq!(state.schematic.document().components[0].name, "R99");
+        assert_eq!(state.schematic.document().components[0].name, "R1");
         assert_eq!(state.schematic.document().components[0].params, "");
         assert_eq!(state.schematic.history().undo_count(), 0);
-        assert!(state.project_undo_sequence().is_some());
-        assert!(component_property_session_error(&state).is_none());
-        assert_ne!(state.tabbed_property_dialog.source, opened_source);
-        assert_eq!(
-            state.tabbed_property_dialog.source,
-            Some(crate::workbench::app::schematic_editor_request_source(
-                &state
-            ))
-        );
-        assert_eq!(
-            state.tabbed_property_dialog.draft.values["name"],
-            PropertyValue::String("R99".to_owned())
-        );
-        assert_eq!(
-            state.tabbed_property_dialog.draft.original_values["name"],
-            PropertyValue::String("R99".to_owned())
-        );
+        assert_eq!(state.tabbed_property_dialog.source, opened_source);
         assert_eq!(
             state.tabbed_property_dialog.draft.numeric_text_draft("m"),
             Some("0")
         );
         assert!(state.tabbed_property_dialog.draft.is_modified("m"));
-        assert!(!state.tabbed_property_dialog.draft.is_modified("name"));
+        assert!(state.tabbed_property_dialog.draft.is_modified("name"));
 
         state
             .tabbed_property_dialog
@@ -1358,12 +1343,5 @@ mod tests {
         assert!(state.tabbed_property_dialog.source.is_none());
         assert_eq!(state.schematic.document().components[0].name, "R99");
         assert_eq!(state.schematic.document().components[0].params, "m=2");
-        assert_eq!(state.schematic.history().undo_count(), 1);
-
-        assert!(state.schematic.undo());
-        assert_eq!(state.schematic.document().components[0].name, "R99");
-        assert_eq!(state.schematic.document().components[0].params, "");
-        assert!(state.undo_project_design().unwrap().is_some());
-        assert_eq!(state.schematic.document().components[0].name, "R1");
     }
 }

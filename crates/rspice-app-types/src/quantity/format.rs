@@ -8,7 +8,7 @@ use std::f64::consts::TAU;
 
 use super::{
     AngleDisplay, CopiedValueFormat, FrequencyDisplay, LayoutCoordinateDisplay, LayoutDatabaseUnit,
-    QuantityPresentationPolicy, TemperatureDisplay, UnitSystem,
+    QuantityPresentationPolicy, TemperatureDisplay,
 };
 
 impl QuantityPresentationPolicy {
@@ -74,33 +74,27 @@ impl QuantityPresentationPolicy {
         database_unit: LayoutDatabaseUnit,
     ) -> String {
         let metres = database_units * database_unit.metres();
-        match self.unit_system {
-            UnitSystem::ImperialLayout => {
-                format!("{:.6} mil · {database_units:.0} DBU", metres / 25.4e-6)
-            }
-            UnitSystem::Si => engineering_value(metres, "m", 3, false),
-            UnitSystem::MixedEngineering => match self.layout_coordinate_display {
-                LayoutCoordinateDisplay::Nanometres => format!("{:.3} nm", metres * 1e9),
-                LayoutCoordinateDisplay::DatabaseUnits => format!("{database_units:.0} DBU"),
-                LayoutCoordinateDisplay::MicrometresWithDatabaseUnitRemainder => {
-                    let units_per_micrometre = 1e-6 / database_unit.metres();
-                    let whole_micrometres = (database_units / units_per_micrometre).trunc();
-                    let remainder = database_units - whole_micrometres * units_per_micrometre;
-                    if remainder.abs() < 1e-9 {
-                        format!("{whole_micrometres:.0} µm")
+        match self.layout_coordinate_display {
+            LayoutCoordinateDisplay::Nanometres => format!("{:.3} nm", metres * 1e9),
+            LayoutCoordinateDisplay::DatabaseUnits => format!("{database_units:.0} DBU"),
+            LayoutCoordinateDisplay::MicrometresWithDatabaseUnitRemainder => {
+                let units_per_micrometre = 1e-6 / database_unit.metres();
+                let whole_micrometres = (database_units / units_per_micrometre).trunc();
+                let remainder = database_units - whole_micrometres * units_per_micrometre;
+                if remainder.abs() < 1e-9 {
+                    format!("{whole_micrometres:.0} µm")
+                } else {
+                    let separator = if remainder.is_sign_negative() {
+                        '-'
                     } else {
-                        let separator = if remainder.is_sign_negative() {
-                            '-'
-                        } else {
-                            '+'
-                        };
-                        format!(
-                            "{whole_micrometres:.0} µm {separator} {:.0} DBU",
-                            remainder.abs()
-                        )
-                    }
+                        '+'
+                    };
+                    format!(
+                        "{whole_micrometres:.0} µm {separator} {:.0} DBU",
+                        remainder.abs()
+                    )
                 }
-            },
+            }
         }
     }
 

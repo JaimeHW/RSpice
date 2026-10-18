@@ -46,8 +46,8 @@ macro_rules! wire_enum {
 }
 
 wire_enum! {
-    /// Preferred presentation family. Layout presentation is intentionally
-    /// advisory and never changes a PDK database unit.
+    /// A presentation family an earlier build stored. Nothing reads it now:
+    /// it is kept so a stored value still decodes and survives a save.
     pub enum UnitSystem for "unit-system" {
         MixedEngineering,
         Si,
@@ -255,7 +255,6 @@ impl UnitsPreferences {
     #[must_use]
     pub fn presentation_policy(&self) -> QuantityPresentationPolicy {
         QuantityPresentationPolicy {
-            unit_system: self.unit_system(),
             engineering_suffixes: self.engineering_suffixes(),
             frequency_display: self.frequency_display(),
             temperature_display: self.temperature_display(),
@@ -387,7 +386,6 @@ impl UnitsPreferences {
 /// Resolved, immutable UI-edge unit policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct QuantityPresentationPolicy {
-    pub unit_system: UnitSystem,
     pub engineering_suffixes: EngineeringSuffixPolicy,
     pub frequency_display: FrequencyDisplay,
     pub temperature_display: TemperatureDisplay,

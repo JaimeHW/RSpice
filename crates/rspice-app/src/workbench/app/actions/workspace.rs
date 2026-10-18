@@ -163,10 +163,7 @@ impl AppState {
     /// policy. This is the only constructor production UI paths use for a new
     /// schematic/testbench document. Existing buffers are never rewritten.
     pub(crate) fn new_schematic_document(&self) -> SchematicState {
-        use crate::state::{
-            NetNamingPolicy, OperatingPointAnnotationPolicy, PropertyCommitPolicy,
-            SchematicGridPitch, WireJunctionPolicy,
-        };
+        use crate::state::{NetNamingPolicy, SchematicGridPitch, WireJunctionPolicy};
         use crate::workbench::ChoicePreference;
 
         let mut document = rspice_design::schematic::document::SchematicDocument::default();
@@ -194,19 +191,6 @@ impl AppState {
                 0 => NetNamingPolicy::StrictCaseSensitive,
                 1 => NetNamingPolicy::SpiceCompatibleRelaxed,
                 _ => unreachable!("net naming policy is normalized before use"),
-            };
-        document.document_policy.property_commit =
-            match preferences.choice(ChoicePreference::PropertyCommitPolicy) {
-                0 => PropertyCommitPolicy::Atomic,
-                1 => PropertyCommitPolicy::ApplyValidFields,
-                _ => unreachable!("property policy is normalized before use"),
-            };
-        document.document_policy.operating_point_annotations =
-            match preferences.choice(ChoicePreference::OperatingPointAnnotation) {
-                0 => OperatingPointAnnotationPolicy::VoltagesAndSelectedCurrents,
-                1 => OperatingPointAnnotationPolicy::VoltagesOnly,
-                2 => OperatingPointAnnotationPolicy::Hidden,
-                _ => unreachable!("operating-point policy is normalized before use"),
             };
 
         let mut schematic = SchematicState::from_document(document);

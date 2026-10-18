@@ -9,7 +9,6 @@ use egui::{Align, Layout, Margin, Stroke, Ui};
 use rspice_app_types::property::{PropertySheet, PropertyValue};
 use rspice_app_types::quantity::{QuantityPresentationPolicy, UiNumberLocale};
 use rspice_design::properties::SourceContractFinding;
-use rspice_design::schematic::document_policy::PropertyCommitPolicy;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::{
@@ -27,7 +26,6 @@ pub struct ComponentPropertyDialogView<'a> {
     pub show_source_preview: bool,
     pub quantity_policy: QuantityPresentationPolicy,
     pub number_locale: UiNumberLocale,
-    pub commit_policy: PropertyCommitPolicy,
 }
 
 /// Services called at their original position within the component dialog.
@@ -70,7 +68,6 @@ pub fn render_component_property_dialog(
         show_source_preview,
         quantity_policy,
         number_locale,
-        commit_policy,
     } = view;
     let mut result = ComponentPropertyDialogResult::None;
     draft.sync_pwl_validation_error();
@@ -101,8 +98,8 @@ pub fn render_component_property_dialog(
         .manual_body_scroll()
         .ghost("Cancel")
         .secondary("Apply")
-        .secondary_enabled(dirty && draft.can_apply(commit_policy) && session_error.is_none())
-        .primary_enabled(session_error.is_none() && (!dirty || draft.can_apply(commit_policy)))
+        .secondary_enabled(dirty && draft.can_apply() && session_error.is_none())
+        .primary_enabled(session_error.is_none() && (!dirty || draft.can_apply()))
         .interaction_enabled(!model_browser_open)
         .initial_focus(DialogInitialFocus::BodyControl);
     if let Some(hint) = footer_hint.as_deref() {
@@ -200,16 +197,12 @@ pub fn render_component_property_dialog(
             DialogChoice::Primary => {
                 if !dirty_after_render {
                     result = ComponentPropertyDialogResult::Cancelled;
-                } else if draft.prepare_commit(sheet, commit_policy) {
-                    result = if draft.validation_errors.is_empty() {
-                        ComponentPropertyDialogResult::AppliedAndClose
-                    } else {
-                        ComponentPropertyDialogResult::Applied
-                    };
+                } else if draft.prepare_commit(sheet) {
+                    result = ComponentPropertyDialogResult::AppliedAndClose;
                 }
             }
             DialogChoice::Secondary => {
-                if dirty_after_render && draft.prepare_commit(sheet, commit_policy) {
+                if dirty_after_render && draft.prepare_commit(sheet) {
                     result = ComponentPropertyDialogResult::Applied;
                 }
             }
@@ -440,7 +433,6 @@ mod tests {
                             show_source_preview,
                             quantity_policy: QuantityPresentationPolicy::default(),
                             number_locale: UiNumberLocale::default(),
-                            commit_policy: PropertyCommitPolicy::default(),
                         },
                         &mut NoServices,
                     );
@@ -503,7 +495,6 @@ mod tests {
                             show_source_preview: true,
                             quantity_policy: QuantityPresentationPolicy::default(),
                             number_locale: UiNumberLocale::default(),
-                            commit_policy: PropertyCommitPolicy::default(),
                         },
                         &mut NoServices,
                     );

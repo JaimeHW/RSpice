@@ -19,7 +19,6 @@ use rspice_app_types::property::{
 };
 use rspice_app_types::quantity::{QuantityPresentationPolicy, UiNumberLocale};
 use rspice_design::schematic::component_type::ComponentType;
-use rspice_design::schematic::document_policy::PropertyCommitPolicy;
 use std::collections::{HashMap, HashSet};
 
 use crate::property_values::{editor_source_text, numeric_source_text};
@@ -291,20 +290,10 @@ impl ComponentPropertyDraft {
         self.refresh_validation_summary();
     }
 
-    /// Whether the document's commit policy has at least one publishable
-    /// action. Atomic mode blocks on every known invalid draft; partial mode
-    /// remains available only when a distinct valid modified field exists.
-    pub fn can_apply(&self, policy: PropertyCommitPolicy) -> bool {
-        if self.modified.is_empty() {
-            return false;
-        }
-        match policy {
-            PropertyCommitPolicy::Atomic => self.validation_errors.is_empty(),
-            PropertyCommitPolicy::ApplyValidFields => self
-                .modified
-                .iter()
-                .any(|name| !self.validation_errors.contains_key(name)),
-        }
+    /// Whether the draft can be applied: something changed and every field is
+    /// valid. An edit applies whole or not at all.
+    pub fn can_apply(&self) -> bool {
+        !self.modified.is_empty() && self.validation_errors.is_empty()
     }
 
     /// Validate all properties against the sheet definitions.
@@ -352,47 +341,26 @@ impl ComponentPropertyDraft {
         self.validation_errors.is_empty()
     }
 
-    /// Validate the draft and prepare exactly the delta authorized by the
-    /// document's commit policy.
-    ///
-    /// Atomic mode prepares nothing unless every field is valid. Partial mode
-    /// prepares only valid modified fields; invalid draft values remain
-    /// isolated in this dialog and are never passed to the component bridge.
-    pub fn prepare_commit(&mut self, sheet: &PropertySheet, policy: PropertyCommitPolicy) -> bool {
+    /// Validate the draft and prepare its modified fields for the component
+    /// bridge. Nothing is prepared unless every field is valid: an edit
+    /// applies whole or not at all, and an invalid draft value stays in this
+    /// dialog.
+    pub fn prepare_commit(&mut self, sheet: &PropertySheet) -> bool {
         self.commit_error = None;
         self.prepared_commit.clear();
-        let all_valid = self.validate_all(sheet);
-        if !all_valid && policy == PropertyCommitPolicy::Atomic {
+        if !self.validate_all(sheet) {
             return false;
         }
 
         for name in &self.modified {
-            if self.validation_errors.contains_key(name) {
-                continue;
-            }
             if let Some(value) = self.values.get(name) {
                 self.prepared_commit.insert(name.clone(), value.clone());
             }
         }
 
         if self.prepared_commit.is_empty() {
-            if all_valid {
-                self.global_error = Some("No modified properties to apply".to_owned());
-            }
+            self.global_error = Some("No modified properties to apply".to_owned());
             return false;
-        }
-
-        if !all_valid {
-            self.global_error = Some(format!(
-                "Applied {} field{}. {}",
-                self.prepared_commit.len(),
-                if self.prepared_commit.len() == 1 {
-                    ""
-                } else {
-                    "s"
-                },
-                still_need_fixing(self.validation_errors.len()),
-            ));
         }
         true
     }
@@ -485,14 +453,6 @@ fn fields_need_fixing(invalid: usize) -> String {
 }
 
 /// The same count after a partial apply, as the second half of a sentence.
-fn still_need_fixing(invalid: usize) -> String {
-    if invalid == 1 {
-        "1 still needs fixing.".to_owned()
-    } else {
-        format!("{invalid} still need fixing.")
-    }
-}
-
 fn validate_property_expression(
     definition: &PropertyDefinition,
     value: &PropertyValue,
@@ -579,30 +539,14 @@ mod tests {
     }
 
     #[test]
-    fn atomic_policy_never_prepares_a_partial_invalid_draft() {
+    fn a_partly_invalid_draft_prepares_nothing() {
         let sheet = constrained_sheet();
         let mut state = edited_draft(&sheet);
 
-        assert!(!state.prepare_commit(&sheet, PropertyCommitPolicy::Atomic));
+        assert!(!state.prepare_commit(&sheet));
         assert!(state.take_prepared_commit().is_empty());
         assert!(state.validation_errors.contains_key("offset"));
         assert!(state.is_modified("gain"));
-    }
-
-    #[test]
-    fn partial_policy_prepares_only_valid_modified_fields() {
-        let sheet = constrained_sheet();
-        let mut state = edited_draft(&sheet);
-
-        assert!(state.prepare_commit(&sheet, PropertyCommitPolicy::ApplyValidFields));
-        let prepared = state.take_prepared_commit();
-        assert_eq!(prepared.get("gain"), Some(&numeric(2.0)));
-        assert!(!prepared.contains_key("offset"));
-
-        state.mark_fields_applied(prepared.into_keys());
-        assert!(!state.is_modified("gain"));
-        assert!(state.is_modified("offset"));
-        assert!(state.validation_errors.contains_key("offset"));
     }
 
     #[test]
@@ -659,7 +603,7 @@ mod tests {
         );
         state.sync_pwl_validation_error();
         assert!(state.validation_errors.contains_key("pwl_data"));
-        assert!(!state.can_apply(PropertyCommitPolicy::Atomic));
+        assert!(!state.can_apply());
 
         state.pwl_editor.edit_buffers[1].1 = "2".to_owned();
         state.pwl_editor.apply_buffer_edits().unwrap();
@@ -669,7 +613,7 @@ mod tests {
         );
         state.sync_pwl_validation_error();
         assert!(!state.validation_errors.contains_key("pwl_data"));
-        assert!(state.can_apply(PropertyCommitPolicy::Atomic));
+        assert!(state.can_apply());
     }
 
     #[test]
@@ -686,23 +630,24 @@ mod tests {
         assert_eq!(state.numeric_text_draft("gain"), Some("1e"));
         assert_eq!(state.get_value("gain"), Some(&numeric(1.0)));
         assert!(state.is_modified("gain"));
-        assert!(!state.can_apply(PropertyCommitPolicy::Atomic));
-        assert!(!state.can_apply(PropertyCommitPolicy::ApplyValidFields));
-        assert!(!state.prepare_commit(&sheet, PropertyCommitPolicy::Atomic));
+        assert!(!state.can_apply());
+        assert!(!state.prepare_commit(&sheet));
         assert_eq!(state.numeric_text_draft("gain"), Some("1e"));
         assert!(state.validation_errors.contains_key("gain"));
 
         state.update_numeric_text_draft("gain", "2".to_owned(), None);
         state.set_value("gain", numeric(2.0));
-        assert!(state.prepare_commit(&sheet, PropertyCommitPolicy::Atomic));
+        assert!(state.prepare_commit(&sheet));
         assert_eq!(
             state.take_prepared_commit().get("gain"),
             Some(&numeric(2.0))
         );
     }
 
+    /// One invalid field holds back the valid one beside it, and the invalid
+    /// text stays in its field until the draft is reset.
     #[test]
-    fn partial_commit_preserves_invalid_numeric_source_until_reset() {
+    fn an_invalid_numeric_source_holds_back_the_whole_edit_until_reset() {
         let sheet = constrained_sheet();
         let mut state = clean_draft(&sheet);
         state.update_numeric_text_draft("gain", "2".to_owned(), None);
@@ -713,14 +658,11 @@ mod tests {
             Some("invalid number: -".to_owned()),
         );
 
-        assert!(!state.can_apply(PropertyCommitPolicy::Atomic));
-        assert!(state.can_apply(PropertyCommitPolicy::ApplyValidFields));
-        assert!(state.prepare_commit(&sheet, PropertyCommitPolicy::ApplyValidFields));
-        let prepared = state.take_prepared_commit();
-        assert_eq!(prepared.get("gain"), Some(&numeric(2.0)));
-        assert!(!prepared.contains_key("offset"));
-        state.mark_fields_applied(prepared.into_keys());
+        assert!(!state.can_apply());
+        assert!(!state.prepare_commit(&sheet));
+        assert!(state.take_prepared_commit().is_empty());
         assert_eq!(state.numeric_text_draft("offset"), Some("-"));
+        assert!(state.is_modified("gain"));
         assert!(state.is_modified("offset"));
 
         state.reset(
@@ -728,7 +670,7 @@ mod tests {
             &sheet,
             state.original_values.clone(),
         );
-        assert_eq!(state.numeric_text_draft("gain"), Some("2"));
+        assert_eq!(state.numeric_text_draft("gain"), Some("1"));
         assert_eq!(state.numeric_text_draft("offset"), Some("0"));
         assert!(!state.has_modifications());
     }
@@ -749,7 +691,7 @@ mod tests {
         assert!(!state.show_advanced);
 
         state.set_value("gain", numeric(20.0));
-        assert!(!state.prepare_commit(&sheet, PropertyCommitPolicy::Atomic));
+        assert!(!state.prepare_commit(&sheet));
         assert!(state.validation_errors.contains_key("gain"));
         assert!(state.show_advanced);
     }

@@ -887,9 +887,9 @@ pub(super) fn starter_veriloga_source(
 mod tests {
     use super::*;
     use crate::state::{
-        Cell, CellViewRef, ComponentType, Library, Point, PortDirection, PortSpec,
-        ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner, PropertyCommitPolicy,
-        SchematicState, SymbolDocument, SymbolPin, View, ViewType,
+        Cell, CellViewRef, ComponentType, Library, NetNamingPolicy, Point, PortDirection, PortSpec,
+        ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner, SchematicState,
+        SymbolDocument, SymbolPin, View, ViewType,
     };
     use crate::workbench::ChoicePreference;
 
@@ -964,7 +964,7 @@ mod tests {
         app.state
             .ui
             .preferences
-            .set_choice(ChoicePreference::PropertyCommitPolicy, 1)
+            .set_choice(ChoicePreference::NetNamingPolicy, 1)
             .unwrap();
         app.state.dialogs.new_view_library = "view_policy_test".to_owned();
         app.state.dialogs.new_view_cell = "filter".to_owned();
@@ -1002,8 +1002,8 @@ mod tests {
             .get(&key)
             .expect("new schematic view owns an explicit document buffer");
         assert_eq!(
-            document.document().document_policy.property_commit,
-            PropertyCommitPolicy::ApplyValidFields
+            document.document().document_policy.net_naming,
+            NetNamingPolicy::SpiceCompatibleRelaxed
         );
     }
 

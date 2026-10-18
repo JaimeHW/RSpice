@@ -66,12 +66,12 @@ fn new_document_defaults_are_resolved_once_and_existing_buffers_are_preserved() 
     state
         .ui
         .preferences
-        .set_choice(ChoicePreference::PropertyCommitPolicy, 1)
+        .set_choice(ChoicePreference::NetNamingPolicy, 1)
         .unwrap();
     let created = state.new_schematic_document();
     assert_eq!(
-        created.document().document_policy.property_commit,
-        crate::state::PropertyCommitPolicy::ApplyValidFields
+        created.document().document_policy.net_naming,
+        crate::state::NetNamingPolicy::SpiceCompatibleRelaxed
     );
 
     let reference = CellViewRef::new("work", "preserved", "schematic");
@@ -81,10 +81,8 @@ fn new_document_defaults_are_resolved_once_and_existing_buffers_are_preserved() 
     library.add_cell(cell);
     state.library_manager.add_library(library);
     let mut existing = SchematicState::default();
-    existing
-        .document_mut_for_test()
-        .document_policy
-        .property_commit = crate::state::PropertyCommitPolicy::Atomic;
+    existing.document_mut_for_test().document_policy.net_naming =
+        crate::state::NetNamingPolicy::StrictCaseSensitive;
     state
         .workspace
         .insert_schematic_editor(reference.key(), existing);
@@ -92,8 +90,8 @@ fn new_document_defaults_are_resolved_once_and_existing_buffers_are_preserved() 
     state.open_workspace_view(reference);
 
     assert_eq!(
-        state.schematic.document().document_policy.property_commit,
-        crate::state::PropertyCommitPolicy::Atomic
+        state.schematic.document().document_policy.net_naming,
+        crate::state::NetNamingPolicy::StrictCaseSensitive
     );
 }
 

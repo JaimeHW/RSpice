@@ -477,28 +477,8 @@ fn workspace(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActi
 }
 
 fn units(ui: &mut Ui, state: &mut AppState) {
-    preference_row(
-        ui,
-        "Unit system",
-        "Display only. A project keeps the units its values were stored in.",
-        |ui| {
-            value_column(ui, |ui| {
-                let mut selected = state.ui.preferences.choice(ChoicePreference::UnitSystem);
-                if segmented(
-                    ui,
-                    "preferences.units.system",
-                    &["Mixed", "SI", "Imperial layout"],
-                    &mut selected,
-                ) {
-                    state
-                        .ui
-                        .preferences
-                        .set_choice(ChoicePreference::UnitSystem, selected)
-                        .expect("unit-system segments define the complete domain");
-                }
-            });
-        },
-    );
+    // A "Unit system" row used to lead this page. Its only effect was on the
+    // layout coordinate readout, which the row below already sets.
     choice_row(
         ui,
         state,
@@ -625,14 +605,7 @@ fn schematic(ui: &mut Ui, state: &mut AppState) {
             });
         },
     );
-    choice_row(
-        ui,
-        state,
-        ChoicePreference::OperatingPointAnnotation,
-        "Operating-point annotation",
-        "Default detail after a completed compatible run.",
-        &["Voltages + selected currents", "Voltages only", "Hidden"],
-    );
+    // Operating-point annotation is set where it works, in View > Visibility.
     toggle_row(
         ui,
         state,
@@ -720,17 +693,6 @@ fn schematic(ui: &mut Ui, state: &mut AppState) {
         &[
             "ASCII letters, digits, _.$:/![]<>-",
             "Any printable character but spaces",
-        ],
-    );
-    choice_row(
-        ui,
-        state,
-        ChoicePreference::PropertyCommitPolicy,
-        "Property commit",
-        "Validate typed values and dependencies before a multi-object edit is applied.",
-        &[
-            "Atomic · reject the complete invalid edit",
-            "Apply valid fields and report failures",
         ],
     );
 }
@@ -1033,7 +995,6 @@ pub(super) fn restore_defaults(category: PreferenceCategory, state: &mut AppStat
         }
         PreferenceCategory::Units => preferences.restore_defaults(
             &[
-                ChoicePreference::UnitSystem,
                 ChoicePreference::EngineeringSuffixes,
                 ChoicePreference::FrequencyDisplay,
                 ChoicePreference::TemperatureDisplay,
@@ -1050,11 +1011,9 @@ pub(super) fn restore_defaults(category: PreferenceCategory, state: &mut AppStat
             &[
                 ChoicePreference::SchematicGrid,
                 ChoicePreference::SchematicCursor,
-                ChoicePreference::OperatingPointAnnotation,
                 ChoicePreference::WireJunctionBehavior,
                 ChoicePreference::SelectionCrossingPolicy,
                 ChoicePreference::NetNamingPolicy,
-                ChoicePreference::PropertyCommitPolicy,
             ],
             &[
                 TogglePreference::CrossProbeBehavior,
@@ -1147,8 +1106,11 @@ mod tests {
     /// implementation wrote them, and nothing in the running application reads
     /// any of them: this build has no remote execution service, no credential
     /// store and no extension loader, and the solver options named here are
-    /// owned by each plan rather than by a profile default. Putting one back
-    /// on a page means first giving it a consumer.
+    /// owned by each plan rather than by a profile default. The last three
+    /// were rows: the unit system only reached the layout readout, which has
+    /// its own row; operating-point annotation is set in View > Visibility;
+    /// and a property edit always applies whole. Putting one back on a page
+    /// means first giving it a consumer.
     #[test]
     fn pages_expose_only_preferences_the_application_reads() {
         let production = production_code();
@@ -1182,6 +1144,9 @@ mod tests {
             "TogglePreference::AutomaticDiagnostics",
             "TogglePreference::PythonAutomationApi",
             "ScalarPreference::ParallelTaskCeiling",
+            "ChoicePreference::UnitSystem",
+            "ChoicePreference::OperatingPointAnnotation",
+            "ChoicePreference::PropertyCommitPolicy",
         ] {
             assert!(
                 !production.contains(unsupported),
