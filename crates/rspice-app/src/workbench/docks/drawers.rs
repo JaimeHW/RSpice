@@ -405,8 +405,8 @@ fn mobile_navigation_dialog(
                         |ui| {
                             egui::ScrollArea::vertical()
                                 .id_salt("workbench.mobile_navigation.scroll")
+                                .auto_shrink([false, true])
                                 .show(ui, |ui| {
-                                    ui.set_width(width);
                                     ui.spacing_mut().item_spacing.y = MOBILE_NAV_GRID_GAP;
                                     ui.add_space(MOBILE_NAV_GRID_PADDING);
                                     let mut group_state = MobileNavigationGroupState {
