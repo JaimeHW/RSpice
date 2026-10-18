@@ -7,7 +7,7 @@ yanked = "deny"
 ignore = [
     { id = "RUSTSEC-2024-0436", reason = "paste is a build-time proc-macro reached only through faer 0.24.4's gemm 0.19.0 and pulp 0.22.3, the newest releases of each, which all still require it; no runtime input reaches it." },
     { id = "RUSTSEC-2026-0192", reason = "ttf-parser is used directly by rspice-hardcopy and reached through krilla's rustybuzz and winit's Wayland title bars; every font it reads is an embedded IBM Plex file or a local system font, and rustybuzz and ab_glyph have no release without it." },
-    { id = "RUSTSEC-2026-0206", reason = "rustybuzz is transitive through krilla 0.8.2 simple-text; RSpice PDF exporters shape only repository-embedded IBM Plex fonts, and no maintained krilla release or compatible drop-in exists yet." },
+    { id = "RUSTSEC-2026-0206", reason = "rustybuzz is transitive through krilla 0.8.2 simple-text, still the newest krilla; RSpice's PDF exporters shape only the four embedded IBM Plex fonts, and no krilla release on harfrust exists yet." },
     { crate = "zip@8.6.0", reason = "zip yanked every 8.x release after fixing extraction advisories in 9.0; rust_xlsxwriter 0.99.1 still requires zip ^8.3, and RSpice never calls ZipArchive::extract or ZipStreamReader::extract." },
 ]
 

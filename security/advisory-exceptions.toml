@@ -24,11 +24,11 @@ exit_criteria = "Remove this exception once rustybuzz (through a krilla release 
 
 [[exceptions]]
 id = "RUSTSEC-2026-0206"
-dependency = "krilla -> rustybuzz"
+dependency = "rspice-hardcopy and rspice-app -> krilla 0.8.2 (simple-text) -> rustybuzz 0.20.1"
 owner = "@JaimeHW"
-review_after = "2026-10-17"
-reason = "rustybuzz became unmaintained and krilla 0.8.2 has no maintained release or compatible shaping-backend migration yet."
-mitigations = "RSpice's two krilla exporters shape only three repository-embedded IBM Plex font files. They expose no user-supplied font loading path, and PDF source text, cells, raster pixels, and output bytes are independently bounded."
+review_after = "2027-01-17"
+reason = "rustybuzz is unmaintained and the advisory lists no patched release. Reviewed 2026-10-18: krilla 0.8.2 is the newest release, its simple-text feature still shapes with rustybuzz 0.20.1, and no krilla release on harfrust exists. Both PDF exporters need simple-text to draw text."
+mitigations = "rustybuzz shapes only with the four IBM Plex files compiled in from assets/fonts with include_bytes!: rspice-hardcopy's PDF export and the app's keyboard-shortcut PDF build every krilla Font from those static bytes, and neither can load another font. Hardcopy text is capped at 64 KiB per string and 16 MiB per scene, control characters are refused, and every character must map to a glyph in the embedded font before it is shaped. Raster pixels and output bytes are bounded separately."
 exit_criteria = "Move to a krilla release backed by harfrust, or replace the simple-text path, as soon as a compatible maintained implementation is available."
 
 [[exceptions]]
