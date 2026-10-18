@@ -167,6 +167,7 @@ pub(super) fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
                 });
                 ui.collapsing("Cursor measurements", |ui| {
                     egui::ScrollArea::vertical()
+                        .auto_shrink([false, true])
                         .max_height(200.0)
                         .show(ui, |ui| super::polar::right_panel(ui, context));
                 });
