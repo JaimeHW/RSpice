@@ -687,6 +687,12 @@ impl LibParser {
         let mut current_section_start_line: Option<usize> = None;
         let mut subckt_content: Option<(ParsedSubcircuit, Vec<String>, usize)> = None;
         let mut last_comment = String::new();
+        // The line the comment paragraph last grew on. A card's description is
+        // the whole paragraph above it, so a comment on the very next line
+        // joins the paragraph and one after a gap starts the next. Taking only
+        // the paragraph's last line left a card described by the tail of a
+        // sentence that began two lines up.
+        let mut comment_line: Option<usize> = None;
 
         for (line_index, (line_number, line)) in lines.iter().enumerate() {
             if line_index.is_multiple_of(64) {
@@ -701,9 +707,16 @@ impl LibParser {
             // Track comments for descriptions
             if line.starts_with('*') {
                 let comment = line.trim_start_matches('*').trim();
-                if !comment.is_empty() && !comment.starts_with('=') {
-                    last_comment = comment.to_string();
+                if comment_line.is_none_or(|previous| previous + 1 != line_number) {
+                    last_comment.clear();
                 }
+                if !comment.is_empty() && !comment.starts_with('=') {
+                    if !last_comment.is_empty() {
+                        last_comment.push(' ');
+                    }
+                    last_comment.push_str(comment);
+                }
+                comment_line = Some(line_number);
                 continue;
             }
 
@@ -2031,6 +2044,41 @@ mod tests {
             "errors should name the unterminated section: {:?}",
             result.errors
         );
+    }
+
+    /// A card is described by the whole comment paragraph above it, not by the
+    /// paragraph's last line, and a paragraph a blank line away belongs to
+    /// nothing below it.
+    #[test]
+    fn a_card_is_described_by_its_whole_comment_paragraph() {
+        let mut parser = LibParser::new(".");
+        let result = parser.parse_string(
+            "* Library header.\n\
+             \n\
+             * ======\n\
+             * Generic self-heating NPN (native VBIC 1.3).\n\
+             * RTH is the one parameter a thermal placement needs.\n\
+             .model QTH NPN (LEVEL=4 RTH=50)\n\
+             .model QPLAIN NPN (BF=100)\n",
+        );
+        let description = |name: &str| {
+            result
+                .top_level_models
+                .iter()
+                .find(|model| model.name == name)
+                .expect("parsed card")
+                .description
+                .clone()
+        };
+
+        assert_eq!(
+            description("QTH").as_deref(),
+            Some(
+                "Generic self-heating NPN (native VBIC 1.3). \
+                 RTH is the one parameter a thermal placement needs."
+            )
+        );
+        assert_eq!(description("QPLAIN"), None);
     }
 
     /// A three-corner library shaped like a foundry corner file: one section
