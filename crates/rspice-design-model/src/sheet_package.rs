@@ -23,6 +23,9 @@ use crate::design_management::{
     DrawingSheetTitleFieldState, MAX_DRAWING_SHEET_PROJECT_PRESETS, SchematicSheetFormat,
 };
 
+mod written_frame;
+use written_frame::{WrittenFrame, frame_span};
+
 pub const PACKAGE_SCHEMA: &str = "rspice-sheet-formats";
 pub const PACKAGE_VERSION: u16 = 1;
 pub const DRAWING_SHEET_PACKAGE_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -130,9 +133,14 @@ pub struct DrawingSheetPresetPackage {
 /// preset written before the product gained a title-block field, such as the
 /// language code, loads with that field supplied, and one written with a
 /// field since retired loads without it, but its package was sealed over the
-/// fields it was written with. Each is checked against what was written, so
-/// changing the product costs no one a package they already hold, and a
-/// package sealed again is written with today's names and fields throughout.
+/// fields it was written with. And a preset written before every sheet took
+/// its series' standard frame loads onto that frame, but its package was
+/// sealed over the frame it was written with: its margins, its plain or
+/// organization border, its zone counts, labels and edges, and its
+/// registration and folding flags. Each is checked against what was written,
+/// so changing the product costs no one a package they already hold, and a
+/// package sealed again is written with today's names, fields and frames
+/// throughout.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct RetiredSpellings {
     /// Positions of the presets whose title block was written as `wide`.
@@ -140,6 +148,9 @@ struct RetiredSpellings {
     /// The title-block fields each preset was written with, for the presets
     /// written with another set than the product has today.
     written_title_fields: BTreeMap<usize, WrittenTitleFields>,
+    /// The frame each preset was written with, for the presets whose frame
+    /// the product writes differently today.
+    written_frames: BTreeMap<usize, WrittenFrame>,
 }
 
 type WrittenTitleFields = BTreeMap<DrawingSheetTitleFieldId, DrawingSheetTitleFieldState>;
@@ -181,9 +192,55 @@ impl RetiredSpellings {
                     .then_some((index, written))
             })
             .collect();
+        let written_frames = presets
+            .iter()
+            .enumerate()
+            .filter_map(|(index, preset)| {
+                // A format that does not decode is refused when the preset
+                // itself is decoded.
+                let format = preset.get("format")?;
+                let written = WrittenFrame::of(format)?;
+                let today = serde_json::from_value::<SchematicSheetFormat>(format.clone()).ok()?;
+                (frame_span(&today)? != written.span()).then_some((index, written))
+            })
+            .collect();
         Self {
             wide_title_blocks,
             written_title_fields,
+            written_frames,
+        }
+    }
+
+    /// The identity the frame-reference manifest gives the border of the
+    /// preset at `index`.
+    fn border_reference(
+        &self,
+        index: usize,
+        border: DrawingSheetBorderTemplate,
+    ) -> Option<&'static str> {
+        if let Some(frame) = self.written_frames.get(&index) {
+            return frame.border_reference();
+        }
+        match border {
+            DrawingSheetBorderTemplate::Standard => Some("standard"),
+            DrawingSheetBorderTemplate::Plain => Some("plain"),
+            DrawingSheetBorderTemplate::None | DrawingSheetBorderTemplate::OrganizationManaged => {
+                None
+            }
+        }
+    }
+
+    /// The identity the review rows give the border of the preset at
+    /// `index`.
+    fn border_identity(&self, index: usize, border: DrawingSheetBorderTemplate) -> &'static str {
+        if let Some(frame) = self.written_frames.get(&index) {
+            return frame.border_identity();
+        }
+        match border {
+            DrawingSheetBorderTemplate::Standard => "builtin/standard",
+            DrawingSheetBorderTemplate::Plain => "builtin/plain",
+            DrawingSheetBorderTemplate::None => "none",
+            DrawingSheetBorderTemplate::OrganizationManaged => "organization-managed",
         }
     }
 
@@ -224,12 +281,45 @@ impl RetiredSpellings {
     }
 
     /// `canonical`, the contract `presets` serialize to, as the package was
-    /// written: each preset written with another field set lists exactly the
-    /// fields it was written with, and each preset written as `wide` names it
-    /// again.
+    /// written: each preset written with another frame has that frame again,
+    /// each preset written with another field set lists exactly the fields it
+    /// was written with, and each preset written as `wide` names it again.
     fn respell(&self, canonical: Vec<u8>, presets: &[PortableDrawingSheetPreset]) -> Vec<u8> {
+        let canonical = self.respell_frames(canonical, presets);
         let canonical = self.respell_title_fields(canonical, presets);
         self.respell_wide_title_blocks(canonical, presets)
+    }
+
+    /// `canonical` with each preset's frame as it was written.
+    ///
+    /// Every preset serializes exactly one frame, and serializes it the same
+    /// way whether alone or within the contract, so the frame of each preset
+    /// in turn is found, in order, as its own serialization.
+    fn respell_frames(
+        &self,
+        canonical: Vec<u8>,
+        presets: &[PortableDrawingSheetPreset],
+    ) -> Vec<u8> {
+        if self.written_frames.is_empty() {
+            return canonical;
+        }
+        let mut written = Vec::with_capacity(canonical.len());
+        let mut rest = canonical.as_slice();
+        for (index, preset) in presets.iter().enumerate() {
+            let Some((at, current)) = frame_span(&preset.format)
+                .and_then(|current| Some((written_frame::find(rest, &current)?, current)))
+            else {
+                break;
+            };
+            written.extend_from_slice(&rest[..at]);
+            match self.written_frames.get(&index) {
+                Some(frame) => written.extend(frame.span()),
+                None => written.extend_from_slice(&current),
+            }
+            rest = &rest[at + current.len()..];
+        }
+        written.extend_from_slice(rest);
+        written
     }
 
     /// `canonical` with each preset's title-block fields as it was written.
@@ -927,14 +1017,7 @@ fn builtin_frame_references(
 ) -> Vec<BuiltinFrameReference> {
     let mut references = BTreeSet::new();
     for (index, preset) in presets.iter().enumerate() {
-        let border = match preset.format.border {
-            DrawingSheetBorderTemplate::Standard => Some("standard"),
-            DrawingSheetBorderTemplate::Plain => Some("plain"),
-            DrawingSheetBorderTemplate::None | DrawingSheetBorderTemplate::OrganizationManaged => {
-                None
-            }
-        };
-        if let Some(identity) = border {
+        if let Some(identity) = spellings.border_reference(index, preset.format.border) {
             references.insert(BuiltinFrameReference {
                 kind: "border".to_owned(),
                 identity: identity.to_owned(),
@@ -961,7 +1044,10 @@ fn human_review_rows(
         .enumerate()
         .map(|(index, preset)| {
             let mut dependencies = Vec::new();
-            dependencies.push(format!("border:{}", border_identity(preset.format.border)));
+            dependencies.push(format!(
+                "border:{}",
+                spellings.border_identity(index, preset.format.border)
+            ));
             dependencies.push(format!(
                 "title-block:{}",
                 spellings.title_block_identity(index, preset.format.title_block.template)
@@ -1004,15 +1090,6 @@ fn validate_human_review_document(document: &HumanReviewPackageDocument) -> Resu
         );
     }
     Ok(())
-}
-
-fn border_identity(template: DrawingSheetBorderTemplate) -> &'static str {
-    match template {
-        DrawingSheetBorderTemplate::Standard => "builtin/standard",
-        DrawingSheetBorderTemplate::Plain => "builtin/plain",
-        DrawingSheetBorderTemplate::None => "none",
-        DrawingSheetBorderTemplate::OrganizationManaged => "organization-managed",
-    }
 }
 
 fn format_millimetres(value_um: u64) -> String {
@@ -1596,4 +1673,5 @@ mod tests {
     }
 
     mod field_history;
+    mod frame_history;
 }
