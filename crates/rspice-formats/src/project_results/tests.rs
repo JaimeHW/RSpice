@@ -119,3 +119,18 @@ fn a_runs_log_survives_the_project_file_and_an_empty_one_is_not_written() {
     let read: ProjectSimulationRun = serde_json::from_str(&text).expect("deserializes");
     assert_eq!(read.into_run().expect("restores").log, run.log);
 }
+
+/// A field is written as `Some` so RON can read it back; a saved project's
+/// JSON must not change with it. A present field is still a bare value there,
+/// and an explicit null still null.
+#[test]
+fn a_persisted_field_writes_project_json_as_a_bare_value_or_null() {
+    let present = PersistedField::Value("ab".to_owned());
+    assert_eq!(serde_json::to_string(&present).unwrap(), "\"ab\"");
+    assert_eq!(
+        serde_json::to_string(&PersistedField::<String>::Null).unwrap(),
+        "null"
+    );
+    let read: PersistedField<String> = serde_json::from_str("\"ab\"").unwrap();
+    assert_eq!(read, present);
+}

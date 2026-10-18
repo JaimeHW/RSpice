@@ -2291,8 +2291,11 @@ impl<T: Serialize> Serialize for PersistedField<T> {
     where
         S: Serializer,
     {
+        // `Some`, the inverse of the `Option` this is read through. JSON writes
+        // a bare value the same way, but RON, the format of the saved working
+        // session, does not, and refused every session that held a result.
         match self {
-            Self::Value(value) => value.serialize(serializer),
+            Self::Value(value) => serializer.serialize_some(value),
             Self::Missing | Self::Null => serializer.serialize_none(),
         }
     }

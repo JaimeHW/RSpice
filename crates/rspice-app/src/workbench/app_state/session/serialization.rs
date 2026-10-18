@@ -606,20 +606,26 @@ mod tests {
 
         let json = serde_json::to_string(&state).expect("session serializes");
         assert!(json.contains("simulation_results"));
-        let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
-
-        assert_eq!(restored.simulation.retained.run_count(), 1);
-        assert_eq!(
-            restored
-                .simulation
-                .active_run()
-                .expect("active restored run")
-                .label,
-            "Run 3 (session fixture)"
-        );
-        assert_eq!(restored.simulation.view.waveforms[0].name, "V(out)");
-        assert!(!restored.simulation.execution.is_running);
-        assert!(!restored.simulation.execution.trigger_abort);
+        // RON is what eframe stores. A result field it could not read back
+        // once replaced every session that held a run with a new one.
+        let ron = ron::to_string(&state).expect("eframe RON session serializes");
+        for (format, restored) in [
+            ("JSON", serde_json::from_str::<AppState>(&json).unwrap()),
+            ("RON", AppState::from_session_ron(&ron).unwrap()),
+        ] {
+            assert_eq!(restored.simulation.retained.run_count(), 1, "{format}");
+            assert_eq!(
+                restored
+                    .simulation
+                    .active_run()
+                    .expect("active restored run")
+                    .label,
+                "Run 3 (session fixture)"
+            );
+            assert_eq!(restored.simulation.view.waveforms[0].name, "V(out)");
+            assert!(!restored.simulation.execution.is_running);
+            assert!(!restored.simulation.execution.trigger_abort);
+        }
     }
 
     #[test]
