@@ -64,4 +64,8 @@ pub enum WorkerSimulationError {
         limit: usize,
     },
     ResourceFailure(crate::resource_failure::ResourceFailure),
+    /// The browser's engine stopped before it answered: it crashed, or its
+    /// worker could not be started or could not take the request. Nothing in
+    /// the design is at fault. The text is what the browser reported.
+    EngineStopped(String),
 }

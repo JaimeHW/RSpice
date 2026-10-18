@@ -120,6 +120,15 @@ pub enum SimulationError {
     /// Thread panicked
     ThreadPanic,
 
+    /// The browser's engine stopped before it answered: it crashed, or its
+    /// worker could not be started or could not take the request.
+    ///
+    /// Kept apart from [`Self::InvalidConfig`], where it used to land, because
+    /// nothing in the design or its setup is at fault and a reader told so
+    /// would go looking for a mistake that is not there. The text is what the
+    /// browser reported.
+    EngineStopped(String),
+
     /// Invalid configuration
     InvalidConfig(String),
 
@@ -187,6 +196,9 @@ impl std::fmt::Display for SimulationError {
             SimulationError::Aborted => write!(f, "Simulation aborted"),
             SimulationError::AlreadyRunning => write!(f, "A simulation is already running"),
             SimulationError::ThreadPanic => write!(f, "Simulation thread panicked"),
+            SimulationError::EngineStopped(msg) => {
+                write!(f, "The simulation engine stopped unexpectedly: {msg}")
+            }
             SimulationError::InvalidConfig(msg) => write!(f, "Invalid configuration: {}", msg),
             SimulationError::UnsupportedOutcome(msg) => {
                 write!(f, "Unsupported simulation outcome: {msg}")
@@ -478,6 +490,7 @@ impl From<SimulationError> for WorkerSimulationError {
             SimulationError::Aborted => Self::Aborted,
             SimulationError::AlreadyRunning => Self::AlreadyRunning,
             SimulationError::ThreadPanic => Self::ThreadPanic,
+            SimulationError::EngineStopped(message) => Self::EngineStopped(message),
             SimulationError::InvalidConfig(message) => Self::InvalidConfig(message),
             SimulationError::UnsupportedOutcome(message) => Self::UnsupportedOutcome(message),
             SimulationError::ResourceLimit {
@@ -568,6 +581,7 @@ impl From<WorkerSimulationError> for SimulationError {
             WorkerSimulationError::Aborted => Self::Aborted,
             WorkerSimulationError::AlreadyRunning => Self::AlreadyRunning,
             WorkerSimulationError::ThreadPanic => Self::ThreadPanic,
+            WorkerSimulationError::EngineStopped(message) => Self::EngineStopped(message),
             WorkerSimulationError::InvalidConfig(message) => Self::InvalidConfig(message),
             WorkerSimulationError::UnsupportedOutcome(message) => Self::UnsupportedOutcome(message),
             WorkerSimulationError::ResourceLimit {

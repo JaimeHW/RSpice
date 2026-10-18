@@ -384,7 +384,7 @@ mod browser {
                 js_error_message(error)
             );
             fail_worker(&handle.state, &handle.worker, message.clone());
-            return Err(SimulationError::InvalidConfig(message));
+            return Err(SimulationError::EngineStopped(message));
         }
 
         Ok(())
@@ -720,7 +720,10 @@ mod browser {
         state.active_engine_log = None;
         state.active_checkpoint = None;
         state.active_transient_checkpoint = None;
-        state.pending_result = Some(Err(SimulationError::InvalidConfig(message)));
+        // The worker's shell answers with an error only when the request
+        // threw on its way through it: the engine trapped, or the request
+        // could not be prepared. A design fault comes back as a typed result.
+        state.pending_result = Some(Err(SimulationError::EngineStopped(message)));
     }
 
     fn worker_error_message(data: &JsValue) -> String {
@@ -738,7 +741,7 @@ mod browser {
         state.current_worker_epoch = None;
         state.availability = EngineAvailability::Unavailable(message.clone());
         if state.active_request_id.take().is_some() && state.pending_result.is_none() {
-            state.pending_result = Some(Err(SimulationError::InvalidConfig(message)));
+            state.pending_result = Some(Err(SimulationError::EngineStopped(message)));
         }
         state.active_progress = None;
         state.active_transient_samples = None;

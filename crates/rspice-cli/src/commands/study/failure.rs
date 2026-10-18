@@ -43,7 +43,7 @@ pub(super) fn execution(error: SimulationError, task: &str, timeout: Option<f64>
         E::UnsupportedOutcome(_) => ("unsupported_outcome", Category::Capability),
         E::ResourceLimit { .. } => ("resource_limit", Category::ResourceLimit),
         E::ResourceFailure(failure) => (failure.code(), Category::ResourceLimit),
-        E::AlreadyRunning | E::ThreadPanic => {
+        E::AlreadyRunning | E::ThreadPanic | E::EngineStopped(_) => {
             return CliError::InternalError {
                 message: error.to_string(),
             };

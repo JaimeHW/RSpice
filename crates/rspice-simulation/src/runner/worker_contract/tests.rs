@@ -144,6 +144,21 @@ fn behavioral_reference_error_round_trips_through_worker_contract() {
 }
 
 #[test]
+fn an_engine_that_stopped_is_not_blamed_on_the_configuration() {
+    let expected = SimulationError::EngineStopped("RuntimeError: unreachable".to_string());
+    assert_eq!(
+        expected.to_string(),
+        "The simulation engine stopped unexpectedly: RuntimeError: unreachable"
+    );
+
+    let worker = WorkerSimulationError::from(expected.clone());
+    let encoded = serde_json::to_string(&worker).expect("worker error serializes");
+    let decoded: WorkerSimulationError =
+        serde_json::from_str(&encoded).expect("worker error deserializes");
+    assert_eq!(SimulationError::from(decoded), expected);
+}
+
+#[test]
 fn output_failures_round_trip_through_worker_contract() {
     for expected in [
         SimulationError::RequestedSignalUnavailable {
