@@ -163,7 +163,7 @@ impl AppState {
     /// policy. This is the only constructor production UI paths use for a new
     /// schematic/testbench document. Existing buffers are never rewritten.
     pub(crate) fn new_schematic_document(&self) -> SchematicState {
-        use crate::state::{NetNamingPolicy, SchematicGridPitch, WireJunctionPolicy};
+        use crate::state::{SchematicGridPitch, WireJunctionPolicy};
         use crate::workbench::ChoicePreference;
 
         let mut document = rspice_design::schematic::document::SchematicDocument::default();
@@ -186,12 +186,7 @@ impl AppState {
         } else {
             WireJunctionPolicy::OrthogonalManual
         };
-        document.document_policy.net_naming =
-            match preferences.choice(ChoicePreference::NetNamingPolicy) {
-                0 => NetNamingPolicy::StrictCaseSensitive,
-                1 => NetNamingPolicy::SpiceCompatibleRelaxed,
-                _ => unreachable!("net naming policy is normalized before use"),
-            };
+        document.document_policy.net_naming = preferences.new_schematic_net_naming();
 
         let mut schematic = SchematicState::from_document(document);
         schematic.session.editor.snap_engine = self.ui.schematic_snap.clone();

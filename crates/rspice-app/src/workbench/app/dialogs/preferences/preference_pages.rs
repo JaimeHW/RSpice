@@ -556,30 +556,39 @@ fn units(ui: &mut Ui, state: &mut AppState) {
 }
 
 fn schematic(ui: &mut Ui, state: &mut AppState) {
-    preference_row(
-        ui,
-        "Grid and snap",
-        "A project may declare a stricter increment.",
-        |ui| {
+    // Junction dots and wire routing are one bit each of one stored choice,
+    // so the values an earlier build wrote keep their meaning.
+    use crate::workbench::app_state::schematic_preferences::{
+        ANY_ANGLE_ROUTING, MANUAL_JUNCTION_DOTS, NET_NAME_CHARACTERS,
+    };
+    fn junction_bit_row(
+        ui: &mut Ui,
+        state: &mut AppState,
+        bit: usize,
+        (title, help, id): (&'static str, &'static str, &'static str),
+        options: [&'static str; 2],
+    ) {
+        preference_row(ui, title, help, |ui| {
             value_column(ui, |ui| {
-                let mut selected = state.ui.preferences.choice(ChoicePreference::SchematicGrid);
-                let labels = crate::state::SchematicGridPitch::ALL
-                    .map(crate::schematic::view::drawing_sheet::grid_pitch_label);
-                if segmented(
-                    ui,
-                    "preferences.schematic.grid",
-                    &labels.each_ref().map(String::as_str),
-                    &mut selected,
-                ) {
+                let stored = state
+                    .ui
+                    .preferences
+                    .choice(ChoicePreference::WireJunctionBehavior);
+                let mut selected = usize::from(stored & bit != 0);
+                if segmented(ui, id, &options, &mut selected) {
                     state
                         .ui
                         .preferences
-                        .set_choice(ChoicePreference::SchematicGrid, selected)
-                        .expect("schematic-grid segments define the complete domain");
+                        .set_choice(
+                            ChoicePreference::WireJunctionBehavior,
+                            (stored & !bit) | if selected == 1 { bit } else { 0 },
+                        )
+                        .expect("junction and routing bits stay inside the domain");
                 }
             });
-        },
-    );
+        });
+    }
+
     preference_row(
         ui,
         "Cursor",
@@ -623,47 +632,17 @@ fn schematic(ui: &mut Ui, state: &mut AppState) {
         "Enable live checking",
     );
     section_heading(ui, "Editing and hierarchy");
-    // Junction dots and wire routing are one bit each of one stored choice,
-    // so the values an earlier build wrote keep their meaning.
-    use crate::workbench::app_state::schematic_preferences::{
-        ANY_ANGLE_ROUTING, MANUAL_JUNCTION_DOTS,
-    };
-    for (bit, title, help, id, options) in [
+    junction_bit_row(
+        ui,
+        state,
+        MANUAL_JUNCTION_DOTS,
         (
-            MANUAL_JUNCTION_DOTS,
             "Junction dots",
             "Automatic adds a dot where a wire tees into another. Applies to open schematics.",
             "preferences.schematic.junction-dots",
-            ["Automatic", "Manual"],
         ),
-        (
-            ANY_ANGLE_ROUTING,
-            "Wire routing",
-            "For new schematics. Grid, snap and wire routing in the View menu changes it for now.",
-            "preferences.schematic.wire-routing",
-            ["Orthogonal", "Any angle"],
-        ),
-    ] {
-        preference_row(ui, title, help, |ui| {
-            value_column(ui, |ui| {
-                let stored = state
-                    .ui
-                    .preferences
-                    .choice(ChoicePreference::WireJunctionBehavior);
-                let mut selected = usize::from(stored & bit != 0);
-                if segmented(ui, id, &options, &mut selected) {
-                    state
-                        .ui
-                        .preferences
-                        .set_choice(
-                            ChoicePreference::WireJunctionBehavior,
-                            (stored & !bit) | if selected == 1 { bit } else { 0 },
-                        )
-                        .expect("junction and routing bits stay inside the domain");
-                }
-            });
-        });
-    }
+        ["Automatic", "Manual"],
+    );
     choice_row(
         ui,
         state,
@@ -684,16 +663,52 @@ fn schematic(ui: &mut Ui, state: &mut AppState) {
         "Descending opens the child in its occurrence; off opens the master on its own.",
         "Enable hierarchical edit in place",
     );
+    // A schematic keeps its own grid, routing and net-name characters, so
+    // these seed new ones; the open schematic's are set where it is edited.
+    section_heading(ui, "New schematics");
+    preference_row(
+        ui,
+        "Grid and snap",
+        "For schematics created from now on. The Inspector sets the open one's.",
+        |ui| {
+            value_column(ui, |ui| {
+                let mut selected = state.ui.preferences.choice(ChoicePreference::SchematicGrid);
+                let labels = crate::state::SchematicGridPitch::ALL
+                    .map(crate::schematic::view::drawing_sheet::grid_pitch_label);
+                if segmented(
+                    ui,
+                    "preferences.schematic.grid",
+                    &labels.each_ref().map(String::as_str),
+                    &mut selected,
+                ) {
+                    state
+                        .ui
+                        .preferences
+                        .set_choice(ChoicePreference::SchematicGrid, selected)
+                        .expect("schematic-grid segments define the complete domain");
+                }
+            });
+        },
+    );
+    junction_bit_row(
+        ui,
+        state,
+        ANY_ANGLE_ROUTING,
+        (
+            "Wire routing",
+            "For schematics created from now on. The View menu sets the open one's.",
+            "preferences.schematic.wire-routing",
+        ),
+        ["Orthogonal", "Any angle"],
+    );
+    const NET_NAME_LABELS: [&str; 2] = [NET_NAME_CHARACTERS[0].1, NET_NAME_CHARACTERS[1].1];
     choice_row(
         ui,
         state,
         ChoicePreference::NetNamingPolicy,
         "Net name characters",
-        "Net names are not case-sensitive: Out and out are one net.",
-        &[
-            "ASCII letters, digits, _.$:/![]<>-",
-            "Any printable character but spaces",
-        ],
+        "For schematics created from now on. Names ignore case: Out and out are one net.",
+        &NET_NAME_LABELS,
     );
 }
 

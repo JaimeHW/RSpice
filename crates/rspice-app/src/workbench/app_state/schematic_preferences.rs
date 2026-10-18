@@ -11,7 +11,7 @@
 //! with orthogonal routing, 1 manual dots, 2 any-angle routing, and 3 both.
 
 use super::AppState;
-use crate::state::{SelectionCrossingPolicy, WireRoutingMode};
+use crate::state::{NetNamingPolicy, SelectionCrossingPolicy, WireRoutingMode};
 use crate::workbench::{ChoicePreference, UserPreferences};
 
 /// The bit of [`ChoicePreference::WireJunctionBehavior`] that says the user
@@ -26,6 +26,19 @@ pub(crate) const SELECTION_CROSSING: [SelectionCrossingPolicy; 3] = [
     SelectionCrossingPolicy::Directional,
     SelectionCrossingPolicy::EnclosedOnly,
     SelectionCrossingPolicy::Intersecting,
+];
+
+/// The characters a net name may use, in stored index order, with the words
+/// Preferences and the sheet inspector name each set by.
+pub(crate) const NET_NAME_CHARACTERS: [(NetNamingPolicy, &str); 2] = [
+    (
+        NetNamingPolicy::StrictCaseSensitive,
+        "ASCII letters, digits, _.$:/![]<>-",
+    ),
+    (
+        NetNamingPolicy::SpiceCompatibleRelaxed,
+        "Any printable character but spaces",
+    ),
 ];
 
 impl UserPreferences {
@@ -47,6 +60,15 @@ impl UserPreferences {
         SELECTION_CROSSING
             .get(self.choice(ChoicePreference::SelectionCrossingPolicy))
             .copied()
+            .unwrap_or_default()
+    }
+
+    /// The characters a new schematic's net names may use.
+    #[must_use]
+    pub(crate) fn new_schematic_net_naming(&self) -> NetNamingPolicy {
+        NET_NAME_CHARACTERS
+            .get(self.choice(ChoicePreference::NetNamingPolicy))
+            .map(|(policy, _)| *policy)
             .unwrap_or_default()
     }
 

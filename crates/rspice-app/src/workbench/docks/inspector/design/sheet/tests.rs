@@ -140,7 +140,8 @@ fn with_nothing_selected_the_panel_edits_the_sheet_and_repeats_no_command() {
          Sheet title\ntop\n\nDocument type\nCircuit diagram\n\n\
          Drawn by\n\nApproved by\n\n\
          Document\nAll sheets\nRevision\n\nDate\nYYYY-MM-DD\n\n\
-         Document status\nDraft\nOrganization\n\nDocument ID\n\n"
+         Document status\nDraft\nOrganization\n\nDocument ID\n\n\
+         Schematic\nGrid\n2.5 mm\nNet names\nASCII letters, digits, _.$:/![]<>-\n"
     );
 }
 
@@ -241,6 +242,42 @@ fn only_the_fields_this_block_shows_are_offered() {
     let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
     assert!(!painted.contains("Document\n"), "{painted}");
     assert!(!painted.contains("Revision"), "{painted}");
+}
+
+/// The grid and net-name characters belong to the open schematic, not to
+/// Preferences: each change lands as one undo step, and a new grid moves the
+/// snap with it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_open_schematics_grid_and_net_names_change_in_the_panel() {
+    use crate::state::{NetNamingPolicy, SchematicGridPitch};
+
+    let mut app = RSpiceApp::test_instance();
+    apply_schematic_edit(
+        &mut app.state,
+        SchematicEdit::Grid(SchematicGridPitch::Mil25),
+    );
+    apply_schematic_edit(
+        &mut app.state,
+        SchematicEdit::NetNameCharacters(NetNamingPolicy::SpiceCompatibleRelaxed),
+    );
+    let schematic = &app.state.schematic;
+    let policy = &schematic.document().document_policy;
+    assert_eq!(policy.grid_pitch, SchematicGridPitch::Mil25);
+    assert_eq!(policy.net_naming, NetNamingPolicy::SpiceCompatibleRelaxed);
+    assert_eq!(schematic.document().grid_size, 5);
+    assert_eq!(schematic.session.editor.snap_engine.grid_size, 5);
+    assert_eq!(app.state.ui.schematic_snap.grid_size, 5);
+    let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
+    assert!(
+        painted.ends_with("Grid\n1.25 mm\nNet names\nAny printable character but spaces\n"),
+        "{painted}"
+    );
+
+    assert!(app.state.schematic.undo());
+    let policy = &app.state.schematic.document().document_policy;
+    assert_eq!(policy.net_naming, NetNamingPolicy::StrictCaseSensitive);
+    assert_eq!(policy.grid_pitch, SchematicGridPitch::Mil25);
 }
 
 /// A typed title value lands when the field is left, as one undo step; the

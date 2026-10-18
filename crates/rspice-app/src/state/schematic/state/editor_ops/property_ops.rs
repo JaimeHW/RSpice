@@ -2,7 +2,7 @@
 
 use crate::state::{
     DesignNote, DesignNoteKind, DesignReviewState, DocumentationShape, DocumentationShapeGeometry,
-    NetLabel, Point, SchematicGridPitch, SchematicState,
+    NetLabel, NetNamingPolicy, Point, SchematicGridPitch, SchematicState,
 };
 
 impl SchematicState {
@@ -105,6 +105,15 @@ impl SchematicState {
             return false;
         }
         let committed = self.design.change_grid_pitch(pitch);
+        self.finish_document_edit(committed);
+        committed
+    }
+
+    pub(crate) fn change_net_naming(&mut self, policy: NetNamingPolicy) -> bool {
+        if self.session.read_only {
+            return false;
+        }
+        let committed = self.design.change_net_naming(policy);
         self.finish_document_edit(committed);
         committed
     }

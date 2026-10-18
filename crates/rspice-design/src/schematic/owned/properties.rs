@@ -1,7 +1,7 @@
 //! Property candidates validate before an editor opens their document scope.
 use super::super::{
     design_note::{DesignNote, DesignNoteKind, DesignReviewState},
-    document_policy::SchematicGridPitch,
+    document_policy::{NetNamingPolicy, SchematicGridPitch},
     documentation_shape::{DocumentationShape, DocumentationShapeGeometry},
     net_label::NetLabel,
 };
@@ -205,6 +205,15 @@ impl Schematic {
         self.begin_operation("change schematic grid pitch");
         self.document.document_policy.grid_pitch = pitch;
         self.document.grid_size = pitch.canvas_grid_size();
+        self.invalidate_topology();
+        self.end_operation()
+    }
+
+    /// Change which characters this schematic's net names may use. The
+    /// connectivity checks read it, so the topology is invalidated.
+    pub fn change_net_naming(&mut self, policy: NetNamingPolicy) -> bool {
+        self.begin_operation("change net name characters");
+        self.document.document_policy.net_naming = policy;
         self.invalidate_topology();
         self.end_operation()
     }

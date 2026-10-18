@@ -5,9 +5,11 @@
 //! block shows that someone types — this sheet's own, then the document's,
 //! which every sheet in the project letters alike. Each edit is one Page
 //! Setup transaction, with the dialog's validation and undo entry, so the two
-//! cannot disagree. Margins, frames, zones, custom sizes and which fields a
-//! block shows stay in Page Setup. The fields RSpice fills in itself
-//! (project, cell, page, paper size) are not offered: nothing types them.
+//! cannot disagree. Below them sit the grid and net-name characters every
+//! sheet of the schematic shares, which Preferences only chooses for new
+//! schematics. Margins, frames, zones, custom sizes and which fields a block
+//! shows stay in Page Setup. The fields RSpice fills in itself (project,
+//! cell, page, paper size) are not offered: nothing types them.
 //!
 //! What the document tab, the sheet strip, the status bar and the navigator
 //! already say about the sheet is not said again, and the toolbar's commands
@@ -21,13 +23,13 @@ use super::{
 };
 use crate::schematic::view::drawing_sheet::{
     ActiveDrawingSheet, DrawingSheetOverflowSummary, drawing_sheet_overflow_summary,
-    resolve_active_drawing_sheet, show_first_drawing_sheet_overflow,
+    grid_pitch_label, resolve_active_drawing_sheet, show_first_drawing_sheet_overflow,
 };
 use crate::schematic::view::frame_symbol_context;
 use crate::state::{
     AuthoredDrawingSheetSize, DrawingSheetReleaseStatus, DrawingSheetStandard,
     DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, DrawingSheetTitleFieldValueAuthority,
-    SchematicPageOrientation, SchematicSheetFormat, SheetId,
+    NetNamingPolicy, SchematicGridPitch, SchematicPageOrientation, SchematicSheetFormat, SheetId,
 };
 use crate::ui::icons::Icon;
 use crate::ui::widgets::Button;
@@ -37,6 +39,7 @@ use crate::workbench::app::{
     drawing_sheet_setup_available_for_state, open_drawing_sheet_overflow_review,
     open_drawing_sheet_setup_for_custom_size, standard_size_choice_label,
 };
+use crate::workbench::app_state::schematic_preferences::NET_NAME_CHARACTERS;
 use crate::workbench::design_system::{
     Problem, problem_line, property_row_combo, property_row_input_with_hint,
     schematic_property_row as property_row, schematic_property_row_problem as property_row_problem,
@@ -59,14 +62,96 @@ pub(super) fn sheet_panel(ui: &mut Ui, state: &mut AppState) {
     let identity = sheet_identity(state);
     let editable = drawing_sheet_setup_available_for_state(state);
     let mut edit = None;
+    let mut schematic_edit = None;
     sheet_section(ui, state, &sheet, editable, &mut edit);
     title_block_section(ui, &sheet, &identity, editable, &mut edit);
     document_section(ui, state, &sheet, &identity, editable, &mut edit);
+    schematic_section(ui, state, editable, &mut schematic_edit);
     checks_section(ui, state);
     if let Some(edit) = edit
         && let Err(error) = apply_drawing_sheet_edit(state, edit)
     {
         state.prompt(error);
+    }
+    if let Some(edit) = schematic_edit {
+        apply_schematic_edit(state, edit);
+    }
+}
+
+/// A change to a property the whole schematic shares, every sheet of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SchematicEdit {
+    Grid(SchematicGridPitch),
+    NetNameCharacters(NetNamingPolicy),
+}
+
+/// The grid and net-name characters of the open schematic. Preferences only
+/// seeds them for new schematics, so this is where an open one changes.
+fn schematic_section(
+    ui: &mut Ui,
+    state: &AppState,
+    editable: bool,
+    edit: &mut Option<SchematicEdit>,
+) {
+    section_header(ui, "Schematic", None);
+    let policy = &state.schematic.document().document_policy;
+    let naming = NET_NAME_CHARACTERS
+        .into_iter()
+        .find(|(choice, _)| *choice == policy.net_naming)
+        .map_or("\u{2014}", |(_, label)| label);
+    if !editable {
+        property_row(ui, "Grid", &grid_pitch_label(policy.grid_pitch));
+        property_row(ui, "Net names", naming);
+        return;
+    }
+
+    let mut grid = grid_pitch_label(policy.grid_pitch);
+    let grids =
+        SchematicGridPitch::ALL.map(|pitch| (grid_pitch_label(pitch), grid_pitch_label(pitch)));
+    if property_row_combo(ui, "Grid", "sheet-inspector-grid", &mut grid, &grids, true)
+        && let Some(pitch) = SchematicGridPitch::ALL
+            .into_iter()
+            .find(|pitch| grid_pitch_label(*pitch) == grid)
+        && pitch != policy.grid_pitch
+    {
+        *edit = Some(SchematicEdit::Grid(pitch));
+    }
+
+    let mut selected = naming.to_owned();
+    let choices = NET_NAME_CHARACTERS.map(|(_, label)| (label.to_owned(), label.to_owned()));
+    if property_row_combo(
+        ui,
+        "Net names",
+        "sheet-inspector-net-names",
+        &mut selected,
+        &choices,
+        true,
+    ) && let Some((choice, _)) = NET_NAME_CHARACTERS
+        .into_iter()
+        .find(|(_, label)| *label == selected)
+        && choice != policy.net_naming
+    {
+        *edit = Some(SchematicEdit::NetNameCharacters(choice));
+    }
+}
+
+/// Apply a schematic-wide change as one undo step. A new grid moves the
+/// editor's snap with it, as Grid, snap and wire routing does.
+fn apply_schematic_edit(state: &mut AppState, edit: SchematicEdit) {
+    let changed = match edit {
+        SchematicEdit::Grid(pitch) => {
+            let changed = state.schematic.change_grid_pitch(pitch);
+            if changed {
+                state.schematic.reconcile_grid_pitch_runtime();
+                state.ui.schematic_snap.grid_size =
+                    state.schematic.session.editor.snap_engine.grid_size;
+            }
+            changed
+        }
+        SchematicEdit::NetNameCharacters(policy) => state.schematic.change_net_naming(policy),
+    };
+    if changed {
+        state.sync_active_schematic_to_workspace();
     }
 }
 
