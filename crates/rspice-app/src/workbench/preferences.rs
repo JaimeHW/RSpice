@@ -1480,7 +1480,9 @@ impl UserPreferences {
         }
     }
 
-    /// Whether startup reopens the project the last session had open.
+    /// Whether startup reopens the project the last session had open. The
+    /// browser binds its project after startup, so only the desktop asks.
+    #[cfg(not(target_arch = "wasm32"))]
     #[must_use]
     pub fn reopen_last_project(&self) -> bool {
         self.choice(ChoicePreference::StartupProject) == 0
