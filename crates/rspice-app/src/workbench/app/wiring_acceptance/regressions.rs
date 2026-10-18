@@ -2,12 +2,22 @@
 //! reproduction.
 
 use super::Bench;
-use super::property::{Pick, Step::*, Turn, p, replay};
-use crate::state::{ComponentType, Point, Rotation};
+use super::property::{Drawing, Pick, Step::*, Turn, p, replay, replay_on};
+use crate::state::{ComponentType, MoveSelectionMode, Point, Rotation};
+use rspice_schematic_editor::view::pointer_target::PointerTarget;
 
-/// Replay a shrunk sequence the property test reported, from its fixture.
+/// Replay a shrunk sequence the property test reported, from the wiring
+/// fixture it was found on.
 fn holds(steps: &[super::property::Step]) {
     if let Err(failure) = replay(steps) {
+        panic!("{failure}");
+    }
+}
+
+/// Replay a shrunk sequence the property test reported from the annotated
+/// fixture.
+fn holds_annotated(steps: &[super::property::Step]) {
+    if let Err(failure) = replay_on(Drawing::Annotated, steps) {
         panic!("{failure}");
     }
 }
@@ -232,6 +242,67 @@ fn a_sheet_switch_after_undo_leaves_the_undone_edit_unredoable() {
         Sheet,
         Redo,
     ]);
+}
+
+/// Both annotated sheets tap their bus onto the L's corner at (360, 100).
+/// Moving the L's leg on Sheet 1 carried Sheet 2's tap along with it, to
+/// (380, 60).
+#[test]
+fn moving_a_wire_leaves_another_sheets_tap_on_its_own_wire() {
+    holds_annotated(&[Move(vec![Pick::Wire(12)], p(20, -40), false)]);
+}
+
+/// Sheet 2 draws what Sheet 1 does, a wire from (100, 100) to (240, 100),
+/// and taps a bus onto it at (160, 100). Moving, dragging or stretching
+/// Sheet 1's wire carried Sheet 2's tap along: those edits find a tap by
+/// where it ends, and the sheet scope left every sheet's taps in reach.
+#[test]
+fn a_wire_edited_on_one_sheet_leaves_another_sheets_tap_where_it_was() {
+    let mut wrong = Vec::new();
+    for edit in ["move", "drag", "stretch"] {
+        let mut bench = Bench::new(&[]);
+        bench.draw_wire(&[p(100, 100), p(240, 100)]);
+        bench.activate_sheet(1);
+        bench.draw_wire(&[p(100, 100), p(240, 100)]);
+        let bus = bench.draw_bus(&[p(100, 40), p(240, 40)], "DATA[7:0]");
+        let tap = bench.place_tap(bus, p(160, 40), p(160, 100), "DATA[3]");
+        assert_ne!(tap, 0, "no tap on Sheet 2\n{}", bench.describe());
+        bench.activate_sheet(0);
+        let document = bench.state().schematic.document();
+        let wire = document
+            .wires
+            .iter()
+            .map(|wire| wire.id)
+            .find(|id| bench.sheet_of(*id) == 0)
+            .expect("Sheet 1's wire");
+        let taps = document.bus_taps.clone();
+        match edit {
+            "move" => {
+                bench.select(|selection| selection.select_wire(wire));
+                bench.move_selection(p(0, 40), MoveSelectionMode::Connected);
+            }
+            "drag" => {
+                bench.select(|selection| selection.select_wire(wire));
+                bench.drag(PointerTarget::Wire(wire), p(120, 100), &[p(0, 40)]);
+            }
+            _ => {
+                bench.select(|selection| selection.select_only_wire_segment(wire, 0));
+                bench.stretch_selection(p(0, 40));
+            }
+        }
+        let document = bench.state().schematic.document();
+        let moved = document.wires.iter().find(|candidate| candidate.id == wire);
+        if moved.map(|wire| wire.points.as_slice()) != Some(&[p(100, 140), p(240, 140)][..]) {
+            wrong.push(format!("the {edit} left Sheet 1's wire at {moved:?}"));
+        }
+        if document.bus_taps != taps {
+            wrong.push(format!(
+                "the {edit} on Sheet 1 carried Sheet 2's tap:\n{}",
+                bench.describe()
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
 /// Opening Sheet 2 is a step in the one undo order. A part placed there

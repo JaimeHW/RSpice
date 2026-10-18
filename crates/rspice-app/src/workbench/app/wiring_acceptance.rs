@@ -15,8 +15,9 @@ use crate::schematic::view::selection_transform::{
 };
 use crate::schematic::view::sheet_visibility::finish_wire_on_active_sheet;
 use crate::state::{
-    Cell, CellViewRef, ComponentType, Library, MoveSelectionMode, Point, Rotation, Selection,
-    SheetDefinition, SheetId, SheetPortPolicy, SheetTemplate, View, ViewType,
+    BusDeclaration, BusSlice, BusTapOrientation, Cell, CellViewRef, ComponentType, Library,
+    MoveSelectionMode, Point, Rotation, Selection, SheetDefinition, SheetId, SheetPortPolicy,
+    SheetTemplate, View, ViewType,
 };
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::Workspace;
@@ -230,15 +231,86 @@ impl Bench {
         else {
             return;
         };
+        self.drag(PointerTarget::Component(id), from, steps);
+    }
+
+    /// Press on `target` at `from`, drag through `steps`, offsets from there,
+    /// and release at the last.
+    pub(super) fn drag(&mut self, target: PointerTarget, from: Point, steps: &[Point]) {
         let ctx = self.ctx.clone();
-        gesture_commits::drag_selection(
-            &mut self.app.state,
-            &ctx,
-            PointerTarget::Component(id),
-            from,
-            steps,
-        );
+        gesture_commits::drag_selection(&mut self.app.state, &ctx, target, from, steps);
         self.end_frame();
+    }
+
+    /// Clicks with the bus tool at each of `points`, the last one ending the
+    /// bus, declared as `declaration`. The bus's id, or 0 if none was drawn.
+    pub(super) fn draw_bus(&mut self, points: &[Point], declaration: &str) -> u64 {
+        let (first, rest) = points.split_first().expect("a bus has a start");
+        let declaration = BusDeclaration::parse(declaration).expect("a bus declaration");
+        let schematic = &mut self.app.state.schematic;
+        let mut id = 0;
+        if schematic.start_bus(*first, Some(declaration)).is_ok() {
+            for point in rest {
+                schematic.extend_bus(*point);
+            }
+            id = schematic.finish_bus().ok().flatten().unwrap_or(0);
+        }
+        self.end_frame();
+        id
+    }
+
+    /// The tap for `slice` the tap tool commits once it has found its ends:
+    /// from `bus` at `bus_point` out to `connection_point`. The tap's id, or
+    /// 0 if it was refused.
+    pub(super) fn place_tap(
+        &mut self,
+        bus: u64,
+        bus_point: Point,
+        connection_point: Point,
+        slice: &str,
+    ) -> u64 {
+        let schematic = &mut self.app.state.schematic;
+        let id = BusSlice::parse(slice)
+            .ok()
+            .and_then(|slice| {
+                schematic
+                    .place_bus_tap(
+                        bus,
+                        bus_point,
+                        connection_point,
+                        slice,
+                        BusTapOrientation::Automatic,
+                    )
+                    .ok()
+            })
+            .unwrap_or(0);
+        self.end_frame();
+        id
+    }
+
+    /// A click with the net-label tool at `at`, naming the net `name`.
+    pub(super) fn place_label(&mut self, at: Point, name: &str) -> u64 {
+        let mut id = 0;
+        self.app
+            .state
+            .schematic
+            .with_undo("place net label", |schematic| {
+                id = schematic.add_net_label(at, name.to_owned());
+            });
+        self.end_frame();
+        id
+    }
+
+    /// A probe flag dropped at `at`.
+    pub(super) fn place_probe(&mut self, at: Point) -> u64 {
+        let id = self
+            .app
+            .state
+            .schematic
+            .place_schematic_probe(at, None, None, None)
+            .unwrap_or(0);
+        self.end_frame();
+        id
     }
 
     /// Delete the selection.
@@ -379,6 +451,33 @@ impl Bench {
                 wire.id,
                 wire.points,
                 self.sheet_of(wire.id)
+            ));
+        }
+        for bus in &document.buses {
+            out.push_str(&format!(
+                "  bus {} {:?} sheet {}\n",
+                bus.id,
+                bus.points,
+                self.sheet_of(bus.id)
+            ));
+        }
+        for tap in &document.bus_taps {
+            out.push_str(&format!(
+                "  tap {} {} {:?} -> {:?} sheet {}\n",
+                tap.id,
+                tap.slice,
+                tap.bus_point,
+                tap.connection_point,
+                self.sheet_of(tap.id)
+            ));
+        }
+        for label in &document.net_labels {
+            out.push_str(&format!(
+                "  label {} {} at {:?} sheet {}\n",
+                label.id,
+                label.name,
+                label.pos,
+                self.sheet_of(label.id)
             ));
         }
         out.push_str(&format!(

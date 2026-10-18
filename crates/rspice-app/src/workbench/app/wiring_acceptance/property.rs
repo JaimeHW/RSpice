@@ -2,8 +2,9 @@
 //! checked after every edit against four invariants:
 //!
 //! - **Sheet isolation.** An edit on one sheet leaves the other sheet's
-//!   objects and nets exactly as they were, although both sheets draw on the
-//!   very same coordinates.
+//!   objects of every kind -- parts, wires, dots, buses, taps, labels,
+//!   probes, notes and shapes -- and its nets exactly as they were, although
+//!   both sheets draw on the very same coordinates.
 //! - **Dots are junctions.** The dots painted are the points the junction
 //!   rule marks on the design a run reads, and each is where the netlister
 //!   joins three conductor ends or the crossing the dot itself joins.
@@ -17,7 +18,8 @@
 //! `cargo test -p rspice-app --lib -- --ignored ten_thousand_random_edit_sequences`.
 //! A failure is shrunk to the fewest steps that still fail the same way and
 //! reported with its seed and those steps, written as the Rust a regression
-//! test replays. Each different way of failing is reported once.
+//! test replays from the annotated drawing. Each different way of failing is
+//! reported once.
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -27,11 +29,16 @@ use super::Bench;
 use crate::schematic::view::selection_transform::SelectionTransform;
 use crate::state::{Component, ComponentType, Junction, MoveSelectionMode, Point, Rotation, Wire};
 use crate::workbench::app_state::AppState;
+use rspice_design::schematic::bus::{Bus, BusTap};
+use rspice_design::schematic::design_note::DesignNote;
 use rspice_design::schematic::document::SchematicDocument;
+use rspice_design::schematic::documentation_shape::DocumentationShape;
 use rspice_design::schematic::junction_edit::JunctionRule;
+use rspice_design::schematic::net_label::NetLabel;
+use rspice_design::schematic::probe::SchematicProbe;
 
-/// Sequences the default test run checks, about 15 s alone in the dev
-/// profile. The full ten thousand take about seven minutes.
+/// Sequences the default test run checks, about 24 s alone in the dev
+/// profile. The full ten thousand take about nine minutes.
 const DEFAULT_SEQUENCES: u64 = 400;
 /// Edits in one sequence.
 const STEPS: usize = 12;
@@ -47,6 +54,17 @@ pub(super) fn p(x: i32, y: i32) -> Point {
 pub(super) enum Pick {
     Part(u64),
     Wire(u64),
+    Bus(u64),
+    Tap(u64),
+    Label(u64),
+}
+
+impl Pick {
+    const fn id(self) -> u64 {
+        match self {
+            Self::Part(id) | Self::Wire(id) | Self::Bus(id) | Self::Tap(id) | Self::Label(id) => id,
+        }
+    }
 }
 
 /// One way to turn or flip a selection.
@@ -96,6 +114,15 @@ pub(super) enum Step {
     Sheet,
     Undo,
     Redo,
+    /// A net-label click at the point; the number tells the label's name
+    /// apart from the others the sheet holds.
+    Label(Point, u32),
+    /// Bus-tool clicks, the bus declared four wide under a name its number
+    /// makes.
+    Bus(Vec<Point>, u32),
+    /// A tap from the bus at the first point out to the second, for the
+    /// bus member numbered.
+    Tap(u64, Point, Point, u32),
 }
 
 impl Step {
@@ -106,10 +133,16 @@ impl Step {
             let listed = points.iter().map(point).collect::<Vec<_>>();
             format!("vec![{}]", listed.join(", "))
         };
-        let picks = |picks: &[Pick]| format!("vec!{picks:?}");
+        let picks = |picks: &[Pick]| {
+            let listed = picks
+                .iter()
+                .map(|pick| format!("Pick::{pick:?}"))
+                .collect::<Vec<_>>();
+            format!("vec![{}]", listed.join(", "))
+        };
         match self {
             Self::Draw(clicks) => format!("Draw({})", points(clicks)),
-            Self::Delete(pick) => format!("Delete({pick:?})"),
+            Self::Delete(pick) => format!("Delete(Pick::{pick:?})"),
             Self::Move(selection, delta, broken) => {
                 format!("Move({}, {}, {broken})", picks(selection), point(delta))
             }
@@ -127,6 +160,11 @@ impl Step {
             Self::Sheet => "Sheet".to_owned(),
             Self::Undo => "Undo".to_owned(),
             Self::Redo => "Redo".to_owned(),
+            Self::Label(at, name) => format!("Label({}, {name})", point(at)),
+            Self::Bus(clicks, name) => format!("Bus({}, {name})", points(clicks)),
+            Self::Tap(bus, from, to, member) => {
+                format!("Tap({bus}, {}, {}, {member})", point(from), point(to))
+            }
         }
     }
 
@@ -193,6 +231,9 @@ struct ActiveSheet {
     parts: Vec<Component>,
     wires: Vec<Wire>,
     junctions: Vec<Point>,
+    buses: Vec<Bus>,
+    taps: Vec<u64>,
+    labels: Vec<u64>,
 }
 
 impl ActiveSheet {
@@ -219,22 +260,61 @@ impl ActiveSheet {
                 .filter(|junction| on_sheet(junction.id))
                 .map(|junction| junction.pos)
                 .collect(),
+            buses: document
+                .buses
+                .iter()
+                .filter(|bus| on_sheet(bus.id))
+                .cloned()
+                .collect(),
+            taps: document
+                .bus_taps
+                .iter()
+                .map(|tap| tap.id)
+                .filter(|id| on_sheet(*id))
+                .collect(),
+            labels: document
+                .net_labels
+                .iter()
+                .map(|label| label.id)
+                .filter(|id| on_sheet(*id))
+                .collect(),
         }
     }
 
+    /// Up to three objects, mostly parts and wires.
     fn picks(&self, rng: &mut Rng) -> Vec<Pick> {
         let mut picks = Vec::new();
         for _ in 0..=rng.below(3) {
-            let pick = if rng.chance(55) || self.wires.is_empty() {
-                rng.pick(&self.parts).map(|part| Pick::Part(part.id))
-            } else {
-                rng.pick(&self.wires).map(|wire| Pick::Wire(wire.id))
-            };
+            let pick = match rng.below(100) {
+                0..=54 => None,
+                55..=89 => rng.pick(&self.wires).map(|wire| Pick::Wire(wire.id)),
+                90..=93 => rng.pick(&self.buses).map(|bus| Pick::Bus(bus.id)),
+                94..=96 => rng.pick(&self.taps).map(Pick::Tap),
+                _ => rng.pick(&self.labels).map(Pick::Label),
+            }
+            .or_else(|| rng.pick(&self.parts).map(|part| Pick::Part(part.id)));
             if let Some(pick) = pick.filter(|pick| !picks.contains(pick)) {
                 picks.push(pick);
             }
         }
         picks
+    }
+
+    /// A pitch point on one of the active buses.
+    fn on_bus(&self, rng: &mut Rng) -> Option<(u64, Point)> {
+        let bus = rng.pick(&self.buses)?;
+        let segment = rng.below(bus.points.len().saturating_sub(1));
+        let (a, b) = (*bus.points.get(segment)?, *bus.points.get(segment + 1)?);
+        let span = ((b.x - a.x).abs() + (b.y - a.y).abs()) / PITCH;
+        let along =
+            i32::try_from(rng.below(usize::try_from(span + 1).unwrap_or(1))).unwrap_or(0) * PITCH;
+        Some((
+            bus.id,
+            p(
+                a.x + (b.x - a.x).signum() * along,
+                a.y + (b.y - a.y).signum() * along,
+            ),
+        ))
     }
 
     fn pins(&self) -> Vec<Point> {
@@ -315,7 +395,7 @@ impl ActiveSheet {
 /// The next edit for the bench as it stands.
 fn generate(bench: &Bench, rng: &mut Rng) -> Step {
     let sheet = ActiveSheet::read(bench);
-    let roll = rng.below(100);
+    let roll = rng.below(112);
     let step = match roll {
         0..=19 => {
             let start = sheet.target(rng);
@@ -388,7 +468,34 @@ fn generate(bench: &Bench, rng: &mut Rng) -> Step {
         72..=76 => Some(Step::Paste(rng.point())),
         77..=81 => Some(Step::Sheet),
         82..=92 => Some(Step::Undo),
-        _ => Some(Step::Redo),
+        93..=99 => Some(Step::Redo),
+        100..=103 => {
+            let name = u32::try_from(rng.below(4)).unwrap_or(0);
+            Some(Step::Label(sheet.target(rng), name))
+        }
+        104..=107 => {
+            let start = sheet.target(rng);
+            let reach = rng.step(6);
+            let end = if rng.chance(50) {
+                p(start.x + reach, start.y)
+            } else {
+                p(start.x, start.y + reach)
+            };
+            Some(Step::Bus(
+                vec![start, end],
+                u32::try_from(rng.below(2)).unwrap_or(0),
+            ))
+        }
+        // The tap tool lands a tap's end on a wire.
+        _ => sheet.on_bus(rng).and_then(|(bus, from)| {
+            let to = if rng.chance(50) {
+                rng.pick(&sheet.vertices())
+            } else {
+                sheet.interior(rng)
+            }?;
+            let member = u32::try_from(rng.below(4)).unwrap_or(0);
+            (to != from).then_some(Step::Tap(bus, from, to, member))
+        }),
     };
     step.unwrap_or(Step::Undo)
 }
@@ -397,7 +504,10 @@ fn generate(bench: &Bench, rng: &mut Rng) -> Step {
 fn on_active_sheet(bench: &Bench, id: u64) -> bool {
     let document = bench.state().schematic.document();
     let exists = document.components.iter().any(|part| part.id == id)
-        || document.wires.iter().any(|wire| wire.id == id);
+        || document.wires.iter().any(|wire| wire.id == id)
+        || document.buses.iter().any(|bus| bus.id == id)
+        || document.bus_taps.iter().any(|tap| tap.id == id)
+        || document.net_labels.iter().any(|label| label.id == id);
     exists && bench.sheet_of(id) == bench.active_sheet()
 }
 
@@ -406,19 +516,27 @@ fn select(bench: &mut Bench, picks: &[Pick]) -> bool {
     let live = picks
         .iter()
         .copied()
-        .filter(|pick| match pick {
-            Pick::Part(id) | Pick::Wire(id) => on_active_sheet(bench, *id),
-        })
+        .filter(|pick| on_active_sheet(bench, pick.id()))
         .collect::<Vec<_>>();
     bench.select(|selection| {
         for pick in &live {
             match pick {
                 Pick::Part(id) => selection.select_component(*id),
                 Pick::Wire(id) => selection.select_wire(*id),
+                Pick::Bus(id) => selection.select_bus(*id),
+                Pick::Tap(id) => selection.select_bus_tap(*id),
+                Pick::Label(id) => selection.select_net_label(*id),
             }
         }
     });
     !live.is_empty()
+}
+
+/// The name a `Label` or `Bus` step numbered `name` gives on `sheet`: no
+/// step names a net on both sheets, though a copy pasted across carries
+/// its names with it.
+fn sheet_name(sheet: usize, kind: &str, name: u32) -> String {
+    format!("S{}{kind}{name}", sheet + 1)
 }
 
 /// Where a resistor turned to `rotation` stands for its `+` pin to be at
@@ -492,6 +610,31 @@ fn apply(bench: &mut Bench, step: &Step) {
         Step::Sheet => bench.activate_sheet(1 - bench.active_sheet()),
         Step::Undo => bench.undo(),
         Step::Redo => bench.redo(),
+        Step::Label(at, name) => {
+            let name = sheet_name(bench.active_sheet(), "N", *name);
+            bench.place_label(*at, &name);
+        }
+        Step::Bus(clicks, name) => {
+            let name = sheet_name(bench.active_sheet(), "B", *name);
+            bench.draw_bus(clicks, &format!("{name}[3:0]"));
+        }
+        Step::Tap(bus, from, to, member) => {
+            if !on_active_sheet(bench, *bus) {
+                return;
+            }
+            let base = bench
+                .state()
+                .schematic
+                .document()
+                .buses
+                .iter()
+                .find(|candidate| candidate.id == *bus)
+                .and_then(|candidate| candidate.declaration.as_ref())
+                .map(|declaration| declaration.name.clone());
+            if let Some(base) = base {
+                bench.place_tap(*bus, *from, *to, &format!("{base}[{member}]"));
+            }
+        }
     }
 }
 
@@ -502,13 +645,122 @@ enum Member {
     Pin(u64, String),
 }
 
-/// What one sheet holds: its objects by id and its nets.
+/// What one sheet holds: its objects of every kind by id, and its nets.
 #[derive(Debug, Clone, Default, PartialEq)]
 struct Sheet {
     parts: Vec<Component>,
     wires: Vec<Wire>,
     junctions: Vec<Junction>,
+    buses: Vec<Bus>,
+    taps: Vec<BusTap>,
+    labels: Vec<NetLabel>,
+    probes: Vec<SchematicProbe>,
+    notes: Vec<DesignNote>,
+    shapes: Vec<DocumentationShape>,
     nets: BTreeSet<BTreeSet<Member>>,
+}
+
+impl Sheet {
+    /// The objects of `document` that `on_sheet` admits, and `nets`.
+    fn read(
+        document: &SchematicDocument,
+        on_sheet: impl Fn(u64) -> bool,
+        nets: BTreeSet<BTreeSet<Member>>,
+    ) -> Self {
+        fn own<T: Clone>(
+            objects: &[T],
+            id: fn(&T) -> u64,
+            on_sheet: &dyn Fn(u64) -> bool,
+        ) -> Vec<T> {
+            let mut own = objects
+                .iter()
+                .filter(|object| on_sheet(id(object)))
+                .cloned()
+                .collect::<Vec<_>>();
+            own.sort_by_key(id);
+            own
+        }
+        Self {
+            parts: own(&document.components, |object| object.id, &on_sheet),
+            wires: own(&document.wires, |object| object.id, &on_sheet),
+            junctions: own(&document.junctions, |object| object.id, &on_sheet),
+            buses: own(&document.buses, |object| object.id, &on_sheet),
+            taps: own(&document.bus_taps, |object| object.id, &on_sheet),
+            labels: own(&document.net_labels, |object| object.id, &on_sheet),
+            probes: own(&document.probes, |object| object.id, &on_sheet),
+            notes: own(&document.design_notes, |object| object.id, &on_sheet),
+            shapes: own(
+                &document.documentation_shapes,
+                |object| object.id,
+                &on_sheet,
+            ),
+            nets,
+        }
+    }
+}
+
+/// `projected` with only the objects `on_sheet` admits.
+fn sheet_alone(projected: &SchematicDocument, on_sheet: impl Fn(u64) -> bool) -> SchematicDocument {
+    let mut alone = projected.clone();
+    alone.components.retain(|object| on_sheet(object.id));
+    alone.wires.retain(|object| on_sheet(object.id));
+    alone.junctions.retain(|object| on_sheet(object.id));
+    alone.buses.retain(|object| on_sheet(object.id));
+    alone.bus_taps.retain(|object| on_sheet(object.id));
+    alone.net_labels.retain(|object| on_sheet(object.id));
+    alone
+        .connections
+        .retain(|record| on_sheet(record.wire_id) && on_sheet(record.component_id));
+    alone
+}
+
+/// Each sheet's nets, as its own drawing makes them.
+///
+/// A net name joins every sheet that carries it, as the deck reads them:
+/// copying a named bus from one sheet to the other joins its nets there. So
+/// a sheet's nets are read from its own drawing alone, and an edit on the
+/// other sheet can change them only by changing this sheet's objects. While
+/// no net reaches both sheets, the deck's own nets are each sheet's already.
+fn sheet_nets(bench: &Bench, projected: &SchematicDocument) -> [BTreeSet<BTreeSet<Member>>; 2] {
+    let sheet_of = |member: &Member| match member {
+        Member::Wire(id) | Member::Pin(id, _) => bench.sheet_of(*id),
+    };
+    let nets = nets_by_member(projected);
+    let shared = nets.iter().any(|net| {
+        let mut sheets = net.iter().map(sheet_of);
+        let first = sheets.next();
+        sheets.any(|sheet| Some(sheet) != first)
+    });
+    if shared {
+        return [0, 1].map(|sheet| {
+            nets_by_member(&sheet_alone(projected, |id| bench.sheet_of(id) == sheet))
+        });
+    }
+    let mut by_sheet = [BTreeSet::new(), BTreeSet::new()];
+    for net in nets {
+        if let Some(member) = net.first() {
+            by_sheet[sheet_of(member)].insert(net);
+        }
+    }
+    by_sheet
+}
+
+/// The nets `document` makes, each as the wires and pins it joins.
+fn nets_by_member(document: &SchematicDocument) -> BTreeSet<BTreeSet<Member>> {
+    let extracted = rspice_design::connectivity::extract(document, |_| None, |_| None);
+    let mut nets = std::collections::BTreeMap::<String, BTreeSet<Member>>::new();
+    for wire in &document.wires {
+        let name = extracted
+            .net_of_wire(wire.id)
+            .map_or_else(|| format!("wire {}", wire.id), |net| net.spice_name());
+        nets.entry(name).or_default().insert(Member::Wire(wire.id));
+    }
+    for terminal in &extracted.terminals {
+        nets.entry(terminal.net_name.clone())
+            .or_default()
+            .insert(Member::Pin(terminal.component_id, terminal.pin.clone()));
+    }
+    nets.into_values().collect()
 }
 
 /// Everything an undo has to put back.
@@ -521,46 +773,12 @@ struct World {
 impl World {
     fn read(bench: &Bench, projected: &SchematicDocument) -> Self {
         let document = bench.state().schematic.document();
-        let mut sheets = [Sheet::default(), Sheet::default()];
-        for part in &document.components {
-            sheets[bench.sheet_of(part.id)].parts.push(part.clone());
-        }
-        for wire in &document.wires {
-            sheets[bench.sheet_of(wire.id)].wires.push(wire.clone());
-        }
-        for junction in &document.junctions {
-            sheets[bench.sheet_of(junction.id)]
-                .junctions
-                .push(*junction);
-        }
-        for sheet in &mut sheets {
-            sheet.parts.sort_by_key(|part| part.id);
-            sheet.wires.sort_by_key(|wire| wire.id);
-            sheet.junctions.sort_by_key(|junction| junction.id);
-        }
-        let extracted = rspice_design::connectivity::extract(projected, |_| None, |_| None);
-        let mut nets = std::collections::BTreeMap::<String, BTreeSet<Member>>::new();
-        for wire in &projected.wires {
-            let name = extracted
-                .net_of_wire(wire.id)
-                .map_or_else(|| format!("wire {}", wire.id), |net| net.spice_name());
-            nets.entry(name).or_default().insert(Member::Wire(wire.id));
-        }
-        for terminal in &extracted.terminals {
-            nets.entry(terminal.net_name.clone())
-                .or_default()
-                .insert(Member::Pin(terminal.component_id, terminal.pin.clone()));
-        }
-        for net in nets.into_values() {
-            let first = match net.first() {
-                Some(Member::Wire(id) | Member::Pin(id, _)) => *id,
-                None => continue,
-            };
-            sheets[bench.sheet_of(first)].nets.insert(net);
-        }
+        let [first, second] = sheet_nets(bench, projected);
+        let sheet =
+            |index: usize, nets| Sheet::read(document, |id| bench.sheet_of(id) == index, nets);
         Self {
             active: bench.active_sheet(),
-            sheets,
+            sheets: [sheet(0, first), sheet(1, second)],
         }
     }
 }
@@ -819,10 +1037,23 @@ fn step_and_check(
     Ok(after)
 }
 
-/// The fixture: each sheet draws the same parts and wiring at the same
-/// coordinates — a T, an unmarked crossing and an L — and neither history
-/// holds a step.
-fn fixture() -> (Bench, AppState) {
+/// Which drawing a sequence starts from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Drawing {
+    /// Parts and wires alone, the drawing the first regressions were found
+    /// on: their object numbers count from it.
+    Wiring,
+    /// The wiring, and on it a bus tapped onto two wires, two net labels
+    /// and a probe flag, which the property test starts from.
+    Annotated,
+}
+
+/// The fixture: each sheet draws the same objects at the same coordinates —
+/// a T, an unmarked crossing and an L, and annotated, a bus above them
+/// tapped onto the T's top wire and onto the L's corner, labels on the
+/// crossing wire and at the T's foot, and a probe at the crossing wire's
+/// end — and neither history holds a step. Each sheet names its own nets.
+fn fixture(drawing: Drawing) -> (Bench, AppState) {
     let mut bench = Bench::new(&[]);
     for sheet in 0..2 {
         bench.activate_sheet(sheet);
@@ -835,16 +1066,42 @@ fn fixture() -> (Bench, AppState) {
         bench.draw_wire(&[p(120, 180), p(280, 180)]);
         bench.draw_wire(&[p(320, 100), p(360, 160)]);
     }
+    if drawing == Drawing::Annotated {
+        for sheet in 0..2 {
+            bench.activate_sheet(sheet);
+            let name = sheet_name(sheet, "D", 0);
+            let bus = bench.draw_bus(&[p(120, 40), p(380, 40)], &format!("{name}[3:0]"));
+            let taps = [
+                bench.place_tap(bus, p(160, 40), p(160, 100), &format!("{name}[1]")),
+                bench.place_tap(bus, p(360, 40), p(360, 100), &format!("{name}[2]")),
+            ];
+            let labels = [
+                bench.place_label(p(240, 180), &sheet_name(sheet, "X", 0)),
+                bench.place_label(p(200, 220), &sheet_name(sheet, "Y", 0)),
+            ];
+            let probe = bench.place_probe(p(280, 180));
+            assert!(
+                bus != 0 && !taps.contains(&0) && !labels.contains(&0) && probe != 0,
+                "the annotated fixture is incomplete\n{}",
+                bench.describe()
+            );
+        }
+    }
     bench.activate_sheet(0);
     bench.forget_history();
     let state = bench.state().clone();
     (bench, state)
 }
 
-/// Replay `steps` from the fixture, as a regression test pins a sequence the
-/// property test reported; the first failure, if any.
+/// Replay `steps` from the wiring fixture, as a regression test pins a
+/// sequence the property test reported; the first failure, if any.
 pub(super) fn replay(steps: &[Step]) -> Result<(), String> {
-    let (mut bench, fixture) = fixture();
+    replay_on(Drawing::Wiring, steps)
+}
+
+/// Replay `steps` from `drawing`; the first failure, if any.
+pub(super) fn replay_on(drawing: Drawing, steps: &[Step]) -> Result<(), String> {
+    let (mut bench, fixture) = fixture(drawing);
     run(&mut bench, &fixture, steps).map_err(|failure| {
         format!(
             "step {} `{}`: {}",
@@ -925,7 +1182,7 @@ fn shrink(
 
 /// Check every seed; report each different way of failing once, shrunk.
 fn check_sequences(seeds: std::ops::Range<u64>) {
-    let (mut bench, fixture) = fixture();
+    let (mut bench, fixture) = fixture(Drawing::Annotated);
     let mut seen = BTreeSet::new();
     let mut reports = Vec::new();
     for seed in seeds {
