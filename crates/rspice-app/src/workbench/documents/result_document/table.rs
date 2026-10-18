@@ -72,7 +72,8 @@ fn show_operating_point_table(ui: &mut Ui, state: &mut AppState) -> bool {
     if row_count == 0 {
         return false;
     }
-    viewer::show_operating_point_table(ui, &analysis.data, row_count);
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    viewer::show_operating_point_table(ui, &analysis.data, row_count, &quantity_policy);
     true
 }
 

@@ -304,7 +304,29 @@ fn operating_point_row_at(analysis: &AnalysisResult, mut index: usize) -> Option
     })
 }
 
-pub fn show_operating_point_table(ui: &mut Ui, analysis: &AnalysisResult, row_count: usize) {
+/// One operating-point row as "Copy row" puts it on the clipboard: the value
+/// with its unit in the format Copied values chose, at full precision.
+fn copied_operating_point_row(
+    row: &TypedOpRow,
+    quantity_policy: &QuantityPresentationPolicy,
+) -> String {
+    // A value without a unit stays as it is: an engineering prefix with no
+    // unit after it would read as a unit of its own.
+    let value = match row.value.parse::<f64>() {
+        Ok(value) if value.is_finite() && !row.unit.is_empty() => {
+            quantity_policy.copy_si_value(value, &row.unit)
+        }
+        _ => format!("{} {}", row.value, row.unit).trim_end().to_owned(),
+    };
+    format!("{}\t{}\t{value}\t{}", row.source, row.quantity, row.status)
+}
+
+pub fn show_operating_point_table(
+    ui: &mut Ui,
+    analysis: &AnalysisResult,
+    row_count: usize,
+    quantity_policy: &QuantityPresentationPolicy,
+) {
     let t = Tokens::get(ui.ctx());
     egui_extras::TableBuilder::new(ui)
         .striped(true)
@@ -325,10 +347,7 @@ pub fn show_operating_point_table(ui: &mut Ui, analysis: &AnalysisResult, row_co
                 let Some(value) = operating_point_row_at(analysis, row.index()) else {
                     return;
                 };
-                let exact_row = format!(
-                    "{}\t{}\t{}\t{}\t{}",
-                    value.source, value.quantity, value.value, value.unit, value.status
-                );
+                let exact_row = copied_operating_point_row(&value, quantity_policy);
                 for (heading, text) in [
                     ("Source", value.source),
                     ("Quantity", value.quantity),
@@ -1068,6 +1087,34 @@ mod tests {
         analysis_type::AnalysisType,
         operating_point::{DcOpResult, OperatingPointValue},
     };
+
+    /// A copied operating-point row carries its value in the format Copied
+    /// values chose, unit included, at full precision.
+    #[test]
+    fn a_copied_operating_point_row_follows_copied_values() {
+        use rspice_app_types::quantity::CopiedValueFormat;
+
+        let row = TypedOpRow {
+            source: "Node".to_owned(),
+            quantity: "V(out)".to_owned(),
+            value: format!("{:.17e}", 1.5e-3),
+            unit: "V".to_owned(),
+            status: "converged".to_owned(),
+        };
+        let mut policy = QuantityPresentationPolicy::default();
+        policy.copied_value_format = CopiedValueFormat::EngineeringNotationWithUnit;
+        let engineering = copied_operating_point_row(&row, &policy);
+        assert!(
+            engineering.starts_with("Node\tV(out)\t1.5") && engineering.contains(" mV\tconverged"),
+            "{engineering}"
+        );
+        policy.copied_value_format = CopiedValueFormat::ScientificNotationWithSiUnit;
+        let scientific = copied_operating_point_row(&row, &policy);
+        let value = scientific.split('\t').nth(2).expect("value column");
+        let (number, unit) = value.split_once(' ').expect("value and unit");
+        assert_eq!(unit, "V");
+        assert_eq!(number.parse::<f64>().expect("a number"), 1.5e-3);
+    }
     struct Fixture {
         model: StripModel,
         view: TableView,
