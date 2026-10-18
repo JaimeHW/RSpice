@@ -2214,11 +2214,13 @@ pub struct DrawingSheetGeometry {
     pub frame_placement: DrawingSheetFramePlacement,
 }
 
-/// Authored title-grid rows for each durable title-block template.
+/// Authored title-grid rows for each durable title-block template: the rows
+/// a flowed block pours its fields into, and the four rows ISO 7200's form
+/// is drawn on.
 ///
-/// All canvas, preview, setup, and publication paths consume this single
-/// contract so a field never moves between cells or gains a different text
-/// budget at output time.
+/// Every renderer draws the cells laid out from these (see
+/// [`drawing_sheet_title_layout`]) so a field never moves between cells or
+/// gains a different text budget at output time.
 #[must_use]
 pub const fn drawing_sheet_title_block_rows(
     template: DrawingSheetTitleBlockTemplate,
@@ -2234,14 +2236,15 @@ pub const fn drawing_sheet_title_block_rows(
 /// Authored padding between a title-grid rule and the lettering inside it.
 pub const DRAWING_SHEET_TITLE_CELL_PADDING_UM: u64 = 2_000;
 
-/// Where a caption sits in its title cell, as a fraction of the cell height
+/// Where a caption sits in its title row, as a fraction of the row height
 /// measured from the top rule. Captions ride high and values sit below them
-/// on the cell's lower portion, the proportion that keeps the value dominant.
+/// on the row's lower portion, the proportion that keeps the value dominant.
 ///
-/// Canvas and hardcopy both place a line on this fraction — the canvas
-/// centring the laid-out line on it, publication converting it to a baseline
-/// — so the two must read it from here rather than each carrying its own
-/// copy, or a change to one silently moves a field relative to the other.
+/// The title layout seats every line on these fractions, and canvas and
+/// hardcopy both letter a line on the seat it is given — the canvas centring
+/// the laid-out line on it, publication converting it to a baseline — so
+/// neither carries a copy that could silently move a field relative to the
+/// other.
 pub const DRAWING_SHEET_TITLE_CAPTION_POSITION: (u64, u64) = (1, 3);
 
 /// Where a field value sits in its title cell. See
