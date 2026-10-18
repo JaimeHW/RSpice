@@ -8,7 +8,7 @@ mod transcript;
 
 use problems::{ProblemCount, active_problem_count, problems};
 
-use egui::{Align, Grid, Layout, ScrollArea, Sense, Ui, Vec2};
+use egui::{Align, Layout, ScrollArea, Sense, Ui, Vec2};
 
 use crate::diagnostics::LogSeverity;
 use crate::state::SimulationState;
@@ -30,11 +30,23 @@ const CONSOLE_ACTION_SIZE: f32 = 27.0;
 const CONSOLE_ACTION_MARGIN_RIGHT: f32 = 3.0;
 const CONSOLE_BODY_PADDING_TOP: f32 = 7.0;
 const CONSOLE_BODY_PADDING_BOTTOM: f32 = 7.0;
+/// Where a page's text stands from the dock's sides. A table's bands and
+/// row fills run edge to edge; only what is written in them is inset.
 const CONSOLE_BODY_PADDING_X: f32 = 10.0;
 const CONSOLE_ROW_MIN_HEIGHT: f32 = 16.0;
+/// A table's header band: one line, like every row under it, with a little
+/// air so the headings read as headings.
+const CONSOLE_TABLE_HEADER_HEIGHT: f32 = CONSOLE_ROW_MIN_HEIGHT + 4.0;
 const CONSOLE_COLUMN_GAP: f32 = 9.0;
+/// How far a table cell's text stands inside the cell, and how far the cell
+/// runs past its widest text. Two of them are the gutter between one
+/// column's widest text and the next column's, the same between every pair.
+const CONSOLE_CELL_INSET: f32 = 6.0;
 /// Space between the tabs and the Console page's controls beside them.
 const CONSOLE_TOOLBAR_GAP: f32 = 12.0;
+/// A select's frame around its text: the inset before it and the chevron's
+/// well after it. A select is sized to its longest choice plus this.
+const CONSOLE_SELECT_CHROME: f32 = 32.0;
 /// Side of a row's leading problem mark, and the gutter every row reserves for
 /// it so a marked row's columns line up with an unmarked row's. Both read from
 /// the kit, so a console row's mark is the mark every other panel sets.
@@ -54,13 +66,14 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let body_rect = ui.available_rect_before_wrap();
     ui.painter()
         .rect_filled(body_rect, 0.0, Tokens::get(ui.ctx()).color.bg_inset);
+    // The page runs from side to side: a table's header band and row fills
+    // meet the dock's edges, and each page insets its own text by
+    // `CONSOLE_BODY_PADDING_X` (see `padded`). Top and bottom are inset here,
+    // for every page alike.
     let content_rect = egui::Rect::from_min_max(
+        egui::pos2(body_rect.left(), body_rect.top() + CONSOLE_BODY_PADDING_TOP),
         egui::pos2(
-            body_rect.left() + CONSOLE_BODY_PADDING_X,
-            body_rect.top() + CONSOLE_BODY_PADDING_TOP,
-        ),
-        egui::pos2(
-            body_rect.right() - CONSOLE_BODY_PADDING_X,
+            body_rect.right(),
             body_rect.bottom() - CONSOLE_BODY_PADDING_BOTTOM,
         ),
     );
@@ -69,7 +82,8 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             .max_rect(content_rect)
             .layout(Layout::top_down(Align::Min)),
         |ui| match page {
-            ConsolePage::Console => transcript::console(ui, &mut app.state),
+            // The transcript is prose, and keeps the inset on every side.
+            ConsolePage::Console => padded(ui, |ui| transcript::console(ui, &mut app.state)),
             ConsolePage::Problems => {
                 // A waiver changes what refuses a run, as the rule deck does,
                 // so a run prepared or checked before it is not authorized
@@ -215,10 +229,13 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             });
         },
     );
+    // The strip's last row of pixels, inside the strip: centred on its
+    // bottom edge, half the line fell on the body, whose fill then painted
+    // over it, and the strip had no visible rule at all.
     if layout.show_console_body {
         ui.painter().hline(
             header.response.rect.x_range(),
-            header.response.rect.bottom(),
+            header.response.rect.bottom() - 0.5,
             egui::Stroke::new(1.0, t.color.border),
         );
     }
@@ -525,69 +542,47 @@ fn measurements(ui: &mut Ui, app: &mut RSpiceApp) {
         .simulation
         .active_run()
         .map(|run| run.label.clone());
-    let mut add_measurement = false;
-    ScrollArea::vertical()
-        .id_salt("workbench.measurements")
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                if let Some(label) = run_label.as_deref() {
-                    ui.label(
-                        egui::RichText::new(label)
-                            .font(theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular))
-                            .color(Tokens::get(ui.ctx()).color.text_dim),
-                    );
-                } else {
-                    muted(ui, "No retained result selected");
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    add_measurement = ui
-                        .add_enabled(
-                            app.state.simulation.active_analysis().is_some(),
-                            egui::Button::new("+ Add measurement…"),
-                        )
-                        .on_disabled_hover_text(
-                            "Select a retained result analysis before creating a measurement",
-                        )
-                        .clicked();
-                });
-            });
-            ui.separator();
-            if rows.is_empty() {
-                if app.state.simulation.active_run().is_some() {
-                    muted(ui, "This dataset has no computed measurements.");
-                } else {
-                    muted(
-                        ui,
-                        "Select a retained result dataset to inspect measurements.",
-                    );
-                }
-                return;
+    let add_measurement = toolbar(ui, |ui| {
+        ui.horizontal(|ui| {
+            if let Some(label) = run_label.as_deref() {
+                ui.label(
+                    egui::RichText::new(label)
+                        .font(theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular))
+                        .color(Tokens::get(ui.ctx()).color.text_dim),
+                );
+            } else {
+                muted(ui, "No retained result selected");
             }
-            Grid::new("workbench.measurements.table")
-                .num_columns(7)
-                .striped(true)
-                .spacing(Vec2::new(16.0, 4.0))
-                .show(ui, |ui| {
-                    measurement_header(ui, "Measurement");
-                    measurement_header(ui, "Expression");
-                    measurement_header(ui, "Value");
-                    measurement_header(ui, "Spec");
-                    measurement_header(ui, "Margin");
-                    measurement_header(ui, "Worst point");
-                    measurement_header(ui, "Status");
-                    ui.end_row();
-                    for row in &rows {
-                        measurement_cell(ui, &row.name, false);
-                        measurement_cell(ui, &row.expression, true);
-                        measurement_cell(ui, &row.value, true);
-                        measurement_cell(ui, &row.specification, true);
-                        measurement_cell(ui, &row.margin, true);
-                        measurement_cell(ui, &row.worst_point, false);
-                        measurement_status_cell(ui, row.status, row.failed);
-                        ui.end_row();
-                    }
-                });
+            // The kit's button, at the kit's control height, so this toolbar
+            // is as tall as the Problems page's and the table under it starts
+            // where that page's does.
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                crate::ui::widgets::Button::new("+ Add measurement…")
+                    .enabled(app.state.simulation.active_analysis().is_some())
+                    .show(ui)
+                    .on_disabled_hover_text(
+                        "Select a retained result analysis before creating a measurement",
+                    )
+                    .clicked()
+            })
+            .inner
+        })
+        .inner
+    });
+    if rows.is_empty() {
+        padded(ui, |ui| {
+            if app.state.simulation.active_run().is_some() {
+                muted(ui, "This dataset has no computed measurements.");
+            } else {
+                muted(
+                    ui,
+                    "Select a retained result dataset to inspect measurements.",
+                );
+            }
         });
+    } else {
+        measurement_table(ui, &rows);
+    }
     // Add measurement draws over the result viewer, so it opens there.
     if add_measurement {
         app.state
@@ -601,12 +596,17 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
     let mut open_log = None;
     ScrollArea::vertical()
         .id_salt("workbench.task_log")
+        // egui otherwise keeps a scrolled area at least 64 points tall, past
+        // the bottom edge of a dock dragged shorter than that.
+        .min_scrolled_height(0.0)
         .show(ui, |ui| {
             if app.state.simulation.retained.runs.is_empty() {
-                muted(
-                    ui,
-                    "Queued, active, cancelled, and completed simulation tasks will appear here.",
-                );
+                padded(ui, |ui| {
+                    muted(
+                        ui,
+                        "Queued, active, cancelled, and completed simulation tasks will appear here.",
+                    );
+                });
             }
             // Both columns fit their widest text, measured in the row's own
             // font: the status over every state a run can be in, so a row
@@ -1050,41 +1050,189 @@ fn specification_text(specification: &crate::state::SpecEntry) -> String {
     }
 }
 
-fn measurement_header(ui: &mut Ui, text: &str) {
-    ui.label(
-        egui::RichText::new(text)
-            .font(theme::sans(CONSOLE_FONT_SIZE, FontWeight::SemiBold))
-            .color(Tokens::get(ui.ctx()).color.text_dim),
-    );
+/// The measurement table's headings, in the order its columns print.
+const MEASUREMENT_HEADINGS: [&str; 7] = [
+    "Measurement",
+    "Expression",
+    "Value",
+    "Spec",
+    "Margin",
+    "Worst point",
+    "Status",
+];
+
+/// One measurement's cells, in [`MEASUREMENT_HEADINGS`] order, each with
+/// whether it is printed in the monospace face. Names are words; values,
+/// expressions and verdicts are monospace so their digits line up.
+fn measurement_cells(row: &MeasurementTableRow) -> [(&str, bool); 7] {
+    [
+        (row.name.as_str(), false),
+        (row.expression.as_str(), true),
+        (row.value.as_str(), true),
+        (row.specification.as_str(), true),
+        (row.margin.as_str(), true),
+        (row.worst_point.as_str(), false),
+        (row.status, true),
+    ]
 }
 
-fn measurement_cell(ui: &mut Ui, text: &str, mono: bool) {
-    let font = if mono {
-        theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular)
+fn measurement_font(mono: bool, weight: FontWeight) -> egui::FontId {
+    if mono {
+        theme::mono(CONSOLE_FONT_SIZE, weight)
     } else {
-        theme::sans(CONSOLE_FONT_SIZE, FontWeight::Regular)
+        theme::sans(CONSOLE_FONT_SIZE, weight)
+    }
+}
+
+/// The measurements, as the dock's other table is drawn: a header band and
+/// one row per measurement, both edge to edge, every column as wide as its
+/// widest cell plus the cell inset on each side, and the last one taking
+/// what is left. Every other row is striped, so a long row can be followed
+/// across.
+fn measurement_table(ui: &mut Ui, rows: &[MeasurementTableRow]) {
+    let tokens = Tokens::get(ui.ctx());
+    let width_of = |ui: &Ui, text: &str, font: egui::FontId| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), font, egui::Color32::PLACEHOLDER)
+            .size()
+            .x
     };
-    ui.label(
-        egui::RichText::new(text)
-            .font(font)
-            .color(Tokens::get(ui.ctx()).color.text),
+    let mut widths = MEASUREMENT_HEADINGS.map(|heading| {
+        width_of(
+            ui,
+            heading,
+            theme::mono(CONSOLE_FONT_SIZE, FontWeight::SemiBold),
+        )
+    });
+    for row in rows {
+        for (width, (text, mono)) in widths.iter_mut().zip(measurement_cells(row)) {
+            *width = width.max(width_of(
+                ui,
+                text,
+                measurement_font(mono, FontWeight::Regular),
+            ));
+        }
+    }
+    let band = ui.available_rect_before_wrap().x_range();
+    let mut starts = [0.0_f32; 7];
+    let mut x = band.min + CONSOLE_BODY_PADDING_X - CONSOLE_CELL_INSET;
+    for (start, width) in starts.iter_mut().zip(widths) {
+        *start = x;
+        x += width + 2.0 * CONSOLE_CELL_INSET;
+    }
+
+    // The header shows only over at least one whole row, and the body holds
+    // whole rows: a dock dragged short cuts neither a row nor the band, and
+    // leaves its bottom inset empty.
+    let pitch = CONSOLE_ROW_MIN_HEIGHT + ui.spacing().item_spacing.y;
+    if ui.available_height() + 0.5 < CONSOLE_TABLE_HEADER_HEIGHT + CONSOLE_ROW_MIN_HEIGHT {
+        return;
+    }
+    let (_, header) = ui.allocate_space(Vec2::new(band.span(), CONSOLE_TABLE_HEADER_HEIGHT));
+    let body_height =
+        ((ui.available_height() + ui.spacing().item_spacing.y) / pitch).floor() * pitch;
+    paint_header_band(ui, header, &starts[1..], None);
+    for (start, heading) in starts.iter().zip(MEASUREMENT_HEADINGS) {
+        ui.painter().text(
+            egui::pos2(start + CONSOLE_CELL_INSET, header.center().y),
+            egui::Align2::LEFT_CENTER,
+            heading,
+            theme::mono(CONSOLE_FONT_SIZE, FontWeight::SemiBold),
+            tokens.color.text_faint,
+        );
+    }
+    ScrollArea::vertical()
+        .id_salt("workbench.measurements")
+        .auto_shrink([false, true])
+        .max_height(body_height)
+        // egui otherwise keeps a scrolled area at least 64 points tall,
+        // past the dock's bottom edge.
+        .min_scrolled_height(0.0)
+        .show_rows(ui, CONSOLE_ROW_MIN_HEIGHT, rows.len(), |ui, range| {
+            for index in range {
+                let Some(row) = rows.get(index) else {
+                    continue;
+                };
+                let (_, rect) =
+                    ui.allocate_space(Vec2::new(ui.available_width(), CONSOLE_ROW_MIN_HEIGHT));
+                if index % 2 == 1 {
+                    paint_row_fill(ui, rect, band.max, ui.visuals().faint_bg_color);
+                }
+                for (column, (start, (text, mono))) in
+                    starts.iter().zip(measurement_cells(row)).enumerate()
+                {
+                    // The status is the one verdict cell: a failure reads in
+                    // the error colour, as ADE Assembler marks it, and a pass
+                    // and every other status are plain text.
+                    let ink = if column == 6 && row.failed {
+                        tokens.color.err
+                    } else {
+                        tokens.color.text
+                    };
+                    let cell = egui::Rect::from_x_y_ranges(
+                        *start..=starts.get(column + 1).copied().unwrap_or(band.max),
+                        rect.y_range(),
+                    );
+                    ui.painter()
+                        .with_clip_rect(cell.intersect(ui.clip_rect()))
+                        .text(
+                            egui::pos2(start + CONSOLE_CELL_INSET, rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            text,
+                            measurement_font(mono, FontWeight::Regular),
+                            ink,
+                        );
+                }
+                let label = row_announcement(&measurement_cells(row).map(|(text, _)| text));
+                let response =
+                    ui.interact(rect, ui.id().with(("measurement", index)), Sense::hover());
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Label,
+                        ui.is_enabled(),
+                        label.clone(),
+                    )
+                });
+            }
+        });
+}
+
+/// A console table's header band over `rect`: its fill, the cell under the
+/// pointer where its cells are controls, the rule under it, and a hairline
+/// at each of `dividers`, the left edges of every cell but the first — as
+/// the Verify table draws its head. The band is drawn from edge to edge of
+/// the dock; only the headings in it are inset.
+fn paint_header_band(ui: &Ui, rect: egui::Rect, dividers: &[f32], hovered: Option<egui::Rect>) {
+    let tokens = Tokens::get(ui.ctx());
+    ui.painter().rect_filled(rect, 0.0, tokens.color.bg_panel_2);
+    if let Some(cell) = hovered {
+        ui.painter().rect_filled(cell, 0.0, tokens.color.bg_hover);
+    }
+    for x in dividers {
+        ui.painter().vline(
+            *x,
+            rect.y_range(),
+            egui::Stroke::new(1.0, tokens.color.border),
+        );
+    }
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        egui::Stroke::new(1.0, tokens.color.border),
     );
 }
 
-/// The status cell: the one verdict cell of a results table. A failure reads
-/// in the error colour, as ADE Assembler marks it; a pass and every other
-/// status are plain text.
-fn measurement_status_cell(ui: &mut Ui, text: &str, failed: bool) {
-    let tokens = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(text)
-            .font(theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular))
-            .color(if failed {
-                tokens.color.err
-            } else {
-                tokens.color.text
-            }),
-    );
+/// Fill a table row from its left edge to `right`, the dock's right edge.
+///
+/// A row is laid out inside its scroll area, which gives up the scrollbar's
+/// width while the bar is drawn; the fill is not given up with it. It runs
+/// on under the bar, and the bar is drawn over it.
+fn paint_row_fill(ui: &Ui, row: egui::Rect, right: f32, fill: egui::Color32) {
+    let mut clip = ui.clip_rect();
+    clip.max.x = clip.max.x.max(right);
+    ui.painter()
+        .with_clip_rect(clip)
+        .rect_filled(row.with_max_x(right), 0.0, fill);
 }
 
 /// A run's lifecycle word, and the mark it earns. Lifecycle words are states,
@@ -1240,6 +1388,9 @@ fn console_clear_action(page: ConsolePage, console_has_output: bool) -> ConsoleC
 
 /// One task-history line: the problem-mark gutter, then the status, run and
 /// figures columns. Severity is the mark's alone; the columns are neutral.
+///
+/// The row runs from side to side of the dock, so its hover fill does; its
+/// text stands in the page's text column.
 fn row_with_sense(
     ui: &mut Ui,
     columns: TaskColumns,
@@ -1252,12 +1403,13 @@ fn row_with_sense(
     sense: egui::Sense,
 ) -> egui::Response {
     let t = Tokens::get(ui.ctx());
-    let message_x_offset = CONSOLE_MARK_GUTTER
+    let message_x_offset = CONSOLE_BODY_PADDING_X
+        + CONSOLE_MARK_GUTTER
         + columns.status
         + CONSOLE_COLUMN_GAP
         + columns.label
         + CONSOLE_COLUMN_GAP;
-    let message_width = (ui.available_width() - message_x_offset).max(1.0);
+    let message_width = (ui.available_width() - message_x_offset - CONSOLE_BODY_PADDING_X).max(1.0);
     let message_galley = ui.painter().layout(
         message.to_owned(),
         theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular),
@@ -1287,8 +1439,9 @@ fn row_with_sense(
     if sense.senses_click() && response.hovered() {
         ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
     }
-    paint_row_mark(ui, rect.left(), rect.top(), problem);
-    let status_x = rect.left() + CONSOLE_MARK_GUTTER;
+    let text_left = rect.left() + CONSOLE_BODY_PADDING_X;
+    paint_row_mark(ui, text_left, rect.top(), problem);
+    let status_x = text_left + CONSOLE_MARK_GUTTER;
     let label_x = status_x + columns.status + CONSOLE_COLUMN_GAP;
     let message_x = label_x + columns.label + CONSOLE_COLUMN_GAP;
     ui.painter().text(
@@ -1307,7 +1460,7 @@ fn row_with_sense(
     );
     let message_clip = egui::Rect::from_min_max(
         egui::pos2(message_x, rect.top()),
-        egui::pos2(rect.right(), rect.bottom()),
+        egui::pos2(rect.right() - CONSOLE_BODY_PADDING_X, rect.bottom()),
     );
     let message_y = if message_galley.size().y <= CONSOLE_ROW_MIN_HEIGHT {
         rect.center().y - message_galley.size().y * 0.5
@@ -1327,12 +1480,46 @@ fn simulation_progress_percent(progress: f64) -> u8 {
     (progress.clamp(0.0, 1.0) * 100.0).round() as u8
 }
 
+/// Run `add` in the page's text column: the page less `CONSOLE_BODY_PADDING_X`
+/// on each side. What a page writes outside a table — its toolbar, a note,
+/// an empty line, the transcript — stands here, so it lines up with the
+/// first cell's text in the table below it.
+fn padded<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let page = ui.available_rect_before_wrap();
+    let column = egui::Rect::from_min_max(
+        egui::pos2(page.left() + CONSOLE_BODY_PADDING_X, page.top()),
+        egui::pos2(
+            (page.right() - CONSOLE_BODY_PADDING_X).max(page.left() + CONSOLE_BODY_PADDING_X),
+            page.bottom(),
+        ),
+    );
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(column)
+            .layout(Layout::top_down(Align::Min)),
+        add,
+    )
+    .inner
+}
+
+/// A page's toolbar: its controls in the text column, with as much space
+/// under them as the body leaves over them, so the controls sit evenly
+/// between the tab strip and the table's header band. Every page with a
+/// toolbar draws it here, at the same height, so moving between them does
+/// not move it.
+fn toolbar<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let inner = padded(ui, add);
+    ui.add_space(CONSOLE_BODY_PADDING_TOP);
+    inner
+}
+
 /// The line a page paints instead of rows.
 ///
 /// It stands exactly where the page's first row would: same left edge, same
 /// leading, same ink as a quiet row. An inset, centred notice floated in the
 /// middle of an otherwise tight panel and read as a different surface from
 /// the one the reader switched to; this reads as a list with nothing in it.
+/// A page that runs side to side writes it in [`padded`].
 fn muted(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
     ui.add(

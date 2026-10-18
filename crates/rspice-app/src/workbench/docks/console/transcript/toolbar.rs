@@ -3,6 +3,7 @@
 
 use egui::{Key, Modifiers, Rect, Sense, Ui, Vec2, pos2};
 
+use super::super::CONSOLE_SELECT_CHROME;
 use super::lines::Rows;
 use super::{body_id, find_id, source};
 use crate::state::SimulationRun;
@@ -18,10 +19,6 @@ use crate::workbench::state::{ConsoleChannel, ConsoleSeverity, ConsoleView};
 
 /// What the channel selector calls the session's log.
 const SESSION: &str = "Session";
-
-/// A select's frame around its text: the inset before it and the chevron's
-/// well after it.
-const SELECT_CHROME: f32 = 32.0;
 
 /// The find field's width, in characters of its face, and the least it
 /// shrinks to.
@@ -82,7 +79,7 @@ fn channel(ui: &mut Ui, runs: &[SimulationRun], view: &mut ConsoleView, advance:
         "Console channel",
         &selected,
         &options,
-        advance * widest as f32 + SELECT_CHROME,
+        advance * widest as f32 + CONSOLE_SELECT_CHROME,
     )
     .picked;
     if let Some(picked) = picked {

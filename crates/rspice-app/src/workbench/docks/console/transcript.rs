@@ -188,6 +188,9 @@ fn body(ui: &mut Ui, state: &AppState, view: &mut ConsoleView) -> Intent {
     let output = ScrollArea::vertical()
         .id_salt(("workbench.console.body", view.channel))
         .auto_shrink(false)
+        // egui otherwise keeps a scrolled area at least 64 points tall, past
+        // the bottom edge of a dock dragged shorter than that.
+        .min_scrolled_height(0.0)
         .stick_to_bottom(true)
         .show_viewport(ui, |ui, visible| {
             ui.set_height(lead + rows.height());
