@@ -515,6 +515,45 @@ fn owned_netlist_history_compare_and_restore_are_persisted_and_monotonic() {
     );
 }
 
+/// The import review starts from the dialect Preferences sets only when the
+/// deck names none; markers in the deck win over the preference.
+#[test]
+fn a_deck_naming_no_dialect_starts_from_the_preferred_one() {
+    for (source, expected) in [
+        (
+            &b"* plain\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n"[..],
+            crate::state::NetlistSourceDialect::Spice3Ngspice,
+        ),
+        (
+            &b"* hspice deck\n.option post=2\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n"[..],
+            crate::state::NetlistSourceDialect::Hspice,
+        ),
+    ] {
+        let mut state = AppState::default();
+        state
+            .ui
+            .preferences
+            .set_choice(
+                crate::workbench::ChoicePreference::ImportedNetlistDialect,
+                1,
+            )
+            .expect("SPICE3 / ngspice is an importable dialect");
+        let transaction =
+            crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(&mut state)
+                .expect("replacement transaction starts");
+        assert!(stage_netlist_import(
+            &mut state,
+            transaction,
+            NetlistImportMode::ImportIntoProject,
+            source.to_vec(),
+            None,
+            "deck.cir".to_owned(),
+        ));
+        let review = state.ui.netlist.import_review.as_ref().unwrap();
+        assert_eq!(review.selected_dialect, expected);
+    }
+}
+
 #[test]
 fn detected_foreign_dialect_requires_explicit_acceptance() {
     let mut state = AppState::default();

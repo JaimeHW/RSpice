@@ -40,6 +40,8 @@ impl CachedResults {
                     imported_transient_checkpoints,
                     next_run_id,
                     retained_dataset_limit,
+                    // Runtime: Preferences supplies it at each dispatch.
+                    preferred_dataset_limit: _,
                     yield_evidence: _,
                 },
             view:

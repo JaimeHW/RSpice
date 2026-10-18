@@ -89,6 +89,7 @@ impl SimSetupState {
     /// to Preferences never mutate an existing plan or its reproducibility.
     pub fn new_with_user_preferences(preferences: &crate::workbench::UserPreferences) -> Self {
         let mut setup = Self::new();
+        setup.save_policy.retained_dataset_limit = preferences.runs_kept();
         let mut options = Self::preferred_solver_options(preferences);
         options.temp = setup.reference_pvt.temperature_celsius;
         setup.options = options;
@@ -610,6 +611,28 @@ mod tests {
         assert_eq!(
             migrated.output_selection_mode,
             crate::state::OutputSelectionMode::Automatic
+        );
+    }
+
+    /// A new project's plan keeps the number of runs Preferences sets, and
+    /// the shipped number is the one a plan has always kept.
+    #[test]
+    fn a_new_plan_keeps_the_runs_preferences_set() {
+        let mut preferences = crate::workbench::UserPreferences::default();
+        assert_eq!(
+            SimSetupState::new_with_user_preferences(&preferences)
+                .save_policy
+                .retained_dataset_limit,
+            SimulationSavePolicy::default().retained_dataset_limit
+        );
+        preferences
+            .set_scalar(crate::workbench::ScalarPreference::RunsKept, 50)
+            .expect("fifty runs is an offered count");
+        assert_eq!(
+            SimSetupState::new_with_user_preferences(&preferences)
+                .save_policy
+                .retained_dataset_limit,
+            50
         );
     }
 }

@@ -513,6 +513,9 @@ impl SimulationController {
         let dispatched_save_policy = dispatch.save_policy();
         let run_receipt = dispatch.prepared_run_receipt(source_domain)?;
 
+        // A run outside every plan is kept under the project's own limit, or
+        // under the one Preferences sets when the project names none.
+        state.simulation.retained.preferred_dataset_limit = Some(state.ui.preferences.runs_kept());
         // Allocate before changing controller queues, cross-probe mappings, or
         // manual-deck publication state: exhaustion must leave no partial batch.
         let run = state

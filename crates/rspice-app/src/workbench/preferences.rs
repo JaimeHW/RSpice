@@ -586,10 +586,12 @@ pub enum ChoicePreference {
     /// The schematic canvas's cursor under a mouse: the tool's own cursor,
     /// or a full-screen crosshair (D1 section 5).
     SchematicCursor,
+    /// The dialect an imported deck with no dialect markers is read as.
+    ImportedNetlistDialect,
 }
 
 impl ChoicePreference {
-    pub(crate) const ALL: [Self; 50] = [
+    pub(crate) const ALL: [Self; 51] = [
         Self::LegacyWorkspacePreset,
         Self::LegacyConsoleOnLaunch,
         Self::LegacySchematicGrid,
@@ -640,6 +642,7 @@ impl ChoicePreference {
         Self::ExtensionPolicy,
         Self::ExtensionUpdates,
         Self::SchematicCursor,
+        Self::ImportedNetlistDialect,
     ];
 
     pub const fn stable_id(self) -> &'static str {
@@ -694,6 +697,7 @@ impl ChoicePreference {
             Self::ExtensionPolicy => "extension-policy",
             Self::ExtensionUpdates => "extension-updates",
             Self::SchematicCursor => "schematic-cursor",
+            Self::ImportedNetlistDialect => "imported-netlist-dialect",
         }
     }
 
@@ -748,6 +752,7 @@ impl ChoicePreference {
             | Self::SchematicCursor => 1,
             // Junction dots and wire routing are one bit each.
             Self::InterfaceScale | Self::DefaultSolverPreset | Self::WireJunctionBehavior => 3,
+            Self::ImportedNetlistDialect => 5,
         }
     }
 
@@ -829,13 +834,15 @@ pub enum ScalarPreference {
     LocalParallelSlots,
     DisplayedSignificantDigits,
     ParallelTaskCeiling,
+    RunsKept,
 }
 
 impl ScalarPreference {
-    const ALL: [Self; 3] = [
+    const ALL: [Self; 4] = [
         Self::LocalParallelSlots,
         Self::DisplayedSignificantDigits,
         Self::ParallelTaskCeiling,
+        Self::RunsKept,
     ];
 
     const fn stable_id(self) -> &'static str {
@@ -843,6 +850,7 @@ impl ScalarPreference {
             Self::LocalParallelSlots => "local-parallel-slots",
             Self::DisplayedSignificantDigits => "displayed-significant-digits",
             Self::ParallelTaskCeiling => "parallel-task-ceiling",
+            Self::RunsKept => "runs-kept",
         }
     }
 
@@ -856,6 +864,7 @@ impl ScalarPreference {
             Self::LocalParallelSlots => 0,
             Self::DisplayedSignificantDigits => 7,
             Self::ParallelTaskCeiling => 64,
+            Self::RunsKept => 20,
         }
     }
 
@@ -864,6 +873,7 @@ impl ScalarPreference {
             Self::LocalParallelSlots => (0, 1024),
             Self::DisplayedSignificantDigits => (3, 17),
             Self::ParallelTaskCeiling => (1, 4096),
+            Self::RunsKept => (1, 100),
         }
     }
 }
@@ -1354,6 +1364,19 @@ impl UserPreferences {
         }
     }
 
+    /// How many runs a new simulation plan keeps before it discards the
+    /// oldest, and how many a project that names no limit keeps.
+    #[must_use]
+    pub fn runs_kept(&self) -> usize {
+        self.scalar(ScalarPreference::RunsKept) as usize
+    }
+
+    /// The dialect an imported deck is read as when nothing in it names one.
+    #[must_use]
+    pub fn imported_netlist_dialect(&self) -> crate::state::NetlistSourceDialect {
+        IMPORTABLE_NETLIST_DIALECTS[self.choice(ChoicePreference::ImportedNetlistDialect)]
+    }
+
     /// The Component shelf's personal pin set and placement history.
     ///
     /// A domain written by an incompatible future build reads as the default,
@@ -1391,6 +1414,17 @@ impl UserPreferences {
 }
 
 const COMPONENT_SHELF_STORAGE_KEY: &str = "component-shelf";
+
+/// The dialects an imported deck can be read as, in stored-index order: each
+/// one RSpice can execute. "Unknown" is a detection outcome, not a choice.
+pub(crate) const IMPORTABLE_NETLIST_DIALECTS: [crate::state::NetlistSourceDialect; 6] = [
+    crate::state::NetlistSourceDialect::RSpice,
+    crate::state::NetlistSourceDialect::Spice3Ngspice,
+    crate::state::NetlistSourceDialect::Hspice,
+    crate::state::NetlistSourceDialect::Pspice,
+    crate::state::NetlistSourceDialect::Spectre,
+    crate::state::NetlistSourceDialect::Ads,
+];
 
 /// The Component shelf's personal pin set and placement history.
 ///

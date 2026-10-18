@@ -345,6 +345,13 @@ pub(super) fn stage_netlist_import(
             Vec::new()
         }
     };
+    // A deck that names no dialect starts from the one Preferences sets; a
+    // deck whose markers name one is read as that.
+    let selected_dialect = if detected_dialect == crate::state::NetlistSourceDialect::RSpice {
+        state.ui.preferences.imported_netlist_dialect()
+    } else {
+        detected_dialect
+    };
     state.ui.netlist.import_review = Some(NetlistImportReviewState {
         transaction,
         operation: match mode {
@@ -362,7 +369,7 @@ pub(super) fn stage_netlist_import(
         encoding,
         line_ending,
         detected_dialect,
-        selected_dialect: detected_dialect,
+        selected_dialect,
         detection_evidence,
         transformations,
         issues,

@@ -448,6 +448,8 @@ pub(super) fn commit_create_plan(
         &app.state.ui.preferences,
     );
     let id = setup.create_plan(name).map_err(|error| error.to_string())?;
+    // Kept unless the retention policy is inherited, which replaces it below.
+    setup.save_policy.retained_dataset_limit = app.state.ui.preferences.runs_kept();
     apply_new_plan_configuration(&mut setup, new_plan, inherited, preferred_options)?;
     workspace.content.migrate_inactive_plan_data(id);
     workspace.content.sync_legacy_specs_projection(id);

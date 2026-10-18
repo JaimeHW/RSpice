@@ -130,7 +130,7 @@ fn row_matches(title: &str, help: &str, terms: &[&str], query: &str) -> bool {
 /// The two things a reader is looking for when they open Preferences: how the
 /// application behaves, or how engineering quantities are read and written.
 ///
-/// A rail of eight entries does not need groups to be navigable, but it does
+/// A rail of ten entries does not need groups to be navigable, but it does
 /// need them to be *predictable*: a reader after the grid size looks under
 /// engineering, and one after the colour mode does not read past Interface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,15 +167,17 @@ pub(super) enum PreferenceCategory {
     Schematic,
     Projects,
     Results,
+    Simulation,
 }
 
 impl PreferenceCategory {
-    pub(super) const ALL: [Self; 8] = [
+    pub(super) const ALL: [Self; 9] = [
         Self::Appearance,
         Self::Accessibility,
         Self::Workspace,
         Self::Shortcuts,
         Self::Units,
+        Self::Simulation,
         Self::Schematic,
         Self::Projects,
         Self::Results,
@@ -191,6 +193,7 @@ impl PreferenceCategory {
             Self::Schematic => "Schematic editor",
             Self::Projects => "Projects and files",
             Self::Results => "Results and precision",
+            Self::Simulation => "Simulation",
         }
     }
 
@@ -199,7 +202,7 @@ impl PreferenceCategory {
             Self::Appearance | Self::Accessibility | Self::Workspace | Self::Shortcuts => {
                 CategoryGroup::Interface
             }
-            Self::Units | Self::Schematic | Self::Projects | Self::Results => {
+            Self::Units | Self::Simulation | Self::Schematic | Self::Projects | Self::Results => {
                 CategoryGroup::Engineering
             }
         }
@@ -215,6 +218,7 @@ impl PreferenceCategory {
             Self::Schematic => "schematic",
             Self::Projects => "projects",
             Self::Results => "results",
+            Self::Simulation => "simulation",
         }
     }
 }
@@ -1911,6 +1915,7 @@ mod tests {
                 "Workspace",
                 "Shortcuts",
                 "Units and notation",
+                "Simulation",
                 "Schematic editor",
                 "Projects and files",
                 "Results and precision",

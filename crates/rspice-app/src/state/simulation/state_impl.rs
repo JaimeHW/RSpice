@@ -1075,6 +1075,21 @@ mod tests {
         );
     }
 
+    /// The limit Preferences sets stands in for a project that names none,
+    /// and gives way to one that does.
+    #[test]
+    fn the_preferred_retention_limit_applies_until_the_project_states_one() {
+        let mut state = SimulationState::default();
+        state.retained.preferred_dataset_limit = Some(5);
+        for _ in 0..8 {
+            state.start_run();
+        }
+        assert_eq!(state.retained.runs.len(), 5);
+
+        state.retained.retained_dataset_limit = Some(7);
+        assert_eq!(state.retained.effective_retained_dataset_limit(), 7);
+    }
+
     #[test]
     fn lowering_the_retention_limit_discards_the_oldest_datasets_at_once() {
         let mut state = SimulationState::default();

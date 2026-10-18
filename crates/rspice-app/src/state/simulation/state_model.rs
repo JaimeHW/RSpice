@@ -69,12 +69,17 @@ pub struct RetainedSimulationState {
     /// How many datasets the project keeps before the oldest unpinned one is
     /// discarded.
     ///
-    /// `None` means the built-in default. This is a real limit that silently
-    /// destroyed work before it was surfaced: a project that ran twenty-one
-    /// times lost its first dataset with no warning and no way to ask for
-    /// more. Saying the number, and letting the reader raise it, is the
-    /// difference between a retention policy and data loss.
+    /// `None` means [`Self::preferred_dataset_limit`]. This is a real limit
+    /// that silently destroyed work before it was surfaced: a project that
+    /// ran twenty-one times lost its first dataset with no warning and no way
+    /// to ask for more. Saying the number, and letting the reader raise it, is
+    /// the difference between a retention policy and data loss.
     pub retained_dataset_limit: Option<usize>,
+
+    /// What a project that names no limit keeps: "Runs kept" in Preferences.
+    /// Set from there at each dispatch and never saved with the project;
+    /// `None` until the first dispatch, which reads as the shipped default.
+    pub preferred_dataset_limit: Option<usize>,
 
     /// Last allocated display sequence; zero before the first run. The legacy
     /// field name is retained, but allocation increments it before assigning.
@@ -250,12 +255,14 @@ impl RetainedSimulationState {
         self.runs.pinned_plan_run_count(plan_id)
     }
 
-    /// The retention limit in force, resolved from the project's own setting.
+    /// The retention limit in force: the project's own setting, else the one
+    /// Preferences sets.
     ///
     /// Clamped to at least one: a limit of zero would discard the dataset the
     /// run just produced, which is never what "retain fewer" means.
     pub fn effective_retained_dataset_limit(&self) -> usize {
         self.retained_dataset_limit
+            .or(self.preferred_dataset_limit)
             .unwrap_or(MAX_RUN_HISTORY)
             .max(1)
     }

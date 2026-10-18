@@ -7,6 +7,8 @@
 //! store is wide, that is why — the store keeps keys for domains that have no
 //! runtime owner yet, and they stay off the page until one exists.
 
+mod simulation;
+
 use egui::Ui;
 
 use crate::ui::tokens::Tokens;
@@ -31,7 +33,7 @@ const NUMERIC_FIELD_WIDTH: f32 = 88.0;
 /// a changed schematic that has a file; the browser keeps only the session.
 #[cfg(not(target_arch = "wasm32"))]
 const AUTOSAVE_HELP: &str =
-    "Saves the working session. A changed schematic saved once also gets a recovery copy.";
+    "Saves the session, and a recovery copy of a changed schematic saved once.";
 #[cfg(target_arch = "wasm32")]
 const AUTOSAVE_HELP: &str = "Saves the working session in this browser.";
 
@@ -49,6 +51,7 @@ pub(super) fn render(
             super::shortcut_preferences::render_page(ui, state, actions);
         }
         PreferenceCategory::Units => units(ui, state),
+        PreferenceCategory::Simulation => simulation::page(ui, state),
         PreferenceCategory::Schematic => schematic(ui, state),
         PreferenceCategory::Projects => projects(ui, state, actions),
         PreferenceCategory::Results => results(ui, state),
@@ -413,8 +416,8 @@ fn workspace(ui: &mut Ui, state: &mut AppState) {
     // layouts…" button for a dialog that applies the same three templates as
     // the preset row above. The dialog stays on the Window menu.
 
+    // Solver threads used to open this section; it is on the Simulation page.
     section_heading(ui, "Background work");
-    solver_threads_row(ui, state);
     preference_row(
         ui,
         "Task attention",
@@ -729,12 +732,9 @@ fn results(ui: &mut Ui, state: &mut AppState) {
     // used to sit after it is asked by "Export dataset…" itself.
 }
 
-/// What a new project starts from, and what saving one does.
-///
-/// Three settings that used to be two pages: Simulation defaults held the
-/// solver preset alone under two paragraphs explaining which numerical options
-/// it does *not* own, and Files, storage and recovery held the other two under
-/// a section heading each. They answer one question between them.
+/// The settings file, and what saving a project does. The solver preset a new
+/// project starts from is on the Simulation page, with the other settings a
+/// new plan takes.
 fn projects(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
     // One file holding every preference and the shortcut library in use.
     preference_row(
@@ -777,14 +777,6 @@ fn projects(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActio
                 );
             });
         },
-    );
-    choice_row(
-        ui,
-        state,
-        ChoicePreference::DefaultSolverPreset,
-        "Default solver preset",
-        "The preset a new project starts from. Each plan may override it.",
-        &["Balanced", "Fast", "Accurate", "Robust"],
     );
     preference_row(ui, "Autosave interval", AUTOSAVE_HELP, |ui| {
         let values = [5_u8, 2, 10];
@@ -938,7 +930,6 @@ pub(super) fn restore_defaults(
             set_browser_spoken_feedback(state, false);
         }
         PreferenceCategory::Workspace => {
-            preferences.restore_defaults(&[], &[], &[ScalarPreference::LocalParallelSlots]);
             if let Ok(workspace) = preferences.workspace_mut() {
                 *workspace = WorkspacePreferences::default();
                 let preset = workspace.preset();
@@ -987,13 +978,20 @@ pub(super) fn restore_defaults(
             ],
             &[],
         ),
+        PreferenceCategory::Simulation => preferences.restore_defaults(
+            &[
+                ChoicePreference::DefaultSolverPreset,
+                ChoicePreference::ImportedNetlistDialect,
+            ],
+            &[],
+            &[
+                ScalarPreference::LocalParallelSlots,
+                ScalarPreference::RunsKept,
+            ],
+        ),
         PreferenceCategory::Projects => {
             state.ui.autosave_minutes = super::DEFAULT_AUTOSAVE_MINUTES;
-            preferences.restore_defaults(
-                &[ChoicePreference::DefaultSolverPreset],
-                &[TogglePreference::RunDesignChecksOnSave],
-                &[],
-            );
+            preferences.restore_defaults(&[], &[TogglePreference::RunDesignChecksOnSave], &[]);
         }
         PreferenceCategory::Results => preferences.restore_defaults(
             &[
@@ -1012,11 +1010,16 @@ mod tests {
     use crate::workbench::RSpiceApp;
 
     /// The page source, with this test module cut off the end.
-    fn production_source() -> &'static str {
-        include_str!("preference_pages.rs")
+    ///
+    /// The pages kept in their own modules come first, so that they fall on
+    /// the pages' side of the split [`pages_and_restore`] makes and every
+    /// scan below reads them as it reads the pages written here.
+    fn production_source() -> String {
+        let own = include_str!("preference_pages.rs")
             .split("#[cfg(test)]")
             .next()
-            .expect("production source precedes tests")
+            .expect("production source precedes tests");
+        [include_str!("preference_pages/simulation.rs"), own].concat()
     }
 
     /// The same source with whole-line comments dropped.
@@ -1139,7 +1142,8 @@ mod tests {
     /// session by hand.
     #[test]
     fn the_zoom_factor_the_shell_applies_is_reachable_from_appearance() {
-        let appearance = production_source()
+        let source = production_source();
+        let appearance = source
             .split("fn appearance(")
             .nth(1)
             .and_then(|source| source.split("\nfn ").next())
@@ -1158,13 +1162,14 @@ mod tests {
     /// existed and was *printed* in the Automation preview, which is worse
     /// than absent — a number shown to a reader that nothing honoured.
     #[test]
-    fn the_worker_ceiling_the_engine_takes_is_reachable_from_workspace() {
-        let workspace = production_source()
+    fn the_worker_ceiling_the_engine_takes_is_reachable_from_simulation() {
+        let source = production_source();
+        let row = source
             .split("fn solver_threads_row(")
             .nth(1)
             .and_then(|source| source.split("\nfn ").next())
             .expect("solver threads row source");
-        assert!(workspace.contains("ScalarPreference::LocalParallelSlots"));
+        assert!(row.contains("ScalarPreference::LocalParallelSlots"));
         assert!(
             production_code().contains("solver_threads_row(ui, state)"),
             "the row has to be on a page, not merely defined"
@@ -1434,13 +1439,19 @@ mod tests {
             state.ui.preferences.set_toggle(key, flipped);
             stored = true;
         }
-        if keys.contains(&"ScalarPreference::DisplayedSignificantDigits".to_owned()) {
-            state
-                .ui
-                .preferences
-                .set_scalar(ScalarPreference::DisplayedSignificantDigits, 12)
-                .expect("twelve significant digits is inside the domain");
-            stored = true;
+        for (key, value) in [
+            (ScalarPreference::DisplayedSignificantDigits, 12),
+            (ScalarPreference::LocalParallelSlots, 1),
+            (ScalarPreference::RunsKept, 50),
+        ] {
+            if keys.contains(&format!("ScalarPreference::{key:?}")) {
+                state
+                    .ui
+                    .preferences
+                    .set_scalar(key, value)
+                    .expect("each override is inside its preference domain");
+                stored = true;
+            }
         }
         if category == PreferenceCategory::Appearance {
             state.ui.theme.mode = crate::ui::Mode::Light;
@@ -1468,7 +1479,8 @@ mod tests {
     /// nets it connects may be called.
     #[test]
     fn the_schematic_page_orders_its_hierarchy_rows() {
-        let schematic = production_source()
+        let source = production_source();
+        let schematic = source
             .split("fn schematic(")
             .nth(1)
             .and_then(|source| source.split("\nfn ").next())
