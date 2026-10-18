@@ -50,7 +50,10 @@ impl SchematicSymbolContext {
         revision: u64,
     ) -> Self {
         let mut resolved_by_component_id = HashMap::new();
-        let mut resolved_by_binding = Vec::new();
+        let mut resolved_by_binding: Vec<(LibraryCellInstance, ResolvedCellSymbol)> = Vec::new();
+        // Instances of one cell share a binding, and a binding resolves the
+        // same every time: each is resolved once, not once per instance.
+        let mut unresolved: Vec<&LibraryCellInstance> = Vec::new();
         for component in document
             .components
             .iter()
@@ -59,19 +62,25 @@ impl SchematicSymbolContext {
             let Some(binding) = component.library_cell.as_ref() else {
                 continue;
             };
+            if let Some((_, resolved)) = resolved_by_binding
+                .iter()
+                .find(|(candidate, _)| candidate == binding)
+            {
+                resolved_by_component_id.insert(component.id, resolved.clone());
+                continue;
+            }
+            if unresolved.contains(&binding) {
+                continue;
+            }
             let Some(resolved) = resolver
                 .resolve_binding(binding)
                 .filter(|symbol| symbol.source() == ResolvedSymbolSource::Authored)
             else {
+                unresolved.push(binding);
                 continue;
             };
             resolved_by_component_id.insert(component.id, resolved.clone());
-            if !resolved_by_binding
-                .iter()
-                .any(|(candidate, _)| candidate == binding)
-            {
-                resolved_by_binding.push((binding.clone(), resolved));
-            }
+            resolved_by_binding.push((binding.clone(), resolved));
         }
         let pending_library_symbol = pending_library_cell
             .and_then(|binding| resolver.resolve_binding(binding))
