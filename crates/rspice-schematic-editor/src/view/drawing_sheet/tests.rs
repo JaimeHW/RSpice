@@ -474,7 +474,6 @@ fn the_canvas_letters_each_field_in_the_cell_the_sheet_lays_out() {
     let sheet = test_sheet();
     let long = "a value far longer than any cell of the block can hold";
     let values = [
-        (Field::Project, "MyCircuit"),
         (Field::CellView, long),
         (Field::Page, "12 of 12"),
         (Field::Revision, "C"),
@@ -497,7 +496,7 @@ fn the_canvas_letters_each_field_in_the_cell_the_sheet_lays_out() {
             assert!(text.contains(&cell.letter_value(&field.value)), "{text:?}");
         }
     }
-    for whole in ["MyCircuit", "12 of 12", "2026-10-18", "In review"] {
+    for whole in ["12 of 12", "2026-10-18", "In review"] {
         assert!(
             text.iter().any(|line| line == whole),
             "{whole} is cut: {text:?}"

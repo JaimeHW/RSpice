@@ -1401,6 +1401,16 @@ impl<'de> Deserialize<'de> for SchematicSheetFormat {
         format.title_block.normalize_title_field_set();
         format.title_block.normalize_managed_template();
         if legacy_title_block {
+            // A sheet saved before title blocks were stored has always been
+            // drawn naming its project, and keeps doing so: only new sheets
+            // leave Project off.
+            if let Some(project) = format
+                .title_block
+                .fields
+                .get_mut(&DrawingSheetTitleFieldId::Project)
+            {
+                project.visible = true;
+            }
             format.fit_default_title_block();
         }
         format.validate().map_err(D::Error::custom)?;

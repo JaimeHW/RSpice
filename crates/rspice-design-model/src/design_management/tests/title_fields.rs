@@ -253,7 +253,7 @@ fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
     }
 
     // A sheet saved before title blocks were stored is still drawn with the
-    // compact block it always had.
+    // compact block it always had, naming its project as it always did.
     let mut legacy = serde_json::to_value(&format).unwrap();
     legacy.as_object_mut().unwrap().remove("title_block");
     let restored: SchematicSheetFormat = serde_json::from_value(legacy).unwrap();
@@ -261,6 +261,15 @@ fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
         restored.title_block.template,
         DrawingSheetTitleBlockTemplate::Compact
     );
+    let project = DrawingSheetTitleFieldId::Project;
+    assert!(restored.title_block.fields[&project].visible);
+    // A new sheet leaves Project off, since Cell / view leads with the same
+    // name, but a sheet saved showing it keeps showing it.
+    assert!(!format.title_block.fields[&project].visible);
+    let mut saved = serde_json::to_value(&format).unwrap();
+    saved["title_block"]["fields"]["project"]["visible"] = serde_json::json!(true);
+    let reopened: SchematicSheetFormat = serde_json::from_value(saved).unwrap();
+    assert!(reopened.title_block.fields[&project].visible);
 }
 
 #[test]

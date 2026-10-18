@@ -173,15 +173,17 @@ impl DrawingSheetTitleFieldId {
     /// ISO 7200 makes the creator and the approval person mandatory, so
     /// Drawn by and Approved by start on the sheet, empty until someone
     /// signs. Checked by is not one of the standard's fields, Classification
-    /// is set by a release policy, and Paper size is optional and restates
-    /// the sheet the reader is holding, so those wait in Page Setup until a
-    /// sheet asks for them: every column a sheet does not spend is width the
-    /// remaining cells keep.
+    /// is set by a release policy, Paper size is optional and restates the
+    /// sheet the reader is holding, and in a single-library workspace the
+    /// project's name is already the leading segment of Cell / view, so a
+    /// sheet showing Project as well letters that name twice. Those wait in
+    /// Page Setup until a sheet asks for them: every cell a sheet does not
+    /// spend is width the remaining cells keep.
     #[must_use]
     pub const fn visible_by_default(self) -> bool {
         !matches!(
             self,
-            Self::CheckedBy | Self::Classification | Self::PaperSize
+            Self::Project | Self::CheckedBy | Self::Classification | Self::PaperSize
         )
     }
 }

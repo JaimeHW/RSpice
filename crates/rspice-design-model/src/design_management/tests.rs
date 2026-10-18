@@ -226,15 +226,15 @@ fn drawing_sheet_title_contract_matches_field_provenance_and_required_visibility
         );
         assert!(format.title_block.fields[&field].visible);
     }
-    // The project name repeats the leading segment of `Cell / view`, so it is
-    // shown by default but the sheet may drop it.
+    // The project name repeats the leading segment of `Cell / view`, so a new
+    // sheet leaves it off, and a sheet may show it.
     let project = DrawingSheetTitleFieldId::Project.policy();
     assert!(!project.required_visible);
     assert_eq!(
         project.value_authority,
         DrawingSheetTitleFieldValueAuthority::Automatic
     );
-    assert!(format.title_block.fields[&DrawingSheetTitleFieldId::Project].visible);
+    assert!(!format.title_block.fields[&DrawingSheetTitleFieldId::Project].visible);
     let sheet_title = DrawingSheetTitleFieldId::SheetTitle.policy();
     assert!(sheet_title.required_visible);
     assert_eq!(
@@ -259,19 +259,24 @@ fn drawing_sheet_title_contract_matches_field_provenance_and_required_visibility
         "210 × 297 mm"
     );
 
-    // The project name may be dropped now that `Cell / view` carries it.
-    let without_project = format
+    // A sheet that asks for the project name letters it.
+    let with_project = format
         .try_update(|draft| {
             draft
                 .title_block
                 .fields
                 .get_mut(&DrawingSheetTitleFieldId::Project)
                 .unwrap()
-                .visible = false;
+                .visible = true;
         })
-        .expect("the project name is no longer a required cell");
+        .expect("a sheet may show the project name");
     assert!(
-        !resolve_drawing_sheet_title_fields(&without_project, &BTreeMap::new())
+        resolve_drawing_sheet_title_fields(&with_project, &BTreeMap::new())
+            .iter()
+            .any(|field| field.id == DrawingSheetTitleFieldId::Project)
+    );
+    assert!(
+        !resolve_drawing_sheet_title_fields(&format, &BTreeMap::new())
             .iter()
             .any(|field| field.id == DrawingSheetTitleFieldId::Project)
     );
@@ -319,12 +324,12 @@ fn drawing_sheet_title_resolution_is_one_renderer_independent_authority() {
                 .value = "Power tree".to_owned();
             // An optional field is hidden until a sheet opts into it, and a
             // shown one may be dropped.
-            draft
-                .title_block
-                .fields
-                .get_mut(&DrawingSheetTitleFieldId::CheckedBy)
-                .unwrap()
-                .visible = true;
+            for field in [
+                DrawingSheetTitleFieldId::Project,
+                DrawingSheetTitleFieldId::CheckedBy,
+            ] {
+                draft.title_block.fields.get_mut(&field).unwrap().visible = true;
+            }
             draft
                 .title_block
                 .fields
@@ -2706,8 +2711,10 @@ fn a_new_sheet_shows_the_fields_iso_7200_requires_and_waits_on_the_rest() {
         );
     }
     // Checked by is not one of the standard's fields, Classification is set
-    // by a release policy, and Paper size restates the sheet in hand.
+    // by a release policy, Paper size restates the sheet in hand, and the
+    // project's name already leads Cell / view.
     let hidden = [
+        DrawingSheetTitleFieldId::Project,
         DrawingSheetTitleFieldId::CheckedBy,
         DrawingSheetTitleFieldId::Classification,
         DrawingSheetTitleFieldId::PaperSize,
