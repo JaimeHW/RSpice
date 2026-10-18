@@ -1,9 +1,12 @@
-//! Project and personal defaults for future drawing sheets.
+//! Project and personal defaults for drawing sheets.
 //!
 //! This surface edits isolated candidates. Project changes publish through the
 //! design-management revision/history authority; personal changes publish
 //! through `UserPreferences`. Existing authored sheet records are never
-//! rewritten by this workflow.
+//! rewritten by this workflow, but a sheet that follows the project default
+//! is drawn from it, so a new project default is every such sheet's new
+//! format: this is where a format reaches several sheets at once. The surface
+//! names the sheets the default reaches and the ones that keep their own.
 //!
 //! The surface is one fused drafting catalog: two seed-record bands and the
 //! new-sheet behavior band across the top, a chip catalog of every format the
@@ -35,7 +38,7 @@ use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry};
 use super::drawing_sheet_preview::{drawing_sheet_preview, sheet_desk_color};
 
 const TITLE: &str = "Drawing-sheet defaults";
-const DESCRIPTION: &str = "Choose what future projects and sheets start with. A default seeds new work; changing one never rewrites an authored sheet.";
+const DESCRIPTION: &str = "Choose what new projects and sheets start with. A sheet that follows the project default is drawn from it, so changing the default changes it; a sheet with its own format keeps it.";
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DrawingSheetDefaultsTarget {
@@ -123,26 +126,7 @@ impl RSpiceApp {
             return;
         }
         refresh_untouched_baselines(&mut self.state);
-        let following_sheets = {
-            let key = self.state.workspace.content.active_key();
-            self.state
-                .workspace
-                .content
-                .design_management
-                .sheet_catalog(&key)
-                .map(|catalog| {
-                    let sheets = catalog.sheets();
-                    let following = sheets
-                        .iter()
-                        .filter(|sheet| {
-                            sheet.page_format().inheritance
-                                == DrawingSheetInheritance::ProjectDefault
-                        })
-                        .count();
-                    (following, sheets.len())
-                })
-                .filter(|(_, total)| *total > 0)
-        };
+        let following_sheets = DefaultReach::of(&self.state);
         let transaction = &self.state.dialogs.drawing_sheet_defaults;
         let project_changed = transaction.draft_project != transaction.baseline_project;
         let personal_changed = transaction.draft_personal != transaction.baseline_personal;
@@ -161,7 +145,7 @@ impl RSpiceApp {
             // The body is one bordered shell whose regions meet on their own
             // 1 px seams. The dialog's default 12 pt inset framed that shell in
             // a band of elevated background instead of letting it reach the
-            // surface edge the way Page Setup's studio does.
+            // surface edge.
             .flush_body()
             .ghost("Cancel")
             .primary_enabled(enabled)
@@ -171,7 +155,7 @@ impl RSpiceApp {
                     &mut self.state.dialogs.drawing_sheet_defaults,
                     project_authority.as_deref(),
                     project_editable,
-                    following_sheets,
+                    following_sheets.as_ref(),
                     &mut open_presets,
                 );
             });
@@ -191,6 +175,67 @@ impl RSpiceApp {
             }
             DialogChoice::Secondary | DialogChoice::None => {}
         }
+    }
+}
+
+/// The active schematic's sheets as the project default reaches them: the
+/// ones drawn from it, which a new default redraws, and the ones with a
+/// format of their own, which it leaves as they are.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct DefaultReach {
+    following: Vec<String>,
+    own: Vec<String>,
+}
+
+impl DefaultReach {
+    /// The reach of the project default into the active schematic, when it
+    /// has sheets for it to reach.
+    fn of(state: &AppState) -> Option<Self> {
+        let catalog = state
+            .workspace
+            .content
+            .design_management
+            .sheet_catalog(&state.workspace.content.active_key())?;
+        let mut reach = Self::default();
+        for sheet in catalog.sheets() {
+            let names =
+                if sheet.page_format().inheritance == DrawingSheetInheritance::ProjectDefault {
+                    &mut reach.following
+                } else {
+                    &mut reach.own
+                };
+            names.push(sheet.name().to_owned());
+        }
+        (!reach.following.is_empty() || !reach.own.is_empty()).then_some(reach)
+    }
+
+    /// Which sheets follow the default, as the preview says it.
+    fn following_text(&self) -> String {
+        match (self.following.is_empty(), self.own.is_empty()) {
+            (true, _) => "no sheet".to_owned(),
+            (false, true) if self.following.len() > 1 => "every sheet".to_owned(),
+            _ => sheet_names(&self.following),
+        }
+    }
+
+    /// Which sheets keep a format of their own, when any do.
+    fn own_text(&self) -> Option<String> {
+        (!self.own.is_empty()).then(|| sheet_names(&self.own))
+    }
+}
+
+/// Up to three sheet names, and how many more there are.
+fn sheet_names(names: &[String]) -> String {
+    const SHOWN: usize = 3;
+    let listed = names
+        .iter()
+        .take(SHOWN)
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(", ");
+    match names.len().saturating_sub(SHOWN) {
+        0 => listed,
+        more => format!("{listed} and {more} more"),
     }
 }
 
@@ -244,7 +289,7 @@ fn drawing_sheet_defaults_body(
     state: &mut DrawingSheetDefaultsDialogState,
     project_authority_error: Option<&str>,
     project_editable: bool,
-    following_sheets: Option<(usize, usize)>,
+    following_sheets: Option<&DefaultReach>,
     open_presets: &mut bool,
 ) {
     let t = Tokens::get(ui.ctx());
@@ -506,7 +551,9 @@ fn target_band(
         DrawingSheetDefaultsTarget::Personal => &state.draft_personal.default_format,
     };
     let (kicker, seeds) = match band_target {
-        DrawingSheetDefaultsTarget::Project => ("PROJECT DEFAULT", "seeds new sheets here"),
+        DrawingSheetDefaultsTarget::Project => {
+            ("PROJECT DEFAULT", "draws the sheets that follow it")
+        }
         DrawingSheetDefaultsTarget::Personal => ("PERSONAL DEFAULT", "seeds new projects"),
     };
     let response = ui.interact(rect, ui.id().with(("sheet-defaults", salt)), Sense::click());
@@ -1011,7 +1058,7 @@ fn preview_region(
     rect: Rect,
     record: &SchematicSheetFormat,
     target: DrawingSheetDefaultsTarget,
-    following_sheets: Option<(usize, usize)>,
+    following_sheets: Option<&DefaultReach>,
 ) {
     let t = Tokens::get(ui.ctx());
     ui.painter()
@@ -1040,7 +1087,7 @@ fn preview_region(
             printed => format!("the {} block", record.title_block_template_label(printed)),
         };
         let text = format!(
-            "{} does not fit this page's{area} drawing area; new sheets draw {instead} until the format grows.",
+            "{} does not fit this page's{area} drawing area; sheets on this default draw {instead} until the format grows.",
             record.title_block_template_label(record.title_block.template),
         );
         let mut job = LayoutJob::simple(
@@ -1088,7 +1135,7 @@ fn preview_facts_galley(
     rect: Rect,
     record: &SchematicSheetFormat,
     target: DrawingSheetDefaultsTarget,
-    following_sheets: Option<(usize, usize)>,
+    following_sheets: Option<&DefaultReach>,
 ) -> std::sync::Arc<egui::Galley> {
     let t = Tokens::get(ui.ctx());
     let faint = TextFormat {
@@ -1127,10 +1174,14 @@ fn preview_facts_galley(
                 strong.clone(),
             );
             if target == DrawingSheetDefaultsTarget::Project
-                && let Some((following, total)) = following_sheets
+                && let Some(reach) = following_sheets
             {
-                job.append(" \u{00b7} followed by ", 0.0, faint);
-                job.append(&format!("{following} of {total} sheets"), 0.0, strong);
+                job.append(" \u{00b7} followed by ", 0.0, faint.clone());
+                job.append(&reach.following_text(), 0.0, strong.clone());
+                if let Some(own) = reach.own_text() {
+                    job.append(" \u{00b7} own format ", 0.0, faint);
+                    job.append(&own, 0.0, strong);
+                }
             }
         }
         Err(_) => job.append("Invalid physical sheet", 0.0, faint),
@@ -1526,7 +1577,7 @@ fn new_sheet_policy_label(value: DrawingSheetNewSheetPolicy) -> &'static str {
 fn new_sheet_policy_note(value: DrawingSheetNewSheetPolicy) -> &'static str {
     match value {
         DrawingSheetNewSheetPolicy::ProjectDefault => {
-            "New sheets take the project default silently. Page Setup can still write an explicit override afterwards."
+            "New sheets follow the project default. Sheet properties can still give one a format of its own afterwards."
         }
         DrawingSheetNewSheetPolicy::Ask => {
             "Sheet creation opens on a format step with the project default preselected."
@@ -1746,6 +1797,132 @@ pub(super) fn commit_project_candidate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A format reaches several sheets through the project default: a new
+    /// default is the new format of every sheet that follows it, a sheet with
+    /// a format of its own keeps it, and the dialog names both.
+    #[test]
+    fn a_new_project_default_redraws_the_sheets_that_follow_it() {
+        use crate::schematic::view::drawing_sheet::resolve_active_drawing_sheet;
+        use crate::state::{
+            DrawingSheetTitleFieldId, SheetDefinition, SheetPortPolicy, SheetTemplate,
+        };
+
+        let mut app = RSpiceApp::test_instance();
+        assert_eq!(DefaultReach::of(&app.state), None);
+        let key = app.state.workspace.content.active_key();
+        let designs = &mut app.state.workspace.content.design_management;
+        let first = designs
+            .bootstrap_for_cell_view(&key, "Sheet 1", [])
+            .unwrap();
+        let default = designs.drawing_sheet_settings().default_format.clone();
+        let catalog = designs.sheet_catalog_mut(&key).unwrap();
+        let second = catalog
+            .create_sheet(
+                SheetDefinition {
+                    name: "Sheet 2".to_owned(),
+                    template: SheetTemplate::AnalogSchematic,
+                    port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                    explicit_page_number: Some(2),
+                },
+                Some(first),
+            )
+            .unwrap();
+        let titled = |format: &SchematicSheetFormat, title: &str, inheritance| {
+            format
+                .try_update(|draft| {
+                    draft.inheritance = inheritance;
+                    draft
+                        .title_block
+                        .fields
+                        .get_mut(&DrawingSheetTitleFieldId::SheetTitle)
+                        .unwrap()
+                        .value = title.to_owned();
+                })
+                .unwrap()
+        };
+        let following = titled(&default, "Sheet 1", DrawingSheetInheritance::ProjectDefault);
+        let own = titled(
+            &SchematicSheetFormat::from_standard(
+                DrawingSheetStandard::IsoA3,
+                SchematicPageOrientation::Landscape,
+            ),
+            "Sheet 2",
+            DrawingSheetInheritance::Explicit,
+        );
+        for (sheet, format) in [(first, following), (second, own)] {
+            let current = catalog.find(sheet).unwrap();
+            if current.page_format() != &format {
+                let revision = current.revision();
+                catalog
+                    .update_sheet_page_format(sheet, revision, format)
+                    .unwrap();
+            }
+        }
+        catalog.set_active(first).unwrap();
+
+        let reach = DefaultReach::of(&app.state).unwrap();
+        assert_eq!(reach.following_text(), "Sheet 1");
+        assert_eq!(reach.own_text().as_deref(), Some("Sheet 2"));
+
+        open_drawing_sheet_defaults(&mut app.state);
+        app.state
+            .dialogs
+            .drawing_sheet_defaults
+            .draft_project
+            .default_format = SchematicSheetFormat::from_standard(
+            DrawingSheetStandard::AnsiA,
+            SchematicPageOrientation::Landscape,
+        )
+        .try_update(|draft| draft.inheritance = DrawingSheetInheritance::ProjectDefault)
+        .unwrap();
+        apply_drawing_sheet_defaults(&mut app).unwrap();
+
+        let drawn = |app: &RSpiceApp| {
+            resolve_active_drawing_sheet(&app.state)
+                .format
+                .authored_size
+                .label()
+                .to_owned()
+        };
+        assert_eq!(drawn(&app), "ANSI A");
+        app.state
+            .workspace
+            .content
+            .design_management
+            .sheet_catalog_mut(&key)
+            .unwrap()
+            .set_active(second)
+            .unwrap();
+        assert_eq!(drawn(&app), "ISO A3");
+    }
+
+    /// The preview names the sheets a default reaches briefly enough to read
+    /// under it.
+    #[test]
+    fn the_sheets_a_default_reaches_are_named_briefly() {
+        let names = |count: usize| {
+            (1..=count)
+                .map(|page| format!("Sheet {page}"))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            sheet_names(&names(5)),
+            "Sheet 1, Sheet 2, Sheet 3 and 2 more"
+        );
+        let every = DefaultReach {
+            following: names(4),
+            own: Vec::new(),
+        };
+        assert_eq!(every.following_text(), "every sheet");
+        assert_eq!(every.own_text(), None);
+        let none = DefaultReach {
+            following: Vec::new(),
+            own: names(2),
+        };
+        assert_eq!(none.following_text(), "no sheet");
+        assert_eq!(none.own_text().as_deref(), Some("Sheet 1, Sheet 2"));
+    }
 
     #[test]
     fn unchanged_defaults_are_a_real_no_op() {
