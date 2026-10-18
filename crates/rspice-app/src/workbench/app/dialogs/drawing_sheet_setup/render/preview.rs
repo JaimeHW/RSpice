@@ -141,12 +141,8 @@ fn page_setup_change_summary(state: &DrawingSheetSetupState) -> String {
             after.title_block.label()
         ));
     }
-    if before.margin_top != after.margin_top
-        || before.margin_right != after.margin_right
-        || before.margin_bottom != after.margin_bottom
-        || before.margin_left != after.margin_left
-    {
-        changes.push("margins".to_owned());
+    if before.binding_margin != after.binding_margin {
+        changes.push("binding margin".to_owned());
     }
     if changes.is_empty() {
         "none — the draft matches the authored sheet".to_owned()
@@ -334,8 +330,20 @@ pub(super) fn margin_map(ui: &mut Ui, draft: &DrawingSheetDraft) {
     let callout = Stroke::new(1.0, t.color.text_dim);
     let label_font = theme::mono(tokens::FS_0, FontWeight::Medium);
     let inset = 7.0;
-    let binding_value = format!("binding {}", draft.margin_left);
-    let right_value = format!("right {}", draft.margin_right);
+    let margins = draft.margins();
+    let length = |value_um| super::format_um(value_um, draft.display_unit);
+    let binding_value = format!(
+        "{} {}",
+        if draft.binding_margin {
+            "binding"
+        } else if draft.frame_convention() == crate::state::DrawingSheetFrameConvention::Iso5457 {
+            "filing"
+        } else {
+            "left"
+        },
+        length(margins.left_um)
+    );
+    let right_value = format!("right {}", length(margins.right_um));
     let text_width = |text: &str| {
         ui.painter()
             .layout_no_wrap(text.to_owned(), label_font.clone(), Color32::WHITE)
@@ -362,7 +370,7 @@ pub(super) fn margin_map(ui: &mut Ui, draft: &DrawingSheetDraft) {
             ],
             egui::pos2(page.center().x, printable.top() + inset),
             Align2::CENTER_TOP,
-            format!("top {}", draft.margin_top),
+            format!("top {}", length(margins.top_um)),
         ),
         (
             [
@@ -380,7 +388,7 @@ pub(super) fn margin_map(ui: &mut Ui, draft: &DrawingSheetDraft) {
             ],
             egui::pos2(page.center().x, printable.bottom() - inset),
             Align2::CENTER_BOTTOM,
-            format!("bottom {}", draft.margin_bottom),
+            format!("bottom {}", length(margins.bottom_um)),
         ),
         (
             [
@@ -404,7 +412,7 @@ pub(super) fn margin_map(ui: &mut Ui, draft: &DrawingSheetDraft) {
             surface.bottom() - MARGIN_MAP_CAPTION_HEIGHT * 0.5,
         ),
         Align2::CENTER_CENTER,
-        "Shaded bands are margin; the dashed rule is the printable boundary.",
+        "Shaded bands are the standard's margins; the dashed rule is the frame.",
         theme::sans(tokens::FS_0, FontWeight::Regular),
         t.color.text_dim,
     );

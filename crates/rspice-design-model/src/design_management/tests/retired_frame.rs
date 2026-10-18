@@ -55,6 +55,97 @@ fn custom_counts_label_schemes_and_edges_load_as_the_standards_zones() {
     assert_eq!(without.geometry().unwrap().zones, None);
 }
 
+fn margins(top_um: u64, right_um: u64, bottom_um: u64, left_um: u64) -> serde_json::Value {
+    serde_json::json!({
+        "top_um": top_um,
+        "right_um": right_um,
+        "bottom_um": bottom_um,
+        "left_um": left_um,
+    })
+}
+
+#[test]
+fn a_sheet_saved_with_its_own_margins_loads_on_its_standards() {
+    let iso = DrawingSheetFrameConvention::Iso5457.margins(false);
+    for saved in [
+        margins(5_000, 5_000, 5_000, 5_000),
+        margins(25_000, 25_000, 25_000, 25_000),
+        margins(10_000, 10_000, 10_000, 19_050),
+    ] {
+        let format = saved_with(|wire| wire["margins"] = saved.clone());
+        assert_eq!(format.margins(), iso, "{saved}");
+        assert!(!format.binding_margin, "an ISO sheet is never bound");
+        let geometry = format.geometry().unwrap();
+        assert_eq!(
+            (geometry.drawing_area.x_um, geometry.drawing_area.y_um),
+            (20_000, 10_000)
+        );
+        let written = serde_json::to_value(&format).unwrap();
+        assert!(written.get("margins").is_none());
+        assert!(written.get("binding_margin").is_none());
+    }
+}
+
+#[test]
+fn an_asme_sheet_saved_with_the_binding_margin_stays_bound() {
+    let ansi_b = || {
+        serde_json::to_value(SchematicSheetFormat::from_standard(
+            DrawingSheetStandard::AnsiB,
+            SchematicPageOrientation::Landscape,
+        ))
+        .unwrap()
+    };
+    let load = |mut wire: serde_json::Value, saved: serde_json::Value| {
+        wire["margins"] = saved;
+        serde_json::from_value::<SchematicSheetFormat>(wire).unwrap()
+    };
+    // Before ANSI sheets took Y14.1's 0.50 in on every side they were saved
+    // with a 0.75 in left margin, which is the binding margin.
+    let bound = load(ansi_b(), margins(12_700, 12_700, 12_700, 19_050));
+    assert!(bound.binding_margin);
+    assert_eq!(bound.margins().left_um, 19_050);
+    assert_eq!(bound.margins().right_um, 12_700);
+    let written = serde_json::to_value(&bound).unwrap();
+    assert_eq!(written["binding_margin"], serde_json::json!(true));
+    assert!(written.get("margins").is_none());
+    assert_eq!(
+        serde_json::from_value::<SchematicSheetFormat>(written).unwrap(),
+        bound
+    );
+    // ARCH sheets were saved with a 1 in left margin, which is no option of
+    // the standard's: they load on its 0.50 in.
+    let wide = load(ansi_b(), margins(12_700, 12_700, 12_700, 25_400));
+    assert!(!wide.binding_margin);
+    assert_eq!(
+        wide.margins(),
+        DrawingSheetFrameConvention::AsmeY141.margins(false)
+    );
+}
+
+#[test]
+fn a_sheet_too_small_for_its_standards_margins_loads_without_a_frame() {
+    let mut wire = serde_json::to_value(
+        SchematicSheetFormat::try_custom("Tag", 52_000, 52_000, SchematicPageOrientation::Portrait)
+            .unwrap(),
+    )
+    .unwrap();
+    // Framed on 5 mm margins, it held a 32 mm drawing area inside a 5 mm
+    // band; ISO 5457's 20 and 10 mm borders leave it 22 mm.
+    wire["border"] = serde_json::json!("standard");
+    wire["margins"] = margins(5_000, 5_000, 5_000, 5_000);
+    wire["zones"] = serde_json::json!({
+        "mode": "automatic",
+        "custom_columns": null,
+        "custom_rows": null,
+        "labels": "alpha-numeric",
+        "edges": "all",
+    });
+    let format: SchematicSheetFormat = serde_json::from_value(wire).unwrap();
+    assert_eq!(format.border, DrawingSheetBorderTemplate::None);
+    assert_eq!(format.zones.mode, DrawingSheetZoneMode::None);
+    assert_eq!(format.geometry().unwrap().drawing_area.width_um, 52_000);
+}
+
 #[test]
 fn registration_and_folding_flags_load_as_the_centring_marks_option() {
     for (registration, folding) in [(true, true), (true, false), (false, true), (false, false)] {

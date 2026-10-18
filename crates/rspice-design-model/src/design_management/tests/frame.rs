@@ -123,25 +123,7 @@ fn an_iso_frame_bounds_the_drawing_space_iso_5457_table_1_gives() {
 }
 
 #[test]
-fn margins_narrower_than_the_band_keep_the_frame_inset() {
-    let tight = sheet(
-        DrawingSheetStandard::IsoA4,
-        SchematicPageOrientation::Landscape,
-    )
-    .try_update(|draft| {
-        draft.margins = DrawingSheetMargins {
-            top_um: 4_000,
-            right_um: 10_000,
-            bottom_um: 10_000,
-            left_um: 20_000,
-        };
-    })
-    .unwrap();
-    let geometry = tight.geometry().unwrap();
-    assert_eq!(geometry.frame_placement, DrawingSheetFramePlacement::Inset);
-    assert_eq!(geometry.zone_band, geometry.printable);
-    assert_eq!(geometry.drawing_area, rect(25.0, 9.0, 257.0, 186.0));
-
+fn a_plain_border_keeps_the_frame_inset() {
     let plain = SchematicSheetFormat::default()
         .try_update(|draft| draft.apply_border_template(DrawingSheetBorderTemplate::Plain))
         .unwrap();
@@ -378,7 +360,11 @@ fn every_ansi_size_takes_its_table_4_1_zone_count() {
         );
     }
     assert_eq!(
-        DrawingSheetStandard::AnsiA.default_margins(),
+        sheet(
+            DrawingSheetStandard::AnsiA,
+            SchematicPageOrientation::Landscape
+        )
+        .margins(),
         DrawingSheetMargins {
             top_um: 12_700,
             right_um: 12_700,
@@ -387,6 +373,34 @@ fn every_ansi_size_takes_its_table_4_1_zone_count() {
         },
         "a binding margin is an option, not the default"
     );
+}
+
+#[test]
+fn a_bound_asme_sheet_widens_its_left_margin_alone() {
+    let ansi_d = sheet(
+        DrawingSheetStandard::AnsiD,
+        SchematicPageOrientation::Landscape,
+    );
+    let bound = ansi_d
+        .try_update(|draft| draft.binding_margin = true)
+        .unwrap();
+    let geometry = bound.geometry().unwrap();
+    // ASME Y14.1 4.1.3: the border line moves in to 0.75 in on the left;
+    // every other side keeps the 0.50 in format margin.
+    assert_eq!(geometry.drawing_area, rect(19.05, 12.7, 831.85, 533.4));
+    // The zones are still measured from the trimmed edge.
+    assert_eq!(layout(&bound).column_boundaries_um().collect::<Vec<_>>(), {
+        layout(&ansi_d).column_boundaries_um().collect::<Vec<_>>()
+    });
+    // An ISO sheet has no binding margin: its 20 mm filing border is one.
+    let a3 = sheet(
+        DrawingSheetStandard::IsoA3,
+        SchematicPageOrientation::Landscape,
+    )
+    .try_update(|draft| draft.binding_margin = true)
+    .unwrap();
+    assert!(!a3.binding_margin);
+    assert_eq!(a3.margins().left_um, 20_000);
 }
 
 #[test]

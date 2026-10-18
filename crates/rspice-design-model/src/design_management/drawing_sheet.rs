@@ -189,32 +189,6 @@ impl DrawingSheetStandard {
         }
     }
 
-    /// The margins a sheet of this size starts with: ISO 5457 4.2's 20 mm
-    /// filing border on the left and 10 mm elsewhere, and ASME Y14.1 Table
-    /// 4-1's 0.50 in format margin on every side. A binding margin is the
-    /// author's choice (see [`DRAWING_SHEET_ASME_BINDING_MARGIN_UM`]).
-    #[must_use]
-    pub const fn default_margins(self) -> DrawingSheetMargins {
-        match self.series() {
-            DrawingSheetStandardSeries::Iso | DrawingSheetStandardSeries::Jis => {
-                DrawingSheetMargins {
-                    top_um: 10_000,
-                    right_um: 10_000,
-                    bottom_um: 10_000,
-                    left_um: 20_000,
-                }
-            }
-            DrawingSheetStandardSeries::Ansi | DrawingSheetStandardSeries::Architectural => {
-                DrawingSheetMargins {
-                    top_um: 12_700,
-                    right_um: 12_700,
-                    bottom_um: 12_700,
-                    left_um: 12_700,
-                }
-            }
-        }
-    }
-
     /// The edges a sheet of this size letters its zone references on: ISO
     /// 5457 4.4 letters A4 at the top and the right side only, and every
     /// other size on all four sides.
@@ -422,6 +396,10 @@ impl DrawingSheetDisplayUnit {
     }
 }
 
+/// The distance from each trimmed edge of a sheet to its frame. A sheet's
+/// margins are its standard's (see [`SchematicSheetFormat::margins`]); a
+/// sheet saved with margins of its own is read only to learn whether it was
+/// bound.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DrawingSheetMargins {
@@ -429,12 +407,6 @@ pub struct DrawingSheetMargins {
     pub right_um: u64,
     pub bottom_um: u64,
     pub left_um: u64,
-}
-
-impl Default for DrawingSheetMargins {
-    fn default() -> Self {
-        DrawingSheetStandard::IsoA4.default_margins()
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1295,7 +1267,11 @@ pub struct SchematicSheetFormat {
     pub orientation: SchematicPageOrientation,
     pub authored_size: AuthoredDrawingSheetSize,
     pub display_unit: DrawingSheetDisplayUnit,
-    pub margins: DrawingSheetMargins,
+    /// ASME Y14.1 4.1.3 lets a bound drawing widen its margin; this one is
+    /// widened to 0.75 in on the left. No other sheet has one, and its
+    /// margins are otherwise its standard's (see [`Self::margins`]).
+    #[serde(skip_serializing_if = "core::ops::Not::not")]
+    pub binding_margin: bool,
     pub bleed_um: u64,
     pub border: DrawingSheetBorderTemplate,
     pub zones: DrawingSheetZones,
@@ -1315,7 +1291,8 @@ pub struct SchematicSheetFormatDraft {
     pub authored_size: AuthoredDrawingSheetSize,
     pub orientation: SchematicPageOrientation,
     pub display_unit: DrawingSheetDisplayUnit,
-    pub margins: DrawingSheetMargins,
+    /// Kept only where the sheet takes the ASME Y14.1 format and a border.
+    pub binding_margin: bool,
     pub bleed_um: u64,
     pub border: DrawingSheetBorderTemplate,
     pub zones: DrawingSheetZones,
@@ -1330,7 +1307,7 @@ impl From<&SchematicSheetFormat> for SchematicSheetFormatDraft {
             authored_size: format.authored_size.clone(),
             orientation: format.orientation,
             display_unit: format.display_unit,
-            margins: format.margins,
+            binding_margin: format.binding_margin,
             bleed_um: format.bleed_um,
             border: format.border,
             zones: format.zones,
@@ -1372,7 +1349,12 @@ struct SchematicSheetFormatWire {
     orientation: SchematicPageOrientation,
     authored_size: PresentField<AuthoredDrawingSheetSize>,
     display_unit: DrawingSheetDisplayUnit,
+    /// The margins a sheet stored before they became its standard's. They
+    /// are read only to keep a bound ASME sheet bound: a sheet saved with
+    /// other margins loads on its standard's, and keeps its content where it
+    /// was on the sheet.
     margins: PresentField<DrawingSheetMargins>,
+    binding_margin: bool,
     bleed_um: u64,
     border: DrawingSheetBorderTemplate,
     zones: PresentField<DrawingSheetZonesWire>,
@@ -1417,6 +1399,7 @@ impl Default for SchematicSheetFormatWire {
             authored_size: PresentField::default(),
             display_unit: DrawingSheetDisplayUnit::default(),
             margins: PresentField::default(),
+            binding_margin: false,
             bleed_um: 0,
             border: DrawingSheetBorderTemplate::default(),
             zones: PresentField::default(),
@@ -1442,21 +1425,20 @@ impl<'de> Deserialize<'de> for SchematicSheetFormat {
             .authored_size
             .0
             .unwrap_or_else(|| authored_size_from_legacy(&wire.size));
-        let standard = match &authored_size {
-            AuthoredDrawingSheetSize::Standard { standard } => Some(*standard),
-            AuthoredDrawingSheetSize::Custom { .. } => None,
-        };
         let legacy_title_block = wire.title_block.0.is_none();
+        // A left margin of exactly the binding margin is how a bound sheet
+        // was stored; on a sheet of another format it was only a margin.
+        let bound = wire.binding_margin
+            || wire
+                .margins
+                .0
+                .is_some_and(|margins| margins.left_um == DRAWING_SHEET_ASME_BINDING_MARGIN_UM);
         let mut format = Self {
             size: wire.size,
             orientation: wire.orientation,
             authored_size,
             display_unit: wire.display_unit,
-            margins: wire.margins.0.unwrap_or_else(|| {
-                standard.map_or_else(DrawingSheetMargins::default, |value| {
-                    value.default_margins()
-                })
-            }),
+            binding_margin: bound,
             bleed_um: wire.bleed_um,
             border: wire.border,
             zones: wire
@@ -1470,6 +1452,23 @@ impl<'de> Deserialize<'de> for SchematicSheetFormat {
             title_block: wire.title_block.0.unwrap_or_default(),
             inheritance: wire.inheritance,
         };
+        format.binding_margin &= format.can_bind();
+        // A sheet saved with margins narrower than its standard's may be too
+        // small to keep a drawing area inside them. No frame of its standard
+        // fits it, so it loads without one rather than not at all.
+        if format.border != DrawingSheetBorderTemplate::None
+            && matches!(
+                format.geometry(),
+                Err(DesignManagementError::NumericRange(
+                    "drawing sheet margins" | "drawing sheet drawing area"
+                ))
+            )
+        {
+            format.border = DrawingSheetBorderTemplate::None;
+            format.zones = DrawingSheetZones::none();
+            format.marks = DrawingSheetBorderTemplate::None.default_marks();
+            format.binding_margin = false;
+        }
         format.title_block.normalize_title_field_set();
         format.title_block.normalize_managed_template();
         if legacy_title_block {
@@ -1502,12 +1501,12 @@ impl SchematicSheetFormat {
     ) -> Result<Self, DesignManagementError> {
         draft.title_block.normalize_managed_template();
         draft.title_block.normalize_title_field_set();
-        let format = Self {
+        let mut format = Self {
             size: draft.authored_size.legacy_projection(),
             orientation: draft.orientation,
             authored_size: draft.authored_size,
             display_unit: draft.display_unit,
-            margins: draft.margins,
+            binding_margin: draft.binding_margin,
             bleed_um: draft.bleed_um,
             border: draft.border,
             zones: draft.zones,
@@ -1515,6 +1514,9 @@ impl SchematicSheetFormat {
             title_block: draft.title_block,
             inheritance: draft.inheritance,
         };
+        // A sheet that leaves the ASME format, or its border, leaves the
+        // binding margin with it.
+        format.binding_margin &= format.can_bind();
         format.validate()?;
         Ok(format)
     }
@@ -1606,7 +1608,7 @@ impl SchematicSheetFormat {
             orientation,
             authored_size,
             display_unit: DrawingSheetDisplayUnit::Millimetres,
-            margins: standard.default_margins(),
+            binding_margin: false,
             bleed_um: 0,
             border: DrawingSheetBorderTemplate::Standard,
             zones: DrawingSheetZones::default(),
@@ -1645,11 +1647,7 @@ impl SchematicSheetFormat {
             orientation,
             authored_size,
             display_unit: DrawingSheetDisplayUnit::Millimetres,
-            margins: if framed {
-                DrawingSheetMargins::default()
-            } else {
-                DrawingSheetMargins::zero()
-            },
+            binding_margin: false,
             bleed_um: 0,
             border: if framed {
                 DrawingSheetBorderTemplate::Standard
@@ -1686,6 +1684,11 @@ impl SchematicSheetFormat {
         }
         if self.bleed_um > DRAWING_SHEET_MAX_BLEED_UM {
             return Err(DesignManagementError::NumericRange("drawing sheet bleed"));
+        }
+        if self.binding_margin && !self.can_bind() {
+            return Err(DesignManagementError::NumericRange(
+                "drawing sheet binding margin",
+            ));
         }
         self.zones.validate(self.border)?;
         self.title_block.validate()?;
@@ -1729,6 +1732,28 @@ impl SchematicSheetFormat {
         }
     }
 
+    /// The margins between the trimmed edge and the frame: the borders of
+    /// the sheet's standard (see [`DrawingSheetFrameConvention::margins`]),
+    /// for a custom size as for a standard one. A sheet with no border has
+    /// no margins, and its drawing area is the paper.
+    #[must_use]
+    pub const fn margins(&self) -> DrawingSheetMargins {
+        match self.border {
+            DrawingSheetBorderTemplate::None => DrawingSheetMargins::zero(),
+            _ => self.frame_convention().margins(self.binding_margin),
+        }
+    }
+
+    /// Whether the sheet may have a binding margin: ASME Y14.1 4.1.3's, so
+    /// only on a bordered sheet of that format.
+    #[must_use]
+    pub const fn can_bind(&self) -> bool {
+        matches!(
+            self.frame_convention(),
+            DrawingSheetFrameConvention::AsmeY141
+        ) && !matches!(self.border, DrawingSheetBorderTemplate::None)
+    }
+
     /// Title-block template actually painted on this physical sheet.
     ///
     /// The requested choice is never silently rewritten. A block that does
@@ -1768,15 +1793,7 @@ impl SchematicSheetFormat {
     fn drawing_area_extent_um(&self) -> Option<(u64, u64)> {
         let (paper_width_um, paper_height_um) = self.oriented_dimensions_um();
         let paper = DrawingSheetRect::new(0, 0, paper_width_um, paper_height_um);
-        let printable = paper
-            .inset(
-                self.margins.left_um,
-                self.margins.top_um,
-                self.margins.right_um,
-                self.margins.bottom_um,
-                "drawing sheet margins",
-            )
-            .ok()?;
+        let printable = paper.inset_by(self.margins()).ok()?;
         let area = self.frame_layout(paper, printable).ok()?.drawing_area;
         Some((area.width_um, area.height_um))
     }
@@ -1878,13 +1895,7 @@ impl SchematicSheetFormat {
                 .checked_add(bleed_diameter)
                 .ok_or(DesignManagementError::NumericRange("drawing sheet bleed"))?,
         );
-        let printable = paper.inset(
-            self.margins.left_um,
-            self.margins.top_um,
-            self.margins.right_um,
-            self.margins.bottom_um,
-            "drawing sheet margins",
-        )?;
+        let printable = paper.inset_by(self.margins())?;
         let frame = self.frame_layout(paper, printable)?;
         let drawing_area = frame.drawing_area;
         if drawing_area.width_um < DRAWING_SHEET_MIN_DRAWING_EDGE_UM
@@ -2176,6 +2187,17 @@ impl DrawingSheetRect {
             self.width_um - horizontal,
             self.height_um - vertical,
         ))
+    }
+
+    /// The rectangle inside a sheet's margins.
+    fn inset_by(self, margins: DrawingSheetMargins) -> Result<Self, DesignManagementError> {
+        self.inset(
+            margins.left_um,
+            margins.top_um,
+            margins.right_um,
+            margins.bottom_um,
+            "drawing sheet margins",
+        )
     }
 
     fn right_um(self) -> Result<i64, DesignManagementError> {

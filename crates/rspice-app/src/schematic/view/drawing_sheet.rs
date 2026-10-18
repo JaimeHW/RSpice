@@ -401,6 +401,50 @@ mod tests {
         }
     }
 
+    /// Saved with 5 mm margins all round, an A4 sheet drew its frame 5 mm
+    /// from the trimmed edge. It loads on ISO 5457's 20 mm filing border, so
+    /// a wire 12 mm from the left edge keeps its place on the sheet and the
+    /// overflow advisory reports it outside the frame.
+    #[test]
+    fn content_the_standard_margins_now_frame_out_is_reported() {
+        let mut state = AppState::default();
+        state
+            .schematic
+            .document_mut_for_test()
+            .wires
+            .push(Wire::new(
+                31,
+                vec![Point::new(-92, 100), Point::new(-88, 100)],
+            ));
+        let mut saved =
+            serde_json::to_value(crate::state::SchematicSheetFormat::default()).unwrap();
+        saved["margins"] = serde_json::json!({
+            "top_um": 5_000,
+            "right_um": 5_000,
+            "bottom_um": 5_000,
+            "left_um": 5_000,
+        });
+        let format: crate::state::SchematicSheetFormat = serde_json::from_value(saved).unwrap();
+        let sheet = ActiveDrawingSheet {
+            geometry: DrawingSheetGeometry::from_format(&format),
+            format,
+            sheet_name: "top".to_owned(),
+            page_label: "1 of 1".to_owned(),
+        };
+        assert_eq!(sheet.geometry.physical.drawing_area.x_um, 20_000);
+
+        let symbol_context = schematic_symbol_context(&state);
+        let report = drawing_sheet_overflow_summary(&state, &symbol_context, &sheet);
+
+        assert_eq!(report.outside_border, 1);
+        assert_eq!(report.off_paper, 0);
+        assert_eq!(report.items[0].sheet_coordinates_mm, (12.0, 35.0));
+        assert_eq!(
+            report.first_target,
+            Some(DrawingSheetOverflowTarget::Wire(31))
+        );
+    }
+
     #[test]
     fn overflow_navigation_selects_and_centers_the_exact_current_target() {
         let mut state = AppState::default();

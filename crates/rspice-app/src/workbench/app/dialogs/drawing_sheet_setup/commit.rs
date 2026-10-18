@@ -74,7 +74,6 @@ pub(crate) fn open_drawing_sheet_setup_with_preset(
     }
     let managed_authority = app.state.dialogs.drawing_sheet_setup.baseline.clone();
     draft.enforce_managed_authority(&managed_authority);
-    app.state.dialogs.drawing_sheet_setup.restore_margins = preset.format.margins;
     app.state.dialogs.drawing_sheet_setup.draft = draft;
     Ok(())
 }
@@ -168,7 +167,6 @@ pub(crate) fn open_drawing_sheet_setup_for_state(state: &mut AppState) -> bool {
             .drawing_sheet_settings()
             .default_format
             .clone(),
-        restore_margins: format.margins,
         authority: Some(DrawingSheetAuthority {
             edit: crate::workbench::app::SchematicEditAuthority::capture(state),
             cell_view_key,
@@ -1428,7 +1426,7 @@ mod tests {
         let drc_version = app.state.dialogs.drc_checked_version;
         let retained_runs = app.state.simulation.retained.runs.len();
         open_drawing_sheet_setup(&mut app);
-        app.state.dialogs.drawing_sheet_setup.draft.margin_top = "12".to_owned();
+        app.state.dialogs.drawing_sheet_setup.draft.bleed = "2".to_owned();
         let expected = app
             .state
             .dialogs
@@ -1559,7 +1557,7 @@ mod tests {
     fn an_inline_sheet_edit_waits_for_an_open_page_setup() {
         let (mut app, _, _) = governed_app_with_sheets(1);
         open_drawing_sheet_setup(&mut app);
-        app.state.dialogs.drawing_sheet_setup.draft.margin_top = "12".to_owned();
+        app.state.dialogs.drawing_sheet_setup.draft.bleed = "2".to_owned();
         let draft = app.state.dialogs.drawing_sheet_setup.draft.clone();
 
         assert!(

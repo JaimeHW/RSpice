@@ -1463,7 +1463,7 @@ fn frame_label(frame: StartingFrame) -> &'static str {
     match frame {
         StartingFrame::IsoA => "Copy ISO A defaults",
         StartingFrame::AnsiA => "Copy ANSI A defaults",
-        StartingFrame::Plain => "Plain 10 mm margins",
+        StartingFrame::Plain => "Plain border",
         StartingFrame::None => "No border or title block",
     }
 }

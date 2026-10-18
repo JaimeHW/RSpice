@@ -6,15 +6,14 @@
 //! that model cannot leak output-media concepts back into this workflow.
 
 use crate::state::{
-    AuthoredDrawingSheetSize, CustomDrawingSheetSnapshot, DRAWING_SHEET_ASME_BINDING_MARGIN_UM,
-    DrawingSheetBorderTemplate, DrawingSheetDisplayUnit, DrawingSheetFrameConvention,
-    DrawingSheetInheritance, DrawingSheetManagedTemplateSnapshot, DrawingSheetMargins,
-    DrawingSheetMarks, DrawingSheetPreset, DrawingSheetPresetScope, DrawingSheetScale,
-    DrawingSheetStandard, DrawingSheetStandardSeries, DrawingSheetTitleBlock,
-    DrawingSheetTitleBlockAnchor, DrawingSheetTitleBlockRotation, DrawingSheetTitleBlockTemplate,
-    DrawingSheetTitleFieldId, DrawingSheetTitleFieldState, DrawingSheetZoneMode, DrawingSheetZones,
-    SchematicPageOrientation, SchematicSheetFormat, SchematicSheetFormatDraft, SheetId,
-    drawing_sheet_automatic_zone_counts,
+    AuthoredDrawingSheetSize, CustomDrawingSheetSnapshot, DrawingSheetBorderTemplate,
+    DrawingSheetDisplayUnit, DrawingSheetFrameConvention, DrawingSheetInheritance,
+    DrawingSheetManagedTemplateSnapshot, DrawingSheetMargins, DrawingSheetMarks,
+    DrawingSheetPreset, DrawingSheetPresetScope, DrawingSheetScale, DrawingSheetStandard,
+    DrawingSheetStandardSeries, DrawingSheetTitleBlock, DrawingSheetTitleBlockAnchor,
+    DrawingSheetTitleBlockRotation, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId,
+    DrawingSheetTitleFieldState, DrawingSheetZoneMode, DrawingSheetZones, SchematicPageOrientation,
+    SchematicSheetFormat, SchematicSheetFormatDraft, SheetId, drawing_sheet_automatic_zone_counts,
 };
 use crate::workbench::app::SchematicEditAuthority;
 
@@ -305,11 +304,9 @@ pub(crate) struct DrawingSheetDraft {
     pub(crate) display_unit: SheetDisplayUnit,
     pub(crate) save_custom_preset: bool,
     pub(crate) custom_preset_scope: DrawingSheetPresetScope,
-    pub(crate) margins_linked: bool,
-    pub(crate) margin_top: String,
-    pub(crate) margin_right: String,
-    pub(crate) margin_bottom: String,
-    pub(crate) margin_left: String,
+    /// ASME Y14.1 4.1.3's binding margin. The margins are otherwise the
+    /// standard's, and nothing here edits them.
+    pub(crate) binding_margin: bool,
     pub(crate) bleed: String,
     pub(crate) border: BorderTemplateChoice,
     pub(crate) zone_mode: ZoneModeChoice,
@@ -371,13 +368,7 @@ impl DrawingSheetDraft {
             display_unit,
             save_custom_preset: false,
             custom_preset_scope: DrawingSheetPresetScope::Project,
-            margins_linked: format.margins.top_um == format.margins.right_um
-                && format.margins.top_um == format.margins.bottom_um
-                && format.margins.top_um == format.margins.left_um,
-            margin_top: format_um(format.margins.top_um, display_unit),
-            margin_right: format_um(format.margins.right_um, display_unit),
-            margin_bottom: format_um(format.margins.bottom_um, display_unit),
-            margin_left: format_um(format.margins.left_um, display_unit),
+            binding_margin: format.binding_margin,
             bleed: format_um(format.bleed_um, display_unit),
             border: border_from_model(format.border),
             zone_mode: zone_mode_from_model(format.zones.mode),
@@ -405,21 +396,13 @@ impl DrawingSheetDraft {
         let physical = [
             parse_length_um(&self.width, current)?,
             parse_length_um(&self.height, current)?,
-            parse_length_um(&self.margin_top, current)?,
-            parse_length_um(&self.margin_right, current)?,
-            parse_length_um(&self.margin_bottom, current)?,
-            parse_length_um(&self.margin_left, current)?,
             parse_length_um(&self.bleed, current)?,
         ];
         let offset_x = parse_signed_length_um(&self.title_block_offset_x, current)?;
         let offset_y = parse_signed_length_um(&self.title_block_offset_y, current)?;
         self.width = format_um(physical[0], next);
         self.height = format_um(physical[1], next);
-        self.margin_top = format_um(physical[2], next);
-        self.margin_right = format_um(physical[3], next);
-        self.margin_bottom = format_um(physical[4], next);
-        self.margin_left = format_um(physical[5], next);
-        self.bleed = format_um(physical[6], next);
+        self.bleed = format_um(physical[2], next);
         self.title_block_offset_x = format_signed_um(offset_x, next);
         self.title_block_offset_y = format_signed_um(offset_y, next);
         self.display_unit = next;
@@ -454,11 +437,8 @@ impl DrawingSheetDraft {
         let (width_um, height_um) = format.oriented_dimensions_um();
         self.width = format_um(width_um, self.display_unit);
         self.height = format_um(height_um, self.display_unit);
-        let margins = standard.default_margins();
-        self.margin_top = format_um(margins.top_um, self.display_unit);
-        self.margin_right = format_um(margins.right_um, self.display_unit);
-        self.margin_bottom = format_um(margins.bottom_um, self.display_unit);
-        self.margin_left = format_um(margins.left_um, self.display_unit);
+        // Only an ASME Y14.1 format is bound.
+        self.binding_margin &= format.can_bind();
         // Marks the author left at the old size's default follow the new
         // size's; a choice they made stays as it is.
         let border = border_to_model(self.border);
@@ -489,20 +469,9 @@ impl DrawingSheetDraft {
     }
 
     /// Whether the frame takes its standard's own placement: the standard
-    /// border, with every margin wide enough for the zone band.
+    /// border.
     pub(crate) fn standard_frame(&self) -> bool {
-        let band_um = DrawingSheetBorderTemplate::Standard.band_width_um();
         self.border == BorderTemplateChoice::Standard
-            && [
-                &self.margin_top,
-                &self.margin_right,
-                &self.margin_bottom,
-                &self.margin_left,
-            ]
-            .into_iter()
-            .all(|margin| {
-                parse_length_um(margin, self.display_unit).is_ok_and(|value| value >= band_um)
-            })
     }
 
     /// The size the draft describes, as the model would store it.
@@ -569,37 +538,15 @@ impl DrawingSheetDraft {
             .then_some("ISO 5457 uses A0–A3 in landscape.")
     }
 
-    /// Whether the left margin is the ASME binding margin.
-    pub(crate) fn binding_margin(&self) -> bool {
-        parse_length_um(&self.margin_left, self.display_unit)
-            .is_ok_and(|value| value == DRAWING_SHEET_ASME_BINDING_MARGIN_UM)
-    }
-
-    /// Widen the left margin to the binding margin, or return it to the
-    /// format margin ASME Y14.1 Table 4-1 gives every side.
-    pub(crate) fn set_binding_margin(&mut self, binding: bool) {
-        let left_um = if binding {
-            DRAWING_SHEET_ASME_BINDING_MARGIN_UM
-        } else {
-            DrawingSheetStandard::AnsiA.default_margins().left_um
-        };
-        self.margin_left = format_um(left_um, self.display_unit);
-        self.margins_linked = false;
-    }
-
-    pub(crate) fn link_margins_from(&mut self, edge: MarginEdge) {
-        if self.margins_linked {
-            let value = match edge {
-                MarginEdge::Top => self.margin_top.clone(),
-                MarginEdge::Right => self.margin_right.clone(),
-                MarginEdge::Bottom => self.margin_bottom.clone(),
-                MarginEdge::Left => self.margin_left.clone(),
-            };
-            self.margin_top.clone_from(&value);
-            self.margin_right.clone_from(&value);
-            self.margin_bottom.clone_from(&value);
-            self.margin_left = value;
+    /// The margins the draft's sheet takes from its standard, or none when it
+    /// has no border.
+    pub(crate) fn margins(&self) -> DrawingSheetMargins {
+        if self.border == BorderTemplateChoice::None {
+            return DrawingSheetMargins::zero();
         }
+        let convention = self.frame_convention();
+        convention
+            .margins(self.binding_margin && convention == DrawingSheetFrameConvention::AsmeY141)
     }
 
     /// Re-apply the two independently managed presentation authorities.
@@ -666,10 +613,6 @@ impl DrawingSheetDraft {
         };
         let width_um = parse("width", &self.width, &mut problems);
         let height_um = parse("height", &self.height, &mut problems);
-        let top_um = parse("margin-top", &self.margin_top, &mut problems);
-        let right_um = parse("margin-right", &self.margin_right, &mut problems);
-        let bottom_um = parse("margin-bottom", &self.margin_bottom, &mut problems);
-        let left_um = parse("margin-left", &self.margin_left, &mut problems);
         let bleed_um = parse("bleed", &self.bleed, &mut problems);
         let offset_x_um = parse_signed_length_um(&self.title_block_offset_x, self.display_unit)
             .map_err(|message| {
@@ -704,29 +647,23 @@ impl DrawingSheetDraft {
                     });
                 }
             }
-            if let (Some(top), Some(right), Some(bottom), Some(left)) =
-                (top_um, right_um, bottom_um, left_um)
-            {
-                let border_band = border_to_model(self.border).band_width_um();
-                let horizontal_reserved = left
-                    .saturating_add(right)
-                    .saturating_add(border_band.saturating_mul(2));
-                let vertical_reserved = top
-                    .saturating_add(bottom)
-                    .saturating_add(border_band.saturating_mul(2));
-                if width.saturating_sub(horizontal_reserved)
+            let margins = self.margins();
+            let band_um = if self.standard_frame() {
+                0
+            } else {
+                border_to_model(self.border).band_width_um()
+            };
+            let horizontal_reserved = margins.left_um + margins.right_um + 2 * band_um;
+            let vertical_reserved = margins.top_um + margins.bottom_um + 2 * band_um;
+            if width.saturating_sub(horizontal_reserved)
+                < crate::state::DRAWING_SHEET_MIN_DRAWING_EDGE_UM
+                || height.saturating_sub(vertical_reserved)
                     < crate::state::DRAWING_SHEET_MIN_DRAWING_EDGE_UM
-                    || height.saturating_sub(vertical_reserved)
-                        < crate::state::DRAWING_SHEET_MIN_DRAWING_EDGE_UM
-                {
-                    problems.push(FieldProblem {
-                        field: "margins",
-                        message: format!(
-                            "Margins and the {} mm frame band must leave at least 25 mm of drawing area on each edge.",
-                            border_band as f64 / 1_000.0
-                        ),
-                    });
-                }
+            {
+                problems.push(FieldProblem {
+                    field: "width",
+                    message: "The sheet must leave at least 25 mm of drawing area inside its standard's margins on each edge.".to_owned(),
+                });
             }
         }
         if self
@@ -783,12 +720,7 @@ impl DrawingSheetDraft {
             authored_size,
             orientation: self.orientation,
             display_unit: display_unit_to_model(self.display_unit),
-            margins: DrawingSheetMargins {
-                top_um: top_um.expect("validated top margin"),
-                right_um: right_um.expect("validated right margin"),
-                bottom_um: bottom_um.expect("validated bottom margin"),
-                left_um: left_um.expect("validated left margin"),
-            },
+            binding_margin: self.binding_margin,
             bleed_um: bleed_um.expect("validated bleed"),
             border: border_to_model(self.border),
             zones: DrawingSheetZones {
@@ -825,11 +757,13 @@ impl DrawingSheetDraft {
                     },
                 ];
             }
+            // The margins are the standard's, so a sheet they leave too
+            // little room inside is too small.
             let field = if message.contains("drawing sheet margin")
                 || message.contains("drawing sheet border")
                 || message.contains("drawing sheet drawing area")
             {
-                "margins"
+                "width"
             } else {
                 "drawing-sheet"
             };
@@ -839,23 +773,11 @@ impl DrawingSheetDraft {
             page_format,
             width_um,
             height_um,
-            margin_top_um: top_um.expect("validated top margin"),
-            margin_right_um: right_um.expect("validated right margin"),
-            margin_bottom_um: bottom_um.expect("validated bottom margin"),
-            margin_left_um: left_um.expect("validated left margin"),
             bleed_um: bleed_um.expect("validated bleed"),
             title_block_offset_x_um: offset_x_um.expect("validated horizontal title offset"),
             title_block_offset_y_um: offset_y_um.expect("validated vertical title offset"),
         })
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MarginEdge {
-    Top,
-    Right,
-    Bottom,
-    Left,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -869,10 +791,6 @@ pub(crate) struct ValidatedDrawingSheetDraft {
     pub(crate) page_format: SchematicSheetFormat,
     pub(crate) width_um: u64,
     pub(crate) height_um: u64,
-    pub(crate) margin_top_um: u64,
-    pub(crate) margin_right_um: u64,
-    pub(crate) margin_bottom_um: u64,
-    pub(crate) margin_left_um: u64,
     pub(crate) bleed_um: u64,
     pub(crate) title_block_offset_x_um: i64,
     pub(crate) title_block_offset_y_um: i64,
@@ -914,7 +832,6 @@ pub(crate) struct DrawingSheetSetupState {
     pub(crate) managed_sheet_names: Vec<String>,
     pub(crate) available_presets: Vec<DrawingSheetPreset>,
     pub(crate) project_default: SchematicSheetFormat,
-    pub(crate) restore_margins: DrawingSheetMargins,
     pub(crate) authority: Option<DrawingSheetAuthority>,
     pub(crate) baseline: DrawingSheetDraft,
     pub(crate) draft: DrawingSheetDraft,
@@ -946,7 +863,6 @@ impl Default for DrawingSheetSetupState {
             managed_sheet_names: Vec::new(),
             available_presets: Vec::new(),
             project_default: SchematicSheetFormat::default(),
-            restore_margins: SchematicSheetFormat::default().margins,
             authority: None,
             baseline: draft.clone(),
             last_valid_format: SchematicSheetFormat::default(),
@@ -973,45 +889,6 @@ impl DrawingSheetSetupState {
         self.draft.clone_from(&self.baseline);
         self.staged_project_title_values = None;
         self.staged_document_control = None;
-        self.capture_restore_margins_from_draft();
-    }
-
-    /// Restore only the four page margins from the selected format authority.
-    ///
-    /// This intentionally leaves dimensions, orientation, preset identity,
-    /// frame/zones, bleed and title-block state untouched.
-    pub(crate) fn restore_selected_margins(&mut self) {
-        let margins = match &self.draft.size {
-            SheetSizeChoice::Standard(standard) => standard.default_margins(),
-            SheetSizeChoice::CapturedPreset { id, .. } => self
-                .available_presets
-                .iter()
-                .find(|preset| preset.id == *id)
-                .map(|preset| preset.format.margins)
-                .unwrap_or(self.restore_margins),
-            SheetSizeChoice::Custom => self.restore_margins,
-        };
-        self.draft.margin_top = format_um(margins.top_um, self.draft.display_unit);
-        self.draft.margin_right = format_um(margins.right_um, self.draft.display_unit);
-        self.draft.margin_bottom = format_um(margins.bottom_um, self.draft.display_unit);
-        self.draft.margin_left = format_um(margins.left_um, self.draft.display_unit);
-    }
-
-    pub(crate) fn capture_restore_margins_from_draft(&mut self) {
-        let unit = self.draft.display_unit;
-        if let (Ok(top_um), Ok(right_um), Ok(bottom_um), Ok(left_um)) = (
-            parse_length_um(&self.draft.margin_top, unit),
-            parse_length_um(&self.draft.margin_right, unit),
-            parse_length_um(&self.draft.margin_bottom, unit),
-            parse_length_um(&self.draft.margin_left, unit),
-        ) {
-            self.restore_margins = DrawingSheetMargins {
-                top_um,
-                right_um,
-                bottom_um,
-                left_um,
-            };
-        }
     }
 }
 
@@ -1246,12 +1123,16 @@ mod tests {
     }
 
     #[test]
-    fn draft_validation_rejects_collapsed_printable_area() {
+    fn draft_validation_rejects_a_size_its_standards_margins_leave_no_room_in() {
         let mut draft = valid_draft();
-        draft.margin_left = "200".to_owned();
-        draft.margin_right = "200".to_owned();
+        draft.size = SheetSizeChoice::Custom;
+        draft.width = "52".to_owned();
         let problems = draft.validate().unwrap_err();
-        assert!(problems.iter().any(|problem| problem.field == "margins"));
+        assert!(problems.iter().any(|problem| problem.field == "width"));
+        // Without a border a sheet has no margins, and the same size is
+        // drawing area edge to edge.
+        draft.set_border_template(BorderTemplateChoice::None);
+        assert!(draft.validate().is_ok());
     }
 
     #[test]
@@ -1320,16 +1201,18 @@ mod tests {
     fn a_binding_margin_is_an_asme_option_not_its_default() {
         let mut draft = valid_draft();
         draft.apply_size_choice(SheetSizeChoice::Standard(DrawingSheetStandard::AnsiB));
-        assert!(!draft.binding_margin());
-        draft.set_binding_margin(true);
-        assert!(draft.binding_margin());
+        assert!(!draft.binding_margin);
+        draft.binding_margin = true;
         let format = draft.validate().unwrap().page_format;
-        assert_eq!(format.margins.left_um, 19_050);
-        assert_eq!(format.margins.right_um, 12_700);
-        draft.set_binding_margin(false);
+        assert_eq!(format.margins().left_um, 19_050);
+        assert_eq!(format.margins().right_um, 12_700);
+        assert_eq!(draft.margins(), format.margins());
+        // An ISO sheet has no binding margin to keep.
+        draft.apply_size_choice(SheetSizeChoice::Standard(DrawingSheetStandard::IsoA3));
+        assert!(!draft.binding_margin);
         assert_eq!(
-            draft.validate().unwrap().page_format.margins.left_um,
-            12_700
+            draft.validate().unwrap().page_format.margins().left_um,
+            20_000
         );
     }
 
@@ -1429,20 +1312,6 @@ mod tests {
     }
 
     #[test]
-    fn linked_margins_propagate_the_edge_that_was_edited() {
-        let mut draft = valid_draft();
-        draft.margins_linked = true;
-        draft.margin_right = "17.25".to_owned();
-
-        draft.link_margins_from(MarginEdge::Right);
-
-        assert_eq!(draft.margin_top, "17.25");
-        assert_eq!(draft.margin_right, "17.25");
-        assert_eq!(draft.margin_bottom, "17.25");
-        assert_eq!(draft.margin_left, "17.25");
-    }
-
-    #[test]
     fn managed_border_and_title_authorities_survive_replacement_drafts() {
         let mut authority = valid_draft();
         authority.set_border_template(BorderTemplateChoice::Organization);
@@ -1472,92 +1341,6 @@ mod tests {
             replacement.title_fields[&DrawingSheetTitleFieldId::SheetTitle].value,
             "Edited title"
         );
-    }
-
-    #[test]
-    fn one_off_custom_margin_restore_does_not_reset_geometry_or_frame() {
-        let mut state = DrawingSheetSetupState::default();
-        state.draft.size = SheetSizeChoice::Custom;
-        state.draft.width = "333.125".to_owned();
-        state.draft.height = "777.25".to_owned();
-        state.draft.border = BorderTemplateChoice::Plain;
-        state.restore_margins = DrawingSheetMargins {
-            top_um: 12_000,
-            right_um: 13_000,
-            bottom_um: 14_000,
-            left_um: 15_000,
-        };
-        state.draft.margin_top = "1".to_owned();
-        state.draft.margin_right = "2".to_owned();
-        state.draft.margin_bottom = "3".to_owned();
-        state.draft.margin_left = "4".to_owned();
-
-        state.restore_selected_margins();
-
-        assert_eq!(state.draft.width, "333.125");
-        assert_eq!(state.draft.height, "777.25");
-        assert_eq!(state.draft.border, BorderTemplateChoice::Plain);
-        assert_eq!(state.draft.margin_top, "12");
-        assert_eq!(state.draft.margin_right, "13");
-        assert_eq!(state.draft.margin_bottom, "14");
-        assert_eq!(state.draft.margin_left, "15");
-    }
-
-    #[test]
-    fn missing_captured_preset_restores_its_opened_margin_snapshot() {
-        let mut state = DrawingSheetSetupState::default();
-        state.draft.size = SheetSizeChoice::CapturedPreset {
-            id: "missing-captured-preset".to_owned(),
-            name: "Retained snapshot".to_owned(),
-            scope: DrawingSheetPresetScope::Project,
-        };
-        state.available_presets.clear();
-        state.restore_margins = DrawingSheetMargins {
-            top_um: 11_000,
-            right_um: 12_000,
-            bottom_um: 13_000,
-            left_um: 14_000,
-        };
-        state.draft.margin_top = "1".to_owned();
-        state.draft.margin_right = "2".to_owned();
-        state.draft.margin_bottom = "3".to_owned();
-        state.draft.margin_left = "4".to_owned();
-
-        state.restore_selected_margins();
-
-        assert_eq!(state.draft.margin_top, "11");
-        assert_eq!(state.draft.margin_right, "12");
-        assert_eq!(state.draft.margin_bottom, "13");
-        assert_eq!(state.draft.margin_left, "14");
-    }
-
-    #[test]
-    fn restore_opened_values_also_restores_the_opened_margin_authority() {
-        let mut state = DrawingSheetSetupState::default();
-        let mut opened = valid_draft();
-        opened.size = SheetSizeChoice::Custom;
-        opened.margin_top = "21".to_owned();
-        opened.margin_right = "22".to_owned();
-        opened.margin_bottom = "23".to_owned();
-        opened.margin_left = "24".to_owned();
-        state.baseline = opened;
-        state
-            .draft
-            .apply_size_choice(SheetSizeChoice::Standard(DrawingSheetStandard::AnsiA));
-        state.restore_margins = DrawingSheetStandard::AnsiA.default_margins();
-
-        state.restore_opened_values();
-        state.draft.margin_top = "1".to_owned();
-        state.draft.margin_right = "2".to_owned();
-        state.draft.margin_bottom = "3".to_owned();
-        state.draft.margin_left = "4".to_owned();
-        state.restore_selected_margins();
-
-        assert_eq!(state.draft.size, SheetSizeChoice::Custom);
-        assert_eq!(state.draft.margin_top, "21");
-        assert_eq!(state.draft.margin_right, "22");
-        assert_eq!(state.draft.margin_bottom, "23");
-        assert_eq!(state.draft.margin_left, "24");
     }
 
     #[test]
@@ -1597,17 +1380,13 @@ mod tests {
         let mut draft = valid_draft();
         draft.width = "54".to_owned();
         draft.height = "54".to_owned();
-        draft.margin_top = "10".to_owned();
-        draft.margin_right = "10".to_owned();
-        draft.margin_bottom = "10".to_owned();
-        draft.margin_left = "10".to_owned();
         draft.border = BorderTemplateChoice::Standard;
         assert!(
             draft
                 .validate()
                 .unwrap_err()
                 .iter()
-                .any(|problem| problem.field == "margins")
+                .any(|problem| problem.field == "width")
         );
     }
 

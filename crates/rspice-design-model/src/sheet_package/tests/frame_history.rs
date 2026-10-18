@@ -510,6 +510,17 @@ fn its_presets_load_onto_todays_frames_and_seal_again_without_the_old_options() 
     assert!(!bound.marks.centring);
     assert!(organization.marks.centring);
     assert!(!plain.marks.centring);
+    // Margins of their own give way to the standard's; the ANSI frame's
+    // 0.75 in left margin was its binding margin, and stays.
+    assert!(bound.binding_margin);
+    assert_eq!(bound.margins().left_um, 19_050);
+    for format in [organization, plain] {
+        assert!(!format.binding_margin);
+        assert_eq!(
+            format.margins(),
+            crate::design_management::DrawingSheetFrameConvention::Iso5457.margins(false)
+        );
+    }
     // Custom counts, coordinate and column-lettered schemes and partial
     // edges give way to the standard's zones.
     for format in [organization, plain] {
@@ -537,6 +548,7 @@ fn its_presets_load_onto_todays_frames_and_seal_again_without_the_old_options() 
     .unwrap();
     let encoded = encode_package(&resealed).unwrap();
     for retired in [
+        r#""margins""#,
         r#""registration""#,
         r#""folding""#,
         r#""custom_columns""#,

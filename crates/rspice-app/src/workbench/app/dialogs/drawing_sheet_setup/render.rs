@@ -26,9 +26,9 @@ use super::commit::{
 };
 use super::state::{
     BorderTemplateChoice, DrawingSheetDraft, DrawingSheetSection, DrawingSheetSetupState,
-    DrawingSheetSupportRequest, FieldProblem, MarginEdge, PageSetupScope, SheetDisplayUnit,
-    SheetSizeChoice, TitleBlockAnchorChoice, TitleBlockRotationChoice, TitleBlockTemplateChoice,
-    ZoneModeChoice, display_unit_from_model, format_um,
+    DrawingSheetSupportRequest, FieldProblem, PageSetupScope, SheetDisplayUnit, SheetSizeChoice,
+    TitleBlockAnchorChoice, TitleBlockRotationChoice, TitleBlockTemplateChoice, ZoneModeChoice,
+    display_unit_from_model, format_um,
 };
 
 const TITLE: &str = "Page setup";
@@ -569,9 +569,7 @@ fn paint_section_icon(ui: &mut Ui, section: DrawingSheetSection, selected: bool)
 fn field_section(field: &str) -> Option<DrawingSheetSection> {
     match field {
         "width" | "height" | "custom-name" => Some(DrawingSheetSection::Format),
-        "margin-top" | "margin-right" | "margin-bottom" | "margin-left" | "margins" | "bleed" => {
-            Some(DrawingSheetSection::Margins)
-        }
+        "bleed" => Some(DrawingSheetSection::Margins),
         "title-offset-x" | "title-offset-y" | "title-fields" | "scale" => {
             Some(DrawingSheetSection::TitleBlock)
         }
@@ -672,11 +670,25 @@ fn section_detail(state: &DrawingSheetSetupState, section: DrawingSheetSection) 
             let orientation = state.draft.orientation.label();
             format!("{} · {orientation}", state.draft.size.label())
         }
-        DrawingSheetSection::Margins => format!(
-            "{} {} binding",
-            state.draft.margin_left,
-            state.draft.display_unit.suffix()
-        ),
+        DrawingSheetSection::Margins => {
+            let margins = state.draft.margins();
+            let unit = state.draft.display_unit;
+            let length = |value_um| format_um(value_um, unit);
+            if state.draft.border == BorderTemplateChoice::None {
+                "no margins".to_owned()
+            } else if state.draft.binding_margin {
+                format!("{} {} binding", length(margins.left_um), unit.suffix())
+            } else if margins.left_um == margins.top_um {
+                format!("{} {}", length(margins.top_um), unit.suffix())
+            } else {
+                format!(
+                    "{} · {} {}",
+                    length(margins.left_um),
+                    length(margins.top_um),
+                    unit.suffix()
+                )
+            }
+        }
         DrawingSheetSection::Frame => match state.draft.zone_mode {
             ZoneModeChoice::None => "border only".to_owned(),
             _ => format!(
@@ -739,7 +751,7 @@ fn active_panel_header(ui: &mut Ui, section: DrawingSheetSection) {
             ui,
             "PAPER INSETS",
             "Margins and bleed",
-            "Margins define the printable boundary. Bleed belongs to export artwork and never enlarges the sheet.",
+            "The sheet's standard sets its margins. Bleed belongs to export artwork and never enlarges the sheet.",
         ),
         DrawingSheetSection::Frame => panel_header(
             ui,
@@ -867,9 +879,6 @@ fn format_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fie
         });
     if previous_size != state.draft.size {
         let selected = state.draft.size.clone();
-        if selected == SheetSizeChoice::Custom {
-            state.capture_restore_margins_from_draft();
-        }
         if let SheetSizeChoice::CapturedPreset { id, scope, .. } = &selected {
             if let Some(preset) = state
                 .available_presets
@@ -883,7 +892,6 @@ fn format_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fie
                 state.draft.scope = scope;
                 state.draft.title_fields = title_fields;
                 state.draft.enforce_managed_authority(&managed_authority);
-                state.restore_margins = preset.format.margins;
                 if let crate::state::AuthoredDrawingSheetSize::Custom { snapshot } =
                     &preset.format.authored_size
                 {
@@ -896,9 +904,6 @@ fn format_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fie
             }
         } else {
             state.draft.apply_size_choice(selected);
-            if let Some(standard) = state.draft.size.standard() {
-                state.restore_margins = standard.default_margins();
-            }
         }
     }
     ui.add_space(12.0);
@@ -1063,56 +1068,7 @@ fn margins_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fi
     margin_map(ui, &state.draft);
     ui.add_space(15.0);
     let unit = state.draft.display_unit.suffix();
-    let mut changed_edge = None;
-    let restore_gutter = ui.spacing().item_spacing.x;
-    ui.spacing_mut().item_spacing.x = FIELD_GUTTER;
-    ui.columns(4, |columns| {
-        if length_field(
-            &mut columns[0],
-            "Top",
-            &mut state.draft.margin_top,
-            "10",
-            field_error(problems, "margin-top").or_else(|| field_error(problems, "margins")),
-            unit,
-        ) {
-            changed_edge = Some(MarginEdge::Top);
-        }
-        if length_field(
-            &mut columns[1],
-            "Right",
-            &mut state.draft.margin_right,
-            "10",
-            field_error(problems, "margin-right").or_else(|| field_error(problems, "margins")),
-            unit,
-        ) {
-            changed_edge = Some(MarginEdge::Right);
-        }
-        if length_field(
-            &mut columns[2],
-            "Bottom",
-            &mut state.draft.margin_bottom,
-            "10",
-            field_error(problems, "margin-bottom").or_else(|| field_error(problems, "margins")),
-            unit,
-        ) {
-            changed_edge = Some(MarginEdge::Bottom);
-        }
-        if length_field(
-            &mut columns[3],
-            "Left · binding",
-            &mut state.draft.margin_left,
-            "20",
-            field_error(problems, "margin-left").or_else(|| field_error(problems, "margins")),
-            unit,
-        ) {
-            changed_edge = Some(MarginEdge::Left);
-        }
-    });
-    ui.spacing_mut().item_spacing.x = restore_gutter;
-    if let Some(edge) = changed_edge {
-        state.draft.link_margins_from(edge);
-    }
-    ui.add_space(12.0);
+    let bordered = state.draft.border != BorderTemplateChoice::None;
     two_column(ui, |left, right| {
         length_field(
             left,
@@ -1123,45 +1079,31 @@ fn margins_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fi
             unit,
         );
         right.add_space(19.0);
-        let linked = right.checkbox(&mut state.draft.margins_linked, "Link all four margins");
-        if linked.changed() && state.draft.margins_linked {
-            state.draft.link_margins_from(MarginEdge::Top);
-        }
         // ASME Y14.1 4.1.3 lets a bound drawing widen its margins.
-        if state.draft.frame_convention() == DrawingSheetFrameConvention::AsmeY141 {
-            let mut binding = state.draft.binding_margin();
-            if right
-                .checkbox(&mut binding, "Binding margin · 0.75 in left")
-                .changed()
-            {
-                state.draft.set_binding_margin(binding);
-            }
+        if bordered && state.draft.frame_convention() == DrawingSheetFrameConvention::AsmeY141 {
+            right.checkbox(
+                &mut state.draft.binding_margin,
+                "Binding margin · 0.75 in left",
+            );
         }
     });
     ui.add_space(14.0);
-    ui.horizontal_wrapped(|ui| {
-        // The body zeroes item spacing for its column rules, which otherwise
-        // butts this note straight against the button.
-        ui.spacing_mut().item_spacing.x = FIELD_GUTTER;
-        let restore_label = state
-            .draft
-            .size
-            .standard()
-            .map(|standard| match standard.series() {
-                DrawingSheetStandardSeries::Iso => "Restore ISO A margins",
-                DrawingSheetStandardSeries::Ansi => "Restore ANSI margins",
-                DrawingSheetStandardSeries::Architectural => "Restore ARCH margins",
-                DrawingSheetStandardSeries::Jis => "Restore JIS B margins",
-            })
-            .unwrap_or("Restore custom-format margins");
-        if Button::new(restore_label).show(ui).clicked() {
-            state.restore_selected_margins();
-        }
-        muted(
-            ui,
-            "Stored to 1 µm; display-unit changes do not alter physical size.",
-        );
-    });
+    muted(
+        ui,
+        match (bordered, state.draft.frame_convention()) {
+            (false, _) => "A sheet with no border has no margins.",
+            (true, DrawingSheetFrameConvention::Iso5457) => {
+                "ISO 5457 sets the margins: 20 mm on the filing side and 10 mm elsewhere."
+            }
+            (true, DrawingSheetFrameConvention::AsmeY141) => {
+                "ASME Y14.1 sets the margins: 0.50 in on every side."
+            }
+        },
+    );
+    muted(
+        ui,
+        "Stored to 1 µm; display-unit changes do not alter physical size.",
+    );
 }
 
 fn frame_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState) {
@@ -2288,7 +2230,7 @@ mod blocked_sections {
             seen += 1;
         }
         assert!(
-            seen >= 14,
+            seen >= 5,
             "the guard found only {seen} reported fields, so it is scanning the wrong region"
         );
     }

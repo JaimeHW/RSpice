@@ -2352,7 +2352,7 @@ mod tests {
             .update_drawing_sheet_settings(revision, settings)
             .unwrap();
         assert!(open_drawing_sheet_setup_for_state(&mut app.state));
-        app.state.dialogs.drawing_sheet_setup.draft.margin_top = "12".to_owned();
+        app.state.dialogs.drawing_sheet_setup.draft.bleed = "2".to_owned();
         let design_revision = app.state.workspace.content.design_management.revision();
         let sheet_revision = app
             .state
@@ -2455,7 +2455,7 @@ mod tests {
             .find(sheet_id)
             .unwrap()
             .page_format();
-        assert_eq!(saved.margins.top_um, 12_000);
+        assert_eq!(saved.bleed_um, 2_000);
         assert_eq!(
             saved.title_block.fields[&DrawingSheetTitleFieldId::SheetTitle].value,
             "Nested accepted title"

@@ -152,44 +152,49 @@ fn drawing_sheet_standards_are_exact_valid_and_round_trip() {
 
 #[test]
 fn drawing_sheet_series_margins_and_border_mark_defaults_are_normative() {
-    assert_eq!(
-        DrawingSheetStandard::IsoA4.default_margins(),
-        DrawingSheetMargins {
-            top_um: 10_000,
-            right_um: 10_000,
-            bottom_um: 10_000,
-            left_um: 20_000,
-        }
-    );
+    let iso = DrawingSheetMargins {
+        top_um: 10_000,
+        right_um: 10_000,
+        bottom_um: 10_000,
+        left_um: 20_000,
+    };
     // ASME Y14.1 Table 4-1: a 0.50 in format margin on every side; a
     // binding margin is the author's option.
+    let asme = DrawingSheetMargins {
+        top_um: 12_700,
+        right_um: 12_700,
+        bottom_um: 12_700,
+        left_um: 12_700,
+    };
+    for (standard, margins) in [
+        (DrawingSheetStandard::IsoA4, iso),
+        (DrawingSheetStandard::AnsiA, asme),
+        (DrawingSheetStandard::ArchA, asme),
+        (DrawingSheetStandard::JisB5, iso),
+    ] {
+        let format =
+            SchematicSheetFormat::from_standard(standard, SchematicPageOrientation::Landscape);
+        assert_eq!(format.margins(), margins, "{standard:?}");
+    }
+    // A custom size takes the margins of the series it was started from.
+    let custom =
+        crate::custom_format("Panel", 300_000, 500_000, crate::StartingFrame::AnsiA).unwrap();
+    assert_eq!(custom.margins(), asme);
+    let bound = custom
+        .try_update(|draft| draft.binding_margin = true)
+        .unwrap();
     assert_eq!(
-        DrawingSheetStandard::AnsiA.default_margins(),
+        bound.margins(),
         DrawingSheetMargins {
-            top_um: 12_700,
-            right_um: 12_700,
-            bottom_um: 12_700,
-            left_um: 12_700,
+            left_um: 19_050,
+            ..asme
         }
     );
-    assert_eq!(
-        DrawingSheetStandard::ArchA.default_margins(),
-        DrawingSheetMargins {
-            top_um: 12_700,
-            right_um: 12_700,
-            bottom_um: 12_700,
-            left_um: 12_700,
-        }
-    );
-    assert_eq!(
-        DrawingSheetStandard::JisB5.default_margins(),
-        DrawingSheetMargins {
-            top_um: 10_000,
-            right_um: 10_000,
-            bottom_um: 10_000,
-            left_um: 20_000,
-        }
-    );
+    // A sheet without a border has no margins.
+    let borderless = custom
+        .try_update(|draft| draft.apply_border_template(DrawingSheetBorderTemplate::None))
+        .unwrap();
+    assert_eq!(borderless.margins(), DrawingSheetMargins::zero());
     assert_eq!(
         DrawingSheetBorderTemplate::Standard.default_marks(),
         DrawingSheetMarks { centring: true }
@@ -714,10 +719,10 @@ fn drawing_sheet_geometry_is_canonical_and_bounded() {
 #[test]
 fn drawing_sheet_title_block_substitution_is_visible_and_non_destructive() {
     // A5 portrait's 118 mm drawing space cannot hold ISO 7200's 180 mm block,
-    // nor can ANSI A portrait's given 20 mm side margins. On a sheet ISO 5457
+    // nor can a 200 mm wide sheet started from ANSI A. On a sheet ISO 5457
     // frames, a block that does not fit gives way to none; on another, to the
     // compact block. Either way the request stays.
-    for (standard, side_margin_um, printed) in [
+    for (standard, narrowed_um, printed) in [
         (
             DrawingSheetStandard::IsoA5,
             None,
@@ -725,7 +730,7 @@ fn drawing_sheet_title_block_substitution_is_visible_and_non_destructive() {
         ),
         (
             DrawingSheetStandard::AnsiA,
-            Some(20_000),
+            Some(200_000),
             DrawingSheetTitleBlockTemplate::Compact,
         ),
     ] {
@@ -733,9 +738,17 @@ fn drawing_sheet_title_block_substitution_is_visible_and_non_destructive() {
             SchematicSheetFormat::from_standard(standard, SchematicPageOrientation::Portrait)
                 .try_update(|draft| {
                     draft.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
-                    if let Some(margin_um) = side_margin_um {
-                        draft.margins.left_um = margin_um;
-                        draft.margins.right_um = margin_um;
+                    if let Some(width_um) = narrowed_um {
+                        draft.authored_size = AuthoredDrawingSheetSize::Custom {
+                            snapshot: CustomDrawingSheetSnapshot {
+                                preset_id: None,
+                                name: "Narrow ANSI".to_owned(),
+                                portrait_width_um: width_um,
+                                portrait_height_um: 279_400,
+                                source_preset_unavailable: false,
+                                started_from: Some(DrawingSheetStandardSeries::Ansi),
+                            },
+                        };
                     }
                 })
                 .unwrap();
@@ -782,7 +795,6 @@ fn drawing_sheet_drafts_derive_compatibility_and_reject_invalid_edits_atomically
                 standard: DrawingSheetStandard::ArchD,
             };
             draft.orientation = SchematicPageOrientation::Portrait;
-            draft.margins = DrawingSheetStandard::ArchD.default_margins();
         })
         .unwrap();
     assert_eq!(arch.portrait_dimensions_um(), (609_600, 914_400));
@@ -796,7 +808,7 @@ fn drawing_sheet_drafts_derive_compatibility_and_reject_invalid_edits_atomically
     ));
 
     let invalid = original.try_update(|draft| {
-        draft.margins.left_um = 2_000_000;
+        draft.bleed_um = 2_000_000;
     });
     assert!(matches!(
         invalid,
@@ -819,8 +831,8 @@ fn legacy_sheet_format_receives_contextual_defaults() {
         }
     );
     assert_eq!(
-        format.margins,
-        DrawingSheetStandard::AnsiA.default_margins()
+        format.margins(),
+        DrawingSheetFrameConvention::AsmeY141.margins(false)
     );
     assert_eq!(format.portrait_dimensions_um(), (215_900, 279_400));
     format.validate().unwrap();
@@ -2950,7 +2962,6 @@ fn a_title_block_letters_at_one_height_on_every_sheet() {
             let format = SchematicSheetFormat::default()
                 .try_update(|draft| {
                     draft.authored_size = AuthoredDrawingSheetSize::Standard { standard };
-                    draft.margins = standard.default_margins();
                     draft.title_block.template = template;
                 })
                 .expect("every standard sheet size is a valid format");

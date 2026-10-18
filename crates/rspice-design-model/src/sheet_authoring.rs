@@ -8,8 +8,8 @@
 use crate::design_management::{
     AuthoredDrawingSheetSize, DRAWING_SHEET_MAX_ASPECT_RATIO, DRAWING_SHEET_MAX_EDGE_UM,
     DRAWING_SHEET_MIN_EDGE_UM, DrawingSheetBorderTemplate, DrawingSheetInheritance,
-    DrawingSheetMargins, DrawingSheetStandard, DrawingSheetStandardSeries,
-    DrawingSheetTitleBlockTemplate, DrawingSheetZones, SchematicSheetFormat,
+    DrawingSheetStandardSeries, DrawingSheetTitleBlockTemplate, DrawingSheetZones,
+    SchematicSheetFormat,
 };
 use crate::primitives::SchematicPageOrientation;
 
@@ -61,12 +61,6 @@ pub fn custom_format(
             draft.inheritance = DrawingSheetInheritance::Explicit;
             match frame {
                 StartingFrame::IsoA => {
-                    draft.margins = DrawingSheetMargins {
-                        top_um: 10_000,
-                        right_um: 10_000,
-                        bottom_um: 10_000,
-                        left_um: 20_000,
-                    };
                     draft.apply_border_template(DrawingSheetBorderTemplate::Standard);
                     draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
                 }
@@ -76,22 +70,14 @@ pub fn custom_format(
                     {
                         snapshot.started_from = Some(DrawingSheetStandardSeries::Ansi);
                     }
-                    draft.margins = DrawingSheetStandard::AnsiA.default_margins();
                     draft.apply_border_template(DrawingSheetBorderTemplate::Standard);
                     draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
                 }
                 StartingFrame::Plain => {
-                    draft.margins = DrawingSheetMargins {
-                        top_um: 10_000,
-                        right_um: 10_000,
-                        bottom_um: 10_000,
-                        left_um: 10_000,
-                    };
                     draft.apply_border_template(DrawingSheetBorderTemplate::Plain);
                     draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
                 }
                 StartingFrame::None => {
-                    draft.margins = DrawingSheetMargins::zero();
                     draft.apply_border_template(DrawingSheetBorderTemplate::None);
                     draft.zones = DrawingSheetZones::none();
                     draft.title_block.template = DrawingSheetTitleBlockTemplate::None;

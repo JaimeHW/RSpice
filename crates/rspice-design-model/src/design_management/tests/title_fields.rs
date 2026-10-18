@@ -364,19 +364,17 @@ fn a_title_block_gives_way_only_when_it_does_not_fit_its_drawing_area() {
         45_000
     );
 
-    // What decides is the drawing area, not the paper: wider margins leave
-    // ANSI A portrait too narrow for the block, and narrower ones make room
-    // for it upright again.
-    let ansi_portrait = SchematicSheetFormat::from_standard(
-        DrawingSheetStandard::AnsiA,
-        SchematicPageOrientation::Portrait,
-    )
-    .try_update(|draft| {
-        draft.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
-        draft.margins.left_um = 20_000;
-        draft.margins.right_um = 20_000;
-    })
-    .unwrap();
+    // What decides is the drawing area, not the paper: a binding margin
+    // leaves a sheet started from ANSI A too narrow for the block, and
+    // without it the block fits upright again.
+    let ansi_portrait =
+        crate::custom_format("Narrow ANSI", 208_000, 279_400, crate::StartingFrame::AnsiA)
+            .unwrap()
+            .try_update(|draft| {
+                draft.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
+                draft.binding_margin = true;
+            })
+            .unwrap();
     assert!(ansi_portrait.geometry().unwrap().drawing_area.width_um < 180_000);
     assert!(ansi_portrait.title_block_substituted());
     // Off ISO 5457's sheets the compact block still stands in for it.
@@ -387,31 +385,32 @@ fn a_title_block_gives_way_only_when_it_does_not_fit_its_drawing_area() {
             .effective_title_block_template,
         DrawingSheetTitleBlockTemplate::Compact
     );
-    let narrow_margins = ansi_portrait
-        .try_update(|draft| {
-            draft.margins = DrawingSheetMargins {
-                top_um: 10_000,
-                right_um: 5_000,
-                bottom_um: 10_000,
-                left_um: 5_000,
-            };
-        })
+    let unbound = ansi_portrait
+        .try_update(|draft| draft.binding_margin = false)
         .unwrap();
-    assert!(narrow_margins.geometry().unwrap().drawing_area.width_um >= 180_000);
-    assert!(!narrow_margins.title_block_substituted());
+    assert!(unbound.geometry().unwrap().drawing_area.width_um >= 180_000);
+    assert!(!unbound.title_block_substituted());
 
     // A drawing area too short for the block gives way as well.
-    let short = SchematicSheetFormat::default()
-        .try_update(|draft| {
-            draft.margins.top_um = 85_000;
-            draft.margins.bottom_um = 85_000;
-        })
-        .unwrap();
+    let short = SchematicSheetFormat::try_custom(
+        "Strip",
+        60_000,
+        297_000,
+        SchematicPageOrientation::Landscape,
+    )
+    .unwrap()
+    .try_update(|draft| {
+        draft.apply_border_template(DrawingSheetBorderTemplate::Standard);
+        draft.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
+    })
+    .unwrap();
     assert!(short.geometry().unwrap().drawing_area.height_um < 45_000);
     assert!(short.title_block_substituted());
+    // A custom size is not one of ISO 5457's sheets, so the compact block
+    // stands in.
     assert_eq!(
         short.geometry().unwrap().effective_title_block_template,
-        DrawingSheetTitleBlockTemplate::None
+        DrawingSheetTitleBlockTemplate::Compact
     );
 }
 

@@ -1183,13 +1183,15 @@ fn custom_dimensions(preset: &DrawingSheetPreset) -> Result<(u64, u64), String> 
 }
 
 fn infer_starting_frame(preset: &DrawingSheetPreset) -> StartingFrame {
-    use crate::state::{DrawingSheetBorderTemplate, DrawingSheetTitleBlockTemplate};
+    use crate::state::{
+        DrawingSheetBorderTemplate, DrawingSheetFrameConvention, DrawingSheetTitleBlockTemplate,
+    };
     match (preset.format.border, preset.format.title_block.template) {
         (DrawingSheetBorderTemplate::None, DrawingSheetTitleBlockTemplate::None) => {
             StartingFrame::None
         }
         (DrawingSheetBorderTemplate::Plain, _) => StartingFrame::Plain,
-        _ if preset.format.margins.top_um == 12_700 && preset.format.margins.left_um == 19_050 => {
+        _ if preset.format.frame_convention() == DrawingSheetFrameConvention::AsmeY141 => {
             StartingFrame::AnsiA
         }
         _ => StartingFrame::IsoA,

@@ -45,6 +45,13 @@ const ASME_Y14_1_ARROW_LARGE_UM: (u64, u64) = (10_160, 5_080);
 /// The shorter edge from which ASME Y14.1 Fig 5-5 sizes arrows as D size.
 const ASME_Y14_1_D_SIZE_LONG_EDGE_UM: u64 = 863_600;
 
+/// ISO 5457 4.2: the left border, which is also the filing margin, is 20 mm
+/// including the frame, and every other border 10 mm.
+const ISO_5457_FILING_BORDER_UM: u64 = 20_000;
+const ISO_5457_BORDER_UM: u64 = 10_000;
+/// ASME Y14.1 Table 4-1: a 0.50 in format margin on every side of every flat
+/// size.
+const ASME_Y14_1_FORMAT_MARGIN_UM: u64 = 12_700;
 /// ASME Y14.1 4.1.3 lets the margins of a bound document grow; RSpice's
 /// binding margin is 0.75 in on the left.
 pub const DRAWING_SHEET_ASME_BINDING_MARGIN_UM: u64 = 19_050;
@@ -108,6 +115,32 @@ impl DrawingSheetFrameConvention {
         match self {
             Self::Iso5457 => ISO_5457_ZONE_LETTERING_UM,
             Self::AsmeY141 => ASME_Y14_1_ZONE_LETTERING_UM,
+        }
+    }
+
+    /// The standard's margins from the trimmed edge to the frame: ISO 5457
+    /// 4.2's 20 mm filing border on the left and 10 mm elsewhere, or ASME
+    /// Y14.1 Table 4-1's 0.50 in on every side, widened on the left for a
+    /// bound drawing.
+    #[must_use]
+    pub const fn margins(self, binding: bool) -> DrawingSheetMargins {
+        match self {
+            Self::Iso5457 => DrawingSheetMargins {
+                top_um: ISO_5457_BORDER_UM,
+                right_um: ISO_5457_BORDER_UM,
+                bottom_um: ISO_5457_BORDER_UM,
+                left_um: ISO_5457_FILING_BORDER_UM,
+            },
+            Self::AsmeY141 => DrawingSheetMargins {
+                top_um: ASME_Y14_1_FORMAT_MARGIN_UM,
+                right_um: ASME_Y14_1_FORMAT_MARGIN_UM,
+                bottom_um: ASME_Y14_1_FORMAT_MARGIN_UM,
+                left_um: if binding {
+                    DRAWING_SHEET_ASME_BINDING_MARGIN_UM
+                } else {
+                    ASME_Y14_1_FORMAT_MARGIN_UM
+                },
+            },
         }
     }
 }
@@ -284,36 +317,17 @@ impl SchematicSheetFormat {
         self.authored_size.frame_convention()
     }
 
-    /// Where this sheet's frame sits. The standard border takes its
-    /// standard's placement when every margin can hold the zone band;
-    /// narrower margins, and the other borders, keep the frame inset.
+    /// Where this sheet's frame sits: the standard border takes its
+    /// standard's placement, and the other borders keep the frame inset.
     #[must_use]
     pub fn frame_placement(&self) -> DrawingSheetFramePlacement {
-        let narrowest = self.narrowest_margin_um();
-        if self.border != DrawingSheetBorderTemplate::Standard
-            || narrowest < self.border.band_width_um()
-        {
+        if self.border != DrawingSheetBorderTemplate::Standard {
             return DrawingSheetFramePlacement::Inset;
         }
         match self.frame_convention() {
             DrawingSheetFrameConvention::Iso5457 => DrawingSheetFramePlacement::Iso5457,
             DrawingSheetFrameConvention::AsmeY141 => DrawingSheetFramePlacement::AsmeY141,
         }
-    }
-
-    const fn narrowest_margin_um(&self) -> u64 {
-        let margins = self.margins;
-        let mut narrowest = margins.top_um;
-        if margins.right_um < narrowest {
-            narrowest = margins.right_um;
-        }
-        if margins.bottom_um < narrowest {
-            narrowest = margins.bottom_um;
-        }
-        if margins.left_um < narrowest {
-            narrowest = margins.left_um;
-        }
-        narrowest
     }
 
     pub(super) fn frame_layout(
@@ -323,24 +337,27 @@ impl SchematicSheetFormat {
     ) -> Result<DrawingSheetFrameLayout, DesignManagementError> {
         let band_um = self.border.band_width_um();
         let placement = self.frame_placement();
+        let margins = self.margins();
         Ok(match placement {
             DrawingSheetFramePlacement::Iso5457 => DrawingSheetFrameLayout {
                 placement,
                 zone_band: paper.inset(
-                    self.margins.left_um - band_um,
-                    self.margins.top_um - band_um,
-                    self.margins.right_um - band_um,
-                    self.margins.bottom_um - band_um,
+                    margins.left_um - band_um,
+                    margins.top_um - band_um,
+                    margins.right_um - band_um,
+                    margins.bottom_um - band_um,
                     "drawing sheet margins",
                 )?,
                 drawing_area: printable,
                 band_um,
             },
+            // The whole margin is the zone band; a binding margin widens it
+            // on the left alone.
             DrawingSheetFramePlacement::AsmeY141 => DrawingSheetFrameLayout {
                 placement,
                 zone_band: paper,
                 drawing_area: printable,
-                band_um: self.narrowest_margin_um(),
+                band_um: ASME_Y14_1_FORMAT_MARGIN_UM,
             },
             DrawingSheetFramePlacement::Inset => DrawingSheetFrameLayout {
                 placement,
