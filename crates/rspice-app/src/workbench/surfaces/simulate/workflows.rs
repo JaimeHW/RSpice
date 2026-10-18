@@ -149,10 +149,7 @@ pub(super) fn rename_analysis_dialog(
         match commit_clear_analysis_name(app, &draft) {
             Ok(message) => {
                 app.state.workbench.simulation_workflow = None;
-                app.state
-                    .ui
-                    .toasts
-                    .success(ctx, "Simulation plan updated", message);
+                app.state.prompt(message);
             }
             Err(error) => {
                 set_workflow_error(&mut draft, error);
@@ -161,7 +158,7 @@ pub(super) fn rename_analysis_dialog(
         }
         return;
     }
-    finish_workflow_choice(ctx, app, choice, draft, commit_rename_analysis);
+    finish_workflow_choice(app, choice, draft, commit_rename_analysis);
 }
 
 /// Return the analysis to its kind label, through the same funnel a rename
@@ -285,7 +282,7 @@ pub(super) fn clone_plan_dialog(
         );
         workflow_validation_message(ui, draft.validation_error.as_deref());
     });
-    finish_workflow_choice(ctx, app, choice, draft, commit_clone_plan);
+    finish_workflow_choice(app, choice, draft, commit_clone_plan);
 }
 
 pub(super) fn design_variable_dialog(
@@ -386,7 +383,7 @@ pub(super) fn design_variable_dialog(
         });
         workflow_validation_message(ui, draft.validation_error.as_deref());
     });
-    finish_workflow_choice(ctx, app, choice, draft, commit_design_variable);
+    finish_workflow_choice(app, choice, draft, commit_design_variable);
 }
 
 pub(super) fn saved_output_dialog(
@@ -497,7 +494,7 @@ pub(super) fn saved_output_dialog(
         });
         workflow_validation_message(ui, draft.validation_error.as_deref());
     });
-    finish_workflow_choice(ctx, app, choice, draft, commit_saved_output);
+    finish_workflow_choice(app, choice, draft, commit_saved_output);
 }
 
 // --------------------------------------------------------------- capture group
@@ -747,7 +744,7 @@ pub(super) fn capture_group_dialog(
         );
         workflow_validation_message(ui, draft.validation_error.as_deref());
     });
-    finish_workflow_choice(ctx, app, choice, draft, commit_capture_group);
+    finish_workflow_choice(app, choice, draft, commit_capture_group);
 }
 
 /// Build the candidate group the draft describes, or say why it is not one yet.
@@ -1652,7 +1649,6 @@ pub(super) fn saved_output_storage_summary(
 }
 
 pub(super) fn finish_workflow_choice<D>(
-    ctx: &egui::Context,
     app: &mut RSpiceApp,
     choice: DialogChoice,
     mut draft: D,
@@ -1664,10 +1660,7 @@ pub(super) fn finish_workflow_choice<D>(
         DialogChoice::Primary => match commit(app, &draft) {
             Ok(message) => {
                 app.state.workbench.simulation_workflow = None;
-                app.state
-                    .ui
-                    .toasts
-                    .success(ctx, "Simulation plan updated", message);
+                app.state.prompt(message);
             }
             Err(error) => {
                 set_workflow_error(&mut draft, error);

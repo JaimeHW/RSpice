@@ -75,10 +75,7 @@ pub(super) fn begin_import(ctx: &egui::Context, state: &mut AppState) {
                 data.insert_temp(owner_id(), Owner::of(state));
             });
         }
-        Err(error) => state
-            .ui
-            .toasts
-            .error_with_title(ctx, "Checkpoint import", error),
+        Err(error) => state.report_failure("Checkpoint import failed", error),
     }
 }
 
@@ -100,10 +97,7 @@ pub(super) fn begin_export(
             )
         });
     if let Err(error) = result {
-        state
-            .ui
-            .toasts
-            .error_with_title(ctx, "Checkpoint export", error);
+        state.report_failure("Checkpoint export failed", error);
     }
 }
 
@@ -138,12 +132,7 @@ pub(super) fn inspect(
                 },
             );
         }),
-        Err(error) => {
-            state
-                .ui
-                .toasts
-                .error_with_title(ctx, "Checkpoint inspection", error.to_string())
-        }
+        Err(error) => state.report_failure("Checkpoint inspection failed", error.to_string()),
     }
 }
 
@@ -159,6 +148,7 @@ pub(super) fn poll(ctx: &egui::Context, app: &mut RSpiceApp) {
         if owner.as_ref() == Some(&Owner::of(&app.state)) {
             match outcome {
                 Ok(Some(file)) => {
+                    let name = file.name.clone();
                     let result = checkpoint_file::decode(&file.text)
                         .map_err(|error| error.to_string())
                         .and_then(|checkpoint| {
@@ -171,38 +161,28 @@ pub(super) fn poll(ctx: &egui::Context, app: &mut RSpiceApp) {
                     match result {
                         Ok(inserted) => {
                             app.invalidate_simulation_preflight();
-                            app.state.ui.toasts.success(ctx, "Checkpoint imported", if inserted { "Select it under Resume previous trials to reuse it. Compatibility is checked when preparing the run." } else { "This checkpoint is already imported." });
+                            app.state.prompt(if inserted {
+                                format!(
+                                    "Imported {name}; select it under Resume previous trials \
+                                     to reuse it."
+                                )
+                            } else {
+                                format!("{name} is already imported.")
+                            });
                         }
-                        Err(error) => {
-                            app.state
-                                .ui
-                                .toasts
-                                .error_with_title(ctx, "Checkpoint import", error)
-                        }
+                        Err(error) => app.state.report_failure("Checkpoint import failed", error),
                     }
                 }
                 Ok(None) => {}
-                Err(error) => app
-                    .state
-                    .ui
-                    .toasts
-                    .error_with_title(ctx, "Checkpoint import", error),
+                Err(error) => app.state.report_failure("Checkpoint import failed", error),
             }
         }
     }
     if let Some(outcome) = file_exchange::take_saved(ctx, export_id()) {
         match outcome {
-            Ok(Some(file)) => app.state.ui.toasts.success(
-                ctx,
-                "Checkpoint exported",
-                format!("Saved {}", file.name),
-            ),
+            Ok(Some(file)) => app.state.prompt(format!("Saved checkpoint {}", file.name)),
             Ok(None) => {}
-            Err(error) => app
-                .state
-                .ui
-                .toasts
-                .error_with_title(ctx, "Checkpoint export", error),
+            Err(error) => app.state.report_failure("Checkpoint export failed", error),
         }
     }
     let Some(inspection) = ctx.data(|data| data.get_temp::<Inspection>(inspection_id())) else {

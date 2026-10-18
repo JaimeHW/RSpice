@@ -115,17 +115,12 @@ pub(super) fn session_block_reason(state: &AppState, route: &PlaceRoute) -> Opti
 /// Arms the cursor with one planned placement, and hands over the canvas.
 ///
 /// Runs after the frame, from the workspace's own action queue, because a
-/// placement ends in three things a render borrow cannot reach: a toast, the
-/// canvas focus, and the workspace receipt. It is the same completion the Model
-/// Hub performs when a retention lands, one operation later.
+/// placement ends in two things a render borrow cannot reach: the canvas
+/// focus and the workspace receipt. It is the same completion the Model Hub
+/// performs when a retention lands, one operation later.
 pub(super) fn arm(state: &mut AppState, ctx: &egui::Context, placement: PartPlacement) {
     let armed = crate::workbench::app::arm_pack_part(state, placement);
     rspice_schematic_editor::view::canvas::request_focus(ctx);
-    state.ui.toasts.success(
-        ctx,
-        "Component placement armed",
-        format!("{armed} will snap to the schematic grid."),
-    );
     apply_receipt(state, Ok(format!("{armed} is armed for placement.")));
 }
 

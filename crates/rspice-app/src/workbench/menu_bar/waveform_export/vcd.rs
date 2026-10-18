@@ -23,7 +23,6 @@
 //! A reader who needs the strength band wants the RSpice Result Bundle.
 
 use super::{NO_ACTIVE_ANALYSIS_MESSAGE, note_result_export_failure, note_result_export_success};
-use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
@@ -74,15 +73,14 @@ pub(super) fn export_vcd(
     };
     match export {
         Ok(()) => {
-            note_result_export_success(state, "VCD");
             let detail = format!(
                 "{} event nodes, {} changes; four bit states, XSPICE drive strength dropped \
                  because VCD has no strength band",
                 prepared.node_count, prepared.change_count
             );
-            state.record(
-                LogSeverity::Info,
-                LogSource::Studio,
+            note_result_export_success(
+                state,
+                "VCD",
                 crate::workbench::workflows::export_workflow::export_completion_message(
                     "VCD",
                     &published_path,

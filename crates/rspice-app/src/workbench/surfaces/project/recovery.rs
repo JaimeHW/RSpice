@@ -136,7 +136,7 @@ impl RecoveryIntent {
             Self::Compare(checkpoint) => {
                 app.state.workbench.project_checkpoint_selection =
                     Some(checkpoint.checkpoint_id().to_string());
-                compare_project_checkpoint(ctx, &mut app.state, &checkpoint);
+                compare_project_checkpoint(&mut app.state, &checkpoint);
             }
             Self::Restore(checkpoint) => {
                 app.state.workbench.project_checkpoint_selection =
@@ -724,31 +724,21 @@ fn checkpoint_age(created_unix_ms: u64, now_unix_ms: Option<u64>) -> String {
     crate::time_compat::relative_age(std::time::Duration::from_millis(elapsed))
 }
 
+/// Answer a compare on the status bar: the reader asked and is looking. Only
+/// a compare that could not be made is toasted.
 fn compare_project_checkpoint(
-    ctx: &Context,
     state: &mut AppState,
     checkpoint: &crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
 ) {
     match crate::workbench::lifecycle::project_checkpoint::matches_current_state(checkpoint, state)
     {
-        Ok(true) => state.ui.toasts.success(
-            ctx,
-            "No changes since this checkpoint",
-            "The current project is identical to this checkpoint.",
-        ),
-        Ok(false) => state.ui.toasts.info_with_title(
-            ctx,
-            "Changed since this checkpoint",
-            format!(
-                "The current project differs from checkpoint {} (revision {}).",
-                short_identity(&checkpoint.checkpoint_id().to_string()),
-                checkpoint.project_revision()
-            ),
-        ),
-        Err(error) => state
-            .ui
-            .toasts
-            .error_with_title(ctx, "Could not compare", error),
+        Ok(true) => state.prompt("The current project is identical to this checkpoint."),
+        Ok(false) => state.prompt(format!(
+            "The current project differs from checkpoint {} (revision {}).",
+            short_identity(&checkpoint.checkpoint_id().to_string()),
+            checkpoint.project_revision()
+        )),
+        Err(error) => state.report_failure("Could not compare", error),
     }
 }
 

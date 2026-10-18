@@ -1340,13 +1340,7 @@ fn cancelling_a_simulation_workflow_never_invokes_its_commit() {
     app.state.workbench.simulation_workflow =
         Some(SimulationWorkflowDialog::ClonePlan(draft.clone()));
 
-    finish_workflow_choice(
-        &egui::Context::default(),
-        &mut app,
-        DialogChoice::Cancelled,
-        draft,
-        commit_clone_plan,
-    );
+    finish_workflow_choice(&mut app, DialogChoice::Cancelled, draft, commit_clone_plan);
 
     assert!(app.state.workbench.simulation_workflow.is_none());
     assert_eq!(
@@ -1358,6 +1352,24 @@ fn cancelling_a_simulation_workflow_never_invokes_its_commit() {
         source_id
     );
     assert_eq!(app.state.sim_setup.inactive_plans().len(), inactive_before);
+}
+
+/// A committed plan edit is answered on the status bar: the reader made the
+/// gesture and is looking at its result, so nothing is toasted.
+#[test]
+fn a_committed_simulation_workflow_answers_on_the_status_bar() {
+    let mut app = RSpiceApp::test_instance();
+    let mut draft = ClonePlanDraft::for_source(
+        app.state.sim_setup.stable_analysis_plan().unwrap().id(),
+        app.state.sim_setup.active_plan_name().as_str(),
+    );
+    draft.name = "Committed clone".to_owned();
+
+    finish_workflow_choice(&mut app, DialogChoice::Primary, draft, commit_clone_plan);
+
+    assert!(app.state.workbench.simulation_workflow.is_none());
+    assert!(app.state.prompt_text().is_some());
+    assert!(app.state.ui.toasts.activity().is_empty());
 }
 
 #[test]

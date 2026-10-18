@@ -197,7 +197,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         state.ui.results.session.selected_soa_rule = response.selection;
     }
     if let Some(selection) = response.cross_probe {
-        apply_schematic_cross_probe(ui, state, &selection);
+        apply_schematic_cross_probe(state, &selection);
     }
 }
 
@@ -258,7 +258,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         state.ui.results.session.soa_stress_trace_open = true;
     }
     if response.locate_device {
-        apply_schematic_cross_probe(ui, state, &selection);
+        apply_schematic_cross_probe(state, &selection);
     }
 }
 
@@ -299,7 +299,7 @@ fn soa_device_target(
     .map(|component| (component.id, component.pos))
 }
 
-fn apply_schematic_cross_probe(ui: &Ui, state: &mut AppState, selection: &SoaRuleSelection) {
+fn apply_schematic_cross_probe(state: &mut AppState, selection: &SoaRuleSelection) {
     let Some((component_id, position)) = soa_device_target(
         &state.simulation,
         &state.workspace,
@@ -307,10 +307,9 @@ fn apply_schematic_cross_probe(ui: &Ui, state: &mut AppState, selection: &SoaRul
         selection.analysis,
         &selection.device_id,
     ) else {
-        state.ui.toasts.warn_with_title(
-            ui.ctx(),
-            "Cannot locate SOA device",
-            "The selected result is stale or its retained device no longer resolves to the active schematic revision.",
+        state.prompt(
+            "The selected result is out of date, or its device is no longer in the active \
+             schematic.",
         );
         return;
     };

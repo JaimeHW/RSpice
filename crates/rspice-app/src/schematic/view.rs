@@ -465,31 +465,13 @@ pub fn render_schematic_view(
         let drop_position =
             snap_resolution::resolve_grid_pointer(state, &viewport, position).snapped_position;
         match commit_shelf_drop(state, payload, drop_position) {
-            ShelfDropOutcome::Placed => {
-                state.ui.toasts.success(
-                    ui.ctx(),
-                    "Component placed",
-                    format!(
-                        "{} was placed at ({}, {}).",
-                        payload.component_type().display_name(),
-                        drop_position.x,
-                        drop_position.y
-                    ),
-                );
-            }
+            // The canvas shows the part where it was dropped.
+            ShelfDropOutcome::Placed => {}
             ShelfDropOutcome::ReadOnly => {
-                state.ui.toasts.warn_with_title(
-                    ui.ctx(),
-                    "Drop not permitted",
-                    "The active schematic is read-only; no component was placed.",
-                );
+                state.prompt("The active schematic is read-only; no component was placed.");
             }
             ShelfDropOutcome::RequiresConfiguration => {
-                state.ui.toasts.warn_with_title(
-                    ui.ctx(),
-                    "Create pins first",
-                    "A pin needs a name. Use Create pins (Shift+P).",
-                );
+                state.prompt("A pin needs a name. Use Create pins (Shift+P).");
             }
         }
     } else {

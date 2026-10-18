@@ -898,10 +898,7 @@ fn handle_plan_manager_action(
             match lifecycle::commit_activate_plan(app, draft.selected_plan_id) {
                 Ok(message) => {
                     app.state.workbench.simulation_workflow = None;
-                    app.state
-                        .ui
-                        .toasts
-                        .success(ctx, "Simulation plan opened", message);
+                    app.state.prompt(message);
                     return;
                 }
                 Err(error) => Some(Err(error)),
@@ -956,11 +953,8 @@ fn handle_plan_manager_action(
         }
         Some(PlanManagerAction::CopyExport) => {
             ctx.copy_text(draft.exchange_text.clone());
-            app.state.ui.toasts.success(
-                ctx,
-                "Simulation plan copied",
-                "Portable plan JSON was copied to the clipboard.",
-            );
+            app.state
+                .prompt("Portable plan JSON was copied to the clipboard.");
             None
         }
         Some(PlanManagerAction::ApplyImport) => Some(
@@ -980,10 +974,7 @@ fn handle_plan_manager_action(
             ) {
                 Ok(message) => {
                     app.state.workbench.simulation_workflow = None;
-                    app.state
-                        .ui
-                        .toasts
-                        .success(ctx, "Simulation campaign queued", message);
+                    app.state.prompt(message);
                     return;
                 }
                 Err(error) => Some(Err(error)),
@@ -1035,10 +1026,7 @@ fn handle_plan_manager_action(
         Some(Ok(message)) => {
             draft.mode = SimulationPlanManagerMode::Browse;
             draft.validation_error = None;
-            app.state
-                .ui
-                .toasts
-                .success(ctx, "Simulation plan updated", message);
+            app.state.prompt(message);
         }
         None => {}
         Some(Err(error)) => draft.validation_error = Some(error),

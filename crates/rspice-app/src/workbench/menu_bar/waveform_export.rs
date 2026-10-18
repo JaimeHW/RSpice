@@ -59,13 +59,17 @@ fn note_result_export_failure(state: &mut AppState, detail: impl Into<String>) {
     );
 }
 
-fn note_result_export_success(state: &mut AppState, format: &str) {
+/// A finished export. The Console keeps `message`, and the status bar shows
+/// it to the reader who just chose the file.
+fn note_result_export_success(state: &mut AppState, format: &str, message: String) {
     let data_version = state.simulation.view.data_version;
     state.ui.results.record_runtime_recovery_if(
         crate::workbench::documents::result_document::operational_state::ResultRuntimeConditionKind::Failed,
         format!("{format} publication succeeded after the recorded export failure."),
         data_version,
     );
+    state.record(LogSeverity::Info, LogSource::Studio, message.clone());
+    state.prompt(message);
 }
 
 /// Canonical export vocabulary from the result-data contract. Availability is
@@ -203,11 +207,10 @@ pub(crate) fn action_export_result_selection_with_io(
     };
     match export {
         Ok(()) => {
-            note_result_export_success(state, "Result text");
             let count = keys.len();
-            state.record(
-                LogSeverity::Info,
-                LogSource::Studio,
+            note_result_export_success(
+                state,
+                "Result text",
                 if count == 1 {
                     "Exported 1 result quantity.".to_owned()
                 } else {
@@ -776,10 +779,9 @@ fn publish_result_text(
     };
     match export {
         Ok(()) => {
-            note_result_export_success(state, label);
-            state.record(
-                LogSeverity::Info,
-                LogSource::Studio,
+            note_result_export_success(
+                state,
+                label,
                 crate::workbench::workflows::export_workflow::export_completion_message(
                     label,
                     &path,
@@ -898,11 +900,10 @@ fn export_native_result_bundle(
     };
     match export {
         Ok(()) => {
-            note_result_export_success(state, kind.display_name());
             let detail = format!("{exported_signal_count} signals, {exported_point_count} points");
-            state.record(
-                LogSeverity::Info,
-                LogSource::Studio,
+            note_result_export_success(
+                state,
+                kind.display_name(),
                 crate::workbench::workflows::export_workflow::export_completion_message(
                     kind.display_name(),
                     &published_path,
@@ -943,15 +944,14 @@ fn export_csv(
                 .and_then(|destination| io.write_waveform_csv_observed(dataset, &destination));
             match export {
                 Ok(()) => {
-                    note_result_export_success(state, "CSV");
                     let detail = format!(
                         "{} signals, {} points",
                         dataset.signal_count(),
                         dataset.point_count()
                     );
-                    state.record(
-                        LogSeverity::Info,
-                        LogSource::Studio,
+                    note_result_export_success(
+                        state,
+                        "CSV",
                         crate::workbench::workflows::export_workflow::export_completion_message(
                             "CSV",
                             &path,
@@ -1002,15 +1002,14 @@ fn export_tsv(
                 .and_then(|destination| io.write_text_file_observed(&destination, &contents));
             match export {
                 Ok(()) => {
-                    note_result_export_success(state, "TSV");
                     let detail = format!(
                         "{} signals, {} points",
                         dataset.signal_count(),
                         dataset.point_count()
                     );
-                    state.record(
-                        LogSeverity::Info,
-                        LogSource::Studio,
+                    note_result_export_success(
+                        state,
+                        "TSV",
                         crate::workbench::workflows::export_workflow::export_completion_message(
                             "TSV",
                             &path,
@@ -1072,16 +1071,15 @@ fn export_touchstone(
                 .and_then(|destination| io.write_text_file_observed(&destination, &contents));
             match export {
                 Ok(()) => {
-                    note_result_export_success(state, "Touchstone");
                     let detail = format!(
                         "{}-port matrix, {} signals, {} points",
                         port_count,
                         dataset.signal_count(),
                         dataset.point_count()
                     );
-                    state.record(
-                        LogSeverity::Info,
-                        LogSource::Studio,
+                    note_result_export_success(
+                        state,
+                        "Touchstone",
                         crate::workbench::workflows::export_workflow::export_completion_message(
                             "Touchstone",
                             &path,

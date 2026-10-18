@@ -526,6 +526,28 @@ fn csv_export_from_a_retained_sheet_is_unchanged_by_the_derived_route() {
     assert_eq!(io.datasets.borrow().len(), 1);
 }
 
+/// The file the reader just chose is named on the status bar, and the Console
+/// keeps the same line. Nothing is toasted for an export that worked.
+#[test]
+fn a_result_export_names_its_file_on_the_status_bar() {
+    let mut state = state_with_typed_result(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![waveform(
+            "V(out)",
+            vec![0.0, 1.0],
+            vec![0.0, 2.0],
+        )]),
+    );
+    state.ui.results.session.viewer = crate::workbench::ResultViewer::Waves;
+    let io = MockExportWorkflowIo::default();
+
+    action_export_csv_with_io(&mut state, &io);
+
+    let line = last_log_message(&state);
+    assert!(line.contains("waveforms.csv"), "{line}");
+    assert_eq!(state.prompt_text(), Some(line.as_str()));
+    assert!(state.ui.toasts.activity().is_empty());
+}
+
 /// An export the user asked for that did not happen is said now, with the
 /// way to its Console line; the reader is not left to find it under the bell.
 #[test]
