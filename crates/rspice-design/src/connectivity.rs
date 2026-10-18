@@ -310,6 +310,9 @@ struct Pass<'a, S, G> {
     /// Labels, pins and tap ends on an unmarked crossing: they join neither
     /// wire, and one blocking finding already says so.
     ambiguous_points: HashSet<Point>,
+    /// Each component's terminals, by its index in the drawing, resolved once
+    /// for every phase that reads them.
+    terminals: Vec<Vec<(String, Point)>>,
 }
 
 impl<'a, S, G> Pass<'a, S, G>
@@ -320,6 +323,11 @@ where
     fn new(schematic: &'a SchematicDocument, resolve_symbol: &'a S, promote_label: &'a G) -> Self {
         let mut buses = analyze_bus_connectivity(schematic);
         buses.scalar_taps.sort_by_key(|binding| binding.tap_id);
+        let terminals = schematic
+            .components
+            .iter()
+            .map(|component| terminal_positions(component, resolve_symbol))
+            .collect();
         Self {
             schematic,
             resolve_symbol,
@@ -331,6 +339,7 @@ where
             vector_nets: VectorConnectivity::default(),
             diagnostics: Vec::new(),
             ambiguous_points: HashSet::new(),
+            terminals,
         }
     }
 
@@ -344,8 +353,9 @@ where
         let schematic = self.schematic;
         let crossings = CrossingIndex::new(&schematic.wires, &schematic.junctions);
         let mut found: Vec<(Point, String)> = Vec::new();
-        for component in &schematic.components {
-            for (pin, point) in terminal_positions(component, self.resolve_symbol) {
+        for (component, terminals) in schematic.components.iter().zip(&self.terminals) {
+            for (pin, point) in terminals {
+                let point = *point;
                 if crossings.is_unmarked_crossing(point) {
                     found.push((point, format!("Pin {pin} of {}", component.name)));
                 }
@@ -401,8 +411,7 @@ where
         // the product of the part and wire counts.
         let wires_at = WiresThrough::new(&schematic.wires);
         let mut found = Vec::new();
-        for component in &schematic.components {
-            let terminals = terminal_positions(component, self.resolve_symbol);
+        for (component, terminals) in schematic.components.iter().zip(&self.terminals) {
             let [(first_pin, first), (second_pin, second)] = terminals.as_slice() else {
                 continue;
             };
@@ -496,7 +505,6 @@ where
     /// the cost and memory.
     fn trace_conductors(&mut self) {
         let schematic = self.schematic;
-        let resolve_symbol = self.resolve_symbol;
         for index in 0..self.buses.diagnostics.len() {
             let diagnostic = self.buses.diagnostics[index].clone();
             let kind = match diagnostic.kind {
@@ -527,65 +535,74 @@ where
         self.find_shorted_parts();
         let ambiguous = &self.ambiguous_points;
 
-        // Seeded nodes: always nets, even when isolated (a floating terminal
-        // must still get its own SPICE node).
-        let mut point_graph: HashMap<Point, HashSet<Point>> = HashMap::new();
-        for wire in &schematic.wires {
-            for point in &wire.points {
-                point_graph.entry(*point).or_default();
+        // Every point that can be a node, sorted and deduplicated, so a node
+        // is its index here. Seeds — wire vertices and terminals — are always
+        // nets, even when isolated (a floating terminal must still get its
+        // own SPICE node). Junctions, labels and tap ends join a segment when
+        // they lie on it but are not seeds: a label floating in empty space
+        // must NOT mint a net (it warns instead).
+        let seeds = schematic
+            .wires
+            .iter()
+            .flat_map(|wire| wire.points.iter().copied())
+            .chain(self.terminals.iter().flatten().map(|(_, point)| *point))
+            .map(|point| (point, true));
+        let others = schematic
+            .junctions
+            .iter()
+            .map(|junction| junction.pos)
+            .chain(schematic.net_labels.iter().map(|label| label.pos))
+            .chain(self.buses.scalar_taps.iter().map(|binding| binding.point))
+            .map(|point| (point, false));
+        let mut marked: Vec<(Point, bool)> = seeds.chain(others).collect();
+        // A seed sorts before a non-seed at the same point, so the one entry
+        // kept for the point says whether anything seeds it.
+        marked.sort_unstable_by_key(|&(point, seed)| (point.x, point.y, !seed));
+        marked.dedup_by_key(|&mut (point, _)| point);
+        let mut is_node: Vec<bool> = marked.iter().map(|&(_, seed)| seed).collect();
+        let points: Vec<Point> = marked.into_iter().map(|(point, _)| point).collect();
+        let index_of = |point: Point| {
+            points
+                .binary_search_by_key(&(point.x, point.y), |node| (node.x, node.y))
+                .expect("a wire vertex is a seed")
+        };
+
+        // Chain candidates: points that join a segment when they lie on it,
+        // by row and by column, each in order along its line because the
+        // points are sorted by (x, y). An ambiguous point is not on any
+        // segment's chain; a pin there keeps its own node.
+        let mut by_row: HashMap<i32, Vec<(i32, usize)>> = HashMap::new();
+        let mut by_col: HashMap<i32, Vec<(i32, usize)>> = HashMap::new();
+        let mut candidates: Vec<usize> = Vec::new();
+        for (index, point) in points.iter().enumerate() {
+            if ambiguous.contains(point) {
+                continue;
             }
-        }
-        for component in &schematic.components {
-            for (_, terminal_pos) in terminal_positions(component, resolve_symbol) {
-                point_graph.entry(terminal_pos).or_default();
-            }
+            by_row.entry(point.y).or_default().push((point.x, index));
+            by_col.entry(point.x).or_default().push((point.y, index));
+            candidates.push(index);
         }
 
-        // Chain candidates: points that join a segment when they lie on it.
-        // Labels and junctions are candidates but not seeds — a label floating
-        // in empty space must NOT mint a net (it warns instead).
-        let mut by_row: HashMap<i32, Vec<i32>> = HashMap::new();
-        let mut by_col: HashMap<i32, Vec<i32>> = HashMap::new();
-        let mut candidate_points: HashSet<Point> = HashSet::new();
-        {
-            // An ambiguous point is not on any segment's chain; a pin there
-            // keeps its own node.
-            let mut add_candidate = |p: Point| {
-                if ambiguous.contains(&p) {
-                    return;
-                }
-                by_row.entry(p.y).or_default().push(p.x);
-                by_col.entry(p.x).or_default().push(p.y);
-                candidate_points.insert(p);
-            };
-            for point in point_graph.keys() {
-                add_candidate(*point);
+        // Joined points share a root; a point joined to another is a node
+        // even when nothing seeds it.
+        let mut parent: Vec<usize> = (0..points.len()).collect();
+        fn root(parent: &mut [usize], mut node: usize) -> usize {
+            while parent[node] != node {
+                parent[node] = parent[parent[node]];
+                node = parent[node];
             }
-            for junction in &schematic.junctions {
-                add_candidate(junction.pos);
-            }
-            for label in &schematic.net_labels {
-                add_candidate(label.pos);
-            }
-            for binding in &self.buses.scalar_taps {
-                add_candidate(binding.point);
-            }
+            node
         }
-        for xs in by_row.values_mut() {
-            xs.sort_unstable();
-            xs.dedup();
-        }
-        for ys in by_col.values_mut() {
-            ys.sort_unstable();
-            ys.dedup();
-        }
-
-        fn link(graph: &mut HashMap<Point, HashSet<Point>>, a: Point, b: Point) {
+        let mut link = |a: usize, b: usize| {
             if a != b {
-                graph.entry(a).or_default().insert(b);
-                graph.entry(b).or_default().insert(a);
+                is_node[a] = true;
+                is_node[b] = true;
+                let (a, b) = (root(&mut parent, a), root(&mut parent, b));
+                if a != b {
+                    parent[a.max(b)] = a.min(b);
+                }
             }
-        }
+        };
 
         for wire in &schematic.wires {
             for seg in wire.points.windows(2) {
@@ -593,31 +610,29 @@ where
                 if a.y == b.y {
                     // Horizontal: chain through candidates on this row.
                     let (x0, x1) = (a.x.min(b.x), a.x.max(b.x));
-                    let mut prev = Point::new(x0, a.y);
-                    if let Some(xs) = by_row.get(&a.y) {
-                        let lo = xs.partition_point(|&x| x < x0);
-                        let hi = xs.partition_point(|&x| x <= x1);
-                        for &x in &xs[lo..hi] {
-                            let p = Point::new(x, a.y);
-                            link(&mut point_graph, prev, p);
-                            prev = p;
+                    let mut prev = index_of(Point::new(x0, a.y));
+                    if let Some(row) = by_row.get(&a.y) {
+                        let lo = row.partition_point(|&(x, _)| x < x0);
+                        let hi = row.partition_point(|&(x, _)| x <= x1);
+                        for &(_, index) in &row[lo..hi] {
+                            link(prev, index);
+                            prev = index;
                         }
                     }
-                    link(&mut point_graph, prev, Point::new(x1, a.y));
+                    link(prev, index_of(Point::new(x1, a.y)));
                 } else if a.x == b.x {
                     // Vertical: chain through candidates on this column.
                     let (y0, y1) = (a.y.min(b.y), a.y.max(b.y));
-                    let mut prev = Point::new(a.x, y0);
-                    if let Some(ys) = by_col.get(&a.x) {
-                        let lo = ys.partition_point(|&y| y < y0);
-                        let hi = ys.partition_point(|&y| y <= y1);
-                        for &y in &ys[lo..hi] {
-                            let p = Point::new(a.x, y);
-                            link(&mut point_graph, prev, p);
-                            prev = p;
+                    let mut prev = index_of(Point::new(a.x, y0));
+                    if let Some(column) = by_col.get(&a.x) {
+                        let lo = column.partition_point(|&(y, _)| y < y0);
+                        let hi = column.partition_point(|&(y, _)| y <= y1);
+                        for &(_, index) in &column[lo..hi] {
+                            link(prev, index);
+                            prev = index;
                         }
                     }
-                    link(&mut point_graph, prev, Point::new(a.x, y1));
+                    link(prev, index_of(Point::new(a.x, y1)));
                 } else {
                     // Any-angle conductors have the same exact attachment
                     // semantics as Manhattan conductors. Terminals, labels,
@@ -626,63 +641,42 @@ where
                     // chain. Interior/interior crossings stay disconnected
                     // unless an explicit junction is authored there.
                     let segment = WireSegment::new(a, b);
-                    let mut points = candidate_points
+                    let mut on_segment = candidates
                         .iter()
                         .copied()
-                        .filter(|point| segment.contains_point(*point))
+                        .filter(|&index| segment.contains_point(points[index]))
                         .collect::<Vec<_>>();
-                    points.sort_unstable_by_key(|point| {
-                        let dx = i128::from(point.x) - i128::from(a.x);
-                        let dy = i128::from(point.y) - i128::from(a.y);
+                    on_segment.sort_unstable_by_key(|&index| {
+                        let dx = i128::from(points[index].x) - i128::from(a.x);
+                        let dy = i128::from(points[index].y) - i128::from(a.y);
                         dx * dx + dy * dy
                     });
-                    points.dedup();
-                    for pair in points.windows(2) {
-                        link(&mut point_graph, pair[0], pair[1]);
+                    for pair in on_segment.windows(2) {
+                        link(pair[0], pair[1]);
                     }
                 }
             }
         }
 
-        // Flood-fill to find connected components (nets).
-        let mut visited: HashSet<Point> = HashSet::new();
-        let mut net_id = 1;
-
-        // Deterministic traversal is critical because auto-generated node
-        // labels (net1, net2, ...) depend on discovery order. HashMap key
-        // iteration is intentionally randomized, so sort points first to keep
-        // names stable across repeated runs of the same schematic.
-        let mut all_points: Vec<Point> = point_graph.keys().copied().collect();
-        all_points.sort_by_key(|point| (point.x, point.y));
-
-        for start_point in all_points {
-            if visited.contains(&start_point) {
+        // Deterministic numbering is critical because auto-generated node
+        // labels (net1, net2, ...) depend on it: nets are numbered from 1 in
+        // the order of each one's first point by (x, y).
+        let mut net_of_root: Vec<Option<usize>> = vec![None; points.len()];
+        let mut nets: Vec<Net> = Vec::new();
+        self.point_to_net.reserve(points.len());
+        for (index, point) in points.iter().enumerate() {
+            if !is_node[index] {
                 continue;
             }
-
-            let mut net = Net::new(net_id);
-            let mut stack = vec![start_point];
-
-            while let Some(point) = stack.pop() {
-                if visited.insert(point) {
-                    net.add_point(point);
-                    self.point_to_net.insert(point, net_id);
-
-                    if let Some(neighbors) = point_graph.get(&point) {
-                        for neighbor in neighbors {
-                            if !visited.contains(neighbor) {
-                                stack.push(*neighbor);
-                            }
-                        }
-                    }
-                }
-            }
-
-            if !net.points.is_empty() {
-                self.nets.push(net);
-                net_id += 1;
-            }
+            let root = root(&mut parent, index);
+            let position = *net_of_root[root].get_or_insert_with(|| {
+                nets.push(Net::new(nets.len() + 1));
+                nets.len() - 1
+            });
+            nets[position].add_point(*point);
+            self.point_to_net.insert(*point, nets[position].id);
         }
+        self.nets.extend(nets);
     }
 
     /// Project every vector net of this schematic into named scalar nodes.
@@ -737,10 +731,9 @@ where
     /// unnamed port is an error: the interface cannot contain an anonymous pin.
     fn apply_interface_ports(&mut self) {
         let schematic = self.schematic;
-        let resolve_symbol = self.resolve_symbol;
         let policy = schematic.document_policy.net_naming;
         let mut name_to_net: HashMap<String, usize> = HashMap::new();
-        for component in &schematic.components {
+        for (index, component) in schematic.components.iter().enumerate() {
             if component.kind != ComponentType::Port {
                 continue;
             }
@@ -754,10 +747,7 @@ where
                 );
                 continue;
             };
-            let Some((_, terminal)) = terminal_positions(component, resolve_symbol)
-                .into_iter()
-                .next()
-            else {
+            let Some(&(_, terminal)) = self.terminals[index].first() else {
                 continue;
             };
             let Some(&net_id) = self.point_to_net.get(&terminal) else {
@@ -1011,13 +1001,11 @@ where
     /// labels are, so the design has the node count the deck has.
     fn identify_ground(&mut self) {
         let schematic = self.schematic;
-        let resolve_symbol = self.resolve_symbol;
-        for component in &schematic.components {
+        for (index, component) in schematic.components.iter().enumerate() {
             if component.kind != ComponentType::Ground {
                 continue;
             }
-            let terminals = terminal_positions(component, resolve_symbol);
-            if let Some((_, terminal_pos)) = terminals.first()
+            if let Some((_, terminal_pos)) = self.terminals[index].first()
                 && let Some(&net_id) = self.point_to_net.get(terminal_pos)
             {
                 self.join_ground(net_id);
@@ -1046,7 +1034,6 @@ where
 
     fn finish(mut self) -> ExtractedConnectivity {
         let schematic = self.schematic;
-        let resolve_symbol = self.resolve_symbol;
 
         // A wire belongs to exactly one net; index it under that net so a
         // conductor-level finding can name the drawn object. The net is found
@@ -1083,8 +1070,9 @@ where
 
         let mut bound: Vec<(u64, String, Point, usize)> = Vec::new();
         let mut terminal_counts: HashMap<usize, usize> = HashMap::new();
-        for component in &schematic.components {
-            for (pin, point) in terminal_positions(component, resolve_symbol) {
+        let terminals = std::mem::take(&mut self.terminals);
+        for (component, terminals) in schematic.components.iter().zip(terminals) {
+            for (pin, point) in terminals {
                 let Some(&net_id) = self.point_to_net.get(&point) else {
                     continue;
                 };

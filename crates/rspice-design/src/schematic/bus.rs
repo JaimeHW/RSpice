@@ -278,6 +278,11 @@ pub fn vector_connectivity(
                 .map(|declaration| (bus, declaration))
         })
         .collect();
+    // With no declared bus, no terminal has one under it to join or to
+    // disagree with, so nobody's terminals need resolving.
+    if declared.is_empty() {
+        return VectorConnectivity::default();
+    }
 
     let mut parents: Vec<usize> = (0..declared.len()).collect();
     for index in 0..declared.len() {
