@@ -8,7 +8,9 @@ use serde_json::{Value, json};
 
 use super::*;
 use crate::ui::Mode;
-use crate::workbench::{ChoicePreference, ScalarPreference, TogglePreference};
+use crate::workbench::{
+    ChoicePreference, FolderListPreference, ScalarPreference, TogglePreference,
+};
 
 /// A preferences file in a folder of its own, never the real settings folder.
 fn temp_store(label: &str) -> (PathBuf, PreferencesStore) {
@@ -64,6 +66,17 @@ fn customize(state: &mut AppState) {
         .preferences
         .set_scalar(ScalarPreference::DisplayedSignificantDigits, 12)
         .expect("significant digits");
+    state
+        .ui
+        .preferences
+        .set_folders(
+            FolderListPreference::LibraryFolders,
+            vec![
+                std::env::temp_dir().join("rspice-library-b"),
+                std::env::temp_dir().join("rspice-library-a"),
+            ],
+        )
+        .expect("library folders");
 }
 
 /// The four settings the file holds, comparable across states.
@@ -188,6 +201,63 @@ fn a_setting_a_newer_build_wrote_is_kept_until_it_is_changed_here() {
         serde_json::to_value(Mode::Light).unwrap()
     );
     assert_eq!(written[THEME]["future-accent"], "teal");
+}
+
+/// A file written before library folders existed reads as none and is left
+/// exactly as it was. A folder list this build cannot read takes nothing else
+/// with it, and is written back as it was found.
+#[test]
+fn library_folders_decode_from_files_that_predate_or_garble_them() {
+    let (path, store) = temp_store("library-folders");
+    let mut first = AppState::default();
+    customize(&mut first);
+    first
+        .ui
+        .preferences
+        .restore_folder_defaults(&[FolderListPreference::LibraryFolders]);
+    first.bind_preferences_file(store.clone());
+    let older = std::fs::read(&path).expect("the file was written");
+    assert!(
+        read_json(&path)[PREFERENCES].get("folders").is_none(),
+        "no list is the shipped state and is not written"
+    );
+
+    let mut state = bound(&store);
+    assert!(
+        state
+            .ui
+            .preferences
+            .folders(FolderListPreference::LibraryFolders)
+            .is_empty()
+    );
+    state.flush_preferences_file();
+    assert_eq!(std::fs::read(&path).unwrap(), older);
+
+    let mut file = read_json(&path);
+    file[PREFERENCES]["folders"] = json!({"library-folders": "not a list"});
+    std::fs::write(&path, serde_json::to_vec(&file).unwrap()).unwrap();
+    let mut state = bound(&store);
+    assert!(
+        state
+            .ui
+            .preferences
+            .folders(FolderListPreference::LibraryFolders)
+            .is_empty()
+    );
+    assert_eq!(
+        state
+            .ui
+            .preferences
+            .choice(ChoicePreference::InterfaceScale),
+        2,
+        "every other preference still loads"
+    );
+    state.ui.theme.mode = Mode::Dark;
+    state.flush_preferences_file();
+    assert_eq!(
+        read_json(&path)[PREFERENCES]["folders"]["library-folders"],
+        "not a list"
+    );
 }
 
 #[test]

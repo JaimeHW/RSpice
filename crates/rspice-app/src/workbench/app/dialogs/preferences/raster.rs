@@ -52,6 +52,21 @@ fn render_every_preferences_category_for_review() {
                 continue;
             }
             let mut app = RSpiceApp::test_instance();
+            // An empty Libraries section is one button, so the page is
+            // reviewed holding a folder this machine has and one it lacks.
+            if category == PreferenceCategory::Projects {
+                app.state
+                    .ui
+                    .preferences
+                    .set_folders(
+                        crate::workbench::FolderListPreference::LibraryFolders,
+                        vec![
+                            std::env::temp_dir(),
+                            std::env::temp_dir().join("rspice-review-missing-library"),
+                        ],
+                    )
+                    .expect("full paths");
+            }
             let mut active = category;
             let canvas = crate::ui::raster::render_themed(
                 *theme,

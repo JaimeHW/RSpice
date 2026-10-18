@@ -941,6 +941,52 @@ impl ScalarPreference {
     }
 }
 
+/// A stored list of host folders, kept in the order they are searched.
+///
+/// A family of its own beside the choices, toggles and scalars for the reason
+/// those are families: a page and Restore defaults each name the key, and the
+/// guards that keep the two in step read those names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FolderListPreference {
+    /// Searched for a netlist's `.include` and `.lib` files after a project's
+    /// own include search paths, which win.
+    LibraryFolders,
+}
+
+impl FolderListPreference {
+    #[cfg(test)]
+    pub(crate) const ALL: [Self; 1] = [Self::LibraryFolders];
+
+    pub const fn stable_id(self) -> &'static str {
+        match self {
+            Self::LibraryFolders => "library-folders",
+        }
+    }
+}
+
+/// One stored folder list. A value this build cannot read is kept as it was
+/// found and reads as no folders, so it cannot take every other preference
+/// down with it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+enum FolderListStorage {
+    Current(Vec<std::path::PathBuf>),
+    Future(Value),
+}
+
+/// Why a folder cannot join a stored list, or `None` when it can.
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn folder_refusal(folder: &std::path::Path) -> Option<&'static str> {
+    if !folder.is_absolute() {
+        Some("a library folder has to be a full path")
+    } else if folder.to_str().is_none() {
+        Some("the preferences file cannot hold that folder's name")
+    } else {
+        None
+    }
+}
+
 /// User/device overrides consumed by the workbench at runtime. Missing values
 /// read as the reviewed zero/false defaults, keeping legacy sessions valid.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -953,6 +999,10 @@ pub struct UserPreferences {
     choices: BTreeMap<String, Value>,
     toggles: BTreeMap<String, Value>,
     scalars: BTreeMap<String, Value>,
+    /// Absent from a file written before the first folder list existed, which
+    /// therefore reads as every list empty.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    folders: BTreeMap<String, FolderListStorage>,
     #[serde(skip_serializing_if = "WorkspacePreferencesStorage::is_default")]
     workspace: WorkspacePreferencesStorage,
     #[serde(skip_serializing_if = "ResultsPreferencesStorage::is_default")]
@@ -1280,6 +1330,52 @@ impl UserPreferences {
                 .insert(key.stable_id().to_owned(), Value::from(value));
         }
         Ok(())
+    }
+
+    /// The folders stored under `key`, in search order. A stored value this
+    /// build cannot read is no folders.
+    #[must_use]
+    pub fn folders(&self, key: FolderListPreference) -> &[std::path::PathBuf] {
+        match self.folders.get(key.stable_id()) {
+            Some(FolderListStorage::Current(folders)) => folders,
+            Some(FolderListStorage::Future(_)) | None => &[],
+        }
+    }
+
+    /// Store `folders` under `key`, in the order given. Each has to be a full
+    /// path the preferences file can hold, and named once. A browser has no
+    /// folders to name, so only the desktop sets a list.
+    #[cfg(any(test, not(target_arch = "wasm32")))]
+    pub fn set_folders(
+        &mut self,
+        key: FolderListPreference,
+        folders: Vec<std::path::PathBuf>,
+    ) -> Result<(), &'static str> {
+        for (index, folder) in folders.iter().enumerate() {
+            if let Some(refusal) = folder_refusal(folder) {
+                return Err(refusal);
+            }
+            if folders[..index].contains(folder) {
+                return Err("that folder is already in the list");
+            }
+        }
+        if folders.is_empty() {
+            self.folders.remove(key.stable_id());
+        } else {
+            self.folders.insert(
+                key.stable_id().to_owned(),
+                FolderListStorage::Current(folders),
+            );
+        }
+        Ok(())
+    }
+
+    /// Drop the stored list for each named key, so each reads as no folders.
+    /// Removal is the reset here too: an absent list is the shipped one.
+    pub fn restore_folder_defaults(&mut self, keys: &[FolderListPreference]) {
+        for key in keys {
+            self.folders.remove(key.stable_id());
+        }
     }
 
     pub(crate) fn normalize(&mut self) {
@@ -2189,6 +2285,45 @@ mod tests {
                 .unwrap()
                 .get("bench-printer")
                 .is_some()
+        );
+    }
+
+    /// A library folder is a full path, named once, kept in the order given;
+    /// clearing the list is what restoring it does.
+    #[test]
+    fn library_folders_keep_their_order_and_refuse_what_cannot_be_searched() {
+        let key = FolderListPreference::LibraryFolders;
+        let first = std::env::temp_dir().join("rspice-library-first");
+        let second = std::env::temp_dir().join("rspice-library-second");
+        let mut preferences = UserPreferences::default();
+
+        preferences
+            .set_folders(key, vec![second.clone(), first.clone()])
+            .expect("two full paths");
+        assert_eq!(preferences.folders(key), [second.clone(), first.clone()]);
+        assert!(
+            preferences
+                .set_folders(key, vec![std::path::PathBuf::from("models")])
+                .is_err(),
+            "a relative folder has nothing to be relative to"
+        );
+        assert!(
+            preferences
+                .set_folders(key, vec![first.clone(), first.clone()])
+                .is_err(),
+            "a folder searched twice is listed by mistake"
+        );
+        assert_eq!(
+            preferences.folders(key),
+            [second, first],
+            "refusals keep the list"
+        );
+
+        preferences.restore_folder_defaults(&[key]);
+        assert!(preferences.folders(key).is_empty());
+        assert_eq!(
+            serde_json::to_value(&preferences).unwrap(),
+            serde_json::to_value(UserPreferences::default()).unwrap()
         );
     }
 }

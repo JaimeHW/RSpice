@@ -85,8 +85,8 @@ pub(crate) use localization::{MessageCatalog, MessageId};
 pub(crate) use preferences::DrawingSheetPersonalPreferences;
 pub use preferences::{
     BackgroundTaskAttention, ChoicePreference, ComplexNumberDisplay, ConsoleLaunchBehavior,
-    EngineeringExportFormat, ScalarPreference, TogglePreference, UserPreferences,
-    WorkspacePreferences, WorkspacePreset,
+    EngineeringExportFormat, FolderListPreference, ScalarPreference, TogglePreference,
+    UserPreferences, WorkspacePreferences, WorkspacePreset,
 };
 pub use routing::availability::{
     SurfaceExecutionAvailability, SurfaceRouteUnavailable, surface_availability,

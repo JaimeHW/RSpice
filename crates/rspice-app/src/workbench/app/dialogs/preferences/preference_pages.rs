@@ -7,6 +7,8 @@
 //! store is wide, that is why — the store keeps keys for domains that have no
 //! runtime owner yet, and they stay off the page until one exists.
 
+#[cfg(not(target_arch = "wasm32"))]
+mod libraries;
 mod navigation;
 mod simulation;
 mod startup_files;
@@ -18,8 +20,8 @@ use crate::ui::tokens::Tokens;
 use crate::ui::widgets::select;
 use crate::ui::{Density, EngineeringCanvasTheme, Mode};
 use crate::workbench::{
-    BackgroundTaskAttention, ChoicePreference, ConsoleLaunchBehavior, ScalarPreference,
-    TogglePreference, WorkspacePreferences, WorkspacePreset,
+    BackgroundTaskAttention, ChoicePreference, ConsoleLaunchBehavior, FolderListPreference,
+    ScalarPreference, TogglePreference, WorkspacePreferences, WorkspacePreset,
 };
 
 use super::preferences_shell::{
@@ -737,9 +739,9 @@ fn results(ui: &mut Ui, state: &mut AppState) {
     waveform_defaults::section(ui, state);
 }
 
-/// The settings file, and what saving a project does. The solver preset a new
-/// project starts from is on the Simulation page, with the other settings a
-/// new plan takes.
+/// The settings file, what saving a project does, and where a deck's
+/// libraries are looked for. The solver preset a new project starts from is
+/// on the Simulation page, with the other settings a new plan takes.
 fn projects(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
     // One file holding every preference and the shortcut library in use.
     preference_row(
@@ -795,6 +797,8 @@ fn projects(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActio
         "Run design checks on save",
     );
     startup_files::section(ui, state);
+    #[cfg(not(target_arch = "wasm32"))]
+    libraries::section(ui, state);
 }
 
 fn accessibility(ui: &mut Ui, state: &mut AppState) {
@@ -997,6 +1001,15 @@ pub(super) fn restore_defaults(
                 ],
                 &[ScalarPreference::RecentFilesListed],
             );
+            let had_library_folders = !preferences
+                .folders(FolderListPreference::LibraryFolders)
+                .is_empty();
+            preferences.restore_folder_defaults(&[FolderListPreference::LibraryFolders]);
+            if had_library_folders {
+                crate::workbench::documents::netlist_document::invalidate_source_evidence(
+                    &mut state.ui.netlist,
+                );
+            }
             state.trim_recent_files();
         }
         PreferenceCategory::Results => {
@@ -1022,23 +1035,26 @@ mod tests {
     use super::*;
     use crate::workbench::RSpiceApp;
 
-    /// The page source, with this test module cut off the end.
+    /// The page source, with each file's test module cut off its end.
     ///
     /// The pages kept in their own modules come first, so that they fall on
     /// the pages' side of the split [`pages_and_restore`] makes and every
     /// scan below reads them as it reads the pages written here.
     fn production_source() -> String {
-        let own = include_str!("preference_pages.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source precedes tests");
         [
+            include_str!("preference_pages/libraries.rs"),
             include_str!("preference_pages/navigation.rs"),
             include_str!("preference_pages/simulation.rs"),
             include_str!("preference_pages/startup_files.rs"),
             include_str!("preference_pages/waveform_defaults.rs"),
-            own,
+            include_str!("preference_pages.rs"),
         ]
+        .map(|source| {
+            source
+                .split("#[cfg(test)]")
+                .next()
+                .expect("production source precedes tests")
+        })
         .concat()
     }
 
@@ -1072,6 +1088,7 @@ mod tests {
             "ChoicePreference::",
             "TogglePreference::",
             "ScalarPreference::",
+            "FolderListPreference::",
         ] {
             for fragment in source.split(enum_name).skip(1) {
                 let variant: String = fragment
@@ -1363,6 +1380,8 @@ mod tests {
             ("launch", "On startup"),
             ("mru", "Recent files listed"),
             ("backup", "Keep a backup when saving"),
+            ("include", "Library folders"),
+            ("models", "Library folders"),
         ] {
             assert!(
                 labels_found_by(query).iter().any(|label| label == row),
@@ -1476,6 +1495,16 @@ mod tests {
                     .preferences
                     .set_scalar(key, value)
                     .expect("each override is inside its preference domain");
+                stored = true;
+            }
+        }
+        for key in FolderListPreference::ALL {
+            if keys.contains(&format!("FolderListPreference::{key:?}")) {
+                state
+                    .ui
+                    .preferences
+                    .set_folders(key, vec![std::env::temp_dir()])
+                    .expect("the temporary folder is a full path");
                 stored = true;
             }
         }
