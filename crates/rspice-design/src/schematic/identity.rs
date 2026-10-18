@@ -405,6 +405,25 @@ pub(crate) fn live_id_in_use(document: &SchematicDocument, id: u64) -> bool {
         || document.probes.iter().any(|item| item.id == id)
 }
 
+/// Every id [`live_id_in_use`] reports in use, sorted.
+pub(crate) fn live_ids(document: &SchematicDocument) -> Vec<u64> {
+    let mut ids = document
+        .components
+        .iter()
+        .map(|item| item.id)
+        .chain(document.wires.iter().map(|item| item.id))
+        .chain(document.junctions.iter().map(|item| item.id))
+        .chain(document.net_labels.iter().map(|item| item.id))
+        .chain(document.buses.iter().map(|item| item.id))
+        .chain(document.bus_taps.iter().map(|item| item.id))
+        .chain(document.design_notes.iter().map(|item| item.id))
+        .chain(document.documentation_shapes.iter().map(|item| item.id))
+        .chain(document.probes.iter().map(|item| item.id))
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    ids
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::{

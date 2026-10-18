@@ -404,9 +404,15 @@ fn place_missing_junctions(
         .map(|junction| junction.pos)
         .collect::<HashSet<_>>();
     let mut changes = false;
+    // Allocating an id searches the whole drawing for it. The ids in use are
+    // gathered once instead, the first time a dot is added, and each new
+    // dot's id joins them as it is placed.
+    let mut in_use: Option<Vec<u64>> = None;
     for point in rule.points(document) {
         if marked.insert(point) {
-            let id = identity.allocate(document);
+            let in_use = in_use.get_or_insert_with(|| super::identity::live_ids(document));
+            let id = identity.allocate_unless(|id| in_use.binary_search(&id).is_ok());
+            in_use.insert(in_use.partition_point(|&used| used < id), id);
             document.junctions.push(Junction::new(id, point));
             changes = true;
         }
