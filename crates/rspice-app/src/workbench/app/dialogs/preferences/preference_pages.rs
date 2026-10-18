@@ -534,7 +534,7 @@ fn units(ui: &mut Ui, state: &mut AppState) {
         state,
         ChoicePreference::LayoutCoordinateDisplay,
         "Layout coordinate display",
-        "The PDK database unit remains authoritative and unchanged.",
+        "Cursor coordinates in the layout editor's status bar.",
         &["µm with database-unit remainder", "nm", "Database units"],
     );
     choice_row(

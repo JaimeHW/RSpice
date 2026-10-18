@@ -568,18 +568,25 @@ fn engineering_context_summary(
                         schematic_cursor_summary(&app.state, x, y)
                     }
                     crate::state::ViewType::Layout => {
-                        app.state.pdk_config.layout_database_unit.map_or_else(
-                            || format!("x {x:.0} · y {y:.0} DBU unavailable"),
-                            |dbu| {
-                                let policy =
-                                    app.state.ui.preferences.quantity_presentation_policy();
-                                format!(
-                                    "x {} · y {}",
-                                    policy.format_layout_coordinate(x, dbu),
-                                    policy.format_layout_coordinate(y, dbu)
-                                )
-                            },
-                        )
+                        // The open layout's own database unit is the one its
+                        // coordinates count in.
+                        let content = &app.state.workspace.content;
+                        content
+                            .physical_layout_document(&content.active_view)
+                            .map(|document| document.technology().database_unit())
+                            .or(app.state.pdk_config.layout_database_unit)
+                            .map_or_else(
+                                || format!("x {x:.0} · y {y:.0} DBU unavailable"),
+                                |dbu| {
+                                    let policy =
+                                        app.state.ui.preferences.quantity_presentation_policy();
+                                    format!(
+                                        "x {} · y {}",
+                                        policy.format_layout_coordinate(x, dbu),
+                                        policy.format_layout_coordinate(y, dbu)
+                                    )
+                                },
+                            )
                     }
                     crate::state::ViewType::Symbol => format!(
                         "x {x:.0} · y {y:.0} · grid {}",

@@ -52,6 +52,9 @@ struct LayoutEditorSession {
     /// Why the last edit was refused, when one was. A committed edit says
     /// nothing: the toolbar's revision row is the receipt.
     status: Option<String>,
+    /// The database-unit point under the pointer this frame, for the status
+    /// bar's coordinate readout.
+    hover: Option<LayoutPoint>,
 }
 
 impl Default for LayoutEditorSession {
@@ -65,6 +68,7 @@ impl Default for LayoutEditorSession {
             rectangle_start: None,
             fit_requested: false,
             status: None,
+            hover: None,
         }
     }
 }
@@ -78,6 +82,9 @@ struct ResolvedDisplayContract {
 }
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+    // The status bar reads the cursor from here; a frame with no canvas
+    // under the pointer has none.
+    app.state.ui.canvas_hover = None;
     let owner = app.state.workspace.content.active_view.clone();
     let session_id = ui.id().with(("physical-layout-editor", owner.key()));
     let mut session = ui.ctx().data_mut(|data| {
@@ -119,9 +126,11 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         &mut session,
         &mut pending_edits,
     );
+    session.hover = None;
     if pending_edits.is_none() {
         pending_edits = show_canvas(ui, &document, &display, &mut session);
     }
+    app.state.ui.canvas_hover = session.hover.map(|point| (point.x as f64, point.y as f64));
 
     if let Some(edits) = pending_edits {
         match app
@@ -378,6 +387,9 @@ fn show_canvas(
         fit_document(document, canvas, session);
         session.fit_requested = false;
     }
+    session.hover = response
+        .hover_pos()
+        .map(|position| screen_to_world(position, canvas, session));
 
     if response.hovered() {
         let scroll = ui.input(|input| input.smooth_scroll_delta.y);
@@ -946,6 +958,38 @@ mod tests {
                 egui::CentralPanel::default().show(context, |ui| show(ui, app));
             },
         )
+    }
+
+    /// A pointer over the canvas puts its database-unit point where the
+    /// status bar reads its coordinate readout from, and leaving clears it.
+    #[test]
+    fn the_cursor_over_the_canvas_reaches_the_status_bar() {
+        let mut app = app_with_layout();
+        let context = egui::Context::default();
+        crate::ui::Theme::default().apply(&context);
+        // Hover is resolved against the previous frame's widgets, so the
+        // pointer rests over the canvas for a few frames before it leaves.
+        let over = egui::Event::PointerMoved(Pos2::new(400.0, 450.0));
+        let steps = [over.clone(), over.clone(), over, egui::Event::PointerGone];
+        for (step, event) in steps.into_iter().enumerate() {
+            let _ = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
+                    events: vec![event],
+                    ..Default::default()
+                },
+                |context| {
+                    egui::CentralPanel::default().show(context, |ui| show(ui, &mut app));
+                },
+            );
+            if step == 2 {
+                assert!(
+                    app.state.ui.canvas_hover.is_some(),
+                    "a pointer over the layout canvas has a coordinate"
+                );
+            }
+        }
+        assert_eq!(app.state.ui.canvas_hover, None);
     }
 
     #[test]
