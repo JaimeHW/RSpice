@@ -683,6 +683,32 @@ impl Toasts {
         }
         taken
     }
+
+    /// Keep a titled record, and its offer, in the notification center
+    /// without raising a toast.
+    ///
+    /// For an outcome the reader asked not to be interrupted for: it is
+    /// still unread, still counted on the bell, and still leads where it
+    /// would have led, but nothing appears over their work.
+    pub fn record_quietly(
+        &mut self,
+        ctx: &Context,
+        category: NotificationCategory,
+        kind: ToastKind,
+        title: impl Into<String>,
+        message: impl Into<String>,
+        action: Option<NotificationAction>,
+    ) {
+        let created = ctx.input(|i| i.time);
+        self.record_activity(
+            title.into(),
+            message.into(),
+            category,
+            kind,
+            action,
+            created,
+        );
+    }
 }
 
 /// The drain bar, cut from the card's own rounded shape so it follows the
@@ -1054,6 +1080,47 @@ mod tests {
         assert_eq!(toasts.queue[1].kind, ToastKind::Warn);
         assert_eq!(toasts.activity().len(), 3);
         assert_eq!(toasts.activity()[0].title(), "Project saved");
+    }
+
+    /// A quiet record is everything a notice is except the toast: unread,
+    /// counted, titled, and still offering where it leads. It neither raises
+    /// a toast nor replaces one that is already up under the same title.
+    #[test]
+    fn a_quiet_record_reaches_the_bell_without_a_toast() {
+        let ctx = Context::default();
+        let mut toasts = Toasts::default();
+        toasts.success(&ctx, "Run 3 complete", "2 analyses saved");
+        let offer = NotificationAction::OpenRunInResults { run_sequence: 4 };
+
+        toasts.record_quietly(
+            &ctx,
+            NotificationCategory::Job,
+            ToastKind::Success,
+            "Run 4 complete",
+            "1 analysis saved",
+            Some(offer),
+        );
+        toasts.record_quietly(
+            &ctx,
+            NotificationCategory::Job,
+            ToastKind::Success,
+            "Run 3 complete",
+            "",
+            None,
+        );
+
+        assert_eq!(toasts.queue.len(), 1, "no toast was raised or replaced");
+        assert_eq!(toasts.queue[0].message, "2 analyses saved");
+        assert_eq!(toasts.activity().len(), 3);
+        assert_eq!(toasts.unread_count(), 3);
+        let quiet = &toasts.activity()[1];
+        assert_eq!(quiet.title(), "Run 4 complete");
+        assert_eq!(quiet.message(), "1 analysis saved");
+        assert_eq!(quiet.category(), NotificationCategory::Job);
+        assert_eq!(quiet.kind(), ToastKind::Success);
+        assert_eq!(quiet.action(), Some(offer));
+        assert!(!quiet.is_read());
+        assert_eq!(toasts.activity()[0].action(), None);
     }
 
     #[test]
