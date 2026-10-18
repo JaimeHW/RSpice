@@ -24,7 +24,7 @@ const MODELS_BASELINES: [ModelsBaseline; 8] = [
         name: "models-00-models-project",
         page: ModelsPage::Models,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "1a9fc4d4a107933fca91e7e5a0d1b76d19d04110a9a273e6c1fed1664d7035bb",
+        fingerprint: "39b54d6768146c1cfd10ceb89d6c1d842d863f686ee148305d31a36f9a041ee5",
     },
     ModelsBaseline {
         name: "models-01-symbols-cdf",
@@ -48,19 +48,19 @@ const MODELS_BASELINES: [ModelsBaseline; 8] = [
         name: "models-04-include-graph",
         page: ModelsPage::Include,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "3a82d32b6a8603c8277bd066beaa0b9d59fc67d8666f6b49ef62f9a8cd0126ab",
+        fingerprint: "0e4f4a9947e51221e64df28f0a1320123889bce8f405889a7f6d102b9920f63f",
     },
     ModelsBaseline {
         name: "models-05-qualification",
         page: ModelsPage::Qualification,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "7fb5cb06de0bfa3a1bc58309efe22ed3828ca31daf7b9dc629d192f72c99cf45",
+        fingerprint: "c9aa60a1b1f57b2d7371d31e180e648587951afbacee7baba9813833b2b36a9e",
     },
     ModelsBaseline {
         name: "models-00b-rspice-library",
         page: ModelsPage::Models,
         scope: ModelsCatalogScope::RSpiceLibrary,
-        fingerprint: "55478b5e5918a31639590269b80308bee5e54bc602f9bc4c24ba6fed9880847e",
+        fingerprint: "ae9c601c21b924036aae46b92230a25593039e7da6cb9a23463978b3c61c5785",
     },
     ModelsBaseline {
         name: "models-00c-installed-packs",
