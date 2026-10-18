@@ -1,5 +1,6 @@
 //! Retained QPNOISE integrals and contributor rankings alongside the plots.
-use crate::presentation::panel_note;
+use crate::presentation::{frequency_readout, panel_note};
+use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_core::engine::{
     QpnoiseAnalysisResult, QpnoiseIntegrationMethod, QpnoiseObservation, QpnoiseUnavailable,
     QpnoiseValue, QpxfQuantity,
@@ -36,15 +37,19 @@ fn value(v: QpnoiseValue, unit: &str) -> String {
 /// each contributor's share are facts with names, and they sit on the same
 /// label/value grid as the rest of the inspector rather than as sentences on
 /// its edge.
-pub fn summary(ui: &mut egui::Ui, response: &QpnoiseAnalysisResult) {
+pub fn summary(
+    ui: &mut egui::Ui,
+    response: &QpnoiseAnalysisResult,
+    quantity_policy: &QuantityPresentationPolicy,
+) {
     section_header(ui, "Noise", None);
     let request = &response.metadata.request;
     if let Some(integration) = &request.integration {
         let band = match integration.band_hz {
             Some([low, high]) => format!(
                 "{} – {}",
-                fmt_si_readout(low, "Hz", 4),
-                fmt_si_readout(high, "Hz", 4)
+                frequency_readout(quantity_policy, low, 4),
+                frequency_readout(quantity_policy, high, 4)
             ),
             None => "full output band".into(),
         };

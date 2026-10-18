@@ -1,6 +1,7 @@
 //! Band-integrated noise contributors, conversion provenance and noise-figure presentation.
 
 use egui::{Align2, Sense, Ui};
+use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_results::noise::NoiseSummary;
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::fmt_si_readout;
@@ -35,7 +36,12 @@ fn contributor_table_width() -> f32 {
 }
 
 /// Show contributors for the host-selected analysis and its validated noise-figure evidence.
-pub fn right_panel(ui: &mut Ui, evidence: ContributorEvidence<'_>) {
+pub fn right_panel(
+    ui: &mut Ui,
+    evidence: ContributorEvidence<'_>,
+    quantity_policy: &QuantityPresentationPolicy,
+) {
+    let frequency = |hertz| crate::presentation::frequency_readout(quantity_policy, hertz, 4);
     let summary = match evidence {
         ContributorEvidence::Retained { summary, .. } => summary,
         _ => {
@@ -90,10 +96,7 @@ pub fn right_panel(ui: &mut Ui, evidence: ContributorEvidence<'_>) {
                     "Not requested".into()
                 },
             ),
-            (
-                "Carrier fundamental",
-                fmt_si_readout(conversion.carrier_hz, "Hz", 4),
-            ),
+            ("Carrier fundamental", frequency(conversion.carrier_hz)),
             (
                 "Sideband in → out",
                 if requested {
@@ -110,8 +113,8 @@ pub fn right_panel(ui: &mut Ui, evidence: ContributorEvidence<'_>) {
                 if requested {
                     format!(
                         "{} … {}",
-                        fmt_si_readout(conversion.input_frequency(summary.band.0), "Hz", 4),
-                        fmt_si_readout(conversion.input_frequency(summary.band.1), "Hz", 4)
+                        frequency(conversion.input_frequency(summary.band.0)),
+                        frequency(conversion.input_frequency(summary.band.1))
                     )
                 } else {
                     "Not requested".into()
@@ -121,8 +124,8 @@ pub fn right_panel(ui: &mut Ui, evidence: ContributorEvidence<'_>) {
                 "Output frequency band",
                 format!(
                     "{} … {}",
-                    fmt_si_readout(conversion.output_frequency(summary.band.0), "Hz", 4),
-                    fmt_si_readout(conversion.output_frequency(summary.band.1), "Hz", 4)
+                    frequency(conversion.output_frequency(summary.band.0)),
+                    frequency(conversion.output_frequency(summary.band.1))
                 ),
             ),
         ];

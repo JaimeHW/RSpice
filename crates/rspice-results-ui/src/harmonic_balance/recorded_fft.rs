@@ -1,10 +1,13 @@
 //! Recorded FFT evidence, incomplete-history captions, logarithmic ordinate and inspector rows.
 
+use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_results::{
     analysis_payload::AnalysisResultPayload, analysis_result::AnalysisResult,
     fft::spectrum::FftSpectrumEvidence,
 };
 use rspice_ui_kit::plot::{Axis, fmt_si, fmt_si_readout};
+
+use crate::presentation::frequency_readout;
 
 /// Stems are one painted segment per coefficient, so they are drawn only for
 /// a spectrum short enough that the cost is bounded.
@@ -68,7 +71,10 @@ pub(super) fn decade_ordinate(
 /// coherent gain and the fundamental's bin index are bookkeeping the reader
 /// cannot act on. Sampling states itself only when it was interpolated, which
 /// is the case that qualifies every number under it.
-pub(super) fn inspector_rows(spectrum: &FftSpectrumEvidence) -> Vec<(&'static str, String, bool)> {
+pub(super) fn inspector_rows(
+    spectrum: &FftSpectrumEvidence,
+    quantity_policy: &QuantityPresentationPolicy,
+) -> Vec<(&'static str, String, bool)> {
     let mut rows = vec![
         ("Output", spectrum.output.clone(), false),
         ("Window", spectrum.window.clone(), false),
@@ -83,7 +89,7 @@ pub(super) fn inspector_rows(spectrum: &FftSpectrumEvidence) -> Vec<(&'static st
         ),
         (
             "Resolution",
-            fmt_si_readout(spectrum.frequency_resolution_hz, "Hz", 4),
+            frequency_readout(quantity_policy, spectrum.frequency_resolution_hz, 4),
             false,
         ),
     ];
@@ -92,9 +98,9 @@ pub(super) fn inspector_rows(spectrum: &FftSpectrumEvidence) -> Vec<(&'static st
     }
     rows.push((
         "Fundamental",
-        fmt_si_readout(
+        frequency_readout(
+            quantity_policy,
             spectrum.fundamental_bin as f64 * spectrum.frequency_resolution_hz,
-            "Hz",
             4,
         ),
         true,
@@ -214,9 +220,10 @@ mod tests {
 
     #[test]
     fn the_inspector_reads_the_transform_the_engine_performed() {
-        let rows = inspector_rows(&evidence_fixture(
-            rspice_results::fft::spectrum::FftSpectrumStatusEvidence::Complete,
-        ));
+        let rows = inspector_rows(
+            &evidence_fixture(rspice_results::fft::spectrum::FftSpectrumStatusEvidence::Complete),
+            &QuantityPresentationPolicy::default(),
+        );
         let labels = rows.iter().map(|(label, _, _)| *label).collect::<Vec<_>>();
         assert_eq!(
             labels,
@@ -234,20 +241,39 @@ mod tests {
         );
     }
 
+    /// Frequencies read in the unit Frequency display chose.
+    #[test]
+    fn the_inspector_frequencies_follow_the_frequency_display() {
+        let policy = QuantityPresentationPolicy {
+            frequency_display: rspice_app_types::quantity::FrequencyDisplay::RadiansPerSecond,
+            ..QuantityPresentationPolicy::default()
+        };
+        let rows = inspector_rows(
+            &evidence_fixture(rspice_results::fft::spectrum::FftSpectrumStatusEvidence::Complete),
+            &policy,
+        );
+        assert!(
+            rows.iter()
+                .any(|(label, value, _)| *label == "Fundamental" && value == "6.283 krad/s"),
+            "{rows:?}"
+        );
+    }
+
     /// Exact sampling is the normal case, so it says nothing; interpolation
     /// qualifies every number under it, so it does.
     #[test]
     fn sampling_is_stated_only_when_it_was_interpolated() {
         let mut spectrum =
             evidence_fixture(rspice_results::fft::spectrum::FftSpectrumStatusEvidence::Complete);
+        let policy = QuantityPresentationPolicy::default();
         assert!(
-            !inspector_rows(&spectrum)
+            !inspector_rows(&spectrum, &policy)
                 .iter()
                 .any(|(label, _, _)| *label == "Sampling")
         );
         spectrum.accurate_sampling = false;
         assert!(
-            inspector_rows(&spectrum)
+            inspector_rows(&spectrum, &policy)
                 .iter()
                 .any(|(label, value, _)| *label == "Sampling" && value == "interpolated")
         );

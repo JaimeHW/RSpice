@@ -1,6 +1,7 @@
 //! Shared result plot navigation, readout cards and status presentation.
 
 use egui::{Ui, WidgetInfo, WidgetType};
+use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_ui_kit::panels::inspector::toned_inspector_copy;
 use rspice_ui_kit::panels::{PANEL_ROW_H, panel_inset};
 use rspice_ui_kit::theme::{self, FontWeight};
@@ -248,6 +249,17 @@ fn stat_column_widths(width: f32, inset: f32) -> (f32, f32) {
     let content = (width - 2.0 * inset - GAP).max(0.0);
     let name = content * 0.42;
     (name, content - name)
+}
+
+/// A frequency readout at `significant_digits`, in the unit Units ▸
+/// Frequency display chose. The stored value is hertz either way.
+pub fn frequency_readout(
+    quantity_policy: &QuantityPresentationPolicy,
+    hertz: f64,
+    significant_digits: usize,
+) -> String {
+    let (scale, offset, unit) = quantity_policy.frequency_axis_transform();
+    rspice_ui_kit::plot::fmt_si_readout(hertz * scale + offset, unit, significant_digits)
 }
 
 /// A faint explanatory note under a right-panel section.

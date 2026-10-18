@@ -11,6 +11,7 @@ use crate::{
     virtual_rows::RowOffsets,
 };
 use egui::{Sense, Ui};
+use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_results::sensitivity::{
     SensitivityBasisEvidence, SensitivityStudyEvidence, SensitivityStudyRow, SensitivityValue,
 };
@@ -29,6 +30,13 @@ const TABLE_MIN_WIDTH: f32 = RANK_WIDTH + PARAMETER_WIDTH + 360.0 + VALUE_WIDTH 
 pub struct StudyView<'a> {
     pub analysis_label: &'a str,
     pub evidence: &'a SensitivityStudyEvidence,
+    pub quantity_policy: QuantityPresentationPolicy,
+}
+
+/// A swept frequency, in the unit Frequency display chose.
+fn frequency_label(hertz: f64, quantity_policy: &QuantityPresentationPolicy) -> String {
+    let (scale, offset, unit) = quantity_policy.frequency_axis_transform();
+    fmt_si(hertz * scale + offset, unit, 4)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -75,6 +83,7 @@ impl SensitivitySheetState {
 pub fn domain_bar(
     ui: &mut Ui,
     evidence: &SensitivityStudyEvidence,
+    quantity_policy: &QuantityPresentationPolicy,
     state: &mut SensitivitySheetState,
 ) -> bool {
     let SensitivityBasisEvidence::Ac { frequencies_hz, .. } = &evidence.basis else {
@@ -85,7 +94,7 @@ pub fn domain_bar(
     }
     let options: Vec<String> = frequencies_hz
         .iter()
-        .map(|frequency| fmt_si(*frequency, "Hz", 4))
+        .map(|frequency| frequency_label(*frequency, quantity_policy))
         .collect();
     let selected = state.frequency_index.min(options.len() - 1);
     if let Some(picked) = rspice_ui_kit::widgets::select(
@@ -202,16 +211,19 @@ fn ranked_rows(evidence: &SensitivityStudyEvidence, index: usize) -> Vec<usize> 
     ranked
 }
 /// The whole grid in one sentence: what was solved, over what band.
-pub(super) fn basis_label(evidence: &SensitivityStudyEvidence) -> String {
+pub(super) fn basis_label(
+    evidence: &SensitivityStudyEvidence,
+    quantity_policy: &QuantityPresentationPolicy,
+) -> String {
     match &evidence.basis {
         SensitivityBasisEvidence::Dc { .. } => "DC operating point".to_owned(),
         SensitivityBasisEvidence::Ac { frequencies_hz, .. } => match frequencies_hz.as_slice() {
             [] => "AC sweep with no frequencies".to_owned(),
-            [only] => format!("AC at {}", fmt_si(*only, "Hz", 4)),
+            [only] => format!("AC at {}", frequency_label(*only, quantity_policy)),
             [first, .., last] => format!(
                 "AC sweep {} to {} · {} points",
-                fmt_si(*first, "Hz", 4),
-                fmt_si(*last, "Hz", 4),
+                frequency_label(*first, quantity_policy),
+                frequency_label(*last, quantity_policy),
                 frequencies_hz.len()
             ),
         },
@@ -219,10 +231,14 @@ pub(super) fn basis_label(evidence: &SensitivityStudyEvidence) -> String {
 }
 
 /// The one point the tables are read at, exactly enough to reproduce it.
-fn read_at_label(evidence: &SensitivityStudyEvidence, index: usize) -> String {
+fn read_at_label(
+    evidence: &SensitivityStudyEvidence,
+    index: usize,
+    quantity_policy: &QuantityPresentationPolicy,
+) -> String {
     evidence.frequency_at(index).map_or_else(
         || "DC operating point".to_owned(),
-        |frequency| rspice_ui_kit::plot::fmt_si_readout(frequency, "Hz", 4),
+        |frequency| crate::presentation::frequency_readout(quantity_policy, frequency, 4),
     )
 }
 
@@ -354,7 +370,7 @@ pub fn show(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan>) {
     let subtitle = format!(
         "{} - {} - {} variables",
         view.evidence.output,
-        basis_label(view.evidence),
+        basis_label(view.evidence, &view.quantity_policy),
         ranked.len()
     );
     StripHeader::new("SENS", &subtitle, &[]).show(ui);
@@ -509,7 +525,10 @@ pub fn show(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan>) {
                     }
                     ui.label(format!("Nominal: {}", exact_value(row.nominal_value)));
                     ui.label(format!("Output: {}", view.evidence.output));
-                    ui.label(format!("Read at: {}", read_at_label(view.evidence, index)));
+                    ui.label(format!(
+                        "Read at: {}",
+                        read_at_label(view.evidence, index, &view.quantity_policy)
+                    ));
                 });
 
                 if !ui.is_rect_visible(rect) {
@@ -632,8 +651,8 @@ pub fn right_panel(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan
     let index = plan.map_or(0, |plan| plan.index);
 
     section_header(ui, "Sensitivity", None);
-    let basis = basis_label(view.evidence);
-    let read_at = read_at_label(view.evidence, index);
+    let basis = basis_label(view.evidence, &view.quantity_policy);
+    let read_at = read_at_label(view.evidence, index, &view.quantity_policy);
     let ranked = plan.map_or(&[][..], StudyPlan::order);
     // The analysis is the pane's own name, the setup owns the filter, the
     // variable count is the length of the table below, rank 1 of that table
@@ -836,13 +855,25 @@ mod tests {
     #[test]
     fn the_sheet_names_the_band_it_solved_and_the_point_it_is_read_at() {
         let evidence = swept_evidence();
-        let basis = basis_label(&evidence);
+        let policy = QuantityPresentationPolicy::default();
+        let basis = basis_label(&evidence, &policy);
         assert!(basis.contains("AC sweep"), "{basis}");
         assert!(basis.contains("3 points"), "{basis}");
         assert_eq!(
-            read_at_label(&evidence, 0),
+            read_at_label(&evidence, 0, &policy),
             format!("{} Hz", exact_value(10.0))
         );
+        // The band and the point follow Frequency display.
+        let radians = QuantityPresentationPolicy {
+            frequency_display: rspice_app_types::quantity::FrequencyDisplay::RadiansPerSecond,
+            ..policy
+        };
+        assert!(
+            basis_label(&evidence, &radians).contains("rad/s"),
+            "{}",
+            basis_label(&evidence, &radians)
+        );
+        assert_eq!(read_at_label(&evidence, 0, &radians), "62.83 rad/s");
 
         let dc = SensitivityStudyEvidence {
             basis: SensitivityBasisEvidence::Dc { output: 2.0 },
@@ -860,8 +891,8 @@ mod tests {
             ..evidence
         };
         dc.validate().expect("the DC projection is valid evidence");
-        assert_eq!(basis_label(&dc), "DC operating point");
-        assert_eq!(read_at_label(&dc, 0), "DC operating point");
+        assert_eq!(basis_label(&dc, &policy), "DC operating point");
+        assert_eq!(read_at_label(&dc, 0, &policy), "DC operating point");
     }
     #[test]
     fn a_study_states_the_filter_that_chose_its_variables() {

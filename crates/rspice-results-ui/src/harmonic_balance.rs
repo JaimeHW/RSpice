@@ -281,7 +281,10 @@ pub fn right_panel(
     // nothing rather than four rows of "Not retained".
     if let Some(spectrum) = &model.fft {
         section_header(ui, "Spectrum", None);
-        crate::presentation::stat_table(ui, &recorded_fft::inspector_rows(spectrum));
+        crate::presentation::stat_table(
+            ui,
+            &recorded_fft::inspector_rows(spectrum, quantity_policy),
+        );
     } else if let Some(point) = &model.qpss {
         section_header(ui, "Harmonics", None);
         let config = point.config();

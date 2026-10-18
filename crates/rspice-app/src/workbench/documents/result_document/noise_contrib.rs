@@ -31,7 +31,8 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     bode::noise_spectrum_right_panel(ui, state);
     let index = bode::selected_noise_analysis_index(state);
     let evidence = selected_evidence(&state.simulation, index);
-    view::right_panel(ui, evidence);
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    view::right_panel(ui, evidence, &quantity_policy);
 }
 
 #[cfg(test)]

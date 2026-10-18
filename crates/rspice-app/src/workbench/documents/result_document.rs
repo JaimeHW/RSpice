@@ -2641,7 +2641,8 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         && let Some(crate::state::AnalysisResultPayload::Qpnoise { response }) =
             &analysis.result_payload
     {
-        rspice_results_ui::qpnoise::summary(ui, response);
+        let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+        rspice_results_ui::qpnoise::summary(ui, response, &quantity_policy);
         if view.viewer == ResultViewer::NoiseContrib {
             waves::right_panel(ui, state);
             return;
