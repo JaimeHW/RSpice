@@ -1,0 +1,377 @@
+{
+  "schema": "rspice-sheet-formats",
+  "version": 1,
+  "source_digest_sha256": "40f1fb675ccb0ec07422c3ebeaa7e985ab5000307a524ce4be8400c7277b9314",
+  "includes_builtin_frame_references": true,
+  "includes_source_metadata": true,
+  "builtin_frame_references": [
+    {
+      "kind": "border",
+      "identity": "standard"
+    },
+    {
+      "kind": "title-block",
+      "identity": "compact"
+    },
+    {
+      "kind": "title-block",
+      "identity": "standard"
+    }
+  ],
+  "source_metadata": {
+    "producer": "RSpice",
+    "content": "drawing-sheet-format-definitions",
+    "exact_dimension_unit": "micrometre",
+    "source_scopes": [
+      "organization"
+    ]
+  },
+  "publisher_signature": {
+    "publisher_id": "rspice-test-publisher",
+    "signing_key_id": "sheet-formats-2026",
+    "signature_base64": "A+dO+QtjOnuzg0qImMT4PWlQY36kO+Ns3E2Qsvc0OBMKdjOIWnRC+/WSYonFQvxU0j7KlF+7/2XfWuJI2Rx2DA=="
+  },
+  "presets": [
+    {
+      "stable_id": "ansi-top",
+      "name": "ANSI top",
+      "source_scope": "organization",
+      "portrait_width_um": 250000,
+      "portrait_height_um": 400000,
+      "format": {
+        "size": {
+          "kind": "custom",
+          "name": "ANSI top",
+          "portrait_width_um": 250000,
+          "portrait_height_um": 400000
+        },
+        "orientation": "portrait",
+        "authored_size": {
+          "kind": "custom",
+          "snapshot": {
+            "preset_id": "ansi-top",
+            "name": "ANSI top",
+            "portrait_width_um": 250000,
+            "portrait_height_um": 400000,
+            "source_preset_unavailable": false,
+            "started_from": "ansi"
+          }
+        },
+        "display_unit": "millimetres",
+        "bleed_um": 0,
+        "border": "standard",
+        "zones": {
+          "mode": "automatic"
+        },
+        "marks": {
+          "centring": false
+        },
+        "title_block": {
+          "template": "compact",
+          "anchor": "top-right",
+          "rotation": "counter-clockwise90",
+          "offset_x_um": -5000,
+          "offset_y_um": 5000,
+          "scale": {
+            "kind": "ratio",
+            "drawing_units": 1,
+            "reality_units": 1
+          },
+          "fields": {
+            "project": {
+              "value": "",
+              "visible": false
+            },
+            "cell-view": {
+              "value": "",
+              "visible": true
+            },
+            "sheet-title": {
+              "value": "",
+              "visible": true
+            },
+            "page": {
+              "value": "",
+              "visible": true
+            },
+            "revision": {
+              "value": "",
+              "visible": true
+            },
+            "format": {
+              "value": "",
+              "visible": false
+            },
+            "drawn-by": {
+              "value": "",
+              "visible": true
+            },
+            "checked-by": {
+              "value": "",
+              "visible": false
+            },
+            "approved-by": {
+              "value": "",
+              "visible": true
+            },
+            "date": {
+              "value": "",
+              "visible": true
+            },
+            "organization": {
+              "value": "",
+              "visible": true
+            },
+            "document-id": {
+              "value": "",
+              "visible": true
+            },
+            "classification": {
+              "value": "",
+              "visible": false
+            },
+            "document-type": {
+              "value": "",
+              "visible": true
+            },
+            "document-status": {
+              "value": "",
+              "visible": true
+            },
+            "language": {
+              "value": "",
+              "visible": false
+            }
+          }
+        },
+        "inheritance": "explicit"
+      }
+    },
+    {
+      "stable_id": "compact-left",
+      "name": "Compact left",
+      "source_scope": "organization",
+      "portrait_width_um": 250000,
+      "portrait_height_um": 400000,
+      "format": {
+        "size": {
+          "kind": "custom",
+          "name": "Compact left",
+          "portrait_width_um": 250000,
+          "portrait_height_um": 400000
+        },
+        "orientation": "portrait",
+        "authored_size": {
+          "kind": "custom",
+          "snapshot": {
+            "preset_id": "compact-left",
+            "name": "Compact left",
+            "portrait_width_um": 250000,
+            "portrait_height_um": 400000,
+            "source_preset_unavailable": false
+          }
+        },
+        "display_unit": "millimetres",
+        "bleed_um": 0,
+        "border": "standard",
+        "zones": {
+          "mode": "automatic"
+        },
+        "marks": {
+          "centring": true
+        },
+        "title_block": {
+          "template": "compact",
+          "anchor": "bottom-left",
+          "rotation": "clockwise90",
+          "offset_x_um": 5000,
+          "offset_y_um": -5000,
+          "scale": {
+            "kind": "ratio",
+            "drawing_units": 2,
+            "reality_units": 1
+          },
+          "fields": {
+            "project": {
+              "value": "",
+              "visible": false
+            },
+            "cell-view": {
+              "value": "",
+              "visible": true
+            },
+            "sheet-title": {
+              "value": "",
+              "visible": true
+            },
+            "page": {
+              "value": "",
+              "visible": true
+            },
+            "revision": {
+              "value": "",
+              "visible": true
+            },
+            "format": {
+              "value": "",
+              "visible": false
+            },
+            "drawn-by": {
+              "value": "",
+              "visible": true
+            },
+            "checked-by": {
+              "value": "",
+              "visible": false
+            },
+            "approved-by": {
+              "value": "",
+              "visible": true
+            },
+            "date": {
+              "value": "",
+              "visible": true
+            },
+            "organization": {
+              "value": "",
+              "visible": true
+            },
+            "document-id": {
+              "value": "",
+              "visible": true
+            },
+            "classification": {
+              "value": "",
+              "visible": false
+            },
+            "document-type": {
+              "value": "",
+              "visible": true
+            },
+            "document-status": {
+              "value": "",
+              "visible": true
+            },
+            "language": {
+              "value": "",
+              "visible": false
+            }
+          }
+        },
+        "inheritance": "explicit"
+      }
+    },
+    {
+      "stable_id": "iso-strip",
+      "name": "ISO strip",
+      "source_scope": "organization",
+      "portrait_width_um": 250000,
+      "portrait_height_um": 400000,
+      "format": {
+        "size": {
+          "kind": "custom",
+          "name": "ISO strip",
+          "portrait_width_um": 250000,
+          "portrait_height_um": 400000
+        },
+        "orientation": "portrait",
+        "authored_size": {
+          "kind": "custom",
+          "snapshot": {
+            "preset_id": "iso-strip",
+            "name": "ISO strip",
+            "portrait_width_um": 250000,
+            "portrait_height_um": 400000,
+            "source_preset_unavailable": false
+          }
+        },
+        "display_unit": "millimetres",
+        "bleed_um": 0,
+        "border": "standard",
+        "zones": {
+          "mode": "automatic"
+        },
+        "marks": {
+          "centring": true
+        },
+        "title_block": {
+          "template": "standard",
+          "anchor": "bottom-strip",
+          "rotation": "upright",
+          "offset_x_um": 0,
+          "offset_y_um": 0,
+          "scale": {
+            "kind": "not-to-scale"
+          },
+          "fields": {
+            "project": {
+              "value": "",
+              "visible": false
+            },
+            "cell-view": {
+              "value": "",
+              "visible": true
+            },
+            "sheet-title": {
+              "value": "",
+              "visible": true
+            },
+            "page": {
+              "value": "",
+              "visible": true
+            },
+            "revision": {
+              "value": "",
+              "visible": true
+            },
+            "format": {
+              "value": "",
+              "visible": false
+            },
+            "drawn-by": {
+              "value": "",
+              "visible": true
+            },
+            "checked-by": {
+              "value": "",
+              "visible": false
+            },
+            "approved-by": {
+              "value": "",
+              "visible": true
+            },
+            "date": {
+              "value": "",
+              "visible": true
+            },
+            "organization": {
+              "value": "",
+              "visible": true
+            },
+            "document-id": {
+              "value": "",
+              "visible": true
+            },
+            "classification": {
+              "value": "",
+              "visible": false
+            },
+            "document-type": {
+              "value": "",
+              "visible": true
+            },
+            "document-status": {
+              "value": "",
+              "visible": true
+            },
+            "language": {
+              "value": "",
+              "visible": false
+            }
+          }
+        },
+        "inheritance": "explicit"
+      }
+    }
+  ]
+}
